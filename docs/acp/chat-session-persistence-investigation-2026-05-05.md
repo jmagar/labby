@@ -18,14 +18,14 @@ One implementation gap was reproduced: a closed session is removed from the live
 | Session list restore | `apps/gateway-admin/lib/chat/chat-session-provider.tsx:254` fetches `/sessions`; `apps/gateway-admin/lib/chat/chat-session-provider.tsx:269` maps backend summaries; `apps/gateway-admin/lib/chat/chat-session-provider.tsx:271` preserves selected id only if returned by backend | Backend list controls visible sessions |
 | Frontend event cache | `apps/gateway-admin/lib/chat/session-event-cache.ts:17` and `:18` are module-level `Map`s; `:39` exposes the event cache | In-memory only, not reload-safe |
 | Mounted SSE reader | `apps/gateway-admin/lib/chat/chat-session-provider.tsx:484` starts the selected-session stream; `:515` requests a subscribe ticket; `:525` opens `/events?since=...`; `:555` writes the in-memory cache | Active provider path for chat UI |
-| Alternate SSE hook | `apps/gateway-admin/lib/chat/use-session-events.ts` exists, but `rg "useSessionEvents\\(" apps/gateway-admin/lib apps/gateway-admin/components apps/gateway-admin/app` found only tests and the hook definition | Stale/alternate hook, not mounted in chat UI |
+| Alternate SSE hook | `apps/gateway-admin/lib/chat/use-session-events.ts:129` defines `useSessionEvents`, but `rg "useSessionEvents\\(" apps/gateway-admin/lib apps/gateway-admin/components apps/gateway-admin/app` found only the hook definition in product files | Stale/alternate hook, not mounted in chat UI |
 | API auth/principal | `crates/lab/src/api/services/acp.rs:29` requires a principal; `:117`, `:144`, `:183`, `:310`, and `:332` apply it to session routes | Session actions are principal-scoped |
 | Registry principal checks | `crates/lab/src/acp/registry.rs:181` rejects empty/mismatched principals; `:204` filters `list_sessions`; `:410`, `:486`, `:604`, `:709`, and `:732` check access on prompt/cancel/close/events/subscribe | Restored sessions remain principal-scoped |
 | Durable DB path | `crates/lab/src/dispatch/acp/persistence.rs:203` resolves `LAB_ACP_DB` or default `~/.lab/acp.db` | Host-local SQLite |
 | Durable tables | `crates/lab/src/dispatch/acp/persistence.rs:444` creates `acp_sessions`, `acp_session_events`, and `acp_permission_requests` | Metadata, events, permission outcomes |
 | Event backfill | `crates/lab/src/acp/registry.rs:750` uses `load_events_since_capped(..., BACKFILL_CAP)` before live SSE fanout | Replay comes from SQLite when available |
 | Startup restore | `crates/lab/src/cli/serve.rs:360` creates registry; `:362` calls `restore_from_db()`; `crates/lab/src/acp/registry.rs:1036` reloads sessions from SQLite | Process restart rehydrates registry |
-| Docker persistence | `docker-compose.yml:16` mounts `${HOME}/.lab`; `:21` maps it to `/home/lab/.lab`; `:29` mounts `.env` read-only | Default `acp.db` survives container restarts |
+| Docker persistence | `docker-compose.yml:16` starts the volume list; `docker-compose.yml:21` maps `${HOME}/.lab` to `/home/lab/.lab`; `docker-compose.yml:31` mounts `.env` read-only | Default `acp.db` survives container restarts |
 
 ## Runtime Evidence
 
