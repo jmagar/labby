@@ -438,7 +438,34 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute_batch(SCHEMA_SQL)?;
         conn.pragma_update(None, "user_version", 1)?;
     }
+    if version < 2 {
+        add_column_if_missing(conn, "acp_sessions", "model_id", "TEXT")?;
+        add_column_if_missing(conn, "acp_sessions", "model_name", "TEXT")?;
+        add_column_if_missing(
+            conn,
+            "acp_sessions",
+            "config_options_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )?;
+        conn.pragma_update(None, "user_version", 2)?;
+    }
     Ok(())
+}
+
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for existing in columns {
+        if existing? == column {
+            return Ok(());
+        }
+    }
+    conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition};"))
 }
 
 const SCHEMA_SQL: &str = "
@@ -453,7 +480,10 @@ CREATE TABLE IF NOT EXISTS acp_sessions (
     principal          TEXT NOT NULL DEFAULT '',
     agent_name         TEXT,
     agent_version      TEXT,
-    provider_session_id TEXT
+    provider_session_id TEXT,
+    model_id           TEXT,
+    model_name         TEXT,
+    config_options_json TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS acp_session_events (
@@ -485,7 +515,8 @@ CREATE INDEX IF NOT EXISTS idx_perm_session
 fn db_load_sessions(conn: &Connection) -> rusqlite::Result<Vec<AcpSessionSummary>> {
     let mut stmt = conn.prepare(
         "SELECT id, provider, title, cwd, state, created_at, updated_at,
-                principal, agent_name, agent_version, provider_session_id
+                principal, agent_name, agent_version, provider_session_id,
+                model_id, model_name, config_options_json
          FROM acp_sessions
          ORDER BY updated_at DESC",
     )?;
@@ -493,6 +524,20 @@ fn db_load_sessions(conn: &Connection) -> rusqlite::Result<Vec<AcpSessionSummary
         let state_str: String = row.get("state")?;
         let state = parse_session_state(&state_str);
         let principal: String = row.get("principal")?;
+        let config_options_json: String = row
+            .get("config_options_json")
+            .unwrap_or_else(|_| "[]".to_string());
+        let config_options = serde_json::from_str(&config_options_json).unwrap_or_else(|error| {
+            tracing::warn!(
+                surface = "acp",
+                service = "persistence",
+                action = "session.config_options.decode",
+                kind = "decode_error",
+                error = %error,
+                "failed to decode ACP session config options; returning empty config option list",
+            );
+            Vec::new()
+        });
         Ok(AcpSessionSummary {
             id: row.get("id")?,
             provider: row.get("provider")?,
@@ -509,17 +554,24 @@ fn db_load_sessions(conn: &Connection) -> rusqlite::Result<Vec<AcpSessionSummary
             agent_name: row.get("agent_name")?,
             agent_version: row.get("agent_version")?,
             provider_session_id: row.get("provider_session_id")?,
+            model_id: row.get("model_id")?,
+            model_name: row.get("model_name")?,
+            config_options,
         })
     })?;
     rows.collect()
 }
 
 fn db_save_session(conn: &Connection, s: &AcpSessionSummary) -> rusqlite::Result<()> {
+    let config_options_json = serde_json::to_string(&s.config_options).map_err(|error| {
+        rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+    })?;
     conn.execute(
         "INSERT INTO acp_sessions
              (id, provider, title, cwd, state, created_at, updated_at,
-              principal, agent_name, agent_version, provider_session_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+              principal, agent_name, agent_version, provider_session_id,
+              model_id, model_name, config_options_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(id) DO UPDATE SET
              provider           = excluded.provider,
              title              = excluded.title,
@@ -529,7 +581,10 @@ fn db_save_session(conn: &Connection, s: &AcpSessionSummary) -> rusqlite::Result
              principal          = excluded.principal,
              agent_name         = excluded.agent_name,
              agent_version      = excluded.agent_version,
-             provider_session_id = excluded.provider_session_id",
+             provider_session_id = excluded.provider_session_id,
+             model_id           = excluded.model_id,
+             model_name         = excluded.model_name,
+             config_options_json = excluded.config_options_json",
         params![
             s.id,
             s.provider,
@@ -542,6 +597,9 @@ fn db_save_session(conn: &Connection, s: &AcpSessionSummary) -> rusqlite::Result
             s.agent_name,
             s.agent_version,
             s.provider_session_id,
+            s.model_id,
+            s.model_name,
+            config_options_json,
         ],
     )?;
     Ok(())

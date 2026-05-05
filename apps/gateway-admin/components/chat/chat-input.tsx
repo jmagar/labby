@@ -6,7 +6,7 @@ import { Send, Paperclip, Wrench, ChevronDown, X, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import type { ACPAgent } from './types'
+import type { ACPAgent, ACPModelOption } from './types'
 import {
   createLocalAttachmentDraft,
   fileToSerializableAttachment,
@@ -30,6 +30,9 @@ interface ChatInputProps {
   selectedAgent: ACPAgent | null
   agents: ACPAgent[]
   onSelectAgent: (agentId: string) => void
+  selectedModel: ACPModelOption | null
+  modelOptions: ACPModelOption[]
+  onSelectModel: (modelId: string) => void
 }
 
 export function ChatInput({
@@ -39,10 +42,14 @@ export function ChatInput({
   selectedAgent,
   agents,
   onSelectAgent,
+  selectedModel,
+  modelOptions,
+  onSelectModel,
 }: ChatInputProps) {
   const [value, setValue] = React.useState('')
   const [sending, setSending] = React.useState(false)
   const [agentPickerOpen, setAgentPickerOpen] = React.useState(false)
+  const [modelPickerOpen, setModelPickerOpen] = React.useState(false)
   const [attachments, setAttachments] = React.useState<AttachmentRef[]>([])
   const attachmentsRef = React.useRef<AttachmentRef[]>(attachments)
   const localFileInputRef = React.useRef<HTMLInputElement>(null)
@@ -57,10 +64,16 @@ export function ChatInput({
   const pickerRef = React.useRef<HTMLDivElement>(null)
   const triggerRef = React.useRef<HTMLButtonElement>(null)
   const optionRefs = React.useRef<Array<HTMLButtonElement | null>>([])
+  const modelPickerRef = React.useRef<HTMLDivElement>(null)
+  const modelTriggerRef = React.useRef<HTMLButtonElement>(null)
+  const modelOptionRefs = React.useRef<Array<HTMLButtonElement | null>>([])
   const [activeAgentIndex, setActiveAgentIndex] = React.useState(0)
+  const [activeModelIndex, setActiveModelIndex] = React.useState(0)
   const pickerId = React.useId()
+  const modelPickerId = React.useId()
 
   optionRefs.current.length = agents.length
+  modelOptionRefs.current.length = modelOptions.length
 
   const hasContent = value.trim().length > 0 || attachments.length > 0
   const localAttachments = attachments.filter(
@@ -179,6 +192,29 @@ export function ChatInput({
     }
   }, [agentPickerOpen, agents, selectedAgent?.id])
 
+  React.useEffect(() => {
+    if (!modelPickerOpen) return
+
+    const selectedIndex = Math.max(modelOptions.findIndex((model) => model.id === selectedModel?.id), 0)
+    setActiveModelIndex(selectedIndex)
+    const frame = window.requestAnimationFrame(() => {
+      modelOptionRefs.current[selectedIndex]?.focus()
+    })
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!modelPickerRef.current?.contains(event.target as Node)) {
+        setModelPickerOpen(false)
+        modelTriggerRef.current?.focus()
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      document.removeEventListener('mousedown', handlePointerDown)
+    }
+  }, [modelPickerOpen, modelOptions, selectedModel?.id])
+
   const selectAgent = (agentId: string) => {
     onSelectAgent(agentId)
     setAgentPickerOpen(false)
@@ -241,6 +277,57 @@ export function ChatInput({
       })
     }
   }, [])
+
+  const selectModel = (modelId: string) => {
+    onSelectModel(modelId)
+    setModelPickerOpen(false)
+    modelTriggerRef.current?.focus()
+  }
+
+  const handleModelTriggerKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      if (modelOptions.length > 1) setModelPickerOpen(true)
+    }
+  }
+
+  const handleModelListKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      setModelPickerOpen(false)
+      modelTriggerRef.current?.focus()
+      return
+    }
+
+    if (event.key === 'Tab') {
+      setModelPickerOpen(false)
+      return
+    }
+
+    if (modelOptions.length === 0) return
+
+    const moveTo = (nextIndex: number) => {
+      setActiveModelIndex(nextIndex)
+      modelOptionRefs.current[nextIndex]?.focus()
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      moveTo((activeModelIndex + 1) % modelOptions.length)
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      moveTo((activeModelIndex - 1 + modelOptions.length) % modelOptions.length)
+    } else if (event.key === 'Home') {
+      event.preventDefault()
+      moveTo(0)
+    } else if (event.key === 'End') {
+      event.preventDefault()
+      moveTo(modelOptions.length - 1)
+    } else if ((event.key === 'Enter' || event.key === ' ') && modelOptions[activeModelIndex]) {
+      event.preventDefault()
+      selectModel(modelOptions[activeModelIndex].id)
+    }
+  }
 
   return (
     <div className="shrink-0 border-t border-aurora-border-default bg-aurora-nav-bg px-3 py-2 sm:px-4 sm:py-3">
@@ -339,6 +426,69 @@ export function ChatInput({
           </TooltipProvider>
 
           <div className="ml-auto flex min-w-0 items-center gap-1.5">
+            {modelOptions.length > 0 && (
+              <div ref={modelPickerRef} className="relative min-w-0">
+                <button
+                  ref={modelTriggerRef}
+                  type="button"
+                  onClick={() => modelOptions.length > 1 && setModelPickerOpen((open) => !open)}
+                  onKeyDown={handleModelTriggerKeyDown}
+                  aria-label={selectedModel ? `Selected model: ${selectedModel.name}` : 'Select model'}
+                  aria-haspopup="listbox"
+                  aria-expanded={modelPickerOpen}
+                  aria-controls={modelPickerId}
+                  disabled={disabled || sending || modelOptions.length <= 1}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-full border border-aurora-border-default',
+                    'max-w-[8.5rem] bg-aurora-panel-medium px-2.5 py-1 text-[11px] font-medium text-aurora-text-muted sm:max-w-[12rem]',
+                    'transition-colors hover:border-aurora-border-strong hover:text-aurora-text-primary',
+                    (disabled || sending || modelOptions.length <= 1) && 'opacity-80 hover:border-aurora-border-default',
+                  )}
+                >
+                  <span className="truncate">{selectedModel?.name ?? modelOptions[0]?.name ?? 'Model'}</span>
+                  {modelOptions.length > 1 && <ChevronDown className="size-3 shrink-0" />}
+                </button>
+
+                {modelPickerOpen && (
+                  <div
+                    id={modelPickerId}
+                    role="listbox"
+                    aria-label="Model picker"
+                    aria-activedescendant={modelOptions[activeModelIndex] ? `${modelPickerId}-${modelOptions[activeModelIndex].id}` : undefined}
+                    onKeyDown={handleModelListKeyDown}
+                    className={cn(
+                      'absolute bottom-full right-0 z-50 mb-1.5 min-w-[180px] overflow-hidden',
+                      'rounded-aurora-2 border border-aurora-border-strong bg-aurora-panel-strong',
+                      'shadow-[var(--aurora-shadow-strong),var(--aurora-highlight-strong)]',
+                    )}
+                  >
+                    {modelOptions.map((model, index) => (
+                      <button
+                        key={model.id}
+                        id={`${modelPickerId}-${model.id}`}
+                        ref={(node) => {
+                          modelOptionRefs.current[index] = node
+                        }}
+                        type="button"
+                        role="option"
+                        aria-selected={selectedModel?.id === model.id}
+                        tabIndex={index === activeModelIndex ? 0 : -1}
+                        onFocus={() => setActiveModelIndex(index)}
+                        onClick={() => selectModel(model.id)}
+                        className={cn(
+                          'flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-aurora-hover-bg',
+                          selectedModel?.id === model.id && 'bg-aurora-panel-medium',
+                        )}
+                      >
+                        <span className="text-[13px] font-medium text-aurora-text-primary">{model.name}</span>
+                        {model.description && <span className="text-[11px] text-aurora-text-muted">{model.description}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div ref={pickerRef} className="relative min-w-0">
             <button
               ref={triggerRef}

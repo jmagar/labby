@@ -119,6 +119,21 @@ export function resolveSelectedAgent(
   return agents[0] ?? ACP_AGENT
 }
 
+export function resolveSelectedModel(
+  agent: ACPAgent | null,
+  requestedModelId: string | null,
+  selectedRun: ACPRun | null,
+) {
+  const models = agent?.models ?? []
+  if (models.length === 0) return null
+  const runModel = selectedRun?.provider === agent?.id ? selectedRun.modelId : null
+  for (const candidate of [requestedModelId, runModel, agent?.currentModelId, agent?.defaultModelId]) {
+    const model = candidate ? models.find((option) => option.id === candidate) : null
+    if (model) return model
+  }
+  return models[0] ?? null
+}
+
 export type PromptPayload = {
   text: string
   attachments: PromptAttachmentRef[]
@@ -128,6 +143,7 @@ export type SendPromptForSelectedProviderOptions = {
   payload: PromptPayload
   selectedRun: ACPRun | null
   selectedProviderId: string | null
+  selectedModelId?: string | null
   createSession: CreateSessionFn
   isMobileViewport: boolean
   fetchAcp: (path: string, init?: RequestInit) => Promise<Response>
@@ -142,6 +158,7 @@ export async function sendPromptForSelectedProvider({
   payload,
   selectedRun,
   selectedProviderId,
+  selectedModelId,
   createSession,
   isMobileViewport,
   fetchAcp,
@@ -172,6 +189,7 @@ export async function sendPromptForSelectedProvider({
 
   const body = {
     prompt: payload.text,
+    ...(selectedModelId && { model: selectedModelId }),
     ...(payload.attachments.length > 0 && { attachments: payload.attachments }),
     ...(includePageContext && pageContext !== null && pageContext !== undefined && { pageContext }),
   }

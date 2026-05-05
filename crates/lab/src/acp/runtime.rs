@@ -11,8 +11,9 @@ use agent_client_protocol::schema::{
     KillTerminalRequest, PermissionOption, PermissionOptionKind, PromptRequest, PromptResponse,
     ProtocolVersion, ReadTextFileRequest, ReleaseTerminalRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
-    SessionInfoUpdate, SessionNotification, SessionUpdate, StopReason, TerminalOutputRequest,
-    TextContent, TextResourceContents, WaitForTerminalExitRequest, WriteTextFileRequest,
+    SessionInfoUpdate, SessionNotification, SessionUpdate, SetSessionModelRequest, StopReason,
+    TerminalOutputRequest, TextContent, TextResourceContents, WaitForTerminalExitRequest,
+    WriteTextFileRequest,
 };
 use agent_client_protocol::{
     Agent, ByteStreams, Client, ConnectionTo, Dispatch, JsonRpcMessage, on_receive_request,
@@ -113,17 +114,24 @@ pub struct RuntimeHandle {
 }
 
 impl RuntimeHandle {
-    pub async fn prompt(&self, prompt: String) -> Result<(), String> {
-        self.prompt_input(PromptInput {
-            text: prompt,
-            attachments: Vec::new(),
-        })
+    pub async fn prompt(&self, prompt: String, model_id: Option<String>) -> Result<(), String> {
+        self.prompt_input(
+            PromptInput {
+                text: prompt,
+                attachments: Vec::new(),
+            },
+            model_id,
+        )
         .await
     }
 
-    pub async fn prompt_input(&self, input: PromptInput) -> Result<(), String> {
+    pub async fn prompt_input(
+        &self,
+        input: PromptInput,
+        model_id: Option<String>,
+    ) -> Result<(), String> {
         self.command_tx
-            .try_send(SessionCommand::Prompt(input))
+            .try_send(SessionCommand::Prompt(PromptCommand { input, model_id }))
             .map_err(session_command_send_error)
     }
 
@@ -169,8 +177,13 @@ pub struct PromptInput {
 }
 
 enum SessionCommand {
-    Prompt(PromptInput),
+    Prompt(PromptCommand),
     Cancel,
+}
+
+struct PromptCommand {
+    input: PromptInput,
+    model_id: Option<String>,
 }
 
 fn session_command_send_error(error: mpsc::error::TrySendError<SessionCommand>) -> String {
@@ -246,6 +259,29 @@ struct RuntimeStarted {
     provider_session_id: String,
     agent_name: String,
     agent_version: String,
+    model_id: Option<String>,
+    model_name: Option<String>,
+    models: Vec<lab_apis::acp::types::AcpModelOption>,
+}
+
+fn session_model_options(
+    response: &agent_client_protocol::schema::NewSessionResponse,
+) -> (Option<String>, Vec<lab_apis::acp::types::AcpModelOption>) {
+    let Some(models) = response.models.as_ref() else {
+        return (None, Vec::new());
+    };
+    let current = Some(models.current_model_id.to_string());
+    let options = models
+        .available_models
+        .iter()
+        .map(|model| lab_apis::acp::types::AcpModelOption {
+            id: model.model_id.to_string(),
+            name: model.name.clone(),
+            description: model.description.clone(),
+            fixed: false,
+        })
+        .collect();
+    (current, options)
 }
 
 #[derive(Default)]
@@ -512,6 +548,10 @@ pub async fn launch_codex_runtime(
             provider_session_id: started.provider_session_id,
             agent_name: started.agent_name,
             agent_version: started.agent_version,
+            model_id: started.model_id,
+            model_name: started.model_name,
+            models: started.models,
+            config_options: Vec::new(),
         },
     ))
 }
@@ -564,6 +604,9 @@ pub fn codex_provider_health() -> AcpProviderHealth {
                     .to_string(),
             )
         },
+        models: Vec::new(),
+        default_model_id: None,
+        current_model_id: None,
     }
 }
 
@@ -586,6 +629,9 @@ fn health_for_provider_entry(provider: &AcpProviderEntry) -> AcpProviderHealth {
                 launch.command
             ))
         },
+        models: Vec::new(),
+        default_model_id: None,
+        current_model_id: None,
     }
 }
 
@@ -1342,6 +1388,12 @@ async fn run_codex_session(
                         .start_session()
                         .await
                         .map_err(|error| acp_internal_error(error.to_string()))?;
+                    let session_response = session.response();
+                    let (model_id, models) = session_model_options(&session_response);
+                    let model_name = model_id
+                        .as_ref()
+                        .and_then(|id| models.iter().find(|model| &model.id == id))
+                        .map(|model| model.name.clone());
 
                     let started = RuntimeStarted {
                         provider_session_id: session.session_id().to_string(),
@@ -1361,6 +1413,9 @@ async fn run_codex_session(
                             .as_ref()
                             .map(|info| info.version.clone())
                             .unwrap_or_else(|| "unknown".to_string()),
+                        model_id,
+                        model_name,
+                        models,
                     };
                     if let Some(sender) = started_tx.lock().ok().and_then(|mut guard| guard.take()) {
                         drop(sender.send(Ok(started)));
@@ -1376,7 +1431,8 @@ async fn run_codex_session(
 
                     while let Some(command) = command_rx.recv().await {
                         match command {
-                            SessionCommand::Prompt(prompt) => {
+                            SessionCommand::Prompt(command) => {
+                                let PromptCommand { input, model_id } = command;
                                 prompt_lifecycle.start();
 
                                 if previous_turn_idle {
@@ -1466,6 +1522,20 @@ async fn run_codex_session(
                                         ))
                                         .await,
                                 );
+                                if let Some(model_id) = model_id.as_deref() {
+                                    session
+                                        .connection()
+                                        .send_request_to(
+                                            Agent,
+                                            SetSessionModelRequest::new(
+                                                session.session_id().clone(),
+                                                model_id.to_string(),
+                                            ),
+                                        )
+                                        .block_task()
+                                        .await
+                                        .map_err(|error| acp_internal_error(error.to_string()))?;
+                                }
                                 drop(
                                     event_tx
                                         .send(provider_info_event(
@@ -1474,8 +1544,9 @@ async fn run_codex_session(
                                             json!({
                                                 "type": "prompt_started",
                                                 "title": "Prompt started",
-                                                "text": prompt.text.clone(),
-                                                "attachment_count": prompt.attachments.len(),
+                                                "text": input.text.clone(),
+                                                "attachment_count": input.attachments.len(),
+                                                "model_id": model_id,
                                             }),
                                         ))
                                         .await,
@@ -1484,7 +1555,7 @@ async fn run_codex_session(
                                 let (prompt_response_tx, prompt_response_rx) =
                                     oneshot::channel::<Result<StopReason, String>>();
                                 let mut prompt_response_rx = Box::pin(prompt_response_rx);
-                                let blocks = prompt_input_to_content_blocks(&prompt);
+                                let blocks = prompt_input_to_content_blocks(&input);
                                 session
                                     .connection()
                                     .send_request_to(
@@ -3116,9 +3187,12 @@ pub fn fake_handle_for_tests() -> (RuntimeHandle, mpsc::Receiver<AcpEvent>) {
 pub fn saturated_fake_handle_for_tests() -> (RuntimeHandle, mpsc::Receiver<AcpEvent>) {
     let (command_tx, command_rx) = mpsc::channel::<SessionCommand>(1);
     command_tx
-        .try_send(SessionCommand::Prompt(PromptInput {
-            text: "already queued".to_string(),
-            attachments: Vec::new(),
+        .try_send(SessionCommand::Prompt(PromptCommand {
+            input: PromptInput {
+                text: "already queued".to_string(),
+                attachments: Vec::new(),
+            },
+            model_id: None,
         }))
         .expect("prefill command queue");
     tokio::spawn(async move {

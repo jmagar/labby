@@ -25,6 +25,7 @@ export {
   integrateCreatedRun,
   providerDisplayName,
   resolveSelectedAgent,
+  resolveSelectedModel,
   sendPromptForSelectedProvider,
   sessionCreationOptionsForIntent,
   shouldAutoCreateInitialRun,
@@ -37,9 +38,9 @@ export function ChatShell() {
   const [systemPrompt, setSystemPrompt] = React.useState('')
   const [temperature, setTemperature] = React.useState(0.7)
   const [maxTokens, setMaxTokens] = React.useState(8192)
-  const { runs, selectedRun, selectedRunId, providerHealth, selectedAgent, agents, projects } =
+  const { runs, selectedRun, selectedRunId, providerHealth, selectedAgent, selectedModel, agents, projects } =
     useChatSessionData()
-  const { selectRun, createSession, sendPrompt, selectAgent } = useChatSessionActions()
+  const { selectRun, createSession, sendPrompt, selectAgent, selectModel } = useChatSessionActions()
   const { messages } = useChatSessionStream()
   const { connectionState } = useChatSessionConnection()
   const providerReady = Boolean(providerHealth?.ready)
@@ -112,6 +113,14 @@ export function ChatShell() {
             <span className="hidden text-aurora-text-muted/50 sm:block">{projects[0]?.name}</span>
             <span className="hidden text-aurora-text-muted/30 sm:block">/</span>
             <span className="max-w-[180px] truncate text-aurora-text-primary sm:max-w-[300px]">{selectedRun.title}</span>
+            {selectedRun.modelName && (
+              <>
+                <span className="hidden text-aurora-text-muted/30 sm:block">/</span>
+                <span className="max-w-[120px] truncate text-aurora-text-muted sm:max-w-[180px]">
+                  {selectedRun.modelName}
+                </span>
+              </>
+            )}
           </div>
         )}
 
@@ -213,6 +222,9 @@ export function ChatShell() {
             selectedAgent={selectedAgent}
             agents={agents.length > 0 ? agents : [selectedAgent]}
             onSelectAgent={selectAgent}
+            selectedModel={selectedModel}
+            modelOptions={selectedAgent.models ?? []}
+            onSelectModel={(modelId) => selectModel(selectedAgent.id, modelId)}
           />
         </div>
 

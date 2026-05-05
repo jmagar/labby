@@ -26,6 +26,9 @@ pub struct ProviderHealth {
     pub command: String,
     pub args: Vec<String>,
     pub message: String,
+    pub models: Vec<lab_apis::acp::types::AcpModelOption>,
+    pub default_model_id: Option<String>,
+    pub current_model_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +46,10 @@ pub struct BridgeSessionSummary {
     pub agent_version: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resumable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -322,6 +329,7 @@ pub struct StartSessionInput {
     pub cwd: String,
     pub title: Option<String>,
     pub principal: Option<String>,
+    pub model_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -329,4 +337,8 @@ pub struct StartSessionResult {
     pub provider_session_id: String,
     pub agent_name: String,
     pub agent_version: String,
+    pub model_id: Option<String>,
+    pub model_name: Option<String>,
+    pub models: Vec<lab_apis::acp::types::AcpModelOption>,
+    pub config_options: Vec<lab_apis::acp::types::AcpSessionConfigOptionView>,
 }

@@ -3,12 +3,22 @@ import type { AttachmentRef } from '@/lib/fs/types'
 
 export type { AttachmentRef }
 
+export interface ACPModelOption {
+  id: string
+  name: string
+  description?: string | null
+  fixed?: boolean
+}
+
 export interface ACPAgent {
   id: string
   name: string
   description: string
   version: string
   capabilities: string[]
+  models?: ACPModelOption[]
+  defaultModelId?: string | null
+  currentModelId?: string | null
 }
 
 export interface ACPProject {
@@ -31,6 +41,8 @@ export interface ACPRun {
   status: ACPRunStatus
   providerSessionId: string
   cwd: string
+  modelId?: string | null
+  modelName?: string | null
 }
 
 /**

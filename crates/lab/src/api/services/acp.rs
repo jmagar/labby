@@ -138,10 +138,28 @@ async fn list_sessions(
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct CreateSessionBody {
     provider: Option<String>,
     cwd: Option<String>,
     title: Option<String>,
+    model: Option<String>,
+    #[serde(alias = "model_id")]
+    model_id: Option<String>,
+}
+
+fn preferred_model_param(model: Option<String>, model_id: Option<String>) -> Option<String> {
+    model
+        .and_then(|value| {
+            let trimmed = value.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        })
+        .or_else(|| {
+            model_id.and_then(|value| {
+                let trimmed = value.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            })
+        })
 }
 
 async fn create_session(
@@ -157,6 +175,7 @@ async fn create_session(
         "provider": body.provider,
         "cwd": body.cwd,
         "title": body.title,
+        "model": preferred_model_param(body.model, body.model_id),
         "principal": principal,
     });
     match dispatch_with_registry(&state.acp_registry, "session.start", params).await {
@@ -182,6 +201,9 @@ struct PromptBody {
     /// Optional structured page context. Passed to dispatch; injection is handled there.
     page_context: Option<PageContextBody>,
     attachments: Option<Vec<PromptAttachmentParam>>,
+    model: Option<String>,
+    #[serde(alias = "model_id")]
+    model_id: Option<String>,
 }
 
 async fn prompt_session(
@@ -235,11 +257,33 @@ async fn prompt_session(
         "text": body.prompt.trim(),
         "page_context": page_context_value,
         "attachments": local_attachments,
+        "model": preferred_model_param(body.model, body.model_id),
         "principal": principal,
     });
     match dispatch_with_registry(&state.acp_registry, "session.prompt", params).await {
         Ok(v) => Json(v).into_response(),
         Err(e) => e.into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::preferred_model_param;
+
+    #[test]
+    fn preferred_model_param_treats_blank_model_as_absent() {
+        assert_eq!(
+            preferred_model_param(Some("  ".to_string()), Some("gpt-5".to_string())),
+            Some("gpt-5".to_string())
+        );
+        assert_eq!(
+            preferred_model_param(Some(" claude ".to_string()), Some("gpt-5".to_string())),
+            Some("claude".to_string())
+        );
+        assert_eq!(
+            preferred_model_param(Some("".to_string()), Some(" ".to_string())),
+            None
+        );
     }
 }
 

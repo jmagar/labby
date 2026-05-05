@@ -71,7 +71,14 @@ function RunRow({
         />
       )}
       <RunIcon status={run.status} agentId={run.agentId} />
-      <span className="min-w-0 flex-1 truncate text-[13px] leading-[1.2]">{run.title}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] leading-[1.2]">{run.title}</span>
+        {run.modelName && (
+          <span className="block truncate text-[11px] leading-[1.2] text-aurora-text-muted/70">
+            {run.modelName}
+          </span>
+        )}
+      </span>
       <span className={cn(AURORA_DENSE_META, 'shrink-0 tabular-nums text-aurora-text-muted')}>
         {formatTimeAgo(run.updatedAt)}
       </span>

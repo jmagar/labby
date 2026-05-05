@@ -16,6 +16,13 @@ import type {
 } from '@agentclientprotocol/sdk'
 
 export type AcpProviderKind = string
+export type ACPModelOption = {
+  id: string
+  name: string
+  description?: string | null
+  fixed?: boolean
+}
+
 export type BridgeSessionStatus =
   | 'idle'
   | 'running'
@@ -31,6 +38,9 @@ export type ProviderHealth = {
   command: string
   args: string[]
   message: string
+  models?: ACPModelOption[]
+  defaultModelId?: string | null
+  currentModelId?: string | null
 }
 
 export type BridgeSessionSummary = {
@@ -45,6 +55,8 @@ export type BridgeSessionSummary = {
   agentName: string
   agentVersion: string
   resumable?: boolean
+  modelId?: string | null
+  modelName?: string | null
 }
 
 export type BridgePermissionOption = {

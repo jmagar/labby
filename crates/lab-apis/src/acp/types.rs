@@ -70,6 +70,36 @@ pub struct AcpSessionSummary {
     pub agent_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub config_options: Vec<AcpSessionConfigOptionView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct AcpModelOption {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fixed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct AcpSessionConfigOptionView {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_value: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<AcpModelOption>,
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +127,12 @@ pub struct AcpProviderHealth {
     pub available: bool,
     pub version: Option<String>,
     pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<AcpModelOption>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_model_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_model_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

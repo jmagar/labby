@@ -44,7 +44,7 @@ import {
   errorMessageFromPayload,
   sameProviderList,
 } from './acp-normalizers'
-import type { ACPAgent, ACPRun, ACPProject, ACPMessage } from '@/components/chat/types'
+import type { ACPAgent, ACPRun, ACPProject, ACPMessage, ACPModelOption } from '@/components/chat/types'
 import type { BridgeSessionSummary, ProviderHealth, BridgeEvent } from '@/lib/acp/types'
 import type { SessionEventConnectionState } from './use-session-events'
 import {
@@ -52,6 +52,7 @@ import {
   integrateCreatedRun,
   providerDisplayName,
   resolveSelectedAgent,
+  resolveSelectedModel,
   sendPromptForSelectedProvider,
   shouldAutoCreateInitialRun,
   type PromptPayload,
@@ -80,6 +81,7 @@ export type ChatSessionDataContextValue = {
   providers: ProviderHealth[]
   selectedProviderId: string | null
   selectedAgent: ACPAgent
+  selectedModel: ACPModelOption | null
   agents: ACPAgent[]
   projects: ACPProject[]
   sessionsLoaded: boolean
@@ -96,6 +98,7 @@ export type ChatSessionActionsContextValue = {
   refreshSessions: () => Promise<void>
   refreshProvider: () => Promise<void>
   selectAgent: (providerId: string) => void
+  selectModel: (providerId: string, modelId: string) => void
   setPageContext: (ctx: PageContext) => void
 }
 
@@ -182,6 +185,7 @@ export function ChatSessionProvider({
   const [providerHealth, setProviderHealth] = React.useState<ProviderHealth | null>(null)
   const [providers, setProviders] = React.useState<ProviderHealth[]>([])
   const [selectedProviderId, setSelectedProviderId] = React.useState<string | null>(null)
+  const [selectedModelByProvider, setSelectedModelByProvider] = React.useState<Record<string, string>>({})
   const [optimisticMessages, setOptimisticMessages] = React.useState<ACPMessage[]>([])
   const [pageContext, setPageContext] = React.useState<PageContext>(null)
 
@@ -233,6 +237,9 @@ export function ChatSessionProvider({
         id: provider.provider,
         name: providerDisplayName(provider.provider),
         version: ACP_AGENT.version,
+        models: provider.models,
+        defaultModelId: provider.defaultModelId,
+        currentModelId: provider.currentModelId,
       })),
     [providers],
   )
@@ -240,6 +247,16 @@ export function ChatSessionProvider({
   const selectedAgent = React.useMemo(
     () => resolveSelectedAgent(agents, selectedProviderId, selectedRun),
     [agents, selectedProviderId, selectedRun],
+  )
+
+  const selectedModel = React.useMemo(
+    () =>
+      resolveSelectedModel(
+        selectedAgent,
+        selectedAgent ? selectedModelByProvider[selectedAgent.id] ?? null : null,
+        selectedRun,
+      ),
+    [selectedAgent, selectedModelByProvider, selectedRun],
   )
 
   const sessionStatus = React.useMemo(
@@ -312,7 +329,10 @@ export function ChatSessionProvider({
       try {
         const response = await fetchAcp('/sessions', {
           method: 'POST',
-          body: JSON.stringify({ provider: selectedProviderId ?? providerHealth?.provider ?? 'codex-acp' }),
+          body: JSON.stringify({
+            provider: selectedProviderId ?? providerHealth?.provider ?? 'codex-acp',
+            ...(selectedModel?.id && { model: selectedModel.id }),
+          }),
         })
         const payload = await readJsonSafe<SessionCreatePayload | ErrorPayload>(response)
         if (!response.ok || !payload) {
@@ -346,7 +366,7 @@ export function ChatSessionProvider({
         isCreatingRef.current = false
       }
     },
-    [fetchAcp, onSessionPanelClose, providerHealth?.provider, selectedProviderId],
+    [fetchAcp, onSessionPanelClose, providerHealth?.provider, selectedModel?.id, selectedProviderId],
   )
 
   const selectRun = React.useCallback(
@@ -372,6 +392,12 @@ export function ChatSessionProvider({
     setSelectedProviderId(providerId)
   }, [])
 
+  const selectModel = React.useCallback((providerId: string, modelId: string) => {
+    const provider = providers.find((candidate) => candidate.provider === providerId)
+    if (!provider?.models?.some((model) => model.id === modelId)) return
+    setSelectedModelByProvider((current) => ({ ...current, [providerId]: modelId }))
+  }, [providers])
+
   const sendPrompt = React.useCallback<ChatSessionActionsContextValue['sendPrompt']>(
     async (payload, options) => {
       try {
@@ -379,6 +405,7 @@ export function ChatSessionProvider({
           payload,
           selectedRun,
           selectedProviderId,
+          selectedModelId: selectedModel?.id ?? null,
           createSession,
           isMobileViewport,
           fetchAcp,
@@ -407,6 +434,7 @@ export function ChatSessionProvider({
       isMobileViewport,
       refreshSessions,
       selectedProviderId,
+      selectedModel?.id,
       selectedRun,
     ],
   )
@@ -589,12 +617,13 @@ export function ChatSessionProvider({
       providers,
       selectedProviderId,
       selectedAgent,
+      selectedModel,
       agents,
       projects,
       sessionsLoaded,
       pageContext,
     }),
-    [runs, selectedRunId, selectedRun, providerHealth, providers, selectedProviderId, selectedAgent, agents, projects, sessionsLoaded, pageContext],
+    [runs, selectedRunId, selectedRun, providerHealth, providers, selectedProviderId, selectedAgent, selectedModel, agents, projects, sessionsLoaded, pageContext],
   )
 
   const actionsValue = React.useMemo<ChatSessionActionsContextValue>(
@@ -605,9 +634,10 @@ export function ChatSessionProvider({
       refreshSessions,
       refreshProvider,
       selectAgent,
+      selectModel,
       setPageContext: setPageContextStable,
     }),
-    [createSession, selectRun, sendPrompt, refreshSessions, refreshProvider, selectAgent, setPageContextStable],
+    [createSession, selectRun, sendPrompt, refreshSessions, refreshProvider, selectAgent, selectModel, setPageContextStable],
   )
 
   const connectionValue = React.useMemo<ChatSessionConnectionContextValue>(

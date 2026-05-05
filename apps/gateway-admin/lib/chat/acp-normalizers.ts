@@ -20,6 +20,11 @@ export type ProviderListPayload = {
     error?: string | null
     command?: string | null
     args?: string[] | null
+    models?: Array<{ id: string; name: string; description?: string | null; fixed?: boolean }>
+    defaultModelId?: string | null
+    currentModelId?: string | null
+    default_model_id?: string | null
+    current_model_id?: string | null
   }>
   provider?: ProviderHealth
 }
@@ -51,6 +56,10 @@ export type RawSessionSummary = {
   provider_session_id?: string
   agent_name?: string
   agent_version?: string
+  modelId?: string | null
+  modelName?: string | null
+  model_id?: string | null
+  model_name?: string | null
 }
 
 // ---- Normalization helpers ----
@@ -67,6 +76,8 @@ export function normalizeSessionSummary(session: RawSessionSummary): BridgeSessi
     providerSessionId: session.providerSessionId ?? session.provider_session_id ?? '',
     agentName: session.agentName ?? session.agent_name ?? 'Codex',
     agentVersion: session.agentVersion ?? session.agent_version ?? 'unknown',
+    modelId: session.modelId ?? session.model_id ?? null,
+    modelName: session.modelName ?? session.model_name ?? null,
   }
 }
 
@@ -83,6 +94,8 @@ export function toRun(session: RawSessionSummary): ACPRun {
     status: normalized.status,
     providerSessionId: normalized.providerSessionId,
     cwd: normalized.cwd,
+    modelId: normalized.modelId ?? null,
+    modelName: normalized.modelName ?? null,
   }
 }
 
@@ -98,6 +111,9 @@ export function normalizeProviderHealth(payload: ProviderListPayload): ProviderH
     command: '',
     args: [],
     message: provider?.error ?? '',
+    models: provider?.models ?? [],
+    defaultModelId: provider?.defaultModelId ?? provider?.default_model_id ?? null,
+    currentModelId: provider?.currentModelId ?? provider?.current_model_id ?? null,
   }
 }
 
@@ -112,6 +128,9 @@ export function normalizeProviderList(payload: ProviderListPayload): ProviderHea
     command: provider.command ?? '',
     args: provider.args ?? [],
     message: provider.error ?? '',
+    models: provider.models ?? [],
+    defaultModelId: provider.defaultModelId ?? provider.default_model_id ?? null,
+    currentModelId: provider.currentModelId ?? provider.current_model_id ?? null,
   }))
 }
 
@@ -138,5 +157,26 @@ export function errorMessageFromPayload(payload: ErrorPayload | null, fallback: 
 
 export function sameProviderList(a: ProviderHealth[], b: ProviderHealth[]): boolean {
   if (a.length !== b.length) return false
-  return a.every((item, i) => item.provider === b[i]?.provider && item.ready === b[i]?.ready)
+  return a.every((item, i) => {
+    const other = b[i]
+    if (!other) return false
+    const models = item.models ?? []
+    const otherModels = other.models ?? []
+    return (
+      item.provider === other.provider &&
+      item.ready === other.ready &&
+      item.defaultModelId === other.defaultModelId &&
+      item.currentModelId === other.currentModelId &&
+      models.length === otherModels.length &&
+      models.every((model, index) => {
+        const otherModel = otherModels[index]
+        return (
+          model.id === otherModel?.id &&
+          model.name === otherModel.name &&
+          model.description === otherModel.description &&
+          model.fixed === otherModel.fixed
+        )
+      })
+    )
+  })
 }
