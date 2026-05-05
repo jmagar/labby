@@ -18,6 +18,7 @@ export default function FinalizePage(): React.ReactElement {
   const [committing, setCommitting] = useState(false)
   const [commitOutcome, setCommitOutcome] = useState<CommitOutcome | undefined>()
   const [commitError, setCommitError] = useState<string | undefined>()
+  const [pluginSummary, setPluginSummary] = useState<string>('Installed: none. Uninstalled: none.')
 
   async function runAudit(): Promise<void> {
     setAuditing(true)
@@ -33,6 +34,12 @@ export default function FinalizePage(): React.ReactElement {
 
   useEffect(() => {
     void runAudit()
+    setupApi.installedPlugins()
+      .then((plugins) => {
+        const installed = plugins.map((plugin) => plugin.id).join(', ')
+        setPluginSummary(`Installed: ${installed || 'none'}. Uninstalled: none.`)
+      })
+      .catch(() => setPluginSummary('Installed: unavailable. Uninstalled: none.'))
   }, [])
 
   // Tie the post-commit redirect to a cleanup-able timer. If the user
@@ -133,6 +140,7 @@ export default function FinalizePage(): React.ReactElement {
             Audit: {commitOutcome.audit_pass_count} / {commitOutcome.audit_total_count} passing.
             Redirecting to Settings…
           </p>
+          <p className="text-xs text-muted-foreground mt-1">{pluginSummary}</p>
         </div>
       ) : null}
 

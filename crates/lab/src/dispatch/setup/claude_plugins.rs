@@ -19,7 +19,10 @@ use crate::registry::service_meta;
 use super::client::{cached_registry, env_path};
 use super::draft;
 
-const DEFAULT_ORG: &str = option_env!("LAB_PLUGIN_ORG").unwrap_or("lab");
+const DEFAULT_ORG: &str = match option_env!("LAB_PLUGIN_ORG") {
+    Some(value) => value,
+    None => "lab",
+};
 const DEFAULT_SCOPE: &str = "user";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
 const CACHE_TTL: Duration = Duration::from_secs(8);
@@ -142,7 +145,10 @@ pub async fn uninstall_plugin(service: &str) -> Result<PluginMutationResult, Too
 pub async fn services_status() -> Result<Vec<ServiceStatus>, ToolError> {
     let installed = installed_plugins(false).await.unwrap_or_default();
     let draft_entries = draft::read_entries(&super::client::draft_path());
-    let draft_keys: HashSet<&str> = draft_entries.iter().map(|entry| entry.key.as_str()).collect();
+    let draft_keys: HashSet<&str> = draft_entries
+        .iter()
+        .map(|entry| entry.key.as_str())
+        .collect();
     let env_entries = draft::read_entries(&env_path());
     let env_keys: HashSet<&str> = env_entries.iter().map(|entry| entry.key.as_str()).collect();
 
@@ -362,10 +368,7 @@ fn parse_installed_plugins(stdout: &str) -> Result<Vec<InstalledPlugin>, ToolErr
                 .get("version")
                 .and_then(Value::as_str)
                 .map(ToString::to_string),
-            enabled: item
-                .get("enabled")
-                .and_then(Value::as_bool)
-                .unwrap_or(true),
+            enabled: item.get("enabled").and_then(Value::as_bool).unwrap_or(true),
         });
     }
     Ok(plugins)

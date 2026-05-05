@@ -643,9 +643,17 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `setup` | `draft.set` | false | false | `entries*: DraftEntry[]`<br>`force: bool` | `DraftSetOutcome` | cli, mcp, api, web |
 | `setup` | `finalize` | false | true | `force: bool` | `CommitOutcome` | cli, mcp, api, web |
 | `setup` | `help` | false | false |  | `Catalog` | cli, mcp, api, web |
+| `setup` | `install_plugin` | false | true | `service*: string` | `PluginMutationResult` | cli, mcp, api, web |
+| `setup` | `install_plugin` | false | true | `service*: string` | `PluginLifecycleOutcome` | cli, mcp, api, web |
+| `setup` | `installed_plugins` | false | false | `force: bool` | `InstalledPlugin[]` | cli, mcp, api, web |
+| `setup` | `installed_plugins` | false | false |  | `InstalledPlugin[]` | cli, mcp, api, web |
 | `setup` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api, web |
 | `setup` | `schema.get` | false | false | `services: string[]` | `ServiceSchemaMap` | cli, mcp, api, web |
+| `setup` | `services_status` | false | false |  | `ServiceStatus[]` | cli, mcp, api, web |
+| `setup` | `services_status` | false | false |  | `ServiceStatus[]` | cli, mcp, api, web |
 | `setup` | `state` | false | false |  | `SetupSnapshot` | cli, mcp, api, web |
+| `setup` | `uninstall_plugin` | false | true | `service*: string` | `PluginMutationResult` | cli, mcp, api, web |
+| `setup` | `uninstall_plugin` | false | true | `service*: string` | `PluginLifecycleOutcome` | cli, mcp, api, web |
 | `sonarr` | `blocklist.delete` | false | true | `id*: i64` | `void` | cli, mcp, api |
 | `sonarr` | `blocklist.list` | false | false |  | `BlocklistPage` | cli, mcp, api |
 | `sonarr` | `calendar.list` | false | false | `start: string`<br>`end: string`<br>`unmonitored: bool` | `Episode[]` | cli, mcp, api |

@@ -16501,6 +16501,99 @@
   },
   {
     "service": "setup",
+    "action": "install_plugin",
+    "description": "Install the Claude Code plugin for one configured service",
+    "destructive": true,
+    "params": [
+      {
+        "name": "service",
+        "ty": "string",
+        "required": true,
+        "description": "Registered service name"
+      }
+    ],
+    "returns": "PluginMutationResult",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "install_plugin",
+    "description": "Install the Claude Code plugin for a registered lab service",
+    "destructive": true,
+    "params": [
+      {
+        "name": "service",
+        "ty": "string",
+        "required": true,
+        "description": "Registered lab service slug"
+      }
+    ],
+    "returns": "PluginLifecycleOutcome",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "installed_plugins",
+    "description": "List installed Claude Code lab plugins",
+    "destructive": false,
+    "params": [
+      {
+        "name": "force",
+        "ty": "bool",
+        "required": false,
+        "description": "Bypass the short in-process cache"
+      }
+    ],
+    "returns": "InstalledPlugin[]",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "installed_plugins",
+    "description": "List installed Claude Code lab service plugins",
+    "destructive": false,
+    "params": [],
+    "returns": "InstalledPlugin[]",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
     "action": "schema",
     "description": "Return the parameter schema for a named action",
     "destructive": false,
@@ -16551,11 +16644,97 @@
   },
   {
     "service": "setup",
+    "action": "services_status",
+    "description": "Join service configuration, draft, and Claude plugin state",
+    "destructive": false,
+    "params": [],
+    "returns": "ServiceStatus[]",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "services_status",
+    "description": "Join service schema, configured-env state, and installed plugin state",
+    "destructive": false,
+    "params": [],
+    "returns": "ServiceStatus[]",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
     "action": "state",
     "description": "First-run + draft snapshot for the wizard / settings UI",
     "destructive": false,
     "params": [],
     "returns": "SetupSnapshot",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "uninstall_plugin",
+    "description": "Uninstall the Claude Code plugin for one service",
+    "destructive": true,
+    "params": [
+      {
+        "name": "service",
+        "ty": "string",
+        "required": true,
+        "description": "Registered service name"
+      }
+    ],
+    "returns": "PluginMutationResult",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "uninstall_plugin",
+    "description": "Uninstall the Claude Code plugin for a registered lab service",
+    "destructive": true,
+    "params": [
+      {
+        "name": "service",
+        "ty": "string",
+        "required": true,
+        "description": "Registered lab service slug"
+      }
+    ],
+    "returns": "PluginLifecycleOutcome",
     "surface_availability": {
       "cli": true,
       "mcp": true,

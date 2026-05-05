@@ -184,13 +184,20 @@ mod tests {
 
     #[tokio::test]
     async fn no_setup_flag_exits_cleanly() {
-        let code = run(SetupArgs {
-            mode: SetupModeArg::Full,
-            no_setup: true,
-            no_browser: true,
-            smoke: false,
-            command: None,
-        }, OutputFormat::from_json_flag(true, crate::output::ColorPolicy::Plain, crate::output::RenderEnv::stdout()))
+        let code = run(
+            SetupArgs {
+                mode: SetupModeArg::Full,
+                no_setup: true,
+                no_browser: true,
+                smoke: false,
+                command: None,
+            },
+            OutputFormat::from_json_flag(
+                true,
+                crate::output::ColorPolicy::Plain,
+                crate::output::RenderEnv::stdout(),
+            ),
+        )
         .await
         .unwrap();
         assert_eq!(code, ExitCode::SUCCESS);

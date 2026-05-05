@@ -731,14 +731,23 @@ Options:
 ```text
 Open the web-based first-run wizard (or settings) — lab-bg3e.3
 
-Usage: setup [OPTIONS]
+Usage: setup [OPTIONS] [COMMAND]
+
+Commands:
+  installed-plugins  List installed Claude Code lab plugins
+  services-status    Join service configuration, draft, and Claude plugin state
+  install-plugin     Install the Claude Code plugin for a configured service
+  uninstall-plugin   Uninstall the Claude Code plugin for a service
 
 Options:
       --json
           Emit JSON instead of human-readable tables
 
-      --no-setup
-          Skip the wizard and exit cleanly. Equivalent to LAB_SKIP_SETUP=1
+      --mode <MODE>
+          Setup UI mode. Standalone setup defaults to full; /setup-core passes plugin
+          
+          [default: full]
+          [possible values: plugin, full]
 
       --color <COLOR>
           Control human-readable CLI styling
@@ -746,11 +755,121 @@ Options:
           [default: auto]
           [possible values: auto, plain, color]
 
+      --no-setup
+          Skip the wizard and exit cleanly. Equivalent to LAB_SKIP_SETUP=1
+
       --no-browser
           Do not attempt to open the browser (no-op for now; reserved for the follow-up that adds `webbrowser` integration)
 
       --smoke
           Smoke-test mode: print the state machine snapshot as JSON and exit. Used by `just smoke-setup` for CI verification
+
+  -h, --help
+          Print help
+```
+
+## `labby setup installed-plugins`
+
+```text
+List installed Claude Code lab plugins
+
+Usage: installed-plugins [OPTIONS]
+
+Options:
+      --force
+          Bypass the short in-process cache
+
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+          
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup services-status`
+
+```text
+Join service configuration, draft, and Claude plugin state
+
+Usage: services-status [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+          
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup install-plugin`
+
+```text
+Install the Claude Code plugin for a configured service
+
+Usage: install-plugin [OPTIONS] <SERVICE>
+
+Arguments:
+  <SERVICE>
+          Service name, for example `plex` or `radarr`
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+  -y, --yes
+          Skip confirmation for destructive actions
+
+      --color <COLOR>
+          Control human-readable CLI styling
+          
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --dry-run
+          Print what would be dispatched without executing
+
+  -h, --help
+          Print help
+```
+
+## `labby setup uninstall-plugin`
+
+```text
+Uninstall the Claude Code plugin for a service
+
+Usage: uninstall-plugin [OPTIONS] <SERVICE>
+
+Arguments:
+  <SERVICE>
+          Service name, for example `plex` or `radarr`
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+  -y, --yes
+          Skip confirmation for destructive actions
+
+      --color <COLOR>
+          Control human-readable CLI styling
+          
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --dry-run
+          Print what would be dispatched without executing
 
   -h, --help
           Print help
@@ -764,6 +883,9 @@ Print the service + action catalog
 Usage: help [OPTIONS]
 
 Options:
+      --all
+          Show every compiled-in service, even if required env vars are missing
+
       --json
           Emit JSON instead of human-readable tables
 
@@ -1900,21 +2022,20 @@ Options:
 ```text
 Claude plugin marketplace manager
 
-Usage: marketplace [OPTIONS] [ACTION]
+Usage: marketplace [OPTIONS] [ACTION] [COMMAND]
+
+Commands:
+  generate  Generate a Claude Code marketplace tree from compiled-in PluginMeta
 
 Arguments:
   [ACTION]
           Action to run (e.g. sources.list, plugins.list, plugin.install)
           
           [default: help]
-          [possible values: help, schema, sources.list, plugins.list, plugin.get, plugin.artifacts, plugin.workspace, plugin.save, plugin.deploy, plugin.deploy.preview, artifact.fork, artifact.list, artifact.unfork, artifact.reset, artifact.diff, artifact.patch, artifact.update.check, artifact.update.preview, artifact.update.apply, artifact.merge.suggest, artifact.config.set, sources.add, plugin.install, plugin.uninstall, agent.list, agent.get, agent.install, plugin.cherry_pick, agent.uninstall, mcp.config, mcp.list, mcp.get, mcp.versions, mcp.validate, mcp.install, mcp.uninstall, mcp.meta.get, mcp.meta.set, mcp.meta.delete, mcp.sync]
 
 Options:
       --json
           Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
 
       --color <COLOR>
           Control human-readable CLI styling
@@ -1922,11 +2043,46 @@ Options:
           [default: auto]
           [possible values: auto, plain, color]
 
+      --params <PARAMS>
+          Action-specific parameters as JSON
+
   -y, --yes
           Skip confirmation for destructive actions
 
       --dry-run
           Print what would be done without executing
+
+  -h, --help
+          Print help
+```
+
+## `labby marketplace generate`
+
+```text
+Generate a Claude Code marketplace tree from compiled-in PluginMeta
+
+Usage: generate [OPTIONS] --out <OUT>
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --out <OUT>
+          Output directory for the generated marketplace tree
+
+      --color <COLOR>
+          Control human-readable CLI styling
+          
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --org <ORG>
+          Marketplace/org suffix used in plugin ids, for example `lab`
+          
+          [default: lab]
+
+      --binary <BINARY>
+          Release binary to copy into lab-core/bin/labby
 
   -h, --help
           Print help

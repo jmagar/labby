@@ -849,6 +849,55 @@
           "returns": "CommitOutcome"
         },
         {
+          "name": "installed_plugins",
+          "description": "List installed Claude Code lab plugins",
+          "destructive": false,
+          "params": [
+            {
+              "name": "force",
+              "ty": "bool",
+              "required": false,
+              "description": "Bypass the short in-process cache"
+            }
+          ],
+          "returns": "InstalledPlugin[]"
+        },
+        {
+          "name": "services_status",
+          "description": "Join service configuration, draft, and Claude plugin state",
+          "destructive": false,
+          "params": [],
+          "returns": "ServiceStatus[]"
+        },
+        {
+          "name": "install_plugin",
+          "description": "Install the Claude Code plugin for one configured service",
+          "destructive": true,
+          "params": [
+            {
+              "name": "service",
+              "ty": "string",
+              "required": true,
+              "description": "Registered service name"
+            }
+          ],
+          "returns": "PluginMutationResult"
+        },
+        {
+          "name": "uninstall_plugin",
+          "description": "Uninstall the Claude Code plugin for one service",
+          "destructive": true,
+          "params": [
+            {
+              "name": "service",
+              "ty": "string",
+              "required": true,
+              "description": "Registered service name"
+            }
+          ],
+          "returns": "PluginMutationResult"
+        },
+        {
           "name": "finalize",
           "description": "Alias for draft.commit; same params, same returns",
           "destructive": true,
@@ -861,6 +910,48 @@
             }
           ],
           "returns": "CommitOutcome"
+        },
+        {
+          "name": "installed_plugins",
+          "description": "List installed Claude Code lab service plugins",
+          "destructive": false,
+          "params": [],
+          "returns": "InstalledPlugin[]"
+        },
+        {
+          "name": "services_status",
+          "description": "Join service schema, configured-env state, and installed plugin state",
+          "destructive": false,
+          "params": [],
+          "returns": "ServiceStatus[]"
+        },
+        {
+          "name": "install_plugin",
+          "description": "Install the Claude Code plugin for a registered lab service",
+          "destructive": true,
+          "params": [
+            {
+              "name": "service",
+              "ty": "string",
+              "required": true,
+              "description": "Registered lab service slug"
+            }
+          ],
+          "returns": "PluginLifecycleOutcome"
+        },
+        {
+          "name": "uninstall_plugin",
+          "description": "Uninstall the Claude Code plugin for a registered lab service",
+          "destructive": true,
+          "params": [
+            {
+              "name": "service",
+              "ty": "string",
+              "required": true,
+              "description": "Registered lab service slug"
+            }
+          ],
+          "returns": "PluginLifecycleOutcome"
         }
       ]
     },

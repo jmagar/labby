@@ -135,6 +135,10 @@ Rules:
 
 The canonical serialization and output-boundary contract lives in [design/SERIALIZATION.md](./design/SERIALIZATION.md).
 
+## Catalog Visibility
+
+`lab help`, `lab.help`, and `lab://catalog` hide services whose required `PluginMeta` env vars are not present. Bootstrap/operator services remain visible. Use `LAB_SHOW_ALL=1` or `lab help --all` when you need the full compiled catalog.
+
 ## Security and Privacy
 
 - no telemetry

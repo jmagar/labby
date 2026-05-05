@@ -8956,6 +8956,25 @@
           }
         }
       },
+      "SetupInstall_pluginParams": {
+        "type": "object",
+        "required": [
+          "service"
+        ],
+        "properties": {
+          "service": {
+            "type": "string"
+          }
+        }
+      },
+      "SetupInstalled_pluginsParams": {
+        "type": "object",
+        "properties": {
+          "force": {
+            "type": "string"
+          }
+        }
+      },
       "SetupSchemaGetParams": {
         "type": "object",
         "properties": {
@@ -8974,6 +8993,17 @@
         ],
         "properties": {
           "action": {
+            "type": "string"
+          }
+        }
+      },
+      "SetupUninstall_pluginParams": {
+        "type": "object",
+        "required": [
+          "service"
+        ],
+        "properties": {
+          "service": {
             "type": "string"
           }
         }

@@ -51,10 +51,7 @@ pub fn parse_force(params: &Value) -> bool {
 
 #[must_use]
 pub fn parse_bool(params: &Value, name: &str) -> bool {
-    params
-        .get(name)
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
+    params.get(name).and_then(Value::as_bool).unwrap_or(false)
 }
 
 pub fn parse_service(params: &Value) -> Result<String, ToolError> {

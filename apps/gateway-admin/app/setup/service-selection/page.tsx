@@ -17,11 +17,16 @@ export default function ServiceSelectionPage(): React.ReactElement {
     const controller = new AbortController()
     setupApi
       .schemaGet(undefined, controller.signal)
-      .then((response) => {
+      .then(async (response) => {
         if (controller.signal.aborted) return
+        const installed = wizard.mode === 'plugin'
+          ? new Set((await setupApi.installedPlugins(controller.signal))
+            .map((plugin) => plugin.service)
+            .filter((service): service is string => service !== null))
+          : undefined
         const sorted = Object.values(response.services).sort((a, b) =>
           a.name.localeCompare(b.name),
-        )
+        ).filter((service) => !installed || installed.has(service.name))
         setServices(sorted)
       })
       .catch((err) => {
@@ -32,7 +37,7 @@ export default function ServiceSelectionPage(): React.ReactElement {
         if (!controller.signal.aborted) setLoading(false)
       })
     return () => controller.abort()
-  }, [])
+  }, [wizard.mode])
 
   function toggle(service: string): void {
     wizard.setSelectedServices((prev) =>
@@ -47,6 +52,7 @@ export default function ServiceSelectionPage(): React.ReactElement {
         <p className="text-sm text-muted-foreground">
           Choose which services you want to configure now. You can always
           add more later from the Settings rail.
+          {wizard.mode === 'plugin' ? ' Plugin mode only shows services with installed plugins.' : null}
         </p>
       </section>
 
