@@ -35,11 +35,16 @@ export const WIZARD_STEPS: WizardStep[] = [
   { slug: 'finalize', title: 'Finalize' },
 ]
 
+const PLUGIN_STEP_SLUGS = new Set(['welcome', 'service-selection', 'configuration', 'finalize'])
+
 type SelectedServicesUpdater = string[] | ((prev: string[]) => string[])
 
 interface WizardState {
   selectedServices: string[]
   setSelectedServices: (next: SelectedServicesUpdater) => void
+  mode: 'plugin' | 'full'
+  steps: WizardStep[]
+  stepHref: (slug: string) => string
   /** Wipe persisted selection. Call after a successful finalize/commit. */
   clearWizardState: () => void
 }
@@ -47,6 +52,7 @@ interface WizardState {
 const WizardContext = createContext<WizardState | undefined>(undefined)
 
 const SELECTED_SERVICES_KEY = 'lab.wizard.selectedServices'
+const WIZARD_MODE_KEY = 'lab.wizard.mode'
 
 function readPersistedSelection(): string[] {
   if (typeof window === 'undefined') return []
@@ -71,6 +77,7 @@ export function WizardProvider({ children }: { children: React.ReactNode }): Rea
   // Initialize empty on first render (matches build-time render where window
   // is undefined) and hydrate from sessionStorage in a post-mount useEffect.
   const [selectedServices, setSelectedServicesState] = useState<string[]>([])
+  const [mode, setMode] = useState<'plugin' | 'full'>('full')
 
   // Track whether the initial hydration has run, so the post-state-change
   // mirror useEffect doesn't write [] to storage on first mount before
@@ -80,6 +87,25 @@ export function WizardProvider({ children }: { children: React.ReactNode }): Rea
   useEffect(() => {
     const persisted = readPersistedSelection()
     if (persisted.length > 0) setSelectedServicesState(persisted)
+    const urlMode = typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('mode')
+      : null
+    const storedMode = typeof window !== 'undefined'
+      ? window.localStorage.getItem(WIZARD_MODE_KEY)
+      : null
+    const nextMode = urlMode === 'plugin' || urlMode === 'full'
+      ? urlMode
+      : storedMode === 'plugin'
+        ? 'plugin'
+        : 'full'
+    setMode(nextMode)
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(WIZARD_MODE_KEY, nextMode)
+      } catch {
+        // Ignore storage failures.
+      }
+    }
     hydrated.current = true
   }, [])
 
@@ -112,9 +138,20 @@ export function WizardProvider({ children }: { children: React.ReactNode }): Rea
     }
   }, [])
 
+  const steps = useMemo(
+    () => mode === 'plugin'
+      ? WIZARD_STEPS.filter((step) => PLUGIN_STEP_SLUGS.has(step.slug))
+      : WIZARD_STEPS,
+    [mode],
+  )
+  const stepHref = useCallback((slug: string): string => {
+    const suffix = mode === 'plugin' ? '?mode=plugin' : ''
+    return `/setup/${slug}/${suffix}`
+  }, [mode])
+
   const value = useMemo<WizardState>(
-    () => ({ selectedServices, setSelectedServices, clearWizardState }),
-    [selectedServices, setSelectedServices, clearWizardState],
+    () => ({ selectedServices, setSelectedServices, mode, steps, stepHref, clearWizardState }),
+    [selectedServices, setSelectedServices, mode, steps, stepHref, clearWizardState],
   )
   return <WizardContext.Provider value={value}>{children}</WizardContext.Provider>
 }
@@ -125,9 +162,11 @@ export function currentStepIndex(pathname: string): number {
 }
 
 export function ProgressBar({ pathname }: { pathname: string }): React.ReactElement {
-  const idx = currentStepIndex(pathname)
-  const step = WIZARD_STEPS[idx]!
-  const total = WIZARD_STEPS.length
+  const { steps, mode } = useWizard()
+  const slug = WIZARD_STEPS[currentStepIndex(pathname)]?.slug
+  const idx = Math.max(0, steps.findIndex((step) => step.slug === slug))
+  const step = steps[idx]!
+  const total = steps.length
   const percent = Math.round(((idx + 1) / total) * 100)
   return (
     <div className="space-y-2">
@@ -135,6 +174,7 @@ export function ProgressBar({ pathname }: { pathname: string }): React.ReactElem
         <span>
           Step {idx + 1} of {total} — <span className="font-medium text-foreground">{step.title}</span>
         </span>
+        {mode === 'plugin' ? <span>plugin mode</span> : null}
         <span>{percent}%</span>
       </div>
       <Progress value={percent} />
@@ -159,17 +199,19 @@ export function NavButtons({
 }): React.ReactElement {
   const router = useRouter()
   const pathname = usePathname() ?? ''
-  const idx = currentStepIndex(pathname)
+  const { steps, stepHref } = useWizard()
+  const slug = WIZARD_STEPS[currentStepIndex(pathname)]?.slug
+  const idx = Math.max(0, steps.findIndex((step) => step.slug === slug))
   const isFirst = idx === 0
-  const isLast = idx === WIZARD_STEPS.length - 1
+  const isLast = idx === steps.length - 1
 
   const handleBack = (): void => {
     if (onBack) onBack()
-    else if (!isFirst) router.push(`/setup/${WIZARD_STEPS[idx - 1]!.slug}/`)
+    else if (!isFirst) router.push(stepHref(steps[idx - 1]!.slug))
   }
   const handleNext = (): void => {
     if (onNext) onNext()
-    else if (!isLast) router.push(`/setup/${WIZARD_STEPS[idx + 1]!.slug}/`)
+    else if (!isLast) router.push(stepHref(steps[idx + 1]!.slug))
   }
 
   return (
@@ -193,9 +235,10 @@ export function NavButtons({
 }
 
 export function StepLink({ index }: { index: number }): React.ReactElement {
-  const step = WIZARD_STEPS[index]!
+  const { steps, stepHref } = useWizard()
+  const step = steps[index]!
   return (
-    <Link href={`/setup/${step.slug}/`} className="underline">
+    <Link href={stepHref(step.slug)} className="underline">
       {step.title}
     </Link>
   )

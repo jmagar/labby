@@ -6,6 +6,7 @@ import { Loader2 } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { NavButtons, useWizard } from '@/components/setup/WizardShell'
 import { ServiceForm, type ProbeOutcome } from '@/components/setup/ServiceForm'
+import { PluginToggle } from '@/components/setup/PluginToggle'
 import { setupApi, type ServiceSchema } from '@/lib/api/setup-client'
 import { doctorApi } from '@/lib/api/doctor-client'
 import { type FieldView } from '@/lib/setup/schemaBuilder'
@@ -23,6 +24,7 @@ export default function ConfigurationPage(): React.ReactElement {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | undefined>()
   const [activeTab, setActiveTab] = useState<string | undefined>(undefined)
+  const [installedPlugins, setInstalledPlugins] = useState<Set<string>>(new Set())
 
   // In-progress field values per service slug. ServiceForm flushes its
   // current values to this cache on unmount via onUnmount; on remount
@@ -39,8 +41,9 @@ export default function ConfigurationPage(): React.ReactElement {
     Promise.all([
       setupApi.schemaGet(wizard.selectedServices, controller.signal),
       setupApi.draftGet(controller.signal),
+      setupApi.installedPlugins(controller.signal),
     ])
-      .then(([schemaResponse, draft]) => {
+      .then(([schemaResponse, draft, plugins]) => {
         if (controller.signal.aborted) return
         const draftMap = draftEntriesToMap(draft.entries)
         const next: ServiceState[] = []
@@ -52,6 +55,9 @@ export default function ConfigurationPage(): React.ReactElement {
         }
         valuesCache.current.clear()
         setServices(next)
+        setInstalledPlugins(
+          new Set(plugins.map((plugin) => plugin.service).filter((service): service is string => service !== null)),
+        )
       })
       .catch((err) => {
         if (controller.signal.aborted) return
@@ -144,6 +150,20 @@ export default function ConfigurationPage(): React.ReactElement {
                   onProbe={(_values, signal) => probeService(s.schema.name, signal)}
                   onUnmount={(values) => valuesCache.current.set(s.schema.name, values)}
                 />
+                <div className="mt-4 flex justify-end border-t pt-4">
+                  <PluginToggle
+                    service={s.schema.name}
+                    installed={installedPlugins.has(s.schema.name)}
+                    onChanged={(installed) => {
+                      setInstalledPlugins((prev) => {
+                        const next = new Set(prev)
+                        if (installed) next.add(s.schema.name)
+                        else next.delete(s.schema.name)
+                        return next
+                      })
+                    }}
+                  />
+                </div>
               </TabsContent>
             )
           })}

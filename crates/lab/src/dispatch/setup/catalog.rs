@@ -135,4 +135,42 @@ pub const ACTIONS: &[ActionSpec] = &[
             description: "Overwrite conflicting .env keys (default false)",
         }],
     },
+    ActionSpec {
+        name: "installed_plugins",
+        description: "List installed Claude Code lab service plugins",
+        destructive: false,
+        returns: "InstalledPlugin[]",
+        params: &[],
+    },
+    ActionSpec {
+        name: "services_status",
+        description: "Join service schema, configured-env state, and installed plugin state",
+        destructive: false,
+        returns: "ServiceStatus[]",
+        params: &[],
+    },
+    ActionSpec {
+        name: "install_plugin",
+        description: "Install the Claude Code plugin for a registered lab service",
+        destructive: true,
+        returns: "PluginLifecycleOutcome",
+        params: &[ParamSpec {
+            name: "service",
+            ty: "string",
+            required: true,
+            description: "Registered lab service slug",
+        }],
+    },
+    ActionSpec {
+        name: "uninstall_plugin",
+        description: "Uninstall the Claude Code plugin for a registered lab service",
+        destructive: true,
+        returns: "PluginLifecycleOutcome",
+        params: &[ParamSpec {
+            name: "service",
+            ty: "string",
+            required: true,
+            description: "Registered lab service slug",
+        }],
+    },
 ];

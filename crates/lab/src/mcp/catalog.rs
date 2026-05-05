@@ -57,6 +57,12 @@ impl LabMcpServer {
         }
     }
 
+    fn service_visible_by_env_or_gateway(&self, service: &str) -> bool {
+        crate::registry::lab_show_all_enabled()
+            || crate::registry::service_visible_with_env(service)
+            || self.gateway_manager.is_some()
+    }
+
     pub(crate) fn builtin_prompt_names(&self) -> Vec<String> {
         list_builtin_prompts()
             .prompts
@@ -76,17 +82,22 @@ impl LabMcpServer {
     }
 
     pub(crate) async fn catalog_json(&self) -> anyhow::Result<Value> {
-        let mut catalog = crate::catalog::build_catalog(&self.registry);
+        let filtered;
+        let registry = if crate::registry::lab_show_all_enabled() || self.gateway_manager.is_some()
+        {
+            &self.registry
+        } else {
+            filtered = crate::registry::filter_by_configured_env(&self.registry);
+            &filtered
+        };
+        let mut catalog = crate::catalog::build_catalog(registry);
         let mut services = Vec::new();
         for mut service in catalog.services {
             let visible_on_mcp = self.service_visible_on_mcp(&service.name).await;
             if !visible_on_mcp {
                 continue;
             }
-            if self.gateway_manager.is_none()
-                && !crate::registry::lab_show_all_enabled()
-                && !crate::registry::service_visible_with_env(&service.name)
-            {
+            if !self.service_visible_by_env_or_gateway(&service.name) {
                 continue;
             }
             if let Some(allowed_actions) = self.allowed_mcp_actions(&service.name).await
@@ -106,10 +117,7 @@ impl LabMcpServer {
         if !self.service_visible_on_mcp(service).await {
             anyhow::bail!("unknown service: {service}");
         }
-        if self.gateway_manager.is_none()
-            && !crate::registry::lab_show_all_enabled()
-            && !crate::registry::service_visible_with_env(service)
-        {
+        if !self.service_visible_by_env_or_gateway(service) {
             anyhow::bail!("unknown service: {service}");
         }
 

@@ -223,6 +223,33 @@ export interface CommitOutcome {
   audit?: unknown
 }
 
+export interface InstalledPlugin {
+  id: string
+  service: string | null
+}
+
+export interface PluginLifecycleOutcome {
+  service: string
+  package_id: string
+  status: string
+  message: string
+}
+
+export interface ServiceStatus {
+  name: string
+  display_name: string
+  description: string
+  configured: boolean
+  plugin_installed: boolean
+  plugin_package_id: string | null
+  required_env: string[]
+}
+
+export interface ServicesStatusResponse {
+  services: ServiceStatus[]
+  plugins: InstalledPlugin[]
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────
 
 export const setupApi = {
@@ -306,5 +333,58 @@ export const setupApi = {
       })
     }
     return setupAction<CommitOutcome>('finalize', { confirm: true }, signal)
+  },
+
+  installedPlugins(signal?: AbortSignal): Promise<InstalledPlugin[]> {
+    if (USE_MOCK_DATA) {
+      signal?.throwIfAborted?.()
+      return Promise.resolve([{ id: 'lab-radarr@lab', service: 'radarr' }])
+    }
+    return setupAction<InstalledPlugin[]>('installed_plugins', {}, signal)
+  },
+
+  servicesStatus(signal?: AbortSignal): Promise<ServicesStatusResponse> {
+    if (USE_MOCK_DATA) {
+      signal?.throwIfAborted?.()
+      return Promise.resolve({
+        plugins: [{ id: 'lab-radarr@lab', service: 'radarr' }],
+        services: Object.values(MOCK_SERVICES).map((schema) => ({
+          name: schema.name,
+          display_name: schema.display_name,
+          description: schema.description,
+          configured: schema.name === 'radarr',
+          plugin_installed: schema.name === 'radarr',
+          plugin_package_id: `lab-${schema.name}@lab`,
+          required_env: schema.env.filter((env) => env.required).map((env) => env.name),
+        })),
+      })
+    }
+    return setupAction<ServicesStatusResponse>('services_status', {}, signal)
+  },
+
+  installPlugin(service: string, signal?: AbortSignal): Promise<PluginLifecycleOutcome> {
+    if (USE_MOCK_DATA) {
+      signal?.throwIfAborted?.()
+      return Promise.resolve({
+        service,
+        package_id: `lab-${service}@lab`,
+        status: 'install',
+        message: 'mock install complete',
+      })
+    }
+    return setupAction<PluginLifecycleOutcome>('install_plugin', { service, confirm: true }, signal)
+  },
+
+  uninstallPlugin(service: string, signal?: AbortSignal): Promise<PluginLifecycleOutcome> {
+    if (USE_MOCK_DATA) {
+      signal?.throwIfAborted?.()
+      return Promise.resolve({
+        service,
+        package_id: `lab-${service}@lab`,
+        status: 'uninstall',
+        message: 'mock uninstall complete',
+      })
+    }
+    return setupAction<PluginLifecycleOutcome>('uninstall_plugin', { service, confirm: true }, signal)
   },
 }

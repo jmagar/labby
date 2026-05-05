@@ -3,7 +3,8 @@
 import { useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 
-import { ProgressBar, WIZARD_STEPS, WizardProvider } from '@/components/setup/WizardShell'
+import { ProgressBar, WIZARD_STEPS, WizardProvider, useWizard } from '@/components/setup/WizardShell'
+import { Button } from '@/components/ui/button'
 import { setupApi } from '@/lib/api/setup-client'
 
 export default function SetupLayout({
@@ -49,11 +50,13 @@ export default function SetupLayout({
           router.replace(`/setup/${step.slug}/`)
           return
         }
-        router.replace('/setup/welcome/')
+          const suffix = window.location.search.includes('mode=plugin') ? '?mode=plugin' : ''
+          router.replace(`/setup/welcome/${suffix}`)
       })
       .catch(() => {
         if (controller.signal.aborted || !stillOnIndex()) return
-        router.replace('/setup/welcome/')
+        const suffix = window.location.search.includes('mode=plugin') ? '?mode=plugin' : ''
+        router.replace(`/setup/welcome/${suffix}`)
       })
     return () => controller.abort()
   }, [pathname, router])
@@ -61,15 +64,31 @@ export default function SetupLayout({
   return (
     <WizardProvider>
       <div className="mx-auto flex max-w-3xl flex-col gap-6 p-8">
-        <header>
-          <h1 className="text-2xl font-semibold">Lab Setup</h1>
-          <p className="text-sm text-muted-foreground">
-            One-time wizard to configure ~/.lab/.env via the browser.
-          </p>
-        </header>
+        <SetupHeader />
         <ProgressBar pathname={pathname} />
         <main className="flex-1">{children}</main>
       </div>
     </WizardProvider>
+  )
+}
+
+function SetupHeader(): React.ReactElement {
+  const { mode } = useWizard()
+  return (
+    <header className="flex items-start justify-between gap-4">
+      <div>
+        <h1 className="text-2xl font-semibold">Lab Setup</h1>
+          <p className="text-sm text-muted-foreground">
+            {mode === 'plugin'
+              ? 'Configure the services you have installed plugins for.'
+              : 'One-time wizard to configure ~/.lab/.env via the browser.'}
+          </p>
+      </div>
+      {mode === 'plugin' ? (
+        <Button variant="outline" asChild>
+          <a href="/setup/welcome/?mode=full">Show advanced setup</a>
+        </Button>
+      ) : null}
+    </header>
   )
 }

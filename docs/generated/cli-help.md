@@ -2032,7 +2032,6 @@ Arguments:
           Action to run (e.g. sources.list, plugins.list, plugin.install)
 
           [default: help]
-          [possible values: help, schema, sources.list, plugins.list, plugin.get, plugin.artifacts, plugin.workspace, plugin.save, plugin.deploy, plugin.deploy.preview, artifact.fork, artifact.list, artifact.unfork, artifact.reset, artifact.diff, artifact.patch, artifact.update.check, artifact.update.preview, artifact.update.apply, artifact.merge.suggest, artifact.config.set, sources.add, plugin.install, plugin.uninstall, agent.list, agent.get, agent.install, plugin.cherry_pick, agent.uninstall, mcp.config, mcp.list, mcp.get, mcp.versions, mcp.validate, mcp.install, mcp.uninstall, mcp.meta.get, mcp.meta.set, mcp.meta.delete, mcp.sync]
 
 Options:
       --json
