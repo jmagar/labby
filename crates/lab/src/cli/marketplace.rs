@@ -1,6 +1,7 @@
-//! `labby marketplace` — thin CLI shim for the marketplace plugin manager.
+//! `labby marketplace` — CLI shim for marketplace plugin management.
 //!
-//! Thin shim: parse → shared dispatch layer → format.
+//! Most actions follow the shared dispatch layer. `generate` is intentionally
+//! CLI-local because it writes a release marketplace tree to disk.
 //! Always-on (synthetic service). See `apprise.rs` for the reference pattern.
 
 use std::process::ExitCode;
@@ -8,7 +9,7 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
-use crate::cli::helpers::{action_parser, print_dry_run, run_confirmable_action_command};
+use crate::cli::helpers::{print_dry_run, run_confirmable_action_command};
 use crate::output::OutputFormat;
 
 mod generator;
@@ -19,7 +20,7 @@ pub struct MarketplaceArgs {
     #[command(subcommand)]
     pub command: Option<MarketplaceCommand>,
     /// Action to run (e.g. sources.list, plugins.list, plugin.install).
-    #[arg(default_value = "help", value_parser = action_parser(crate::dispatch::marketplace::actions()))]
+    #[arg(default_value = "help")]
     pub action: String,
     /// Action-specific parameters as JSON.
     #[arg(long)]
