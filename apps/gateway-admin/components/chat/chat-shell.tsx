@@ -9,14 +9,22 @@ import { SidebarTrigger } from '@/components/ui/sidebar'
 import { Separator } from '@/components/ui/separator'
 import { SessionSidebar } from './session-sidebar'
 import { MessageThread } from './message-thread'
-import { ChatInput } from './chat-input'
+import { ChatInput, type ChatInputPayload } from './chat-input'
 import { SettingsPanel } from './settings-panel'
+import type { ACPMessage } from './types'
 import {
   useChatSessionData,
   useChatSessionActions,
   useChatSessionConnection,
   useChatSessionStream,
 } from '@/lib/chat/chat-session-provider'
+
+export async function retryMessageText(
+  message: Pick<ACPMessage, 'text'>,
+  send: (payload: ChatInputPayload) => Promise<void>,
+) {
+  await send({ text: message.text, attachments: [] })
+}
 
 export {
   createSessionForIntent,
@@ -37,6 +45,7 @@ export function ChatShell() {
   const [systemPrompt, setSystemPrompt] = React.useState('')
   const [temperature, setTemperature] = React.useState(0.7)
   const [maxTokens, setMaxTokens] = React.useState(8192)
+  const [draftText, setDraftText] = React.useState('')
   const { runs, selectedRun, selectedRunId, providerHealth, selectedAgent, agents, projects } =
     useChatSessionData()
   const { selectRun, createSession, sendPrompt, selectAgent } = useChatSessionActions()
@@ -63,6 +72,17 @@ export function ChatShell() {
     },
     [sendPrompt],
   )
+
+  const handleRetryMessage = React.useCallback(
+    async (message: ACPMessage) => {
+      await retryMessageText(message, handleSendPrompt)
+    },
+    [handleSendPrompt],
+  )
+
+  const handleEditMessage = React.useCallback((message: ACPMessage) => {
+    setDraftText(message.text)
+  }, [])
 
   React.useEffect(() => {
     const media = window.matchMedia('(max-width: 767px)')
@@ -202,11 +222,21 @@ export function ChatShell() {
               <span className="text-aurora-text-muted">{providerUnavailableMessage}</span>
             </div>
           )}
-          <MessageThread run={selectedRun} messages={messages} connectionState={connectionState} />
+          <MessageThread
+            run={selectedRun}
+            messages={messages}
+            connectionState={connectionState}
+            canRetryMessages={providerReady}
+            canEditMessages
+            onRetryMessage={(message) => void handleRetryMessage(message)}
+            onEditMessage={handleEditMessage}
+          />
           <ChatInput
             onSend={handleSendPrompt}
             disabled={!providerReady}
             disabledReason={providerUnavailableMessage ?? undefined}
+            draftText={draftText}
+            onDraftTextChange={setDraftText}
             selectedAgent={selectedAgent}
             agents={agents.length > 0 ? agents : [selectedAgent]}
             onSelectAgent={selectAgent}

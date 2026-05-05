@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import { Bot, Check, ChevronDown, Copy, ListChecks, UserRound } from 'lucide-react'
+import { Bot, Check, ChevronDown, Copy, ListChecks, Pencil, RotateCcw, UserRound } from 'lucide-react'
 import {
   Streamdown,
   defaultUrlTransform,
@@ -22,34 +22,84 @@ import { GroupedToolCallDisplay, groupConsecutiveToolCalls } from './grouped-too
 import { getToolCategory } from './tool-call-presentation'
 import type { ACPMessage } from './types'
 
+type CopyState = 'idle' | 'copied' | 'failed'
+
 function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = React.useState(false)
+  const [copyState, setCopyState] = React.useState<CopyState>('idle')
 
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(text)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 2000)
+      setCopyState('copied')
+      window.setTimeout(() => setCopyState('idle'), 2000)
     } catch {
-      setCopied(false)
+      setCopyState('failed')
+      window.setTimeout(() => setCopyState('idle'), 2000)
     }
   }
+
+  const label =
+    copyState === 'copied'
+      ? 'Copied message'
+      : copyState === 'failed'
+        ? 'Copy failed'
+        : 'Copy message'
 
   return (
     <Button
       variant="ghost"
       size="icon"
       onClick={handleCopy}
-      aria-label="Copy message"
-      className="size-6 shrink-0 rounded text-aurora-text-muted/40 opacity-0 transition-opacity group-hover/bubble:opacity-100 hover:bg-aurora-hover-bg hover:text-aurora-text-muted"
+      aria-label={label}
+      className="size-7 shrink-0 rounded text-aurora-text-muted/70 hover:bg-aurora-hover-bg hover:text-aurora-text-primary"
     >
-      {copied ? <Check className="size-3 text-aurora-success" /> : <Copy className="size-3" />}
+      {copyState === 'copied' ? <Check className="size-3.5 text-aurora-success" /> : <Copy className="size-3.5" />}
+      <span className="sr-only">{label}</span>
     </Button>
   )
 }
 
 export function getMessageCopyText(message: Pick<ACPMessage, 'text'>) {
   return message.text
+}
+
+export type MessageActionAvailabilityInput = {
+  canRetry?: boolean
+  canEdit?: boolean
+}
+
+export type MessageActionAvailability = {
+  copy: boolean
+  retry: boolean
+  edit: boolean
+}
+
+export function getMessageActionAvailability(
+  message: Pick<ACPMessage, 'role' | 'text' | 'isStreaming'>,
+  input: MessageActionAvailabilityInput = {},
+): MessageActionAvailability {
+  const hasText = message.text.trim().length > 0
+  const isUser = message.role === 'user'
+  const isStable = !message.isStreaming
+
+  return {
+    copy: hasText,
+    retry: hasText && isUser && isStable && Boolean(input.canRetry),
+    edit: hasText && isUser && isStable && Boolean(input.canEdit),
+  }
+}
+
+export type MessageBubbleActionState = {
+  selected?: boolean
+  canRetry?: boolean
+  canEdit?: boolean
+}
+
+export type MessageBubbleActionHandlers = {
+  onSelect?: (messageId: string) => void
+  onDismiss?: () => void
+  onRetry?: (message: ACPMessage) => void
+  onEdit?: (message: ACPMessage) => void
 }
 
 function StreamingCursor() {
@@ -160,7 +210,70 @@ function AgentActionsPanel({
   )
 }
 
-function MessageBubbleComponent({ message }: { message: ACPMessage }) {
+function MessageActionToolbar({
+  message,
+  availability,
+  selected,
+  onRetry,
+  onEdit,
+}: {
+  message: ACPMessage
+  availability: MessageActionAvailability
+  selected: boolean
+  onRetry?: (message: ACPMessage) => void
+  onEdit?: (message: ACPMessage) => void
+}) {
+  if (!availability.copy && !availability.retry && !availability.edit) {
+    return null
+  }
+
+  return (
+    <div
+      aria-label="Message actions"
+      data-selected={selected ? 'true' : 'false'}
+      className={cn(
+        'flex w-full justify-end gap-1 pr-1 transition-opacity',
+        selected
+          ? 'opacity-100'
+          : 'opacity-0 group-hover/bubble:opacity-100 group-focus-within/bubble:opacity-100',
+      )}
+    >
+      {availability.copy ? <CopyButton text={getMessageCopyText(message)} /> : null}
+      {availability.retry ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Retry message"
+          className="size-7 rounded text-aurora-text-muted/70 hover:bg-aurora-hover-bg hover:text-aurora-text-primary"
+          onClick={() => onRetry?.(message)}
+        >
+          <RotateCcw className="size-3.5" />
+        </Button>
+      ) : null}
+      {availability.edit ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Edit message"
+          className="size-7 rounded text-aurora-text-muted/70 hover:bg-aurora-hover-bg hover:text-aurora-text-primary"
+          onClick={() => onEdit?.(message)}
+        >
+          <Pencil className="size-3.5" />
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+function MessageBubbleComponent({
+  message,
+  actionState = {},
+  actionHandlers = {},
+}: {
+  message: ACPMessage
+  actionState?: MessageBubbleActionState
+  actionHandlers?: MessageBubbleActionHandlers
+}) {
   const isUser = message.role === 'user'
   const [reasoningOpen, setReasoningOpen] = React.useState(Boolean(message.isStreaming))
   const [chainOpen, setChainOpen] = React.useState(Boolean(message.isStreaming))
@@ -177,7 +290,15 @@ function MessageBubbleComponent({ message }: { message: ACPMessage }) {
   const hasActions = !isUser && message.toolCalls.length > 0
 
   return (
-    <div className={cn('group/bubble flex min-w-0 gap-3', isUser && 'flex-row-reverse')}>
+    <div
+      data-message-id={message.id}
+      onPointerDown={(event) => {
+        if (event.pointerType === 'touch') {
+          actionHandlers.onSelect?.(message.id)
+        }
+      }}
+      className={cn('group/bubble flex min-w-0 gap-3', isUser && 'flex-row-reverse')}
+    >
       <div
         className={cn(
           'mt-1 flex size-6 shrink-0 items-center justify-center rounded-full border',
@@ -254,26 +375,38 @@ function MessageBubbleComponent({ message }: { message: ACPMessage }) {
               />
             )}
             {isUser ? (
-              <p className="min-w-0 whitespace-pre-wrap pr-8 text-[13px] leading-[1.55] text-aurora-text-primary [overflow-wrap:anywhere]">
+              <p className="min-w-0 whitespace-pre-wrap text-[13px] leading-[1.55] text-aurora-text-primary [overflow-wrap:anywhere]">
                 {message.text}
                 {message.isStreaming ? <StreamingCursor /> : null}
               </p>
             ) : (
               <AssistantMarkdown text={message.text} isStreaming={Boolean(message.isStreaming)} />
             )}
-            <div className="absolute right-2 top-2">
-              <CopyButton text={getMessageCopyText(message)} />
-            </div>
           </div>
         )}
+        <MessageActionToolbar
+          message={message}
+          availability={getMessageActionAvailability(message, actionState)}
+          selected={Boolean(actionState.selected)}
+          onRetry={actionHandlers.onRetry}
+          onEdit={actionHandlers.onEdit}
+        />
       </div>
     </div>
   )
 }
 
 function areMessageBubblePropsEqual(
-  previous: Readonly<{ message: ACPMessage }>,
-  next: Readonly<{ message: ACPMessage }>,
+  previous: Readonly<{
+    message: ACPMessage
+    actionState?: MessageBubbleActionState
+    actionHandlers?: MessageBubbleActionHandlers
+  }>,
+  next: Readonly<{
+    message: ACPMessage
+    actionState?: MessageBubbleActionState
+    actionHandlers?: MessageBubbleActionHandlers
+  }>,
 ) {
   const prev = previous.message
   const current = next.message
@@ -285,7 +418,10 @@ function areMessageBubblePropsEqual(
     prev.isStreaming === current.isStreaming &&
     prev.version === current.version &&
     prev.thoughts.length === current.thoughts.length &&
-    prev.toolCalls.length === current.toolCalls.length
+    prev.toolCalls.length === current.toolCalls.length &&
+    previous.actionState?.selected === next.actionState?.selected &&
+    previous.actionState?.canRetry === next.actionState?.canRetry &&
+    previous.actionState?.canEdit === next.actionState?.canEdit
   )
 }
 

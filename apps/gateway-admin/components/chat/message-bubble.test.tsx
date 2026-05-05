@@ -1,10 +1,38 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import React from 'react'
+import { act } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { Window } from 'happy-dom'
 
-import { MessageBubble, getMessageCopyText } from './message-bubble'
+import { MessageBubble, getMessageActionAvailability, getMessageCopyText } from './message-bubble'
 import type { ACPMessage } from './types'
+
+const window = new Window()
+Object.defineProperty(globalThis, 'window', { value: window, configurable: true })
+Object.defineProperty(globalThis, 'document', { value: window.document, configurable: true })
+Object.defineProperty(globalThis, 'navigator', { value: window.navigator, configurable: true })
+Object.defineProperty(globalThis, 'DOMException', { value: window.DOMException, configurable: true })
+Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { value: true, configurable: true })
+
+async function renderClient(element: React.ReactElement) {
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+
+  await act(async () => {
+    root.render(element)
+  })
+
+  return {
+    container,
+    unmount: async () => {
+      await act(async () => root.unmount())
+      container.remove()
+    },
+  }
+}
 
 function assistantMessage(overrides: Partial<ACPMessage> = {}): ACPMessage {
   return {
@@ -193,6 +221,118 @@ test('copies raw message text rather than rendered markdown text', () => {
   })
 
   assert.equal(getMessageCopyText(message), message.text)
+})
+
+test('derives message actions from role, text, and callback availability', () => {
+  assert.deepEqual(
+    getMessageActionAvailability(userMessage({ text: 'Retry me.' }), {
+      canRetry: true,
+      canEdit: true,
+    }),
+    { copy: true, retry: true, edit: true },
+  )
+
+  assert.deepEqual(
+    getMessageActionAvailability(assistantMessage({ text: 'Assistant.' }), {
+      canRetry: true,
+      canEdit: true,
+    }),
+    { copy: true, retry: false, edit: false },
+  )
+
+  assert.deepEqual(
+    getMessageActionAvailability(userMessage({ text: '   ' }), {
+      canRetry: true,
+      canEdit: true,
+    }),
+    { copy: false, retry: false, edit: false },
+  )
+})
+
+test('renders message actions under the bubble and right aligned', () => {
+  const markup = renderToStaticMarkup(
+    <MessageBubble
+      message={userMessage({ text: 'Can you retry this?' })}
+      actionState={{ selected: false, canRetry: true, canEdit: true }}
+    />,
+  )
+
+  assert.match(markup, /aria-label="Message actions"/)
+  assert.match(markup, /Copy message/)
+  assert.match(markup, /Retry message/)
+  assert.match(markup, /Edit message/)
+  assert.match(markup, /justify-end/)
+  assert.ok(
+    markup.indexOf('Can you retry this?') < markup.indexOf('aria-label="Message actions"'),
+    'actions should render after the message content',
+  )
+})
+
+test('omits retry and edit for assistant messages', () => {
+  const markup = renderToStaticMarkup(
+    <MessageBubble
+      message={assistantMessage({ isStreaming: false, thoughts: [], toolCalls: [] })}
+      actionState={{ selected: false, canRetry: true, canEdit: true }}
+    />,
+  )
+
+  assert.match(markup, /Copy message/)
+  assert.doesNotMatch(markup, /Retry message/)
+  assert.doesNotMatch(markup, /Edit message/)
+})
+
+test('copy action writes raw message text and shows copied state', async () => {
+  const writes: string[] = []
+  Object.defineProperty(navigator, 'clipboard', {
+    value: {
+      writeText: async (value: string) => {
+        writes.push(value)
+      },
+    },
+    configurable: true,
+  })
+
+  const view = await renderClient(
+    <MessageBubble
+      message={assistantMessage({ text: '**raw** markdown', isStreaming: false, thoughts: [], toolCalls: [] })}
+      actionState={{ selected: true }}
+    />,
+  )
+
+  const button = view.container.querySelector('button[aria-label="Copy message"]') as HTMLButtonElement
+  await act(async () => {
+    button.click()
+  })
+
+  assert.deepEqual(writes, ['**raw** markdown'])
+  assert.match(view.container.textContent ?? '', /Copied/)
+  await view.unmount()
+})
+
+test('copy action exposes failure state when clipboard write is denied', async () => {
+  Object.defineProperty(navigator, 'clipboard', {
+    value: {
+      writeText: async () => {
+        throw new DOMException('Denied', 'NotAllowedError')
+      },
+    },
+    configurable: true,
+  })
+
+  const view = await renderClient(
+    <MessageBubble
+      message={assistantMessage({ text: 'copy me', isStreaming: false, thoughts: [], toolCalls: [] })}
+      actionState={{ selected: true }}
+    />,
+  )
+
+  const button = view.container.querySelector('button[aria-label="Copy message"]') as HTMLButtonElement
+  await act(async () => {
+    button.click()
+  })
+
+  assert.match(button.getAttribute('aria-label') ?? '', /Copy failed/)
+  await view.unmount()
 })
 
 test('keeps the streaming cursor adjacent to assistant markdown content', () => {

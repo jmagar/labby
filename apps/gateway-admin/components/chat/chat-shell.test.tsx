@@ -6,6 +6,7 @@ import {
   ensurePromptRunIdForProvider,
   integrateCreatedRun,
   providerDisplayName,
+  retryMessageText,
   resolveSelectedAgent,
   sendPromptForSelectedProvider,
   sessionCreationOptionsForIntent,
@@ -246,4 +247,18 @@ test('sendPromptForSelectedProvider removes optimistic message and throws normal
   )
 
   assert.deepEqual(optimisticIds, [])
+})
+
+test('retry payload uses selected message text without inventing attachments', async () => {
+  const sent: unknown[] = []
+  await retryMessageText(
+    {
+      text: 'retry this',
+    },
+    async (payload) => {
+      sent.push(payload)
+    },
+  )
+
+  assert.deepEqual(sent, [{ text: 'retry this', attachments: [] }])
 })

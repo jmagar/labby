@@ -13,6 +13,10 @@ interface MessageThreadProps {
   run: ACPRun | null
   messages: ACPMessage[]
   connectionState?: SessionEventConnectionState
+  canRetryMessages?: boolean
+  canEditMessages?: boolean
+  onRetryMessage?: (message: ACPMessage) => void
+  onEditMessage?: (message: ACPMessage) => void
 }
 
 function EmptyState() {
@@ -69,12 +73,44 @@ function SessionStatusNotice({ run, connectionState }: { run: ACPRun; connection
   )
 }
 
-export function MessageThread({ run, messages, connectionState }: MessageThreadProps) {
+export function MessageThread({
+  run,
+  messages,
+  connectionState,
+  canRetryMessages = false,
+  canEditMessages = false,
+  onRetryMessage,
+  onEditMessage,
+}: MessageThreadProps) {
   const bottomRef = React.useRef<HTMLDivElement>(null)
+  const threadRef = React.useRef<HTMLDivElement>(null)
+  const [selectedMessageId, setSelectedMessageId] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  React.useEffect(() => {
+    if (!selectedMessageId) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedMessageId(null)
+    }
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (target instanceof Node && !threadRef.current?.contains(target)) {
+        setSelectedMessageId(null)
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('pointerdown', onPointerDown)
+    }
+  }, [selectedMessageId])
 
   if (!run) {
     return <EmptyState />
@@ -82,10 +118,27 @@ export function MessageThread({ run, messages, connectionState }: MessageThreadP
 
   return (
     <ScrollArea className="min-h-0 min-w-0 flex-1 overflow-hidden">
-      <div className="mx-auto flex w-full max-w-[860px] min-w-0 flex-col gap-4 px-3 py-4 sm:gap-5 sm:px-6 sm:py-6">
+      <div
+        ref={threadRef}
+        className="mx-auto flex w-full max-w-[860px] min-w-0 flex-col gap-4 px-3 py-4 sm:gap-5 sm:px-6 sm:py-6"
+      >
         <SessionStatusNotice run={run} connectionState={connectionState} />
         {messages.map((message) => (
-          <MessageBubble key={message.id} message={message} />
+          <MessageBubble
+            key={message.id}
+            message={message}
+            actionState={{
+              selected: selectedMessageId === message.id,
+              canRetry: canRetryMessages,
+              canEdit: canEditMessages,
+            }}
+            actionHandlers={{
+              onSelect: setSelectedMessageId,
+              onDismiss: () => setSelectedMessageId(null),
+              onRetry: onRetryMessage,
+              onEdit: onEditMessage,
+            }}
+          />
         ))}
         <div ref={bottomRef} />
       </div>

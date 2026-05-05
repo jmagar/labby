@@ -21,6 +21,8 @@ interface ChatInputProps {
   onSend: (payload: ChatInputPayload) => void | Promise<void>
   disabled?: boolean
   disabledReason?: string
+  draftText?: string
+  onDraftTextChange?: (value: string) => void
   selectedAgent: ACPAgent | null
   agents: ACPAgent[]
   onSelectAgent: (agentId: string) => void
@@ -30,11 +32,13 @@ export function ChatInput({
   onSend,
   disabled = false,
   disabledReason,
+  draftText,
+  onDraftTextChange,
   selectedAgent,
   agents,
   onSelectAgent,
 }: ChatInputProps) {
-  const [value, setValue] = React.useState('')
+  const [uncontrolledValue, setUncontrolledValue] = React.useState('')
   const [sending, setSending] = React.useState(false)
   const [agentPickerOpen, setAgentPickerOpen] = React.useState(false)
   const [attachments, setAttachments] = React.useState<AttachmentRef[]>([])
@@ -50,6 +54,17 @@ export function ChatInput({
   const optionRefs = React.useRef<Array<HTMLButtonElement | null>>([])
   const [activeAgentIndex, setActiveAgentIndex] = React.useState(0)
   const pickerId = React.useId()
+
+  const value = draftText ?? uncontrolledValue
+  const setValue = React.useCallback(
+    (nextValue: string) => {
+      if (draftText === undefined) {
+        setUncontrolledValue(nextValue)
+      }
+      onDraftTextChange?.(nextValue)
+    },
+    [draftText, onDraftTextChange],
+  )
 
   optionRefs.current.length = agents.length
 
@@ -105,6 +120,12 @@ export function ChatInput({
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
   }
+
+  React.useEffect(() => {
+    if (!textareaRef.current) return
+    textareaRef.current.style.height = 'auto'
+    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`
+  }, [value])
 
   React.useEffect(() => {
     if (!agentPickerOpen) return
