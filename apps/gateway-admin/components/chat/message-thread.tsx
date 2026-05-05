@@ -80,6 +80,26 @@ export function shouldShowWorkingAssistantBubble(
   return !hasStreamingAssistantMessage
 }
 
+export type MessageTimestampSelectionAction =
+  | { type: 'select'; messageId: string }
+  | { type: 'dismiss' }
+  | { type: 'run-change'; runId: string | null }
+
+export function reduceSelectedMessageId(
+  selectedMessageId: string | null,
+  action: MessageTimestampSelectionAction,
+): string | null {
+  switch (action.type) {
+    case 'select':
+      return action.messageId
+    case 'dismiss':
+    case 'run-change':
+      return null
+    default:
+      return selectedMessageId
+  }
+}
+
 export function MessageThread({
   run,
   messages,
@@ -98,26 +118,28 @@ export function MessageThread({
   }, [messages])
 
   React.useEffect(() => {
-    if (!selectedMessageId) return
+    setSelectedMessageId((current) => reduceSelectedMessageId(current, { type: 'run-change', runId: run?.id ?? null }))
+  }, [run?.id])
 
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSelectedMessageId(null)
+  React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSelectedMessageId((current) => reduceSelectedMessageId(current, { type: 'dismiss' }))
+      }
     }
-
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target
-      if (target instanceof Node && !threadRef.current?.contains(target)) {
-        setSelectedMessageId(null)
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!threadRef.current?.contains(event.target as Node)) {
+        setSelectedMessageId((current) => reduceSelectedMessageId(current, { type: 'dismiss' }))
       }
     }
 
-    document.addEventListener('keydown', onKeyDown)
-    document.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('keydown', handleKeyDown)
+    document.addEventListener('pointerdown', handlePointerDown)
     return () => {
-      document.removeEventListener('keydown', onKeyDown)
-      document.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+      document.removeEventListener('pointerdown', handlePointerDown)
     }
-  }, [selectedMessageId])
+  }, [])
 
   if (!run) {
     return <EmptyState />
@@ -140,7 +162,8 @@ export function MessageThread({
               canEdit: canEditMessages,
             }}
             actionHandlers={{
-              onSelect: setSelectedMessageId,
+              onSelect: (messageId) =>
+                setSelectedMessageId((current) => reduceSelectedMessageId(current, { type: 'select', messageId })),
               onRetry: onRetryMessage,
               onEdit: onEditMessage,
             }}

@@ -17,6 +17,7 @@ import {
   ChainOfThoughtHeader,
 } from '@/components/ai/chain-of-thought'
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai/reasoning'
+import { formatUiDateTime, formatUiTime } from '@/lib/format-ui-time'
 import { ToolCallDisplay } from './tool-call-display'
 import { GroupedToolCallDisplay, groupConsecutiveToolCalls } from './grouped-tool-call-display'
 import { getToolCategory } from './tool-call-presentation'
@@ -99,6 +100,28 @@ export type MessageBubbleActionHandlers = {
   onSelect?: (messageId: string) => void
   onRetry?: (message: ACPMessage) => void
   onEdit?: (message: ACPMessage) => void
+}
+
+export type MessageTimestampLabels = {
+  visible: string
+  detail: string
+}
+
+function hasValidDate(value: Date) {
+  return !Number.isNaN(value.getTime())
+}
+
+export function shouldRenderMessageTimestamp(message: Pick<ACPMessage, 'createdAt'>) {
+  return hasValidDate(message.createdAt)
+}
+
+export function getMessageTimestampLabels(
+  message: Pick<ACPMessage, 'createdAt'>,
+): MessageTimestampLabels {
+  return {
+    visible: formatUiTime(message.createdAt),
+    detail: formatUiDateTime(message.createdAt),
+  }
 }
 
 function StreamingCursor() {
@@ -211,6 +234,33 @@ function AgentActionsPanel({
           </div>
         </CollapsibleContent>
       </Collapsible>
+    </div>
+  )
+}
+
+function MessageTimestamp({
+  message,
+  selected,
+}: {
+  message: ACPMessage
+  selected?: boolean
+}) {
+  if (!shouldRenderMessageTimestamp(message)) return null
+
+  const labels = getMessageTimestampLabels(message)
+
+  return (
+    <div
+      data-message-timestamp
+      aria-label={`Message sent at ${labels.detail}`}
+      title={labels.detail}
+      className={cn(
+        'min-h-4 text-[11px] leading-4 text-aurora-text-muted/60 transition-opacity duration-150',
+        'opacity-0 group-hover/bubble:opacity-100 group-focus-within/bubble:opacity-100',
+        selected && 'opacity-100',
+      )}
+    >
+      {labels.visible}
     </div>
   )
 }
@@ -340,12 +390,12 @@ function MessageBubbleComponent({
   return (
     <div
       data-message-id={message.id}
-      onPointerDown={(event) => {
-        if (event.pointerType === 'touch') {
-          actionHandlers.onSelect?.(message.id)
-        }
-      }}
       className={cn('group/bubble flex min-w-0 gap-3', isUser && 'flex-row-reverse')}
+      onClick={(event) => {
+        const target = event.target as HTMLElement
+        if (target.closest('button,a,input,textarea,select,[role="button"]')) return
+        actionHandlers.onSelect?.(message.id)
+      }}
     >
       <div
         className={cn(
@@ -425,6 +475,7 @@ function MessageBubbleComponent({
             )}
           </div>
         )}
+        <MessageTimestamp message={message} selected={Boolean(actionState.selected)} />
         <MessageActionToolbar
           message={message}
           availability={getMessageActionAvailability(message, actionState)}
@@ -437,7 +488,7 @@ function MessageBubbleComponent({
   )
 }
 
-function areMessageBubblePropsEqual(
+export function areMessageBubblePropsEqual(
   previous: Readonly<{
     message: ACPMessage
     actionState?: MessageBubbleActionState
@@ -456,6 +507,7 @@ function areMessageBubblePropsEqual(
     prev.id === current.id &&
     prev.role === current.role &&
     prev.text === current.text &&
+    Object.is(prev.createdAt.getTime(), current.createdAt.getTime()) &&
     prev.isStreaming === current.isStreaming &&
     prev.version === current.version &&
     prev.thoughts.length === current.thoughts.length &&

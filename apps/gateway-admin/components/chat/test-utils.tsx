@@ -10,6 +10,7 @@ export function installChatTestDom() {
   Object.defineProperty(globalThis, 'navigator', { value: window.navigator, configurable: true })
   Object.defineProperty(globalThis, 'DOMException', { value: window.DOMException, configurable: true })
   Object.defineProperty(globalThis, 'Node', { value: window.Node, configurable: true })
+  Object.defineProperty(globalThis, 'MouseEvent', { value: window.MouseEvent, configurable: true })
   Object.defineProperty(globalThis, 'PointerEvent', { value: window.PointerEvent, configurable: true })
   Object.defineProperty(globalThis, 'KeyboardEvent', { value: window.KeyboardEvent, configurable: true })
   Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { value: true, configurable: true })
@@ -27,6 +28,11 @@ export async function renderClient(element: React.ReactElement) {
 
   return {
     container,
+    rerender: async (next: React.ReactElement) => {
+      await act(async () => {
+        root.render(next)
+      })
+    },
     unmount: async () => {
       await act(async () => root.unmount())
       container.remove()

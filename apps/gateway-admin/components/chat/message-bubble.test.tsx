@@ -4,7 +4,15 @@ import React from 'react'
 import { act } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import { MessageBubble, WorkingAssistantBubble, getMessageActionAvailability, getMessageCopyText } from './message-bubble'
+import {
+  MessageBubble,
+  WorkingAssistantBubble,
+  areMessageBubblePropsEqual,
+  getMessageActionAvailability,
+  getMessageCopyText,
+  getMessageTimestampLabels,
+  shouldRenderMessageTimestamp,
+} from './message-bubble'
 import { installChatTestDom, renderClient } from './test-utils'
 import type { ACPMessage } from './types'
 
@@ -317,6 +325,93 @@ test('copy action exposes failure state when clipboard write is denied', async (
 
   assert.match(button.getAttribute('aria-label') ?? '', /Copy failed/)
   await view.unmount()
+})
+
+test('formats message timestamp labels from createdAt metadata', () => {
+  const labels = getMessageTimestampLabels(userMessage({
+    createdAt: new Date('2026-05-04T12:34:00Z'),
+  }))
+
+  assert.equal(labels.visible, '12:34 PM UTC')
+  assert.equal(labels.detail, 'May 4, 2026, 12:34 PM UTC')
+})
+
+test('omits timestamp presentation when createdAt is invalid', () => {
+  const message = userMessage({ createdAt: new Date(Number.NaN) })
+
+  assert.equal(shouldRenderMessageTimestamp(message), false)
+})
+
+test('renders timestamp row after message content without overlapping copy action', () => {
+  const markup = renderToStaticMarkup(
+    <MessageBubble message={userMessage({ createdAt: new Date('2026-05-04T12:34:00Z') })} />,
+  )
+
+  assert.match(markup, /aria-label="Message sent at May 4, 2026, 12:34 PM UTC"/)
+  assert.match(markup, /12:34 PM UTC/)
+  assert.match(markup, /data-message-timestamp/)
+  assert.match(markup, /group-hover\/bubble:opacity-100/)
+  assert.match(markup, /group-focus-within\/bubble:opacity-100/)
+  assert.ok(
+    markup.indexOf('Hello.') < markup.indexOf('data-message-timestamp'),
+    'timestamp should render after the message text',
+  )
+  assert.match(markup, /aria-label="Message actions"/)
+})
+
+test('renders timestamp for assistant messages with only tool activity', () => {
+  const markup = renderToStaticMarkup(
+    <MessageBubble
+      message={assistantMessage({
+        text: '',
+        isStreaming: false,
+        thoughts: [],
+        toolCalls: [
+          {
+            id: 'tool-only',
+            title: 'Read file',
+            status: 'completed',
+            locations: ['README.md'],
+          },
+        ],
+        createdAt: new Date('2026-05-04T12:45:00Z'),
+      })}
+    />,
+  )
+
+  assert.match(markup, /data-message-timestamp/)
+  assert.match(markup, /12:45 PM UTC/)
+})
+
+test('selected message renders timestamp as visible for touch interaction', () => {
+  const markup = renderToStaticMarkup(<MessageBubble message={userMessage()} actionState={{ selected: true }} />)
+
+  assert.match(markup, /data-message-id="message-user-1"/)
+  assert.match(markup, /opacity-100/)
+})
+
+test('message bubble memo comparison includes timestamp and selected state', () => {
+  const base = userMessage({ createdAt: new Date('2026-05-04T12:00:00Z') })
+  const changedTimestamp = { ...base, createdAt: new Date('2026-05-04T12:01:00Z') }
+
+  assert.equal(
+    areMessageBubblePropsEqual({ message: base }, { message: changedTimestamp }),
+    false,
+  )
+  assert.equal(
+    areMessageBubblePropsEqual({ message: base, actionState: { selected: false } }, { message: base, actionState: { selected: true } }),
+    false,
+  )
+})
+
+test('message bubble memo comparison treats invalid timestamps as stable', () => {
+  const invalid = userMessage({ createdAt: new Date(Number.NaN) })
+  const nextInvalid = { ...invalid, createdAt: new Date(Number.NaN) }
+
+  assert.equal(
+    areMessageBubblePropsEqual({ message: invalid }, { message: nextInvalid }),
+    true,
+  )
 })
 
 test('keeps the streaming cursor adjacent to assistant markdown content', () => {
