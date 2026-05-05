@@ -29,11 +29,34 @@ export interface FsListResponse {
   truncated: boolean
 }
 
-/**
- * Attachment reference emitted by the chat input on submit.
- *
- * Intentionally narrow: only a filesystem path is carried. Google Drive
- * support is a future `{ kind: 'drive'; fileId; mimeType? }` variant
- * (deferred — see lab-f1t2 locked decisions).
- */
-export type AttachmentRef = { kind: 'file'; path: string }
+export type WorkspaceAttachmentRef = { kind: 'file'; path: string }
+
+export type LocalAttachmentDraft = {
+  kind: 'local'
+  id: string
+  file: File
+  previewUrl: string | null
+}
+
+export type SerializableLocalAttachment =
+  | {
+      kind: 'local'
+      id: string
+      name: string
+      mimeType: string
+      size: number
+      contentKind: 'text'
+      text: string
+    }
+  | {
+      kind: 'local'
+      id: string
+      name: string
+      mimeType: string
+      size: number
+      contentKind: 'blob'
+      base64: string
+    }
+
+export type PromptAttachmentRef = WorkspaceAttachmentRef | SerializableLocalAttachment
+export type AttachmentRef = WorkspaceAttachmentRef | LocalAttachmentDraft

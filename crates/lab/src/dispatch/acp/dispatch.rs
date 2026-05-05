@@ -13,7 +13,9 @@ use crate::dispatch::helpers::{action_schema, help_payload, to_json};
 use super::catalog::ACTIONS;
 use super::client::require_registry;
 use super::page_context::{PageContextInput, build_prompt_with_context};
-use super::params::{opt_str, opt_u64, require_str};
+use super::params::{
+    LocalPromptAttachment, opt_str, opt_u64, require_str, validate_local_attachments,
+};
 
 /// SSE ticket lifetime in seconds.
 const TICKET_TTL_SECS: u64 = 30;
@@ -113,7 +115,9 @@ pub async fn dispatch_with_registry(
     action: &str,
     params: Value,
 ) -> Result<Value, ToolError> {
-    ensure_params_size(&params)?;
+    if action != "session.prompt" {
+        ensure_params_size(&params)?;
+    }
 
     match action {
         "help" => Ok(help_payload("acp", ACTIONS)),
@@ -251,8 +255,25 @@ pub async fn dispatch_with_registry(
             let effective_text = build_prompt_with_context(session_id, raw_text, page_ctx.as_ref());
             ensure_prompt_size(&effective_text)?;
 
+            let attachments: Vec<LocalPromptAttachment> = params
+                .get("attachments")
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|error| ToolError::InvalidParam {
+                    message: format!("invalid attachments payload: {error}"),
+                    param: "attachments".into(),
+                })?
+                .unwrap_or_default();
+            validate_local_attachments(&attachments)?;
+
             registry
-                .prompt_session(session_id, &effective_text, principal)
+                .prompt_session_with_attachments(
+                    session_id,
+                    &effective_text,
+                    attachments,
+                    principal,
+                )
                 .await?;
             to_json(json!({ "ok": true, "session_id": session_id }))
         }

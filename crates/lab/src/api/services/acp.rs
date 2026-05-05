@@ -21,6 +21,9 @@ use crate::api::state::AppState;
 use crate::dispatch::acp::catalog::ACTIONS;
 use crate::dispatch::acp::dispatch::dispatch_with_registry;
 use crate::dispatch::acp::dispatch::validate_subscribe_ticket;
+use crate::dispatch::acp::params::{
+    PromptAttachmentParam, local_prompt_attachments, validate_prompt_attachments,
+};
 use crate::dispatch::error::ToolError;
 
 /// Hard cap on incoming prompt text (64 000 chars ≈ 16 000 tokens at 4 chars/token).
@@ -178,6 +181,7 @@ struct PromptBody {
     prompt: String,
     /// Optional structured page context. Passed to dispatch; injection is handled there.
     page_context: Option<PageContextBody>,
+    attachments: Option<Vec<PromptAttachmentParam>>,
 }
 
 async fn prompt_session(
@@ -210,6 +214,12 @@ async fn prompt_session(
         .into_response();
     }
 
+    let attachments = body.attachments.unwrap_or_default();
+    if let Err(error) = validate_prompt_attachments(&attachments) {
+        return error.into_response();
+    }
+    let local_attachments = local_prompt_attachments(&attachments);
+
     // Pass page_context as a JSON object to the dispatch layer.
     // All sanitization and prefix assembly happens there — HTTP handler is a thin shim.
     let page_context_value = body.page_context.as_ref().map(|ctx| {
@@ -224,6 +234,7 @@ async fn prompt_session(
         "session_id": session_id,
         "text": body.prompt.trim(),
         "page_context": page_context_value,
+        "attachments": local_attachments,
         "principal": principal,
     });
     match dispatch_with_registry(&state.acp_registry, "session.prompt", params).await {

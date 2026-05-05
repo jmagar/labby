@@ -5,13 +5,14 @@ use std::time::{Duration, Instant};
 use std::{collections::HashMap, fmt};
 
 use agent_client_protocol::schema::{
-    CancelNotification, ClientCapabilities, ConfigOptionUpdate, ContentBlock, ContentChunk,
-    CreateTerminalRequest, CurrentModeUpdate, FileSystemCapabilities, Implementation,
-    InitializeRequest, KillTerminalRequest, PermissionOption, PermissionOptionKind,
+    BlobResourceContents, CancelNotification, ClientCapabilities, ConfigOptionUpdate,
+    ContentBlock, ContentChunk, CreateTerminalRequest, CurrentModeUpdate, EmbeddedResource,
+    EmbeddedResourceResource, FileSystemCapabilities, Implementation, InitializeRequest,
+    KillTerminalRequest, PermissionOption, PermissionOptionKind, PromptRequest, PromptResponse,
     ProtocolVersion, ReadTextFileRequest, ReleaseTerminalRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
     SessionInfoUpdate, SessionNotification, SessionUpdate, StopReason, TerminalOutputRequest,
-    WaitForTerminalExitRequest, WriteTextFileRequest,
+    TextContent, TextResourceContents, WaitForTerminalExitRequest, WriteTextFileRequest,
 };
 use agent_client_protocol::{
     Agent, ByteStreams, Client, ConnectionTo, Dispatch, JsonRpcMessage, on_receive_request,
@@ -113,8 +114,16 @@ pub struct RuntimeHandle {
 
 impl RuntimeHandle {
     pub async fn prompt(&self, prompt: String) -> Result<(), String> {
+        self.prompt_input(PromptInput {
+            text: prompt,
+            attachments: Vec::new(),
+        })
+        .await
+    }
+
+    pub async fn prompt_input(&self, input: PromptInput) -> Result<(), String> {
         self.command_tx
-            .try_send(SessionCommand::Prompt(prompt))
+            .try_send(SessionCommand::Prompt(input))
             .map_err(session_command_send_error)
     }
 
@@ -138,8 +147,29 @@ impl RuntimeHandle {
     }
 }
 
+#[derive(Clone)]
+pub struct PromptAttachment {
+    pub id: String,
+    pub name: String,
+    pub mime_type: String,
+    pub size: u64,
+    pub content: PromptAttachmentContent,
+}
+
+#[derive(Clone)]
+pub enum PromptAttachmentContent {
+    Text(String),
+    Blob(String),
+}
+
+#[derive(Clone)]
+pub struct PromptInput {
+    pub text: String,
+    pub attachments: Vec<PromptAttachment>,
+}
+
 enum SessionCommand {
-    Prompt(String),
+    Prompt(PromptInput),
     Cancel,
 }
 
@@ -148,6 +178,29 @@ fn session_command_send_error(error: mpsc::error::TrySendError<SessionCommand>) 
         mpsc::error::TrySendError::Full(_) => "ACP session command queue saturated".to_string(),
         mpsc::error::TrySendError::Closed(_) => "ACP session command channel closed".to_string(),
     }
+}
+
+fn prompt_input_to_content_blocks(input: &PromptInput) -> Vec<ContentBlock> {
+    let mut blocks = Vec::with_capacity(1 + input.attachments.len());
+    blocks.push(ContentBlock::Text(TextContent::new(input.text.clone())));
+
+    for attachment in &input.attachments {
+        let uri = format!("file://local-attachment/{}", attachment.name);
+        let resource = match &attachment.content {
+            PromptAttachmentContent::Text(text) => EmbeddedResourceResource::TextResourceContents(
+                TextResourceContents::new(text.clone(), uri).mime_type(attachment.mime_type.clone()),
+            ),
+            PromptAttachmentContent::Blob(base64) => {
+                EmbeddedResourceResource::BlobResourceContents(
+                    BlobResourceContents::new(base64.clone(), uri)
+                        .mime_type(attachment.mime_type.clone()),
+                )
+            }
+        };
+        blocks.push(ContentBlock::Resource(EmbeddedResource::new(resource)));
+    }
+
+    blocks
 }
 
 #[derive(Default)]
@@ -862,6 +915,20 @@ fn acp_permission_option_from_protocol(option: &PermissionOption) -> AcpPermissi
 fn resolve_provider_launch(provider: Option<&str>) -> Result<ProviderLaunch, String> {
     let provider_id = normalize_provider_id(provider);
     if provider_id == "codex-acp" {
+        if codex_launch_override()
+            .lock()
+            .expect("codex launch override poisoned")
+            .is_some()
+        {
+            let (command, args) = resolve_codex_launch();
+            return Ok(ProviderLaunch {
+                id: provider_id,
+                command,
+                args,
+                cwd: None,
+                env: std::collections::BTreeMap::new(),
+            });
+        }
         if let Some(entry) = read_providers()
             .map_err(|error| error.to_string())?
             .into_iter()
@@ -1388,14 +1455,30 @@ async fn run_codex_session(
                                             json!({
                                                 "type": "prompt_started",
                                                 "title": "Prompt started",
-                                                "text": prompt.clone(),
+                                                "text": prompt.text.clone(),
+                                                "attachment_count": prompt.attachments.len(),
                                             }),
                                         ))
                                         .await,
                                 );
 
+                                let (prompt_response_tx, prompt_response_rx) =
+                                    oneshot::channel::<Result<StopReason, String>>();
+                                let mut prompt_response_rx = Box::pin(prompt_response_rx);
+                                let blocks = prompt_input_to_content_blocks(&prompt);
                                 session
-                                    .send_prompt(prompt)
+                                    .connection()
+                                    .send_request_to(
+                                        Agent,
+                                        PromptRequest::new(session.session_id().clone(), blocks),
+                                    )
+                                    .on_receiving_result(async move |result| {
+                                        let stop_reason = result
+                                            .map(|PromptResponse { stop_reason, .. }| stop_reason)
+                                            .map_err(|error| error.to_string());
+                                        drop(prompt_response_tx.send(stop_reason));
+                                        Ok(())
+                                    })
                                     .map_err(|error| acp_internal_error(error.to_string()))?;
 
                                 let mut saw_assistant_output = false;
@@ -1404,6 +1487,12 @@ async fn run_codex_session(
                                 // before the next turn's prompt is dispatched.
                                 let mut ended_via_idle = false;
                                 loop {
+                                    enum PromptTurnMessage {
+                                        Provider(Result<agent_client_protocol::SessionMessage, agent_client_protocol::Error>),
+                                        Stop(Result<StopReason, String>),
+                                        Idle,
+                                    }
+
                                     let update = tokio::select! {
                                         // Prefer consuming a real update over the idle timeout.
                                         // Without `biased`, when both arms are ready simultaneously
@@ -1411,12 +1500,78 @@ async fn run_codex_session(
                                         // tokio picks randomly. A timeout win leaves StopReason
                                         // in the channel where it poisons the next turn's read loop.
                                         biased;
-                                        update = session.read_update() => Some(update),
-                                        () = tokio::time::sleep(acp_prompt_idle_timeout()), if saw_assistant_output => None,
+                                        stop_reason = &mut prompt_response_rx => {
+                                            PromptTurnMessage::Stop(
+                                                stop_reason.unwrap_or_else(|_| Err("prompt response channel closed".to_string())),
+                                            )
+                                        },
+                                        update = session.read_update() => PromptTurnMessage::Provider(update),
+                                        () = tokio::time::sleep(acp_prompt_idle_timeout()), if saw_assistant_output => PromptTurnMessage::Idle,
                                     };
                                     let update = match update {
-                                        Some(update) => update,
-                                        None => {
+                                        PromptTurnMessage::Provider(update) => update,
+                                        PromptTurnMessage::Stop(Ok(stop_reason)) => {
+                                            let stop_reason =
+                                                map_stop_reason(&stop_reason).to_string();
+                                            let state = if stop_reason == "cancelled" {
+                                                lab_apis::acp::types::AcpSessionState::Cancelled
+                                            } else {
+                                                lab_apis::acp::types::AcpSessionState::Completed
+                                            };
+                                            drop(
+                                                event_tx
+                                                    .send(session_state_event(
+                                                        session_id.clone(),
+                                                        state.clone(),
+                                                    ))
+                                                    .await,
+                                            );
+                                            drop(
+                                                event_tx
+                                                    .send(provider_info_event(
+                                                        session_id.clone(),
+                                                        &provider_id,
+                                                        json!({
+                                                            "type": "stop_reason",
+                                                            "title": "Prompt completed",
+                                                            "status": match state {
+                                                                lab_apis::acp::types::AcpSessionState::Cancelled => "cancelled",
+                                                                _ => "completed",
+                                                            },
+                                                            "stop_reason": stop_reason,
+                                                        }),
+                                                    ))
+                                                    .await,
+                                            );
+                                            prompt_lifecycle.finish();
+                                            break;
+                                        }
+                                        PromptTurnMessage::Stop(Err(error)) => {
+                                            drop(
+                                                event_tx
+                                                    .send(session_state_event(
+                                                        session_id.clone(),
+                                                        lab_apis::acp::types::AcpSessionState::Failed,
+                                                    ))
+                                                    .await,
+                                            );
+                                            drop(
+                                                event_tx
+                                                    .send(provider_info_event(
+                                                        session_id.clone(),
+                                                        &provider_id,
+                                                        json!({
+                                                            "type": "provider_error",
+                                                            "title": "Provider error",
+                                                            "text": error,
+                                                        }),
+                                                    ))
+                                                    .await,
+                                            );
+                                            prompt_lifecycle.finish();
+                                            break;
+                                        }
+                                        PromptTurnMessage::Idle => {
                                             drop(
                                                 event_tx
                                                     .send(session_state_event(
@@ -2934,7 +3089,10 @@ pub fn fake_handle_for_tests() -> (RuntimeHandle, mpsc::Receiver<AcpEvent>) {
 pub fn saturated_fake_handle_for_tests() -> (RuntimeHandle, mpsc::Receiver<AcpEvent>) {
     let (command_tx, command_rx) = mpsc::channel::<SessionCommand>(1);
     command_tx
-        .try_send(SessionCommand::Prompt("already queued".to_string()))
+        .try_send(SessionCommand::Prompt(PromptInput {
+            text: "already queued".to_string(),
+            attachments: Vec::new(),
+        }))
         .expect("prefill command queue");
     tokio::spawn(async move {
         let _command_rx = command_rx;

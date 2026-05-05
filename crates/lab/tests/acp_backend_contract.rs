@@ -62,6 +62,9 @@ import os
 import sys
 
 session_id = f"stub-session-{os.getpid()}"
+capture_path = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("LAB_ACP_FAKE_PROMPT_CAPTURE")
+if capture_path:
+    open(capture_path, "a", encoding="utf-8").close()
 
 for raw in sys.stdin:
     raw = raw.strip()
@@ -89,6 +92,9 @@ for raw in sys.stdin:
         result = {"sessionId": session_id, "configOptions": []}
         print(json.dumps({"jsonrpc": "2.0", "id": req_id, "result": result}), flush=True)
     elif method == "session/prompt":
+        if capture_path:
+            with open(capture_path, "a", encoding="utf-8") as out:
+                out.write(json.dumps(params.get("prompt", [])) + "\n")
         print(json.dumps({"jsonrpc": "2.0", "id": req_id, "result": {}}), flush=True)
     elif req_id is not None:
         error = {"code": -32601, "message": "method not found"}
@@ -108,6 +114,31 @@ fn install_fake_provider() -> LaunchGuard {
         vec!["-u".to_string(), script_path.display().to_string()],
     );
     LaunchGuard
+}
+
+fn install_fake_provider_with_prompt_capture(capture: &std::path::Path) -> LaunchGuard {
+    let script_path = write_fake_provider_script();
+    let python = choose_python_command();
+    set_codex_launch_override_for_tests(
+        Some(python),
+        vec![
+            "-u".to_string(),
+            script_path.display().to_string(),
+            capture.display().to_string(),
+        ],
+    );
+    LaunchGuard
+}
+
+fn prompt_capture_path(name: &str) -> PathBuf {
+    let root = std::env::current_dir().expect("workspace cwd");
+    let dir = root.join("target/test-artifacts");
+    std::fs::create_dir_all(&dir).expect("create test artifact dir");
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time")
+        .as_nanos();
+    dir.join(format!("{name}-{unique}.jsonl"))
 }
 
 async fn create_owned_session(registry: &AcpSessionRegistry, principal: &str) -> String {
@@ -132,6 +163,27 @@ async fn json_body(response: axum::response::Response) -> Value {
         .await
         .expect("response bytes");
     serde_json::from_slice(&bytes).expect("json body")
+}
+
+async fn response_body_text(response: axum::response::Response) -> (StatusCode, String) {
+    let status = response.status();
+    let bytes = body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response bytes");
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn read_prompt_capture(path: &std::path::Path) -> Vec<Value> {
+    for _ in 0..100 {
+        if path.metadata().map(|meta| meta.len() > 0).unwrap_or(false) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let raw = std::fs::read_to_string(path).expect("read prompt capture");
+    raw.lines()
+        .map(|line| serde_json::from_str(line).expect("captured prompt json"))
+        .collect()
 }
 
 fn acp_test_app() -> (Router, Arc<AcpSessionRegistry>) {
@@ -528,6 +580,137 @@ async fn http_acp_action_route_returns_shared_error_envelopes() {
     );
     let missing_confirmation_json = json_body(missing_confirmation).await;
     assert_eq!(missing_confirmation_json["kind"], "confirmation_required");
+}
+
+#[tokio::test]
+async fn acp_prompt_accepts_local_text_attachment_as_embedded_resource() {
+    let _guard = test_lock().lock().await;
+    let capture = prompt_capture_path("acp-local-text-attachment");
+    let _launch = install_fake_provider_with_prompt_capture(&capture);
+    let (app, registry) = acp_test_app();
+    let session_id = create_owned_session(&registry, "static-bearer").await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/acp/sessions/{session_id}/prompt"))
+                .header(header::AUTHORIZATION, "Bearer secret-token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "prompt": "Summarize",
+                        "attachments": [{
+                            "kind": "local",
+                            "id": "local-notes",
+                            "name": "notes.txt",
+                            "mimeType": "text/plain",
+                            "size": 11,
+                            "contentKind": "text",
+                            "text": "hello world"
+                        }]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let body = json_body(response).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["ok"], true);
+
+    let captured = read_prompt_capture(&capture);
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0][0]["type"], "text");
+    assert_eq!(captured[0][0]["text"], "Summarize");
+    assert_eq!(captured[0][1]["type"], "resource");
+    assert_eq!(
+        captured[0][1]["resource"]["uri"],
+        "file://local-attachment/notes.txt"
+    );
+    assert_eq!(captured[0][1]["resource"]["mimeType"], "text/plain");
+    assert_eq!(captured[0][1]["resource"]["text"], "hello world");
+}
+
+#[tokio::test]
+async fn acp_prompt_preserves_workspace_attachment_noop_behavior() {
+    let _guard = test_lock().lock().await;
+    let capture = prompt_capture_path("acp-workspace-attachment");
+    let _launch = install_fake_provider_with_prompt_capture(&capture);
+    let (app, registry) = acp_test_app();
+    let session_id = create_owned_session(&registry, "static-bearer").await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/acp/sessions/{session_id}/prompt"))
+                .header(header::AUTHORIZATION, "Bearer secret-token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "prompt": "Summarize",
+                        "attachments": [{
+                            "kind": "file",
+                            "path": "/tmp/a.txt"
+                        }]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let (status, body) = response_body_text(response).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let captured = read_prompt_capture(&capture);
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].as_array().expect("prompt blocks").len(), 1);
+    assert_eq!(captured[0][0]["text"], "Summarize");
+}
+
+#[tokio::test]
+async fn acp_prompt_rejects_oversized_local_attachment_metadata() {
+    let _guard = test_lock().lock().await;
+    let _launch = install_fake_provider();
+    let (app, registry) = acp_test_app();
+    let session_id = create_owned_session(&registry, "alice").await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/acp/sessions/{session_id}/prompt"))
+                .header(header::AUTHORIZATION, "Bearer secret-token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "prompt": "Summarize",
+                        "attachments": [{
+                            "kind": "local",
+                            "id": "local-big",
+                            "name": "big.txt",
+                            "mimeType": "text/plain",
+                            "size": 2_097_153,
+                            "contentKind": "text",
+                            "text": "too big"
+                        }]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = json_body(response).await;
+    assert_eq!(body["kind"], "invalid_param");
+    assert_eq!(body["param"], "attachments");
 }
 
 #[tokio::test]
