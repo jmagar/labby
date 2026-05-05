@@ -141,6 +141,7 @@ struct CreateSessionBody {
     cwd: Option<String>,
     title: Option<String>,
     model: Option<String>,
+    #[serde(alias = "model_id")]
     model_id: Option<String>,
 }
 
@@ -183,6 +184,7 @@ struct PromptBody {
     /// Optional structured page context. Passed to dispatch; injection is handled there.
     page_context: Option<PageContextBody>,
     model: Option<String>,
+    #[serde(alias = "model_id")]
     model_id: Option<String>,
 }
 

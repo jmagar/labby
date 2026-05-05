@@ -339,5 +339,6 @@ pub struct StartSessionResult {
     pub agent_version: String,
     pub model_id: Option<String>,
     pub model_name: Option<String>,
+    pub models: Vec<lab_apis::acp::types::AcpModelOption>,
     pub config_options: Vec<lab_apis::acp::types::AcpSessionConfigOptionView>,
 }

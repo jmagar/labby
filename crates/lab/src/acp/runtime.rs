@@ -10,8 +10,8 @@ use agent_client_protocol::schema::{
     InitializeRequest, KillTerminalRequest, PermissionOption, PermissionOptionKind,
     ProtocolVersion, ReadTextFileRequest, ReleaseTerminalRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
-    SessionInfoUpdate, SessionNotification, SessionUpdate, StopReason, TerminalOutputRequest,
-    WaitForTerminalExitRequest, WriteTextFileRequest,
+    SessionInfoUpdate, SessionNotification, SessionUpdate, SetSessionModelRequest, StopReason,
+    TerminalOutputRequest, WaitForTerminalExitRequest, WriteTextFileRequest,
 };
 use agent_client_protocol::{
     Agent, ByteStreams, Client, ConnectionTo, Dispatch, JsonRpcMessage, on_receive_request,
@@ -179,6 +179,29 @@ struct RuntimeStarted {
     provider_session_id: String,
     agent_name: String,
     agent_version: String,
+    model_id: Option<String>,
+    model_name: Option<String>,
+    models: Vec<lab_apis::acp::types::AcpModelOption>,
+}
+
+fn session_model_options(
+    response: &agent_client_protocol::schema::NewSessionResponse,
+) -> (Option<String>, Vec<lab_apis::acp::types::AcpModelOption>) {
+    let Some(models) = response.models.as_ref() else {
+        return (None, Vec::new());
+    };
+    let current = Some(models.current_model_id.to_string());
+    let options = models
+        .available_models
+        .iter()
+        .map(|model| lab_apis::acp::types::AcpModelOption {
+            id: model.model_id.to_string(),
+            name: model.name.clone(),
+            description: model.description.clone(),
+            fixed: false,
+        })
+        .collect();
+    (current, options)
 }
 
 #[derive(Default)]
@@ -445,8 +468,9 @@ pub async fn launch_codex_runtime(
             provider_session_id: started.provider_session_id,
             agent_name: started.agent_name,
             agent_version: started.agent_version,
-            model_id: None,
-            model_name: None,
+            model_id: started.model_id,
+            model_name: started.model_name,
+            models: started.models,
             config_options: Vec::new(),
         },
     ))
@@ -1270,6 +1294,12 @@ async fn run_codex_session(
                         .start_session()
                         .await
                         .map_err(|error| acp_internal_error(error.to_string()))?;
+                    let session_response = session.response();
+                    let (model_id, models) = session_model_options(&session_response);
+                    let model_name = model_id
+                        .as_ref()
+                        .and_then(|id| models.iter().find(|model| &model.id == id))
+                        .map(|model| model.name.clone());
 
                     let started = RuntimeStarted {
                         provider_session_id: session.session_id().to_string(),
@@ -1289,6 +1319,9 @@ async fn run_codex_session(
                             .as_ref()
                             .map(|info| info.version.clone())
                             .unwrap_or_else(|| "unknown".to_string()),
+                        model_id,
+                        model_name,
+                        models,
                     };
                     if let Some(sender) = started_tx.lock().ok().and_then(|mut guard| guard.take()) {
                         drop(sender.send(Ok(started)));
@@ -1395,6 +1428,20 @@ async fn run_codex_session(
                                         ))
                                         .await,
                                 );
+                                if let Some(model_id) = model_id.as_deref() {
+                                    session
+                                        .connection()
+                                        .send_request_to(
+                                            Agent,
+                                            SetSessionModelRequest::new(
+                                                session.session_id().clone(),
+                                                model_id.to_string(),
+                                            ),
+                                        )
+                                        .block_task()
+                                        .await
+                                        .map_err(|error| acp_internal_error(error.to_string()))?;
+                                }
                                 drop(
                                     event_tx
                                         .send(provider_info_event(

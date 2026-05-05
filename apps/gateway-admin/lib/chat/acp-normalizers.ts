@@ -168,7 +168,15 @@ export function sameProviderList(a: ProviderHealth[], b: ProviderHealth[]): bool
       item.defaultModelId === other.defaultModelId &&
       item.currentModelId === other.currentModelId &&
       models.length === otherModels.length &&
-      models.every((model, index) => model.id === otherModels[index]?.id)
+      models.every((model, index) => {
+        const otherModel = otherModels[index]
+        return (
+          model.id === otherModel?.id &&
+          model.name === otherModel.name &&
+          model.description === otherModel.description &&
+          model.fixed === otherModel.fixed
+        )
+      })
     )
   })
 }

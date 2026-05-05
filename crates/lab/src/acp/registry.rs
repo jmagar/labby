@@ -375,9 +375,19 @@ impl AcpSessionRegistry {
         })?;
 
         let provider = normalize_provider_id(input.provider.as_deref());
+        if !started.models.is_empty() {
+            self.provider_models
+                .write()
+                .await
+                .insert(provider.clone(), started.models.clone());
+        }
         let options = self.provider_model_options(&provider).await;
-        let (model_id, model_name) =
-            resolve_model_selection(&provider, input.model_id.as_deref(), &options, started.model_id.as_deref())?;
+        let (model_id, model_name) = resolve_model_selection(
+            &provider,
+            input.model_id.as_deref(),
+            &options,
+            started.model_id.as_deref(),
+        )?;
         let summary = AcpSessionSummary {
             id: session_id.clone(),
             provider,
@@ -1562,21 +1572,11 @@ fn resolve_model_selection(
     current: Option<&str>,
 ) -> Result<(Option<String>, Option<String>), ToolError> {
     let selected = requested.or(current);
-    let Some(selected) = selected
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
+    let Some(selected) = selected.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok((None, None));
     };
     if options.is_empty() {
-        return if requested.is_some() {
-            Err(ToolError::InvalidParam {
-                message: format!("provider `{provider}` does not expose switchable models"),
-                param: "model".to_string(),
-            })
-        } else {
-            Ok((Some(selected.to_string()), None))
-        };
+        return Ok((Some(selected.to_string()), None));
     }
     let Some(option) = options.iter().find(|option| option.id == selected) else {
         return Err(ToolError::InvalidParam {
@@ -1841,5 +1841,32 @@ mod tests {
             title_from_prompt(prompt).as_deref(),
             Some("Summarize the Docker ACP session creation behavior and identi...")
         );
+    }
+
+    #[test]
+    fn resolve_model_selection_accepts_requested_model_without_cached_options() {
+        let (model_id, model_name) =
+            resolve_model_selection("codex-acp", Some("gpt-5.4"), &[], None)
+                .expect("requested model should pass through when provider model cache is empty");
+
+        assert_eq!(model_id.as_deref(), Some("gpt-5.4"));
+        assert_eq!(model_name, None);
+    }
+
+    #[test]
+    fn resolve_model_selection_uses_cached_model_metadata() {
+        let options = vec![AcpModelOption {
+            id: "gpt-5.4".to_string(),
+            name: "GPT 5.4".to_string(),
+            description: Some("fast".to_string()),
+            fixed: false,
+        }];
+
+        let (model_id, model_name) =
+            resolve_model_selection("codex-acp", Some("gpt-5.4"), &options, None)
+                .expect("cached model should validate");
+
+        assert_eq!(model_id.as_deref(), Some("gpt-5.4"));
+        assert_eq!(model_name.as_deref(), Some("GPT 5.4"));
     }
 }
