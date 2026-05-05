@@ -77,7 +77,10 @@ export function ChatShell() {
 
   return (
     <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-aurora-page-bg">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-aurora-border-default bg-aurora-nav-bg px-2.5 sm:px-3">
+      <header
+        role="banner"
+        className="sticky top-0 z-20 flex h-[calc(3rem+env(safe-area-inset-top,0px))] shrink-0 items-center gap-2 border-b border-aurora-border-default bg-aurora-nav-bg px-2.5 pt-[env(safe-area-inset-top,0px)] sm:px-3 md:static md:z-auto md:h-12 md:pt-0"
+      >
         <SidebarTrigger
           aria-label="Toggle app sidebar"
           className="-ml-1 text-aurora-text-muted/60 hover:text-aurora-text-primary"

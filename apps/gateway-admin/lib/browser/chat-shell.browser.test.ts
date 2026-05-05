@@ -35,6 +35,7 @@ type BrowserEvent = {
   createdAt: string
   role?: 'user' | 'assistant' | 'thinking'
   text?: string
+  messageId?: string
 }
 
 function session(id: string, title: string, provider = 'codex'): BrowserSession {
@@ -165,6 +166,128 @@ test.after(async () => {
     previewServer.kill('SIGKILL')
     await once(previewServer, 'exit').catch(() => undefined)
   }
+})
+
+test('chat page keeps the header visible while the mobile message thread scrolls', { concurrency: false }, async (t) => {
+  await startPreviewServer()
+
+  const browser = await chromium.launch({ headless: true })
+  t.after(async () => {
+    await browser.close()
+  })
+
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true })
+  const sessions: BrowserSession[] = [session('session-mobile', 'Mobile sticky header')]
+
+  await mockAuthenticatedSession(page)
+  await page.route('**/v1/acp/**', async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+
+    if (url.pathname === '/v1/acp/provider') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          provider: {
+            provider: 'codex',
+            ready: true,
+            command: 'npx',
+            args: ['@zed-industries/codex-acp'],
+            message: 'ready',
+          },
+        }),
+      })
+      return
+    }
+
+    if (url.pathname === '/v1/acp/sessions' && request.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ sessions }),
+      })
+      return
+    }
+
+    const ticketMatch = url.pathname.match(/^\/v1\/acp\/sessions\/([^/]+)\/subscribe_ticket$/)
+    if (ticketMatch && request.method() === 'POST') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ticket: `ticket-${decodeURIComponent(ticketMatch[1]!)}` }),
+      })
+      return
+    }
+
+    const eventMatch = url.pathname.match(/^\/v1\/acp\/sessions\/([^/]+)\/events$/)
+    if (eventMatch && request.method() === 'GET') {
+      const sessionId = decodeURIComponent(eventMatch[1]!)
+      const body = Array.from({ length: 40 }, (_, index) =>
+        sseFrame(bridgeEvent(sessionId, index + 1, {
+          messageId: `mobile-message-${index + 1}`,
+          role: index % 2 === 0 ? 'user' : 'assistant',
+          text: `Mobile message ${index + 1}`,
+        })),
+      ).join('')
+
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body,
+      })
+      return
+    }
+
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: `Unhandled ACP request: ${url.pathname}` }),
+    })
+  })
+
+  await page.goto(`${BASE_URL}/chat/`, { waitUntil: 'networkidle' })
+  await page.getByText('Mobile sticky header').first().waitFor()
+  await page.getByText('Mobile message 40').waitFor()
+
+  const header = page.getByRole('banner').first()
+  const input = page.getByRole('textbox', { name: 'Message' })
+  const scrollViewport = page.locator('[data-slot="scroll-area-viewport"]').last()
+
+  const before = await header.boundingBox()
+  assert.ok(before, 'header should be measurable before scroll')
+
+  const scrollMetrics = await scrollViewport.evaluate((node) => {
+    node.scrollTop = 0
+    const before = node.scrollTop
+    node.scrollTop = Math.max(1, node.scrollHeight / 2)
+    node.dispatchEvent(new Event('scroll', { bubbles: true }))
+    return {
+      before,
+      after: node.scrollTop,
+      scrollHeight: node.scrollHeight,
+      clientHeight: node.clientHeight,
+    }
+  })
+  assert.ok(
+    scrollMetrics.scrollHeight > scrollMetrics.clientHeight,
+    'message viewport should have scrollable overflow for sticky-header coverage',
+  )
+  assert.ok(
+    scrollMetrics.after > scrollMetrics.before,
+    `message viewport should scroll before measuring sticky header, got ${scrollMetrics.before} -> ${scrollMetrics.after}`,
+  )
+
+  const after = await header.boundingBox()
+  const inputBox = await input.boundingBox()
+  assert.ok(after, 'header should be measurable after scroll')
+  assert.ok(inputBox, 'input should be measurable after scroll')
+  assert.ok(after.y >= 0, `header should stay within the viewport, got y=${after.y}`)
+  assert.ok(
+    after.y + after.height <= inputBox.y,
+    `header must not overlap the prompt input, header bottom=${after.y + after.height}, input top=${inputBox.y}`,
+  )
+  assert.equal(Math.round(after.height), Math.round(before.height))
 })
 
 test('chat shell sends prompts without bearer auth and resumes session streams from the last sequence on reselection', { concurrency: false }, async (t) => {
