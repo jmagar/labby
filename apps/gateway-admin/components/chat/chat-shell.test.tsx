@@ -214,6 +214,61 @@ test('sendPromptForSelectedProvider creates provider-matched run and posts page 
   ])
 })
 
+test('sendPromptForSelectedProvider posts local attachment payloads without dropping prompt text', async () => {
+  const requests: Array<{ path: string; body: unknown }> = []
+
+  await sendPromptForSelectedProvider({
+    payload: {
+      text: 'summarize this file',
+      attachments: [
+        {
+          kind: 'local',
+          id: 'local-notes',
+          name: 'notes.txt',
+          mimeType: 'text/plain',
+          size: 11,
+          contentKind: 'text',
+          text: 'hello world',
+        },
+      ],
+    },
+    selectedRun: {
+      ...run('run-codex'),
+      provider: 'codex-acp',
+    },
+    selectedProviderId: 'codex-acp',
+    createSession: async () => run('unused'),
+    isMobileViewport: false,
+    fetchAcp: async (path, init) => {
+      requests.push({ path, body: JSON.parse(String(init?.body)) })
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    },
+    refreshSessions: async () => {},
+    addOptimisticMessage: () => {},
+    removeOptimisticMessage: () => {},
+  })
+
+  assert.deepEqual(requests, [
+    {
+      path: '/sessions/run-codex/prompt',
+      body: {
+        prompt: 'summarize this file',
+        attachments: [
+          {
+            kind: 'local',
+            id: 'local-notes',
+            name: 'notes.txt',
+            mimeType: 'text/plain',
+            size: 11,
+            contentKind: 'text',
+            text: 'hello world',
+          },
+        ],
+      },
+    },
+  ])
+})
+
 test('sendPromptForSelectedProvider removes optimistic message and throws normalized backend errors', async () => {
   const optimisticIds: string[] = []
 

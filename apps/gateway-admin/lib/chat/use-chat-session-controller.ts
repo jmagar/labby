@@ -4,7 +4,7 @@ import {
   errorMessageFromPayload,
 } from './acp-normalizers'
 import type { ACPAgent, ACPMessage, ACPRun } from '@/components/chat/types'
-import type { AttachmentRef } from '@/lib/fs/types'
+import type { PromptAttachmentRef } from '@/lib/fs/types'
 
 export const ACP_AGENT: ACPAgent = {
   id: 'codex',
@@ -121,7 +121,7 @@ export function resolveSelectedAgent(
 
 export type PromptPayload = {
   text: string
-  attachments: AttachmentRef[]
+  attachments: PromptAttachmentRef[]
 }
 
 export type SendPromptForSelectedProviderOptions = {

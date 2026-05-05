@@ -13,11 +13,14 @@ use crate::dispatch::helpers::{action_schema, help_payload, to_json};
 use super::catalog::ACTIONS;
 use super::client::require_registry;
 use super::page_context::{PageContextInput, build_prompt_with_context};
-use super::params::{opt_str, opt_u64, require_str};
+use super::params::{
+    LocalPromptAttachment, opt_str, opt_u64, require_str, validate_local_attachments,
+};
 
 /// SSE ticket lifetime in seconds.
 const TICKET_TTL_SECS: u64 = 30;
 const MAX_ACP_PARAMS_BYTES: usize = 64 * 1024;
+const MAX_ACP_PROMPT_PARAMS_BYTES: usize = 384 * 1024;
 const MAX_ACP_PROMPT_BYTES: usize = 32 * 1024;
 
 fn require_confirm(params: &Value, action: &str) -> Result<(), ToolError> {
@@ -34,16 +37,14 @@ fn require_confirm(params: &Value, action: &str) -> Result<(), ToolError> {
     }
 }
 
-fn ensure_params_size(params: &Value) -> Result<(), ToolError> {
+fn ensure_params_size(params: &Value, max_bytes: usize) -> Result<(), ToolError> {
     let size = serde_json::to_vec(params)
         .map(|bytes| bytes.len())
         .unwrap_or(usize::MAX);
-    if size > MAX_ACP_PARAMS_BYTES {
+    if size > max_bytes {
         return Err(ToolError::Sdk {
             sdk_kind: "content_too_large".to_string(),
-            message: format!(
-                "ACP params exceed {MAX_ACP_PARAMS_BYTES} bytes (received {size} bytes)"
-            ),
+            message: format!("ACP params exceed {max_bytes} bytes (received {size} bytes)"),
         });
     }
     Ok(())
@@ -113,7 +114,12 @@ pub async fn dispatch_with_registry(
     action: &str,
     params: Value,
 ) -> Result<Value, ToolError> {
-    ensure_params_size(&params)?;
+    let max_params_bytes = if action == "session.prompt" {
+        MAX_ACP_PROMPT_PARAMS_BYTES
+    } else {
+        MAX_ACP_PARAMS_BYTES
+    };
+    ensure_params_size(&params, max_params_bytes)?;
 
     match action {
         "help" => Ok(help_payload("acp", ACTIONS)),
@@ -251,8 +257,25 @@ pub async fn dispatch_with_registry(
             let effective_text = build_prompt_with_context(session_id, raw_text, page_ctx.as_ref());
             ensure_prompt_size(&effective_text)?;
 
+            let attachments: Vec<LocalPromptAttachment> = params
+                .get("attachments")
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|error| ToolError::InvalidParam {
+                    message: format!("invalid attachments payload: {error}"),
+                    param: "attachments".into(),
+                })?
+                .unwrap_or_default();
+            validate_local_attachments(&attachments)?;
+
             registry
-                .prompt_session(session_id, &effective_text, principal)
+                .prompt_session_with_attachments(
+                    session_id,
+                    &effective_text,
+                    attachments,
+                    principal,
+                )
                 .await?;
             to_json(json!({ "ok": true, "session_id": session_id }))
         }
@@ -493,6 +516,27 @@ mod tests {
         )
         .await
         .expect_err("oversized params must be rejected");
+
+        assert_eq!(err.kind(), "content_too_large");
+    }
+
+    #[tokio::test]
+    async fn session_prompt_rejects_oversized_prompt_params() {
+        let registry = AcpSessionRegistry::new_for_tests(Duration::from_millis(100));
+        let oversized = "x".repeat(MAX_ACP_PROMPT_PARAMS_BYTES + 1);
+
+        let err = dispatch_with_registry(
+            &registry,
+            "session.prompt",
+            json!({
+                "session_id": "sess-over-limit",
+                "principal": "alice",
+                "text": "hello",
+                "padding": oversized,
+            }),
+        )
+        .await
+        .expect_err("oversized session.prompt params must be rejected");
 
         assert_eq!(err.kind(), "content_too_large");
     }

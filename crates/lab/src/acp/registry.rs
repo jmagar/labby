@@ -25,7 +25,8 @@ use crate::dispatch::acp::persistence::SqliteAcpPersistence;
 use crate::dispatch::error::ToolError;
 
 use super::runtime::{
-    RuntimeHandle, launch_codex_runtime, normalize_provider_id, provider_healths,
+    PromptAttachment, PromptAttachmentContent, PromptInput, RuntimeHandle, launch_codex_runtime,
+    normalize_provider_id, provider_healths,
 };
 use super::types::{
     StartSessionInput, event_created_at, session_title_from_event, stamp_event_sequence,
@@ -407,6 +408,62 @@ impl AcpSessionRegistry {
         prompt: &str,
         principal: &str,
     ) -> Result<(), ToolError> {
+        self.prompt_session_input(
+            session_id,
+            PromptInput {
+                text: prompt.to_string(),
+                attachments: Vec::new(),
+            },
+            principal,
+        )
+        .await
+    }
+
+    pub async fn prompt_session_with_attachments(
+        &self,
+        session_id: &str,
+        prompt: &str,
+        attachments: Vec<crate::dispatch::acp::params::LocalPromptAttachment>,
+        principal: &str,
+    ) -> Result<(), ToolError> {
+        let runtime_attachments = attachments
+            .into_iter()
+            .map(|attachment| {
+                let content = match attachment.content {
+                    crate::dispatch::acp::params::LocalAttachmentContent::Text { text } => {
+                        PromptAttachmentContent::Text(text)
+                    }
+                    crate::dispatch::acp::params::LocalAttachmentContent::Blob { base64 } => {
+                        PromptAttachmentContent::Blob(base64)
+                    }
+                };
+                PromptAttachment {
+                    id: attachment.id,
+                    name: attachment.name,
+                    mime_type: attachment.mime_type,
+                    size: attachment.size,
+                    content,
+                }
+            })
+            .collect();
+
+        self.prompt_session_input(
+            session_id,
+            PromptInput {
+                text: prompt.to_string(),
+                attachments: runtime_attachments,
+            },
+            principal,
+        )
+        .await
+    }
+
+    async fn prompt_session_input(
+        &self,
+        session_id: &str,
+        prompt: PromptInput,
+        principal: &str,
+    ) -> Result<(), ToolError> {
         let session = self.get_session_arc(session_id).await?;
         Self::check_principal(&session, principal)?;
 
@@ -426,7 +483,7 @@ impl AcpSessionRegistry {
         {
             let mut summary = session.summary.write().await;
             if should_replace_prompt_title(&summary.title)
-                && let Some(title) = title_from_prompt(prompt)
+                && let Some(title) = title_from_prompt(&prompt.text)
             {
                 summary.title = title;
             }
@@ -441,7 +498,9 @@ impl AcpSessionRegistry {
 
         tracing::debug!(
             surface = "acp", service = "registry", action = "session.prompt",
-            session_id = %session_id, prompt_len = prompt.len(),
+            session_id = %session_id,
+            prompt_len = prompt.text.len(),
+            attachment_count = prompt.attachments.len(),
             "ACP session prompt dispatched",
         );
 
@@ -464,7 +523,7 @@ impl AcpSessionRegistry {
                 .ok_or_else(|| internal("ACP runtime unavailable"))?
         };
         runtime
-            .prompt(prompt.to_string())
+            .prompt_input(prompt)
             .await
             .map_err(session_command_error)?;
 

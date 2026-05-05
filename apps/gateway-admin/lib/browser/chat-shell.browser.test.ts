@@ -705,3 +705,118 @@ test('chat shell agent picker switches provider and sends through a provider-mat
     },
   ])
 })
+
+test('chat shell attaches and removes local files before sending prompt', { concurrency: false }, async (t) => {
+  await startPreviewServer()
+
+  const browser = await chromium.launch({ headless: true })
+  t.after(async () => {
+    await browser.close()
+  })
+
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
+  const sessions: BrowserSession[] = []
+  const promptRequests: Array<{ prompt: string; attachments?: unknown[] }> = []
+
+  await mockAuthenticatedSession(page)
+  await page.route('**/v1/acp/**', async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+
+    if (url.pathname === '/v1/acp/provider') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ provider: { provider: 'codex', ready: true, command: 'npx', args: [], message: 'ready' } }),
+      })
+      return
+    }
+
+    if (url.pathname === '/v1/acp/sessions' && request.method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sessions }) })
+      return
+    }
+
+    if (url.pathname === '/v1/acp/sessions' && request.method() === 'POST') {
+      const created = session('session-attach', 'Attachment session')
+      sessions.unshift(created)
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ session: created }) })
+      return
+    }
+
+    const promptMatch = url.pathname.match(/^\/v1\/acp\/sessions\/([^/]+)\/prompt$/)
+    if (promptMatch && request.method() === 'POST') {
+      const payload = JSON.parse(request.postData() ?? '{}') as { prompt?: string; attachments?: unknown[] }
+      promptRequests.push({ prompt: payload.prompt ?? '', attachments: payload.attachments })
+      await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ accepted: true }) })
+      return
+    }
+
+    const ticketMatch = url.pathname.match(/^\/v1\/acp\/sessions\/([^/]+)\/subscribe_ticket$/)
+    if (ticketMatch && request.method() === 'POST') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ticket: 'ticket-attach' }) })
+      return
+    }
+
+    const eventMatch = url.pathname.match(/^\/v1\/acp\/sessions\/([^/]+)\/events$/)
+    if (eventMatch && request.method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' })
+      return
+    }
+
+    await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ message: `Unhandled ACP request: ${url.pathname}` }) })
+  })
+
+  await page.goto(`${BASE_URL}/chat/`, { waitUntil: 'networkidle' })
+  await page.getByRole('textbox', { name: 'Message' }).fill('Use these notes')
+
+  const chooserPromise = page.waitForEvent('filechooser')
+  await page.getByRole('button', { name: 'Attach local file' }).click()
+  const chooser = await chooserPromise
+  await chooser.setFiles([
+    {
+      name: 'notes.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('local browser notes'),
+    },
+  ])
+
+  await assert.doesNotReject(() => page.getByText('notes.txt').waitFor())
+  await page.getByRole('button', { name: 'Remove notes.txt' }).click()
+  await assert.doesNotReject(() => page.getByRole('button', { name: 'Send message' }).waitFor())
+
+  const chooserPromise2 = page.waitForEvent('filechooser')
+  await page.getByRole('button', { name: 'Attach local file' }).click()
+  const chooser2 = await chooserPromise2
+  await chooser2.setFiles([
+    {
+      name: 'notes.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('local browser notes'),
+    },
+  ])
+
+  await page.getByRole('button', { name: 'Send message' }).click()
+  await waitForCondition(() => promptRequests.length === 1)
+
+  assert.equal(promptRequests[0]?.prompt, 'Use these notes')
+  const attachments = promptRequests[0]?.attachments as Array<Record<string, unknown>> | undefined
+  assert.equal(attachments?.length, 1)
+  assert.deepEqual(
+    {
+      ...attachments?.[0],
+      id: typeof attachments?.[0]?.id === 'string' && attachments[0].id.startsWith('local-notes.txt-19-')
+        ? 'local-notes.txt-19-*'
+        : attachments?.[0]?.id,
+    },
+    {
+      kind: 'local',
+      id: 'local-notes.txt-19-*',
+      name: 'notes.txt',
+      mimeType: 'text/plain',
+      size: 19,
+      contentKind: 'text',
+      text: 'local browser notes',
+    },
+  )
+})
