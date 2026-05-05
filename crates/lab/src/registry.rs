@@ -218,6 +218,59 @@ impl ToolRegistry {
     }
 }
 
+const ALWAYS_VISIBLE_SERVICES: &[&str] = &[
+    "init",
+    "setup",
+    "doctor",
+    "plugins",
+    "extract",
+    "gateway",
+    "help",
+    "completions",
+    "scaffold",
+    "audit",
+    "marketplace",
+    "logs",
+    "device",
+    "acp",
+    "stash",
+];
+
+#[must_use]
+pub fn lab_show_all_enabled() -> bool {
+    std::env::var("LAB_SHOW_ALL")
+        .ok()
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+}
+
+#[must_use]
+pub fn filter_by_configured_env(registry: &ToolRegistry) -> ToolRegistry {
+    let mut filtered = ToolRegistry::new();
+    for service in registry.services() {
+        if service_visible_with_env(service.name) {
+            filtered.register(service.clone());
+        }
+    }
+    filtered
+}
+
+#[must_use]
+pub fn service_visible_with_env(service: &str) -> bool {
+    ALWAYS_VISIBLE_SERVICES.contains(&service) || service_configured_by_env(service)
+}
+
+#[must_use]
+pub fn service_configured_by_env(service: &str) -> bool {
+    let Some(meta) = service_meta(service) else {
+        return false;
+    };
+    meta.required_env.iter().all(|var| {
+        std::env::var(var.name)
+            .ok()
+            .is_some_and(|value| !value.trim().is_empty())
+    })
+}
+
 /// Build a registry with every feature-enabled service registered.
 ///
 /// This is the single place feature flags gate MCP tool availability.

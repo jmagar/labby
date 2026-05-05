@@ -16,11 +16,17 @@
 use std::process::ExitCode;
 
 use anyhow::Result;
-use clap::Args;
+use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Value, json};
+
+use crate::output::{OutputFormat, print};
 
 #[derive(Debug, Args)]
 pub struct SetupArgs {
+    /// Setup UI mode. Standalone setup defaults to full; /setup-core passes plugin.
+    #[arg(long, value_enum, default_value_t = SetupModeArg::Full)]
+    pub mode: SetupModeArg,
+
     /// Skip the wizard and exit cleanly. Equivalent to LAB_SKIP_SETUP=1.
     #[arg(long)]
     pub no_setup: bool,
@@ -34,12 +40,62 @@ pub struct SetupArgs {
     /// Used by `just smoke-setup` for CI verification.
     #[arg(long)]
     pub smoke: bool,
+
+    #[command(subcommand)]
+    pub command: Option<SetupCommand>,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum SetupModeArg {
+    Plugin,
+    Full,
+}
+
+impl SetupModeArg {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Plugin => "plugin",
+            Self::Full => "full",
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SetupCommand {
+    /// List installed Claude Code lab plugins.
+    InstalledPlugins {
+        /// Bypass the short in-process cache.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Join service configuration, draft, and Claude plugin state.
+    ServicesStatus,
+    /// Install the Claude Code plugin for a configured service.
+    InstallPlugin(PluginMutationArgs),
+    /// Uninstall the Claude Code plugin for a service.
+    UninstallPlugin(PluginMutationArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct PluginMutationArgs {
+    /// Service name, for example `plex` or `radarr`.
+    pub service: String,
+    /// Skip confirmation for destructive actions.
+    #[arg(short = 'y', long, alias = "no-confirm")]
+    pub yes: bool,
+    /// Print what would be dispatched without executing.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 /// Default URL for the embedded web UI (per Q1: 127.0.0.1:8765).
 const DEFAULT_LAB_URL: &str = "http://127.0.0.1:8765";
 
-pub async fn run(args: SetupArgs) -> Result<ExitCode> {
+pub async fn run(args: SetupArgs, format: OutputFormat) -> Result<ExitCode> {
+    if let Some(command) = args.command {
+        return run_command(command, format).await;
+    }
+
     if std::env::var("LAB_SKIP_SETUP").as_deref() == Ok("1") || args.no_setup {
         eprintln!(
             "setup skipped (LAB_SKIP_SETUP=1 or --no-setup); run `labby setup` manually when ready"
@@ -65,7 +121,7 @@ pub async fn run(args: SetupArgs) -> Result<ExitCode> {
         .unwrap_or(false);
     let route = if first_run { "/setup" } else { "/settings" };
 
-    let url = format!("{DEFAULT_LAB_URL}{route}");
+    let url = format!("{DEFAULT_LAB_URL}{route}?mode={}", args.mode.as_str());
     eprintln!();
     if first_run {
         eprintln!("Welcome to lab. First-run detected.");
@@ -79,6 +135,49 @@ pub async fn run(args: SetupArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<ExitCode> {
+    match command {
+        SetupCommand::InstalledPlugins { force } => {
+            let value =
+                crate::dispatch::setup::dispatch("installed_plugins", json!({ "force": force }))
+                    .await?;
+            print(&value, format)?;
+        }
+        SetupCommand::ServicesStatus => {
+            let value = crate::dispatch::setup::dispatch("services_status", json!({})).await?;
+            print(&value, format)?;
+        }
+        SetupCommand::InstallPlugin(args) => {
+            run_plugin_mutation("install_plugin", args, format).await?;
+        }
+        SetupCommand::UninstallPlugin(args) => {
+            run_plugin_mutation("uninstall_plugin", args, format).await?;
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+async fn run_plugin_mutation(
+    action: &'static str,
+    args: PluginMutationArgs,
+    format: OutputFormat,
+) -> Result<()> {
+    let params = json!({
+        "service": args.service,
+        "confirm": true,
+    });
+    if args.dry_run {
+        crate::cli::helpers::print_dry_run("setup", action, &params);
+        return Ok(());
+    }
+    if !args.yes {
+        anyhow::bail!("setup {action} is destructive; pass -y/--yes to confirm");
+    }
+    let value = crate::dispatch::setup::dispatch(action, params).await?;
+    print(&value, format)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -86,10 +185,12 @@ mod tests {
     #[tokio::test]
     async fn no_setup_flag_exits_cleanly() {
         let code = run(SetupArgs {
+            mode: SetupModeArg::Full,
             no_setup: true,
             no_browser: true,
             smoke: false,
-        })
+            command: None,
+        }, OutputFormat::from_json_flag(true, crate::output::ColorPolicy::Plain, crate::output::RenderEnv::stdout()))
         .await
         .unwrap();
         assert_eq!(code, ExitCode::SUCCESS);

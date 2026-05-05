@@ -12,12 +12,26 @@ use crate::{catalog::build_catalog, registry::ToolRegistry};
 
 /// Render the `lab://catalog` resource as JSON.
 pub fn catalog_json(registry: &ToolRegistry) -> Result<Value> {
+    let filtered;
+    let registry = if crate::registry::lab_show_all_enabled() {
+        registry
+    } else {
+        filtered = crate::registry::filter_by_configured_env(registry);
+        &filtered
+    };
     let catalog = build_catalog(registry);
     Ok(serde_json::to_value(catalog)?)
 }
 
 /// Render the `lab://<service>/actions` resource for one service.
 pub fn service_actions_json(registry: &ToolRegistry, service: &str) -> Result<Value> {
+    let filtered;
+    let registry = if crate::registry::lab_show_all_enabled() {
+        registry
+    } else {
+        filtered = crate::registry::filter_by_configured_env(registry);
+        &filtered
+    };
     let catalog = build_catalog(registry);
     let entry = catalog
         .services

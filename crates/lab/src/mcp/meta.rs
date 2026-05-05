@@ -17,5 +17,12 @@ use crate::{
 /// are fallible, even though this particular helper is currently infallible.
 #[allow(clippy::unnecessary_wraps)]
 pub fn help(registry: &ToolRegistry) -> Result<ToolEnvelope<Catalog>, ToolError> {
+    let filtered;
+    let registry = if crate::registry::lab_show_all_enabled() {
+        registry
+    } else {
+        filtered = crate::registry::filter_by_configured_env(registry);
+        &filtered
+    };
     Ok(ToolEnvelope::new(build_catalog(registry)))
 }

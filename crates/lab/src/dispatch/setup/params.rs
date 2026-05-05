@@ -50,6 +50,27 @@ pub fn parse_force(params: &Value) -> bool {
 }
 
 #[must_use]
+pub fn parse_bool(params: &Value, name: &str) -> bool {
+    params
+        .get(name)
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+pub fn parse_service(params: &Value) -> Result<String, ToolError> {
+    params
+        .get("service")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .ok_or_else(|| ToolError::MissingParam {
+            message: "missing required parameter `service`".into(),
+            param: "service".into(),
+        })
+}
+
+#[must_use]
 pub fn parse_services_filter(params: &Value) -> Option<Vec<String>> {
     let array = params.get("services")?.as_array()?;
     Some(

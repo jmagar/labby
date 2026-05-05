@@ -82,6 +82,11 @@ impl LabMcpServer {
             if !self.service_visible_on_mcp(&service.name).await {
                 continue;
             }
+            if !crate::registry::lab_show_all_enabled()
+                && !crate::registry::service_visible_with_env(&service.name)
+            {
+                continue;
+            }
             if let Some(allowed_actions) = self.allowed_mcp_actions(&service.name).await
                 && !allowed_actions.is_empty()
             {
@@ -97,6 +102,11 @@ impl LabMcpServer {
 
     pub(crate) async fn service_actions_json(&self, service: &str) -> anyhow::Result<Value> {
         if !self.service_visible_on_mcp(service).await {
+            anyhow::bail!("unknown service: {service}");
+        }
+        if !crate::registry::lab_show_all_enabled()
+            && !crate::registry::service_visible_with_env(service)
+        {
             anyhow::bail!("unknown service: {service}");
         }
 

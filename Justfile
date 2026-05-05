@@ -41,6 +41,10 @@ build-release:
     cargo build --workspace --all-features --release
     install -D -m 755 target/release/labby bin/labby
 
+# Generate Claude Code marketplace tree from compiled service metadata
+marketplace: build-release
+    cargo run --package labby --all-features -- marketplace generate --out target/marketplace --binary target/release/labby
+
 # Install release binary to ~/.local/bin/labby (updates the host CLI)
 install: build-release
     install -D -m 755 bin/labby ~/.local/bin/labby

@@ -423,6 +423,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
 
     let mut state = AppState::from_registry(registry)
         .with_config(config.clone())
+        .with_http_bind_host(host.clone())
         .with_acp_registry(Arc::clone(&acp_registry));
     if auth_configured {
         match crate::observability::activity::ActorKeyDeriver::load_or_create() {

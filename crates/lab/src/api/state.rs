@@ -70,6 +70,8 @@ pub struct AppState {
     pub workspace_root: Option<Arc<PathBuf>>,
     /// When true, `/v1/*` skips auth middleware for hosted UI requests.
     pub web_ui_auth_disabled: bool,
+    /// HTTP bind host resolved by `labby serve`.
+    pub http_bind_host: Option<Arc<String>>,
     /// Shared SQLite-backed MCP registry store for `/v0.1` read endpoints.
     ///
     /// `None` when the `mcpregistry` feature is disabled or the store failed to open.
@@ -129,6 +131,7 @@ impl AppState {
             embedded_web_assets: false,
             workspace_root: None,
             web_ui_auth_disabled: false,
+            http_bind_host: None,
             server_start: std::time::Instant::now(),
             #[cfg(feature = "mcpregistry")]
             registry_store: None,
@@ -232,6 +235,12 @@ impl AppState {
     #[must_use]
     pub fn with_web_ui_auth_disabled(mut self, disabled: bool) -> Self {
         self.web_ui_auth_disabled = disabled;
+        self
+    }
+
+    #[must_use]
+    pub fn with_http_bind_host(mut self, host: impl Into<String>) -> Self {
+        self.http_bind_host = Some(Arc::new(host.into()));
         self
     }
 

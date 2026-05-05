@@ -7,6 +7,7 @@
 //! exception clause in `crates/lab/src/dispatch/CLAUDE.md`).
 
 mod catalog;
+mod claude_plugins;
 mod client;
 mod dispatch;
 mod draft;

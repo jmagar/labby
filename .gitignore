@@ -102,3 +102,4 @@ config.local.toml
 
 # Personal local cheatsheet (never commit)
 CLAUDE.md.local
+.worktrees

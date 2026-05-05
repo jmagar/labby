@@ -164,7 +164,7 @@ pub enum Command {
     /// Open the web-based first-run wizard (or settings) — lab-bg3e.3.
     Setup(setup::SetupArgs),
     /// Print the service + action catalog.
-    Help,
+    Help(help::HelpArgs),
     /// Generate a new service onboarding scaffold.
     Scaffold(scaffold::ScaffoldArgs),
     /// Generate shell completions.
@@ -305,8 +305,8 @@ pub async fn dispatch(cli: Cli, config: LabConfig) -> Result<ExitCode> {
         Command::Install(args) => install::run_install(&args).map(|()| ExitCode::SUCCESS),
         Command::Uninstall(args) => install::run_uninstall(&args).map(|()| ExitCode::SUCCESS),
         Command::Init => install::run_init().map(|()| ExitCode::SUCCESS),
-        Command::Setup(args) => setup::run(args).await,
-        Command::Help => help::run(format),
+        Command::Setup(args) => setup::run(args, format).await,
+        Command::Help(args) => help::run(args, format),
         Command::Scaffold(args) => scaffold::run(args, format),
         #[cfg(feature = "controller")]
         Command::Completions(args) => completions::run(&args),

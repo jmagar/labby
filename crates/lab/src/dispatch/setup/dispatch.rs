@@ -35,9 +35,10 @@ use crate::dispatch::helpers::{action_schema, help_payload, to_json};
 use crate::registry::service_meta;
 
 use super::catalog::ACTIONS;
+use super::claude_plugins;
 use super::client::{cached_env_var_index, cached_registry, draft_path, env_path};
 use super::draft;
-use super::params::{parse_entries, parse_force, parse_services_filter};
+use super::params::{parse_bool, parse_entries, parse_force, parse_service, parse_services_filter};
 use super::secret_mask;
 use super::state;
 
@@ -63,6 +64,10 @@ async fn dispatch_inner(action: &str, params: &Value) -> Result<Value, ToolError
         "draft.get" => draft_get_action(),
         "draft.set" => draft_set_action(params).await,
         "draft.commit" => draft_commit_action(params).await,
+        "installed_plugins" => installed_plugins_action(params).await,
+        "services_status" => services_status_action().await,
+        "install_plugin" => install_plugin_action(params).await,
+        "uninstall_plugin" => uninstall_plugin_action(params).await,
         "finalize" => draft_commit_action(params).await,
         unknown => Err(ToolError::UnknownAction {
             message: format!("unknown action `{unknown}` for service `setup`"),
@@ -70,6 +75,27 @@ async fn dispatch_inner(action: &str, params: &Value) -> Result<Value, ToolError
             hint: None,
         }),
     }
+}
+
+async fn installed_plugins_action(params: &Value) -> Result<Value, ToolError> {
+    let force = parse_bool(params, "force");
+    let plugins = claude_plugins::installed_plugins(force).await?;
+    Ok(claude_plugins::installed_plugins_json(plugins))
+}
+
+async fn services_status_action() -> Result<Value, ToolError> {
+    let statuses = claude_plugins::services_status().await?;
+    Ok(claude_plugins::services_status_json(statuses))
+}
+
+async fn install_plugin_action(params: &Value) -> Result<Value, ToolError> {
+    let service = parse_service(params)?;
+    to_json(claude_plugins::install_plugin(&service).await?)
+}
+
+async fn uninstall_plugin_action(params: &Value) -> Result<Value, ToolError> {
+    let service = parse_service(params)?;
+    to_json(claude_plugins::uninstall_plugin(&service).await?)
 }
 
 fn state_action() -> Result<Value, ToolError> {
