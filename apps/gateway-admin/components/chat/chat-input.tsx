@@ -27,6 +27,7 @@ interface ChatInputProps {
 }
 
 export const CHAT_INPUT_MAX_HEIGHT_PX = 200
+const CHAT_INPUT_MIN_HEIGHT_PX = 44
 
 export function resizeChatPromptTextarea(el: HTMLTextAreaElement) {
   el.style.height = 'auto'
@@ -230,11 +231,7 @@ export function ChatInput({
             'text-aurora-text-primary placeholder:text-aurora-text-muted/50',
             'outline-none disabled:opacity-50',
           )}
-          style={{
-            minHeight: '44px',
-            maxHeight: `${CHAT_INPUT_MAX_HEIGHT_PX}px`,
-            overflowY: 'hidden',
-          }}
+          style={{ minHeight: `${CHAT_INPUT_MIN_HEIGHT_PX}px`, maxHeight: `${CHAT_INPUT_MAX_HEIGHT_PX}px` }}
         />
 
         <div className="flex items-center gap-2 px-2.5 pb-2 sm:gap-2.5 sm:px-3">

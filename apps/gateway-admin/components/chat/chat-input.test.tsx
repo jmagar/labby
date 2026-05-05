@@ -55,7 +55,7 @@ test('chat input textarea renders with max height and without whole-composer ove
   )
 
   assert.match(markup, /aria-label="Message"/)
-  assert.match(markup, /max-height:200px/)
-  assert.match(markup, /overflow-y:hidden/)
+  assert.match(markup, new RegExp(`max-height:${CHAT_INPUT_MAX_HEIGHT_PX}px`))
+  assert.doesNotMatch(markup, /overflow-y:hidden/)
   assert.doesNotMatch(markup, /overflow-hidden bg-transparent/)
 })
