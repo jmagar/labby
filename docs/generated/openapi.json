@@ -3401,10 +3401,16 @@
           "principal"
         ],
         "properties": {
+          "continuity_mode": {
+            "type": "string"
+          },
           "page_context": {
             "type": "object"
           },
           "principal": {
+            "type": "string"
+          },
+          "provider": {
             "type": "string"
           },
           "session_id": {

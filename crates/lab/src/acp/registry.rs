@@ -453,6 +453,7 @@ impl AcpSessionRegistry {
         Ok(summary)
     }
 
+    #[allow(dead_code)]
     pub async fn prompt_session(
         &self,
         session_id: &str,
@@ -515,6 +516,7 @@ impl AcpSessionRegistry {
         .await
     }
 
+    #[allow(dead_code)]
     async fn prompt_session_input(
         &self,
         session_id: &str,
@@ -532,6 +534,7 @@ impl AcpSessionRegistry {
         .await
     }
 
+    #[allow(dead_code)]
     pub async fn prompt_session_with_options(
         &self,
         session_id: &str,
@@ -741,7 +744,7 @@ impl AcpSessionRegistry {
 
         let continuity_mode = match options.continuity_mode.as_deref() {
             Some("reset") => "reset",
-            Some("handoff") | None | Some("") => "handoff",
+            Some("handoff" | "") | None => "handoff",
             Some(other) => {
                 return Err(ToolError::InvalidParam {
                     message: format!("unsupported continuity_mode `{other}`"),

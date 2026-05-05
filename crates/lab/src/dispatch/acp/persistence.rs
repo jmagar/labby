@@ -465,7 +465,9 @@ fn add_column_if_missing(
             return Ok(());
         }
     }
-    conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition};"))
+    conn.execute_batch(&format!(
+        "ALTER TABLE {table} ADD COLUMN {column} {definition};"
+    ))
 }
 
 const SCHEMA_SQL: &str = "
@@ -563,9 +565,8 @@ fn db_load_sessions(conn: &Connection) -> rusqlite::Result<Vec<AcpSessionSummary
 }
 
 fn db_save_session(conn: &Connection, s: &AcpSessionSummary) -> rusqlite::Result<()> {
-    let config_options_json = serde_json::to_string(&s.config_options).map_err(|error| {
-        rusqlite::Error::ToSqlConversionFailure(Box::new(error))
-    })?;
+    let config_options_json = serde_json::to_string(&s.config_options)
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
     conn.execute(
         "INSERT INTO acp_sessions
              (id, provider, title, cwd, state, created_at, updated_at,

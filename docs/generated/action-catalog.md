@@ -18,7 +18,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `acp` | `session.list` | false | false | `principal: string` | `Value` | cli, mcp, api |
 | `acp` | `session.permission.approve` | false | true | `session_id*: string`<br>`request_id*: string`<br>`option_id*: string`<br>`principal: string`<br>`confirm*: boolean` | `Value` | cli, mcp, api |
 | `acp` | `session.permission.reject` | false | false | `session_id*: string`<br>`request_id*: string`<br>`principal: string` | `Value` | cli, mcp, api |
-| `acp` | `session.prompt` | false | false | `session_id*: string`<br>`text*: string`<br>`principal*: string`<br>`page_context: object` | `Value` | cli, mcp, api |
+| `acp` | `session.prompt` | false | false | `session_id*: string`<br>`text*: string`<br>`principal*: string`<br>`provider: string`<br>`continuity_mode: string`<br>`page_context: object` | `Value` | cli, mcp, api |
 | `acp` | `session.start` | false | false | `provider: string`<br>`title: string`<br>`cwd: string`<br>`principal: string` | `Value` | cli, mcp, api |
 | `acp` | `session.subscribe_ticket` | false | false | `session_id*: string`<br>`principal: string` | `Value` | cli, mcp, api |
 | `adguard` | `filtering.check-host` | false | false | `host*: string` | `AdguardResponse` | cli, mcp, api |

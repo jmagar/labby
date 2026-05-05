@@ -114,6 +114,7 @@ pub struct RuntimeHandle {
 }
 
 impl RuntimeHandle {
+    #[allow(dead_code)]
     pub async fn prompt(&self, prompt: String, model_id: Option<String>) -> Result<(), String> {
         self.prompt_input(
             PromptInput {
@@ -157,9 +158,11 @@ impl RuntimeHandle {
 
 #[derive(Clone)]
 pub struct PromptAttachment {
+    #[allow(dead_code)]
     pub id: String,
     pub name: String,
     pub mime_type: String,
+    #[allow(dead_code)]
     pub size: u64,
     pub content: PromptAttachmentContent,
 }
