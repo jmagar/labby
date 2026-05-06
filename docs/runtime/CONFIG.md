@@ -580,9 +580,21 @@ env_file:
   `workspace-write` and `read-only` modes. Provider config changes affect new
   sessions; already-running provider subprocesses keep their launch state until
   a new session or container restart.
+- The dev image (`config/Dockerfile.fast`) pre-installs the three ACP adapters
+  (`claude-agent-acp`, `codex-acp`, `gemini`) into `/opt/acp-adapters/` and
+  symlinks the binaries into `/usr/local/bin/`. The provider config calls
+  those binaries directly — no `npx -y` round-trip on each spawn. The
+  `@anthropic-ai/claude-agent-sdk` version is pinned via an `overrides` entry
+  so the bundled Claude Code binary stays compatible with the host's
+  credential format (mismatched SDK/credentials cause the Claude Code binary
+  to `SIGILL` on `session/new`). Bumping any adapter version requires a
+  `docker compose build labby-master` rebuild; the labby binary itself can be
+  hot-swapped with `just dev` or `just dev-debug` without an image rebuild.
 - `docker-compose.yml` sets `init: true` for `labby-master` so Docker's tiny
-  init reaps provider grandchildren orphaned by launch wrappers such as `npx`
-  after Lab terminates the ACP process group.
+  init reaps provider grandchildren orphaned by the ACP process group when
+  Lab terminates a session. (Historically this was needed to clean up `npx`
+  launch wrappers; with the pre-installed adapters there's nothing extra to
+  reap, but `init: true` remains a defense-in-depth default.)
 - `just dev-debug` rebuilds the local debug binary, hot-swaps it into the
   dev container through the bind-mounted `bin/labby`, and restarts the
   container. Config-only edits usually need only a restart; Rust ACP health or

@@ -238,6 +238,12 @@ Browser-session introspection semantics:
   logged-out outcome
 - the same payload includes `login_available` so browser clients can suppress
   the hosted-login CTA when OAuth browser login is not configured
+- a request that carries `Authorization: Bearer <LAB_MCP_HTTP_TOKEN>` is treated
+  as an authenticated admin caller and gets `authenticated: true` with
+  `sub: "static-bearer"`, `is_admin: true`, and an empty `csrf_token` (CSRF is
+  unnecessary for bearer-authenticated requests). This is the bridge that lets
+  automation tooling (e.g. `agent-browser --headers`) drive the UI alongside
+  OAuth browser users without the flag-and-disable dance
 - internal failures from session lookup, persistence, signing, or provider
   coordination remain structured 5xx responses instead of collapsing into
   `authenticated: false`

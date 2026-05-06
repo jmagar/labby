@@ -252,6 +252,7 @@ Protected route behavior:
 | `/mcp` HTTP MCP | Static bearer token or Lab OAuth JWT bearer token | Browser session cookies are not accepted for MCP transport. |
 | `/v0.1/*` MCP Registry compatibility routes | Same as protected `/v1` routes | Mounted when the registry feature is enabled. |
 | Labby web UI | Browser session in OAuth mode, or the configured development bypass | Static assets and SPA paths are served by `labby serve`; data calls still use `/v1`. |
+| `/auth/session` (web UI bootstrap) | Browser session cookie OR static bearer token | When the request carries `Authorization: Bearer <LAB_MCP_HTTP_TOKEN>`, returns a synthetic admin session keyed by `static-bearer`. Lets automation tooling (e.g. `agent-browser --headers`) drive the UI alongside OAuth without disabling it. |
 | `/health`, `/ready` | No auth | Intended for probes. |
 | `/v1/nodes/hello`, `/v1/nodes/ws` | No bearer middleware | Node WebSocket `initialize` validates the enrolled `device_id` and device token before node methods run. |
 
@@ -520,10 +521,23 @@ just web-build        # cd apps/gateway-admin && pnpm build
 just web-watch        # rebuild Labby static assets on frontend changes
 just run -- help      # cargo run --all-features -- <args>
 just chat-local       # local Labby chat workflow with auth disabled for development
+just dev-up           # bring up the docker dev container (first-time start)
+just dev              # release rebuild + hot-swap binary into the dev container
+just dev-debug        # nightly+cranelift debug rebuild + hot-swap (3x faster compile)
 just fmt              # cargo fmt --all
 just clean            # cargo clean
 just release          # cargo release
 just mcp-token        # rotate LAB_MCP_HTTP_TOKEN in .env
+```
+
+The dev container (`docker-compose.yml` + `docker-compose.dev.yml`) pre-installs the three ACP adapters (`claude-agent-acp`, `codex-acp`, `gemini`) into the image at fixed versions, with an npm `overrides` entry floating `@anthropic-ai/claude-agent-sdk` forward of the version `claude-agent-acp` pins. This eliminates per-spawn `npx` overhead and avoids credential/binary-version mismatches that otherwise SIGILL the bundled Claude Code binary. Bumping any adapter version requires rebuilding the image (`docker compose build labby-master`); changing only the labby binary uses `just dev` or `just dev-debug` and is immediate.
+
+Driving the UI as automation while OAuth is enabled: pass the static bearer token as a header. The `/auth/session` endpoint recognizes the same token and returns a synthetic admin session, so the AuthBootstrap treats the caller as logged in:
+
+```bash
+TOKEN=$(grep "LAB_MCP_HTTP_TOKEN" .env | cut -d= -f2)
+agent-browser open http://localhost:8765/chat \
+  --headers "{\"Authorization\":\"Bearer $TOKEN\"}"
 ```
 
 Authoritative verification is all-features:

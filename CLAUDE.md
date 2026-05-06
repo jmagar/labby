@@ -91,9 +91,17 @@ lab/
 ├── Cargo.toml                        # workspace
 ├── Justfile
 ├── deny.toml
+├── crates/vendor/
+│   └── agent-client-protocol/        # vendored fork of agent-client-protocol (see Vendored ACP SDK below)
 ├── docs/README.md
 └── CLAUDE.md
 ```
+
+### Vendored ACP SDK
+
+`crates/vendor/agent-client-protocol/` is a local fork of `agent-client-protocol` 0.11.1 with one patch: `ActiveSession` preserves the `models: Option<SessionModelState>` field that upstream's `attach_session()` was discarding. Without the patch, `session.response()` rebuilds a `NewSessionResponse` without the model list and the chat UI's adapter model picker stays empty even when codex/claude/gemini advertise models in their `NewSessionResponse`.
+
+Wired via `[patch.crates-io]` in the workspace `Cargo.toml`. Drop the patch when upstream gains a public accessor for session models on `ActiveSession` — the change is small enough that an upstream PR is the right long-term fix. Don't edit this directory casually; if you need to bump the underlying SDK version, copy `~/.cargo/registry/src/index.crates.io-*/agent-client-protocol-<VER>` over the directory, re-apply the same three deltas in `src/session.rs` (struct field, `attach_session`, `response()`, and the proxy-mode destructure stub), and re-run `just build`.
 
 ## Key Patterns
 
@@ -320,6 +328,37 @@ Default verification targets the all-features build. If you run a reduced featur
 
 - **`labby doctor`** — comprehensive health audit: checks env vars, reachability, auth, version for every enabled service. Emits human-readable table by default, `--json` for CI. Exit code reflects worst severity.
 - **`bin/health-check`** — repo-level shell helper for CI/CD smoke tests.
+
+### Docker dev container
+
+`docker-compose.yml` + `docker-compose.dev.yml` run `labby:dev` with the host's `~/.lab/`, `~/.gemini/`, and the repo workspace bind-mounted in. The image at `config/Dockerfile.fast` pre-installs the three ACP adapters (`claude-agent-acp`, `codex-acp`, `gemini`) into `/opt/acp-adapters/node_modules` and symlinks them into `/usr/local/bin/`, so each chat session spawn calls a deterministic local binary instead of paying the `npx -y` round-trip. The provider config at `config/acp-providers.docker.json` therefore uses `command: "claude-agent-acp"` (etc.) directly.
+
+The Claude SDK is held forward of `claude-agent-acp`'s pinned version via an `overrides` entry in `/opt/acp-adapters/package.json` (currently `^0.2.131`). The bundled Claude Code binary version must match credential format expectations from the host's `claude` CLI, otherwise the underlying binary `SIGILL`s on session start. Bump both when upgrading.
+
+`just dev-debug` rebuilds the labby binary with nightly + cranelift codegen and hot-swaps it into the running container without rebuilding the Docker image. Image rebuilds are only needed when changing `Dockerfile.fast` or the pre-installed package set.
+
+### Bearer auth in dev (driving the UI with agent-browser)
+
+When OAuth is configured (`LAB_AUTH_MODE=oauth`), browser users still hit the Google login flow. Automation tooling (e.g. `agent-browser`, curl) can pass the static bearer token as a header and be treated as an admin session for both `/v1/*` API calls AND the AuthBootstrap session-state endpoint.
+
+```bash
+TOKEN=$(grep "LAB_MCP_HTTP_TOKEN" .env | cut -d= -f2)
+
+# All /v1/* calls
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8765/v1/acp/provider
+
+# /auth/session — returns synthetic admin session for the bearer holder.
+# Without this the UI's AuthBootstrap renders the sign-in page even though
+# the underlying API calls succeed.
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8765/auth/session
+
+# agent-browser carries the header into every same-origin request.
+agent-browser --session test set viewport 1280 800
+agent-browser --session test open http://localhost:8765/chat \
+  --headers "{\"Authorization\":\"Bearer $TOKEN\"}"
+```
+
+The bearer-via-`/auth/session` path returns `sub: "static-bearer"` so admin-gated UI is reachable. OAuth users see no behavior change — the cookie path is still primary.
 
 Scoped to a single crate:
 
