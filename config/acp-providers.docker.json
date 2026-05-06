@@ -3,11 +3,9 @@
     "id": "codex-acp",
     "name": "Codex CLI",
     "version": "0.12.0",
-    "distribution": "npx",
-    "command": "npx",
+    "distribution": "global",
+    "command": "codex-acp",
     "args": [
-      "-y",
-      "@zed-industries/codex-acp@0.12.0",
       "-c",
       "sandbox_mode=\"danger-full-access\""
     ],
@@ -21,12 +19,9 @@
     "id": "claude-acp",
     "name": "Claude Agent",
     "version": "latest",
-    "distribution": "npx",
-    "command": "npx",
-    "args": [
-      "-y",
-      "@agentclientprotocol/claude-agent-acp"
-    ],
+    "distribution": "global",
+    "command": "claude-agent-acp",
+    "args": [],
     "env": {
       "CLAUDE_CONFIG_DIR": "/home/lab/.lab/acp/claude-home",
       "LAB_SPAWN_DEPTH": "1"
@@ -38,11 +33,9 @@
     "id": "gemini",
     "name": "Gemini CLI",
     "version": "0.40.0",
-    "distribution": "npx",
-    "command": "npx",
+    "distribution": "global",
+    "command": "gemini",
     "args": [
-      "-y",
-      "@google/gemini-cli@0.40.0",
       "--acp"
     ],
     "env": {

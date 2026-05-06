@@ -11,6 +11,39 @@ RUN apt-get update \
  && apt-get update \
  && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/*
+
+# Pre-install ACP adapters at known versions so each session spawn skips the
+# npx download/cache check and uses a deterministic binary. The claude-agent-sdk
+# version determines which Claude Code binary ships, which determines which
+# credentials.json formats it accepts. claude-agent-acp pins its SDK with `=`,
+# so we override the nested install via package.json overrides to float the
+# bundled Claude Code binary forward — matching newer host credential formats
+# (host Claude Code 2.1.129 + pinned SDK 0.2.126 → SIGILL).
+RUN mkdir -p /opt/acp-adapters \
+ && cd /opt/acp-adapters \
+ && cat > package.json <<'EOF'
+{
+  "name": "lab-acp-adapters",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "^0.32.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.131",
+    "@zed-industries/codex-acp": "0.12.0",
+    "@google/gemini-cli": "0.40.0"
+  },
+  "overrides": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.131"
+  }
+}
+EOF
+RUN cd /opt/acp-adapters \
+ && npm install --omit=dev --no-audit --no-fund \
+ && ln -sf /opt/acp-adapters/node_modules/.bin/claude-agent-acp /usr/local/bin/claude-agent-acp \
+ && ln -sf /opt/acp-adapters/node_modules/.bin/codex-acp /usr/local/bin/codex-acp \
+ && ln -sf /opt/acp-adapters/node_modules/.bin/gemini /usr/local/bin/gemini \
+ && npm cache clean --force
+
 RUN mkdir -p /home/lab/.lab /home/lab/.config/lab /home/lab/.local/state/lab /home/lab/.local/share/lab && chown -R 1000:1000 /home/lab
 COPY bin/labby /usr/local/bin/labby
 RUN chmod +x /usr/local/bin/labby
