@@ -5,6 +5,12 @@ import * as React from 'react'
 import { Send, Paperclip, Wrench, ChevronDown, X, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import type { ACPAgent, ACPModelOption } from './types'
 import {
@@ -110,27 +116,34 @@ export function ChatInput({
   const handleSend = async () => {
     const trimmed = value.trim()
     if (!hasContent || disabled || sendingRef.current) return
+    // Snapshot the attachments at send time so cleanup uses the same list
+    // we just shipped, regardless of state churn during the network call.
+    const sendingAttachments = attachments
     // Acquire the lock synchronously BEFORE any async work so a re-entrant
     // call within the same tick observes the lock and bails. The release
     // path lives inside `finally` so any synchronous throw between this line
     // and the first await still clears the lock.
     sendingRef.current = true
+    setSending(true)
+    let serializedAttachments: PromptAttachmentRef[]
     try {
-      setSending(true)
-      let serializedAttachments: PromptAttachmentRef[]
-      try {
-        serializedAttachments = await Promise.all(
-          attachments.map((attachment) =>
-            attachment.kind === 'local' ? fileToSerializableAttachment(attachment) : attachment,
-          ),
-        )
-      } catch {
-        setAttachmentError('Could not read one or more attached files.')
-        return
-      }
+      serializedAttachments = await Promise.all(
+        sendingAttachments.map((attachment) =>
+          attachment.kind === 'local' ? fileToSerializableAttachment(attachment) : attachment,
+        ),
+      )
+    } catch {
+      setAttachmentError('Could not read one or more attached files.')
+      sendingRef.current = false
+      setSending(false)
+      return
+    }
 
+    try {
       await onSend({ text: trimmed, attachments: serializedAttachments })
-      attachments.forEach((attachment) => {
+      // Success path: clear the input and chip list now that the prompt
+      // shipped. Revoke object URLs for any local previews to free memory.
+      sendingAttachments.forEach((attachment) => {
         if (attachment.kind === 'local') revokeLocalAttachmentPreview(attachment)
       })
       setAttachmentError(null)
@@ -141,6 +154,13 @@ export function ChatInput({
         textareaRef.current.style.overflowY = 'hidden'
         textareaRef.current.scrollTop = 0
       }
+    } catch (error) {
+      // Failure path: surface the error inline and KEEP the chips so the
+      // user can retry without re-attaching. Previous behavior threw the
+      // rejection out of an event handler, which crashed the chat page when
+      // it bubbled to the React tree.
+      const message = error instanceof Error ? error.message : 'Failed to send prompt.'
+      setAttachmentError(message)
     } finally {
       sendingRef.current = false
       setSending(false)
@@ -419,37 +439,44 @@ export function ChatInput({
         <div className="flex items-center gap-2 px-2.5 pb-2 sm:gap-2.5 sm:px-3">
           <TooltipProvider delayDuration={400}>
             <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label="Attach local file"
-                    onClick={() => localFileInputRef.current?.click()}
-                    disabled={disabled || sending}
-                    className="size-7 rounded text-aurora-text-muted hover:bg-aurora-hover-bg hover:text-aurora-text-primary"
+              <DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label="Attach file"
+                        disabled={disabled || sending}
+                        className="size-7 rounded text-aurora-text-muted hover:bg-aurora-hover-bg hover:text-aurora-text-primary"
+                      >
+                        <Paperclip className="size-3.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">Attach file</TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="start" sideOffset={6} className="min-w-44">
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault()
+                      localFileInputRef.current?.click()
+                    }}
                   >
                     <Paperclip className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="text-xs">Attach local file</TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label="Attach workspace file"
-                    onClick={() => setWorkspacePickerOpen(true)}
-                    disabled={disabled || sending}
-                    className="size-7 rounded text-aurora-text-muted hover:bg-aurora-hover-bg hover:text-aurora-text-primary"
+                    <span>From device</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault()
+                      setWorkspacePickerOpen(true)
+                    }}
                   >
                     <FileText className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="text-xs">Attach workspace file</TooltipContent>
-              </Tooltip>
+                    <span>From workspace</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
 
               <Tooltip>
                 <TooltipTrigger asChild>

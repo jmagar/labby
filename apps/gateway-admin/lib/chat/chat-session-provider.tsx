@@ -197,6 +197,10 @@ export function ChatSessionProvider({
   // Mutex for createSession
   const isCreatingRef = React.useRef(false)
 
+  // Forward-declared ref so createSession (defined before refreshProvider)
+  // can refresh the provider catalog after a new session is bootstrapped.
+  const refreshProviderRef = React.useRef<() => Promise<void>>(async () => {})
+
   // ---- ACP fetch utility (re-derived per call, not stored in state) ----
   const fetchAcpRef = React.useRef(createAcpFetcher())
   // Re-derive on each render in case config changed (stable ref via useCallback)
@@ -319,6 +323,11 @@ export function ChatSessionProvider({
     setProviderHealth(selected)
   }, [fetchAcp])
 
+  // Keep the ref in sync so createSession can call the latest closure.
+  React.useEffect(() => {
+    refreshProviderRef.current = refreshProvider
+  }, [refreshProvider])
+
   const createSession = React.useCallback<CreateSessionFn>(
     async (createOptions?: CreateSessionOptions) => {
       if (isCreatingRef.current) {
@@ -361,6 +370,11 @@ export function ChatSessionProvider({
         if (createOptions?.closeSessionPanel) {
           onSessionPanelClose?.()
         }
+        // Refresh provider list so model picker reflects models the agent
+        // returned during session bootstrap. Most ACP providers only populate
+        // their model catalog after a session has been created — without this
+        // refresh the picker stays empty until the user manually reloads.
+        void refreshProviderRef.current?.()
         return run
       } finally {
         isCreatingRef.current = false
