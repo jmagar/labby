@@ -764,6 +764,14 @@
                 "repo": "ArkTechNWA/zsh-tool"
             },
             "description": "Zsh shell for Claude Code - full terminal control, live output, PTY mode for interactive commands"
+        },
+        {
+            "name": "syslog",
+            "source": {
+                "source": "github",
+                "repo": "jmagar/syslog-mcp"
+            },
+            "description": "Syslog MCP server - query, search, and tail system logs via Model Context Protocol"
         }
     ]
 }
