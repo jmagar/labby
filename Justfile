@@ -60,8 +60,11 @@ dev: build-release
 # Debug build with Cranelift codegen (fastest compile) → hot-swap into running dev container.
 # Uses nightly toolchain — RUSTFLAGS explicitly includes mold since env var overrides config.toml.
 dev-debug:
-    RUSTFLAGS="-C link-arg=-fuse-ld=mold -Z codegen-backend=cranelift" \
-        cargo +nightly build -p labby --all-features
+    #!/usr/bin/env bash
+    set -euo pipefail
+    nightly_rustc=$(rustup which --toolchain nightly rustc)
+    RUSTC="$nightly_rustc" RUSTC_WRAPPER="" RUSTFLAGS="-C link-arg=-fuse-ld=mold -Z codegen-backend=cranelift" \
+        cargo build -p labby --all-features
     install -D -m 755 target/debug/labby bin/labby
     docker compose -f docker-compose.yml -f docker-compose.dev.yml restart
 
