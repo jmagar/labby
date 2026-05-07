@@ -1,285 +1,183 @@
 # Marketplace
 
-`marketplace` is an always-on synthetic service that surfaces the Claude Code plugin marketplace system — known marketplaces, published plugins, installed plugins, and their shipped artifacts — through the same CLI + MCP + API dispatch path as every other `lab` service.
+`marketplace` is the unified Lab surface for installable agent tooling:
 
-## Why It Exists
+- Claude Code and Codex plugin marketplaces (`sources.*`, `plugins.*`, `plugin.*`, `artifact.*`)
+- the official MCP Registry (`mcp.*`)
+- the ACP Agent Registry (`agent.*`)
 
-Claude Code stores marketplace metadata under `~/.claude/plugins/`. That layout is machine-readable but not programmatically exposed: there is no CLI that lists plugins across all configured marketplaces with their installed state, and no API that returns the artifact payload of an installed plugin. `marketplace` fills that gap.
+It is always compiled and exposed through the normal Lab dispatch paths: CLI,
+MCP, HTTP API, and the web UI. The generated service catalog must show
+`marketplace` as `available` while `mcpregistry` and `acp_registry` remain
+`sdk_only`.
 
-It also wraps the destructive `claude plugin …` shell commands (`marketplace add`, `install`, `uninstall`) behind the same confirmation gate as the rest of `lab`: MCP elicitation, CLI `-y`/`--yes`, HTTP `"confirm": true`.
+## Ownership
 
-## Why It Is a Service
+Marketplace owns orchestration, local state, install planning, and safety gates.
+The SDK-only registry modules own protocol clients and metadata:
 
-`marketplace` is not a remote API integration, but it follows the same shape as real services:
+| Surface | Runtime owner | SDK/source owner | Notes |
+| --- | --- | --- | --- |
+| Claude/Codex plugins | `crates/lab/src/dispatch/marketplace/` | Claude/Codex marketplace files under `~/.claude/plugins/` | Reads installed/source state and shells out to `claude plugin ...` for plugin install/uninstall. |
+| MCP Registry | `marketplace` `mcp.*` actions | `lab-apis::mcpregistry` plus `[mcpregistry].url` | `mcpregistry` is not a first-class CLI/MCP/API service. |
+| ACP Agent Registry | `marketplace` `agent.*` actions | `lab-apis::acp_registry` plus `LAB_ACP_REGISTRY_URL` | `acp_registry` is not a first-class CLI/MCP/API service. |
 
-- pure types live in `lab-apis/src/marketplace/types.rs`
-- action catalog, dispatch, and params live in `crates/lab/src/dispatch/marketplace/`
-- CLI shim in `crates/lab/src/cli/marketplace.rs`
-- MCP tool registered in `build_default_registry()`
-- HTTP API route group at `/v1/marketplace`
-
-This keeps plugin management inside the one-tool-per-service model and avoids special-case plumbing.
-
-## Compilation Rule
-
-`marketplace` is always compiled. Like `extract`, it is a bootstrap/operator capability, not a feature-gated optional integration.
-
-## Responsibilities
-
-`marketplace` owns:
-
-- reading `~/.claude/plugins/known_marketplaces.json`
-- reading each marketplace's `marketplace.json` manifest
-- reading `~/.claude/plugins/installed_plugins.json`
-- enriching plugin listings with `owner`, `desc`, `tags`, `category`, installed state, timestamps
-- walking an installed plugin's install path and returning artifact contents (skills, agents, scripts, configs)
-- shelling out to `claude plugin marketplace add`, `claude plugin install`, `claude plugin uninstall` for destructive actions
-
-It does **not** own:
-
-- fetching marketplace manifests over the network — that happens inside `claude plugin marketplace add`
-- Claude Code's plugin resolution logic — lab reads the recorded state, it does not re-derive it
+Marketplace does not re-implement upstream registry semantics. Registry URL
+validation, schema validation, SDK decode errors, and upstream request failures
+must flow through the shared dispatch error envelope.
 
 ## Data Sources
 
-| Path | Purpose |
+| Path or source | Purpose |
 | --- | --- |
-| `~/.claude/plugins/known_marketplaces.json` | Marketplace registry (id → source, autoUpdate, totalPlugins, lastUpdated, installLocation) |
-| `<installLocation>/.claude-plugin/marketplace.json` | Manifest: `name`, `owner.name`, `metadata.description`, `plugins[]` |
-| `<installLocation>/marketplace.json` | Fallback manifest location |
-| `~/.claude/plugins/installed_plugins.json` | Installed state by `name@marketplace` → `installPath`, `installedAt`, `lastUpdated` |
-| `<installPath>/**` | Plugin artifacts (returned by `plugin.artifacts`) |
+| `~/.claude/plugins/known_marketplaces.json` | Claude/Codex marketplace registry. |
+| `<installLocation>/.claude-plugin/marketplace.json` | Marketplace manifest. |
+| `<installLocation>/marketplace.json` | Fallback manifest location. |
+| `~/.claude/plugins/installed_plugins.json` | Installed Claude/Codex plugin state. |
+| `<installPath>/**` | Installed plugin artifacts returned by `plugin.artifacts`. |
+| `[mcpregistry].url` | Optional MCP Registry base URL, defaulting to `https://registry.modelcontextprotocol.io`. |
+| `LAB_ACP_REGISTRY_URL` | Optional ACP Agent Registry CDN base URL, defaulting to `https://cdn.agentclientprotocol.com`. |
+| `~/.lab/acp-providers.json` | Local ACP provider entries written by `agent.install` and removed by `agent.uninstall`. |
 
-Missing files are treated as empty — a fresh Claude Code install returns zero marketplaces without error.
+Missing Claude/Codex marketplace files are treated as empty so a fresh machine
+returns zero plugin sources without error.
 
 ## Actions
 
-The complete marketplace action inventory is generated from `ActionSpec`:
+The full action inventory is generated from `ActionSpec`:
 
-- [generated action catalog](./generated/action-catalog.md)
-- [generated action catalog JSON](./generated/action-catalog.json)
+- [generated action catalog](../generated/action-catalog.md)
+- [generated action catalog JSON](../generated/action-catalog.json)
 
-### Parameters
+The handwritten contract is organized by action family:
 
-- `sources.add` — pass exactly one of `repo` (`owner/repo` slug) or `url` (git URL). Passing both returns `invalid_param`; passing neither returns `missing_param`.
-- `plugins.list` — optional `marketplace`, `kind`, `installed`, and `query` filters. Filters are additive.
-- `plugin.get`, `plugin.artifacts`, `plugin.workspace`, `plugin.deploy.preview`, `plugin.deploy`, `plugin.install`, `plugin.uninstall` — require `id` in `name@marketplace` form. Malformed ids return `invalid_param`.
-- `plugin.save` — requires `id`, `path`, and `content`. `path` is always relative to the plugin workspace mirror.
+| Family | Examples | Role |
+| --- | --- | --- |
+| `sources.*` | `sources.list`, `sources.add` | List or add Claude/Codex plugin marketplaces. |
+| `plugins.*` | `plugins.list` | Search plugin manifests across configured plugin marketplaces. |
+| `plugin.*` | `plugin.get`, `plugin.install`, `plugin.workspace`, `plugin.deploy` | Read, install, edit, and deploy whole plugins. |
+| `artifact.*` | `artifact.fork`, `artifact.diff`, `artifact.update.apply` | Fork, patch, diff, reset, and update individual plugin artifacts. |
+| `mcp.*` | `mcp.list`, `mcp.install`, `mcp.sync` | Discover, validate, mirror, install, and remove MCP Registry servers. |
+| `agent.*` | `agent.list`, `agent.install`, `agent.uninstall` | Discover and install ACP-compatible agents. |
 
-## Return Shapes
+`help` and `schema` are also available through the shared service dispatch
+model.
 
-### `Marketplace` (from `sources.list`)
+## Install Targets
 
-```json
-{
-  "id": "jmagar-lab",
-  "name": "jmagar-lab",
-  "owner": "Jacob Magar",
-  "ghUser": "jmagar",
-  "repo": "jmagar/lab-plugins",
-  "source": "github",
-  "url": null,
-  "path": null,
-  "desc": "Homelab control plane — skills and tooling for lab",
-  "autoUpdate": true,
-  "totalPlugins": 9,
-  "lastUpdated": "2026-04-21T19:13:23.871Z"
-}
-```
+Marketplace supports multiple installation targets. Callers must choose an
+explicit target instead of relying on hidden global defaults:
 
-### `Plugin` (from `plugins.list`, `plugin.get`)
+| Action | Target selector | Effect |
+| --- | --- | --- |
+| `plugin.install` / `plugin.uninstall` | `id` in `name@marketplace` form | Delegates to `claude plugin install/uninstall` for the controller host. |
+| `plugin.deploy` | `id` | Copies the editable workspace mirror into the configured local plugin target. |
+| `plugin.cherry_pick` | `node_ids`, `scope`, `components`, optional `project_path` | Installs selected plugin components on fleet nodes. |
+| `mcp.install` | `gateway_ids` and/or `client_targets` | Adds remote HTTP servers to Lab gateway upstreams, or writes stdio command configs to Claude/Codex clients on fleet devices. At least one target set is required. |
+| `mcp.uninstall` | `gateway_name` | Removes a previously installed gateway upstream. |
+| `agent.install` | `node_ids` plus optional `platform` | Installs an ACP provider entry locally (`local` or host name) or asks a remote node to install a supported package distribution. |
+| `agent.uninstall` | `id` | Removes the local ACP provider entry. |
 
-```json
-{
-  "id": "aurora-design@jmagar-lab",
-  "name": "aurora-design",
-  "mkt": "jmagar-lab",
-  "ver": "0.3.1",
-  "desc": "Aurora design system primitives",
-  "tags": ["ui", "design-system", "shadcn"],
-  "installed": true,
-  "hasUpdate": null,
-  "installedAt": "2026-04-10T12:04:11Z",
-  "updatedAt": "2026-04-19T08:22:40Z"
-}
-```
+For MCP installs, HTTP transports are added as gateway remote URLs after SSRF
+validation. Stdio packages become command configs. Required environment values
+must be supplied through `env_values` or an explicit env-var reference such as
+`bearer_token_env`; raw bearer token values must not be embedded in logs or docs.
 
-`tags` is a deduplicated merge of the plugin's `category` (prepended when present), `tags`, and `keywords` arrays from `marketplace.json`.
+## Bounded Discovery
 
-### `Artifact` (from `plugin.artifacts`)
+`mcp.list` is intentionally bounded:
 
-```json
-{
-  "path": "skills/foo/SKILL.md",
-  "lang": "markdown",
-  "content": "# Foo skill\n..."
-}
-```
+- default `limit` is 10
+- maximum `limit` is 100
+- pagination uses the returned `metadata.nextCursor`
+- `search` wins over `owner` when both are supplied
+- `owner` is a GitHub convenience filter that maps to `search=io.github.{owner}/`
+- local Lab metadata filters include `featured`, `reviewed`, `recommended`,
+  `hidden`, and `tag`
 
-`lang` is inferred from the file extension: `json`, `yaml`, `markdown`, `bash`, `toml`, or `text`. The walker:
+`mcp.list` on `/v1/marketplace` reads the local SQLite mirror populated by
+`mcp.sync`. The wire-compatible `GET /v0.1/servers` surface reads the same
+store and defaults to 20 rows per page for REST clients.
 
-- skips dotfiles, `node_modules`, and `target`
-- skips files larger than 256 KiB
-- caps output at 200 files per plugin
-- returns paths relative to the plugin's install path
+`gateway.mcp.list` is a separate gateway runtime inventory action. It lists
+configured upstream MCP runtime state, discovery counts, and likely stale
+process counts; it is not a Marketplace registry search API and should remain
+read-only and non-destructive in the generated catalog.
 
-### `PluginWorkspace` (from `plugin.workspace`)
+## Confirmation
 
-```json
-{
-  "pluginId": "aurora-design@jmagar-lab",
-  "workspaceRoot": "/Users/jmagar/.lab/stash/plugins/aurora-design-jmagar-lab",
-  "deployTarget": "/Users/jmagar/.claude/skills/aurora-design",
-  "hasDirtyFiles": false,
-  "files": [
-    {
-      "path": "SKILL.md",
-      "lang": "markdown",
-      "content": "---\nname: aurora-design\n..."
-    }
-  ]
-}
-```
+`ActionSpec.destructive` is the single source of truth for Marketplace
+confirmation behavior.
 
-The workspace mirror is created under `<workspace.root>/plugins/` on first load from the marketplace source tree and preserved separately from the installed Claude Code target. By default `workspace.root` is `~/.lab/stash`, and it also backs the read-only attachment picker. Legacy mirrors under `~/.claude/plugins/workspaces/` are migrated to `<workspace.root>/plugins/` on first access when the new mirror does not already exist.
-
-### `SaveResult` (from `plugin.save`)
-
-```json
-{
-  "pluginId": "aurora-design@jmagar-lab",
-  "path": "SKILL.md",
-  "savedAt": "2026-04-23T03:11:29.000Z"
-}
-```
-
-### `DeployPreviewResult` (from `plugin.deploy.preview`)
-
-```json
-{
-  "pluginId": "aurora-design@jmagar-lab",
-  "targetPath": "/Users/jmagar/.claude/skills/aurora-design",
-  "changed": ["SKILL.md"],
-  "skipped": [],
-  "removed": ["old.txt"],
-  "failed": []
-}
-```
-
-### `DeployResult` (from `plugin.deploy`)
-
-```json
-{
-  "pluginId": "aurora-design@jmagar-lab",
-  "targetPath": "/Users/jmagar/.claude/skills/aurora-design",
-  "changed": ["SKILL.md"],
-  "skipped": [],
-  "removed": ["old.txt"],
-  "failed": []
-}
-```
-
-### Shell wrappers (`sources.add`, `plugin.install`, `plugin.uninstall`)
-
-```json
-{ "ok": true, "id": "foo@bar", "stdout": "...", "stderr": "..." }
-```
-
-A non-zero exit from `claude plugin …` becomes a `server_error` envelope with the captured `stderr` in the message.
-
-## Error Envelopes
-
-`marketplace` returns the canonical `ToolError` kinds from `docs/ERRORS.md`:
-
-| Kind | When |
+| Surface | Required confirmation |
 | --- | --- |
-| `unknown_action` | Action name not in the catalog |
-| `missing_param` | Required param absent (e.g., `id` for `plugin.get`) |
-| `invalid_param` | Malformed input (e.g., `id` without `@`, both `repo` and `url` supplied) |
-| `not_found` | Plugin id not present in any manifest, or `plugin.artifacts` called on an uninstalled plugin |
-| `decode_error` | JSON parse failure on a plugin registry file |
-| `internal_error` | `HOME` unset, filesystem I/O error, `claude` binary not spawnable |
-| `server_error` | `claude plugin …` exited non-zero |
-| `confirmation_required` | Destructive action without `confirm: true` / `-y` / elicitation accept |
+| CLI | `-y` / `--yes` for destructive actions. |
+| MCP | Client elicitation accept, or `params.confirm: true` for clients without elicitation. |
+| HTTP | `params.confirm: true`; missing or false confirmation returns `kind: "confirmation_required"` with HTTP `422`. |
 
-## CLI Surface
+The confirmation flag is handled by the shared dispatcher before Marketplace
+domain parsers run. Do not duplicate confirmation checks inside action-specific
+parsers unless a protocol-specific exception is documented.
+
+## Integrity And Safety
+
+Marketplace install paths are intentionally narrow:
+
+- observational plugin actions read from `~/.claude/plugins/` and installed
+  plugin paths recorded by Claude/Codex
+- workspace mirrors live under the configured Lab stash root, defaulting to
+  `~/.lab/stash/plugins/`
+- ACP binaries install under `~/.lab/bin/<agent_id>/`
+- ACP provider config writes go to `~/.lab/acp-providers.json`
+
+Binary and package integrity policy:
+
+- ACP binary archive URLs must be HTTPS and must not point at loopback, private,
+  link-local, unspecified, or common local-only hostnames.
+- Archive downloads are streamed to a temp file, hashed with SHA-256, fsynced,
+  extracted into a temp dir, then copied into the final install directory.
+- Extraction rejects symlinks and entries that escape the extraction root, and
+  treats partial extraction as a hard failure.
+- Installed ACP binary entries record the computed SHA-256 in the provider
+  entry.
+- Stdio package distributions (`npx`, `uvx`, MCP Registry package configs) are
+  config-only installs. Marketplace records command/package metadata; package
+  manager resolution happens when the client runs the command.
+- Claude/Codex plugin install/uninstall still delegates to the `claude` binary
+  with explicit argv and no shell interpolation.
+
+`plugin.artifacts` is bounded to 256 KiB per file and 200 files per plugin.
+Large plugins must return truncated artifact output rather than multi-MB MCP or
+HTTP responses.
+
+## Surfaces
+
+CLI:
 
 ```bash
-labby marketplace sources.list                    # default human table
-labby marketplace sources.list --json             # machine-readable
+labby marketplace sources.list --json
 labby marketplace plugins.list --params '{"marketplace":"jmagar-lab"}'
-labby marketplace plugin.get   --params '{"id":"aurora-design@jmagar-lab"}'
-labby marketplace plugin.artifacts --params '{"id":"aurora-design@jmagar-lab"}'
-
-labby marketplace sources.add      --params '{"repo":"obra/superpowers-marketplace"}' -y
-labby marketplace plugin.install   --params '{"id":"aurora-design@jmagar-lab"}' -y
-labby marketplace plugin.uninstall --params '{"id":"aurora-design@jmagar-lab"}' -y
+labby marketplace mcp.list --params '{"search":"postgres","limit":10}'
+labby marketplace agent.list
+labby marketplace mcp.install --params '{"name":"io.github.user/server","gateway_ids":["default"],"confirm":true}' -y
 ```
 
-Destructive actions require `-y` / `--yes` (or `--no-confirm`) to run non-interactively. `--dry-run` prints what would be dispatched without touching `~/.claude/`.
-
-## MCP Surface
-
-One tool, `marketplace`, accepting the standard `{ action, params }` envelope:
+MCP:
 
 ```jsonc
-marketplace({ "action": "sources.list" })
-marketplace({ "action": "plugins.list", "params": { "marketplace": "jmagar-lab" } })
-marketplace({ "action": "plugin.get",   "params": { "id": "aurora-design@jmagar-lab" } })
-
-// destructive — clients with elicitation get a confirm prompt;
-// clients without elicitation must pass confirm: true explicitly.
-marketplace({ "action": "plugin.install",
-              "params": { "id": "aurora-design@jmagar-lab", "confirm": true } })
+marketplace({ "action": "mcp.list", "params": { "owner": "modelcontextprotocol", "limit": 10 } })
+marketplace({ "action": "agent.get", "params": { "id": "openai/codex-cli" } })
+marketplace({ "action": "plugin.install", "params": { "id": "aurora-design@jmagar-lab", "confirm": true } })
 ```
 
-Discovery resources:
-
-- `lab://marketplace/actions` — action catalog
-- `lab://catalog` — includes `marketplace` alongside every other service
-
-## HTTP API Surface
-
-Route group: `/v1/marketplace` (bearer auth required).
+HTTP:
 
 ```bash
-# List marketplaces
 curl -s -X POST http://127.0.0.1:8765/v1/marketplace \
   -H "Authorization: Bearer $LAB_MCP_HTTP_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"action":"sources.list"}'
-
-# Install a plugin (destructive — must confirm)
-curl -s -X POST http://127.0.0.1:8765/v1/marketplace \
-  -H "Authorization: Bearer $LAB_MCP_HTTP_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"plugin.install","params":{"id":"aurora-design@jmagar-lab","confirm":true}}'
+  -d '{"action":"mcp.list","params":{"search":"postgres","limit":10}}'
 ```
 
-Status mapping follows `docs/ERRORS.md`: `not_found` → 404, `invalid_param`/`missing_param` → 422, `confirmation_required` → 400, `server_error` → 502.
-
-## Web UI
-
-The gateway admin UI at `/marketplace` consumes the HTTP API and presents:
-
-- the nine (or however many are configured) marketplaces as cards with owner, plugin count, and description
-- every plugin across every marketplace with installed badges
-- an "Add marketplace" flow that calls `sources.add`
-- a dedicated plugin detail route at `/marketplace/plugin?id=<pluginId>`
-- an editable `Files` tab backed by a workspace mirror, explicit `Save`, deploy preview, and explicit `Deploy`
-- install / uninstall buttons gated behind the shared destructive confirmation flow
-
-The frontend never talks to `~/.claude/` directly — every read and write goes through `/v1/marketplace`.
-
-Deploy preview and deploy use a cheap-first sync model:
-- file metadata is checked before file contents are read
-- unchanged files are short-circuited without a full content read
-- only potentially changed files are compared more deeply
-- this keeps large plugin workspaces responsive while preserving explicit `Save` and `Deploy` semantics
-
-## Safety
-
-- No action reads or writes anywhere outside `~/.claude/plugins/` for the observational commands.
-- Destructive actions delegate to the `claude` CLI binary; `lab` captures stdout/stderr but does not modify the plugin registry itself.
-- `plugin.artifacts` enforces a 256 KiB per-file cap and 200-file ceiling to keep responses bounded — large plugins return a truncated artifact list rather than a multi-MB payload.
-- Spawning the `claude` binary happens via `tokio::process::Command` with explicit argv (no shell interpolation); plugin ids and repo slugs are never passed through a shell.
+The web UI consumes `/v1/marketplace`; it must not read or write `~/.claude/`,
+`~/.lab/bin/`, or `~/.lab/acp-providers.json` directly.

@@ -12,7 +12,11 @@
 //! Remote install via fleet WS supports `npx` only — the device-side `DistType`
 //! has no `Uvx` or `Binary` variant.
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use serde_json::Value;
@@ -30,6 +34,11 @@ use crate::dispatch::node::send::send_rpc_to_node;
 use lab_apis::acp_registry::client::AcpRegistryClient;
 #[cfg(feature = "acp_registry")]
 use lab_apis::acp_registry::types::{Agent, BinaryAsset};
+
+#[cfg(feature = "acp_registry")]
+static BINARY_INSTALL_LOCKS: OnceLock<
+    std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+> = OnceLock::new();
 
 /// Dispatch an `agent.*` action using a freshly constructed client.
 pub async fn dispatch_acp(action: &str, params: Value) -> Result<Value, ToolError> {
@@ -454,7 +463,11 @@ async fn install_binary(
     agent_id: &str,
     asset: &BinaryAsset,
 ) -> Result<(PathBuf, String), ToolError> {
+    let expected_sha256 = expected_archive_sha256(asset)?;
     validate_archive_url(&asset.archive)?;
+
+    let install_lock = binary_install_lock(agent_id)?;
+    let _install_guard = install_lock.lock().await;
 
     let install_dir = agent_bin_dir(agent_id)?;
     std::fs::create_dir_all(&install_dir).map_err(|e| {
@@ -466,6 +479,7 @@ async fn install_binary(
         .map_err(|e| ToolError::internal_message(format!("temp archive: {e}")))?;
 
     let sha256 = download_archive(&asset.archive, tmp_archive.path()).await?;
+    verify_archive_sha256(&expected_sha256, &sha256)?;
 
     // Extract to a temp dir in the same parent so we can do an atomic move.
     let tmp_extract = tempfile::TempDir::new_in(&install_dir)
@@ -474,7 +488,7 @@ async fn install_binary(
     extract_archive(tmp_archive.path(), tmp_extract.path(), &asset.archive)?;
 
     // Locate the binary: `cmd` is like `"./my-agent"` or `"my-agent"`.
-    let binary_name = std::path::Path::new(asset.cmd.trim_start_matches("./"))
+    let binary_name = Path::new(asset.cmd.trim_start_matches("./"))
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or(asset.cmd.trim_start_matches("./"));
@@ -489,8 +503,73 @@ async fn install_binary(
 
     let dest = install_dir.join(binary_name);
 
-    // Symlink guard before writing.
-    if let Ok(meta) = std::fs::symlink_metadata(&dest)
+    install_executable_atomically(&src, &dest)?;
+
+    Ok((dest, sha256))
+}
+
+#[cfg(feature = "acp_registry")]
+fn binary_install_lock(agent_id: &str) -> Result<Arc<tokio::sync::Mutex<()>>, ToolError> {
+    let locks = BINARY_INSTALL_LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut locks = locks
+        .lock()
+        .map_err(|_| ToolError::internal_message("binary install lock poisoned"))?;
+    Ok(locks
+        .entry(agent_id.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone())
+}
+
+#[cfg(feature = "acp_registry")]
+fn expected_archive_sha256(asset: &BinaryAsset) -> Result<String, ToolError> {
+    if let Some(value) = asset.sha256.as_deref() {
+        return normalize_sha256(value, "sha256");
+    }
+    if let Some(value) = asset.digest.as_deref() {
+        return normalize_sha256(value, "digest");
+    }
+    Err(ToolError::Sdk {
+        sdk_kind: "integrity_missing".to_string(),
+        message: format!(
+            "binary archive `{}` has no SHA-256 integrity metadata; refusing install",
+            asset.archive
+        ),
+    })
+}
+
+#[cfg(feature = "acp_registry")]
+fn normalize_sha256(value: &str, field: &str) -> Result<String, ToolError> {
+    let trimmed = value.trim();
+    let hex = trimmed.strip_prefix("sha256:").unwrap_or(trimmed);
+    if hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Ok(hex.to_ascii_lowercase());
+    }
+    Err(ToolError::Sdk {
+        sdk_kind: "invalid_param".to_string(),
+        message: format!(
+            "binary archive `{field}` must be a SHA-256 digest as 64 hex chars or sha256:<hex>"
+        ),
+    })
+}
+
+#[cfg(feature = "acp_registry")]
+fn verify_archive_sha256(expected: &str, actual: &str) -> Result<(), ToolError> {
+    if expected.eq_ignore_ascii_case(actual) {
+        return Ok(());
+    }
+    Err(ToolError::Sdk {
+        sdk_kind: "integrity_mismatch".to_string(),
+        message: format!("binary archive SHA-256 mismatch: expected {expected}, got {actual}"),
+    })
+}
+
+#[cfg(feature = "acp_registry")]
+fn install_executable_atomically(src: &Path, dest: &Path) -> Result<(), ToolError> {
+    let parent = dest
+        .parent()
+        .ok_or_else(|| ToolError::internal_message("install destination has no parent"))?;
+
+    if let Ok(meta) = std::fs::symlink_metadata(dest)
         && meta.file_type().is_symlink()
     {
         return Err(ToolError::Sdk {
@@ -502,24 +581,57 @@ async fn install_binary(
         });
     }
 
-    std::fs::copy(&src, &dest).map_err(|e| {
-        ToolError::internal_message(format!("copy binary to {}: {e}", dest.display()))
-    })?;
-
-    #[cfg(unix)]
+    let mut input = File::open(src)
+        .map_err(|e| ToolError::internal_message(format!("open {}: {e}", src.display())))?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|e| ToolError::internal_message(format!("temp executable: {e}")))?;
     {
-        // lab-zxx5.18: set exact 0o755 (rwxr-xr-x). Do NOT OR with existing
-        // permissions — that would preserve setuid/setgid bits (0o4000 /
-        // 0o2000) if they were set on the source. An attacker-controlled
-        // archive with setuid could silently install a privilege-escalation
-        // binary under ~/.lab/bin/. Explicitly clear.
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755)).map_err(|e| {
-            ToolError::internal_message(format!("chmod 0o755 {}: {e}", dest.display()))
+        let output = temp.as_file_mut();
+        std::io::copy(&mut input, output).map_err(|e| {
+            ToolError::internal_message(format!(
+                "copy {} to temp executable in {}: {e}",
+                src.display(),
+                parent.display()
+            ))
+        })?;
+        output.flush().map_err(|e| {
+            ToolError::internal_message(format!("flush temp executable {}: {e}", dest.display()))
         })?;
     }
 
-    Ok((dest, sha256))
+    #[cfg(unix)]
+    {
+        // Set exact 0o755 (rwxr-xr-x). Do not OR with source permissions:
+        // source archives may carry setuid/setgid bits.
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o755)).map_err(
+            |e| {
+                ToolError::internal_message(format!(
+                    "chmod 0o755 temp executable for {}: {e}",
+                    dest.display()
+                ))
+            },
+        )?;
+    }
+
+    temp.as_file().sync_all().map_err(|e| {
+        ToolError::internal_message(format!("fsync temp executable {}: {e}", dest.display()))
+    })?;
+    temp.persist(dest).map_err(|e| {
+        ToolError::internal_message(format!("atomic rename {}: {e}", dest.display()))
+    })?;
+    fsync_parent_dir(parent);
+    Ok(())
+}
+
+#[cfg(feature = "acp_registry")]
+fn fsync_parent_dir(parent: &Path) {
+    #[cfg(unix)]
+    if let Ok(dir) = File::open(parent) {
+        drop(dir.sync_all());
+    }
+    #[cfg(not(unix))]
+    let _ = parent;
 }
 
 /// Resolve `~/.lab/bin/<agent_id>/`.
@@ -593,6 +705,7 @@ fn validate_archive_url(url: &str) -> Result<(), ToolError> {
         if host_lower == "localhost"
             || host_lower.starts_with("127.")
             || host_lower == "::1"
+            || host_lower.contains("::ffff:")
             || host_lower == "0.0.0.0"
             || PRIVATE_SUFFIXES.iter().any(|s| host_lower.ends_with(s))
         {
@@ -613,7 +726,12 @@ fn validate_archive_url(url: &str) -> Result<(), ToolError> {
                 other => other,
             };
             let is_private = match addr {
-                std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_link_local(),
+                std::net::IpAddr::V4(v4) => {
+                    let octets = v4.octets();
+                    v4.is_private()
+                        || v4.is_link_local()
+                        || (octets[0] == 100 && (64..=127).contains(&octets[1]))
+                }
                 std::net::IpAddr::V6(v6) => v6.is_unique_local() || v6.is_unicast_link_local(),
             };
             if is_private || addr.is_loopback() || addr.is_unspecified() {
@@ -640,7 +758,7 @@ fn validate_archive_url(url: &str) -> Result<(), ToolError> {
 /// returned. This is separate from the overall reqwest timeout, which
 /// caps the total duration; the watchdog catches a stalled connection
 /// that's neither fast-failing nor completing.
-async fn download_archive(url: &str, dest: &std::path::Path) -> Result<String, ToolError> {
+async fn download_archive(url: &str, dest: &Path) -> Result<String, ToolError> {
     use futures::StreamExt;
     use sha2::{Digest, Sha256};
     use tokio::io::AsyncWriteExt;
@@ -803,11 +921,7 @@ async fn open_archive_response(
 ///    success,
 /// 3. Post-extract, walk `dest_dir` and count files. If the count falls
 ///    below the expected minimum, fail closed.
-fn extract_archive(
-    archive: &std::path::Path,
-    dest_dir: &std::path::Path,
-    url: &str,
-) -> Result<(), ToolError> {
+fn extract_archive(archive: &Path, dest_dir: &Path, url: &str) -> Result<(), ToolError> {
     let archive_s = archive.to_string_lossy();
     let dest_s = dest_dir.to_string_lossy();
 
@@ -894,7 +1008,7 @@ fn extract_archive(
 /// Used by `extract_archive` as a pre-flight expectation. We count only
 /// regular-file-looking entries, not directories, to stay consistent with
 /// the post-extract walk in `validate_no_escape`.
-fn list_archive_file_count(archive: &std::path::Path, url: &str) -> Result<usize, ToolError> {
+fn list_archive_file_count(archive: &Path, url: &str) -> Result<usize, ToolError> {
     let archive_s = archive.to_string_lossy();
     let output = if url.ends_with(".zip") {
         // `unzip -Z -1` prints one entry per line; trailing `/` indicates a dir.
@@ -945,10 +1059,7 @@ fn list_archive_file_count(archive: &std::path::Path, url: &str) -> Result<usize
 /// an attacker-crafted permission-denied entry could evade rejection. A
 /// stat failure in a security-critical walk is treated as a refusal to
 /// validate the tree.
-fn validate_no_escape(
-    canonical_root: &std::path::Path,
-    dir: &std::path::Path,
-) -> Result<usize, ToolError> {
+fn validate_no_escape(canonical_root: &Path, dir: &Path) -> Result<usize, ToolError> {
     let rd = std::fs::read_dir(dir).map_err(|e| ToolError::Sdk {
         sdk_kind: "internal_error".to_string(),
         message: format!("walk extract dir {}: {e}", dir.display()),
@@ -998,7 +1109,7 @@ fn validate_no_escape(
 }
 
 /// Walk `dir` recursively to find the first file whose name matches `binary_name`.
-fn find_binary_in_dir(dir: &std::path::Path, binary_name: &str) -> Option<PathBuf> {
+fn find_binary_in_dir(dir: &Path, binary_name: &str) -> Option<PathBuf> {
     let entries = std::fs::read_dir(dir).ok()?;
     for entry in entries.flatten() {
         let path = entry.path();
@@ -1075,5 +1186,98 @@ mod tests {
         ] {
             assert!(source.contains(required), "missing {required}");
         }
+    }
+
+    #[test]
+    fn binary_asset_without_integrity_metadata_fails_closed() {
+        let asset = BinaryAsset {
+            archive: "https://example.com/agent.tar.gz".to_string(),
+            sha256: None,
+            digest: None,
+            cmd: "./agent".to_string(),
+            args: Vec::new(),
+        };
+
+        let err = expected_archive_sha256(&asset).expect_err("missing integrity must fail");
+
+        assert_eq!(err.kind(), "integrity_missing");
+    }
+
+    #[test]
+    fn binary_asset_digest_metadata_is_normalized() {
+        let asset = BinaryAsset {
+            archive: "https://example.com/agent.tar.gz".to_string(),
+            sha256: None,
+            digest: Some(format!("sha256:{}", "A".repeat(64))),
+            cmd: "./agent".to_string(),
+            args: Vec::new(),
+        };
+
+        let expected = expected_archive_sha256(&asset).expect("valid digest");
+
+        assert_eq!(expected, "a".repeat(64));
+    }
+
+    #[test]
+    fn digest_mismatch_verification_helper_fails() {
+        let expected = "a".repeat(64);
+        let actual = "b".repeat(64);
+
+        let err = verify_archive_sha256(&expected, &actual).expect_err("mismatch must fail");
+
+        assert_eq!(err.kind(), "integrity_mismatch");
+    }
+
+    #[test]
+    fn archive_url_rejects_local_and_private_hosts() {
+        for url in [
+            "http://example.com/agent.tar.gz",
+            "https://127.0.0.1/agent.tar.gz",
+            "https://[::ffff:127.0.0.1]/agent.tar.gz",
+            "https://192.168.1.20/agent.tar.gz",
+            "https://agent.local/agent.tar.gz",
+        ] {
+            let err = validate_archive_url(url).expect_err(url);
+            assert_eq!(err.kind(), "invalid_param");
+        }
+    }
+
+    #[test]
+    fn install_executable_atomically_replaces_file_contents() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let src = dir.path().join("src-agent");
+        let dest = dir.path().join("agent");
+        std::fs::write(&src, b"new agent").expect("write src");
+        std::fs::write(&dest, b"old agent").expect("write dest");
+
+        install_executable_atomically(&src, &dest).expect("atomic install");
+
+        assert_eq!(std::fs::read(&dest).expect("read dest"), b"new agent");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&dest)
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o755);
+        }
+    }
+
+    #[test]
+    fn provider_config_is_written_after_binary_install_returns() {
+        let source = include_str!("acp_dispatch.rs");
+        let install_pos = source
+            .find("let (cmd_path, digest) = install_binary(agent_id, asset).await?;")
+            .expect("install_binary call");
+        let upsert_pos = source
+            .find("upsert_provider(&entry)?;")
+            .expect("upsert_provider call");
+
+        assert!(
+            install_pos < upsert_pos,
+            "provider config must be written only after install_binary succeeds"
+        );
     }
 }

@@ -38,6 +38,10 @@ function marketplaceAction<T>(action: string, params: object, signal?: AbortSign
 
 export interface McpListResult {
   servers: McpServer[]
+  metadata?: {
+    count?: number
+    nextCursor?: string | null
+  }
 }
 
 export async function listMcpServers(signal?: AbortSignal): Promise<McpServer[]> {
@@ -45,7 +49,7 @@ export async function listMcpServers(signal?: AbortSignal): Promise<McpServer[]>
     signal?.throwIfAborted?.()
     return structuredClone(MOCK_MCP_SERVERS)
   }
-  const res = await marketplaceAction<McpListResult>('mcp.list', {}, signal)
+  const res = await marketplaceAction<McpListResult>('mcp.list', { limit: 20 }, signal)
   return res.servers ?? []
 }
 

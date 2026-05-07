@@ -14,11 +14,10 @@ import type {
   ValidationResult,
   ServerJSON,
 } from '@/lib/types/registry'
-import type { Gateway } from '@/lib/types/gateway'
 
 type RawServerResponse = Omit<ServerResponse, 'server'> & { server: ServerJSON }
-type RawServerListResponse = Omit<ServerListResponse, 'servers'> & { servers: RawServerResponse[] }
 type RestServerListRaw = { servers: RawServerResponse[]; next_cursor: string | null }
+type RestServerVersionsRaw = { versions: RawServerResponse[] }
 
 const USE_MOCK_DATA = process.env.NEXT_PUBLIC_MOCK_DATA === 'true'
 
@@ -143,7 +142,7 @@ function listMockServers(): RawServerResponse[] {
   return MOCK_REGISTRY_SERVERS.map(mergeMockMetadata)
 }
 
-async function registryAction<T>(
+async function marketplaceMcpAction<T>(
   action: string,
   params: object,
   signal?: AbortSignal,
@@ -153,7 +152,7 @@ async function registryAction<T>(
     params,
     signal,
     serviceLabel: 'McpRegistry',
-    url: '/v1/mcpregistry',
+    url: '/v1/marketplace',
     createError: createRegistryError,
   })
 }
@@ -162,13 +161,43 @@ export interface RegistryConfig {
   url: string
 }
 
+async function registryRestGet<T>(url: string, fallbackMessage: string, signal?: AbortSignal): Promise<T> {
+  const token = process.env.NEXT_PUBLIC_API_TOKEN
+  const standaloneBearerAuth = isStandaloneBearerAuthMode(token)
+
+  let response: Response
+  try {
+    response = await fetch(url, {
+      headers: gatewayHeaders(token, standaloneBearerAuth),
+      cache: 'no-store',
+      credentials: standaloneBearerAuth ? 'omit' : 'include',
+      signal,
+    })
+  } catch (error) {
+    if (isAbortError(error)) throw error
+    const msg = error instanceof Error ? error.message : 'unknown network error'
+    throw createRegistryError(`${fallbackMessage}: ${msg}`, 502, 'backend_unreachable')
+  }
+
+  if (!response.ok) {
+    const body = await (response.json() as Promise<{ message?: string; kind?: string }>).catch((): { message?: string; kind?: string } => ({}))
+    throw createRegistryError(body.message ?? fallbackMessage, response.status, body.kind)
+  }
+
+  return response.json() as Promise<T>
+}
+
+function registryServerPath(name: string): string {
+  return encodeURIComponent(name)
+}
+
 export async function getRegistryConfig(signal?: AbortSignal): Promise<RegistryConfig> {
   if (USE_MOCK_DATA) {
     signal?.throwIfAborted?.()
     return cloneValue(MOCK_REGISTRY_CONFIG)
   }
 
-  return registryAction<RegistryConfig>('config', {}, signal)
+  return marketplaceMcpAction<RegistryConfig>('mcp.config', {}, signal)
 }
 
 export async function listServers(
@@ -225,29 +254,7 @@ export async function listServers(
 
   const qstr = qs.toString()
   const url = qstr ? `/v0.1/servers?${qstr}` : '/v0.1/servers'
-  const token = process.env.NEXT_PUBLIC_API_TOKEN
-  const standaloneBearerAuth = isStandaloneBearerAuthMode(token)
-
-  let response: Response
-  try {
-    response = await fetch(url, {
-      headers: gatewayHeaders(token, standaloneBearerAuth),
-      cache: 'no-store',
-      credentials: standaloneBearerAuth ? 'omit' : 'include',
-      signal,
-    })
-  } catch (error) {
-    if (isAbortError(error)) throw error
-    const msg = error instanceof Error ? error.message : 'unknown network error'
-    throw createRegistryError(`Registry list failed: ${msg}`, 502, 'backend_unreachable')
-  }
-
-  if (!response.ok) {
-    const body = await (response.json() as Promise<{ message?: string; kind?: string }>).catch((): { message?: string; kind?: string } => ({}))
-    throw createRegistryError(body.message ?? 'Failed to list servers', response.status, body.kind)
-  }
-
-  const raw = await (response.json() as Promise<RestServerListRaw>)
+  const raw = await registryRestGet<RestServerListRaw>(url, 'Failed to list servers', signal)
   const servers: ServerResponse[] = raw.servers.map(normalizeResponse)
   return { servers, metadata: { count: servers.length, nextCursor: raw.next_cursor } }
 }
@@ -265,7 +272,11 @@ export async function getServer(
     return normalizeResponse(found)
   }
 
-  const raw = await registryAction<RawServerResponse>('server.get', { name }, signal)
+  const raw = await registryRestGet<RawServerResponse>(
+    `/v0.1/servers/${registryServerPath(name)}/versions/latest`,
+    'Failed to load server',
+    signal,
+  )
   return normalizeResponse(raw)
 }
 
@@ -285,8 +296,13 @@ export async function listVersions(
     }
   }
 
-  const raw = await registryAction<RawServerListResponse>('server.versions', { name }, signal)
-  return { ...raw, servers: raw.servers.map(normalizeResponse) }
+  const raw = await registryRestGet<RestServerVersionsRaw>(
+    `/v0.1/servers/${registryServerPath(name)}/versions`,
+    'Failed to list server versions',
+    signal,
+  )
+  const servers = raw.versions.map(normalizeResponse)
+  return { servers, metadata: { count: servers.length, nextCursor: null } }
 }
 
 export async function validateServer(
@@ -298,7 +314,7 @@ export async function validateServer(
     return { valid: true, issues: [] }
   }
 
-  return registryAction<ValidationResult>('server.validate', { server_json: serverJson }, signal)
+  return marketplaceMcpAction<ValidationResult>('mcp.validate', { server_json: serverJson }, signal)
 }
 
 export async function getServerLocalMetadata(
@@ -317,8 +333,8 @@ export async function getServerLocalMetadata(
     }
   }
 
-  return registryAction<RegistryLocalMetaResponse>(
-    'server.meta.get',
+  return marketplaceMcpAction<RegistryLocalMetaResponse>(
+    'mcp.meta.get',
     { name, version },
     signal,
   )
@@ -342,8 +358,8 @@ export async function setServerLocalMetadata(
     }
   }
 
-  return registryAction<RegistryLocalMetaResponse>(
-    'server.meta.set',
+  return marketplaceMcpAction<RegistryLocalMetaResponse>(
+    'mcp.meta.set',
     { name, version: options?.version, updated_by: options?.updated_by, metadata },
     signal,
   )
@@ -366,8 +382,8 @@ export async function deleteServerLocalMetadata(
     }
   }
 
-  return registryAction<RegistryLocalMetaDeleteResponse>(
-    'server.meta.delete',
+  return marketplaceMcpAction<RegistryLocalMetaDeleteResponse>(
+    'mcp.meta.delete',
     { name, version },
     signal,
   )
@@ -380,22 +396,46 @@ export interface InstallServerParams {
   bearer_token_env?: string
 }
 
+export interface InstallServerGatewayResult {
+  gateway_id: string
+  ok: boolean
+  error?: string
+  result?: unknown
+}
+
+export interface InstallServerResult {
+  results: InstallServerGatewayResult[]
+}
+
 export async function installServer(
   params: InstallServerParams,
   signal?: AbortSignal,
-): Promise<Gateway> {
+): Promise<InstallServerResult> {
   if (USE_MOCK_DATA) {
     signal?.throwIfAborted?.()
     const gateway = getMockGatewayFallback('gw-2')
     if (!gateway) {
       throw createRegistryError('Failed to install server', 500, 'mock_gateway_missing')
     }
-    return gateway
+    return {
+      results: [
+        {
+          gateway_id: params.gateway_name,
+          ok: true,
+          result: gateway,
+        },
+      ],
+    }
   }
 
-  return registryAction<Gateway>(
-    'server.install',
-    confirmGatewayParams(params),
+  return marketplaceMcpAction<InstallServerResult>(
+    'mcp.install',
+    confirmGatewayParams({
+      name: params.name,
+      gateway_ids: [params.gateway_name],
+      version: params.version,
+      bearer_token_env: params.bearer_token_env,
+    }),
     signal,
   )
 }

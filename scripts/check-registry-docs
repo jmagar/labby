@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+need() {
+  local file="$1"
+  local pattern="$2"
+  local message="$3"
+  if ! grep -Eq "$pattern" "$file"; then
+    printf 'registry-docs check failed: %s\n  file: %s\n  pattern: %s\n' "$message" "$file" "$pattern" >&2
+    exit 1
+  fi
+}
+
+jq -e '
+  any(.[]; .name == "marketplace" and .status == "available" and .surfaces.cli and .surfaces.mcp and .surfaces.api and .surfaces.web_ui)
+  and any(.[]; .name == "mcpregistry" and .status == "sdk_only" and (.surfaces.cli|not) and (.surfaces.mcp|not) and (.surfaces.api|not))
+  and any(.[]; .name == "acp_registry" and .status == "sdk_only" and (.surfaces.cli|not) and (.surfaces.mcp|not) and (.surfaces.api|not))
+' docs/generated/service-catalog.json >/dev/null
+
+for action in \
+  agent.list agent.install agent.uninstall \
+  mcp.list mcp.install mcp.uninstall mcp.sync \
+  plugin.install plugin.deploy artifact.update.apply sources.add
+do
+  jq -e --arg action "$action" 'any(.[]; .service == "marketplace" and .action == $action)' \
+    docs/generated/action-catalog.json >/dev/null
+  need docs/services/MARKETPLACE.md "(^|[^[:alnum:]_.-])${action//./\\.}([^[:alnum:]_.-]|$)" \
+    "Marketplace doc should mention generated action ${action}"
+done
+
+jq -e 'any(.[]; .service == "gateway" and .action == "gateway.mcp.list" and (.destructive | not))' \
+  docs/generated/action-catalog.json >/dev/null
+need docs/services/MARKETPLACE.md 'gateway\.mcp\.list' \
+  "Marketplace doc should distinguish gateway.mcp.list from registry search"
+
+need docs/services/MARKETPLACE.md 'LAB_ACP_REGISTRY_URL' \
+  "Marketplace doc should name the Marketplace ACP registry override"
+need docs/upstream-api/acp-registry.md 'LAB_ACP_REGISTRY_URL' \
+  "ACP registry upstream doc should name the Marketplace ACP registry override"
+need docs/services/MARKETPLACE.md 'confirmation_required.*422|422.*confirmation_required' \
+  "Marketplace doc should document HTTP 422 confirmation_required"
+need docs/upstream-api/acp-registry.md 'confirmation_required.*422|422.*confirmation_required' \
+  "ACP registry upstream doc should document HTTP 422 confirmation_required"
+need docs/services/MARKETPLACE.md 'maximum `limit` is 100|max: 100' \
+  "Marketplace doc should document bounded mcp.list limits"
+need docs/services/MARKETPLACE.md 'SHA-256|fsync|HTTPS' \
+  "Marketplace doc should document binary/package integrity policy"
+
+printf 'registry-docs check passed\n'

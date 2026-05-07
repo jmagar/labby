@@ -84,6 +84,13 @@ pub struct Distribution {
 pub struct BinaryAsset {
     /// URL to download the archive (`.tar.gz` or `.zip`).
     pub archive: String,
+    /// Expected SHA-256 digest for the archive, as 64 hex chars or
+    /// `sha256:<hex>`.
+    #[serde(default, alias = "sha256sum", alias = "checksum_sha256")]
+    pub sha256: Option<String>,
+    /// OCI/GitHub-style digest field, usually `sha256:<hex>`.
+    #[serde(default)]
+    pub digest: Option<String>,
     /// Command to run after extraction (e.g. `"./my-agent"`).
     pub cmd: String,
     /// Extra CLI arguments appended after `cmd`.
@@ -144,4 +151,35 @@ pub struct AgentEnvVar {
     /// Whether this variable is required for the agent to function.
     #[serde(default)]
     pub required: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn binary_asset_models_sha256_metadata() {
+        let asset: BinaryAsset = serde_json::from_value(serde_json::json!({
+            "archive": "https://example.com/agent.tar.gz",
+            "sha256": "abc",
+            "digest": "sha256:def",
+            "cmd": "./agent"
+        }))
+        .expect("deserialize");
+
+        assert_eq!(asset.sha256.as_deref(), Some("abc"));
+        assert_eq!(asset.digest.as_deref(), Some("sha256:def"));
+    }
+
+    #[test]
+    fn binary_asset_accepts_sha256_aliases() {
+        let asset: BinaryAsset = serde_json::from_value(serde_json::json!({
+            "archive": "https://example.com/agent.tar.gz",
+            "sha256sum": "abc",
+            "cmd": "./agent"
+        }))
+        .expect("deserialize");
+
+        assert_eq!(asset.sha256.as_deref(), Some("abc"));
+    }
 }

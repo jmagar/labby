@@ -15,7 +15,7 @@ pub const MCP_ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "mcp.list",
-        description: "List MCP servers from the registry with optional search, owner filter, and pagination. This action calls the upstream registry directly (/v1 surface).",
+        description: "List MCP servers from the local registry mirror with optional search, owner filter, and bounded pagination.",
         destructive: false,
         returns: "ServerListResponse",
         params: &[
@@ -89,7 +89,7 @@ pub const MCP_ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "mcp.get",
-        description: "Get details for a single MCP server by its registry name. Calls the upstream registry directly (/v1 surface).",
+        description: "Get details for a single MCP server by its registry name from the registry client/store surface.",
         destructive: false,
         returns: "ServerResponse",
         params: &[ParamSpec {
@@ -101,7 +101,7 @@ pub const MCP_ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "mcp.versions",
-        description: "List available versions for a named MCP server. Calls the upstream registry directly (/v1 surface).",
+        description: "List available versions for a named MCP server from the registry client/store surface.",
         destructive: false,
         returns: "ServerListResponse",
         params: &[ParamSpec {

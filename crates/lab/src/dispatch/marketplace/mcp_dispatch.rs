@@ -129,23 +129,12 @@ async fn dispatch_mcp_list(client: &McpRegistryClient, params: &Value) -> Result
     ensure_registry_store_populated(&store, client).await?;
     let list_params = store_list_params_from_mcp_params(&parsed);
 
-    if parsed.cursor.is_some() || params.get("limit").is_some() {
-        let page = store.list_servers(list_params).await?;
-        return Ok(serde_json::json!({
-            "servers": page.servers,
-            "metadata": {
-                "count": page.servers.len(),
-                "nextCursor": page.next_cursor,
-            },
-        }));
-    }
-
-    let servers = list_all_store_servers(&store, list_params).await?;
+    let page = store.list_servers(list_params).await?;
     Ok(serde_json::json!({
-        "servers": servers,
+        "servers": page.servers,
         "metadata": {
-            "count": servers.len(),
-            "nextCursor": null,
+            "count": page.servers.len(),
+            "nextCursor": page.next_cursor,
         },
     }))
 }
@@ -165,7 +154,7 @@ fn store_list_params_from_mcp_params(
 ) -> crate::dispatch::marketplace::store::StoreListParams {
     let mut store_params = crate::dispatch::marketplace::store::StoreListParams {
         cursor: params.cursor.clone(),
-        limit: params.limit,
+        limit: Some(params.limit.unwrap_or(10)),
         version: params.version.clone(),
         updated_since: params.updated_since.clone(),
         include_deleted: false,
@@ -208,44 +197,8 @@ async fn ensure_registry_store_populated(
     .await
     {
         Ok(_) => Ok(()),
-        Err(error) if error.kind() == "sync_in_progress" => Ok(()),
         Err(error) => Err(error),
     }
-}
-
-#[cfg(feature = "mcpregistry")]
-async fn list_all_store_servers(
-    store: &crate::dispatch::marketplace::store::RegistryStore,
-    params: crate::dispatch::marketplace::store::StoreListParams,
-) -> Result<Vec<lab_apis::mcpregistry::types::ServerResponse>, ToolError> {
-    let mut cursor = params.cursor.clone();
-    let mut servers = Vec::new();
-    let mut seen_cursors = std::collections::HashSet::new();
-
-    loop {
-        let page = store
-            .list_servers(crate::dispatch::marketplace::store::StoreListParams {
-                cursor: cursor.clone(),
-                limit: Some(100),
-                ..params.clone()
-            })
-            .await?;
-        servers.extend(page.servers);
-        match page.next_cursor {
-            Some(next) if !next.is_empty() => {
-                if cursor.as_deref() == Some(next.as_str()) || !seen_cursors.insert(next.clone()) {
-                    return Err(ToolError::Sdk {
-                        sdk_kind: "invalid_cursor".to_string(),
-                        message: "registry store returned a non-advancing cursor".to_string(),
-                    });
-                }
-                cursor = Some(next);
-            }
-            _ => break,
-        }
-    }
-
-    Ok(servers)
 }
 
 /// Handle `mcp.install`: fetch server details and install to selected targets.
@@ -949,6 +902,9 @@ async fn dispatch_mcp_local(action: &str, params: Value) -> Result<Value, ToolEr
 
 #[cfg(all(test, feature = "mcpregistry"))]
 mod tests {
+    use std::sync::atomic::Ordering;
+
+    use lab_apis::core::Auth;
     use lab_apis::mcpregistry::types::{
         EnvironmentVariable, Package, Transport as RegistryTransport,
     };
@@ -1081,6 +1037,34 @@ mod tests {
         .unwrap();
 
         assert_eq!(spec["command"], "npx");
+    }
+
+    #[test]
+    fn mcp_list_omitted_limit_uses_marketplace_default() {
+        let parsed = mcp_params::list_servers_params(&json!({})).unwrap();
+        let store_params = store_list_params_from_mcp_params(&parsed);
+
+        assert_eq!(store_params.limit, Some(10));
+        assert_eq!(store_params.cursor, None);
+        assert!(store_params.latest_only);
+    }
+
+    #[tokio::test]
+    async fn empty_store_sync_in_progress_is_retryable_error() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("registry.db");
+        let store = crate::dispatch::marketplace::store::RegistryStore::open(&db_path)
+            .await
+            .unwrap();
+        let client = McpRegistryClient::new("http://127.0.0.1:9", Auth::None).unwrap();
+
+        let previous =
+            crate::dispatch::marketplace::sync::SYNC_IN_PROGRESS.swap(true, Ordering::AcqRel);
+        let result = ensure_registry_store_populated(&store, &client).await;
+        crate::dispatch::marketplace::sync::SYNC_IN_PROGRESS.store(previous, Ordering::Release);
+
+        let error = result.unwrap_err();
+        assert_eq!(error.kind(), "sync_in_progress");
     }
 
     #[test]
