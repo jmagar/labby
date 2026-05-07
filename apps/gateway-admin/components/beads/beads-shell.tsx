@@ -99,11 +99,17 @@ export function BeadsShell() {
   // If the user picked a custom status on project A and then switched to
   // project B that doesn't define it, the stale filter would silently keep
   // hiding rows. Reset to 'any' once we know it's not a valid option here.
+  // Gate on `summaryQuery.data` so we don't clear a still-valid custom
+  // status during the in-flight fetch right after a project switch.
   useEffect(() => {
-    if (status !== 'any' && !statusOptions.includes(status)) {
+    if (
+      summaryQuery.data &&
+      status !== 'any' &&
+      !statusOptions.includes(status)
+    ) {
       setStatus('any')
     }
-  }, [status, statusOptions])
+  }, [status, statusOptions, summaryQuery.data])
 
   const issues = issuesQuery.data ?? []
   const isInitialLoading =
