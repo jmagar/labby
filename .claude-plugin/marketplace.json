@@ -105,8 +105,8 @@
         {
             "name": "axon",
             "source": {
-                "source": "url",
-                "url": "https://github.com/jmagar/axon.git"
+                "source": "github",
+                "repo": "jmagar/axon"
             },
             "description": "Skills and MCP configuration for the Axon crawl, ingest, embed, query, and RAG engine."
         },
