@@ -10,4 +10,4 @@ Frontend: `/beads` admin page renders the project picker (driven by `SHOW DATABA
 
 Deferred: issue/comment/dependency writes, close/reopen/update/create, raw SQL, Dolt push/pull/commit, branch operations, import/export.
 
-Security: v1 issues only `SELECT` against the configured projection. Project identifiers are validated against `[A-Za-z0-9_-]+` before backtick interpolation; status filters are allowlisted. Credentials live in `~/.lab/.env` (writable from the **Settings → Services → Beads** web form) and never leave `lab-apis`.
+Security: v1 issues only `SELECT` against the configured projection. Project identifiers are validated against `[A-Za-z0-9_-]+` before backtick interpolation; status filters accept any shape-checked string (no whitespace or control characters, length-bounded) so user-defined values from `custom_statuses` work, and the value travels as a bound MySQL parameter rather than being string-interpolated. Credentials live in `~/.lab/.env` (writable from the **Settings → Services → Beads** web form) and never leave `lab-apis` — Beads consumes them via the shared `lab_apis::core::Auth` enum, whose `Debug` impl already redacts secrets.

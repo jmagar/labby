@@ -35,14 +35,12 @@ async function beadsAction<T>(
   })
 }
 
-export type BeadsStatus =
-  | 'open'
-  | 'in_progress'
-  | 'blocked'
-  | 'deferred'
-  | 'closed'
+// Beads supports user-defined statuses via `custom_statuses` on the Dolt
+// server, so the typed wrapper accepts any string. The canonical list below
+// is for UI defaults (filter dropdown seed values) — the wire shape is open.
+export type BeadsStatus = string
 
-export const BEADS_STATUS_VALUES: BeadsStatus[] = [
+export const BEADS_STATUS_VALUES: string[] = [
   'open',
   'in_progress',
   'blocked',

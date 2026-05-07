@@ -166,14 +166,16 @@ function formatRelative(value?: string | null): string {
   const ts = Date.parse(value)
   if (Number.isNaN(ts)) return value
   const diff = Date.now() - ts
-  const minutes = Math.round(diff / 60_000)
+  // Math.floor — buckets shouldn't roll over until a full unit has passed
+  // (e.g. 45 minutes is "45m ago", not "1h ago").
+  const minutes = Math.floor(diff / 60_000)
   if (minutes < 1) return 'just now'
   if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.round(minutes / 60)
+  const hours = Math.floor(minutes / 60)
   if (hours < 24) return `${hours}h ago`
-  const days = Math.round(hours / 24)
+  const days = Math.floor(hours / 24)
   if (days < 7) return `${days}d ago`
-  const weeks = Math.round(days / 7)
+  const weeks = Math.floor(days / 7)
   if (weeks < 5) return `${weeks}w ago`
   const date = new Date(ts)
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })

@@ -36,21 +36,27 @@ import {
   useBeadsProjects,
   useBeadsStatusSummary,
 } from '@/lib/hooks/use-beads'
-import { BEADS_STATUS_VALUES, type BeadsStatus, type Issue } from '@/lib/api/beads-client'
+import { BEADS_STATUS_VALUES, type Issue } from '@/lib/api/beads-client'
 import { cn, getErrorMessage } from '@/lib/utils'
 import { BeadsIssueList } from './issue-list'
 import { BeadsIssueDetailSheet } from './issue-detail-sheet'
 
-type StatusFilter = BeadsStatus | 'any'
+type StatusFilter = 'any' | string
 type IssueView = 'all' | 'ready'
 
-const STATUS_LABELS: Record<StatusFilter, string> = {
+// Canonical labels for the built-in Beads statuses. Custom statuses surfaced
+// from `status.summary` get a humanized fallback (`replace('_', ' ')`).
+const CANONICAL_STATUS_LABELS: Record<string, string> = {
   any: 'All statuses',
   open: 'Open',
   in_progress: 'In progress',
   blocked: 'Blocked',
   deferred: 'Deferred',
   closed: 'Closed',
+}
+
+function humanizeStatus(value: string): string {
+  return CANONICAL_STATUS_LABELS[value] ?? value.replace(/_/g, ' ')
 }
 
 export function BeadsShell() {
@@ -77,6 +83,18 @@ export function BeadsShell() {
   const contextQuery = useBeadsContext(project)
   const summaryQuery = useBeadsStatusSummary(project)
   const issuesQuery = useBeadsIssues(project, view, status, 200)
+
+  // Status filter options = canonical built-ins union the statuses observed
+  // in the current project's `status.summary`, so user-defined statuses
+  // (Beads' `custom_statuses`) appear without needing a separate discovery
+  // round-trip.
+  const statusOptions = useMemo(() => {
+    const seen = new Set<string>(BEADS_STATUS_VALUES)
+    for (const row of summaryQuery.data?.by_status ?? []) {
+      seen.add(row.status)
+    }
+    return Array.from(seen)
+  }, [summaryQuery.data?.by_status])
 
   const issues = issuesQuery.data ?? []
   const isInitialLoading =
@@ -190,10 +208,10 @@ export function BeadsShell() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="any">All statuses</SelectItem>
-                      {BEADS_STATUS_VALUES.map((value) => (
+                      <SelectItem value="any">{humanizeStatus('any')}</SelectItem>
+                      {statusOptions.map((value) => (
                         <SelectItem key={value} value={value}>
-                          {STATUS_LABELS[value]}
+                          {humanizeStatus(value)}
                         </SelectItem>
                       ))}
                     </SelectContent>

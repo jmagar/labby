@@ -1,4 +1,5 @@
 use lab_apis::beads::{BeadsClient, DoltConnection};
+use lab_apis::core::Auth;
 
 use crate::dispatch::error::ToolError;
 use crate::dispatch::helpers::env_non_empty;
@@ -13,8 +14,7 @@ pub fn client_from_env() -> Option<BeadsClient> {
     let url = env_non_empty("BEADS_DOLT_URL")?;
     let connection = DoltConnection {
         url,
-        user: env_non_empty("BEADS_DOLT_USER"),
-        password: env_non_empty("BEADS_DOLT_PASSWORD"),
+        auth: auth_from_env(),
         default_project: env_non_empty("BEADS_DEFAULT_PROJECT"),
     };
     BeadsClient::new(connection).ok()
@@ -25,8 +25,7 @@ pub fn require_client() -> Result<BeadsClient, ToolError> {
     let url = env_non_empty("BEADS_DOLT_URL").ok_or_else(not_configured_error)?;
     let connection = DoltConnection {
         url,
-        user: env_non_empty("BEADS_DOLT_USER"),
-        password: env_non_empty("BEADS_DOLT_PASSWORD"),
+        auth: auth_from_env(),
         default_project: env_non_empty("BEADS_DEFAULT_PROJECT"),
     };
     BeadsClient::new(connection).map_err(|err| ToolError::Sdk {
@@ -39,5 +38,17 @@ pub fn not_configured_error() -> ToolError {
     ToolError::Sdk {
         sdk_kind: "not_configured".into(),
         message: "BEADS_DOLT_URL not configured".into(),
+    }
+}
+
+fn auth_from_env() -> Auth {
+    let user = env_non_empty("BEADS_DOLT_USER");
+    let password = env_non_empty("BEADS_DOLT_PASSWORD");
+    match (user, password) {
+        (None, None) => Auth::None,
+        (user, password) => Auth::Basic {
+            username: user.unwrap_or_default(),
+            password: password.unwrap_or_default(),
+        },
     }
 }

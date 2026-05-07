@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 use mysql_async::prelude::*;
 use mysql_async::{Conn, Opts, OptsBuilder, Pool, Row};
 
+use crate::core::Auth;
+
 use super::error::BeadsError;
 use super::types::{
     BeadsContext, BeadsHealth, Comment, ContractStatus, Dependency, DependencyGraph, DoltVersion,
@@ -18,25 +20,38 @@ use super::types::{
 
 /// Connection parameters for the Dolt SQL server.
 ///
-/// `Debug` is intentionally hand-written and never includes the password —
-/// per the lab-apis library invariant, anything holding secrets must redact in
-/// `Debug`.
+/// Credentials flow through the shared [`Auth`] enum — Beads accepts
+/// [`Auth::Basic`] (username + password) and [`Auth::None`]. `Debug` is
+/// hand-written and never includes the password (Auth's own Debug redacts) and
+/// never includes the raw URL (a `mysql://user:pass@host/` DSN can carry
+/// embedded credentials in the userinfo component).
 #[derive(Clone)]
 pub struct DoltConnection {
     pub url: String,
-    pub user: Option<String>,
-    pub password: Option<String>,
+    pub auth: Auth,
     pub default_project: Option<String>,
 }
 
 impl std::fmt::Debug for DoltConnection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DoltConnection")
-            .field("url", &self.url)
-            .field("user", &self.user)
-            .field("password", &self.password.as_ref().map(|_| "***"))
+            .field("url", &sanitize_dsn_for_debug(&self.url))
+            .field("auth", &self.auth)
             .field("default_project", &self.default_project)
             .finish()
+    }
+}
+
+/// Strip any userinfo from a MySQL DSN so a `Debug` print never leaks
+/// credentials embedded in the URL itself.
+fn sanitize_dsn_for_debug(url: &str) -> String {
+    match url::Url::parse(url) {
+        Ok(mut parsed) => {
+            let _ = parsed.set_username("");
+            let _ = parsed.set_password(None);
+            parsed.into()
+        }
+        Err(_) => "<unparseable>".to_string(),
     }
 }
 
@@ -44,11 +59,21 @@ impl DoltConnection {
     fn into_opts(self) -> Result<Opts, BeadsError> {
         let base = Opts::from_url(&self.url)?;
         let mut builder = OptsBuilder::from_opts(base);
-        if let Some(user) = self.user.as_deref().filter(|s| !s.is_empty()) {
-            builder = builder.user(Some(user));
-        }
-        if let Some(password) = self.password.as_deref() {
-            builder = builder.pass(Some(password));
+        match self.auth {
+            Auth::None => {}
+            Auth::Basic { username, password } => {
+                if !username.is_empty() {
+                    builder = builder.user(Some(username));
+                }
+                builder = builder.pass(Some(password));
+            }
+            other => {
+                return Err(BeadsError::NotConfigured {
+                    message: format!(
+                        "unsupported auth scheme for Dolt SQL: {other:?} (expected Auth::Basic or Auth::None)"
+                    ),
+                });
+            }
         }
         Ok(builder.into())
     }

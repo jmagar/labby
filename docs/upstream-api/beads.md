@@ -24,7 +24,7 @@ Beads is a git/Dolt-backed issue tracker. Lab v1 connects to Beads through the D
 | `issue.show` | reads one row plus joined `dependencies`, `labels`, and `comments` | network-only |
 | `graph.show` | walks `dependencies` from a root issue (capped at 100 nodes) | network-only |
 
-Every action accepts an optional `project: string` param. When omitted, the dispatcher falls back to `BEADS_DEFAULT_PROJECT`. Project identifiers are validated to `[A-Za-z0-9_-]+` before being interpolated as a backtick-quoted database name.
+All per-project actions (`context.get`, `status.summary`, `issue.list`, `issue.ready`, `issue.show`, `graph.show`) accept an optional `project: string` param and fall back to `BEADS_DEFAULT_PROJECT` when omitted. The server-scoped actions (`health.status`, `version.get`, `project.list`) do not accept `project`. Project identifiers are validated to `[A-Za-z0-9_-]+` before being interpolated as a backtick-quoted database name.
 
 ## Schema mapping
 
@@ -50,6 +50,6 @@ Write operations remain deferred: create, update, close, reopen, comment, depend
 ## Security
 
 - Every action is read-only; no `INSERT`/`UPDATE`/`DELETE`/`CALL` is issued.
-- Project identifiers are validated before interpolation; status filters are matched against an allowlist.
+- Project identifiers are validated before backtick interpolation. Status filters are not allowlisted (Beads supports user-defined statuses via `custom_statuses`); the dispatcher applies a shape check (length-bounded, no whitespace or control characters) and the value travels as a bound MySQL parameter.
 - Comment text and issue descriptions are returned verbatim as plain JSON — surface code is responsible for HTML escaping when it renders.
-- Credentials never leave `lab-apis`; `Auth` is constructed inside the dispatch client from env vars and passed straight to `mysql_async`.
+- Credentials never leave `lab-apis`; `lab_apis::core::Auth` is constructed inside the dispatch client from env vars and translated into `mysql_async` `OptsBuilder` calls. The `DoltConnection` Debug impl strips userinfo from the DSN and Auth's own Debug redacts the password.
