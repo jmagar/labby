@@ -1,9 +1,9 @@
 use std::fmt;
 use std::path::Path;
 
-use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
+use base64::Engine;
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey, LineEnding};
 use rsa::rand_core::{TryCryptoRng, TryRng, UnwrapErr};
 use rsa::traits::PublicKeyParts;
@@ -106,6 +106,14 @@ impl SigningKeys {
             .map_err(|error| AuthError::Storage(format!("encode access token: {error}")))
     }
 
+    /// Validate access token signature, algorithm, and audience.
+    ///
+    /// NOTE: this method does NOT enforce the `iss` claim. Callers that
+    /// need RFC 7519 issuer validation MUST use
+    /// [`Self::validate_access_token_with_issuer`] instead. This entry
+    /// point is preserved for the lab consumer, which performs its own
+    /// post-decode `iss` check. New consumers (syslog-mcp et al.) should
+    /// always use the issuer-enforcing variant.
     pub fn validate_access_token(
         &self,
         token: &str,
@@ -113,6 +121,24 @@ impl SigningKeys {
     ) -> Result<AccessClaims, AuthError> {
         let mut validation = Validation::new(Algorithm::RS256);
         validation.set_audience(&[expected_audience]);
+        decode::<AccessClaims>(token, &self.decoding_key, &validation)
+            .map(|data| data.claims)
+            .map_err(|_| AuthError::InvalidAccessToken)
+    }
+
+    /// Validate signature, algorithm, audience, AND issuer in a single
+    /// pass — the issuer is enforced via `Validation::set_issuer` BEFORE
+    /// decode (RFC 7519 §4.1.1 compliant) rather than via a manual
+    /// `claims.iss != expected` check after decode.
+    pub fn validate_access_token_with_issuer(
+        &self,
+        token: &str,
+        expected_audience: &str,
+        expected_issuer: &str,
+    ) -> Result<AccessClaims, AuthError> {
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.set_audience(&[expected_audience]);
+        validation.set_issuer(&[expected_issuer]);
         decode::<AccessClaims>(token, &self.decoding_key, &validation)
             .map(|data| data.claims)
             .map_err(|_| AuthError::InvalidAccessToken)
@@ -246,6 +272,40 @@ mod tests {
         assert!(
             result.is_err(),
             "token with wrong audience must be rejected"
+        );
+    }
+
+    #[test]
+    fn validate_with_issuer_accepts_matching_issuer() {
+        let signer = test_signer();
+        let claims = sample_claims();
+        let token = signer.issue_access_token(&claims).unwrap();
+        let decoded = signer
+            .validate_access_token_with_issuer(
+                &token,
+                "https://lab.example.com",
+                "https://lab.example.com",
+            )
+            .expect("token with matching issuer must validate");
+        assert_eq!(decoded.iss, "https://lab.example.com");
+    }
+
+    #[test]
+    fn validate_with_issuer_rejects_wrong_issuer_via_validation_struct() {
+        // Locked decision: issuer enforcement uses Validation::set_issuer
+        // BEFORE decode (so jsonwebtoken rejects up-front), not a manual
+        // post-decode `claims.iss != expected` comparison.
+        let signer = test_signer();
+        let claims = sample_claims();
+        let token = signer.issue_access_token(&claims).unwrap();
+        let result = signer.validate_access_token_with_issuer(
+            &token,
+            "https://lab.example.com",
+            "https://attacker.example.com",
+        );
+        assert!(
+            result.is_err(),
+            "token signed by us but with wrong expected issuer must be rejected"
         );
     }
 

@@ -75,13 +75,17 @@ pub struct AuthState {
 impl AuthState {
     pub async fn new(config: AuthConfig) -> Result<Self, AuthError> {
         if !matches!(config.mode, AuthMode::OAuth) {
-            return Err(AuthError::Config(
-                "AuthState requires LAB_AUTH_MODE=oauth".to_string(),
-            ));
+            return Err(AuthError::Config(format!(
+                "AuthState requires {prefix}_AUTH_MODE=oauth",
+                prefix = config.env_prefix
+            )));
         }
 
         let public_url = config.public_url.clone().ok_or_else(|| {
-            AuthError::Config("LAB_PUBLIC_URL is required when LAB_AUTH_MODE=oauth".to_string())
+            AuthError::Config(format!(
+                "{prefix}_PUBLIC_URL is required when {prefix}_AUTH_MODE=oauth",
+                prefix = config.env_prefix
+            ))
         })?;
         let redirect_uri = build_google_redirect_uri(&public_url, &config.google.callback_path);
         let store = SqliteStore::open(config.sqlite_path.clone()).await?;
@@ -93,13 +97,15 @@ impl AuthState {
         )?;
         google.scopes.clone_from(&config.google.scopes);
         info!(
+            crate_name = "lab-auth",
+            env_prefix = %config.env_prefix,
             auth_mode = "oauth",
             public_url = %public_url,
             google_redirect_uri = %google.redirect_uri,
             sqlite_path = %config.sqlite_path.display(),
             key_path = %config.key_path.display(),
             google_scopes = ?config.google.scopes,
-            "lab-auth state initialized"
+            "auth state initialized"
         );
 
         let authorize_limiter = RateLimiter::new(config.authorize_requests_per_minute);
@@ -242,6 +248,7 @@ mod tests {
             register_requests_per_minute: 10,
             authorize_requests_per_minute: 20,
             max_pending_oauth_states: 1024,
+            ..AuthConfig::default()
         })
         .await
         .expect("auth state")
@@ -321,6 +328,7 @@ mod tests {
             register_requests_per_minute: 10,
             authorize_requests_per_minute: 20,
             max_pending_oauth_states: 1024,
+            ..AuthConfig::default()
         })
         .await
         .expect("auth state");

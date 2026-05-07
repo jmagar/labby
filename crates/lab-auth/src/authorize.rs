@@ -19,7 +19,6 @@ use crate::types::{
 use crate::util::{expires_at, fingerprint, now_unix, random_token};
 
 const AUTH_REQUEST_TTL_SECS: i64 = 300;
-const LAB_SCOPE: &str = "lab";
 
 /// Enforces the configured email allowlist.
 ///
@@ -88,7 +87,7 @@ pub async fn browser_login(
 
     let location = state.google.authorize_url(&AuthorizeUrlRequest {
         state: request_state,
-        scope: LAB_SCOPE.to_string(),
+        scope: state.config.default_scope.clone(),
         code_challenge: provider_code_challenge,
         code_challenge_method: "S256".to_string(),
     })?;
@@ -156,7 +155,7 @@ pub async fn authorize(
     state.ensure_pending_oauth_state_capacity().await?;
     validate_response_type(&query.response_type)?;
     validate_resource(&state, query.resource.as_deref())?;
-    let scope = validate_scope(&query.scope)?;
+    let scope = validate_scope(&query.scope, &state.config.default_scope)?;
     let client_state_id = fingerprint(&query.state);
     info!(
         client_id = %query.client_id,
@@ -429,17 +428,17 @@ fn validate_response_type(response_type: &str) -> Result<(), AuthError> {
     }
 }
 
-fn validate_scope(scope: &str) -> Result<String, AuthError> {
+fn validate_scope(scope: &str, default_scope: &str) -> Result<String, AuthError> {
     let normalized = scope.trim();
     if normalized.is_empty() {
-        return Ok(LAB_SCOPE.to_string());
+        return Ok(default_scope.to_string());
     }
-    if normalized == LAB_SCOPE {
+    if normalized == default_scope {
         return Ok(normalized.to_string());
     }
     warn!(scope = %normalized, "oauth authorize rejected: unsupported scope");
     Err(AuthError::Validation(format!(
-        "scope must be `{LAB_SCOPE}`"
+        "scope must be `{default_scope}`"
     )))
 }
 
@@ -1151,6 +1150,21 @@ pub mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
         }
+    }
+
+    #[test]
+    fn validate_scope_accepts_configured_default_and_rejects_others() {
+        // Empty scope falls back to configured default.
+        assert_eq!(super::validate_scope("", "syslog:read").unwrap(), "syslog:read");
+        // Matching scope passes through.
+        assert_eq!(
+            super::validate_scope("syslog:read", "syslog:read").unwrap(),
+            "syslog:read"
+        );
+        // Anything else is rejected — and the error mentions the configured
+        // default (proving the LAB_SCOPE constant is gone).
+        let err = super::validate_scope("lab", "syslog:read").unwrap_err();
+        assert!(err.to_string().contains("syslog:read"), "got: {err}");
     }
 
     #[tokio::test]
