@@ -17,6 +17,11 @@ const GOOGLE_TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
 const GOOGLE_JWKS_ENDPOINT: &str = "https://www.googleapis.com/oauth2/v3/certs";
 const GOOGLE_ISSUER: &str = "https://accounts.google.com";
 const GOOGLE_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+/// Per-request timeout on the JWKS GET. Bound aggressively (5s) so a slow
+/// google.com call cannot starve a tokio worker holding the JWKS write
+/// lock. Token exchange / refresh keep the looser 30s bound because they
+/// can legitimately take longer.
+const GOOGLE_JWKS_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 const GOOGLE_DEFAULT_JWKS_TTL: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -505,6 +510,7 @@ impl GoogleProvider {
         let trace = GoogleRequestTrace::start("fetch_jwks", "GET", jwks_endpoint);
         let response = http
             .get(jwks_endpoint.clone())
+            .timeout(GOOGLE_JWKS_FETCH_TIMEOUT)
             .send()
             .await
             .map_err(|error| {

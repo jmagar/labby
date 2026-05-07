@@ -1,4 +1,4 @@
-use axum::{Json, extract::State};
+use axum::{extract::State, Json};
 
 use crate::state::AuthState;
 use crate::types::{AuthorizationServerMetadata, ProtectedResourceMetadata};
@@ -30,7 +30,7 @@ pub async fn protected_resource_metadata(
     Json(ProtectedResourceMetadata {
         resource: canonical_resource_url(&state),
         authorization_servers: vec![base],
-        scopes_supported: vec!["lab".to_string()],
+        scopes_supported: state.config.scopes_supported.clone(),
         bearer_methods_supported: vec!["header".to_string()],
     })
 }
@@ -54,7 +54,13 @@ pub(crate) fn public_base_url(state: &AuthState) -> String {
 }
 
 pub fn canonical_resource_url(state: &AuthState) -> String {
-    format!("{}/mcp", public_base_url(state))
+    let base = public_base_url(state);
+    let suffix = state.config.resource_path.trim_start_matches('/');
+    if suffix.is_empty() {
+        base
+    } else {
+        format!("{base}/{suffix}")
+    }
 }
 
 #[cfg(test)]
@@ -105,5 +111,52 @@ mod tests {
             .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["resource"], "https://lab.example.com/mcp");
+    }
+
+    #[tokio::test]
+    async fn protected_resource_metadata_advertises_configured_scopes_and_resource_path() {
+        use crate::authorize::tests::test_auth_state_with_config;
+        use crate::config::AuthConfig;
+
+        // Synthesize a config that overrides scopes_supported and resource_path,
+        // matching how syslog-mcp will eventually configure lab-auth.
+        let dir = tempfile::tempdir().unwrap();
+        let config = AuthConfig {
+            mode: crate::config::AuthMode::OAuth,
+            public_url: Some(url::Url::parse("https://syslog.example.com").unwrap()),
+            sqlite_path: dir.path().join("auth.db"),
+            key_path: dir.path().join("auth.pem"),
+            admin_email: "admin@example.com".into(),
+            google: crate::config::GoogleConfig {
+                client_id: "id".into(),
+                client_secret: "secret".into(),
+                callback_path: "/auth/google/callback".into(),
+                scopes: vec!["openid".into(), "email".into()],
+            },
+            scopes_supported: vec!["syslog:read".to_string(), "syslog:admin".to_string()],
+            resource_path: "/syslog/mcp".to_string(),
+            ..AuthConfig::default()
+        };
+        let state = test_auth_state_with_config(config).await;
+        let app = router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/.well-known/oauth-protected-resource")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["resource"], "https://syslog.example.com/syslog/mcp");
+        assert_eq!(
+            json["scopes_supported"],
+            serde_json::json!(["syslog:read", "syslog:admin"])
+        );
     }
 }
