@@ -107,7 +107,7 @@
   {
     "name": "beads",
     "display_name": "Beads",
-    "description": "Git/Dolt-backed issue tracker through the local bd CLI",
+    "description": "Git/Dolt-backed issue tracker, queried directly over the Dolt SQL protocol",
     "category": "bootstrap",
     "status": "available",
     "feature": "beads",
@@ -118,7 +118,7 @@
       "api": true,
       "web_ui": false
     },
-    "default_port": null,
+    "default_port": 3306,
     "docs_url": "https://gastownhall.github.io/beads/",
     "coverage_doc": "docs/coverage/beads.md",
     "upstream_doc": "docs/upstream-api/beads.md",

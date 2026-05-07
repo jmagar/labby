@@ -11,7 +11,7 @@ Feature invariant status: clean.
 | lab-apis | `all` | AggregateDefault | false | false | labby/all | `radarr`<br>`sonarr`<br>`prowlarr`<br>`overseerr`<br>`plex`<br>`tautulli`<br>`sabnzbd`<br>`qbittorrent`<br>`tailscale`<br>`linkding`<br>`memos`<br>`beads`<br>`bytestash`<br>`paperless`<br>`arcane`<br>`unraid`<br>`unifi`<br>`gotify`<br>`jellyfin`<br>`adguard`<br>`glances`<br>`pihole`<br>`neo4j`<br>`uptime_kuma`<br>`immich`<br>`loggifly`<br>`navidrome`<br>`scrutiny`<br>`freshrss`<br>`openacp`<br>`openai`<br>`notebooklm`<br>`qdrant`<br>`tei`<br>`apprise`<br>`deploy`<br>`mcpregistry`<br>`acp_registry`<br>`dozzle`<br>`extract` |
 | lab-apis | `apprise` | ServicePassthrough | false | true | labby/apprise |  |
 | lab-apis | `arcane` | ServicePassthrough | false | true | labby/arcane |  |
-| lab-apis | `beads` | ServicePassthrough | false | true | labby/beads |  |
+| lab-apis | `beads` | ServicePassthrough | false | true | labby/beads | `dep:mysql_async` |
 | lab-apis | `bytestash` | ServicePassthrough | false | true | labby/bytestash |  |
 | lab-apis | `default` | AggregateDefault | false | false | labby/default |  |
 | lab-apis | `deploy` | ServicePassthrough | false | true | labby/deploy |  |

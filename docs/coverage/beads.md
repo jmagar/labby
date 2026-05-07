@@ -1,11 +1,13 @@
 # Beads Coverage
 
-Status: local read-only CLI contract implemented.
+Status: Dolt SQL contract implemented. Read-only.
 
-Actions: `contract.status`, `health.status`, `version.get`, `context.get`, `status.summary`, `issue.list`, `issue.ready`, `issue.show`, `graph.show`, plus built-in `help` and `schema`.
+Actions: `contract.status`, `health.status`, `version.get`, `project.list`, `context.get`, `status.summary`, `issue.list`, `issue.ready`, `issue.show`, `graph.show`, plus built-in `help` and `schema`.
 
-Implemented now: first-class Lab service wiring for SDK, dispatch, CLI, MCP catalog, HTTP API, TUI metadata, and onboarding audit. The implementation shells out to `bd --json --readonly` and caps list/ready result limits at 500.
+Implemented now: full Lab service wiring (SDK, dispatch, CLI, MCP catalog, HTTP API, TUI metadata, onboarding audit) backed by `mysql_async` against the configured Dolt SQL server. Each database on the server is treated as one Beads project; the dispatcher accepts an optional `project` param on every issue/graph action and falls back to `BEADS_DEFAULT_PROJECT`.
 
-Deferred: issue/comment/dependency writes, close/reopen/update/create, raw SQL, Dolt push/pull/commit, branch operations, import/export, and any direct Dolt database access.
+Frontend: `/beads` admin page renders the project picker (driven by `SHOW DATABASES`), the status-summary strip, the ready/all issue toggle, and an issue detail drawer with dependencies, labels, and comments.
 
-Security: v1 is read-only and uses `--readonly` on every `bd` invocation. It returns `bd` JSON output without exposing write operations through Lab.
+Deferred: issue/comment/dependency writes, close/reopen/update/create, raw SQL, Dolt push/pull/commit, branch operations, import/export.
+
+Security: v1 issues only `SELECT` against the configured projection. Project identifiers are validated against `[A-Za-z0-9_-]+` before backtick interpolation; status filters are allowlisted. Credentials live in `~/.lab/.env` (writable from the **Settings → Services → Beads** web form) and never leave `lab-apis`.

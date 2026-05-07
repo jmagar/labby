@@ -1,5 +1,26 @@
 use lab_apis::core::action::{ActionSpec, ParamSpec};
 
+const PROJECT_PARAM: ParamSpec = ParamSpec {
+    name: "project",
+    ty: "string",
+    required: false,
+    description: "Dolt database name. Falls back to BEADS_DEFAULT_PROJECT if omitted.",
+};
+
+const ID_PARAM: ParamSpec = ParamSpec {
+    name: "id",
+    ty: "string",
+    required: true,
+    description: "Beads issue id",
+};
+
+const LIMIT_PARAM: ParamSpec = ParamSpec {
+    name: "limit",
+    ty: "integer",
+    required: false,
+    description: "Maximum issues to return, capped at 500",
+};
+
 pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "help",
@@ -22,94 +43,82 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "contract.status",
-        description: "Return Beads local CLI integration contract status",
+        description: "Return the Beads/Dolt integration contract",
         destructive: false,
         returns: "ContractStatus",
         params: &[],
     },
     ActionSpec {
         name: "health.status",
-        description: "Check bd availability and workspace status",
+        description: "Check Dolt reachability and report the server version",
         destructive: false,
         returns: "BeadsHealth",
         params: &[],
     },
     ActionSpec {
         name: "version.get",
-        description: "Return bd version metadata",
+        description: "Return the Dolt SQL server version",
         destructive: false,
-        returns: "BdJson",
+        returns: "DoltVersion",
+        params: &[],
+    },
+    ActionSpec {
+        name: "project.list",
+        description: "List the Dolt databases visible on the server (Beads projects)",
+        destructive: false,
+        returns: "Project[]",
         params: &[],
     },
     ActionSpec {
         name: "context.get",
-        description: "Return active Beads workspace/backend context",
+        description: "Return headline counters for the requested project",
         destructive: false,
-        returns: "BdJson",
-        params: &[],
+        returns: "BeadsContext",
+        params: &[PROJECT_PARAM],
     },
     ActionSpec {
         name: "status.summary",
-        description: "Return Beads database summary counts",
+        description: "Return per-status issue counts for the requested project",
         destructive: false,
-        returns: "BdJson",
-        params: &[],
+        returns: "StatusSummary",
+        params: &[PROJECT_PARAM],
     },
     ActionSpec {
         name: "issue.list",
-        description: "List Beads issues with optional status and limit filters",
+        description: "List issues, optionally filtered by stored status",
         destructive: false,
-        returns: "BdJson",
+        returns: "Issue[]",
         params: &[
+            PROJECT_PARAM,
             ParamSpec {
                 name: "status",
                 ty: "string",
                 required: false,
                 description: "Optional stored status filter: open, in_progress, blocked, deferred, closed",
             },
-            ParamSpec {
-                name: "limit",
-                ty: "integer",
-                required: false,
-                description: "Maximum issues to return, capped at 500",
-            },
+            LIMIT_PARAM,
         ],
     },
     ActionSpec {
         name: "issue.ready",
-        description: "List ready unblocked Beads issues",
+        description: "List ready (unblocked) issues",
         destructive: false,
-        returns: "BdJson",
-        params: &[ParamSpec {
-            name: "limit",
-            ty: "integer",
-            required: false,
-            description: "Maximum issues to return, capped at 500",
-        }],
+        returns: "Issue[]",
+        params: &[PROJECT_PARAM, LIMIT_PARAM],
     },
     ActionSpec {
         name: "issue.show",
-        description: "Show one Beads issue by id",
+        description: "Show one Beads issue plus dependencies and comments",
         destructive: false,
-        returns: "BdJson",
-        params: &[ParamSpec {
-            name: "id",
-            ty: "string",
-            required: true,
-            description: "Beads issue id",
-        }],
+        returns: "IssueDetail",
+        params: &[PROJECT_PARAM, ID_PARAM],
     },
     ActionSpec {
         name: "graph.show",
-        description: "Show one Beads issue dependency graph",
+        description: "Walk the dependency graph from a root issue (capped at 100 nodes)",
         destructive: false,
-        returns: "BdJson",
-        params: &[ParamSpec {
-            name: "id",
-            ty: "string",
-            required: true,
-            description: "Beads issue id",
-        }],
+        returns: "DependencyGraph",
+        params: &[PROJECT_PARAM, ID_PARAM],
     },
 ];
 
@@ -122,5 +131,10 @@ mod tests {
         for spec in ACTIONS {
             assert!(!spec.destructive, "{} should remain read-only", spec.name);
         }
+    }
+
+    #[test]
+    fn beads_catalog_includes_project_list() {
+        assert!(ACTIONS.iter().any(|a| a.name == "project.list"));
     }
 }

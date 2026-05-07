@@ -6,6 +6,7 @@ import { LabbyIcon } from '@/components/labby-icon'
 import { usePathname } from 'next/navigation'
 import {
   Cable,
+  CircleDot,
   MessageSquareText,
   LayoutDashboard,
   ShoppingBag,
@@ -73,6 +74,11 @@ export const primarySidebarNavigation = [
     title: 'Activity',
     url: '/activity',
     icon: Activity,
+  },
+  {
+    title: 'Beads',
+    url: '/beads',
+    icon: CircleDot,
   },
   {
     title: 'Logs',

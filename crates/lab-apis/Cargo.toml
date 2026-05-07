@@ -28,6 +28,7 @@ russh-sftp = { workspace = true, optional = true }
 russh-config = { workspace = true, optional = true }
 quick-xml = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
+mysql_async = { workspace = true, optional = true }
 tempfile.workspace = true
 neo4rs = { version = "0.9.0-rc.9", features = ["json"], optional = true }
 rust_socketio = { version = "0.6.0", features = ["async"], optional = true }
@@ -88,7 +89,7 @@ all = [
 ]
 apprise = []
 arcane = []
-beads = []
+beads = ["dep:mysql_async"]
 bytestash = []
 default = []
 deploy = []

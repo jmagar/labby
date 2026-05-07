@@ -43,3 +43,31 @@ pub fn optional_status(params: &Value) -> Result<Option<String>, ToolError> {
         }
     }
 }
+
+pub fn optional_project(params: &Value) -> Result<Option<String>, ToolError> {
+    match params.get("project") {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => {
+            let Some(project) = value.as_str() else {
+                return Err(ToolError::InvalidParam {
+                    message: "`project` must be a string".into(),
+                    param: "project".into(),
+                });
+            };
+            let project = project.trim();
+            if project.is_empty() {
+                return Ok(None);
+            }
+            for ch in project.chars() {
+                if !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '-') {
+                    return Err(ToolError::InvalidParam {
+                        message: "`project` may only contain ASCII letters, digits, `_`, and `-`"
+                            .into(),
+                        param: "project".into(),
+                    });
+                }
+            }
+            Ok(Some(project.to_owned()))
+        }
+    }
+}

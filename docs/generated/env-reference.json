@@ -91,12 +91,39 @@
   },
   {
     "service": "beads",
-    "env_var": "BEADS_BIN",
+    "env_var": "BEADS_DEFAULT_PROJECT",
     "required": false,
     "secret": false,
-    "description": "Path or command name for the bd executable",
-    "example": "bd",
-    "default_port": null
+    "description": "Database name selected when a request omits `project`",
+    "example": "lab",
+    "default_port": 3306
+  },
+  {
+    "service": "beads",
+    "env_var": "BEADS_DOLT_PASSWORD",
+    "required": false,
+    "secret": true,
+    "description": "Password for the Dolt SQL server",
+    "example": "<beads_dolt_password>",
+    "default_port": 3306
+  },
+  {
+    "service": "beads",
+    "env_var": "BEADS_DOLT_URL",
+    "required": true,
+    "secret": false,
+    "description": "Dolt SQL endpoint as a MySQL connection URL (e.g. mysql://host:3306/)",
+    "example": "mysql://dolt.local:3306/",
+    "default_port": 3306
+  },
+  {
+    "service": "beads",
+    "env_var": "BEADS_DOLT_USER",
+    "required": false,
+    "secret": false,
+    "description": "Username for the Dolt SQL server",
+    "example": "root",
+    "default_port": 3306
   },
   {
     "service": "bytestash",

@@ -7,7 +7,7 @@ use crate::dispatch::helpers::{action_schema, help_payload, require_str, to_json
 
 use super::catalog::ACTIONS;
 use super::client::require_client;
-use super::params::{optional_status, optional_u32};
+use super::params::{optional_project, optional_status, optional_u32};
 
 pub async fn dispatch(action: &str, params: Value) -> Result<Value, ToolError> {
     match action {
@@ -35,24 +35,39 @@ pub async fn dispatch_with_client(
         "contract.status" => to_json(client.contract_status()),
         "health.status" => to_json(client.health_status().await?),
         "version.get" => to_json(client.version().await?),
-        "context.get" => to_json(client.context().await?),
-        "status.summary" => to_json(client.status_summary().await?),
+        "project.list" => to_json(client.databases().await?),
+        "context.get" => {
+            let project = optional_project(&params)?;
+            to_json(client.context(project.as_deref()).await?)
+        }
+        "status.summary" => {
+            let project = optional_project(&params)?;
+            to_json(client.status_summary(project.as_deref()).await?)
+        }
         "issue.list" => {
+            let project = optional_project(&params)?;
             let status = optional_status(&params)?;
             let limit = optional_u32(&params, "limit")?;
-            to_json(client.list(status.as_deref(), limit).await?)
+            to_json(
+                client
+                    .list(project.as_deref(), status.as_deref(), limit)
+                    .await?,
+            )
         }
         "issue.ready" => {
+            let project = optional_project(&params)?;
             let limit = optional_u32(&params, "limit")?;
-            to_json(client.ready(limit).await?)
+            to_json(client.ready(project.as_deref(), limit).await?)
         }
         "issue.show" => {
+            let project = optional_project(&params)?;
             let id = require_str(&params, "id")?;
-            to_json(client.show(id).await?)
+            to_json(client.show(project.as_deref(), id).await?)
         }
         "graph.show" => {
+            let project = optional_project(&params)?;
             let id = require_str(&params, "id")?;
-            to_json(client.graph(id).await?)
+            to_json(client.graph(project.as_deref(), id).await?)
         }
         unknown => Err(unknown_action(unknown)),
     }

@@ -4,7 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-(empty)
+- **beads → Dolt SQL backend**: `lab-apis::beads` now connects to a Dolt SQL server over the MySQL protocol via `mysql_async` instead of shelling out to the `bd` CLI. Each Dolt database is treated as one Beads project; every issue/graph action accepts an optional `project` param and falls back to `BEADS_DEFAULT_PROJECT`. Configuration moves from `BEADS_BIN` to `BEADS_DOLT_URL` / `BEADS_DOLT_USER` / `BEADS_DOLT_PASSWORD` / `BEADS_DEFAULT_PROJECT`, all editable from **Settings → Services → Beads** in the web UI.
+- **gateway-admin /beads page**: new admin route renders a project picker (driven by `SHOW DATABASES`), the status-summary strip, a ready/all toggle, and an issue detail drawer with dependencies, labels, and comments. Sidebar entry added between Activity and Logs.
 
 ---
 

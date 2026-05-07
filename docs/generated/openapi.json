@@ -3885,6 +3885,14 @@
           }
         }
       },
+      "BeadsContextGetParams": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          }
+        }
+      },
       "BeadsGraphShowParams": {
         "type": "object",
         "required": [
@@ -3892,6 +3900,9 @@
         ],
         "properties": {
           "id": {
+            "type": "string"
+          },
+          "project": {
             "type": "string"
           }
         }
@@ -3901,6 +3912,9 @@
         "properties": {
           "limit": {
             "type": "integer"
+          },
+          "project": {
+            "type": "string"
           },
           "status": {
             "type": "string"
@@ -3912,6 +3926,9 @@
         "properties": {
           "limit": {
             "type": "integer"
+          },
+          "project": {
+            "type": "string"
           }
         }
       },
@@ -3923,6 +3940,9 @@
         "properties": {
           "id": {
             "type": "string"
+          },
+          "project": {
+            "type": "string"
           }
         }
       },
@@ -3933,6 +3953,14 @@
         ],
         "properties": {
           "action": {
+            "type": "string"
+          }
+        }
+      },
+      "BeadsStatusSummaryParams": {
+        "type": "object",
+        "properties": {
+          "project": {
             "type": "string"
           }
         }

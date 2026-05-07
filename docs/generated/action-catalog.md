@@ -62,17 +62,18 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `arcane` | `volume.delete` | false | true | `env_id*: string`<br>`volume_name*: string` | `void` | cli, mcp, api |
 | `arcane` | `volume.list` | false | false | `env_id*: string` | `Volume[]` | cli, mcp, api |
 | `arcane` | `volume.prune` | false | true | `env_id*: string` | `PruneResult` | cli, mcp, api |
-| `beads` | `context.get` | false | false |  | `BdJson` | cli, mcp, api |
+| `beads` | `context.get` | false | false | `project: string` | `BeadsContext` | cli, mcp, api |
 | `beads` | `contract.status` | false | false |  | `ContractStatus` | cli, mcp, api |
-| `beads` | `graph.show` | false | false | `id*: string` | `BdJson` | cli, mcp, api |
+| `beads` | `graph.show` | false | false | `project: string`<br>`id*: string` | `DependencyGraph` | cli, mcp, api |
 | `beads` | `health.status` | false | false |  | `BeadsHealth` | cli, mcp, api |
 | `beads` | `help` | false | false |  | `Catalog` | cli, mcp, api |
-| `beads` | `issue.list` | false | false | `status: string`<br>`limit: integer` | `BdJson` | cli, mcp, api |
-| `beads` | `issue.ready` | false | false | `limit: integer` | `BdJson` | cli, mcp, api |
-| `beads` | `issue.show` | false | false | `id*: string` | `BdJson` | cli, mcp, api |
+| `beads` | `issue.list` | false | false | `project: string`<br>`status: string`<br>`limit: integer` | `Issue[]` | cli, mcp, api |
+| `beads` | `issue.ready` | false | false | `project: string`<br>`limit: integer` | `Issue[]` | cli, mcp, api |
+| `beads` | `issue.show` | false | false | `project: string`<br>`id*: string` | `IssueDetail` | cli, mcp, api |
+| `beads` | `project.list` | false | false |  | `Project[]` | cli, mcp, api |
 | `beads` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api |
-| `beads` | `status.summary` | false | false |  | `BdJson` | cli, mcp, api |
-| `beads` | `version.get` | false | false |  | `BdJson` | cli, mcp, api |
+| `beads` | `status.summary` | false | false | `project: string` | `StatusSummary` | cli, mcp, api |
+| `beads` | `version.get` | false | false |  | `DoltVersion` | cli, mcp, api |
 | `bytestash` | `auth.config` | false | false |  | `Value` | cli, mcp, api |
 | `bytestash` | `auth.login` | false | false | `username*: string`<br>`password*: string`<br>`payload: json` | `Value` | cli, mcp, api |
 | `bytestash` | `auth.register` | false | true | `username*: string`<br>`password*: string`<br>`payload: json` | `Value` | cli, mcp, api |

@@ -1581,10 +1581,17 @@
   {
     "service": "beads",
     "action": "context.get",
-    "description": "Return active Beads workspace/backend context",
+    "description": "Return headline counters for the requested project",
     "destructive": false,
-    "params": [],
-    "returns": "BdJson",
+    "params": [
+      {
+        "name": "project",
+        "ty": "string",
+        "required": false,
+        "description": "Dolt database name. Falls back to BEADS_DEFAULT_PROJECT if omitted."
+      }
+    ],
+    "returns": "BeadsContext",
     "surface_availability": {
       "cli": true,
       "mcp": true,
@@ -1599,7 +1606,7 @@
   {
     "service": "beads",
     "action": "contract.status",
-    "description": "Return Beads local CLI integration contract status",
+    "description": "Return the Beads/Dolt integration contract",
     "destructive": false,
     "params": [],
     "returns": "ContractStatus",
@@ -1617,9 +1624,15 @@
   {
     "service": "beads",
     "action": "graph.show",
-    "description": "Show one Beads issue dependency graph",
+    "description": "Walk the dependency graph from a root issue (capped at 100 nodes)",
     "destructive": false,
     "params": [
+      {
+        "name": "project",
+        "ty": "string",
+        "required": false,
+        "description": "Dolt database name. Falls back to BEADS_DEFAULT_PROJECT if omitted."
+      },
       {
         "name": "id",
         "ty": "string",
@@ -1627,7 +1640,7 @@
         "description": "Beads issue id"
       }
     ],
-    "returns": "BdJson",
+    "returns": "DependencyGraph",
     "surface_availability": {
       "cli": true,
       "mcp": true,
@@ -1642,7 +1655,7 @@
   {
     "service": "beads",
     "action": "health.status",
-    "description": "Check bd availability and workspace status",
+    "description": "Check Dolt reachability and report the server version",
     "destructive": false,
     "params": [],
     "returns": "BeadsHealth",
@@ -1678,9 +1691,15 @@
   {
     "service": "beads",
     "action": "issue.list",
-    "description": "List Beads issues with optional status and limit filters",
+    "description": "List issues, optionally filtered by stored status",
     "destructive": false,
     "params": [
+      {
+        "name": "project",
+        "ty": "string",
+        "required": false,
+        "description": "Dolt database name. Falls back to BEADS_DEFAULT_PROJECT if omitted."
+      },
       {
         "name": "status",
         "ty": "string",
@@ -1694,7 +1713,7 @@
         "description": "Maximum issues to return, capped at 500"
       }
     ],
-    "returns": "BdJson",
+    "returns": "Issue[]",
     "surface_availability": {
       "cli": true,
       "mcp": true,
@@ -1709,9 +1728,15 @@
   {
     "service": "beads",
     "action": "issue.ready",
-    "description": "List ready unblocked Beads issues",
+    "description": "List ready (unblocked) issues",
     "destructive": false,
     "params": [
+      {
+        "name": "project",
+        "ty": "string",
+        "required": false,
+        "description": "Dolt database name. Falls back to BEADS_DEFAULT_PROJECT if omitted."
+      },
       {
         "name": "limit",
         "ty": "integer",
@@ -1719,7 +1744,7 @@
         "description": "Maximum issues to return, capped at 500"
       }
     ],
-    "returns": "BdJson",
+    "returns": "Issue[]",
     "surface_availability": {
       "cli": true,
       "mcp": true,
@@ -1734,9 +1759,15 @@
   {
     "service": "beads",
     "action": "issue.show",
-    "description": "Show one Beads issue by id",
+    "description": "Show one Beads issue plus dependencies and comments",
     "destructive": false,
     "params": [
+      {
+        "name": "project",
+        "ty": "string",
+        "required": false,
+        "description": "Dolt database name. Falls back to BEADS_DEFAULT_PROJECT if omitted."
+      },
       {
         "name": "id",
         "ty": "string",
@@ -1744,7 +1775,25 @@
         "description": "Beads issue id"
       }
     ],
-    "returns": "BdJson",
+    "returns": "IssueDetail",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "beads",
+    "action": "project.list",
+    "description": "List the Dolt databases visible on the server (Beads projects)",
+    "destructive": false,
+    "params": [],
+    "returns": "Project[]",
     "surface_availability": {
       "cli": true,
       "mcp": true,
@@ -1784,10 +1833,17 @@
   {
     "service": "beads",
     "action": "status.summary",
-    "description": "Return Beads database summary counts",
+    "description": "Return per-status issue counts for the requested project",
     "destructive": false,
-    "params": [],
-    "returns": "BdJson",
+    "params": [
+      {
+        "name": "project",
+        "ty": "string",
+        "required": false,
+        "description": "Dolt database name. Falls back to BEADS_DEFAULT_PROJECT if omitted."
+      }
+    ],
+    "returns": "StatusSummary",
     "surface_availability": {
       "cli": true,
       "mcp": true,
@@ -1802,10 +1858,10 @@
   {
     "service": "beads",
     "action": "version.get",
-    "description": "Return bd version metadata",
+    "description": "Return the Dolt SQL server version",
     "destructive": false,
     "params": [],
-    "returns": "BdJson",
+    "returns": "DoltVersion",
     "surface_availability": {
       "cli": true,
       "mcp": true,

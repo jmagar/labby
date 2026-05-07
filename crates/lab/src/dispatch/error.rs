@@ -292,7 +292,10 @@ impl_tool_error_from!(
 impl_tool_error_from!(
     "beads",
     lab_apis::beads::error::BeadsError,
-    Command { .. } => "upstream_error",
+    NotConfigured { .. } => "internal_error",
+    Connect { .. } => "network_error",
+    Query { .. } => "upstream_error",
+    InvalidIdentifier { .. } => "invalid_param",
     Decode { .. } => "decode_error"
 );
 
