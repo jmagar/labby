@@ -114,6 +114,7 @@ impl SigningKeys {
     /// point is preserved for the lab consumer, which performs its own
     /// post-decode `iss` check. New consumers (syslog-mcp et al.) should
     /// always use the issuer-enforcing variant.
+    #[deprecated(note = "Use `validate_access_token_with_issuer` for RFC 7519 §4.1.1 compliance")]
     pub fn validate_access_token(
         &self,
         token: &str,
@@ -251,6 +252,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn minted_access_token_round_trips_and_contains_kid() {
         let signer = test_signer();
         let claims = sample_claims();
@@ -264,6 +266,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn wrong_audience_is_rejected() {
         let signer = test_signer();
         let claims = sample_claims();

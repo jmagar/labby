@@ -6,3 +6,7 @@
 //! that build their own `WWW-Authenticate` header outside of the auth layer.
 
 pub use lab_auth::auth_context::AuthContext;
+// Re-exported for lab callers that build WWW-Authenticate headers directly;
+// not used within this crate itself.
+#[allow(unused_imports)]
+pub use lab_auth::www_authenticate_value;

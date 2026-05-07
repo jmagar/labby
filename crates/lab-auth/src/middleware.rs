@@ -271,8 +271,14 @@ async fn authenticate(
         .and_then(parse_bearer_token);
 
     if let Some(token) = auth_header {
-        // 1. Static bearer match.
-        if let Some(ref expected) = layer.static_token
+        // 1. Static bearer match — skipped when the consumer has set
+        //    `disable_static_token_with_oauth=true` and OAuth mode is active.
+        let static_token_blocked = layer.auth_state.as_ref().is_some_and(|s| {
+            s.config.disable_static_token_with_oauth
+                && matches!(s.config.mode, crate::config::AuthMode::OAuth)
+        });
+        if !static_token_blocked
+            && let Some(ref expected) = layer.static_token
             && tokens_equal(&token, expected.as_ref())
         {
             let sub = "static-bearer".to_string();
@@ -485,7 +491,7 @@ mod tests {
     use axum::routing::get;
     use tower::ServiceExt;
 
-    use crate::authorize::tests::test_auth_state;
+    use crate::authorize::tests::{test_auth_config, test_auth_state, test_auth_state_with_config};
 
     fn echo_app(layer: AuthLayer) -> Router {
         Router::new()
@@ -767,5 +773,32 @@ mod tests {
             location.starts_with("/syslog/auth/login?return_to="),
             "unexpected redirect Location: `{location}`"
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn static_bearer_blocked_when_disable_static_token_with_oauth_is_set() {
+        // When disable_static_token_with_oauth=true and mode=OAuth, the static
+        // token must be rejected even though the token value matches.
+        let mut config = test_auth_config();
+        config.disable_static_token_with_oauth = true;
+        let state = Arc::new(test_auth_state_with_config(config).await);
+
+        let token: Arc<str> = Arc::from("super-secret");
+        let layer = AuthLayer::from_state(state)
+            .with_static_token(Some(token.clone()));
+        let app = echo_app(layer);
+
+        let response = app
+            .oneshot(
+                HttpRequest::builder()
+                    .uri("/probe")
+                    .header(header::AUTHORIZATION, "Bearer super-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // Must be 401 — static token blocked because OAuth is active.
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 }

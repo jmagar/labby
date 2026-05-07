@@ -599,7 +599,9 @@ pub mod tests {
 
     #[tokio::test]
     async fn register_accepts_public_dcr_and_enforces_loopback_redirects() {
-        let app = router(test_auth_state().await);
+        let mut config = test_auth_config();
+        config.enable_dynamic_registration = true;
+        let app = router(test_auth_state_with_config(config).await);
         let response = app
             .clone()
             .oneshot(
@@ -641,6 +643,7 @@ pub mod tests {
     #[tokio::test]
     async fn register_accepts_allowed_non_loopback_redirect_patterns() {
         let mut config = test_auth_config();
+        config.enable_dynamic_registration = true;
         config.allowed_client_redirect_uris =
             vec!["https://callback.tootie.tv/callback/*".to_string()];
         let app = router(test_auth_state_with_config(config).await);
@@ -666,6 +669,7 @@ pub mod tests {
     #[tokio::test]
     async fn register_is_rate_limited_after_configured_burst() {
         let mut config = test_auth_config();
+        config.enable_dynamic_registration = true;
         config.register_requests_per_minute = 1;
         let app = router(test_auth_state_with_config(config).await);
 
@@ -1237,7 +1241,7 @@ pub mod tests {
         AuthState::new(config).await.unwrap()
     }
 
-    fn test_auth_config() -> AuthConfig {
+    pub fn test_auth_config() -> AuthConfig {
         let dir = Box::leak(Box::new(tempfile::tempdir().unwrap()));
         AuthConfig {
             mode: AuthMode::OAuth,

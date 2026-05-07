@@ -566,7 +566,12 @@ pub fn build_router(
     let make_auth_layer = |allow_session_cookie: bool| -> AuthLayer {
         let mut layer = match auth_state.clone() {
             Some(state) => AuthLayer::from_state(state),
-            None => AuthLayer::new(),
+            // Bearer-only path (no OAuth state): grant the same legacy scopes
+            // that the old middleware always issued for static-token requests.
+            None => AuthLayer::new().with_static_token_scopes(vec![
+                "lab:read".to_string(),
+                "lab:admin".to_string(),
+            ]),
         };
         layer = layer
             .with_static_token(static_token.clone())

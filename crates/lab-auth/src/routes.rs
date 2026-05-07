@@ -13,7 +13,8 @@ use crate::state::AuthState;
 use crate::token::token;
 
 pub fn router(state: AuthState) -> Router {
-    Router::new()
+    let enable_registration = state.config.enable_dynamic_registration;
+    let mut app = Router::new()
         .route(
             "/.well-known/oauth-authorization-server",
             get(authorization_server_metadata),
@@ -23,12 +24,14 @@ pub fn router(state: AuthState) -> Router {
             get(protected_resource_metadata),
         )
         .route("/jwks", get(jwks))
-        .route("/register", post(register_client))
         .route("/authorize", get(authorize))
         .route("/auth/login", get(browser_login))
         .route("/auth/google/callback", get(callback))
-        .route("/token", post(token))
-        .with_state(state)
+        .route("/token", post(token));
+    if enable_registration {
+        app = app.route("/register", post(register_client));
+    }
+    app.with_state(state)
         .layer(middleware::from_fn(auth_dispatch_observability))
 }
 
@@ -159,7 +162,7 @@ mod tests {
     use tracing_subscriber::layer::SubscriberExt;
 
     use super::*;
-    use crate::authorize::tests::test_auth_state;
+    use crate::authorize::tests::{test_auth_config, test_auth_state, test_auth_state_with_config};
 
     #[test]
     fn auth_dispatch_action_names_are_stable() {
@@ -187,7 +190,10 @@ mod tests {
             );
         let _ = tracing::subscriber::set_global_default(subscriber);
 
-        let app = router(test_auth_state().await);
+        // Build a state with dynamic registration enabled so /register is mounted.
+        let mut config = test_auth_config();
+        config.enable_dynamic_registration = true;
+        let app = router(test_auth_state_with_config(config).await);
         let response = app
             .oneshot(
                 HttpRequest::builder()
