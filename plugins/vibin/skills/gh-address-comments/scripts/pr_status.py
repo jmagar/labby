@@ -17,6 +17,7 @@ import argparse
 import json
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 
@@ -74,12 +75,15 @@ def check_threads(input_file: str | None, pr_number: int, owner: str, repo: str)
                 data = json.load(f)
         else:
             # Live fetch (quiet)
+            fetch_comments = Path(__file__).resolve().with_name("fetch_comments.py")
             out = subprocess.run(
                 [sys.executable,
-                 __file__.replace("pr_status.py", "fetch_comments.py"),
+                 str(fetch_comments),
                  "--pr", str(pr_number), "--repo", f"{owner}/{repo}"],
                 capture_output=True, text=True,
             )
+            if out.returncode != 0:
+                raise RuntimeError(out.stderr.strip() or out.stdout.strip())
             data = json.loads(out.stdout)
         threads = data.get("review_threads", [])
         open_threads = [t for t in threads if not t.get("isResolved") and not t.get("isOutdated")]
