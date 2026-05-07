@@ -14,7 +14,7 @@ pub fn client_from_env() -> Option<BeadsClient> {
     let connection = DoltConnection {
         url,
         user: env_non_empty("BEADS_DOLT_USER"),
-        password: std::env::var("BEADS_DOLT_PASSWORD").ok(),
+        password: env_non_empty("BEADS_DOLT_PASSWORD"),
         default_project: env_non_empty("BEADS_DEFAULT_PROJECT"),
     };
     BeadsClient::new(connection).ok()
@@ -26,7 +26,7 @@ pub fn require_client() -> Result<BeadsClient, ToolError> {
     let connection = DoltConnection {
         url,
         user: env_non_empty("BEADS_DOLT_USER"),
-        password: std::env::var("BEADS_DOLT_PASSWORD").ok(),
+        password: env_non_empty("BEADS_DOLT_PASSWORD"),
         default_project: env_non_empty("BEADS_DEFAULT_PROJECT"),
     };
     BeadsClient::new(connection).map_err(|err| ToolError::Sdk {

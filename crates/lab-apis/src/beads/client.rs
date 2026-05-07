@@ -17,12 +17,27 @@ use super::types::{
 };
 
 /// Connection parameters for the Dolt SQL server.
-#[derive(Debug, Clone)]
+///
+/// `Debug` is intentionally hand-written and never includes the password —
+/// per the lab-apis library invariant, anything holding secrets must redact in
+/// `Debug`.
+#[derive(Clone)]
 pub struct DoltConnection {
     pub url: String,
     pub user: Option<String>,
     pub password: Option<String>,
     pub default_project: Option<String>,
+}
+
+impl std::fmt::Debug for DoltConnection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DoltConnection")
+            .field("url", &self.url)
+            .field("user", &self.user)
+            .field("password", &self.password.as_ref().map(|_| "***"))
+            .field("default_project", &self.default_project)
+            .finish()
+    }
 }
 
 impl DoltConnection {

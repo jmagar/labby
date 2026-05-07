@@ -9,7 +9,7 @@ pub use error::BeadsError;
 
 use crate::core::error::ApiError;
 use crate::core::plugin::{Category, EnvVar, PluginMeta};
-use crate::core::plugin_ui::{SECRET_OPTIONAL_FIELD, TEXT_OPTIONAL_FIELD, URL_FIELD};
+use crate::core::plugin_ui::{SECRET_OPTIONAL_FIELD, TEXT_FIELD, TEXT_OPTIONAL_FIELD};
 use crate::core::status::ServiceStatus;
 use crate::core::traits::ServiceClient;
 
@@ -21,10 +21,13 @@ pub const META: PluginMeta = PluginMeta {
     docs_url: "https://gastownhall.github.io/beads/",
     required_env: &[EnvVar {
         name: "BEADS_DOLT_URL",
+        // The MUST be a `mysql://` (or `mysqls://`) DSN; URL_FIELD's pattern
+        // hardcodes `^https?://` and would reject those schemes, so we use
+        // TEXT_FIELD for plain string validation.
         description: "Dolt SQL endpoint as a MySQL connection URL (e.g. mysql://host:3306/)",
         example: "mysql://dolt.local:3306/",
         secret: false,
-        ui: Some(&URL_FIELD),
+        ui: Some(&TEXT_FIELD),
     }],
     optional_env: &[
         EnvVar {

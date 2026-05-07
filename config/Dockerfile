@@ -22,6 +22,12 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates/lab/Cargo.toml      crates/lab/Cargo.toml
 COPY crates/lab-apis/Cargo.toml crates/lab-apis/Cargo.toml
 COPY crates/lab-auth/Cargo.toml crates/lab-auth/Cargo.toml
+# Workspace `[patch.crates-io]` redirects `agent-client-protocol` to a vendored
+# fork at `crates/vendor/agent-client-protocol`. Cargo resolves this path even
+# during the dep-cache layer below, so the vendored crate must be present
+# before any `cargo build` runs — otherwise resolution fails with
+# `failed to read crates/vendor/agent-client-protocol/Cargo.toml`.
+COPY crates/vendor/ crates/vendor/
 
 # Create stub source + test files so cargo can parse ALL manifests without error.
 #

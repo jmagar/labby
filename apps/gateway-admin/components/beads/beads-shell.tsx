@@ -63,8 +63,14 @@ export function BeadsShell() {
   const [openIssueId, setOpenIssueId] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!project && projects.length > 0) {
+    if (projects.length === 0) return
+    // If nothing's selected yet, or the previously-selected project is gone
+    // (renamed/dropped on the Dolt server), fall through to the first entry
+    // so the picker never holds a stale value that drives 404 queries.
+    const stillExists = project ? projects.some((p) => p.name === project) : false
+    if (!stillExists) {
       setProject(projects[0]?.name)
+      setOpenIssueId(null)
     }
   }, [projects, project])
 
