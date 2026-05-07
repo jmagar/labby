@@ -142,6 +142,8 @@ const ASSISTANT_MESSAGE_CONTENT_CLASS =
   'border border-aurora-border-default bg-aurora-panel-medium shadow-[var(--aurora-shadow-medium),var(--aurora-highlight-medium)]'
 const USER_MESSAGE_CONTENT_CLASS =
   'border border-aurora-border-strong bg-aurora-panel-strong shadow-[var(--aurora-shadow-medium),var(--aurora-highlight-medium)]'
+const MESSAGE_REVEAL_ON_INTERACTION_CLASS =
+  'opacity-0 group-data-[interaction-open=true]:opacity-100 group-focus-within:opacity-100'
 
 function isAllowedMarkdownUrl(url: string) {
   const trimmed = url.trim()
@@ -256,7 +258,7 @@ function MessageTimestamp({
       title={labels.detail}
       className={cn(
         'min-h-4 text-[11px] leading-4 text-aurora-text-muted/60 transition-opacity duration-150',
-        'opacity-0 group-hover/bubble:opacity-100 group-focus-within/bubble:opacity-100',
+        MESSAGE_REVEAL_ON_INTERACTION_CLASS,
         selected && 'opacity-100',
       )}
     >
@@ -329,7 +331,7 @@ function MessageActionToolbar({
         'flex w-full justify-end gap-1 pr-1 transition-opacity',
         selected
           ? 'opacity-100'
-          : 'opacity-0 group-hover/bubble:opacity-100 group-focus-within/bubble:opacity-100',
+          : MESSAGE_REVEAL_ON_INTERACTION_CLASS,
       )}
     >
       {availability.copy ? <CopyButton text={getMessageCopyText(message)} /> : null}
@@ -373,6 +375,7 @@ function MessageBubbleComponent({
   const [reasoningOpen, setReasoningOpen] = React.useState(isStreaming)
   const [chainOpen, setChainOpen] = React.useState(isStreaming)
   const [actionsOpen, setActionsOpen] = React.useState(isStreaming)
+  const [interactionOpen, setInteractionOpen] = React.useState(false)
 
   React.useEffect(() => {
     setReasoningOpen(isStreaming)
@@ -390,7 +393,16 @@ function MessageBubbleComponent({
   return (
     <div
       data-message-id={message.id}
-      className={cn('group/bubble flex min-w-0 gap-3', isUser && 'flex-row-reverse')}
+      data-interaction-open={interactionOpen ? 'true' : 'false'}
+      className={cn('group flex min-w-0 gap-3', isUser && 'flex-row-reverse')}
+      onMouseEnter={() => setInteractionOpen(true)}
+      onMouseLeave={() => setInteractionOpen(false)}
+      onFocusCapture={() => setInteractionOpen(true)}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setInteractionOpen(false)
+        }
+      }}
       onClick={(event) => {
         const target = event.target as HTMLElement
         if (target.closest('button,a,input,textarea,select,[role="button"]')) return

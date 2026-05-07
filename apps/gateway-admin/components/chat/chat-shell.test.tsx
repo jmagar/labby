@@ -199,9 +199,8 @@ test('resolveSelectedModel falls through invalid requested ids before using list
   )
 })
 
-test('ensurePromptRunIdForProvider creates a run when selected provider differs from selected run', async () => {
+test('ensurePromptRunIdForProvider reuses the current run when selected provider differs', async () => {
   let createCalls = 0
-  let receivedOptions: { closeSessionPanel?: boolean } | undefined
 
   const runId = await ensurePromptRunIdForProvider(
     {
@@ -209,9 +208,8 @@ test('ensurePromptRunIdForProvider creates a run when selected provider differs 
       provider: 'codex-acp',
     },
     'claude-acp',
-    async (options) => {
+    async () => {
       createCalls += 1
-      receivedOptions = options
       return {
         ...run('run-claude'),
         provider: 'claude-acp',
@@ -220,9 +218,8 @@ test('ensurePromptRunIdForProvider creates a run when selected provider differs 
     false,
   )
 
-  assert.equal(runId, 'run-claude')
-  assert.equal(createCalls, 1)
-  assert.deepEqual(receivedOptions, { closeSessionPanel: false })
+  assert.equal(runId, 'run-codex')
+  assert.equal(createCalls, 0)
 })
 
 test('ensurePromptRunIdForProvider reuses run when provider selection already matches', async () => {
@@ -245,10 +242,34 @@ test('ensurePromptRunIdForProvider reuses run when provider selection already ma
   assert.equal(createCalls, 0)
 })
 
-test('sendPromptForSelectedProvider creates provider-matched run and posts page context', async () => {
+test('ensurePromptRunIdForProvider creates a run when no session is selected', async () => {
+  let createCalls = 0
+  let receivedOptions: { closeSessionPanel?: boolean } | undefined
+
+  const runId = await ensurePromptRunIdForProvider(
+    null,
+    'claude-acp',
+    async (options) => {
+      createCalls += 1
+      receivedOptions = options
+      return {
+        ...run('run-claude'),
+        provider: 'claude-acp',
+      }
+    },
+    false,
+  )
+
+  assert.equal(runId, 'run-claude')
+  assert.equal(createCalls, 1)
+  assert.deepEqual(receivedOptions, { closeSessionPanel: false })
+})
+
+test('sendPromptForSelectedProvider switches provider inside the selected run and posts page context', async () => {
   const optimisticIds: string[] = []
   const requests: Array<{ path: string; body: unknown }> = []
   let refreshCalls = 0
+  let createCalls = 0
 
   await sendPromptForSelectedProvider({
     payload: {
@@ -260,10 +281,13 @@ test('sendPromptForSelectedProvider creates provider-matched run and posts page 
       provider: 'codex-acp',
     },
     selectedProviderId: 'claude-acp',
-    createSession: async () => ({
-      ...run('run-claude'),
-      provider: 'claude-acp',
-    }),
+    createSession: async () => {
+      createCalls += 1
+      return {
+        ...run('run-claude'),
+        provider: 'claude-acp',
+      }
+    },
     isMobileViewport: false,
     fetchAcp: async (path, init) => {
       requests.push({
@@ -287,11 +311,13 @@ test('sendPromptForSelectedProvider creates provider-matched run and posts page 
 
   assert.equal(refreshCalls, 1)
   assert.equal(optimisticIds.length, 1)
+  assert.equal(createCalls, 0)
   assert.deepEqual(requests, [
     {
-      path: '/sessions/run-claude/prompt',
+      path: '/sessions/run-codex/prompt',
       body: {
         prompt: 'hello',
+        provider: 'claude-acp',
         attachments: [{ kind: 'file', path: '/tmp/a.txt' }],
         pageContext: { route: '/gateways', entityType: 'gateway', entityId: 'local' },
       },

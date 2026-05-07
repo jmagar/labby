@@ -63,7 +63,7 @@ test('message thread renders timestamp-ready bubbles with stable message ids', (
   assert.match(markup, /data-message-id="m2"/)
   assert.match(markup, /12:10 PM UTC/)
   assert.match(markup, /12:20 PM UTC/)
-  assert.match(markup, /opacity-0 group-hover\/bubble:opacity-100 group-focus-within\/bubble:opacity-100/)
+  assert.match(markup, /opacity-0 group-data-\[interaction-open=true\]:opacity-100 group-focus-within:opacity-100/)
 })
 
 test('working assistant bubble logic remains unchanged for running sessions', () => {

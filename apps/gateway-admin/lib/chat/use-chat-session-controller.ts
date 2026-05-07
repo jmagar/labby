@@ -86,7 +86,7 @@ export async function ensurePromptRunIdForProvider(
   createSession: CreateSessionFn,
   isMobileViewport: boolean,
 ) {
-  if (selectedRun && (!selectedProviderId || selectedRun.provider === selectedProviderId)) {
+  if (selectedRun) {
     return selectedRun.id
   }
 
@@ -189,6 +189,9 @@ export async function sendPromptForSelectedProvider({
 
   const body = {
     prompt: payload.text,
+    ...(selectedRun &&
+      selectedProviderId &&
+      selectedProviderId !== selectedRun.provider && { provider: selectedProviderId }),
     ...(selectedModelId && { model: selectedModelId }),
     ...(payload.attachments.length > 0 && { attachments: payload.attachments }),
     ...(includePageContext && pageContext !== null && pageContext !== undefined && { pageContext }),

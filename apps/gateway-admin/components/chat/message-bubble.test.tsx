@@ -350,8 +350,9 @@ test('renders timestamp row after message content without overlapping copy actio
   assert.match(markup, /aria-label="Message sent at May 4, 2026, 12:34 PM UTC"/)
   assert.match(markup, /12:34 PM UTC/)
   assert.match(markup, /data-message-timestamp/)
-  assert.match(markup, /group-hover\/bubble:opacity-100/)
-  assert.match(markup, /group-focus-within\/bubble:opacity-100/)
+  assert.match(markup, /class="group /)
+  assert.match(markup, /group-data-\[interaction-open=true\]:opacity-100/)
+  assert.match(markup, /group-focus-within:opacity-100/)
   assert.ok(
     markup.indexOf('Hello.') < markup.indexOf('data-message-timestamp'),
     'timestamp should render after the message text',

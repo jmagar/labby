@@ -105,8 +105,8 @@
         {
             "name": "axon",
             "source": {
-                "source": "github",
-                "repo": "jmagar/axon"
+                "source": "url",
+                "url": "https://github.com/jmagar/axon.git"
             },
             "description": "Skills and MCP configuration for the Axon crawl, ingest, embed, query, and RAG engine."
         },
@@ -308,7 +308,7 @@
             "source": {
                 "source": "git-subdir",
                 "url": "https://github.com/gastownhall/beads.git",
-                "path": "./plugins/beads"
+                "path": "plugins/beads"
             },
             "description": "AI-supervised issue tracker for coding workflows"
         },
