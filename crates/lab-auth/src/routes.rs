@@ -1,9 +1,9 @@
-use axum::Router;
 use axum::extract::Request;
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::routing::{get, post};
+use axum::Router;
 use std::time::Instant;
 
 use crate::authorize::{authorize, browser_login, callback, register_client};
@@ -31,6 +31,56 @@ pub fn router(state: AuthState) -> Router {
         .with_state(state)
         .layer(middleware::from_fn(auth_dispatch_observability))
 }
+
+/// Bearer-only OAuth subset router for headless consumers (e.g. syslog-mcp).
+///
+/// Mounts only the endpoints a non-browser MCP client needs to discover and
+/// exchange tokens — `/.well-known/*`, `/jwks`, `/authorize`,
+/// `/auth/google/callback`, and `/token`. Excludes:
+///
+/// - `/auth/login` (browser HTML — no UI on a headless service).
+/// - `/register` (RFC 7591 dynamic client registration — extra attack
+///   surface with no current consumer).
+/// - Any session-cookie endpoints.
+///
+/// Use [`router`] for the full surface (lab itself).
+pub fn bearer_only_router(state: AuthState) -> Router {
+    Router::new()
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(authorization_server_metadata),
+        )
+        .route(
+            "/.well-known/oauth-protected-resource",
+            get(protected_resource_metadata),
+        )
+        .route("/jwks", get(jwks))
+        .route("/authorize", get(authorize))
+        .route("/auth/google/callback", get(callback))
+        .route("/token", post(token))
+        .with_state(state)
+        .layer(middleware::from_fn(auth_dispatch_observability))
+}
+
+/// Pinned snapshot of the routes mounted by [`bearer_only_router`]. Sorted.
+///
+/// If you add or remove an endpoint in `bearer_only_router`, update this
+/// list AND consider whether the change is intentional — silently
+/// drifting the headless subset is the bug this snapshot exists to catch
+/// (REVIEW-APPLIED #9).
+pub const BEARER_ONLY_ROUTER_PATHS: &[(&str, &str)] = &[
+    ("GET", "/.well-known/oauth-authorization-server"),
+    ("GET", "/.well-known/oauth-protected-resource"),
+    ("GET", "/authorize"),
+    ("GET", "/auth/google/callback"),
+    ("GET", "/jwks"),
+    ("POST", "/token"),
+];
+
+/// Paths that must NOT be mounted by [`bearer_only_router`] — verified
+/// by the snapshot test.
+pub const BEARER_ONLY_ROUTER_FORBIDDEN_PATHS: &[(&str, &str)] =
+    &[("GET", "/auth/login"), ("POST", "/register")];
 
 async fn auth_dispatch_observability(request: Request, next: Next) -> Response {
     let action = auth_dispatch_action(request.uri().path());
@@ -171,5 +221,62 @@ mod tests {
             logs.contains("\"elapsed_ms\":"),
             "missing elapsed_ms in:\n{logs}"
         );
+    }
+
+    /// Pinned-snapshot test for [`bearer_only_router`] — sends a probe
+    /// request to each path in [`BEARER_ONLY_ROUTER_PATHS`] and asserts
+    /// the response is NOT 404 (i.e. the route is mounted), then probes
+    /// each path in [`BEARER_ONLY_ROUTER_FORBIDDEN_PATHS`] and asserts
+    /// IT IS 404 (i.e. the route is NOT mounted).
+    ///
+    /// Catches future drift where lab-auth contributors add endpoints to
+    /// [`router`] but forget to keep the headless subset in lock-step.
+    #[tokio::test(flavor = "current_thread")]
+    async fn bearer_only_router_route_list_matches_pinned_snapshot() {
+        let state = test_auth_state().await;
+        let app = bearer_only_router(state);
+
+        for (method, path) in BEARER_ONLY_ROUTER_PATHS {
+            let response = app
+                .clone()
+                .oneshot(
+                    HttpRequest::builder()
+                        .method(*method)
+                        .uri(*path)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_ne!(
+                response.status(),
+                StatusCode::NOT_FOUND,
+                "expected `{method} {path}` to be mounted on bearer_only_router \
+                 but got 404 — did the route get removed without updating \
+                 BEARER_ONLY_ROUTER_PATHS?"
+            );
+        }
+
+        for (method, path) in BEARER_ONLY_ROUTER_FORBIDDEN_PATHS {
+            let response = app
+                .clone()
+                .oneshot(
+                    HttpRequest::builder()
+                        .method(*method)
+                        .uri(*path)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::NOT_FOUND,
+                "expected `{method} {path}` to be ABSENT from bearer_only_router \
+                 but got status {} — Locked Decision: bearer_only_router \
+                 must NOT mount /auth/login or /register",
+                response.status()
+            );
+        }
     }
 }
