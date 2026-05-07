@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { listAcpAgents, listMcpServers } from './api-client'
+import { listAcpAgents, listMcpServers, listMcpServersPage } from './api-client'
 
 test('listAcpAgents accepts the backend array response from agent.list', async () => {
   const originalFetch = globalThis.fetch
@@ -34,7 +34,7 @@ test('listAcpAgents accepts the backend array response from agent.list', async (
   }
 })
 
-test('listMcpServers requests a bounded registry page', async () => {
+test('listMcpServersPage requests one bounded registry page', async () => {
   const originalFetch = globalThis.fetch
 
   try {
@@ -52,9 +52,50 @@ test('listMcpServers requests a bounded registry page', async () => {
       )
     }) as typeof fetch
 
+    const result = await listMcpServersPage()
+
+    assert.equal(result.servers.length, 0)
+    assert.equal(result.metadata?.nextCursor, null)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('listMcpServers follows marketplace registry cursors', async () => {
+  const originalFetch = globalThis.fetch
+  const calls: unknown[] = []
+
+  try {
+    globalThis.fetch = (async (_input, init) => {
+      const body = JSON.parse(String(init?.body))
+      calls.push(body.params)
+
+      if (calls.length === 1) {
+        return new Response(
+          JSON.stringify({
+            servers: [{ name: 'io.github.example/first' }],
+            metadata: { count: 1, nextCursor: 'page-2' },
+          }),
+          { status: 200 },
+        )
+      }
+
+      return new Response(
+        JSON.stringify({
+          servers: [{ name: 'io.github.example/second' }],
+          metadata: { count: 1, nextCursor: null },
+        }),
+        { status: 200 },
+      )
+    }) as typeof fetch
+
     const servers = await listMcpServers()
 
-    assert.equal(servers.length, 0)
+    assert.deepEqual(calls, [{ limit: 20 }, { limit: 20, cursor: 'page-2' }])
+    assert.deepEqual(
+      servers.map((server) => server.name),
+      ['io.github.example/first', 'io.github.example/second'],
+    )
   } finally {
     globalThis.fetch = originalFetch
   }

@@ -44,13 +44,41 @@ export interface McpListResult {
   }
 }
 
-export async function listMcpServers(signal?: AbortSignal): Promise<McpServer[]> {
+export interface McpListOptions {
+  limit?: number
+  cursor?: string | null
+}
+
+const MCP_LIST_PAGE_SIZE = 20
+
+export async function listMcpServersPage(
+  options: McpListOptions = {},
+  signal?: AbortSignal,
+): Promise<McpListResult> {
   if (USE_MOCK_DATA) {
     signal?.throwIfAborted?.()
-    return structuredClone(MOCK_MCP_SERVERS)
+    const limit = options.limit ?? MCP_LIST_PAGE_SIZE
+    const offset = options.cursor ? Number.parseInt(options.cursor, 10) : 0
+    const servers = structuredClone(MOCK_MCP_SERVERS).slice(offset, offset + limit)
+    const nextCursor = offset + limit < MOCK_MCP_SERVERS.length ? String(offset + limit) : null
+    return { servers, metadata: { count: servers.length, nextCursor } }
   }
-  const res = await marketplaceAction<McpListResult>('mcp.list', { limit: 20 }, signal)
-  return res.servers ?? []
+  const params: Record<string, string | number> = { limit: options.limit ?? MCP_LIST_PAGE_SIZE }
+  if (options.cursor) params.cursor = options.cursor
+  return marketplaceAction<McpListResult>('mcp.list', params, signal)
+}
+
+export async function listMcpServers(signal?: AbortSignal): Promise<McpServer[]> {
+  const servers: McpServer[] = []
+  let cursor: string | null | undefined = null
+
+  do {
+    const res = await listMcpServersPage({ limit: MCP_LIST_PAGE_SIZE, cursor }, signal)
+    servers.push(...(res.servers ?? []))
+    cursor = res.metadata?.nextCursor ?? null
+  } while (cursor)
+
+  return servers
 }
 
 export async function getMcpServer(name: string, signal?: AbortSignal): Promise<McpServer> {

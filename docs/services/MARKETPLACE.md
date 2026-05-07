@@ -57,8 +57,8 @@ The handwritten contract is organized by action family:
 | `plugins.*` | `plugins.list` | Search plugin manifests across configured plugin marketplaces. |
 | `plugin.*` | `plugin.get`, `plugin.install`, `plugin.workspace`, `plugin.deploy` | Read, install, edit, and deploy whole plugins. |
 | `artifact.*` | `artifact.fork`, `artifact.diff`, `artifact.update.apply` | Fork, patch, diff, reset, and update individual plugin artifacts. |
-| `mcp.*` | `mcp.list`, `mcp.install`, `mcp.sync` | Discover, validate, mirror, install, and remove MCP Registry servers. |
-| `agent.*` | `agent.list`, `agent.install`, `agent.uninstall` | Discover and install ACP-compatible agents. |
+| `mcp.*` | `mcp.config`, `mcp.list`, `mcp.get`, `mcp.versions`, `mcp.validate`, `mcp.meta.get`, `mcp.meta.set`, `mcp.meta.delete`, `mcp.sync`, `mcp.install`, `mcp.uninstall` | Discover, validate, mirror, annotate, install, and remove MCP Registry servers. |
+| `agent.*` | `agent.list`, `agent.get`, `agent.install`, `agent.uninstall` | Discover and install ACP-compatible agents. |
 
 `help` and `schema` are also available through the shared service dispatch
 model.

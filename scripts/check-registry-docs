@@ -20,9 +20,12 @@ jq -e '
   and any(.[]; .name == "acp_registry" and .status == "sdk_only" and (.surfaces.cli|not) and (.surfaces.mcp|not) and (.surfaces.api|not))
 ' docs/generated/service-catalog.json >/dev/null
 
-for action in \
-  agent.list agent.install agent.uninstall \
-  mcp.list mcp.install mcp.uninstall mcp.sync \
+mapfile -t registry_actions < <(
+  jq -r '.[] | select(.service == "marketplace" and ((.action | startswith("agent.")) or (.action | startswith("mcp.")))) | .action' \
+    docs/generated/action-catalog.json | sort -u
+)
+
+for action in "${registry_actions[@]}" \
   plugin.install plugin.deploy artifact.update.apply sources.add
 do
   jq -e --arg action "$action" 'any(.[]; .service == "marketplace" and .action == $action)' \

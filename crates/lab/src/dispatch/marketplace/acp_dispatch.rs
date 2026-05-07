@@ -690,7 +690,6 @@ fn validate_archive_url(url: &str) -> Result<(), ToolError> {
     validated_archive_url(url).map(|_| ())
 }
 
-#[cfg(feature = "acp_registry")]
 fn validated_archive_url(url: &str) -> Result<url::Url, ToolError> {
     const PRIVATE_SUFFIXES: &[&str] =
         &[".local", ".internal", ".lan", ".intranet", ".corp", ".home"];
@@ -730,7 +729,6 @@ fn validated_archive_url(url: &str) -> Result<url::Url, ToolError> {
     Ok(parsed)
 }
 
-#[cfg(feature = "acp_registry")]
 async fn archive_download_client(parsed: &url::Url) -> Result<reqwest::Client, ToolError> {
     let host = parsed.host_str().ok_or_else(|| ToolError::Sdk {
         sdk_kind: "invalid_param".to_string(),
@@ -748,7 +746,6 @@ async fn archive_download_client(parsed: &url::Url) -> Result<reqwest::Client, T
         .map_err(|e| ToolError::internal_message(format!("build http client: {e}")))
 }
 
-#[cfg(feature = "acp_registry")]
 async fn resolve_archive_host(
     host: &str,
     port: u16,
@@ -775,7 +772,6 @@ async fn resolve_archive_host(
     Ok(addrs)
 }
 
-#[cfg(feature = "acp_registry")]
 fn check_archive_ip_not_private(ip: std::net::IpAddr, host: &str) -> Result<(), ToolError> {
     let normalized = match ip {
         std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
@@ -814,7 +810,6 @@ fn check_archive_ip_not_private(ip: std::net::IpAddr, host: &str) -> Result<(), 
     Ok(())
 }
 
-#[cfg(feature = "acp_registry")]
 async fn cleanup_partial_archive(dest: &Path, action: &'static str) {
     if let Err(e) = tokio::fs::remove_file(dest).await {
         tracing::warn!(
@@ -828,7 +823,6 @@ async fn cleanup_partial_archive(dest: &Path, action: &'static str) {
     }
 }
 
-#[cfg(feature = "acp_registry")]
 fn archive_size_error(url: &str, size: u64) -> ToolError {
     ToolError::Sdk {
         sdk_kind: "invalid_param".to_string(),
@@ -836,7 +830,6 @@ fn archive_size_error(url: &str, size: u64) -> ToolError {
     }
 }
 
-#[cfg(feature = "acp_registry")]
 fn enforce_archive_size_limit(
     downloaded: &mut u64,
     chunk_len: usize,
@@ -860,7 +853,6 @@ fn enforce_archive_size_limit(
 /// for bundled runtimes while preventing unbounded disk growth from hostile or
 /// misconfigured archive URLs. Oversized streams are aborted and partial files
 /// are removed before surfacing the error.
-#[cfg(feature = "acp_registry")]
 const MAX_ACP_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Download `url` to `dest`, return the hex SHA-256 of the downloaded bytes.

@@ -71,9 +71,12 @@ Dispatch layers may add the following kinds on top of SDK errors:
 - `no_remote_transport` — `server.install` called on a server with no HTTP remote transports (stdio-only); cannot be added as a gateway upstream
 - `ssrf_blocked` — registry-sourced URL resolves to a private, loopback, link-local, or ULA address; blocked to prevent SSRF
 - `sync_in_progress` — a registry sync is already running; callers should retry later. HTTP status: 503.
+- `integrity_missing` — registry-sourced executable/package metadata lacks required SHA-256 integrity data; install fails closed. HTTP status: 502.
+- `integrity_mismatch` — downloaded executable/package bytes do not match registry-provided SHA-256 metadata; install fails closed. HTTP status: 502.
 
 `no_remote_transport` and `ssrf_blocked` use `ToolError::Sdk { sdk_kind, message }`. HTTP status: 422.
 `sync_in_progress` uses `ToolError::Sdk { sdk_kind, message }`. HTTP status: 503.
+`integrity_missing` and `integrity_mismatch` use `ToolError::Sdk { sdk_kind, message }`. HTTP status: 502.
 
 ### Stash-specific kinds
 
@@ -398,7 +401,7 @@ surfaced via `DeployError::kind()` in `lab-apis/src/deploy/error.rs`:
 | `partial_failure` | — | Multi-host run where some hosts failed; returned as HTTP 200 with `ok=false` in the body, not as an error response. |
 | `conflict` | 409 | Another deploy is in progress for the same host. |
 | `arch_mismatch` | 502 | Remote `uname -m` differs from local build triple. |
-| `integrity_mismatch` | 502 | Remote sha256 of staged artifact differs from local. |
+| `integrity_mismatch` | 502 | Remote sha256 of staged artifact differs from local, or registry-sourced executable/package bytes differ from expected SHA-256 metadata. |
 
 The deploy-specific kinds (`ssh_unreachable`, `build_failed`, `preflight_failed`,
 `transfer_failed`, `install_failed`, `restart_failed`, `verify_failed`,

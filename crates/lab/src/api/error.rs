@@ -55,6 +55,7 @@ impl IntoResponse for ToolError {
             | "restart_failed"
             | "verify_failed"
             | "arch_mismatch"
+            | "integrity_missing"
             | "integrity_mismatch" => StatusCode::BAD_GATEWAY,
             "conflict" | "ambiguous_tool" => StatusCode::CONFLICT,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
@@ -97,5 +98,15 @@ mod tests {
         }
         .into_response();
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[test]
+    fn integrity_missing_maps_to_502() {
+        let response = ToolError::Sdk {
+            sdk_kind: "integrity_missing".to_string(),
+            message: "missing sha256".to_string(),
+        }
+        .into_response();
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     }
 }
