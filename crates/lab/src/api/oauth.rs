@@ -1,30 +1,12 @@
-use axum::http::request::Parts;
-use std::sync::Arc;
+//! Compatibility re-export shim — `AuthContext` now lives in the shared
+//! `lab_auth` crate. Existing `use crate::api::oauth::AuthContext;` import
+//! sites continue to compile via this re-export.
+//!
+//! `www_authenticate_value` likewise re-exported for the (rare) lab callers
+//! that build their own `WWW-Authenticate` header outside of the auth layer.
 
-/// Stored in request extensions by the HTTP auth middleware.
-///
-/// Downstream handlers can read this when they need caller identity or scope
-/// checks, but not every route consumes it yet.
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct AuthContext {
-    pub sub: String,
-    pub actor_key: Option<Arc<str>>,
-    pub scopes: Vec<String>,
-    pub issuer: String,
-    pub via_session: bool,
-    pub csrf_token: Option<String>,
-    pub email: Option<String>,
-}
-
-pub fn www_authenticate_value(resource_url: &str) -> String {
-    format!(
-        "Bearer resource_metadata=\"{}/.well-known/oauth-protected-resource\"",
-        resource_url.trim_end_matches('/')
-    )
-}
-
-#[allow(dead_code)]
-pub fn auth_context(parts: &Parts) -> Option<&AuthContext> {
-    parts.extensions.get::<AuthContext>()
-}
+pub use lab_auth::auth_context::AuthContext;
+// Re-exported for lab callers that build WWW-Authenticate headers directly;
+// not used within this crate itself.
+#[allow(unused_imports)]
+pub use lab_auth::www_authenticate_value;

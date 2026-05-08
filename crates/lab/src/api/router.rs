@@ -6,14 +6,11 @@ use std::time::Duration;
 
 use axum::{
     Json, Router,
-    body::Body,
     extract::{Query, State},
-    http::{HeaderName, HeaderValue, Method, Request, StatusCode, header},
-    middleware::Next,
+    http::{HeaderName, Request, StatusCode, header},
     response::{Html, IntoResponse},
     routing::{get, post},
 };
-use subtle::ConstantTimeEq;
 use tower_http::{
     compression::CompressionLayer,
     cors::{AllowOrigin, CorsLayer},
@@ -23,7 +20,23 @@ use tower_http::{
 };
 use tracing::Level;
 
+use lab_auth::AuthLayer;
 use lab_auth::error::AuthError as LabAuthError;
+
+/// Convert lab's strongly-typed [`crate::observability::activity::ActorKeyDeriver`]
+/// into the closure-erased [`lab_auth::ActorKeyDeriver`] alias accepted by
+/// [`AuthLayer::with_actor_key_deriver`]. Keeps the lab-specific HMAC actor-key
+/// derivation while letting lab-auth stay agnostic about consumer-specific
+/// observability hooks.
+fn lab_auth_deriver(
+    deriver: Arc<crate::observability::activity::ActorKeyDeriver>,
+) -> Arc<lab_auth::ActorKeyDeriver> {
+    Arc::new(move |subject: &str| {
+        deriver
+            .derive_subject(subject)
+            .map(crate::observability::activity::ActorKey::into_arc)
+    })
+}
 
 const DEV_MARKETPLACE_READ_ACTIONS: &[&str] = &[
     "help",
@@ -43,44 +56,6 @@ const DEV_MARKETPLACE_READ_ACTIONS: &[&str] = &[
     "mcp.versions",
     "mcp.meta.get",
 ];
-
-/// Constant-time byte comparison using `subtle::ConstantTimeEq` to prevent
-/// timing-based token prefix leakage (lab-63jc).
-pub(crate) fn tokens_equal(a: &str, b: &str) -> bool {
-    a.as_bytes().ct_eq(b.as_bytes()).into()
-}
-
-fn percent_encode_path(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~' | b'/' | b'?') {
-            out.push(b as char);
-        } else {
-            out.push('%');
-            out.push(
-                char::from_digit((b >> 4) as u32, 16)
-                    .unwrap()
-                    .to_ascii_uppercase(),
-            );
-            out.push(
-                char::from_digit((b & 0xf) as u32, 16)
-                    .unwrap()
-                    .to_ascii_uppercase(),
-            );
-        }
-    }
-    out
-}
-
-pub(crate) fn parse_bearer_token(header_value: &str) -> Option<String> {
-    let mut parts = header_value.split_whitespace();
-    let scheme = parts.next()?;
-    let token = parts.next()?;
-    if parts.next().is_some() || !scheme.eq_ignore_ascii_case("bearer") {
-        return None;
-    }
-    Some(token.to_string())
-}
 
 use super::{health, services, state::AppState};
 use crate::dispatch::error::ToolError;
@@ -142,204 +117,6 @@ async fn auth_token(
     form: axum::extract::Form<lab_auth::types::TokenRequest>,
 ) -> Result<impl IntoResponse, LabAuthError> {
     Ok(lab_auth::token::token(State(app_auth_state(&state)?), form).await?)
-}
-
-fn auth_error_response(message: &str, resource_url: Option<&str>) -> axum::response::Response {
-    let err = ToolError::Sdk {
-        sdk_kind: "auth_failed".into(),
-        message: message.into(),
-    };
-    let mut response = err.into_response();
-    if let Some(url) = resource_url {
-        let www_auth = crate::api::oauth::www_authenticate_value(url);
-        if let Ok(value) = HeaderValue::from_str(&www_auth) {
-            response
-                .headers_mut()
-                .insert(header::WWW_AUTHENTICATE, value);
-        }
-    }
-    response
-}
-
-fn csrf_error_response(message: &str) -> axum::response::Response {
-    ToolError::Sdk {
-        sdk_kind: "validation_failed".into(),
-        message: message.into(),
-    }
-    .into_response()
-}
-
-async fn authenticate_request(
-    mut request: Request<Body>,
-    next: Next,
-    static_token: Option<Arc<str>>,
-    auth_state: Option<Arc<lab_auth::state::AuthState>>,
-    actor_key_deriver: Option<Arc<crate::observability::activity::ActorKeyDeriver>>,
-    resource_url: Option<Arc<str>>,
-    allow_session_cookie: bool,
-) -> Result<axum::response::Response, std::convert::Infallible> {
-    let auth_header = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(parse_bearer_token);
-
-    if let Some(token) = auth_header {
-        if let Some(ref expected) = static_token
-            && tokens_equal(&token, expected.as_ref())
-        {
-            let sub = "static-bearer".to_string();
-            let actor_key = derive_actor_key(actor_key_deriver.as_deref(), &sub);
-            request
-                .extensions_mut()
-                .insert(crate::api::oauth::AuthContext {
-                    sub,
-                    actor_key,
-                    scopes: vec!["lab:read".to_string(), "lab:admin".to_string()],
-                    issuer: "local".to_string(),
-                    via_session: false,
-                    csrf_token: None,
-                    email: None,
-                });
-            return Ok(next.run(request).await);
-        }
-
-        if let Some(ref auth_state) = auth_state {
-            let Some(expected_issuer) = auth_state
-                .config
-                .public_url
-                .as_ref()
-                .map(|url| url.as_str().trim_end_matches('/').to_string())
-            else {
-                return Ok(auth_error_response(
-                    "server misconfigured: LAB_PUBLIC_URL required for JWT validation",
-                    resource_url.as_deref(),
-                ));
-            };
-            let expected_aud = lab_auth::metadata::canonical_resource_url(auth_state);
-            match auth_state
-                .signing_keys
-                .validate_access_token(&token, &expected_aud)
-            {
-                Ok(claims) => {
-                    if claims.iss != expected_issuer {
-                        return Ok(auth_error_response(
-                            "invalid bearer token",
-                            resource_url.as_deref(),
-                        ));
-                    }
-
-                    request
-                        .extensions_mut()
-                        .insert(crate::api::oauth::AuthContext {
-                            actor_key: derive_actor_key(actor_key_deriver.as_deref(), &claims.sub),
-                            sub: claims.sub,
-                            scopes: claims
-                                .scope
-                                .split_whitespace()
-                                .filter(|scope| !scope.is_empty())
-                                .map(ToOwned::to_owned)
-                                .collect(),
-                            issuer: claims.iss,
-                            via_session: false,
-                            csrf_token: None,
-                            email: None,
-                        });
-                    return Ok(next.run(request).await);
-                }
-                Err(error) => {
-                    tracing::debug!(error = %error, "lab-auth JWT validation failed");
-                }
-            }
-        }
-
-        return Ok(auth_error_response(
-            "invalid bearer token",
-            resource_url.as_deref(),
-        ));
-    }
-
-    if allow_session_cookie
-        && let Some(auth_state) = auth_state.as_ref()
-        && let Some(session_id) = lab_auth::session::read_cookie(
-            request.headers(),
-            lab_auth::session::BROWSER_SESSION_COOKIE_NAME,
-        )
-    {
-        match auth_state.store.find_browser_session(&session_id).await {
-            Ok(Some(session)) => {
-                if !matches!(
-                    *request.method(),
-                    Method::GET | Method::HEAD | Method::OPTIONS
-                ) {
-                    let csrf = request
-                        .headers()
-                        .get(lab_auth::session::BROWSER_CSRF_HEADER_NAME)
-                        .and_then(|value| value.to_str().ok());
-                    if csrf != Some(session.csrf_token.as_str()) {
-                        return Ok(csrf_error_response("missing or invalid csrf token"));
-                    }
-                }
-
-                request
-                    .extensions_mut()
-                    .insert(crate::api::oauth::AuthContext {
-                        actor_key: derive_actor_key(actor_key_deriver.as_deref(), &session.subject),
-                        sub: session.subject,
-                        scopes: vec!["lab:read".to_string(), "lab:admin".to_string()],
-                        issuer: "browser-session".to_string(),
-                        via_session: true,
-                        csrf_token: Some(session.csrf_token),
-                        email: session.email,
-                    });
-                return Ok(next.run(request).await);
-            }
-            Ok(None) => {}
-            Err(error) => {
-                tracing::debug!(error = %error, "browser session lookup failed");
-            }
-        }
-    }
-
-    // For browser GET requests with no bearer token and no valid session cookie,
-    // redirect to /auth/login so the Google OAuth flow can establish a session.
-    // Only fires on v1 routes (allow_session_cookie=true); the MCP endpoint uses bearer-only.
-    if allow_session_cookie
-        && auth_state.is_some()
-        && *request.method() == Method::GET
-        && request
-            .headers()
-            .get(header::ACCEPT)
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(|accept| accept.contains("text/html"))
-    {
-        let return_to = request
-            .uri()
-            .path_and_query()
-            .map(|pq| pq.as_str())
-            .unwrap_or("/");
-        let encoded = percent_encode_path(return_to);
-        let login_url = format!("/auth/login?return_to={encoded}");
-        return Ok(axum::response::Redirect::to(&login_url).into_response());
-    }
-
-    Ok(auth_error_response(
-        if allow_session_cookie {
-            "missing bearer token or session cookie"
-        } else {
-            "missing bearer token"
-        },
-        resource_url.as_deref(),
-    ))
-}
-
-fn derive_actor_key(
-    deriver: Option<&crate::observability::activity::ActorKeyDeriver>,
-    subject: &str,
-) -> Option<Arc<str>> {
-    deriver
-        .and_then(|deriver| deriver.derive_subject(subject))
-        .map(crate::observability::activity::ActorKey::into_arc)
 }
 
 /// Build the `/v1` sub-router with all feature-gated service routes.
@@ -782,24 +559,29 @@ pub fn build_router(
                 .and_then(|cfg| cfg.public_url.as_ref().map(url::Url::as_str))
         })
         .map(Arc::from);
-    let auth_state_for_v1 = auth_state.clone();
-    let static_token_for_v1 = static_token.clone();
-    let actor_key_deriver_for_v1 = state.actor_key_deriver.clone();
-    let resource_url_for_v1 = resource_url.clone();
+    let layer_deriver = state.actor_key_deriver.clone().map(lab_auth_deriver);
+    // Build the shared AuthLayer once; per-route variants only differ in
+    // whether the session-cookie path is enabled (true for browser-facing
+    // /v1 + /dev + /v0.1; false for the bearer-only /mcp transport).
+    let make_auth_layer = |allow_session_cookie: bool| -> AuthLayer {
+        let mut layer = match auth_state.clone() {
+            Some(state) => AuthLayer::from_state(state),
+            // Bearer-only path (no OAuth state): grant the same legacy scopes
+            // that the old middleware always issued for static-token requests.
+            None => AuthLayer::new().with_static_token_scopes(vec![
+                "lab:read".to_string(),
+                "lab:admin".to_string(),
+            ]),
+        };
+        layer = layer
+            .with_static_token(static_token.clone())
+            .with_actor_key_deriver(layer_deriver.clone())
+            .with_resource_url(resource_url.clone())
+            .with_allow_session_cookie(allow_session_cookie);
+        layer
+    };
     let v1_protected = if needs_auth {
-        v1_router.route_layer(axum::middleware::from_fn(
-            move |request: Request<Body>, next: Next| {
-                authenticate_request(
-                    request,
-                    next,
-                    static_token_for_v1.clone(),
-                    auth_state_for_v1.clone(),
-                    actor_key_deriver_for_v1.clone(),
-                    resource_url_for_v1.clone(),
-                    true,
-                )
-            },
-        ))
+        v1_router.route_layer(make_auth_layer(true))
     } else {
         v1_router
     };
@@ -807,48 +589,16 @@ pub fn build_router(
     #[cfg(feature = "mcpregistry")]
     let v0_1_protected = {
         let v0_1_router = build_v0_1_router();
-        let auth_state_for_v0_1 = auth_state.clone();
-        let static_token_for_v0_1 = static_token.clone();
-        let actor_key_deriver_for_v0_1 = state.actor_key_deriver.clone();
-        let resource_url_for_v0_1 = resource_url.clone();
         if needs_auth {
-            v0_1_router.route_layer(axum::middleware::from_fn(
-                move |request: Request<Body>, next: Next| {
-                    authenticate_request(
-                        request,
-                        next,
-                        static_token_for_v0_1.clone(),
-                        auth_state_for_v0_1.clone(),
-                        actor_key_deriver_for_v0_1.clone(),
-                        resource_url_for_v0_1.clone(),
-                        true,
-                    )
-                },
-            ))
+            v0_1_router.route_layer(make_auth_layer(true))
         } else {
             v0_1_router
         }
     };
 
-    let auth_state_for_mcp = auth_state.clone();
-    let static_token_for_mcp = static_token.clone();
-    let actor_key_deriver_for_mcp = state.actor_key_deriver.clone();
-    let resource_url_for_mcp = resource_url.clone();
     let mcp_protected = mcp_router.map(|mcp| {
         if needs_auth {
-            mcp.route_layer(axum::middleware::from_fn(
-                move |request: Request<Body>, next: Next| {
-                    authenticate_request(
-                        request,
-                        next,
-                        static_token_for_mcp.clone(),
-                        auth_state_for_mcp.clone(),
-                        actor_key_deriver_for_mcp.clone(),
-                        resource_url_for_mcp.clone(),
-                        false,
-                    )
-                },
-            ))
+            mcp.route_layer(make_auth_layer(false))
         } else {
             mcp
         }
@@ -936,23 +686,7 @@ pub fn build_router(
         .route("/dev/{name}", get(dev_mockup_named))
         .route("/dev/{name}/", get(dev_mockup_named));
     let dev_routes = if needs_auth {
-        let auth_state_for_dev = auth_state.clone();
-        let static_token_for_dev = static_token.clone();
-        let actor_key_deriver_for_dev = state.actor_key_deriver.clone();
-        let resource_url_for_dev = resource_url.clone();
-        dev_routes.route_layer(axum::middleware::from_fn(
-            move |request: Request<Body>, next: Next| {
-                authenticate_request(
-                    request,
-                    next,
-                    static_token_for_dev.clone(),
-                    auth_state_for_dev.clone(),
-                    actor_key_deriver_for_dev.clone(),
-                    resource_url_for_dev.clone(),
-                    true,
-                )
-            },
-        ))
+        dev_routes.route_layer(make_auth_layer(true))
     } else {
         dev_routes
     };
@@ -1508,21 +1242,12 @@ mod tests {
             crate::observability::activity::ActorKeyDeriver::from_secret("test-secret").unwrap();
         let expected = deriver.derive_subject("static-bearer").unwrap();
         let deriver = Arc::new(deriver);
+        let layer = AuthLayer::new()
+            .with_static_token(Some(Arc::<str>::from("secret-token")))
+            .with_actor_key_deriver(Some(lab_auth_deriver(Arc::clone(&deriver))));
         let app = Router::new()
             .route("/probe", get(actor_key_probe))
-            .route_layer(axum::middleware::from_fn(
-                move |request: Request<Body>, next: Next| {
-                    authenticate_request(
-                        request,
-                        next,
-                        Some(Arc::<str>::from("secret-token")),
-                        None,
-                        Some(Arc::clone(&deriver)),
-                        None,
-                        false,
-                    )
-                },
-            ));
+            .route_layer(layer);
 
         let response = app
             .oneshot(
@@ -1552,22 +1277,12 @@ mod tests {
             crate::observability::activity::ActorKeyDeriver::from_secret("test-secret").unwrap();
         let expected = deriver.derive_subject(&session.subject).unwrap();
         let deriver = Arc::new(deriver);
-        let auth_state_for_layer = Arc::clone(&auth_state);
+        let layer = AuthLayer::from_state(Arc::clone(&auth_state))
+            .with_actor_key_deriver(Some(lab_auth_deriver(Arc::clone(&deriver))))
+            .with_allow_session_cookie(true);
         let app = Router::new()
             .route("/probe", get(actor_key_probe))
-            .route_layer(axum::middleware::from_fn(
-                move |request: Request<Body>, next: Next| {
-                    authenticate_request(
-                        request,
-                        next,
-                        None,
-                        Some(Arc::clone(&auth_state_for_layer)),
-                        Some(Arc::clone(&deriver)),
-                        None,
-                        true,
-                    )
-                },
-            ));
+            .route_layer(layer);
 
         let response = app
             .oneshot(
@@ -1598,21 +1313,11 @@ mod tests {
 
     #[tokio::test]
     async fn authenticated_bind_leaves_actor_key_null_without_deriver() {
+        let layer = AuthLayer::new()
+            .with_static_token(Some(Arc::<str>::from("secret-token")));
         let app = Router::new()
             .route("/probe", get(actor_key_probe))
-            .route_layer(axum::middleware::from_fn(
-                move |request: Request<Body>, next: Next| {
-                    authenticate_request(
-                        request,
-                        next,
-                        Some(Arc::<str>::from("secret-token")),
-                        None,
-                        None,
-                        None,
-                        false,
-                    )
-                },
-            ));
+            .route_layer(layer);
 
         let response = app
             .oneshot(
