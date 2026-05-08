@@ -141,8 +141,8 @@ pub async fn auth_session(State(state): State<AppState>, headers: HeaderMap) -> 
         && let Some(token) = headers
             .get(header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
-            .and_then(crate::api::router::parse_bearer_token)
-        && crate::api::router::tokens_equal(&token, expected.as_ref())
+            .and_then(lab_auth::parse_bearer_token)
+        && lab_auth::tokens_equal(&token, expected.as_ref())
     {
         let response = no_store_json(serde_json::json!({
             "authenticated": true,
