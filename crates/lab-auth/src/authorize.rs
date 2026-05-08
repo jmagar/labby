@@ -1177,15 +1177,15 @@ pub mod tests {
     #[test]
     fn validate_scope_accepts_configured_default_and_rejects_others() {
         // Empty scope falls back to configured default.
-        assert_eq!(super::validate_scope("", "syslog:read").unwrap(), "syslog:read");
+        assert_eq!(super::validate_scope("", "syslog:read", &["syslog:read".to_string(), "syslog:admin".to_string()]).unwrap(), "syslog:read");
         // Matching scope passes through.
         assert_eq!(
-            super::validate_scope("syslog:read", "syslog:read").unwrap(),
+            super::validate_scope("syslog:read", "syslog:read", &["syslog:read".to_string(), "syslog:admin".to_string()]).unwrap(),
             "syslog:read"
         );
         // Anything else is rejected — and the error mentions the configured
         // default (proving the LAB_SCOPE constant is gone).
-        let err = super::validate_scope("lab", "syslog:read").unwrap_err();
+        let err = super::validate_scope("lab", "syslog:read", &["syslog:read".to_string(), "syslog:admin".to_string()]).unwrap_err();
         assert!(err.to_string().contains("syslog:read"), "got: {err}");
     }
 
