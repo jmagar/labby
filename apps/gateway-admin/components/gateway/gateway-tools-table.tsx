@@ -19,11 +19,20 @@ import {
 } from '@/components/gateway/gateway-theme'
 import type { ToolInventoryRow } from './gateway-list-state'
 
+const TOOL_RENDER_LIMIT = 300
+
 export function GatewayToolsTable({ rows }: { rows: ToolInventoryRow[] }) {
+  const renderedRows = rows.slice(0, TOOL_RENDER_LIMIT)
+
   return (
     <>
+      {rows.length > renderedRows.length ? (
+        <div className={cn(AURORA_MEDIUM_PANEL, 'mb-3 p-3 text-sm text-aurora-text-muted')}>
+          Showing the first {renderedRows.length} of {rows.length} tools. Search or filter to narrow the inventory.
+        </div>
+      ) : null}
       <div className="space-y-3 md:hidden">
-        {rows.map((row) => (
+        {renderedRows.map((row) => (
           <article key={`${row.gatewayId}:${row.toolName}`} className={cn(AURORA_MEDIUM_PANEL, 'space-y-3 p-4')}>
             <div className="space-y-1">
               <div className="flex flex-wrap items-center gap-2">
@@ -63,7 +72,7 @@ export function GatewayToolsTable({ rows }: { rows: ToolInventoryRow[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map((row) => (
+            {renderedRows.map((row) => (
               <TableRow
                 key={`${row.gatewayId}:${row.toolName}`}
                 className={AURORA_GATEWAY_ROW}

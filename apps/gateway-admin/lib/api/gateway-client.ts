@@ -12,6 +12,9 @@ import type {
   SupportedService,
   ToolSearchConfig,
   ToolSearchConfigInput,
+  ProtectedMcpRoute,
+  ProtectedMcpRouteInput,
+  ProtectedMcpRouteTestResult,
 } from '../types/gateway.ts'
 import {
   type BackendGatewayMcpRuntimeView,
@@ -519,6 +522,56 @@ export const gatewayApi = {
     return gatewayAction<ToolSearchConfig>(
       'gateway.tool_search.set',
       confirmGatewayParams(input),
+      signal,
+    )
+  },
+
+  async listProtectedRoutes(signal?: AbortSignal): Promise<ProtectedMcpRoute[]> {
+    return gatewayAction<ProtectedMcpRoute[]>('gateway.protected_route.list', {}, signal)
+  },
+
+  async getProtectedRoute(name: string, signal?: AbortSignal): Promise<ProtectedMcpRoute> {
+    return gatewayAction<ProtectedMcpRoute>('gateway.protected_route.get', { name }, signal)
+  },
+
+  async addProtectedRoute(
+    route: ProtectedMcpRouteInput,
+    signal?: AbortSignal,
+  ): Promise<ProtectedMcpRoute> {
+    return gatewayAction<ProtectedMcpRoute>(
+      'gateway.protected_route.add',
+      confirmGatewayParams({ route }),
+      signal,
+    )
+  },
+
+  async updateProtectedRoute(
+    name: string,
+    route: ProtectedMcpRouteInput,
+    signal?: AbortSignal,
+  ): Promise<ProtectedMcpRoute> {
+    return gatewayAction<ProtectedMcpRoute>(
+      'gateway.protected_route.update',
+      confirmGatewayParams({ name, route }),
+      signal,
+    )
+  },
+
+  async removeProtectedRoute(name: string, signal?: AbortSignal): Promise<ProtectedMcpRoute> {
+    return gatewayAction<ProtectedMcpRoute>(
+      'gateway.protected_route.remove',
+      confirmGatewayParams({ name }),
+      signal,
+    )
+  },
+
+  async testProtectedRoute(
+    route: ProtectedMcpRouteInput,
+    signal?: AbortSignal,
+  ): Promise<ProtectedMcpRouteTestResult> {
+    return gatewayAction<ProtectedMcpRouteTestResult>(
+      'gateway.protected_route.test',
+      { route },
       signal,
     )
   },

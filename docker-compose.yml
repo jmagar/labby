@@ -8,6 +8,7 @@ services:
     # Run Docker's tiny init as PID 1 so provider grandchildren orphaned by
     # launch wrappers such as npx are reaped after Lab terminates the process group.
     init: true
+    working_dir: /workspace/lab
 
     ports:
       # LAB_HOST_PORT lets you remap the host-side port without editing this file.
@@ -35,7 +36,7 @@ services:
       # Docker-specific ACP provider file. Uses container-local paths for
       # provider commands; overrides whatever is in the host ~/.lab/. File-level
       # mount wins over the parent directory bind mount above.
-      - ./config/acp-providers.docker.json:/home/lab/.lab/acp-providers.json:ro
+      - ./config/acp-providers.docker.json:/home/lab/.lab/acp-providers.json
       # Claude credentials — sourced live from the host's ~/.claude/ so the
       # token the container uses stays in lockstep with whatever the host
       # `claude` CLI most recently refreshed. Without this the lab-stored copy
@@ -45,8 +46,24 @@ services:
       # claude-agent-sdk may rewrite the file on token refresh; that goes
       # straight back to the host source-of-truth.
       - ${HOME}/.claude/.credentials.json:/home/lab/.lab/acp/claude-home/.credentials.json
+      # Marketplace catalog state. The marketplace API reads Claude's known
+      # marketplaces, cached marketplace checkouts, and installed plugin index
+      # from ~/.claude/plugins; without this mount the web UI only sees the
+      # network-backed ACP/MCP registries.
+      - ${HOME}/.claude/plugins:/home/lab/.claude/plugins
+      # Claude stores absolute host paths in known_marketplaces.json. Mirror
+      # those paths inside the container so source counts and local marketplace
+      # entries resolve without rewriting the host-owned index.
+      - ${HOME}/.claude/plugins:${HOME}/.claude/plugins
+      # Codex marketplace catalog state. The Codex backend reads personal
+      # catalog manifests from ~/.agents/plugins and installed/cache metadata
+      # from ~/.codex.
+      - ${HOME}/.agents/plugins:/home/lab/.agents/plugins:ro
+      - ${HOME}/.codex/config.toml:/home/lab/.codex/config.toml:ro
+      - ${HOME}/.codex/cache:/home/lab/.codex/cache:ro
       - ${HOME}/.gemini:/home/lab/.gemini
       - .:/workspace/lab
+      - .:${HOME}/workspace/lab
 
     environment:
       # Bind to all container interfaces so the port mapping works.

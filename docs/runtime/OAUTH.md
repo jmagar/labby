@@ -9,7 +9,7 @@ Lab supports two HTTP auth modes:
 
 This document covers mode selection, startup behavior, registration and token flow, JWT validation, and operator-facing constraints.
 For the complete generated route/auth matrix, see
-[generated/api-routes.md](./generated/api-routes.md).
+[generated/api-routes.md](../generated/api-routes.md).
 
 ## Configuration
 
@@ -307,6 +307,57 @@ WWW-Authenticate: Bearer resource_metadata="https://lab.example.com/.well-known/
 
 This header is only included when `LAB_PUBLIC_URL` is configured. If not, the header is omitted rather than advertising localhost.
 
+## Gateway-Managed Route Metadata
+
+Gateway-managed protected MCP routes publish route-specific OAuth protected
+resource metadata under the public route host:
+
+```http
+GET /.well-known/oauth-protected-resource/<route-path>
+```
+
+For a route configured as `public_host = "mcp.example.com"` and
+`public_path = "/syslog"`, clients discover:
+
+```http
+GET https://mcp.example.com/.well-known/oauth-protected-resource/syslog
+```
+
+The metadata `resource` value is the public MCP resource:
+
+```json
+{
+  "resource": "https://mcp.example.com/syslog",
+  "authorization_servers": ["https://lab.example.com"],
+  "scopes_supported": ["mcp:read", "mcp:write"],
+  "bearer_methods_supported": ["header"]
+}
+```
+
+An unauthenticated request to the route returns a route-specific challenge:
+
+```http
+WWW-Authenticate: Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/syslog"
+```
+
+OAuth clients must request a token for the route resource
+`https://mcp.example.com/syslog` and present that token to
+`https://mcp.example.com/syslog`. The backend MCP URL remains private and must
+not appear in public metadata, public challenges, or public error bodies.
+
+Static bearer compatibility does not automatically make a public route an OAuth
+resource. `LAB_MCP_HTTP_TOKEN` is an operator/admin shortcut for Lab-protected
+surfaces; a Gateway-managed public MCP route should accept it only when the
+route is explicitly configured to do so.
+
+Disabled or unknown protected routes must not advertise protected-resource
+metadata or proxy to a backend. They should fail with a stable public error that
+does not leak backend origins, backend paths, private IPs, or token env var
+names.
+
+Full route configuration and curl verification examples live in
+[GATEWAY.md](../services/GATEWAY.md#gateway-managed-protected-mcp-routes).
+
 ## Auth Precedence
 
 When both static bearer and OAuth are configured, auth is checked in this order:
@@ -411,5 +462,5 @@ Auth-specific items `labby doctor` covers (or should cover):
 
 - [CONFIG.md](./CONFIG.md) — config loading and env var conventions
 - [TRANSPORT.md](./TRANSPORT.md) — HTTP transport setup and middleware
-- [ERRORS.md](./ERRORS.md) — `auth_failed` error kind
-- [RMCP.md](./RMCP.md) — RMCP auth ownership contract
+- [ERRORS.md](../dev/ERRORS.md) — `auth_failed` error kind
+- [RMCP.md](../surfaces/RMCP.md) — RMCP auth ownership contract

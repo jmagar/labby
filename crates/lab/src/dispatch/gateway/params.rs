@@ -2,7 +2,9 @@ use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::config::{ToolSearchConfig, UpstreamConfig, UpstreamOauthConfig};
+use crate::config::{
+    ProtectedMcpRouteConfig, ToolSearchConfig, UpstreamConfig, UpstreamOauthConfig,
+};
 use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -42,6 +44,22 @@ pub struct GatewayNameParams {
     pub origin: Option<String>,
     #[serde(default)]
     pub owner: Option<GatewayRuntimeOwnerParams>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProtectedRouteNameParams {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProtectedRouteSpecParams {
+    pub route: ProtectedMcpRouteConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProtectedRouteUpdateParams {
+    pub name: String,
+    pub route: ProtectedMcpRouteConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

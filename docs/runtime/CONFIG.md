@@ -423,7 +423,7 @@ alias `LAB_WEB_UI_DISABLE_AUTH` is still accepted, but new configs should use
 
 Lab can proxy tool calls and resource reads to upstream MCP servers.
 
-Full details in [UPSTREAM.md](./UPSTREAM.md).
+Full details in [UPSTREAM.md](../services/UPSTREAM.md).
 
 ### config.toml
 
@@ -443,6 +443,47 @@ proxy_resources = false
 ```
 
 `expose_tools` is optional. When present, it limits which discovered upstream tools are republished by the gateway. Entries support exact names and simple `*` wildcards.
+
+### Gateway-Managed Protected MCP Routes
+
+Gateway-managed protected MCP routes are configured with
+`[[protected_mcp_routes]]`. They publish a public OAuth-protected MCP resource
+at `https://<public_host><public_path>` and proxy accepted Streamable HTTP MCP
+traffic to `backend_url + backend_mcp_path`.
+
+Use these for inline public MCP routes that need Lab-owned OAuth protected
+resource metadata, 401 challenges, token validation, and redacted public errors.
+Do not model them with legacy `MCP_<SERVICE>_URLS` or
+`MCP_<SERVICE>_BACKEND` env vars; use the Gateway UI or
+`labby gateway protected-route ...` so validation and duplicate detection share
+the same source of truth.
+
+```toml
+[[protected_mcp_routes]]
+name = "syslog"
+enabled = true
+public_host = "mcp.example.com"
+public_path = "/syslog"
+backend_url = "http://100.88.16.79:3100"
+backend_mcp_path = "/mcp"
+scopes = ["mcp:read", "mcp:write"]
+health_path = "/health"
+```
+
+Rules:
+
+- `public_host` is a bare host with no scheme, port, or path.
+- `public_path` must include a service segment and cannot overlap Lab reserved
+  routes such as `/mcp`, `/.well-known/*`, or `/v1/*`.
+- `backend_url` is an origin only; put the backend MCP path in
+  `backend_mcp_path`.
+- `scopes` defaults to `mcp:read` and `mcp:write` when omitted.
+- Disabled routes do not publish metadata, issue challenges, or proxy traffic.
+- Public errors must not reveal `backend_url`, `backend_mcp_path`, private IPs,
+  or token env var names.
+
+Full operator setup, SWAG/nginx, Traefik, tunnel guidance, migration examples,
+and curl verification live in [GATEWAY.md](../services/GATEWAY.md#gateway-managed-protected-mcp-routes).
 
 ### Upstream OAuth (authorization_code + PKCE)
 
@@ -503,7 +544,7 @@ strategy = "dynamic"
 ```
 
 Dynamic registration may require an initial access token; supply it via env
-(documented in [UPSTREAM.md](./UPSTREAM.md)). DCR-issued credentials are
+(documented in [UPSTREAM.md](../services/UPSTREAM.md)). DCR-issued credentials are
 persisted alongside tokens and reused on restart.
 
 Setting `oauth` and `bearer_token_env` on the same upstream produces a

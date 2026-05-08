@@ -155,7 +155,7 @@ pub async fn authorize(
     state.check_authorize_rate_limit()?;
     state.ensure_pending_oauth_state_capacity().await?;
     validate_response_type(&query.response_type)?;
-    validate_resource(&state, query.resource.as_deref())?;
+    let resource = validate_resource(&state, query.resource.as_deref())?;
     let scope = validate_scope(&query.scope)?;
     let client_state_id = fingerprint(&query.state);
     info!(
@@ -217,6 +217,7 @@ pub async fn authorize(
             client_id: query.client_id.clone(),
             redirect_uri: query.redirect_uri.clone(),
             client_state: query.state.clone(),
+            resource,
             scope: scope.clone(),
             provider_code_verifier,
             code_challenge: query.code_challenge.clone(),
@@ -346,6 +347,7 @@ pub async fn callback(
             client_id: request.client_id,
             subject: google.subject,
             redirect_uri: request.redirect_uri.clone(),
+            resource: request.resource,
             scope: request.scope,
             code_challenge: request.code_challenge,
             code_challenge_method: request.code_challenge_method,
@@ -446,22 +448,23 @@ fn validate_scope(scope: &str) -> Result<String, AuthError> {
 pub(crate) fn validate_resource(
     state: &AuthState,
     requested: Option<&str>,
-) -> Result<(), AuthError> {
+) -> Result<String, AuthError> {
+    let canonical = crate::metadata::canonical_resource_url(state);
     let Some(requested) = requested.map(str::trim).filter(|value| !value.is_empty()) else {
-        return Ok(());
+        return Ok(canonical);
     };
-    let expected = crate::metadata::canonical_resource_url(state);
-    if requested == expected {
-        return Ok(());
+    let requested = requested.trim_end_matches('/');
+    if requested == canonical || state.is_allowed_resource_url(requested) {
+        return Ok(requested.to_string());
     }
 
     warn!(
         requested_resource = %requested,
-        expected_resource = %expected,
-        "oauth request rejected: resource does not match canonical MCP endpoint"
+        expected_resource = %canonical,
+        "oauth request rejected: resource does not match an allowed MCP endpoint"
     );
     Err(AuthError::Validation(format!(
-        "resource must be `{expected}`"
+        "resource must be `{canonical}` or a configured protected MCP route"
     )))
 }
 
@@ -970,6 +973,7 @@ pub mod tests {
                 client_id: "client".to_string(),
                 redirect_uri: "http://127.0.0.1:7777/callback".to_string(),
                 client_state: "client-abc".to_string(),
+                resource: "https://lab.example.com/mcp".to_string(),
                 scope: "lab".to_string(),
                 provider_code_verifier: "provider-verifier".to_string(),
                 code_challenge: "challenge".to_string(),
@@ -1193,6 +1197,7 @@ pub mod tests {
                 client_id: "client".to_string(),
                 redirect_uri: "http://127.0.0.1:7777/callback".to_string(),
                 client_state: "client-state".to_string(),
+                resource: "https://lab.example.com/mcp".to_string(),
                 scope: "lab".to_string(),
                 provider_code_verifier: "provider-verifier".to_string(),
                 code_challenge: "challenge".to_string(),
@@ -1288,6 +1293,7 @@ pub mod tests {
                 client_id: "client".to_string(),
                 redirect_uri: "http://127.0.0.1:7777/callback".to_string(),
                 client_state: "client-state".to_string(),
+                resource: "https://lab.example.com/mcp".to_string(),
                 scope: "lab".to_string(),
                 provider_code_verifier: "provider-verifier".to_string(),
                 code_challenge: "challenge".to_string(),
@@ -1575,6 +1581,7 @@ Iy60nwnOxK6B5mZV2Cs+kv8=
                     client_id: "client".to_string(),
                     redirect_uri: "http://127.0.0.1:7777/callback".to_string(),
                     client_state: "client-xyz".to_string(),
+                    resource: "https://lab.example.com/mcp".to_string(),
                     scope: "lab".to_string(),
                     provider_code_verifier: "provider-verifier".to_string(),
                     code_challenge: "challenge".to_string(),

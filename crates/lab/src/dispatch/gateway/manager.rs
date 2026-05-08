@@ -10,7 +10,8 @@ use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
 use crate::config::{
-    LabConfig, ToolSearchConfig, UpstreamConfig, backup_env, env_is_up_to_date, write_env,
+    LabConfig, ProtectedMcpRouteConfig, ToolSearchConfig, UpstreamConfig, backup_env,
+    env_is_up_to_date, write_env,
 };
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::error::ToolError;
@@ -25,13 +26,15 @@ use crate::registry::ToolRegistry;
 use lab_apis::extract::types::ServiceCreds;
 
 use super::config::{
-    default_gateway_bearer_env_name, insert_upstream, load_gateway_config, remove_upstream,
+    default_gateway_bearer_env_name, insert_protected_mcp_route, insert_upstream,
+    load_gateway_config, remove_protected_mcp_route, remove_upstream, update_protected_mcp_route,
     update_upstream, validate_bearer_token_env_name, validate_tool_search, write_gateway_config,
 };
 use super::config_mutation::{ensure_stdio_admin_ack, read_env_values, values_to_service_creds};
 use super::index::{SearchHit, ToolIndex};
 use super::params::GatewayUpdatePatch;
 use super::projection::*;
+use super::protected_routes::ProtectedRouteIndex;
 pub use super::runtime::GatewayRuntimeHandle;
 use super::runtime::runtime_origin_tag;
 use super::service_catalog::service_meta;
@@ -130,6 +133,7 @@ pub struct GatewayManager {
     pub(super) oauth_key: Option<EncryptionKey>,
     pub(super) oauth_redirect_uri: Option<Arc<String>>,
     tool_indexes: Arc<dashmap::DashMap<String, GatewayToolIndexState>>,
+    protected_route_index: Arc<RwLock<ProtectedRouteIndex>>,
 }
 
 impl GatewayManager {
@@ -147,6 +151,7 @@ impl GatewayManager {
             oauth_key: None,
             oauth_redirect_uri: None,
             tool_indexes: Arc::new(dashmap::DashMap::new()),
+            protected_route_index: Arc::new(RwLock::new(ProtectedRouteIndex::default())),
         }
     }
 
@@ -196,7 +201,32 @@ impl GatewayManager {
         // config.rs normalizes legacy tool_search before calling seed_config;
         // do not re-normalize here with false — that would incorrectly promote
         // legacy upstream config when the root [tool_search] is explicitly disabled.
+        *self.protected_route_index.write().await =
+            ProtectedRouteIndex::from_routes(&config.protected_mcp_routes);
         *self.config.write().await = config;
+    }
+
+    pub async fn protected_route_resources(&self) -> Vec<String> {
+        self.protected_route_index.read().await.resources()
+    }
+
+    pub async fn resolve_protected_route(
+        &self,
+        host: &str,
+        path: &str,
+    ) -> Option<ProtectedMcpRouteConfig> {
+        self.protected_route_index.read().await.resolve(host, path)
+    }
+
+    pub async fn resolve_protected_route_metadata(
+        &self,
+        host: &str,
+        path: &str,
+    ) -> Option<ProtectedMcpRouteConfig> {
+        self.protected_route_index
+            .read()
+            .await
+            .resolve_exact_metadata_path(host, path)
     }
 
     pub async fn current_pool(&self) -> Option<Arc<UpstreamPool>> {
@@ -907,6 +937,80 @@ impl GatewayManager {
         Ok(self.tool_search_config().await)
     }
 
+    pub async fn protected_route_list(&self) -> Vec<ProtectedMcpRouteConfig> {
+        self.config.read().await.protected_mcp_routes.clone()
+    }
+
+    pub async fn protected_route_get(
+        &self,
+        name: &str,
+    ) -> Result<ProtectedMcpRouteConfig, ToolError> {
+        self.config
+            .read()
+            .await
+            .protected_mcp_routes
+            .iter()
+            .find(|route| route.name == name)
+            .cloned()
+            .ok_or_else(|| ToolError::Sdk {
+                sdk_kind: "not_found".to_string(),
+                message: format!("protected MCP route `{name}` not found"),
+            })
+    }
+
+    pub async fn protected_route_add(
+        &self,
+        route: ProtectedMcpRouteConfig,
+    ) -> Result<ProtectedMcpRouteConfig, ToolError> {
+        let _mutation_guard = self.config_mutation.lock().await;
+        let mut cfg = self.config.read().await.clone();
+        let route = insert_protected_mcp_route(&mut cfg, route)?;
+        self.persist_config(cfg).await?;
+        Ok(route)
+    }
+
+    pub async fn protected_route_update(
+        &self,
+        name: &str,
+        route: ProtectedMcpRouteConfig,
+    ) -> Result<ProtectedMcpRouteConfig, ToolError> {
+        let _mutation_guard = self.config_mutation.lock().await;
+        let mut cfg = self.config.read().await.clone();
+        let route = update_protected_mcp_route(&mut cfg, name, route)?;
+        self.persist_config(cfg).await?;
+        Ok(route)
+    }
+
+    pub async fn protected_route_remove(
+        &self,
+        name: &str,
+    ) -> Result<ProtectedMcpRouteConfig, ToolError> {
+        let _mutation_guard = self.config_mutation.lock().await;
+        let mut cfg = self.config.read().await.clone();
+        let route = remove_protected_mcp_route(&mut cfg, name)?;
+        self.persist_config(cfg).await?;
+        Ok(route)
+    }
+
+    pub async fn protected_route_test(
+        &self,
+        route: ProtectedMcpRouteConfig,
+    ) -> Result<serde_json::Value, ToolError> {
+        let mut cfg = LabConfig::default();
+        let route = insert_protected_mcp_route(&mut cfg, route)?;
+        let resource = route.public_resource();
+        let metadata_url = format!(
+            "https://{}/.well-known/oauth-protected-resource{}",
+            route.public_host, route.public_path
+        );
+        Ok(serde_json::json!({
+            "ok": true,
+            "route": route,
+            "resource": resource,
+            "metadata_url": metadata_url,
+        }))
+    }
+
     pub async fn reload_with_origin(
         &self,
         origin: Option<&str>,
@@ -1052,6 +1156,8 @@ impl GatewayManager {
                 "gateway old upstream pool drain finish"
             );
         }
+        *self.protected_route_index.write().await =
+            ProtectedRouteIndex::from_routes(&cfg.protected_mcp_routes);
         *self.config.write().await = cfg;
         let current_cfg = self.config.read().await.clone();
         let current_pool = self.runtime.current_pool().await;

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { Eye, EyeOff, Search, SlidersHorizontal, X } from 'lucide-react'
 
@@ -73,6 +73,7 @@ export function PrimitiveExposureTable({
   const [isSaving, setIsSaving] = useState(false)
 
   const effectiveSearch = searchValue ?? search
+  const deferredSearch = useDeferredValue(effectiveSearch)
   const setEffectiveSearch = onSearchValueChange ?? setSearch
 
   useEffect(() => {
@@ -96,7 +97,7 @@ export function PrimitiveExposureTable({
   }, [items])
 
   const filteredItems = useMemo(() => {
-    const term = effectiveSearch.trim().toLowerCase()
+    const term = deferredSearch.trim().toLowerCase()
     return items.filter((item) => {
       const matchesFilter =
         filter === 'all'
@@ -111,7 +112,7 @@ export function PrimitiveExposureTable({
         item.secondary?.toLowerCase().includes(term)
       return matchesFilter && matchesSearch
     })
-  }, [effectiveSearch, filter, items])
+  }, [deferredSearch, filter, items])
 
   const filteredNames = filteredItems.map((item) => item.name)
   const selectedRowSet = useMemo(() => new Set(selectedRows), [selectedRows])

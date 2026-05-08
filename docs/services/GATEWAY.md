@@ -25,8 +25,8 @@ Secrets remain indirect:
 
 The complete gateway action inventory is generated from `ActionSpec`:
 
-- [generated action catalog](./generated/action-catalog.md)
-- [generated action catalog JSON](./generated/action-catalog.json)
+- [generated action catalog](../generated/action-catalog.md)
+- [generated action catalog JSON](../generated/action-catalog.json)
 
 `gateway.add`, `gateway.update`, `gateway.remove`, and `gateway.reload` are
 destructive actions in shared action metadata. HTTP callers must send
@@ -212,10 +212,342 @@ POST /v1/gateway
 { "action": "gateway.update", "params": { "confirm": true, "name": "remote-lab", "patch": { "proxy_resources": true } } }
 ```
 
+## Gateway-Managed Protected MCP Routes
+
+Gateway-managed protected MCP routes let Lab publish an arbitrary MCP backend at
+a public host/path while Lab owns the OAuth protected-resource metadata,
+challenge, token validation, and public error contract. The edge proxy points
+the public MCP URL at Lab; Lab then proxies accepted Streamable HTTP MCP traffic
+to the configured backend origin and MCP path.
+
+Use this for inline MCP services that should look like their own public OAuth
+protected resources instead of appearing only as tools merged into Lab's `/mcp`
+catalog.
+
+Example public route:
+
+```text
+https://mcp.example.com/syslog
+```
+
+Example backend target:
+
+```text
+http://100.88.16.79:3100/mcp
+```
+
+Persisted config lives in `[[protected_mcp_routes]]` entries in
+`~/.config/lab/config.toml`:
+
+```toml
+[[protected_mcp_routes]]
+name = "syslog"
+enabled = true
+public_host = "mcp.example.com"
+public_path = "/syslog"
+backend_url = "http://100.88.16.79:3100"
+backend_mcp_path = "/mcp"
+scopes = ["mcp:read", "mcp:write"]
+health_path = "/health"
+```
+
+Fields:
+
+| Field | Purpose |
+|-------|---------|
+| `name` | Stable operator-facing route id. |
+| `enabled` | Whether the route participates in metadata, challenge, auth, and proxy resolution. Defaults to `true`. |
+| `public_host` | Bare public host only. Do not include scheme, port, or path. |
+| `public_path` | Public MCP path prefix. Must include a service segment and cannot use Lab-reserved paths like `/mcp`, `/.well-known/*`, or `/v1/*`. |
+| `backend_url` | Backend origin only, for example `http://100.88.16.79:3100`. Put `/mcp` in `backend_mcp_path`, not here. |
+| `backend_mcp_path` | Backend Streamable HTTP MCP endpoint path. Defaults to `/mcp`. |
+| `scopes` | OAuth scopes advertised and enforced for this route. Defaults to `mcp:read` and `mcp:write`. |
+| `health_path` | Optional backend health path used by route test actions. |
+
+Management actions:
+
+```json
+{ "action": "gateway.protected_route.list", "params": {} }
+{ "action": "gateway.protected_route.get", "params": { "name": "syslog" } }
+{ "action": "gateway.protected_route.test", "params": { "route": { "name": "syslog", "public_host": "mcp.example.com", "public_path": "/syslog", "backend_url": "http://100.88.16.79:3100", "backend_mcp_path": "/mcp" } } }
+{ "action": "gateway.protected_route.add", "params": { "route": { "name": "syslog", "public_host": "mcp.example.com", "public_path": "/syslog", "backend_url": "http://100.88.16.79:3100", "backend_mcp_path": "/mcp", "scopes": ["mcp:read", "mcp:write"] } } }
+{ "action": "gateway.protected_route.update", "params": { "name": "syslog", "route": { "name": "syslog", "enabled": false, "public_host": "mcp.example.com", "public_path": "/syslog", "backend_url": "http://100.88.16.79:3100", "backend_mcp_path": "/mcp" } } }
+{ "action": "gateway.protected_route.remove", "params": { "name": "syslog" } }
+```
+
+CLI equivalents:
+
+```bash
+labby gateway protected-route list
+labby gateway protected-route get syslog
+labby gateway protected-route test \
+  --name syslog \
+  --public-host mcp.example.com \
+  --public-path /syslog \
+  --backend-url http://100.88.16.79:3100 \
+  --backend-mcp-path /mcp
+labby gateway protected-route add \
+  --name syslog \
+  --public-host mcp.example.com \
+  --public-path /syslog \
+  --backend-url http://100.88.16.79:3100 \
+  --backend-mcp-path /mcp \
+  --scope mcp:read \
+  --scope mcp:write
+labby gateway protected-route update syslog \
+  --public-host mcp.example.com \
+  --public-path /syslog \
+  --backend-url http://100.88.16.79:3100 \
+  --backend-mcp-path /mcp \
+  --enabled false
+labby gateway protected-route remove syslog
+```
+
+### Migration From Legacy Env Routes
+
+Older inline MCP proxy experiments used service-specific env vars such as
+`MCP_<SERVICE>_URLS` or `MCP_<SERVICE>_BACKEND`. Move those values into a
+Gateway-managed route instead:
+
+| Legacy value | New Gateway field |
+|--------------|-------------------|
+| Service name in `MCP_<SERVICE>_*` | `name` |
+| Public host from the URL clients used | `public_host` |
+| Public path from the URL clients used | `public_path` |
+| Backend origin from `MCP_<SERVICE>_BACKEND` | `backend_url` |
+| Backend MCP path from `MCP_<SERVICE>_BACKEND` | `backend_mcp_path` |
+| Required OAuth scope policy | `scopes` |
+
+For example, replace:
+
+```bash
+MCP_SYSLOG_URLS=https://mcp.example.com/syslog
+MCP_SYSLOG_BACKEND=http://100.88.16.79:3100/mcp
+```
+
+with:
+
+```bash
+labby gateway protected-route add \
+  --name syslog \
+  --public-host mcp.example.com \
+  --public-path /syslog \
+  --backend-url http://100.88.16.79:3100 \
+  --backend-mcp-path /mcp
+```
+
+The same fields are exposed in the Lab Gateway UI. Prefer the UI/CLI fields over
+ad hoc env parsing so route validation, duplicate detection, OAuth metadata,
+and public error redaction all use the same source of truth.
+
+### Edge Proxy Requirements
+
+The edge proxy must preserve the request authority and scheme Lab uses to match
+the configured public resource:
+
+- preserve `Host`
+- set `X-Forwarded-Proto` to the original client scheme
+- forward `Authorization`, `Accept`, `Content-Type`, and MCP session headers
+- disable request/response buffering for the MCP proxy path
+- avoid response compression on the MCP proxy path
+- use long read/write/idle timeouts suitable for Streamable HTTP and SSE
+- do not rewrite the public path before Lab sees it
+
+Public route OAuth is not the same as Lab's static bearer compatibility path.
+`Authorization: Bearer $LAB_MCP_HTTP_TOKEN` remains an operator/admin shortcut
+for Lab-protected routes and must not be treated as an OAuth-authenticated
+public MCP route unless the route is explicitly configured to accept that mode.
+
+Public errors must not leak backend origins, backend paths, private IPs, token
+env var names, or upstream transport errors. Unknown, disabled, unhealthy, and
+auth-failed routes should return stable public errors that identify only the
+public route and public error kind.
+
+### SWAG / nginx
+
+For SWAG or plain nginx, route the MCP host/path to Lab and keep streaming
+behavior unbuffered:
+
+```nginx
+location /syslog {
+    proxy_pass http://labby:8765;
+    proxy_http_version 1.1;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header Authorization $http_authorization;
+    proxy_set_header Accept $http_accept;
+    proxy_set_header Content-Type $content_type;
+
+    proxy_buffering off;
+    proxy_request_buffering off;
+    gzip off;
+    proxy_read_timeout 1h;
+    proxy_send_timeout 1h;
+}
+
+location /.well-known/oauth-protected-resource/syslog {
+    proxy_pass http://labby:8765;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+If your SWAG include stack has a shared OAuth discovery location, make sure it
+does not swallow path-suffixed metadata such as
+`/.well-known/oauth-protected-resource/syslog`. Those requests must reach Lab.
+
+### Traefik
+
+With Traefik, match both the public MCP path and the route-specific protected
+resource metadata path, and forward to the Lab service:
+
+```yaml
+http:
+  routers:
+    syslog-mcp:
+      rule: Host(`mcp.example.com`) && (PathPrefix(`/syslog`) || PathPrefix(`/.well-known/oauth-protected-resource/syslog`))
+      entryPoints: [websecure]
+      service: labby
+      tls: {}
+  services:
+    labby:
+      loadBalancer:
+        servers:
+          - url: http://labby:8765
+        passHostHeader: true
+```
+
+Do not attach compression or buffering middleware to this router. Set transport
+timeouts high enough for long-lived SSE reads.
+
+### Generic Tunnels
+
+For Cloudflare Tunnel, Tailscale Funnel, Pangolin, or another generic tunnel,
+publish the public host to Lab's HTTP listener and keep the path intact. The
+tunnel or local reverse proxy in front of Lab must pass the original `Host` and
+scheme-equivalent `X-Forwarded-Proto` headers. Avoid tunnel features that buffer
+large request bodies, compress event streams, or enforce short idle timeouts on
+SSE connections.
+
+### Verification Checklist
+
+Set:
+
+```bash
+BASE=https://mcp.example.com
+ROUTE=/syslog
+TOKEN=<lab-oauth-access-token-for-this-resource>
+SESSION=<mcp-session-id-from-initialize-response>
+```
+
+Metadata is public and route-specific:
+
+```bash
+curl -i "$BASE/.well-known/oauth-protected-resource$ROUTE"
+```
+
+Expected:
+
+- `200`
+- JSON `resource` is `https://mcp.example.com/syslog`
+- `authorization_servers` points at the Lab issuer/public URL
+- `scopes_supported` includes the route scopes
+- no backend URL appears in headers or body
+
+Unauthenticated MCP request returns a challenge:
+
+```bash
+curl -i -X POST "$BASE$ROUTE" \
+  -H 'Content-Type: application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
+```
+
+Expected:
+
+- `401`
+- `WWW-Authenticate: Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/syslog"`
+- structured public auth error
+- no backend URL appears in headers or body
+
+OAuth resource flow:
+
+```bash
+curl -i "$BASE/.well-known/oauth-protected-resource$ROUTE"
+```
+
+Use the advertised authorization server to request a token for resource
+`https://mcp.example.com/syslog` and the configured scopes. The resulting access
+token must be presented to the public route, not to the backend.
+
+Streamable HTTP initialize:
+
+```bash
+curl -i -X POST "$BASE$ROUTE" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
+```
+
+Expected:
+
+- success response from the backend MCP server
+- MCP session header present when the backend is stateful
+- no public response reveals `backend_url`
+
+GET SSE stream:
+
+```bash
+curl -i -N "$BASE$ROUTE" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Mcp-Session-Id: $SESSION" \
+  -H 'Accept: text/event-stream'
+```
+
+Expected:
+
+- `200` with `Content-Type: text/event-stream`, or the backend's valid MCP
+  stream response
+- no buffering-delayed first bytes once the backend emits events
+- connection is not closed by the edge timeout during normal idle periods
+
+DELETE session:
+
+```bash
+curl -i -X DELETE "$BASE$ROUTE" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Mcp-Session-Id: $SESSION"
+```
+
+Expected:
+
+- backend MCP session is terminated or acknowledged according to backend
+  Streamable HTTP behavior
+- no backend URL appears in headers or body
+
+Disabled and unknown route behavior:
+
+```bash
+curl -i "$BASE/.well-known/oauth-protected-resource/disabled"
+curl -i -X POST "$BASE/disabled" -H 'Content-Type: application/json' --data '{}'
+curl -i "$BASE/.well-known/oauth-protected-resource/not-a-route"
+curl -i -X POST "$BASE/not-a-route" -H 'Content-Type: application/json' --data '{}'
+```
+
+Expected:
+
+- disabled routes do not advertise protected-resource metadata and do not proxy
+  to the backend
+- unknown routes do not advertise metadata and do not proxy to any backend
+- public errors are stable and redacted; they must not reveal backend origins,
+  backend paths, private IPs, or configured token env var names
+
 ## Upstream OAuth Routes
 
 For upstreams configured with `[upstream.oauth]` (see
-[CONFIG.md](./CONFIG.md#upstream-oauth-authorization_code--pkce) and
+[CONFIG.md](../runtime/CONFIG.md#upstream-oauth-authorization_code--pkce) and
 [UPSTREAM.md](./UPSTREAM.md#upstream-oauth-authorization_code--pkce)), the
 gateway mounts four master-only HTTP routes. All four require an authenticated
 session and the master-only middleware; non-master sessions get `403`.

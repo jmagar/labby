@@ -90,6 +90,7 @@ impl ByteStashClient {
 
     /// Get one snippet.
     pub async fn snippet_get(&self, id: &str) -> Result<Value, ByteStashError> {
+        let id = HttpClient::encode_path_segment(id);
         self.get_value(&format!("/api/snippets/{id}")).await
     }
 
@@ -107,11 +108,13 @@ impl ByteStashClient {
         id: &str,
         body: &B,
     ) -> Result<Value, ByteStashError> {
+        let id = HttpClient::encode_path_segment(id);
         self.put_value(&format!("/api/snippets/{id}"), body).await
     }
 
     /// Delete a snippet.
     pub async fn snippets_delete(&self, id: &str) -> Result<(), ByteStashError> {
+        let id = HttpClient::encode_path_segment(id);
         self.delete_value(&format!("/api/snippets/{id}")).await
     }
 
@@ -122,6 +125,7 @@ impl ByteStashClient {
 
     /// Get one public snippet.
     pub async fn snippets_public_get(&self, id: &str) -> Result<Value, ByteStashError> {
+        let id = HttpClient::encode_path_segment(id);
         self.get_value(&format!("/api/public/snippets/{id}")).await
     }
 
@@ -135,6 +139,7 @@ impl ByteStashClient {
 
     /// Get a shared snippet.
     pub async fn snippets_share_get(&self, share_id: &str) -> Result<Value, ByteStashError> {
+        let share_id = HttpClient::encode_path_segment(share_id);
         self.get_value(&format!("/api/share/{share_id}")).await
     }
 
@@ -169,6 +174,7 @@ impl ByteStashClient {
 
     /// Toggle a user's active status (admin only — requires `ByteStash` with admin routes).
     pub async fn users_toggle_active(&self, id: &str) -> Result<Value, ByteStashError> {
+        let id = HttpClient::encode_path_segment(id);
         self.patch_value(
             &format!("/api/admin/users/{id}/toggle-active"),
             &serde_json::json!({}),
@@ -178,6 +184,7 @@ impl ByteStashClient {
 
     /// Delete a user (admin only — requires `ByteStash` with admin routes).
     pub async fn users_delete(&self, id: &str) -> Result<(), ByteStashError> {
+        let id = HttpClient::encode_path_segment(id);
         self.delete_value(&format!("/api/admin/users/{id}")).await
     }
 }

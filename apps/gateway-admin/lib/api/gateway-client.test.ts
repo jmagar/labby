@@ -292,6 +292,57 @@ test('gatewayApi.setToolSearchConfig sends confirm=true for gateway-wide updates
   )
 })
 
+test('gatewayApi protected route actions use gateway service action payloads', async () => {
+  const route = {
+    name: 'syslog',
+    enabled: true,
+    public_host: 'mcp.example.com',
+    public_path: '/syslog',
+    backend_url: 'http://100.88.16.79:3100',
+    backend_mcp_path: '/mcp',
+    scopes: ['mcp:syslog'],
+    health_path: '/health',
+  }
+
+  await withGatewayFetch(
+    {
+      'gateway.protected_route.list': () => [route],
+      'gateway.protected_route.get': () => route,
+      'gateway.protected_route.test': () => ({
+        ok: true,
+        route,
+        resource: 'https://mcp.example.com/syslog',
+        metadata_url: 'https://mcp.example.com/.well-known/oauth-protected-resource/syslog',
+      }),
+      'gateway.protected_route.add': () => route,
+      'gateway.protected_route.update': () => route,
+      'gateway.protected_route.remove': () => route,
+    },
+    async (requests) => {
+      assert.deepEqual(await gatewayApi.listProtectedRoutes(), [route])
+      assert.deepEqual(await gatewayApi.getProtectedRoute('syslog'), route)
+      assert.equal((await gatewayApi.testProtectedRoute(route)).ok, true)
+      await gatewayApi.addProtectedRoute(route)
+      await gatewayApi.updateProtectedRoute('syslog', route)
+      await gatewayApi.removeProtectedRoute('syslog')
+
+      assert.deepEqual(requests.map((request) => request.action), [
+        'gateway.protected_route.list',
+        'gateway.protected_route.get',
+        'gateway.protected_route.test',
+        'gateway.protected_route.add',
+        'gateway.protected_route.update',
+        'gateway.protected_route.remove',
+      ])
+      assert.deepEqual(requests[1]?.params, { name: 'syslog' })
+      assert.deepEqual(requests[2]?.params, { route })
+      assert.equal(requests[3]?.params.confirm, true)
+      assert.equal(requests[4]?.params.confirm, true)
+      assert.equal(requests[5]?.params.confirm, true)
+    },
+  )
+})
+
 test('gatewayApi.setExposurePolicy sends confirm=true when updating a gateway config', async () => {
   await withGatewayFetch(
     {

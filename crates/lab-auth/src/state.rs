@@ -1,5 +1,6 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 use std::time::Instant;
 
 use tracing::info;
@@ -68,6 +69,7 @@ pub struct AuthState {
     pub store: SqliteStore,
     pub signing_keys: Arc<SigningKeys>,
     pub google: Arc<GoogleProvider>,
+    allowed_resource_urls: Arc<RwLock<BTreeSet<String>>>,
     authorize_limiter: RateLimiter,
     register_limiter: RateLimiter,
 }
@@ -109,9 +111,36 @@ impl AuthState {
             store,
             signing_keys: Arc::new(signing_keys),
             google: Arc::new(google),
+            allowed_resource_urls: Arc::new(RwLock::new(BTreeSet::new())),
             authorize_limiter,
             register_limiter,
         })
+    }
+
+    /// Replace the extra OAuth resource audiences accepted by `/authorize` and `/token`.
+    ///
+    /// The canonical `{LAB_PUBLIC_URL}/mcp` resource is always accepted; callers use this
+    /// to publish Gateway-managed protected MCP resources such as
+    /// `https://mcp.example.com/syslog` or `https://syslog.example.com/mcp`.
+    pub fn set_allowed_resource_urls(&self, resources: impl IntoIterator<Item = String>) {
+        let mut allowed = self
+            .allowed_resource_urls
+            .write()
+            .expect("allowed resource url lock");
+        allowed.clear();
+        allowed.extend(
+            resources
+                .into_iter()
+                .map(|resource| resource.trim().trim_end_matches('/').to_string())
+                .filter(|resource| !resource.is_empty()),
+        );
+    }
+
+    pub fn is_allowed_resource_url(&self, resource: &str) -> bool {
+        self.allowed_resource_urls
+            .read()
+            .expect("allowed resource url lock")
+            .contains(resource.trim().trim_end_matches('/'))
     }
 
     /// Rate-limit guard for `/authorize` and `/browser_login` endpoints.
@@ -183,6 +212,7 @@ impl AuthState {
             store,
             signing_keys: Arc::new(signing_keys),
             google: Arc::new(google),
+            allowed_resource_urls: Arc::new(RwLock::new(BTreeSet::new())),
             authorize_limiter,
             register_limiter,
         }

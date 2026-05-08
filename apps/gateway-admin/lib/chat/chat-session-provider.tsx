@@ -214,6 +214,8 @@ export function ChatSessionProvider({
     () => runs.find((run) => run.id === selectedRunId) ?? null,
     [runs, selectedRunId],
   )
+  const selectedRunProviderSyncId = selectedRun?.id ?? null
+  const selectedRunProvider = selectedRun?.provider ?? null
 
   const projects = React.useMemo(
     () =>
@@ -328,6 +330,15 @@ export function ChatSessionProvider({
     refreshProviderRef.current = refreshProvider
   }, [refreshProvider])
 
+  React.useEffect(() => {
+    if (USE_MOCK_DATA) return
+    const handleProvidersChanged = () => {
+      void refreshProviderRef.current?.()
+    }
+    window.addEventListener('lab:acp-providers-changed', handleProvidersChanged)
+    return () => window.removeEventListener('lab:acp-providers-changed', handleProvidersChanged)
+  }, [])
+
   const createSession = React.useCallback<CreateSessionFn>(
     async (createOptions?: CreateSessionOptions) => {
       if (isCreatingRef.current) {
@@ -336,11 +347,13 @@ export function ChatSessionProvider({
       }
       isCreatingRef.current = true
       try {
+        const provider = createOptions?.providerId ?? selectedProviderId ?? providerHealth?.provider ?? 'codex-acp'
+        const model = createOptions?.modelId ?? selectedModel?.id ?? null
         const response = await fetchAcp('/sessions', {
           method: 'POST',
           body: JSON.stringify({
-            provider: selectedProviderId ?? providerHealth?.provider ?? 'codex-acp',
-            ...(selectedModel?.id && { model: selectedModel.id }),
+            provider,
+            ...(model && { model }),
           }),
         })
         const payload = await readJsonSafe<SessionCreatePayload | ErrorPayload>(response)
@@ -411,6 +424,11 @@ export function ChatSessionProvider({
     if (!provider?.models?.some((model) => model.id === modelId)) return
     setSelectedModelByProvider((current) => ({ ...current, [providerId]: modelId }))
   }, [providers])
+
+  React.useEffect(() => {
+    if (!selectedRunProviderSyncId || !selectedRunProvider) return
+    setSelectedProviderId(selectedRunProvider)
+  }, [selectedRunProviderSyncId, selectedRunProvider])
 
   const sendPrompt = React.useCallback<ChatSessionActionsContextValue['sendPrompt']>(
     async (payload, options) => {

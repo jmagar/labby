@@ -111,7 +111,7 @@ pub async fn perform_sync(
     let sync_result = store
         .sync_from_upstream(client, trigger)
         .await
-        .map_err(|e| ToolError::internal_message(format!("sync failed: {e}")));
+        .map_err(ToolError::from);
 
     if rate_limit {
         *last_sync_at().lock().unwrap() = Some(std::time::Instant::now());
@@ -195,6 +195,7 @@ mod tests {
             "items_synced",
             "error_count",
             "kind = error.kind()",
+            "map_err(ToolError::from)",
         ] {
             assert!(source.contains(required), "missing {required}");
         }

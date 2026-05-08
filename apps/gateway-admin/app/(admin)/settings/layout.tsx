@@ -11,7 +11,7 @@ export default function SettingsLayout({
 }): React.ReactElement {
   return (
     <div className="flex flex-col">
-      <AppHeader />
+      <AppHeader breadcrumbs={[{ label: 'Settings' }]} />
       <div className="grid min-w-0 gap-4 p-4 sm:p-6 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-6">
         <aside className="min-w-0 rounded-md border bg-card">
           <SettingsRail />

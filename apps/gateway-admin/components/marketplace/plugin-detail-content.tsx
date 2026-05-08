@@ -141,9 +141,9 @@ export function PluginDetailContent({ pluginId }: { pluginId: string }) {
               <div className="mb-[5px] text-[10px] font-bold uppercase tracking-[0.16em] leading-none text-aurora-text-muted">
                 {marketplace?.name ?? plugin.marketplaceId}
               </div>
-              <div className="font-display text-[22px] font-bold tracking-[-0.02em] leading-[1.12] text-aurora-text-primary">
+              <h1 className="font-display text-[22px] font-bold leading-[1.12] text-aurora-text-primary">
                 {plugin.name}
-              </div>
+              </h1>
               <div className="mt-[6px] flex flex-wrap items-center gap-[6px]">
                 <span className="rounded-full border border-aurora-border-default bg-aurora-control-surface px-[10px] py-[3px] text-[11px] font-semibold text-aurora-text-muted">
                   v{plugin.version}

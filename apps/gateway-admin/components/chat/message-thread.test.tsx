@@ -98,7 +98,7 @@ test('touch selection shows actions and timestamp for one message and selecting 
 
   const bubbles = view.container.querySelectorAll('[data-message-id]')
   await act(async () => {
-    bubbles[0]!.click()
+    ;(bubbles[0] as HTMLElement).click()
   })
   assert.equal(
     view.container.querySelector('[data-message-id="m1"] [aria-label="Message actions"]')?.getAttribute('data-selected'),
@@ -110,7 +110,7 @@ test('touch selection shows actions and timestamp for one message and selecting 
   )
 
   await act(async () => {
-    bubbles[1]!.click()
+    ;(bubbles[1] as HTMLElement).click()
   })
   assert.equal(
     view.container.querySelector('[data-message-id="m1"] [aria-label="Message actions"]')?.getAttribute('data-selected'),

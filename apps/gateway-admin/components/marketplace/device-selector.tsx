@@ -13,6 +13,19 @@ export interface DeviceSelectorProps {
   className?: string
 }
 
+const LOCAL_CHAT_DEVICE: FleetDevice = {
+  node_id: 'local',
+  connected: true,
+  role: 'controller',
+}
+
+function withLocalChatDevice(devices: FleetDevice[]): FleetDevice[] {
+  if (devices.some((device) => device.node_id === LOCAL_CHAT_DEVICE.node_id)) {
+    return devices
+  }
+  return [LOCAL_CHAT_DEVICE, ...devices]
+}
+
 function PlatformBadge({
   label,
   enabled,
@@ -55,6 +68,7 @@ function DeviceRow({
   onToggle: (id: string) => void
 }) {
   const checkboxId = `device-select-${device.node_id}`
+  const isLocalChatTarget = device.node_id === LOCAL_CHAT_DEVICE.node_id
 
   return (
     <label
@@ -116,9 +130,15 @@ function DeviceRow({
 
       {/* Platform badges */}
       <div className="flex items-center gap-1 flex-shrink-0">
-        <PlatformBadge label="Claude" enabled={true} />
-        <PlatformBadge label="Codex" enabled={false} />
-        <PlatformBadge label="Gemini" enabled={false} />
+        {isLocalChatTarget ? (
+          <PlatformBadge label="Chat" enabled={true} />
+        ) : (
+          <>
+            <PlatformBadge label="Claude" enabled={true} />
+            <PlatformBadge label="Codex" enabled={false} />
+            <PlatformBadge label="Gemini" enabled={false} />
+          </>
+        )}
       </div>
     </label>
   )
@@ -136,10 +156,14 @@ export function DeviceSelector({ selected, onChange, className }: DeviceSelector
 
     fetchFleetDevices(controller.signal)
       .then(data => {
-        setDevices(data)
+        const nextDevices = withLocalChatDevice(data)
+        setDevices(nextDevices)
         // Pre-select the first device (local/master) if nothing selected yet
-        if (selected.length === 0 && data.length > 0) {
-          const localDevice = data.find(d => d.role === 'master') ?? data[0]
+        if (selected.length === 0 && nextDevices.length > 0) {
+          const localDevice =
+            nextDevices.find(d => d.node_id === LOCAL_CHAT_DEVICE.node_id) ??
+            nextDevices.find(d => d.role === 'master') ??
+            nextDevices[0]
           if (localDevice) {
             onChange([localDevice.node_id])
           }

@@ -90,7 +90,7 @@ export function DataDisplaySection() {
           <section className={cn(AURORA_MEDIUM_PANEL, 'space-y-4 px-4 py-4')}>
             <p className="text-sm font-medium text-aurora-text-primary">Dense table rows</p>
             <div className="aurora-scrollbar overflow-x-auto">
-            <Table className="min-w-[560px]">
+            <Table className="min-w-0 md:min-w-[560px]">
               <TableHeader>
                 <TableRow className="border-aurora-border-strong text-aurora-text-muted">
                   <TableHead>Gateway</TableHead>

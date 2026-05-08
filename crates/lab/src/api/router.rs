@@ -93,6 +93,16 @@ fn app_auth_state(state: &AppState) -> Result<lab_auth::state::AuthState, LabAut
         .ok_or_else(|| LabAuthError::Config("oauth auth state is not configured".to_string()))
 }
 
+async fn app_auth_state_with_protected_routes(
+    state: &AppState,
+) -> Result<lab_auth::state::AuthState, LabAuthError> {
+    let auth_state = app_auth_state(state)?;
+    if let Some(manager) = state.gateway_manager.as_ref() {
+        auth_state.set_allowed_resource_urls(manager.protected_route_resources().await);
+    }
+    Ok(auth_state)
+}
+
 async fn auth_authorization_server_metadata(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, LabAuthError> {
@@ -101,8 +111,68 @@ async fn auth_authorization_server_metadata(
 
 async fn auth_protected_resource_metadata(
     State(state): State<AppState>,
+    request: Request<Body>,
 ) -> Result<impl IntoResponse, LabAuthError> {
+    if let (Some(manager), Some(host)) = (state.gateway_manager.as_ref(), request_host(&request))
+        && let Some(route) = manager
+            .resolve_protected_route_metadata(&host, request.uri().path())
+            .await
+    {
+        let auth_state = app_auth_state_with_protected_routes(&state).await?;
+        let public_url = auth_state
+            .config
+            .public_url
+            .as_ref()
+            .ok_or_else(|| LabAuthError::Config("LAB_PUBLIC_URL is required".to_string()))?;
+        return Ok(Json(lab_auth::types::ProtectedResourceMetadata {
+            resource: route.public_resource(),
+            authorization_servers: vec![public_url.as_str().trim_end_matches('/').to_string()],
+            scopes_supported: route.scopes,
+            bearer_methods_supported: vec!["header".to_string()],
+        }));
+    }
     Ok(lab_auth::metadata::protected_resource_metadata(State(app_auth_state(&state)?)).await)
+}
+
+async fn protected_route_resource_metadata(
+    State(state): State<AppState>,
+    request: Request<Body>,
+) -> axum::response::Response {
+    let Some(manager) = state.gateway_manager.as_ref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Some(host) = request_host(&request) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let path = request.uri().path();
+    let Some(route) = manager.resolve_protected_route_metadata(&host, path).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    protected_route_metadata_response(&state, route).await
+}
+
+async fn protected_route_metadata_response(
+    state: &AppState,
+    route: crate::config::ProtectedMcpRouteConfig,
+) -> axum::response::Response {
+    let Ok(auth_state) = app_auth_state_with_protected_routes(&state).await else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let Some(public_url) = auth_state.config.public_url.as_ref() else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let mut response = Json(lab_auth::types::ProtectedResourceMetadata {
+        resource: route.public_resource(),
+        authorization_servers: vec![public_url.as_str().trim_end_matches('/').to_string()],
+        scopes_supported: route.scopes,
+        bearer_methods_supported: vec!["header".to_string()],
+    })
+    .into_response();
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=3600"),
+    );
+    response
 }
 
 async fn auth_jwks(State(state): State<AppState>) -> Result<impl IntoResponse, LabAuthError> {
@@ -120,7 +190,11 @@ async fn auth_authorize(
     State(state): State<AppState>,
     query: Query<lab_auth::types::AuthorizeQuery>,
 ) -> Result<impl IntoResponse, LabAuthError> {
-    Ok(lab_auth::authorize::authorize(State(app_auth_state(&state)?), query).await?)
+    Ok(lab_auth::authorize::authorize(
+        State(app_auth_state_with_protected_routes(&state).await?),
+        query,
+    )
+    .await?)
 }
 
 async fn auth_browser_login(
@@ -141,7 +215,11 @@ async fn auth_token(
     State(state): State<AppState>,
     form: axum::extract::Form<lab_auth::types::TokenRequest>,
 ) -> Result<impl IntoResponse, LabAuthError> {
-    Ok(lab_auth::token::token(State(app_auth_state(&state)?), form).await?)
+    Ok(lab_auth::token::token(
+        State(app_auth_state_with_protected_routes(&state).await?),
+        form,
+    )
+    .await?)
 }
 
 fn auth_error_response(message: &str, resource_url: Option<&str>) -> axum::response::Response {
@@ -159,6 +237,229 @@ fn auth_error_response(message: &str, resource_url: Option<&str>) -> axum::respo
         }
     }
     response
+}
+
+fn request_host(request: &Request<Body>) -> Option<String> {
+    request
+        .headers()
+        .get("x-forwarded-host")
+        .or_else(|| request.headers().get(header::HOST))
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn route_metadata_url(route: &crate::config::ProtectedMcpRouteConfig) -> String {
+    format!(
+        "https://{}/.well-known/oauth-protected-resource{}",
+        route.public_host, route.public_path
+    )
+}
+
+async fn authenticate_protected_route_request(
+    request: &mut Request<Body>,
+    route: &crate::config::ProtectedMcpRouteConfig,
+    auth_state: Option<&lab_auth::state::AuthState>,
+    actor_key_deriver: Option<&crate::observability::activity::ActorKeyDeriver>,
+) -> Result<(), axum::response::Response> {
+    let resource = route.public_resource();
+    let auth_header = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(parse_bearer_token);
+    let Some(token) = auth_header else {
+        return Err(auth_error_response(
+            "missing bearer token",
+            Some(&route_metadata_url(route)),
+        ));
+    };
+    let Some(auth_state) = auth_state else {
+        return Err(auth_error_response(
+            "oauth auth state is not configured",
+            Some(&route_metadata_url(route)),
+        ));
+    };
+    let Some(expected_issuer) = auth_state
+        .config
+        .public_url
+        .as_ref()
+        .map(|url| url.as_str().trim_end_matches('/').to_string())
+    else {
+        return Err(auth_error_response(
+            "server misconfigured: LAB_PUBLIC_URL required for JWT validation",
+            Some(&route_metadata_url(route)),
+        ));
+    };
+    let claims = auth_state
+        .signing_keys
+        .validate_access_token(&token, &resource)
+        .map_err(|error| {
+            tracing::debug!(error = %error, resource = %resource, "protected route JWT validation failed");
+            auth_error_response("invalid bearer token", Some(&route_metadata_url(route)))
+        })?;
+    if claims.iss != expected_issuer {
+        return Err(auth_error_response(
+            "invalid bearer token",
+            Some(&route_metadata_url(route)),
+        ));
+    }
+    let required_scopes = route.scopes.iter().map(String::as_str).collect::<Vec<_>>();
+    let granted = claims.scope.split_whitespace().collect::<Vec<_>>();
+    if !required_scopes
+        .iter()
+        .all(|required| granted.iter().any(|scope| scope == required))
+    {
+        return Err(ToolError::Sdk {
+            sdk_kind: "forbidden".into(),
+            message: "insufficient OAuth scope for protected MCP route".into(),
+        }
+        .into_response());
+    }
+    request
+        .extensions_mut()
+        .insert(crate::api::oauth::AuthContext {
+            actor_key: derive_actor_key(actor_key_deriver, &claims.sub),
+            sub: claims.sub,
+            scopes: granted.into_iter().map(ToOwned::to_owned).collect(),
+            issuer: claims.iss,
+            via_session: false,
+            csrf_token: None,
+            email: None,
+        });
+    Ok(())
+}
+
+async fn proxy_protected_mcp_route(
+    request: Request<Body>,
+    route: crate::config::ProtectedMcpRouteConfig,
+) -> axum::response::Response {
+    let suffix = request
+        .uri()
+        .path()
+        .strip_prefix(&route.public_path)
+        .unwrap_or("");
+    let mut upstream = match reqwest::Url::parse(&route.backend_url) {
+        Ok(url) => url,
+        Err(_) => return StatusCode::BAD_GATEWAY.into_response(),
+    };
+    let mut backend_path = route.backend_mcp_path.trim_end_matches('/').to_string();
+    if !suffix.is_empty() {
+        backend_path.push('/');
+        backend_path.push_str(suffix.trim_start_matches('/'));
+    }
+    upstream.set_path(&backend_path);
+    upstream.set_query(request.uri().query());
+
+    let method = request.method().clone();
+    let headers = request.headers().clone();
+    let body = match axum::body::to_bytes(request.into_body(), 50 * 1024 * 1024).await {
+        Ok(body) => body,
+        Err(error) => {
+            return ToolError::Sdk {
+                sdk_kind: "bad_request".into(),
+                message: format!("failed to read MCP request body: {error}"),
+            }
+            .into_response();
+        }
+    };
+    let mut builder = reqwest::Client::new().request(method, upstream);
+    for header_name in [
+        header::ACCEPT,
+        header::CONTENT_TYPE,
+        HeaderName::from_static("mcp-protocol-version"),
+        HeaderName::from_static("mcp-session-id"),
+        HeaderName::from_static("last-event-id"),
+    ] {
+        if let Some(value) = headers.get(&header_name) {
+            builder = builder.header(&header_name, value);
+        }
+    }
+    let upstream_response = match builder.body(body).send().await {
+        Ok(response) => response,
+        Err(error) => {
+            return ToolError::Sdk {
+                sdk_kind: "bad_gateway".into(),
+                message: format!("protected MCP backend request failed: {error}"),
+            }
+            .into_response();
+        }
+    };
+    let status = StatusCode::from_u16(upstream_response.status().as_u16())
+        .unwrap_or(StatusCode::BAD_GATEWAY);
+    let mut response = axum::response::Response::builder().status(status);
+    for header_name in [
+        header::CONTENT_TYPE,
+        header::CACHE_CONTROL,
+        HeaderName::from_static("mcp-session-id"),
+        HeaderName::from_static("mcp-protocol-version"),
+    ] {
+        if let Some(value) = upstream_response.headers().get(&header_name) {
+            response = response.header(&header_name, value);
+        }
+    }
+    response
+        .body(Body::from_stream(upstream_response.bytes_stream()))
+        .unwrap_or_else(|error| {
+            ToolError::Sdk {
+                sdk_kind: "bad_gateway".into(),
+                message: format!("failed to build protected MCP response: {error}"),
+            }
+            .into_response()
+        })
+}
+
+async fn protected_mcp_route_entry(
+    state: AppState,
+    mut request: Request<Body>,
+    route: crate::config::ProtectedMcpRouteConfig,
+) -> axum::response::Response {
+    let compatibility_metadata_path = format!(
+        "{}/.well-known/oauth-protected-resource",
+        route.public_path.trim_end_matches('/')
+    );
+    if *request.method() == Method::GET && request.uri().path() == compatibility_metadata_path {
+        return protected_route_metadata_response(&state, route).await;
+    }
+    if !matches!(
+        *request.method(),
+        Method::GET | Method::POST | Method::DELETE
+    ) {
+        return StatusCode::METHOD_NOT_ALLOWED.into_response();
+    }
+    if let Err(response) = authenticate_protected_route_request(
+        &mut request,
+        &route,
+        state.oauth_state.as_deref(),
+        state.actor_key_deriver.as_deref(),
+    )
+    .await
+    {
+        return response;
+    }
+    proxy_protected_mcp_route(request, route).await
+}
+
+async fn protected_mcp_intercept(
+    State(state): State<AppState>,
+    request: Request<Body>,
+    next: Next,
+) -> Result<axum::response::Response, std::convert::Infallible> {
+    let route = if let (Some(manager), Some(host)) =
+        (state.gateway_manager.as_ref(), request_host(&request))
+    {
+        manager
+            .resolve_protected_route(&host, request.uri().path())
+            .await
+    } else {
+        None
+    };
+    if let Some(route) = route {
+        return Ok(protected_mcp_route_entry(state, request, route).await);
+    }
+    Ok(next.run(request).await)
 }
 
 fn csrf_error_response(message: &str) -> axum::response::Response {
@@ -539,8 +840,8 @@ fn build_v0_1_router() -> Router<AppState> {
 // ── Dev mockup file server ────────────────────────────────────────────────
 // Implements the Tier 1 serving model from docs/design/component-development.md §5.
 // Serves self-contained HTML from ~/.superpowers/brainstorm/content/ at:
-//   GET /dev          → newest .html file
-//   GET /dev/{name}   → newest .html whose stem contains {name}
+//   GET /dev/mockup          → newest .html file
+//   GET /dev/mockup/{name}   → newest .html whose stem contains {name}
 //
 // Rules (enforced by the doc — do not violate):
 //   • These functions MUST live in router.rs alongside dev_marketplace_readonly.
@@ -754,6 +1055,16 @@ pub fn build_router(
     if let Some(ref auth_state) = auth_state {
         state = state.with_oauth_state(auth_state.clone());
     }
+    if let Some(auth_state) = auth_state.as_ref() {
+        auth_state.set_allowed_resource_urls(
+            state
+                .config
+                .protected_mcp_routes
+                .iter()
+                .filter(|route| route.enabled)
+                .map(crate::config::ProtectedMcpRouteConfig::public_resource),
+        );
+    }
     let static_token = bearer_token.map(Arc::<str>::from);
     state = state.with_bearer_token(static_token.clone());
     let auth_state = auth_state.map(Arc::new);
@@ -835,7 +1146,8 @@ pub fn build_router(
     let actor_key_deriver_for_mcp = state.actor_key_deriver.clone();
     let resource_url_for_mcp = resource_url.clone();
     let mcp_protected = mcp_router.map(|mcp| {
-        if needs_auth {
+        let protected_manager_present = state.gateway_manager.is_some() && auth_state.is_some();
+        let mcp = if needs_auth {
             mcp.route_layer(axum::middleware::from_fn(
                 move |request: Request<Body>, next: Next| {
                     authenticate_request(
@@ -848,6 +1160,14 @@ pub fn build_router(
                         false,
                     )
                 },
+            ))
+        } else {
+            mcp
+        };
+        if protected_manager_present {
+            mcp.route_layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                protected_mcp_intercept,
             ))
         } else {
             mcp
@@ -898,6 +1218,10 @@ pub fn build_router(
                 get(auth_authorization_server_metadata),
             )
             .route(
+                "/.well-known/oauth-protected-resource/{*route}",
+                get(protected_route_resource_metadata),
+            )
+            .route(
                 "/.well-known/oauth-protected-resource",
                 get(auth_protected_resource_metadata),
             )
@@ -921,20 +1245,18 @@ pub fn build_router(
     // over the SPA. See docs/design/component-development.md §5 (two-tier
     // serving model) for the full rationale.
     //
-    // /dev/api/*        → read-only dispatch endpoints (marketplace guard, nodeinfo)
-    // /dev, /dev/{name} → Tier 1 mockup file server: serves HTML from
+    // /dev/api/*                  → read-only dispatch endpoints (marketplace guard, nodeinfo)
+    // /dev/mockup, /dev/mockup/*  → Tier 1 mockup file server: serves HTML from
     //                     ~/.superpowers/brainstorm/content/{name}.html directly.
-    //                     Once a feature graduates to a real Next.js page at
-    //                     app/(admin)/dev/{name}/page.tsx, remove the corresponding
-    //                     dev_mockup_named handler entry.
+    //                     Keep this out of `/dev` so real Next.js dev pages can render.
     let dev_routes = Router::new()
         .route("/dev/api/marketplace", post(dev_marketplace_readonly))
         .route("/dev/api/nodeinfo", get(dev_nodeinfo))
         // Mockup page routes — MUST stay before the static fallback (docs/design/component-development.md §5)
-        .route("/dev", get(dev_mockup))
-        .route("/dev/", get(dev_mockup))
-        .route("/dev/{name}", get(dev_mockup_named))
-        .route("/dev/{name}/", get(dev_mockup_named));
+        .route("/dev/mockup", get(dev_mockup))
+        .route("/dev/mockup/", get(dev_mockup))
+        .route("/dev/mockup/{name}", get(dev_mockup_named))
+        .route("/dev/mockup/{name}/", get(dev_mockup_named));
     let dev_routes = if needs_auth {
         let auth_state_for_dev = auth_state.clone();
         let static_token_for_dev = static_token.clone();
@@ -958,11 +1280,13 @@ pub fn build_router(
     };
     router = router.merge(dev_routes);
 
-    // Static-file fallback for the Next.js SPA.
+    // Static-file fallback for the Next.js SPA. Protected MCP proxying is an
+    // outer middleware below so it bypasses the API timeout/compression stack.
     if state.web_assets_enabled() {
         router = router.fallback(crate::api::web::serve_web_request);
     }
 
+    let protected_proxy_state = state.clone();
     router
         .with_state(state)
         .layer(build_cors_layer(config_cors_origins))
@@ -991,6 +1315,10 @@ pub fn build_router(
                 )
             }),
         )
+        .layer(axum::middleware::from_fn_with_state(
+            protected_proxy_state,
+            protected_mcp_intercept,
+        ))
         // SetRequestId generates a UUID for every request that lacks one.
         .layer(SetRequestIdLayer::new(x_request_id, MakeRequestUuid))
 }
@@ -1120,6 +1448,8 @@ mod tests {
     use axum::body::Body;
     use axum::http::{Request, StatusCode, header};
     use tower::ServiceExt;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
 
@@ -1907,6 +2237,196 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn protected_mcp_route_metadata_uses_host_and_path_resource() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+            tempdir.path().join("gateway.toml"),
+            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+        ));
+        let config =
+            protected_route_config("syslog", "mcp.tootie.tv", "/syslog", "http://10.0.0.2:3100");
+        manager.seed_config(config.clone()).await;
+        let state = AppState::new()
+            .with_config(config)
+            .with_gateway_manager(manager);
+        let auth_state = test_lab_auth_state().await;
+        let app = build_router(state, None, Some(auth_state), None, &[]);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/.well-known/oauth-protected-resource/syslog")
+                    .header(header::HOST, "mcp.tootie.tv")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["resource"], "https://mcp.tootie.tv/syslog");
+    }
+
+    #[tokio::test]
+    async fn protected_mcp_route_metadata_compatibility_alias_matches_resource() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+            tempdir.path().join("gateway.toml"),
+            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+        ));
+        let config =
+            protected_route_config("syslog", "mcp.tootie.tv", "/syslog", "http://10.0.0.2:3100");
+        manager.seed_config(config.clone()).await;
+        let state = AppState::new()
+            .with_config(config)
+            .with_gateway_manager(manager);
+        let auth_state = test_lab_auth_state().await;
+        let app = build_router(state, None, Some(auth_state), None, &[]);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/syslog/.well-known/oauth-protected-resource")
+                    .header(header::HOST, "mcp.tootie.tv")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["resource"], "https://mcp.tootie.tv/syslog");
+    }
+
+    #[tokio::test]
+    async fn protected_mcp_route_proxies_with_route_audience_token() {
+        let backend = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/mcp"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_string(r#"{"jsonrpc":"2.0","result":{}}"#),
+            )
+            .mount(&backend)
+            .await;
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+            tempdir.path().join("gateway.toml"),
+            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+        ));
+        let config = protected_route_config("syslog", "mcp.tootie.tv", "/syslog", &backend.uri());
+        manager.seed_config(config.clone()).await;
+        let state = AppState::new()
+            .with_config(config)
+            .with_gateway_manager(manager);
+        let auth_state = test_lab_auth_state().await;
+        let token = issue_test_route_token(&auth_state, "https://mcp.tootie.tv/syslog");
+        let app = build_router(
+            state,
+            Some("static-token".to_string()),
+            Some(auth_state),
+            None,
+            &[],
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/syslog")
+                    .header(header::HOST, "mcp.tootie.tv")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"jsonrpc":"2.0","method":"ping"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(body.to_vec()).unwrap(),
+            r#"{"jsonrpc":"2.0","result":{}}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn protected_domain_mcp_route_intercepts_canonical_mcp_path_by_host() {
+        let backend = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/mcp"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_string(r#"{"proxied":true}"#),
+            )
+            .mount(&backend)
+            .await;
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+            tempdir.path().join("gateway.toml"),
+            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+        ));
+        let config = protected_route_config("syslog", "syslog.tootie.tv", "/mcp", &backend.uri());
+        manager.seed_config(config.clone()).await;
+        let state = AppState::new()
+            .with_config(config)
+            .with_gateway_manager(manager);
+        let auth_state = test_lab_auth_state().await;
+        let token = issue_test_route_token(&auth_state, "https://syslog.tootie.tv/mcp");
+        let local_mcp = Router::new().route(
+            "/mcp",
+            post(|| async { Json(serde_json::json!({"local": true})) }),
+        );
+        let app = build_router(
+            state,
+            Some("static-token".to_string()),
+            Some(auth_state),
+            Some(local_mcp),
+            &[],
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mcp")
+                    .header(header::HOST, "syslog.tootie.tv")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"jsonrpc":"2.0","method":"ping"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(body.to_vec()).unwrap(),
+            r#"{"proxied":true}"#
+        );
+    }
+
+    #[tokio::test]
     async fn gateway_oauth_routes_require_auth() {
         let tempdir = tempfile::tempdir().unwrap();
         let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
@@ -2120,6 +2640,18 @@ mod tests {
     }
 
     fn issue_test_lab_token(auth_state: &lab_auth::state::AuthState) -> String {
+        issue_test_token(auth_state, "https://lab.example.com/mcp", "lab")
+    }
+
+    fn issue_test_route_token(auth_state: &lab_auth::state::AuthState, audience: &str) -> String {
+        issue_test_token(auth_state, audience, "mcp:read mcp:write")
+    }
+
+    fn issue_test_token(
+        auth_state: &lab_auth::state::AuthState,
+        audience: &str,
+        scope: &str,
+    ) -> String {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -2129,14 +2661,35 @@ mod tests {
             .issue_access_token(&lab_auth::jwt::AccessClaims {
                 iss: "https://lab.example.com".to_string(),
                 sub: "google-user".to_string(),
-                aud: "https://lab.example.com/mcp".to_string(),
+                aud: audience.to_string(),
                 exp: now + 3600,
                 iat: now,
                 jti: "test-jti".to_string(),
-                scope: "lab".to_string(),
+                scope: scope.to_string(),
                 azp: "client".to_string(),
             })
             .unwrap()
+    }
+
+    fn protected_route_config(
+        name: &str,
+        host: &str,
+        path: &str,
+        backend_url: &str,
+    ) -> crate::config::LabConfig {
+        crate::config::LabConfig {
+            protected_mcp_routes: vec![crate::config::ProtectedMcpRouteConfig {
+                name: name.to_string(),
+                enabled: true,
+                public_host: host.to_string(),
+                public_path: path.to_string(),
+                backend_url: backend_url.to_string(),
+                backend_mcp_path: "/mcp".to_string(),
+                scopes: vec!["mcp:read".to_string(), "mcp:write".to_string()],
+                health_path: None,
+            }],
+            ..crate::config::LabConfig::default()
+        }
     }
 
     async fn seed_browser_session(

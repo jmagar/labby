@@ -12,8 +12,7 @@
     "env": {
       "CODEX_HOME": "/home/lab/.lab/acp/codex-home"
     },
-    "installed_at": "2026-05-01T16:56:38-04:00",
-    "sha256": null
+    "installed_at": "2026-05-01T16:56:38-04:00"
   },
   {
     "id": "claude-acp",
@@ -26,8 +25,7 @@
       "CLAUDE_CONFIG_DIR": "/home/lab/.lab/acp/claude-home",
       "LAB_SPAWN_DEPTH": "1"
     },
-    "installed_at": "2026-05-01T16:56:38-04:00",
-    "sha256": null
+    "installed_at": "2026-05-01T16:56:38-04:00"
   },
   {
     "id": "gemini",
@@ -41,7 +39,18 @@
     "env": {
       "GEMINI_CONFIG_DIR": "/home/lab/.gemini"
     },
-    "installed_at": "2026-05-01T16:56:38-04:00",
-    "sha256": null
+    "installed_at": "2026-05-01T16:56:38-04:00"
+  },
+  {
+    "id": "opencode",
+    "name": "OpenCode",
+    "version": "1.14.41",
+    "distribution": "binary",
+    "command": "/home/lab/.lab/bin/opencode/opencode",
+    "args": [
+      "acp"
+    ],
+    "installed_at": "2026-05-07T20:15:10.129993504Z",
+    "sha256": "d27d3c85183a7bd2df4506484a2f508d1897962063b7ccc8466705b493963dc5"
   }
 ]

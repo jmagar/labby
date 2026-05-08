@@ -191,12 +191,22 @@ export function SessionSidebar({
 }: SessionSidebarProps) {
   const activeProjectId = selectedProjectId
   const [search, setSearch] = React.useState('')
+  const deferredSearch = React.useDeferredValue(search)
 
   const visibleProjects = React.useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase()
+    const normalizedSearch = deferredSearch.trim().toLowerCase()
+    const runsByProject = new Map<string, typeof runs>()
+    for (const run of runs) {
+      const projectRuns = runsByProject.get(run.projectId)
+      if (projectRuns) {
+        projectRuns.push(run)
+      } else {
+        runsByProject.set(run.projectId, [run])
+      }
+    }
 
     return projects.flatMap((project) => {
-      const projectRuns = runs.filter((run) => run.projectId === project.id)
+      const projectRuns = runsByProject.get(project.id) ?? []
       if (!normalizedSearch) {
         return [{ project, matchingRuns: projectRuns }]
       }
@@ -210,7 +220,7 @@ export function SessionSidebar({
         ? [{ project, matchingRuns }]
         : []
     })
-  }, [projects, runs, search])
+  }, [deferredSearch, projects, runs])
 
   return (
     <div className={cn('flex h-full w-full shrink-0 flex-col border-r border-aurora-border-default bg-aurora-nav-bg md:w-[272px]', className)}>

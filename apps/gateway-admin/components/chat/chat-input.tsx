@@ -39,9 +39,9 @@ interface ChatInputProps {
   selectedAgent: ACPAgent | null
   agents: ACPAgent[]
   onSelectAgent: (agentId: string) => void
-  selectedModel: ACPModelOption | null
-  modelOptions: ACPModelOption[]
-  onSelectModel: (modelId: string) => void
+  selectedModel?: ACPModelOption | null
+  modelOptions?: ACPModelOption[]
+  onSelectModel?: (modelId: string) => void
 }
 
 export const CHAT_INPUT_MAX_HEIGHT_PX = 200
