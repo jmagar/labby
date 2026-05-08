@@ -47,13 +47,13 @@ const DEFAULT_TOOL_SEARCH_CONFIG: ToolSearchConfig = {
 let mockToolSearchConfig: ToolSearchConfig = DEFAULT_TOOL_SEARCH_CONFIG
 let mockProtectedRoutes: ProtectedMcpRoute[] = [
   {
-    name: 'syslog',
+    name: 'tools',
     enabled: true,
-    public_host: 'mcp.example.com',
-    public_path: '/syslog',
-    backend_url: 'http://100.88.16.79:3100',
+    public_host: 'mcp.example.net',
+    public_path: '/tools',
+    backend_url: 'http://localhost:3100',
     backend_mcp_path: '/mcp',
-    scopes: ['mcp:syslog'],
+    scopes: ['mcp:read'],
     health_path: '/health',
   },
 ]

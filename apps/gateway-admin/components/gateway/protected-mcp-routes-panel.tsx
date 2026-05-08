@@ -230,8 +230,8 @@ export function ProtectedMcpRoutesPanel() {
         </div>
       ) : null}
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(22rem,0.7fr)]">
-        <div className="overflow-hidden rounded-lg border">
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(22rem,0.7fr)_minmax(0,1fr)]">
+        <div className="order-2 overflow-hidden rounded-lg border xl:order-2">
           <Table>
             <TableHeader>
               <TableRow>
@@ -317,14 +317,14 @@ export function ProtectedMcpRoutesPanel() {
           </Table>
         </div>
 
-        <div className="rounded-lg border bg-aurora-control-surface/10 p-4">
+        <div className="order-1 rounded-lg border bg-aurora-control-surface/10 p-4 xl:order-1">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h4 className="text-sm font-semibold text-aurora-text-primary">
                 {isEditing ? `Edit ${editingName}` : 'Add protected route'}
               </h4>
               <p className="mt-1 text-xs text-aurora-text-muted">
-                Paths should be prefixes such as /syslog and backend MCP usually stays /mcp.
+                Paths should be public prefixes such as /tools and backend MCP usually stays /mcp.
               </p>
             </div>
             <Switch
@@ -341,7 +341,7 @@ export function ProtectedMcpRoutesPanel() {
                 id="protected-route-name"
                 value={draft.name}
                 onChange={(event) => updateDraft('name', event.target.value)}
-                placeholder="syslog"
+                placeholder="tools"
               />
             </div>
             <div className="grid gap-1.5">
@@ -350,7 +350,7 @@ export function ProtectedMcpRoutesPanel() {
                 id="protected-route-public-host"
                 value={draft.public_host}
                 onChange={(event) => updateDraft('public_host', event.target.value)}
-                placeholder="mcp.example.com"
+                placeholder="mcp.example.net"
               />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -360,7 +360,7 @@ export function ProtectedMcpRoutesPanel() {
                   id="protected-route-public-path"
                   value={draft.public_path}
                   onChange={(event) => updateDraft('public_path', event.target.value)}
-                  placeholder="/syslog"
+                  placeholder="/tools"
                 />
               </div>
               <div className="grid gap-1.5">
@@ -379,7 +379,7 @@ export function ProtectedMcpRoutesPanel() {
                 id="protected-route-backend-url"
                 value={draft.backend_url}
                 onChange={(event) => updateDraft('backend_url', event.target.value)}
-                placeholder="http://100.88.16.79:3100"
+                placeholder="http://localhost:3100"
               />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -389,7 +389,7 @@ export function ProtectedMcpRoutesPanel() {
                   id="protected-route-scopes"
                   value={draft.scopes}
                   onChange={(event) => updateDraft('scopes', event.target.value)}
-                  placeholder="mcp:syslog, mcp:read"
+                  placeholder="mcp:read, mcp:write"
                 />
               </div>
               <div className="grid gap-1.5">
