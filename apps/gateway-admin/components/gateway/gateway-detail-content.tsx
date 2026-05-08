@@ -35,6 +35,7 @@ import { DisableGatewayDialog } from './disable-gateway-dialog'
 import { DeleteGatewayDialog } from './delete-gateway-dialog'
 import { TestResultPanel } from './test-result-panel'
 import { CleanupResultPanel } from './cleanup-result-panel'
+import { ProtectedMcpRoutesPanel } from './protected-mcp-routes-panel'
 import { useGateway, useGatewayMutations } from '@/lib/hooks/use-gateways'
 import { AURORA_DISPLAY_1 } from '@/components/aurora/tokens'
 import type { Gateway, CreateGatewayInput, UpdateGatewayInput } from '@/lib/types/gateway'
@@ -949,6 +950,8 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
                   </div>
                 </div>
               ) : null}
+
+              <ProtectedMcpRoutesPanel />
             </div>
           </TabsContent>
 

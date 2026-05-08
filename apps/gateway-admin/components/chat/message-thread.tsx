@@ -12,6 +12,7 @@ import type { SessionEventConnectionState } from '@/lib/chat/use-session-events'
 interface MessageThreadProps {
   run: ACPRun | null
   messages: ACPMessage[]
+  workingLabel?: string
   connectionState?: SessionEventConnectionState
   canRetryMessages?: boolean
   canEditMessages?: boolean
@@ -103,6 +104,7 @@ export function reduceSelectedMessageId(
 export function MessageThread({
   run,
   messages,
+  workingLabel,
   connectionState,
   canRetryMessages = false,
   canEditMessages = false,
@@ -170,7 +172,7 @@ export function MessageThread({
           />
         ))}
         {shouldShowWorkingAssistantBubble(run, messages, connectionState) ? (
-          <WorkingAssistantBubble />
+          <WorkingAssistantBubble label={workingLabel ?? 'Assistant is working'} />
         ) : null}
         <div ref={bottomRef} />
       </div>

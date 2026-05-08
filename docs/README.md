@@ -13,7 +13,7 @@ The docs are split by topic so contributors do not have to recover architecture,
 - Use [design/component-development.md](./design/component-development.md) and [design/design-system-contract.md](./design/design-system-contract.md) when building or revising Labby web UI components.
 - Use [CONFIG.md](./runtime/CONFIG.md), [EXTRACT.md](./services/EXTRACT.md), and [OPERATIONS.md](./OPERATIONS.md) for setup and operator workflows.
 - Refer to [OAUTH.md](./runtime/OAUTH.md) for bearer vs OAuth mode selection, Google-backed authorization flow, lab-issued JWT behavior, and callback-forwarding constraints.
-- Use [GATEWAY.md](./services/GATEWAY.md) when managing upstream MCP gateways over CLI, MCP, or `/v1/gateway`.
+- Use [GATEWAY.md](./services/GATEWAY.md) when managing upstream MCP gateways over CLI, MCP, `/v1/gateway`, or Gateway-managed OAuth protected MCP routes.
 - Use [acp/README.md](./acp/README.md) for ACP service architecture, the `acp` vs `chat` boundary, and gateway integration direction.
 - Use [acp/design.md](./acp/design.md) for ACP design details and [acp/research-findings.md](./acp/research-findings.md) for the supporting research notes.
 - Use [coverage/README.md](./coverage/README.md), [upstream-api/README.md](./upstream-api/README.md), [generated/README.md](./generated/README.md), and [features/README.md](./features/README.md) for directory-level indexes.
@@ -94,7 +94,7 @@ The docs are split by topic so contributors do not have to recover architecture,
 - [OAUTH.md](./runtime/OAUTH.md)
   HTTP auth modes: static bearer compatibility, internal Google-backed OAuth, lab-issued JWTs, JWKS, RFC 9728 metadata, and redirect/callback forwarding rules.
 - [GATEWAY.md](./services/GATEWAY.md)
-  Gateway control plane: CRUD, reload/test flows, runtime views, and tool exposure policy.
+  Gateway control plane: CRUD, reload/test flows, runtime views, tool exposure policy, and Gateway-managed OAuth protected MCP routes.
 - [acp/README.md](./acp/README.md)
   ACP service entrypoint, first-class service design, and the browser `chat` relationship.
 - [acp/design.md](./acp/design.md)
@@ -204,7 +204,7 @@ Use the smallest correct doc:
 - MCP tool, discovery, or envelope behavior: [MCP.md](./surfaces/MCP.md)
 - RMCP SDK integration, feature posture, and server-shape rules: [RMCP.md](./surfaces/RMCP.md)
 - HTTP auth modes, JWKS, and JWT validation: [OAUTH.md](./runtime/OAUTH.md)
-- gateway control plane and exposure policy: [GATEWAY.md](./services/GATEWAY.md)
+- gateway control plane, exposure policy, and protected MCP routes: [GATEWAY.md](./services/GATEWAY.md)
 - ACP service architecture and chat/backend boundary: [acp/README.md](./acp/README.md)
 - mirrored MCP Registry metadata contract: [MCPREGISTRY_METADATA.md](./services/MCPREGISTRY_METADATA.md)
 - node runtime roles, fleet ingest, and master gating: [DEVICE_RUNTIME.md](./runtime/DEVICE_RUNTIME.md)

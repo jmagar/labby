@@ -71,6 +71,12 @@ async fn authorization_code_grant(
     state: AuthState,
     request: TokenRequest,
 ) -> Result<TokenResponse, AuthError> {
+    let requested_resource = request
+        .resource
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.trim_end_matches('/').to_string());
     crate::authorize::validate_resource(&state, request.resource.as_deref())?;
     let code = require_field(request.code, "code")?;
     let client_id = require_field(request.client_id, "client_id")?;
@@ -101,6 +107,19 @@ async fn authorization_code_grant(
         &code_verifier,
         &auth_code_id,
     )?;
+    if let Some(requested_resource) = requested_resource
+        && requested_resource != row.resource
+    {
+        warn!(
+            auth_code_id = %auth_code_id,
+            requested_resource = %requested_resource,
+            stored_resource = %row.resource,
+            "oauth token rejected: resource does not match authorization code"
+        );
+        return Err(AuthError::InvalidGrant(
+            "resource does not match the authorization code".to_string(),
+        ));
+    }
 
     let refresh_token = if let Some(provider_refresh_token) = row.provider_refresh_token {
         let refresh_token = random_token(24)?;
@@ -111,6 +130,7 @@ async fn authorization_code_grant(
                 refresh_token: refresh_token.clone(),
                 client_id: row.client_id.clone(),
                 subject: row.subject.clone(),
+                resource: row.resource.clone(),
                 scope: row.scope.clone(),
                 provider_refresh_token: Some(provider_refresh_token),
                 created_at,
@@ -142,14 +162,27 @@ async fn authorization_code_grant(
         None
     };
 
-    build_token_response(&state, row.client_id, row.subject, row.scope, refresh_token)
+    let resource = if row.resource.trim().is_empty() {
+        crate::metadata::canonical_resource_url(&state)
+    } else {
+        row.resource
+    };
+    build_token_response(
+        &state,
+        row.client_id,
+        row.subject,
+        resource,
+        row.scope,
+        refresh_token,
+    )
 }
 
 async fn refresh_token_grant(
     state: AuthState,
     request: TokenRequest,
 ) -> Result<TokenResponse, AuthError> {
-    crate::authorize::validate_resource(&state, request.resource.as_deref())?;
+    let requested_resource =
+        crate::authorize::validate_resource(&state, request.resource.as_deref())?;
     let client_id = require_field(request.client_id, "client_id")?;
     let refresh_token = require_field(request.refresh_token, "refresh_token")?;
     let refresh_token_id = fingerprint(&refresh_token);
@@ -182,6 +215,22 @@ async fn refresh_token_grant(
             "client_id does not match the refresh token".to_string(),
         ));
     }
+    let stored_resource = if stored.resource.trim().is_empty() {
+        crate::metadata::canonical_resource_url(&state)
+    } else {
+        stored.resource.clone()
+    };
+    if requested_resource != stored_resource {
+        warn!(
+            refresh_token_id = %refresh_token_id,
+            requested_resource = %requested_resource,
+            stored_resource = %stored_resource,
+            "oauth token rejected: resource does not match refresh token"
+        );
+        return Err(AuthError::InvalidGrant(
+            "resource does not match the refresh token".to_string(),
+        ));
+    }
 
     let Some(provider_refresh_token) = stored.provider_refresh_token.clone() else {
         warn!(
@@ -201,6 +250,7 @@ async fn refresh_token_grant(
             refresh_token: refresh_token.clone(),
             client_id: stored.client_id.clone(),
             subject: google.subject.clone(),
+            resource: stored_resource.clone(),
             scope: stored.scope.clone(),
             provider_refresh_token: google.refresh_token.or(Some(provider_refresh_token)),
             created_at: stored.created_at,
@@ -224,6 +274,7 @@ async fn refresh_token_grant(
         &state,
         stored.client_id,
         google.subject,
+        stored_resource,
         stored.scope,
         Some(refresh_token),
     )
@@ -233,11 +284,11 @@ fn build_token_response(
     state: &AuthState,
     client_id: String,
     subject: String,
+    resource: String,
     scope: String,
     refresh_token: Option<String>,
 ) -> Result<TokenResponse, AuthError> {
     let issuer = crate::metadata::public_base_url(state);
-    let resource = crate::metadata::canonical_resource_url(state);
     let now = timestamp_usize(now_unix(), "current unix timestamp")?;
     let access_token_ttl = duration_secs_usize(
         state.config.access_token_ttl,
@@ -509,6 +560,7 @@ mod tests {
                 refresh_token: "refresh-token".to_string(),
                 client_id: "client".to_string(),
                 subject: "google-subject-123".to_string(),
+                resource: "https://lab.example.com/mcp".to_string(),
                 scope: "lab".to_string(),
                 provider_refresh_token: Some("provider-refresh".to_string()),
                 created_at: crate::util::now_unix() - 60,
@@ -578,6 +630,7 @@ mod tests {
                 refresh_token: "refresh-token".to_string(),
                 client_id: "client".to_string(),
                 subject: "google-subject-123".to_string(),
+                resource: "https://lab.example.com/mcp".to_string(),
                 scope: "lab".to_string(),
                 provider_refresh_token: Some("provider-refresh".to_string()),
                 created_at: crate::util::now_unix() - 3600,
@@ -625,6 +678,7 @@ mod tests {
                 refresh_token: "refresh-token".to_string(),
                 client_id: "client".to_string(),
                 subject: "google-subject-123".to_string(),
+                resource: "https://lab.example.com/mcp".to_string(),
                 scope: "lab".to_string(),
                 provider_refresh_token: Some("provider-refresh".to_string()),
                 created_at: crate::util::now_unix() - 60,
@@ -675,6 +729,7 @@ mod tests {
                 refresh_token: "refresh-token".to_string(),
                 client_id: "client".to_string(),
                 subject: "google-subject-123".to_string(),
+                resource: "https://lab.example.com/mcp".to_string(),
                 scope: "lab".to_string(),
                 provider_refresh_token: None,
                 created_at: crate::util::now_unix() - 60,
@@ -711,6 +766,7 @@ mod tests {
                 client_id: "client".to_string(),
                 subject: "google-subject-123".to_string(),
                 redirect_uri: "http://127.0.0.1:7777/callback".to_string(),
+                resource: "https://lab.example.com/mcp".to_string(),
                 scope: "lab".to_string(),
                 code_challenge: super::pkce_challenge("verifier"),
                 code_challenge_method: "S256".to_string(),
@@ -730,6 +786,7 @@ mod tests {
                 client_id: "client".to_string(),
                 subject: "google-subject-123".to_string(),
                 redirect_uri: "http://127.0.0.1:7777/callback".to_string(),
+                resource: "https://lab.example.com/mcp".to_string(),
                 scope: "lab".to_string(),
                 code_challenge: super::pkce_challenge("verifier"),
                 code_challenge_method: "S256".to_string(),

@@ -15,7 +15,11 @@ export const ACP_AGENT: ACPAgent = {
 }
 
 export type SessionCreationIntent = 'bootstrap' | 'manual' | 'send'
-export type CreateSessionOptions = { closeSessionPanel?: boolean }
+export type CreateSessionOptions = {
+  closeSessionPanel?: boolean
+  providerId?: string | null
+  modelId?: string | null
+}
 export type CreateSessionFn = (options?: CreateSessionOptions) => Promise<ACPRun>
 
 export function providerDisplayName(providerId: string): string {
@@ -83,6 +87,7 @@ export async function ensurePromptRunId(
 export async function ensurePromptRunIdForProvider(
   selectedRun: ACPRun | null,
   selectedProviderId: string | null,
+  selectedModelId: string | null | undefined,
   createSession: CreateSessionFn,
   isMobileViewport: boolean,
 ) {
@@ -90,7 +95,11 @@ export async function ensurePromptRunIdForProvider(
     return selectedRun.id
   }
 
-  const run = await createSessionForIntent(createSession, 'send', isMobileViewport)
+  const run = await createSession({
+    ...sessionCreationOptionsForIntent('send', isMobileViewport),
+    providerId: selectedProviderId,
+    modelId: selectedModelId,
+  })
   return run.id
 }
 
@@ -126,7 +135,7 @@ export function resolveSelectedModel(
 ) {
   const models = agent?.models ?? []
   if (models.length === 0) return null
-  const runModel = selectedRun?.provider === agent?.id ? selectedRun.modelId : null
+  const runModel = selectedRun && agent && selectedRun.provider === agent.id ? selectedRun.modelId : null
   for (const candidate of [requestedModelId, runModel, agent?.currentModelId, agent?.defaultModelId]) {
     const model = candidate ? models.find((option) => option.id === candidate) : null
     if (model) return model
@@ -171,6 +180,7 @@ export async function sendPromptForSelectedProvider({
   const runId = await ensurePromptRunIdForProvider(
     selectedRun,
     selectedProviderId,
+    selectedModelId,
     createSession,
     isMobileViewport,
   )

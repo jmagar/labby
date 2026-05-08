@@ -103,7 +103,7 @@ export function FloatingChatFab({
           'relative flex items-center gap-2 rounded-full border border-aurora-border-strong',
           'bg-aurora-panel-strong text-aurora-text-muted',
           'hover:text-aurora-text-primary hover:bg-aurora-hover-bg',
-          'px-4 py-2.5 text-sm font-medium',
+          'size-11 justify-center p-0 text-sm font-medium sm:size-auto sm:justify-start sm:px-4 sm:py-2.5',
           'transition-all duration-150',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-aurora-accent-primary',
           // Connection ring indicator (only after first open — when connectionState is set)
@@ -115,7 +115,7 @@ export function FloatingChatFab({
         )}
       >
         <MessageSquare className="size-4" />
-        <span>Chat</span>
+        <span className="hidden sm:inline">Chat</span>
 
         {/* Unread count badge — dot until notification system */}
         {unreadCount > 0 && (

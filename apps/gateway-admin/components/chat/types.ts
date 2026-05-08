@@ -1,5 +1,5 @@
 import type { BridgeEvent, BridgeSessionStatus } from '@/lib/acp/types'
-import type { AttachmentRef } from '@/lib/fs/types'
+import type { AttachmentRef, PromptAttachmentRef } from '@/lib/fs/types'
 
 export type { AttachmentRef }
 
@@ -90,7 +90,7 @@ export interface ACPMessage {
   runId: string
   role: 'user' | 'assistant' | 'system'
   text: string
-  attachments?: AttachmentRef[]
+  attachments?: PromptAttachmentRef[]
   createdAt: Date
   isStreaming?: boolean
   thoughts: string[]

@@ -8,6 +8,12 @@ If gateway-wide `[tool_search].enabled = true`, raw upstream tools are hidden fr
 
 `lab` also exposes a separate `gateway` management surface for editing and reloading upstream definitions. That management surface is documented in [GATEWAY.md](./GATEWAY.md).
 
+Gateway-managed protected MCP routes are a different mode: they publish an
+inline public MCP route with Lab-owned OAuth protected-resource metadata and
+proxy the whole Streamable HTTP MCP route to a backend. Use
+[GATEWAY.md — Gateway-Managed Protected MCP Routes](./GATEWAY.md#gateway-managed-protected-mcp-routes)
+for that setup instead of `[[upstream]]` tool merging.
+
 The upstream pool lives in `crates/lab/src/dispatch/upstream/` because it is shared infrastructure. The runtime proxy path described in this document is wired into the MCP surface. The HTTP API now exposes `/v1/gateway` for gateway management, but it still does not proxy arbitrary upstream MCP tools.
 
 ## What Operators Configure

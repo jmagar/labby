@@ -640,7 +640,11 @@ export function deriveTranscriptAndActivity(events: BridgeEvent[]): {
           activeAssistantMessageId ?? lastAssistantMessageId,
         )
         if (event.text) {
-          message.thoughts.push(event.text)
+          if (message.thoughts.length === 0) {
+            message.thoughts.push(event.text)
+          } else {
+            message.thoughts[message.thoughts.length - 1] += event.text
+          }
           message.createdAt = toDate(event.createdAt)
         }
         activeAssistantMessageId = key

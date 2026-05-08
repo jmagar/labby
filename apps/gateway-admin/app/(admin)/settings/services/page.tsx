@@ -72,25 +72,25 @@ export default function ServicesIndex(): React.ReactElement {
   }, [services, snapshot, statuses])
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Services</CardTitle>
-        <CardDescription>
-          Configure connection details for every Bootstrap service. Click a
-          row to edit its env vars; saves commit immediately to{' '}
-          <code>~/.lab/.env</code>.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> loading catalog
-          </div>
-        ) : null}
-        {error ? (
-          <p className="text-sm text-destructive">{error}</p>
-        ) : null}
-        {!loading && !error ? (
+    <>
+      <h1 className="sr-only">Service settings</h1>
+      <Card>
+        <CardHeader>
+          <CardTitle>Services</CardTitle>
+          <CardDescription>
+            Configure connection details for every Bootstrap service. Click a
+            row to edit its env vars; saves commit immediately to{' '}
+            <code>~/.lab/.env</code>.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> loading catalog
+            </div>
+          ) : null}
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {!loading && !error ? (
           <ul className="divide-y rounded-md border">
             {rows.map(({ schema, configured, pluginInstalled }) => (
               <li key={schema.name}>
@@ -123,7 +123,8 @@ export default function ServicesIndex(): React.ReactElement {
             ))}
           </ul>
         ) : null}
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </>
   )
 }

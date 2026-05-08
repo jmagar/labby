@@ -20,7 +20,7 @@ use agent_client_protocol::{
 };
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Notify, mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 #[cfg(unix)]
@@ -50,6 +50,10 @@ fn acp_internal_error(message: impl Into<String>) -> agent_client_protocol::Erro
 // timeout"). Keep that section in sync when the default or behavior changes.
 const DEFAULT_PROMPT_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_PERMISSION_TIMEOUT: Duration = Duration::from_secs(60);
+#[cfg(not(test))]
+const DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
+#[cfg(test)]
+const DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(25);
 const MAX_PROVIDER_STDERR_CHARS: usize = 2_048;
 const SESSION_COMMAND_QUEUE_CAPACITY: usize = 8;
 const CODEX_DOCKER_SAFE_SANDBOX_MODE: &str = "danger-full-access";
@@ -109,6 +113,8 @@ pub struct RuntimeHandle {
     pub provider_session_id: String,
     command_tx: mpsc::Sender<SessionCommand>,
     permissions: Arc<PendingPermissions>,
+    terminated: Arc<AtomicBool>,
+    termination_notify: Arc<Notify>,
     #[cfg(test)]
     _event_tx_for_tests: Option<mpsc::Sender<AcpEvent>>,
 }
@@ -141,6 +147,36 @@ impl RuntimeHandle {
         self.command_tx
             .try_send(SessionCommand::Cancel)
             .map_err(session_command_send_error)
+    }
+
+    pub async fn shutdown(self) -> Result<(), String> {
+        let terminated = Arc::clone(&self.terminated);
+        let termination_notify = Arc::clone(&self.termination_notify);
+        let cancel_result = self.cancel().await;
+        drop(self);
+
+        if terminated.load(Ordering::SeqCst) {
+            return cancel_result;
+        }
+
+        match tokio::time::timeout(
+            DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT,
+            termination_notify.notified(),
+        )
+        .await
+        {
+            Ok(()) => cancel_result,
+            Err(_) => {
+                tracing::warn!(
+                    surface = "acp",
+                    service = "runtime",
+                    action = "runtime.shutdown.timeout",
+                    timeout_ms = DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT.as_millis(),
+                    "ACP runtime did not report termination before timeout",
+                );
+                cancel_result
+            }
+        }
     }
 
     pub async fn approve_permission(
@@ -511,6 +547,10 @@ pub async fn launch_codex_runtime(
     let (command_tx, command_rx) = mpsc::channel(SESSION_COMMAND_QUEUE_CAPACITY);
     let permissions = Arc::new(PendingPermissions::new(acp_permission_timeout()));
     let thread_permissions = Arc::clone(&permissions);
+    let terminated = Arc::new(AtomicBool::new(false));
+    let thread_terminated = Arc::clone(&terminated);
+    let termination_notify = Arc::new(Notify::new());
+    let thread_termination_notify = Arc::clone(&termination_notify);
 
     std::thread::Builder::new()
         .name(format!("lab-acp-{session_id}"))
@@ -531,6 +571,8 @@ pub async fn launch_codex_runtime(
                     )
                     .await,
                 );
+                thread_terminated.store(true, Ordering::SeqCst);
+                thread_termination_notify.notify_waiters();
             });
         })
         .map_err(|error| error.to_string())?;
@@ -544,6 +586,8 @@ pub async fn launch_codex_runtime(
             provider_session_id: started.provider_session_id.clone(),
             command_tx,
             permissions,
+            terminated,
+            termination_notify,
             #[cfg(test)]
             _event_tx_for_tests: None,
         },
@@ -3219,9 +3263,15 @@ mod tests {
 #[allow(dead_code)]
 pub fn fake_handle_for_tests() -> (RuntimeHandle, mpsc::Receiver<AcpEvent>) {
     let (command_tx, command_rx) = mpsc::channel::<SessionCommand>(SESSION_COMMAND_QUEUE_CAPACITY);
+    let terminated = Arc::new(AtomicBool::new(false));
+    let task_terminated = Arc::clone(&terminated);
+    let termination_notify = Arc::new(Notify::new());
+    let task_termination_notify = Arc::clone(&termination_notify);
     tokio::spawn(async move {
-        let _command_rx = command_rx;
-        std::future::pending::<()>().await;
+        let mut command_rx = command_rx;
+        while command_rx.recv().await.is_some() {}
+        task_terminated.store(true, Ordering::SeqCst);
+        task_termination_notify.notify_waiters();
     });
     let (event_tx, event_rx) =
         mpsc::channel::<AcpEvent>(crate::acp::registry::ACP_EVENT_CHANNEL_CAPACITY);
@@ -3229,6 +3279,8 @@ pub fn fake_handle_for_tests() -> (RuntimeHandle, mpsc::Receiver<AcpEvent>) {
         provider_session_id: "fake-provider-session".to_string(),
         command_tx,
         permissions: Arc::new(PendingPermissions::new(DEFAULT_PERMISSION_TIMEOUT)),
+        terminated,
+        termination_notify,
         _event_tx_for_tests: Some(event_tx),
     };
     (handle, event_rx)
@@ -3238,6 +3290,8 @@ pub fn fake_handle_for_tests() -> (RuntimeHandle, mpsc::Receiver<AcpEvent>) {
 #[allow(dead_code)]
 pub fn saturated_fake_handle_for_tests() -> (RuntimeHandle, mpsc::Receiver<AcpEvent>) {
     let (command_tx, command_rx) = mpsc::channel::<SessionCommand>(1);
+    let terminated = Arc::new(AtomicBool::new(false));
+    let termination_notify = Arc::new(Notify::new());
     command_tx
         .try_send(SessionCommand::Prompt(PromptCommand {
             input: PromptInput {
@@ -3257,6 +3311,8 @@ pub fn saturated_fake_handle_for_tests() -> (RuntimeHandle, mpsc::Receiver<AcpEv
         provider_session_id: "fake-provider-session".to_string(),
         command_tx,
         permissions: Arc::new(PendingPermissions::new(DEFAULT_PERMISSION_TIMEOUT)),
+        terminated,
+        termination_notify,
         _event_tx_for_tests: Some(event_tx),
     };
     (handle, event_rx)

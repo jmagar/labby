@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, type ReactNode } from 'react'
+import { useDeferredValue, useMemo, useState, type ReactNode } from 'react'
 import {
   Activity,
   ArrowLeft,
@@ -137,6 +137,8 @@ export function GatewayListContent() {
   const [toolFilters, setToolFilters] = useState<ToolFilterState>(DEFAULT_TOOL_FILTERS)
   const [density, setDensity] = useState<'comfortable' | 'condensed'>(DEFAULT_DENSITY)
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
+  const deferredGatewayFilters = useDeferredValue(lastGatewayFilters)
+  const deferredToolFilters = useDeferredValue(toolFilters)
 
   const [formOpen, setFormOpen] = useState(false)
   const [editingGateway, setEditingGateway] = useState<Gateway | null>(null)
@@ -165,12 +167,14 @@ export function GatewayListContent() {
     return { configured, healthy, disconnected, tools }
   }, [items])
 
-  const filteredGateways = useMemo(() => filterGateways(items, lastGatewayFilters), [items, lastGatewayFilters])
+  const toolRows = useMemo(() => aggregateToolsFromGateways(items), [items])
 
-  const filteredToolRows = useMemo(() => {
-    const rows = aggregateToolsFromGateways(items)
-    return sortToolRows(filterTools(rows, toolFilters))
-  }, [items, toolFilters])
+  const filteredGateways = useMemo(() => filterGateways(items, deferredGatewayFilters), [items, deferredGatewayFilters])
+
+  const filteredToolRows = useMemo(
+    () => sortToolRows(filterTools(toolRows, deferredToolFilters)),
+    [deferredToolFilters, toolRows],
+  )
 
   const gatewayOptions = useMemo(
     () => items.map((gateway) => ({ value: gateway.id, label: gateway.name })),
@@ -628,6 +632,7 @@ export function GatewayListView({
           </div>
         }
       />
+      <h1 className="sr-only">Gateways</h1>
 
       <div
         className={cn(

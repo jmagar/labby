@@ -11,9 +11,10 @@ use super::manager::GatewayManager;
 use super::params::{
     GatewayAddParams, GatewayMcpCleanupParams, GatewayMcpToggleParams, GatewayNameParams,
     GatewayOauthNameParams, GatewayReloadParams, GatewayStatusParams, GatewayTestParams,
-    GatewayUpdateParams, GatewayUpdatePatch, ServiceConfigGetParams, ServiceConfigSetParams,
-    ToolInvokeParams, ToolSearchParams, ToolSearchSetParams, VirtualServerMcpPolicyParams,
-    VirtualServerNameParams, VirtualServerSurfaceParams,
+    GatewayUpdateParams, GatewayUpdatePatch, ProtectedRouteNameParams, ProtectedRouteSpecParams,
+    ProtectedRouteUpdateParams, ServiceConfigGetParams, ServiceConfigSetParams, ToolInvokeParams,
+    ToolSearchParams, ToolSearchSetParams, VirtualServerMcpPolicyParams, VirtualServerNameParams,
+    VirtualServerSurfaceParams,
 };
 use super::types::ServiceActionView;
 
@@ -96,6 +97,31 @@ pub async fn dispatch_with_manager(
             to_json(manager.get_server(&params.id).await?)
         }
         "gateway.supported_services" => to_json(super::service_catalog::supported_services()),
+        "gateway.protected_route.list" => to_json(manager.protected_route_list().await),
+        "gateway.protected_route.get" => {
+            let params: ProtectedRouteNameParams = parse_params(params_value)?;
+            to_json(manager.protected_route_get(&params.name).await?)
+        }
+        "gateway.protected_route.add" => {
+            let params: ProtectedRouteSpecParams = parse_params(params_value)?;
+            to_json(manager.protected_route_add(params.route).await?)
+        }
+        "gateway.protected_route.update" => {
+            let params: ProtectedRouteUpdateParams = parse_params(params_value)?;
+            to_json(
+                manager
+                    .protected_route_update(&params.name, params.route)
+                    .await?,
+            )
+        }
+        "gateway.protected_route.remove" => {
+            let params: ProtectedRouteNameParams = parse_params(params_value)?;
+            to_json(manager.protected_route_remove(&params.name).await?)
+        }
+        "gateway.protected_route.test" => {
+            let params: ProtectedRouteSpecParams = parse_params(params_value)?;
+            to_json(manager.protected_route_test(params.route).await?)
+        }
         "gateway.virtual_server.enable" => {
             let params: VirtualServerNameParams = parse_params(params_value)?;
             to_json(manager.enable_virtual_server(&params.id).await?)
@@ -386,7 +412,7 @@ pub async fn dispatch(action: &str, params_value: Value) -> Result<Value, ToolEr
 mod tests {
     use serde_json::json;
 
-    use crate::config::UpstreamConfig;
+    use crate::config::{ProtectedMcpRouteConfig, UpstreamConfig};
 
     use super::super::manager::GatewayRuntimeHandle;
     use super::*;
@@ -397,6 +423,12 @@ mod tests {
         assert!(names.contains(&"gateway.list"));
         assert!(names.contains(&"gateway.server.get"));
         assert!(names.contains(&"gateway.supported_services"));
+        assert!(names.contains(&"gateway.protected_route.list"));
+        assert!(names.contains(&"gateway.protected_route.get"));
+        assert!(names.contains(&"gateway.protected_route.add"));
+        assert!(names.contains(&"gateway.protected_route.update"));
+        assert!(names.contains(&"gateway.protected_route.remove"));
+        assert!(names.contains(&"gateway.protected_route.test"));
         assert!(names.contains(&"gateway.virtual_server.enable"));
         assert!(names.contains(&"gateway.virtual_server.disable"));
         assert!(names.contains(&"gateway.virtual_server.remove"));
@@ -430,6 +462,9 @@ mod tests {
             "gateway.add",
             "gateway.update",
             "gateway.remove",
+            "gateway.protected_route.add",
+            "gateway.protected_route.update",
+            "gateway.protected_route.remove",
             "gateway.virtual_server.remove",
             "gateway.virtual_server.quarantine.restore",
             "gateway.reload",
@@ -487,6 +522,52 @@ mod tests {
         assert_eq!(row["exposed_resource_count"], 0);
         assert_eq!(row["discovered_prompt_count"], 0);
         assert_eq!(row["exposed_prompt_count"], 0);
+    }
+
+    fn protected_route_fixture(name: &str) -> ProtectedMcpRouteConfig {
+        ProtectedMcpRouteConfig {
+            name: name.to_string(),
+            enabled: true,
+            public_host: "mcp.tootie.tv".to_string(),
+            public_path: "/syslog".to_string(),
+            backend_url: "http://100.88.16.79:3100".to_string(),
+            backend_mcp_path: "/mcp".to_string(),
+            scopes: Vec::new(),
+            health_path: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn protected_route_dispatch_add_list_and_test_share_gateway_actions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manager = GatewayManager::new(
+            dir.path().join("config.toml"),
+            GatewayRuntimeHandle::default(),
+        );
+
+        let tested = dispatch_with_manager(
+            &manager,
+            "gateway.protected_route.test",
+            json!({ "route": protected_route_fixture("syslog") }),
+        )
+        .await
+        .expect("test route");
+        assert_eq!(tested["resource"], "https://mcp.tootie.tv/syslog");
+
+        let added = dispatch_with_manager(
+            &manager,
+            "gateway.protected_route.add",
+            json!({ "route": protected_route_fixture("syslog") }),
+        )
+        .await
+        .expect("add route");
+        assert_eq!(added["name"], "syslog");
+
+        let listed = dispatch_with_manager(&manager, "gateway.protected_route.list", json!({}))
+            .await
+            .expect("list routes");
+        assert_eq!(listed.as_array().expect("array").len(), 1);
+        assert_eq!(listed[0]["public_host"], "mcp.tootie.tv");
     }
 
     #[tokio::test]

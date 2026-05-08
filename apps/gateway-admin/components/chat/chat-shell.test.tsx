@@ -208,6 +208,7 @@ test('ensurePromptRunIdForProvider reuses the current run when selected provider
       provider: 'codex-acp',
     },
     'claude-acp',
+    null,
     async () => {
       createCalls += 1
       return {
@@ -231,6 +232,7 @@ test('ensurePromptRunIdForProvider reuses run when provider selection already ma
       provider: 'claude-acp',
     },
     'claude-acp',
+    null,
     async () => {
       createCalls += 1
       return run('run-created')
@@ -244,11 +246,12 @@ test('ensurePromptRunIdForProvider reuses run when provider selection already ma
 
 test('ensurePromptRunIdForProvider creates a run when no session is selected', async () => {
   let createCalls = 0
-  let receivedOptions: { closeSessionPanel?: boolean } | undefined
+  let receivedOptions: { closeSessionPanel?: boolean; providerId?: string | null; modelId?: string | null } | undefined
 
   const runId = await ensurePromptRunIdForProvider(
     null,
     'claude-acp',
+    'default',
     async (options) => {
       createCalls += 1
       receivedOptions = options
@@ -262,7 +265,7 @@ test('ensurePromptRunIdForProvider creates a run when no session is selected', a
 
   assert.equal(runId, 'run-claude')
   assert.equal(createCalls, 1)
-  assert.deepEqual(receivedOptions, { closeSessionPanel: false })
+  assert.deepEqual(receivedOptions, { closeSessionPanel: false, providerId: 'claude-acp', modelId: 'default' })
 })
 
 test('sendPromptForSelectedProvider switches provider inside the selected run and posts page context', async () => {

@@ -15,6 +15,8 @@ config.toml
 !apps/gateway-admin/components/logs/*.tsx
 !crates/lab/src/dispatch/logs/
 !crates/lab/src/dispatch/logs/*.rs
+/config.runtime.json
+/artifacts/
 backups/
 *.log
 *.pid

@@ -9,7 +9,7 @@ use serde_json::json;
 use tokio::time::sleep;
 
 use crate::cli::helpers::run_action_command;
-use crate::config::{LabConfig, config_toml_path};
+use crate::config::{LabConfig, ProtectedMcpRouteConfig, config_toml_path};
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
 use crate::dispatch::gateway::install_gateway_manager;
@@ -32,6 +32,7 @@ pub enum GatewayCommand {
     Update(GatewayUpdateArgs),
     Remove(GatewayRemoveArgs),
     Quarantine(GatewayQuarantineArgs),
+    ProtectedRoute(GatewayProtectedRouteArgs),
     ToolSearch(GatewayToolSearchArgs),
     Reload,
     Mcp(GatewayMcpArgs),
@@ -107,6 +108,68 @@ pub enum GatewayQuarantineCommand {
 #[derive(Debug, Args)]
 pub struct GatewayQuarantineRestoreArgs {
     pub id: String,
+}
+
+#[derive(Debug, Args)]
+pub struct GatewayProtectedRouteArgs {
+    #[command(subcommand)]
+    pub command: GatewayProtectedRouteCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum GatewayProtectedRouteCommand {
+    List,
+    Get(GatewayProtectedRouteNameArgs),
+    Add(GatewayProtectedRouteUpsertArgs),
+    Update(GatewayProtectedRouteUpdateArgs),
+    Remove(GatewayProtectedRouteNameArgs),
+    Test(GatewayProtectedRouteUpsertArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct GatewayProtectedRouteNameArgs {
+    pub name: String,
+}
+
+#[derive(Debug, Args)]
+pub struct GatewayProtectedRouteUpdateArgs {
+    pub name: String,
+    #[arg(long)]
+    pub new_name: Option<String>,
+    #[arg(long)]
+    pub enabled: Option<bool>,
+    #[arg(long)]
+    pub public_host: String,
+    #[arg(long)]
+    pub public_path: String,
+    #[arg(long)]
+    pub backend_url: String,
+    #[arg(long, default_value = "/mcp")]
+    pub backend_mcp_path: String,
+    #[arg(long = "scope")]
+    pub scopes: Vec<String>,
+    #[arg(long)]
+    pub health_path: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct GatewayProtectedRouteUpsertArgs {
+    #[arg(long)]
+    pub name: String,
+    #[arg(long, default_value_t = true)]
+    pub enabled: bool,
+    #[arg(long)]
+    pub public_host: String,
+    #[arg(long)]
+    pub public_path: String,
+    #[arg(long)]
+    pub backend_url: String,
+    #[arg(long, default_value = "/mcp")]
+    pub backend_mcp_path: String,
+    #[arg(long = "scope")]
+    pub scopes: Vec<String>,
+    #[arg(long)]
+    pub health_path: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -224,8 +287,21 @@ async fn build_manager(config: &LabConfig, discover_upstreams: bool) -> Arc<Gate
     manager
 }
 
+fn protected_route_from_args(args: GatewayProtectedRouteUpsertArgs) -> ProtectedMcpRouteConfig {
+    ProtectedMcpRouteConfig {
+        name: args.name,
+        enabled: args.enabled,
+        public_host: args.public_host,
+        public_path: args.public_path,
+        backend_url: args.backend_url,
+        backend_mcp_path: args.backend_mcp_path,
+        scopes: args.scopes,
+        health_path: args.health_path,
+    }
+}
+
 pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) -> Result<ExitCode> {
-    let discover_upstreams = !matches!(
+    let discover_upstreams = !(matches!(
         &args.command,
         GatewayCommand::Mcp(GatewayMcpArgs {
             command: GatewayMcpCommand::List
@@ -236,7 +312,7 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                     command: GatewayMcpAuthCommand::Status(_) | GatewayMcpAuthCommand::Clear(_),
                 }),
         })
-    );
+    ) || matches!(&args.command, GatewayCommand::ProtectedRoute(_)));
     let manager = build_manager(config, discover_upstreams).await;
     let cli_origin = format!("cli:{}", std::process::id());
     let cli_owner = json!({
@@ -409,6 +485,43 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                     GatewayQuarantineCommand::Restore(args) => (
                         "gateway.virtual_server.quarantine.restore".to_string(),
                         json!({ "id": args.id }),
+                    ),
+                },
+                GatewayCommand::ProtectedRoute(args) => match args.command {
+                    GatewayProtectedRouteCommand::List => {
+                        ("gateway.protected_route.list".to_string(), json!({}))
+                    }
+                    GatewayProtectedRouteCommand::Get(args) => (
+                        "gateway.protected_route.get".to_string(),
+                        json!({ "name": args.name }),
+                    ),
+                    GatewayProtectedRouteCommand::Add(args) => (
+                        "gateway.protected_route.add".to_string(),
+                        json!({ "route": protected_route_from_args(args) }),
+                    ),
+                    GatewayProtectedRouteCommand::Update(args) => (
+                        "gateway.protected_route.update".to_string(),
+                        json!({
+                            "name": args.name,
+                            "route": ProtectedMcpRouteConfig {
+                                name: args.new_name.unwrap_or_else(|| args.name.clone()),
+                                enabled: args.enabled.unwrap_or(true),
+                                public_host: args.public_host,
+                                public_path: args.public_path,
+                                backend_url: args.backend_url,
+                                backend_mcp_path: args.backend_mcp_path,
+                                scopes: args.scopes,
+                                health_path: args.health_path,
+                            }
+                        }),
+                    ),
+                    GatewayProtectedRouteCommand::Remove(args) => (
+                        "gateway.protected_route.remove".to_string(),
+                        json!({ "name": args.name }),
+                    ),
+                    GatewayProtectedRouteCommand::Test(args) => (
+                        "gateway.protected_route.test".to_string(),
+                        json!({ "route": protected_route_from_args(args) }),
                     ),
                 },
                 GatewayCommand::ToolSearch(args) => match args.command {

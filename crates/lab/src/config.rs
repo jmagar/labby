@@ -84,6 +84,13 @@ pub struct LabConfig {
     /// Upstream MCP servers to proxy through the gateway.
     #[serde(default)]
     pub upstream: Vec<UpstreamConfig>,
+    /// Public HTTP MCP routes protected by Lab OAuth and proxied by Lab.
+    ///
+    /// These are intentionally separate from `upstream`: upstreams import tools
+    /// into Lab, while protected MCP routes expose a backend MCP server through
+    /// Lab as an OAuth resource server.
+    #[serde(default)]
+    pub protected_mcp_routes: Vec<ProtectedMcpRouteConfig>,
     /// Virtual MCP servers backed by canonically configured Lab services.
     #[serde(default)]
     pub virtual_servers: Vec<VirtualServerConfig>,
@@ -386,6 +393,46 @@ pub struct UpstreamConfig {
     /// `[tool_search]`; this field is only read to migrate older configs.
     #[serde(default, skip_serializing)]
     pub tool_search: ToolSearchConfig,
+}
+
+/// Gateway-managed public MCP route protected by Lab OAuth.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtectedMcpRouteConfig {
+    /// Stable operator-facing identifier.
+    pub name: String,
+    /// Whether this route is active for metadata, auth, and proxy resolution.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Public host that reaches Lab through the edge proxy, e.g. `mcp.tootie.tv`.
+    pub public_host: String,
+    /// Public path prefix on that host, e.g. `/syslog`.
+    pub public_path: String,
+    /// Backend origin only, e.g. `http://100.88.16.79:3100`.
+    pub backend_url: String,
+    /// Backend MCP endpoint path. Defaults to `/mcp`.
+    #[serde(default = "default_mcp_path")]
+    pub backend_mcp_path: String,
+    /// OAuth scopes advertised and enforced for this route.
+    #[serde(default = "default_mcp_scopes")]
+    pub scopes: Vec<String>,
+    /// Optional backend health path used by route test actions.
+    #[serde(default)]
+    pub health_path: Option<String>,
+}
+
+impl ProtectedMcpRouteConfig {
+    #[must_use]
+    pub fn public_resource(&self) -> String {
+        format!("https://{}{}", self.public_host, self.public_path)
+    }
+}
+
+fn default_mcp_path() -> String {
+    "/mcp".to_string()
+}
+
+fn default_mcp_scopes() -> Vec<String> {
+    vec!["mcp:read".to_string(), "mcp:write".to_string()]
 }
 
 impl UpstreamConfig {

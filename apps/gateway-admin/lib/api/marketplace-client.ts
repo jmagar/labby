@@ -429,7 +429,12 @@ type RawAcpAgentInstallResult = {
 function normalizeAcpInstallResult(raw: RawAcpAgentInstallResult): AcpAgentInstallResult {
   return {
     results: (raw.results ?? []).map((result) => {
-      const message = result.message ?? (typeof result.error === 'string' ? result.error : undefined)
+      const message =
+        result.message ??
+        (typeof result.error === 'string' ? result.error : undefined) ??
+        (result.ok && (result.device_id ?? result.node_id) === 'local'
+          ? 'Available in /chat'
+          : undefined)
       return {
         device_id: result.device_id ?? result.node_id ?? 'unknown',
         ok: result.ok,
@@ -454,7 +459,11 @@ export async function installAcpAgent(
     { id: params.agent_id, node_ids: params.device_ids, confirm: true },
     signal,
   )
-  return normalizeAcpInstallResult(raw)
+  const result = normalizeAcpInstallResult(raw)
+  if (result.results.some((item) => item.ok && item.device_id === 'local')) {
+    globalThis.dispatchEvent?.(new CustomEvent('lab:acp-providers-changed'))
+  }
+  return result
 }
 
 // ── Cherry-pick ────────────────────────────────────────────────────────────

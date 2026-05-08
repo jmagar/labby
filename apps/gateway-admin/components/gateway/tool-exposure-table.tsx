@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Asterisk, Eye, EyeOff, Search, SlidersHorizontal, Wrench, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -92,6 +92,7 @@ export function ToolExposureTable({
   }, [manageMode])
   const isSearchControlled = searchValue !== undefined
   const effectiveSearch = isSearchControlled ? searchValue : search
+  const deferredSearch = useDeferredValue(effectiveSearch)
   const setEffectiveSearch = (next: string) => {
     if (!isSearchControlled) {
       setSearch(next)
@@ -100,8 +101,8 @@ export function ToolExposureTable({
   }
 
   const filteredTools = useMemo(
-    () => filterToolsForExposureView(tools, filter, effectiveSearch),
-    [effectiveSearch, filter, tools],
+    () => filterToolsForExposureView(tools, filter, deferredSearch),
+    [deferredSearch, filter, tools],
   )
 
   const filterCounts = useMemo(() => getExposureFilterCounts(tools), [tools])

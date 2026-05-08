@@ -296,32 +296,46 @@ export function NodesPage() {
       <AppHeader
         breadcrumbs={[{ label: 'Nodes' }]}
         actions={(
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2">
             {/* View toggle */}
             <div className="flex rounded-aurora-1 border border-aurora-border-strong overflow-hidden">
               <button
                 type="button"
                 title="Card view"
+                aria-label="Card view"
                 onClick={() => setView('cards')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs transition-colors ${view === 'cards' ? 'bg-aurora-control-surface text-aurora-text-primary' : 'text-aurora-text-muted hover:text-aurora-text-primary'}`}
+                className={`flex items-center gap-1.5 px-2 py-1.5 text-xs transition-colors sm:px-2.5 ${view === 'cards' ? 'bg-aurora-control-surface text-aurora-text-primary' : 'text-aurora-text-muted hover:text-aurora-text-primary'}`}
               >
-                <LayoutGrid className="size-3.5" />Cards
+                <LayoutGrid className="size-3.5" />
+                <span className="hidden sm:inline">Cards</span>
               </button>
               <button
                 type="button"
                 title="Table view"
+                aria-label="Table view"
                 onClick={() => setView('table')}
-                className={`flex items-center gap-1.5 border-l border-aurora-border-strong px-2.5 py-1.5 text-xs transition-colors ${view === 'table' ? 'bg-aurora-control-surface text-aurora-text-primary' : 'text-aurora-text-muted hover:text-aurora-text-primary'}`}
+                className={`flex items-center gap-1.5 border-l border-aurora-border-strong px-2 py-1.5 text-xs transition-colors sm:px-2.5 ${view === 'table' ? 'bg-aurora-control-surface text-aurora-text-primary' : 'text-aurora-text-muted hover:text-aurora-text-primary'}`}
               >
-                <Table2 className="size-3.5" />Table
+                <Table2 className="size-3.5" />
+                <span className="hidden sm:inline">Table</span>
               </button>
             </div>
-            <Button variant="outline" size="sm" className="gap-2" disabled={refreshing} onClick={() => void loadNodes()}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 px-2 sm:px-3"
+              disabled={refreshing}
+              onClick={() => void loadNodes()}
+              aria-label={refreshing ? 'Refreshing nodes' : 'Refresh nodes'}
+            >
               <RefreshCw className="size-4" />
-              {refreshing ? 'Refreshing…' : 'Refresh'}
+              <span className="hidden sm:inline">{refreshing ? 'Refreshing…' : 'Refresh'}</span>
             </Button>
-            <Button asChild size="sm" variant="outline">
-              <Link href="/logs">Global logs</Link>
+            <Button asChild size="sm" variant="outline" className="px-2 sm:px-3">
+              <Link href="/logs" aria-label="Global logs">
+                <ScrollText className="size-4 sm:hidden" />
+                <span className="hidden sm:inline">Global logs</span>
+              </Link>
             </Button>
           </div>
         )}

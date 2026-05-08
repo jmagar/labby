@@ -1,7 +1,7 @@
 'use client'
 
 import Image from 'next/image'
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Bot,
   Boxes,
@@ -10,6 +10,7 @@ import {
   Grid2X2,
   Hammer,
   LayoutList,
+  MonitorSmartphone,
   Plus,
   RefreshCw,
   Search,
@@ -22,6 +23,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { AppHeader } from '@/components/app-header'
+import { useMediaQuery } from '@/lib/hooks/use-media-query'
 import {
   AURORA_BADGE_LABEL,
   AURORA_CARD_TITLE,
@@ -34,12 +36,12 @@ import {
   AURORA_PAGE_SHELL,
   AURORA_STAT_PANEL,
   AURORA_STRONG_PANEL,
-  pillTone,
 } from '@/components/aurora/tokens'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useAcpAgents, useMarketplaceMutations, useMarketplaces, useMcpServers, usePlugins } from '@/lib/hooks/use-marketplace'
 import { cn, getErrorMessage } from '@/lib/utils'
@@ -64,8 +66,13 @@ import { AddMarketplaceModal } from './add-marketplace-modal'
 import { AcpAgentInstallModal } from './acp-agent-install-modal'
 import { CherryPickDialog } from './cherry-pick-dialog'
 import { McpInstallModal } from './mcp-install-modal'
-
-type ViewMode = 'cards' | 'table'
+import {
+  MARKETPLACE_VIEW_MODE_STORAGE_KEY,
+  isMarketplaceViewPreference,
+  resolveMarketplaceViewMode,
+  type MarketplaceViewMode,
+  type MarketplaceViewPreference,
+} from './marketplace-view-preference'
 
 const DEFAULT_FILTERS: MarketplaceCatalogFilterState = {
   lens: 'all',
@@ -114,8 +121,21 @@ const SORT_OPTIONS: Array<{ value: MarketplaceSort; label: string }> = [
   { value: 'updated', label: 'Recently updated' },
 ]
 
+const VIEW_OPTIONS: Array<{ value: MarketplaceViewPreference; label: string; icon: ReactNode }> = [
+  { value: 'auto', label: 'Auto view', icon: <MonitorSmartphone className="size-4" /> },
+  { value: 'cards', label: 'Card view', icon: <Grid2X2 className="size-4" /> },
+  { value: 'table', label: 'Table view', icon: <LayoutList className="size-4" /> },
+]
+
+const CATALOG_RENDER_BATCH = 200
 function toggleValue<T extends string>(values: T[], value: T): T[] {
   return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]
+}
+
+function marketplacePillTone(active: boolean): string {
+  return active
+    ? 'border-aurora-accent-primary/45 bg-aurora-accent-primary/14 text-aurora-text-primary shadow-[var(--aurora-active-glow)]'
+    : 'border-aurora-border-strong bg-aurora-control-surface text-aurora-text-primary hover:border-aurora-accent-primary/30 hover:bg-aurora-hover-bg'
 }
 
 const KIND_META: Record<MarketplaceCatalogKind, { label: string; icon: ReactNode }> = {
@@ -256,33 +276,33 @@ function CatalogCard({
       onClick={() => onAction(item)}
       className={cn(
         AURORA_STRONG_PANEL,
-        'flex min-h-[214px] flex-col gap-3 p-4 text-left transition-[background-color,border-color,box-shadow,transform] hover:-translate-y-px hover:bg-aurora-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-aurora-accent-primary/34',
+        'flex min-h-[214px] w-full min-w-0 overflow-hidden flex-col gap-3 p-4 text-left transition-[background-color,border-color,box-shadow,transform] hover:-translate-y-px hover:bg-aurora-hover-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-aurora-accent-primary/34',
       )}
       aria-label={`${primaryActionLabel(item)} ${item.name}`}
     >
-      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3">
+      <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
         <CatalogIdentityMark item={item} />
         <div className="min-w-0">
           <h3 className={cn(AURORA_CARD_TITLE, 'truncate text-aurora-text-primary')}>{item.name}</h3>
           <p className={cn(AURORA_DENSE_META, 'mt-1 truncate text-aurora-text-muted')}>{item.subtitle}</p>
         </div>
-        <span className={cn(AURORA_BADGE_LABEL, 'rounded-full border px-2 py-1', pillTone(item.installed || item.hasUpdate))}>
+        <span className={cn(AURORA_BADGE_LABEL, 'col-span-2 w-fit rounded-full border px-2 py-1 sm:col-span-1', marketplacePillTone(item.installed || item.hasUpdate))}>
           {item.hasUpdate ? 'Update' : item.installed ? 'Installed' : kindLabel(item.kind)}
         </span>
       </div>
-      <p className="line-clamp-3 min-h-[60px] text-[13px] leading-[1.55] text-aurora-text-muted">{item.description || 'No description provided.'}</p>
-      <div className="flex flex-wrap gap-1">
+      <p className="line-clamp-3 min-h-[60px] min-w-0 text-[13px] leading-[1.55] text-aurora-text-muted">{item.description || 'No description provided.'}</p>
+      <div className="flex min-w-0 flex-wrap gap-1">
         {[item.ecosystem, item.distribution, item.sourceName, ...item.tags].filter(Boolean).slice(0, 4).map((tag) => (
           <span key={tag} className={cn(AURORA_BADGE_LABEL, 'rounded-full border border-aurora-border-default bg-aurora-control-surface px-2 py-1 text-aurora-text-muted')}>
             {tag}
           </span>
         ))}
       </div>
-      <div className="mt-auto flex items-center justify-between gap-2 border-t border-aurora-border-default pt-2">
+      <div className="mt-auto flex min-w-0 items-center justify-between gap-2 border-t border-aurora-border-default pt-2">
         <span className={cn(AURORA_DENSE_META, 'rounded-full border border-aurora-border-default bg-aurora-control-surface px-2.5 py-1 font-semibold text-aurora-text-muted')}>
           {item.version ? `v${item.version}` : item.kind === 'source' ? 'source' : 'latest'}
         </span>
-        <span className={cn(gatewayActionTone(), 'inline-flex h-8 items-center rounded-aurora-1 border px-3 text-[13px] font-semibold text-aurora-text-primary')}>
+        <span className={cn(gatewayActionTone(), 'inline-flex h-8 shrink-0 items-center rounded-aurora-1 border px-3 text-[13px] font-semibold text-aurora-text-primary')}>
           {primaryActionLabel(item)}
         </span>
       </div>
@@ -294,13 +314,13 @@ function CatalogTable({ items, onAction }: { items: MarketplaceCatalogItem[]; on
   return (
     <div className={cn(AURORA_STRONG_PANEL, 'overflow-hidden')}>
       <div className="aurora-scrollbar overflow-x-auto">
-        <Table>
+        <Table className="min-w-[520px] sm:min-w-[760px]">
           <TableHeader>
             <TableRow>
               <TableHead>Item</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Source/package</TableHead>
-              <TableHead>Version</TableHead>
+              <TableHead className="hidden sm:table-cell">Type</TableHead>
+              <TableHead className="hidden md:table-cell">Source/package</TableHead>
+              <TableHead className="hidden sm:table-cell">Version</TableHead>
               <TableHead>State</TableHead>
               <TableHead className="text-right">Action</TableHead>
             </TableRow>
@@ -322,7 +342,7 @@ function CatalogTable({ items, onAction }: { items: MarketplaceCatalogItem[]; on
                 className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-aurora-accent-primary/34"
               >
                 <TableCell>
-                  <div className="flex max-w-[320px] items-center gap-3">
+                  <div className="flex max-w-[280px] items-center gap-2 sm:max-w-[320px] sm:gap-3">
                     <CatalogIdentityMark item={item} size={32} />
                     <div className="min-w-0">
                       <p className="truncate font-semibold text-aurora-text-primary">{item.name}</p>
@@ -330,9 +350,9 @@ function CatalogTable({ items, onAction }: { items: MarketplaceCatalogItem[]; on
                     </div>
                   </div>
                 </TableCell>
-                <TableCell>{kindLabel(item.kind)}</TableCell>
-                <TableCell>{item.sourceName ?? item.subtitle}</TableCell>
-                <TableCell>{item.version ? `v${item.version}` : '-'}</TableCell>
+                <TableCell className="hidden sm:table-cell">{kindLabel(item.kind)}</TableCell>
+                <TableCell className="hidden md:table-cell">{item.sourceName ?? item.subtitle}</TableCell>
+                <TableCell className="hidden sm:table-cell">{item.version ? `v${item.version}` : '-'}</TableCell>
                 <TableCell>{item.hasUpdate ? 'Update available' : item.installed ? 'Installed' : item.builtin ? 'Built-in' : 'Available'}</TableCell>
                 <TableCell className="text-right">
                   <Button
@@ -425,7 +445,9 @@ export function MarketplaceListContent({ readOnlyPreview = false }: { readOnlyPr
   const { install, uninstall, addSource } = useMarketplaceMutations()
 
   const [filters, setFilters] = useState<MarketplaceCatalogFilterState>(DEFAULT_FILTERS)
-  const [viewMode, setViewMode] = useState<ViewMode>('cards')
+  const [viewPreference, setViewPreference] = useState<MarketplaceViewPreference>('auto')
+  const prefersDesktopLayout = useMediaQuery('(min-width: 1024px)')
+  const effectiveViewMode: MarketplaceViewMode = resolveMarketplaceViewMode(viewPreference, prefersDesktopLayout)
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const isMutatingRef = useRef(false)
@@ -435,12 +457,25 @@ export function MarketplaceListContent({ readOnlyPreview = false }: { readOnlyPr
   const [mcpInstallItem, setMcpInstallItem] = useState<MarketplaceCatalogItem | null>(null)
   const [acpInstallItem, setAcpInstallItem] = useState<MarketplaceCatalogItem | null>(null)
   const [componentInstallItem, setComponentInstallItem] = useState<MarketplaceCatalogItem | null>(null)
+  const deferredFilters = useDeferredValue(filters)
+  const [renderLimit, setRenderLimit] = useState(CATALOG_RENDER_BATCH)
+
+  useEffect(() => {
+    const storedViewPreference = window.localStorage.getItem(MARKETPLACE_VIEW_MODE_STORAGE_KEY)
+    if (isMarketplaceViewPreference(storedViewPreference)) {
+      setViewPreference(storedViewPreference)
+    }
+  }, [])
+
+  const updateViewPreference = (nextViewPreference: MarketplaceViewPreference) => {
+    setViewPreference(nextViewPreference)
+    window.localStorage.setItem(MARKETPLACE_VIEW_MODE_STORAGE_KEY, nextViewPreference)
+  }
 
   const items = useMemo(
     () => buildMarketplaceCatalogItems({ plugins, sources, mcpServers, acpAgents }),
     [acpAgents, mcpServers, plugins, sources],
   )
-  const summary = useMemo(() => marketplaceCatalogSummary(items), [items])
   const { sourceLabels, sourceOptions, ecosystemOptions, distributionOptions } = useMemo(() => {
     const labels = new Map<string, string>()
     const ecosystems = new Set<string>()
@@ -465,10 +500,24 @@ export function MarketplaceListContent({ readOnlyPreview = false }: { readOnlyPr
     [filters, sourceLabels],
   )
   const filteredItems = useMemo(
-    () => sortMarketplaceCatalogItems(filterMarketplaceCatalogItems(items, filters), filters.sort),
-    [filters, items],
+    () => sortMarketplaceCatalogItems(
+      filterMarketplaceCatalogItems(items, deferredFilters),
+      deferredFilters.sort,
+      deferredFilters.search,
+    ),
+    [deferredFilters, items],
   )
+  const summaryItems = useMemo(
+    () => filterMarketplaceCatalogItems(items, { ...deferredFilters, lens: 'all' }),
+    [deferredFilters, items],
+  )
+  const summary = useMemo(() => marketplaceCatalogSummary(summaryItems), [summaryItems])
+  const renderedItems = useMemo(() => filteredItems.slice(0, renderLimit), [filteredItems, renderLimit])
   const loadErrors = [sourcesError, pluginsError, mcpError, acpError].filter(Boolean)
+
+  useEffect(() => {
+    setRenderLimit(CATALOG_RENDER_BATCH)
+  }, [deferredFilters, effectiveViewMode])
 
   const updateFilters = (patch: Partial<MarketplaceCatalogFilterState>) => {
     setFilters((current) => ({ ...current, ...patch }))
@@ -554,7 +603,7 @@ export function MarketplaceListContent({ readOnlyPreview = false }: { readOnlyPr
       <FilterGroup label="Sort">
         <div className="flex flex-wrap gap-2">
           {SORT_OPTIONS.map((option) => (
-            <button key={option.value} type="button" onClick={() => updateFilters({ sort: option.value })} className={cn('rounded-full border px-3 py-2 text-[13px] font-medium', pillTone(filters.sort === option.value))} aria-label={`Sort by ${option.label}`} aria-pressed={filters.sort === option.value}>
+            <button key={option.value} type="button" onClick={() => updateFilters({ sort: option.value })} className={cn('rounded-full border px-3 py-2 text-[13px] font-medium', marketplacePillTone(filters.sort === option.value))} aria-label={`Sort by ${option.label}`} aria-pressed={filters.sort === option.value}>
               {option.label}
             </button>
           ))}
@@ -583,8 +632,19 @@ export function MarketplaceListContent({ readOnlyPreview = false }: { readOnlyPr
       <AppHeader
         breadcrumbs={[{ label: 'Labby', href: '/' }, { label: 'Marketplace' }]}
         actions={<div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" onClick={() => setViewMode('cards')} className={cn(gatewayActionTone(), 'hidden size-9 lg:inline-flex', viewMode === 'cards' && 'border-aurora-accent-primary/45 text-aurora-accent-strong')} aria-label="Card view" aria-pressed={viewMode === 'cards'}><Grid2X2 className="size-4" /></Button>
-          <Button variant="outline" size="icon" onClick={() => setViewMode('table')} className={cn(gatewayActionTone(), 'hidden size-9 lg:inline-flex', viewMode === 'table' && 'border-aurora-accent-primary/45 text-aurora-accent-strong')} aria-label="Table view" aria-pressed={viewMode === 'table'}><LayoutList className="size-4" /></Button>
+          {VIEW_OPTIONS.map((option) => (
+            <Button
+              key={option.value}
+              variant="outline"
+              size="icon"
+              onClick={() => updateViewPreference(option.value)}
+              className={cn(gatewayActionTone(), 'size-9', viewPreference === option.value && 'border-aurora-accent-primary/45 text-aurora-accent-strong')}
+              aria-label={option.label}
+              aria-pressed={viewPreference === option.value}
+            >
+              {option.icon}
+            </Button>
+          ))}
           <Button variant="outline" size="icon" onClick={() => readOnlyPreview ? toast.info('Dev preview is read-only. Source add flow is visible but writes are blocked.') : setAddSourceOpen(true)} className={cn(gatewayActionTone(), 'size-9')} aria-label="Add marketplace source"><Plus className="size-4" /></Button>
           <Button size="icon" onClick={() => { void handleRefresh() }} disabled={isRefreshing} className={cn(gatewayActionTone('accent'), 'size-9 border')} aria-label="Refresh marketplace catalog"><RefreshCw className={cn('size-4', isRefreshing && 'animate-spin')} /></Button>
         </div>}
@@ -636,8 +696,21 @@ export function MarketplaceListContent({ readOnlyPreview = false }: { readOnlyPr
                     <Button type="button" variant="outline" size="icon" onClick={() => setMobileSheetOpen(!mobileSheetOpen)} className={cn(gatewayActionTone(), 'relative size-7 rounded-full')} aria-label="Open filters"><SlidersHorizontal className="size-3.5" />{activeLabels.length ? <span className={cn(AURORA_BADGE_LABEL, 'absolute -top-1 -right-1 rounded-full border border-aurora-accent-primary/35 bg-aurora-accent-primary/14 px-2 leading-4 text-aurora-accent-strong')}>{activeLabels.length}</span> : null}</Button>
                   </div>
                 </div>
-                {activeLabels.length ? <div className="flex flex-wrap gap-2">{activeLabels.map((label) => <span key={label} className={cn(AURORA_BADGE_LABEL, 'rounded-full border px-2.5 py-1', pillTone(true))}>{label}</span>)}</div> : null}
-                {mobileSheetOpen ? <div className={cn(AURORA_MEDIUM_PANEL, 'space-y-4 p-4')}><div className="flex items-center justify-between"><p className={AURORA_MUTED_LABEL}>Filter catalog</p><Button variant="outline" size="sm" onClick={clearFilters} className={cn(gatewayActionTone(), 'h-8 px-3')}>Clear</Button></div>{filterGroups}</div> : null}
+                {activeLabels.length ? <div className="flex flex-wrap gap-2">{activeLabels.map((label) => <span key={label} className={cn(AURORA_BADGE_LABEL, 'rounded-full border px-2.5 py-1', marketplacePillTone(true))}>{label}</span>)}</div> : null}
+                <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
+                  <SheetContent side="bottom" className="max-h-[82svh] overflow-hidden rounded-t-aurora-3 border-aurora-border-strong bg-aurora-panel-strong p-0 text-aurora-text-primary">
+                    <SheetHeader className="border-b border-aurora-border-strong px-4 py-4 text-left">
+                      <SheetTitle>Filter catalog</SheetTitle>
+                      <SheetDescription>Refine marketplace items without leaving the results list.</SheetDescription>
+                    </SheetHeader>
+                    <div className="aurora-scrollbar overflow-y-auto px-4 py-4">
+                      <div className="mb-4 flex justify-end">
+                        <Button variant="outline" size="sm" onClick={clearFilters} className={cn(gatewayActionTone(), 'h-8 px-3 text-aurora-text-primary')}>Clear</Button>
+                      </div>
+                      {filterGroups}
+                    </div>
+                  </SheetContent>
+                </Sheet>
               </div>
 
               <div className={cn(AURORA_MEDIUM_PANEL, 'hidden space-y-4 p-4 lg:block')}>
@@ -664,10 +737,28 @@ export function MarketplaceListContent({ readOnlyPreview = false }: { readOnlyPr
               </div>
               {filteredItems.length === 0 ? (
                 <div className={cn(AURORA_STRONG_PANEL, 'p-8 text-center')}><p className={cn(AURORA_COMPACT_TITLE, 'text-aurora-text-primary')}>No matching marketplace items</p><p className="mt-2 text-sm text-aurora-text-muted">Adjust search or filters to return plugins, MCP servers, ACP agents, or sources.</p></div>
-              ) : viewMode === 'table' ? (
-                <CatalogTable items={filteredItems} onAction={handleItemAction} />
               ) : (
-                <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-3">{filteredItems.map((item) => <CatalogCard key={item.id} item={item} onAction={handleItemAction} />)}</div>
+                <>
+                  {filteredItems.length > renderedItems.length ? (
+                    <div className={cn(AURORA_MEDIUM_PANEL, 'mb-3 flex flex-wrap items-center justify-between gap-3 p-3 text-[13px] text-aurora-text-muted')}>
+                      <span>Showing {renderedItems.length} of {filteredItems.length} results.</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setRenderLimit((current) => current + CATALOG_RENDER_BATCH)}
+                        className={cn(gatewayActionTone(), 'h-8 px-3 text-aurora-text-primary')}
+                      >
+                        Show more
+                      </Button>
+                    </div>
+                  ) : null}
+                  {effectiveViewMode === 'table' ? (
+                    <CatalogTable items={renderedItems} onAction={handleItemAction} />
+                  ) : (
+                    <div className="grid min-w-0 gap-3 xl:grid-cols-2 2xl:grid-cols-3">{renderedItems.map((item) => <CatalogCard key={item.id} item={item} onAction={handleItemAction} />)}</div>
+                  )}
+                </>
               )}
             </section>
           </div>
