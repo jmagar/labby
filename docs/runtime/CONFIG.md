@@ -231,13 +231,13 @@ The node runtime reuses the same target model when `POST /v1/nodes/oauth/relay/s
 
 | Key | Env override | Default | Description |
 |-----|-------------|---------|-------------|
-| `built_in_upstream_apis_enabled` | none | `true` | Enables all compiled built-in service integrations that call external service APIs. Set to `false` to keep bootstrap/operator tools online while removing built-in upstream API integrations from runtime discovery and dispatch. |
+| `built_in_upstream_apis_enabled` | none | `true` | Enables all compiled built-in service integrations that call external service APIs. Set to `false` to keep bootstrap/operator tools online while removing built-in upstream API integrations from runtime discovery and dispatch on the next `labby serve` start. |
 
 When `built_in_upstream_apis_enabled = false`, Lab preserves stored service credentials and config on disk. Disablement controls runtime exposure only; it does not delete `.env` values.
 
 Persistent disablement wins over `labby serve --services` and `labby mcp --services` by default. The `--services` flag can narrow the already-enabled runtime registry, but it does not re-enable a built-in upstream API service disabled by `[services]`.
 
-Generated/static docs describe the compiled surface. Runtime discovery (`lab://catalog`, MCP list tools, HTTP route mounting, and settings projections) reflects the running process and this config value.
+Generated/static docs describe the compiled surface. Runtime discovery (`lab://catalog`, MCP list tools, HTTP route mounting, and action dispatch) reflects the config value captured when the server process started. Changing this setting through Settings writes `config.toml` without deleting comments or unknown keys, then reports `restart_required: true`; restart `labby serve` for the runtime registry and routes to change.
 
 ### `[services.tailscale]`
 

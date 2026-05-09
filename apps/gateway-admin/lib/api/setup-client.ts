@@ -200,6 +200,25 @@ function mockSetupSnapshot(): SetupSnapshot {
   }
 }
 
+function mockSettingsSurfaces(): SettingsState['surfaces'] {
+  return {
+    mcp: {
+      transport: 'http',
+      host: '127.0.0.1',
+      port: 8765,
+      stateful: null,
+    },
+    web: {
+      auth_disabled: false,
+      assets_dir: null,
+    },
+    auth: {
+      mode: 'bearer',
+      public_url: null,
+    },
+  }
+}
+
 // ─── Drafts ─────────────────────────────────────────────────────────────
 
 export interface DraftEntry {
@@ -253,10 +272,28 @@ export interface ServicesStatusResponse {
 
 export interface SettingsState {
   config_path: string
+  restart_required: boolean
+  restart_note: string
   services: {
     built_in_upstream_apis_enabled: boolean
     built_in_upstream_api_services: string[]
     bootstrap_services: string[]
+  }
+  surfaces: {
+    mcp: {
+      transport: string
+      host: string
+      port: number
+      stateful: boolean | null
+    }
+    web: {
+      auth_disabled: boolean
+      assets_dir: string | null
+    }
+    auth: {
+      mode: string
+      public_url: string | null
+    }
   }
 }
 
@@ -297,11 +334,14 @@ export const setupApi = {
       signal?.throwIfAborted?.()
       return Promise.resolve({
         config_path: '~/.config/lab/config.toml',
+        restart_required: false,
+        restart_note: 'Changes to built-in upstream API services take effect after restarting labby serve.',
         services: {
           built_in_upstream_apis_enabled: true,
           built_in_upstream_api_services: Object.keys(MOCK_SERVICES),
           bootstrap_services: ['setup', 'doctor', 'extract', 'gateway'],
         },
+        surfaces: mockSettingsSurfaces(),
       })
     }
     return setupAction<SettingsState>('settings.state', {}, signal)
@@ -312,15 +352,22 @@ export const setupApi = {
       signal?.throwIfAborted?.()
       return Promise.resolve({
         config_path: '~/.config/lab/config.toml',
+        restart_required: true,
+        restart_note: 'Changes to built-in upstream API services take effect after restarting labby serve.',
         services: {
           built_in_upstream_apis_enabled:
             patch.services?.built_in_upstream_apis_enabled ?? true,
           built_in_upstream_api_services: Object.keys(MOCK_SERVICES),
           bootstrap_services: ['setup', 'doctor', 'extract', 'gateway'],
         },
+        surfaces: mockSettingsSurfaces(),
       })
     }
-    return setupAction<SettingsState>('settings.update', patch as Record<string, unknown>, signal)
+    return setupAction<SettingsState>(
+      'settings.update',
+      { ...(patch as Record<string, unknown>), confirm: true },
+      signal,
+    )
   },
 
   draftGet(signal?: AbortSignal): Promise<{ entries: DraftEntry[] }> {

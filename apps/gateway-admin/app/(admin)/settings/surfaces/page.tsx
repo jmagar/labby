@@ -7,13 +7,6 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { setupApi, type SettingsState } from '@/lib/api/setup-client'
 
-const SURFACE_ROWS = [
-  { key: 'mcp.transport', label: 'MCP transport', source: 'mcp.transport / LAB_MCP_TRANSPORT' },
-  { key: 'mcp.http', label: 'HTTP bind', source: 'mcp.host + mcp.port / LAB_MCP_HTTP_*' },
-  { key: 'web.auth', label: 'Web UI auth', source: 'web.auth_disabled / LAB_WEB_UI_AUTH_DISABLED' },
-  { key: 'oauth.public_url', label: 'OAuth public URL', source: 'auth.public_url / LAB_AUTH_PUBLIC_URL' },
-]
-
 export default function SurfacesPage(): React.ReactElement {
   const [settings, setSettings] = useState<SettingsState | undefined>()
   const [loading, setLoading] = useState(true)
@@ -34,6 +27,41 @@ export default function SurfacesPage(): React.ReactElement {
       })
     return () => controller.abort()
   }, [])
+
+  const surfaceRows = settings
+    ? [
+        {
+          key: 'mcp.transport',
+          label: 'MCP transport',
+          value: settings.surfaces.mcp.transport,
+          source: 'mcp.transport / LAB_MCP_TRANSPORT',
+        },
+        {
+          key: 'mcp.http',
+          label: 'HTTP bind',
+          value: `${settings.surfaces.mcp.host}:${settings.surfaces.mcp.port}`,
+          source: 'mcp.host + mcp.port / LAB_MCP_HTTP_*',
+        },
+        {
+          key: 'web.auth',
+          label: 'Web UI auth',
+          value: settings.surfaces.web.auth_disabled ? 'disabled' : 'enabled',
+          source: 'web.disable_auth / LAB_WEB_UI_AUTH_DISABLED',
+        },
+        {
+          key: 'auth.mode',
+          label: 'Auth mode',
+          value: settings.surfaces.auth.mode,
+          source: 'auth.mode / LAB_AUTH_MODE',
+        },
+        {
+          key: 'auth.public_url',
+          label: 'Public URL',
+          value: settings.surfaces.auth.public_url ?? 'not configured',
+          source: 'auth.public_url / LAB_PUBLIC_URL',
+        },
+      ]
+    : []
 
   return (
     <>
@@ -56,10 +84,11 @@ export default function SurfacesPage(): React.ReactElement {
             <p className="text-xs text-muted-foreground">Config path: {settings.config_path}</p>
           ) : null}
           <ul className="divide-y rounded-md border">
-            {SURFACE_ROWS.map((row) => (
+            {surfaceRows.map((row) => (
               <li key={row.key} className="flex items-center justify-between gap-3 p-3">
                 <div>
                   <p className="text-sm font-medium">{row.label}</p>
+                  <p className="font-mono text-xs">{row.value}</p>
                   <p className="text-xs text-muted-foreground">{row.source}</p>
                 </div>
                 <Badge variant="secondary">read-only</Badge>

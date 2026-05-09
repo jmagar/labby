@@ -64,6 +64,7 @@ export default function AdvancedPage(): React.ReactElement {
         settings.services.built_in_upstream_api_services,
       bootstrap_services: settings.services.bootstrap_services,
     },
+    surfaces: settings.surfaces,
   },
   null,
   2,

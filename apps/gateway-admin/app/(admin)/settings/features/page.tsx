@@ -72,7 +72,13 @@ export default function FeaturesPage(): React.ReactElement {
                 </div>
                 <p className="text-sm text-muted-foreground">
                   Disable every bundled external API integration while keeping bootstrap tools online.
+                  Changes are saved to config.toml and take effect after restarting labby serve.
                 </p>
+                {settings.restart_required ? (
+                  <p className="text-sm text-amber-700 dark:text-amber-300">
+                    {settings.restart_note}
+                  </p>
+                ) : null}
                 <p className="text-xs text-muted-foreground">
                   {settings.services.built_in_upstream_api_services.join(', ')}
                 </p>

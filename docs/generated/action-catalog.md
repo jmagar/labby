@@ -655,7 +655,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `setup` | `schema.get` | false | false | `services: string[]` | `ServiceSchemaMap` | cli, mcp, api, web |
 | `setup` | `services_status` | false | false |  | `ServiceStatus[]` | cli, mcp, api, web |
 | `setup` | `settings.state` | false | false |  | `SettingsState` | cli, mcp, api, web |
-| `setup` | `settings.update` | false | false | `services.built_in_upstream_apis_enabled: bool` | `SettingsState` | cli, mcp, api, web |
+| `setup` | `settings.update` | false | true | `services.built_in_upstream_apis_enabled: bool` | `SettingsState` | cli, mcp, api, web |
 | `setup` | `state` | false | false |  | `SetupSnapshot` | cli, mcp, api, web |
 | `setup` | `uninstall_plugin` | false | true | `service*: string` | `PluginMutationResult` | cli, mcp, api, web |
 | `sonarr` | `blocklist.delete` | false | true | `id*: i64` | `void` | cli, mcp, api |

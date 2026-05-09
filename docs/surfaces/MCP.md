@@ -307,7 +307,7 @@ The runtime registry only exposes enabled services. Discovery reflects the runni
 That means:
 
 - compiled features matter
-- `[services].built_in_upstream_apis_enabled = false` removes built-in upstream API integrations while preserving bootstrap/operator tools
+- `[services].built_in_upstream_apis_enabled = false` removes built-in upstream API integrations on the next server start while preserving bootstrap/operator tools
 - `--services` filtering matters
 - `lab://catalog` only shows what is actually available
 

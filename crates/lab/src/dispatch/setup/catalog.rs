@@ -90,7 +90,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "settings.update",
         description: "Update non-secret operator settings with validation",
-        destructive: false,
+        destructive: true,
         returns: "SettingsState",
         params: &[ParamSpec {
             name: "services.built_in_upstream_apis_enabled",
