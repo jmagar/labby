@@ -1378,7 +1378,7 @@ Options:
 ## `labby gateway protected-route add`
 
 ```text
-Usage: add [OPTIONS] --name <NAME> --public-host <PUBLIC_HOST> --public-path <PUBLIC_PATH> --backend-url <BACKEND_URL>
+Usage: add [OPTIONS] --name <NAME> --public-host <PUBLIC_HOST> --public-path <PUBLIC_PATH>
 
 Options:
       --json
@@ -1402,11 +1402,11 @@ Options:
       --public-path <PUBLIC_PATH>
 
 
+      --upstream <UPSTREAM>
+
+
       --backend-url <BACKEND_URL>
 
-
-      --backend-mcp-path <BACKEND_MCP_PATH>
-          [default: /mcp]
 
       --scope <SCOPES>
 
@@ -1421,7 +1421,7 @@ Options:
 ## `labby gateway protected-route update`
 
 ```text
-Usage: update [OPTIONS] --public-host <PUBLIC_HOST> --public-path <PUBLIC_PATH> --backend-url <BACKEND_URL> <NAME>
+Usage: update [OPTIONS] --public-host <PUBLIC_HOST> --public-path <PUBLIC_PATH> <NAME>
 
 Arguments:
   <NAME>
@@ -1449,11 +1449,11 @@ Options:
       --public-path <PUBLIC_PATH>
 
 
+      --upstream <UPSTREAM>
+
+
       --backend-url <BACKEND_URL>
 
-
-      --backend-mcp-path <BACKEND_MCP_PATH>
-          [default: /mcp]
 
       --scope <SCOPES>
 
@@ -1491,7 +1491,7 @@ Options:
 ## `labby gateway protected-route test`
 
 ```text
-Usage: test [OPTIONS] --name <NAME> --public-host <PUBLIC_HOST> --public-path <PUBLIC_PATH> --backend-url <BACKEND_URL>
+Usage: test [OPTIONS] --name <NAME> --public-host <PUBLIC_HOST> --public-path <PUBLIC_PATH>
 
 Options:
       --json
@@ -1515,11 +1515,11 @@ Options:
       --public-path <PUBLIC_PATH>
 
 
+      --upstream <UPSTREAM>
+
+
       --backend-url <BACKEND_URL>
 
-
-      --backend-mcp-path <BACKEND_MCP_PATH>
-          [default: /mcp]
 
       --scope <SCOPES>
 

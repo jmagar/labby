@@ -182,7 +182,12 @@ impl UpstreamOauthManager {
             .collect();
 
         let client_cfg = self
-            .resolve_client_config(&mut manager, subject, &scopes)
+            .resolve_client_config(
+                &mut manager,
+                subject,
+                &scopes,
+                DynamicClientRegistrationUse::BeginAuthorization,
+            )
             .await
             .map_err(|e| {
                 tracing::warn!(
@@ -250,16 +255,22 @@ impl UpstreamOauthManager {
     ) -> Result<(), OauthError> {
         let started = std::time::Instant::now();
 
-        let auth_manager = self.configured_authorization_manager(subject).await.map_err(|e| {
-            tracing::warn!(
-                upstream = %self.upstream.name,
+        let auth_manager = self
+            .configured_authorization_manager(
                 subject,
-                kind = e.kind(),
-                error = %e,
-                "upstream oauth: failed to build configured authorization manager for token exchange"
-            );
-            e
-        })?;
+                DynamicClientRegistrationUse::CompleteAuthorization,
+            )
+            .await
+            .map_err(|e| {
+                tracing::warn!(
+                    upstream = %self.upstream.name,
+                    subject,
+                    kind = e.kind(),
+                    error = %e,
+                    "upstream oauth: failed to build configured authorization manager for token exchange"
+                );
+                e
+            })?;
 
         auth_manager
             .exchange_code_for_token(code, csrf_token)
@@ -341,7 +352,10 @@ impl UpstreamOauthManager {
         let _guard = lock.lock().await;
 
         let mut manager = self
-            .configured_authorization_manager(subject)
+            .configured_authorization_manager(
+                subject,
+                DynamicClientRegistrationUse::StoredCredentials,
+            )
             .await
             .inspect_err(|e| {
                 tracing::warn!(
@@ -433,6 +447,67 @@ impl UpstreamOauthManager {
         Ok(AuthClient::new(reqwest::Client::new(), manager))
     }
 
+    /// Force a refresh for stored credentials.
+    ///
+    /// `AuthorizationManager::get_access_token()` only refreshes inside rmcp's
+    /// short refresh buffer. Status checks need an explicit refresh so UI state
+    /// cannot report a stale credential row as connected.
+    pub async fn refresh_auth_client(&self, subject: &str) -> Result<(), OauthError> {
+        let started = std::time::Instant::now();
+        let lock = self.locks.acquire(&self.upstream.name, subject);
+        let _guard = lock.lock().await;
+
+        let mut manager = self
+            .configured_authorization_manager(
+                subject,
+                DynamicClientRegistrationUse::StoredCredentials,
+            )
+            .await
+            .inspect_err(|e| {
+                tracing::warn!(
+                    upstream = %self.upstream.name,
+                    provider = %self.oauth_provider_label(),
+                    subject,
+                    scope = %self.oauth_scope_label(),
+                    kind = e.kind(),
+                    elapsed_ms = started.elapsed().as_millis(),
+                    fallback = "reauthorization_required",
+                    "upstream oauth: failed to build refresh manager"
+                );
+            })?;
+        let initialized = manager.initialize_from_store().await.map_err(|e| {
+            tracing::warn!(
+                upstream = %self.upstream.name,
+                provider = %self.oauth_provider_label(),
+                subject,
+                scope = %self.oauth_scope_label(),
+                kind = "internal_error",
+                elapsed_ms = started.elapsed().as_millis(),
+                fallback = "reauthorization_required",
+                "upstream oauth: failed to initialize refresh manager from credential store"
+            );
+            OauthError::Internal(format!("initialize from store: {e}"))
+        })?;
+
+        if !initialized {
+            return Err(OauthError::NeedsReauth(format!(
+                "no stored credentials for upstream '{}' subject '{subject}'",
+                self.upstream.name
+            )));
+        }
+
+        manager.refresh_token().await.map_err(map_auth_error)?;
+        tracing::info!(
+            upstream = %self.upstream.name,
+            provider = %self.oauth_provider_label(),
+            subject,
+            scope = %self.oauth_scope_label(),
+            elapsed_ms = started.elapsed().as_millis(),
+            "upstream oauth: status refresh succeeded"
+        );
+        Ok(())
+    }
+
     pub async fn credential_row(
         &self,
         subject: &str,
@@ -460,6 +535,7 @@ impl UpstreamOauthManager {
     async fn configured_authorization_manager(
         &self,
         subject: &str,
+        dynamic_registration_use: DynamicClientRegistrationUse,
     ) -> Result<AuthorizationManager, OauthError> {
         let upstream_url = self.upstream_url()?;
         let oauth_cfg = self.oauth_config()?;
@@ -490,7 +566,7 @@ impl UpstreamOauthManager {
             .map(String::as_str)
             .collect();
         let client_cfg = self
-            .resolve_client_config(&mut manager, subject, &scopes)
+            .resolve_client_config(&mut manager, subject, &scopes, dynamic_registration_use)
             .await?;
         manager
             .configure_client(client_cfg)
@@ -662,6 +738,7 @@ impl UpstreamOauthManager {
         manager: &mut AuthorizationManager,
         subject: &str,
         scopes: &[&str],
+        dynamic_registration_use: DynamicClientRegistrationUse,
     ) -> Result<OAuthClientConfig, OauthError> {
         let oauth_cfg = self.oauth_config()?;
         match &oauth_cfg.registration {
@@ -690,43 +767,61 @@ impl UpstreamOauthManager {
                 Ok(cfg)
             }
             UpstreamOauthRegistration::Dynamic => {
-                // Dynamic registration (RFC 7591) must run exactly once per (upstream, subject).
-                // The AS assigns a client_id that must be reused across restarts. Priority:
-                //   1. Stored credential row — client_id persisted after token exchange.
-                //   2. Dynamic client registration row — client_id persisted between
-                //      begin_authorization and the callback, survives server restarts.
-                //   3. Call register_client — only on the very first invocation.
+                // Dynamic registration (RFC 7591) has two different lifetimes:
+                //   1. Stored credentials are durable and remain authoritative after
+                //      a successful token exchange for normal MCP calls.
+                //   2. The dynamic registration row is only pending state between
+                //      begin_authorization and callback. It survives Lab restarts, but
+                //      must not be reused to start a new flow because upstream AS state
+                //      can be reset independently, leaving a stale client_id behind.
 
-                // 1. Stored credentials
-                if let Some(row) = self
-                    .sqlite
-                    .find_upstream_oauth_credentials(&self.upstream.name, subject)
-                    .await
-                    .map_err(|e| OauthError::Internal(e.to_string()))?
-                {
-                    let mut cfg = OAuthClientConfig::new(row.client_id, self.redirect_uri.as_str());
-                    cfg = cfg.with_scopes(scopes.iter().map(|s| s.to_string()).collect());
-                    return Ok(cfg);
+                match dynamic_registration_use {
+                    DynamicClientRegistrationUse::StoredCredentials => {
+                        if let Some(row) = self
+                            .sqlite
+                            .find_upstream_oauth_credentials(&self.upstream.name, subject)
+                            .await
+                            .map_err(|e| OauthError::Internal(e.to_string()))?
+                        {
+                            let mut cfg =
+                                OAuthClientConfig::new(row.client_id, self.redirect_uri.as_str());
+                            cfg = cfg.with_scopes(scopes.iter().map(|s| s.to_string()).collect());
+                            return Ok(cfg);
+                        }
+
+                        return Err(OauthError::NeedsReauth(format!(
+                            "no stored credentials for upstream '{}' subject '{subject}'",
+                            self.upstream.name
+                        )));
+                    }
+                    DynamicClientRegistrationUse::CompleteAuthorization => {
+                        // Callback/token exchange path: use the client_id created
+                        // by the begin_authorization call. This keeps callbacks
+                        // valid across Lab process restarts and lets an explicit
+                        // reauth flow replace stale stored credentials.
+                        if let Some(client_id) = self
+                            .sqlite
+                            .find_dynamic_client_registration(&self.upstream.name, subject)
+                            .await
+                            .map_err(|e| OauthError::Internal(e.to_string()))?
+                        {
+                            let mut cfg =
+                                OAuthClientConfig::new(client_id, self.redirect_uri.as_str());
+                            cfg = cfg.with_scopes(scopes.iter().map(|s| s.to_string()).collect());
+                            return Ok(cfg);
+                        }
+
+                        return Err(OauthError::NeedsReauth(format!(
+                            "no dynamic client registration for upstream '{}' subject '{subject}'",
+                            self.upstream.name
+                        )));
+                    }
+                    DynamicClientRegistrationUse::BeginAuthorization => {}
                 }
 
-                // 2. Persisted dynamic registration (survives restarts)
-                if let Some(client_id) = self
-                    .sqlite
-                    .find_dynamic_client_registration(&self.upstream.name, subject)
-                    .await
-                    .map_err(|e| OauthError::Internal(e.to_string()))?
-                {
-                    let mut cfg = OAuthClientConfig::new(client_id, self.redirect_uri.as_str());
-                    cfg = cfg.with_scopes(scopes.iter().map(|s| s.to_string()).collect());
-                    return Ok(cfg);
-                }
-
-                // 3. Register with the AS — first call only.
-                //    Two concurrent callers can both reach here if neither found
-                //    a persisted registration above. Save uses ON CONFLICT DO
-                //    UPDATE (last-writer-wins), so we read back the canonical
-                //    client_id from the DB rather than using cfg.client_id, which
-                //    may be from a losing concurrent write.
+                // Beginning a new flow: register with the AS every time there are
+                // no stored credentials. This self-heals when the upstream AS loses
+                // its dynamic-client DB while Lab still has an old pending row.
                 let cfg = manager
                     .register_client("lab", self.redirect_uri.as_str(), scopes)
                     .await
@@ -775,6 +870,13 @@ impl UpstreamOauthManager {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DynamicClientRegistrationUse {
+    BeginAuthorization,
+    CompleteAuthorization,
+    StoredCredentials,
 }
 
 /// Return the normalized origin (scheme + "://" + lowercased host + optional explicit port)

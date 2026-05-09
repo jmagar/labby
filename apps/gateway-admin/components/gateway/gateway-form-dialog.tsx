@@ -27,6 +27,7 @@ import type {
   UpdateGatewayInput,
   TransportType,
   SupportedService,
+  ProtectedMcpRouteInput,
 } from '@/lib/types/gateway'
 import { toast } from 'sonner'
 import { cn, getErrorMessage } from '@/lib/utils'
@@ -38,7 +39,6 @@ import { upstreamOauthApi } from '@/lib/api/upstream-oauth-client'
 import { useUpstreamOauthStatus } from '@/lib/hooks/use-upstream-oauth'
 import type { OAuthConnectState } from '@/lib/types/upstream-oauth'
 import { Badge } from '@/components/ui/badge'
-import { ProtectedMcpRoutesPanel } from './protected-mcp-routes-panel'
 import {
   SERVICE_BRANDS,
   SERVICE_BRAND_FALLBACK,
@@ -55,9 +55,34 @@ interface GatewayFormDialogProps {
   onSave: (input: CreateGatewayInput | UpdateGatewayInput) => Promise<void>
 }
 
-type FormMode = 'custom' | 'lab' | 'protected'
+type FormMode = 'custom' | 'lab'
 type GatewayAuthMode = 'none' | 'bearer' | 'oauth'
 type GatewayAuthSource = 'paste' | 'env'
+
+const PROTECTED_MCP_PUBLIC_HOST = process.env.NEXT_PUBLIC_PROTECTED_MCP_HOST || 'mcp.tootie.tv'
+const PROTECTED_ROUTE_SCOPES = ['mcp:read', 'mcp:write']
+
+function normalizeProtectedPublicPath(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) return ''
+
+  const withoutOrigin = trimmed.startsWith('http://') || trimmed.startsWith('https://')
+    ? new URL(trimmed).pathname
+    : trimmed
+  const withSlash = withoutOrigin.startsWith('/') ? withoutOrigin : `/${withoutOrigin}`
+  const normalized = withSlash.replace(/\/+/g, '/').replace(/\/$/, '')
+
+  if (!normalized || normalized === '/') {
+    throw new Error('Use a non-root path such as /tools')
+  }
+  if (!/^\/[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(normalized)) {
+    throw new Error('Use letters, numbers, dots, underscores, hyphens, and slashes')
+  }
+  if (normalized.split('/').some((segment) => segment === '..')) {
+    throw new Error('Path cannot contain .. segments')
+  }
+  return normalized
+}
 
 function valuePreview(fieldName: string, preview?: string | null) {
   return preview ?? (fieldName.endsWith('_URL') ? 'http://localhost' : '')
@@ -146,14 +171,14 @@ export function GatewayFormDialog({
   const nameAutoRef = useRef(false)
   const skipUrlOauthResetRef = useRef(false)
   const { data: supportedServices } = useSupportedServices()
-  const { testGateway, saveServiceConfig, enableVirtualServer, disableVirtualServer } =
+  const { testGateway, saveServiceConfig, enableVirtualServer, disableVirtualServer, addProtectedRoute, updateProtectedRoute } =
     useGatewayMutations()
 
   const [mode, setMode] = useState<FormMode>('custom')
-  const isProtectedMode = mode === 'protected' && !isEditing
   const [transport, setTransport] = useState<TransportType>('http')
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
+  const [protectedPublicPath, setProtectedPublicPath] = useState('')
   const [command, setCommand] = useState('')
   const [args, setArgs] = useState('')
   const [authMode, setAuthMode] = useState<GatewayAuthMode>('none')
@@ -312,6 +337,7 @@ export function GatewayFormDialog({
           : 'none'
         skipUrlOauthResetRef.current = initialAuthMode === 'oauth'
         setUrl(gateway.config.url || '')
+        setProtectedPublicPath('')
         setCommand(gateway.config.command || '')
         setArgs(gateway.config.args?.join(' ') || '')
         setAuthMode(initialAuthMode)
@@ -330,6 +356,7 @@ export function GatewayFormDialog({
         setTransport(emptyCustomState.transport)
         setName(emptyCustomState.name)
         setUrl(emptyCustomState.url)
+        setProtectedPublicPath('')
         setCommand(emptyCustomState.command)
         setArgs(emptyCustomState.args)
         setAuthMode('none')
@@ -386,6 +413,16 @@ export function GatewayFormDialog({
           new URL(url)
         } catch {
           newErrors.url = 'Invalid URL format'
+        }
+      }
+
+      if (protectedPublicPath.trim()) {
+        try {
+          normalizeProtectedPublicPath(protectedPublicPath)
+        } catch (error) {
+          newErrors.protectedPublicPath = error instanceof Error
+            ? error.message
+            : 'Invalid protected route path'
         }
       }
     } else if (!command.trim()) {
@@ -471,6 +508,30 @@ export function GatewayFormDialog({
     },
   })
 
+  const buildProtectedRouteInput = (publicPath: string): ProtectedMcpRouteInput => ({
+    name: name.trim(),
+    enabled: true,
+    public_host: PROTECTED_MCP_PUBLIC_HOST,
+    public_path: publicPath,
+    upstream: name.trim(),
+    backend_url: '',
+    scopes: PROTECTED_ROUTE_SCOPES,
+    health_path: null,
+  })
+
+  const saveProtectedRoute = async (publicPath: string, signal?: AbortSignal) => {
+    const route = buildProtectedRouteInput(publicPath)
+    try {
+      await addProtectedRoute(route, signal)
+    } catch (error) {
+      if (error instanceof GatewayApiError && error.status === 409) {
+        await updateProtectedRoute(route.name, route, signal)
+        return
+      }
+      throw error
+    }
+  }
+
   const handleTest = async () => {
     if (isSaving) return
     if (!gateway || gateway.source === 'in_process') {
@@ -543,13 +604,23 @@ export function GatewayFormDialog({
         return
       }
 
-      if (mode === 'protected') return
-
       if (!validateCustom()) return
       setSaveError(null)
+      const normalizedProtectedPath = transport === 'http'
+        ? normalizeProtectedPublicPath(protectedPublicPath)
+        : ''
       await onSave(buildInput())
+      if (normalizedProtectedPath) {
+        await saveProtectedRoute(normalizedProtectedPath, controller.signal)
+      }
       if (controller.signal.aborted) return
-      toast.success(isEditing ? 'Gateway updated successfully' : 'Gateway created successfully')
+      toast.success(
+        normalizedProtectedPath
+          ? `Gateway saved and protected at https://${PROTECTED_MCP_PUBLIC_HOST}${normalizedProtectedPath}`
+          : isEditing
+            ? 'Gateway updated successfully'
+            : 'Gateway created successfully',
+      )
       onOpenChange(false)
     } catch (error) {
       if (isAbortError(error)) return
@@ -675,7 +746,7 @@ export function GatewayFormDialog({
         <DialogContent
           className={cn(
             'overflow-visible transition-[border-radius] duration-[250ms]',
-            isProtectedMode ? 'sm:max-w-[920px]' : 'sm:max-w-[540px]',
+            'sm:max-w-[540px]',
             (envDrawerOpen || jsonDrawerOpen) && 'rounded-r-none',
           )}
         >
@@ -688,8 +759,6 @@ export function GatewayFormDialog({
                   ? 'Edit gateway settings.'
                   : mode === 'lab'
                     ? 'Connect a built-in Lab service.'
-                    : mode === 'protected'
-                      ? 'Protect an existing MCP endpoint through Lab OAuth.'
                     : 'Connect an upstream MCP server.'}
               </DialogDescription>
             </div>
@@ -741,18 +810,13 @@ export function GatewayFormDialog({
           }}
           className="space-y-6"
         >
-          <TabsList className={cn('grid w-full overflow-hidden', isEditing ? 'grid-cols-2' : 'grid-cols-3')}>
+          <TabsList className="grid w-full grid-cols-2 overflow-hidden">
             <TabsTrigger value="lab" disabled={isEditing && !isLabGateway}>
               Lab Service
             </TabsTrigger>
             <TabsTrigger value="custom" disabled={isEditing && isLabGateway}>
               Custom
             </TabsTrigger>
-            {!isEditing ? (
-              <TabsTrigger value="protected">
-                Protected Routes
-              </TabsTrigger>
-            ) : null}
           </TabsList>
 
           <TabsContent value="lab" className="space-y-6">
@@ -901,6 +965,31 @@ export function GatewayFormDialog({
                     )}
                   </div>
                   {errors.url && <p className="text-sm text-destructive">{errors.url}</p>}
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="protected-public-path">Protected route path</FieldLabel>
+                  <div className="flex overflow-hidden rounded-md border border-aurora-border-strong bg-aurora-control-surface focus-within:ring-2 focus-within:ring-ring">
+                    <span className="hidden items-center border-r border-aurora-border-strong px-3 text-sm text-aurora-text-muted sm:flex">
+                      https://{PROTECTED_MCP_PUBLIC_HOST}
+                    </span>
+                    <Input
+                      id="protected-public-path"
+                      value={protectedPublicPath}
+                      onChange={(event) => setProtectedPublicPath(event.target.value)}
+                      placeholder="/tools"
+                      className={cn(
+                        'border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0',
+                        errors.protectedPublicPath && 'text-destructive',
+                      )}
+                    />
+                  </div>
+                  {errors.protectedPublicPath ? (
+                    <p className="text-sm text-destructive">{errors.protectedPublicPath}</p>
+                  ) : (
+                    <FieldDescription>
+                      Optional. When set, Lab publishes this server through Google OAuth at that public path.
+                    </FieldDescription>
+                  )}
                 </Field>
               </FieldGroup>
             )}
@@ -1161,12 +1250,6 @@ export function GatewayFormDialog({
               />
             </div>
           </TabsContent>
-
-          {!isEditing ? (
-            <TabsContent value="protected" className="space-y-6">
-              <ProtectedMcpRoutesPanel />
-            </TabsContent>
-          ) : null}
         </Tabs>
         </div>
 
@@ -1310,50 +1393,42 @@ export function GatewayFormDialog({
           </div>
         </div>
 
-        {saveError && mode !== 'protected' && (
+        {saveError && (
           <div className="shrink-0 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <AlertCircle className="size-4 mt-0.5 shrink-0" />
             <span>{saveError}</span>
           </div>
         )}
         <DialogFooter className="shrink-0 gap-2 sm:gap-0">
-          {isProtectedMode ? (
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Close
-            </Button>
-          ) : (
-            <>
-              {isEditing && !isLabGateway && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleTest}
-                  disabled={isTesting || isSaving}
-                  className="mr-auto"
-                >
-                  {isTesting ? (
-                    <Loader2 className="size-4 mr-2 animate-spin" />
-                  ) : (
-                    <Play className="size-4 mr-2" />
-                  )}
-                  Test
-                </Button>
+          {isEditing && !isLabGateway && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleTest}
+              disabled={isTesting || isSaving}
+              className="mr-auto"
+            >
+              {isTesting ? (
+                <Loader2 className="size-4 mr-2 animate-spin" />
+              ) : (
+                <Play className="size-4 mr-2" />
               )}
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleSave} disabled={isSaving || isTesting}>
-                {isSaving && <Loader2 className="size-4 mr-2 animate-spin" />}
-                {mode === 'lab'
-                  ? isEditing
-                    ? 'Save Service'
-                    : 'Configure Service'
-                  : isEditing
-                    ? 'Save Changes'
-                    : 'Add Gateway'}
-              </Button>
-            </>
+              Test
+            </Button>
           )}
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={isSaving || isTesting}>
+            {isSaving && <Loader2 className="size-4 mr-2 animate-spin" />}
+            {mode === 'lab'
+              ? isEditing
+                ? 'Save Service'
+                : 'Configure Service'
+              : isEditing
+                ? 'Save Changes'
+                : 'Add Gateway'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

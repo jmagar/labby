@@ -5,7 +5,6 @@ use crate::config::ProtectedMcpRouteConfig;
 #[derive(Debug, Clone, Default)]
 pub struct ProtectedRouteIndex {
     routes: HashMap<(String, String), ProtectedMcpRouteConfig>,
-    resources: Vec<String>,
 }
 
 impl ProtectedRouteIndex {
@@ -14,17 +13,9 @@ impl ProtectedRouteIndex {
         let mut index = Self::default();
         for route in routes.iter().filter(|route| route.enabled) {
             let key = route_key(&route.public_host, &route.public_path);
-            index.resources.push(route.public_resource());
             index.routes.insert(key, route.clone());
         }
-        index.resources.sort();
-        index.resources.dedup();
         index
-    }
-
-    #[must_use]
-    pub fn resources(&self) -> Vec<String> {
-        self.resources.clone()
     }
 
     #[must_use]
@@ -86,6 +77,7 @@ mod tests {
             enabled: true,
             public_host: host.to_string(),
             public_path: path.to_string(),
+            upstream: None,
             backend_url: "http://100.88.16.79:3100".to_string(),
             backend_mcp_path: "/mcp".to_string(),
             scopes: vec!["mcp:read".to_string(), "mcp:write".to_string()],

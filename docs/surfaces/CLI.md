@@ -280,7 +280,7 @@ Supported forms:
 
 ```bash
 labby oauth relay-local --machine dookie --port 38935
-labby oauth relay-local --forward-base http://100.88.16.79:38935/callback/dookie --port 38935
+labby oauth relay-local --forward-base http://node.internal.example:38935/callback/dookie --port 38935
 ```
 
 Flags:
@@ -305,7 +305,7 @@ Example named-machine config:
 
 ```toml
 [oauth.machines.dookie]
-target_url = "http://100.88.16.79:38935/callback/dookie"
+target_url = "http://node.internal.example:38935/callback/dookie"
 description = "dookie Codex callback listener"
 default_port = 38935
 ```

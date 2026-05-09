@@ -717,7 +717,7 @@ impl UpstreamPool {
     /// upstream is marked unhealthy, but do not prevent other upstreams from
     /// connecting.
     #[allow(clippy::too_many_lines)]
-    pub async fn discover_all(&self, configs: &[UpstreamConfig]) {
+    async fn discover_all_inner(&self, configs: &[UpstreamConfig], oauth_subject: Option<&str>) {
         if configs.is_empty() {
             return;
         }
@@ -766,6 +766,18 @@ impl UpstreamPool {
             if config.name.contains('/') || config.name.contains('?') || config.name.contains('#') {
                 continue;
             }
+            // OAuth HTTP upstreams require an explicit subject to select the
+            // correct token set. Subject-less discovery must skip them so one
+            // user's tool view is never cached globally by accident.
+            if config.oauth.is_some() && oauth_subject.is_none() {
+                tracing::info!(
+                    upstream = %config.name,
+                    transport = upstream_transport(config),
+                    target = %upstream_target_redacted(config),
+                    "skipping shared upstream discovery for subject-scoped OAuth upstream"
+                );
+                continue;
+            }
             // Validate config
             if let Err(msg) = validate_upstream_config(config) {
                 tracing::warn!(
@@ -780,13 +792,18 @@ impl UpstreamPool {
             let oauth_client_cache = oauth_client_cache.clone();
             let runtime_origin = runtime_origin.clone();
             let runtime_owner = runtime_owner.clone();
+            let subject = config
+                .oauth
+                .as_ref()
+                .and(oauth_subject)
+                .map(ToOwned::to_owned);
             futures.push(async move {
                 let name = config.name.clone();
                 match tokio::time::timeout(
                     DISCOVERY_TIMEOUT,
                     connect_upstream(
                         &config,
-                        None,
+                        subject.as_deref(),
                         oauth_client_cache.as_ref(),
                         runtime_origin.as_deref(),
                         runtime_owner.as_ref(),
@@ -963,6 +980,22 @@ impl UpstreamPool {
                 }
             }
         }
+    }
+
+    /// Connect to non-OAuth upstreams and discover their tools.
+    ///
+    /// OAuth upstreams are intentionally skipped because they need a request or
+    /// gateway subject to select the right upstream token set.
+    pub async fn discover_all(&self, configs: &[UpstreamConfig]) {
+        self.discover_all_inner(configs, None).await;
+    }
+
+    /// Connect to all configured upstreams, using `subject` for OAuth upstreams.
+    ///
+    /// This is for gateway-owned discovery where the subject is an explicit
+    /// shared identity, not for subject-less startup discovery.
+    pub async fn discover_all_for_subject(&self, configs: &[UpstreamConfig], subject: &str) {
+        self.discover_all_inner(configs, Some(subject)).await;
     }
 
     fn ensure_probe_task(&self, config: UpstreamConfig) {
@@ -1247,13 +1280,17 @@ impl UpstreamPool {
         registry: &ToolRegistry,
     ) {
         self.discover_all(configs).await;
-        let services: Vec<RegisteredService> = registry
-            .services()
-            .iter()
-            .filter(|service| !service.actions.is_empty())
-            .cloned()
-            .collect();
-        self.register_in_process_service_list(services).await;
+        self.register_in_process_service_peers(registry).await;
+    }
+
+    pub async fn discover_all_for_subject_with_in_process_peers(
+        &self,
+        configs: &[UpstreamConfig],
+        subject: &str,
+        registry: &ToolRegistry,
+    ) {
+        self.discover_all_for_subject(configs, subject).await;
+        self.register_in_process_service_peers(registry).await;
     }
 
     pub async fn register_in_process_service_peers(&self, registry: &ToolRegistry) {
@@ -3624,6 +3661,16 @@ mod tests {
                 .to_string()
                 .contains("no auth client cache is registered")
         );
+    }
+
+    #[tokio::test]
+    async fn shared_discovery_skips_oauth_http_upstreams() {
+        let pool = UpstreamPool::new()
+            .with_oauth_client_cache(OauthClientCache::new(Arc::new(dashmap::DashMap::new())));
+        pool.discover_all(&[oauth_http_config()]).await;
+
+        assert_eq!(pool.upstream_count().await, 0);
+        assert!(pool.upstream_status().await.is_empty());
     }
 
     #[test]
