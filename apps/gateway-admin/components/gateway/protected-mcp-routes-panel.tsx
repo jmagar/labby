@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, Loader2, Plus, Save, ShieldCheck, Trash2, X } from 'lucide-react'
+import { CheckCircle2, Loader2, Plus, Radar, Save, ShieldCheck, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,7 @@ import {
   useGatewayMutations,
   useProtectedMcpRoutes,
 } from '@/lib/hooks/use-gateways'
+import { doctorApi, isBlockingDoctorSeverity, type DoctorReport } from '@/lib/api/doctor-client'
 import type {
   ProtectedMcpRoute,
   ProtectedMcpRouteInput,
@@ -91,6 +92,103 @@ function isRouteComplete(draft: RouteDraft) {
   )
 }
 
+const LAB_RESERVED_PATH_PREFIXES = [
+  '/.well-known',
+  '/_next',
+  '/auth',
+  '/authorize',
+  '/callback',
+  '/dev',
+  '/health',
+  '/jwks',
+  '/mcp',
+  '/ready',
+  '/register',
+  '/settings',
+  '/setup',
+  '/success',
+  '/token',
+  '/v1',
+]
+
+function normalizedHost(value: string) {
+  return value.trim().replace(/\.$/, '').toLowerCase()
+}
+
+function normalizedPath(value: string) {
+  const trimmed = value.trim()
+  if (trimmed.length > 1 && trimmed.endsWith('/')) return trimmed.replace(/\/+$/, '')
+  return trimmed
+}
+
+function protectedRouteDraftHints(
+  draft: RouteDraft,
+  routes: ProtectedMcpRoute[],
+  editingName: string | null,
+) {
+  const hints: string[] = []
+  const name = draft.name.trim()
+  const publicHost = normalizedHost(draft.public_host)
+  const publicPath = normalizedPath(draft.public_path)
+  const backendUrl = draft.backend_url.trim()
+
+  if (name && routes.some((route) => route.name === name && route.name !== editingName)) {
+    hints.push(`A protected route named ${name} already exists.`)
+  }
+
+  if (publicHost.includes('/') || publicHost.includes(':') || publicHost.includes('@')) {
+    hints.push('Public host should be a bare host without scheme, port, path, or user info.')
+  }
+
+  if (publicPath && !publicPath.startsWith('/')) {
+    hints.push('Public path must start with /.')
+  } else if (publicPath === '/') {
+    hints.push('Public path needs a service segment, for example /tools.')
+  } else if (publicPath.includes('?') || publicPath.includes('#')) {
+    hints.push('Public path should not include query strings or fragments.')
+  } else if (publicPath.includes('//') || /(^|\/)\.{1,2}(\/|$)/.test(publicPath) || /%2f|%5c|%2e/i.test(publicPath)) {
+    hints.push('Public path contains ambiguous or unsafe path segments.')
+  }
+
+  if (publicHost && publicPath && draft.enabled) {
+    const duplicate = routes.find(
+      (route) =>
+        route.name !== editingName &&
+        route.enabled &&
+        normalizedHost(route.public_host) === publicHost &&
+        normalizedPath(route.public_path) === publicPath,
+    )
+    if (duplicate) {
+      hints.push(`Public route ${publicHost}${publicPath} is already used by ${duplicate.name}.`)
+    }
+  }
+
+  if (typeof window !== 'undefined' && publicHost === window.location.hostname.toLowerCase()) {
+    const reserved = LAB_RESERVED_PATH_PREFIXES.find(
+      (prefix) => publicPath === prefix || publicPath.startsWith(`${prefix}/`),
+    )
+    if (reserved) {
+      hints.push(`Public path ${publicPath} conflicts with Lab's ${reserved} routes on this host.`)
+    }
+  }
+
+  if (backendUrl) {
+    try {
+      const parsed = new URL(backendUrl)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        hints.push('Backend URL must use http:// or https://.')
+      }
+      if (parsed.pathname !== '/' || parsed.search || parsed.hash) {
+        hints.push('Backend URL should be only an origin; put the MCP path in Backend MCP path.')
+      }
+    } catch {
+      hints.push('Backend URL must be a valid URL.')
+    }
+  }
+
+  return hints
+}
+
 export function ProtectedMcpRoutesPanel() {
   const { data: routes = [], isLoading, error } = useProtectedMcpRoutes()
   const {
@@ -104,6 +202,7 @@ export function ProtectedMcpRoutesPanel() {
   const [draft, setDraft] = useState<RouteDraft>(EMPTY_DRAFT)
   const [pendingAction, setPendingAction] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<ProtectedMcpRouteTestResult | null>(null)
+  const [smokeResult, setSmokeResult] = useState<DoctorReport | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
 
   const sortedRoutes = useMemo(
@@ -117,6 +216,7 @@ export function ProtectedMcpRoutesPanel() {
       setEditingName(null)
       setDraft(EMPTY_DRAFT)
       setTestResult(null)
+      setSmokeResult(null)
       setFormError(null)
     }
   }, [editingName, isEditing, routes])
@@ -125,12 +225,14 @@ export function ProtectedMcpRoutesPanel() {
     setDraft((current) => ({ ...current, [key]: value }))
     setFormError(null)
     setTestResult(null)
+    setSmokeResult(null)
   }
 
   const startCreate = () => {
     setEditingName(null)
     setDraft(EMPTY_DRAFT)
     setTestResult(null)
+    setSmokeResult(null)
     setFormError(null)
   }
 
@@ -138,8 +240,14 @@ export function ProtectedMcpRoutesPanel() {
     setEditingName(route.name)
     setDraft(draftFromRoute(route))
     setTestResult(null)
+    setSmokeResult(null)
     setFormError(null)
   }
+
+  const validationHints = useMemo(
+    () => protectedRouteDraftHints(draft, routes, editingName),
+    [draft, editingName, routes],
+  )
 
   const handleTest = async () => {
     if (!isRouteComplete(draft)) {
@@ -182,6 +290,41 @@ export function ProtectedMcpRoutesPanel() {
       toast.success(isEditing ? 'Protected route updated' : 'Protected route added')
     } catch (error) {
       const message = getErrorMessage(error, 'Failed to save protected route')
+      setFormError(message)
+      toast.error(message)
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
+  const handleSmoke = async () => {
+    if (!isRouteComplete(draft)) {
+      setFormError('Public host and public path are required before running the proxy smoke check.')
+      return
+    }
+
+    const controller = new AbortController()
+    setPendingAction('smoke')
+    setFormError(null)
+    setSmokeResult(null)
+    try {
+      const report = await doctorApi.proxyCheck(
+        {
+          app_url: window.location.origin,
+          mcp_url: `https://${draft.public_host.trim()}`,
+          route: draft.public_path.trim(),
+        },
+        controller.signal,
+      )
+      setSmokeResult(report)
+      const blocked = report.findings.some((finding) => isBlockingDoctorSeverity(finding.severity))
+      if (blocked) {
+        toast.error('Protected route proxy smoke failed')
+      } else {
+        toast.success('Protected route proxy smoke passed')
+      }
+    } catch (error) {
+      const message = getErrorMessage(error, 'Failed to run protected route proxy smoke')
       setFormError(message)
       toast.error(message)
     } finally {
@@ -407,6 +550,16 @@ export function ProtectedMcpRoutesPanel() {
             </div>
           ) : null}
 
+          {validationHints.length > 0 ? (
+            <div className="mt-3 rounded-lg border border-aurora-warning/30 bg-aurora-warning/10 px-3 py-2 text-sm text-aurora-text-primary">
+              <ul className="space-y-1">
+                {validationHints.map((hint) => (
+                  <li key={hint}>{hint}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           {testResult ? (
             <div className="mt-3 rounded-lg border border-aurora-success/30 bg-aurora-success/10 px-3 py-2 text-sm">
               <div className="flex items-center gap-2 text-aurora-text-primary">
@@ -415,6 +568,29 @@ export function ProtectedMcpRoutesPanel() {
               </div>
               <p className="mt-1 break-all font-mono text-xs text-aurora-text-muted">{testResult.resource}</p>
               <p className="mt-1 break-all font-mono text-xs text-aurora-text-muted">{testResult.metadata_url}</p>
+            </div>
+          ) : null}
+
+          {smokeResult ? (
+            <div className="mt-3 rounded-lg border bg-aurora-page-bg px-3 py-2 text-sm">
+              <div className="flex items-center gap-2 text-aurora-text-primary">
+                <Radar className="size-4 text-aurora-text-muted" />
+                <span className="font-medium">Proxy smoke results</span>
+              </div>
+              <div className="mt-2 space-y-1">
+                {smokeResult.findings.map((finding) => (
+                  <div key={`${finding.category ?? 'proxy'}:${finding.message}`} className="flex gap-2 text-xs">
+                    <Badge
+                      variant={isBlockingDoctorSeverity(finding.severity) ? 'default' : 'secondary'}
+                      status={isBlockingDoctorSeverity(finding.severity) ? 'error' : 'default'}
+                      className="h-5 shrink-0"
+                    >
+                      {finding.severity}
+                    </Badge>
+                    <span className="min-w-0 text-aurora-text-muted">{finding.message}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : null}
 
@@ -432,6 +608,14 @@ export function ProtectedMcpRoutesPanel() {
                 <ShieldCheck className="mr-2 size-4" />
               )}
               Test
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={handleSmoke} disabled={pendingAction !== null}>
+              {pendingAction === 'smoke' ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <Radar className="mr-2 size-4" />
+              )}
+              Smoke
             </Button>
             <Button type="button" size="sm" onClick={handleSave} disabled={pendingAction !== null}>
               {pendingAction === 'save' ? (

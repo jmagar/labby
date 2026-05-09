@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage:
+  scripts/protected-mcp-smoke --app-url https://lab.example.com --mcp-url https://mcp.example.com --route /syslog
+
+Runs the same public protected-MCP reverse-proxy checks as:
+  labby doctor proxy --app-url ... --mcp-url ... --route ...
+
+Checks:
+  - Lab app /health is reachable through the public app URL
+  - protected-resource metadata exists for the public MCP route
+  - unauthenticated route access returns an OAuth bearer challenge
+USAGE
+}
+
+app_url=""
+mcp_url=""
+route=""
+labby_bin="${LABBY_BIN:-labby}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --app-url)
+      app_url="${2:-}"
+      shift 2
+      ;;
+    --mcp-url)
+      mcp_url="${2:-}"
+      shift 2
+      ;;
+    --route)
+      route="${2:-}"
+      shift 2
+      ;;
+    --labby-bin)
+      labby_bin="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if [[ -z "$app_url" || -z "$mcp_url" || -z "$route" ]]; then
+  echo "error: --app-url, --mcp-url, and --route are required" >&2
+  usage
+  exit 2
+fi
+
+exec "$labby_bin" doctor proxy \
+  --app-url "$app_url" \
+  --mcp-url "$mcp_url" \
+  --route "$route"

@@ -72,6 +72,10 @@ dev-debug:
 acp-smoke *ARGS:
     scripts/acp-smoke-check {{ARGS}}
 
+# Verify a public OAuth-protected MCP route through the deployed reverse proxy.
+protected-mcp-smoke *ARGS:
+    scripts/protected-mcp-smoke {{ARGS}}
+
 # Rebuild static Labby web assets served by labby serve
 web-build:
     cd apps/gateway-admin && pnpm build

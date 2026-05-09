@@ -333,6 +333,19 @@ labby gateway protected-route update syslog \
 labby gateway protected-route remove syslog
 ```
 
+Route testing has two layers:
+
+- `labby gateway protected-route test ...` validates the route config and
+  backend health path before saving or updating the Lab config.
+- `just protected-mcp-smoke -- --app-url https://lab.example.com --mcp-url
+  https://mcp.example.com --route /syslog` verifies the deployed public flow:
+  Lab app health, route-specific protected-resource metadata, and the
+  unauthenticated OAuth bearer challenge through the reverse proxy.
+
+The Gateway UI exposes the same split: **Test** validates the Lab route config,
+and **Smoke** runs the public proxy check using the current browser origin as
+the Lab app URL and the route's public host/path as the MCP URL.
+
 ### Migration From Legacy Env Routes
 
 Older inline MCP proxy experiments used service-specific env vars such as
