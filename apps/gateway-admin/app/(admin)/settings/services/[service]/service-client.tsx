@@ -15,7 +15,7 @@ import { PluginToggle } from '@/components/setup/PluginToggle'
 import { setupApi, type ServiceSchema } from '@/lib/api/setup-client'
 import { doctorApi } from '@/lib/api/doctor-client'
 import { type FieldView } from '@/lib/setup/schemaBuilder'
-import { buildServiceFormDefaults, draftEntriesToMap } from '@/lib/setup/draft'
+import { STORED_SECRET_MARKER, buildServiceFormDefaults, draftEntriesToMap } from '@/lib/setup/draft'
 import { isKnownService } from '@/lib/setup/buildServiceSlugs'
 
 interface PageState {
@@ -79,7 +79,14 @@ export default function ServicePage({
   }, [service])
 
   async function save(values: Record<string, string>): Promise<void> {
-    const entries = Object.entries(values).map(([key, value]) => ({ key, value }))
+    const fieldByName = new Map(state?.fields.map((field) => [field.name, field]) ?? [])
+    const entries = Object.entries(values)
+      .filter(([key, value]) => {
+        const field = fieldByName.get(key)
+        if (!field?.secret) return true
+        return value !== '' && value !== STORED_SECRET_MARKER && value !== '********'
+      })
+      .map(([key, value]) => ({ key, value }))
     if (entries.length === 0) return
     await setupApi.draftSet(entries, { force: true })
     await setupApi.draftCommit({ force: true })

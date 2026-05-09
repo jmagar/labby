@@ -16,9 +16,12 @@
 
 pub mod env_merge;
 
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
 use std::{
     collections::BTreeMap,
     collections::HashMap,
+    fs::OpenOptions,
     io::Write as _,
     path::{Path, PathBuf},
 };
@@ -27,10 +30,20 @@ use anyhow::{Context, Result};
 use lab_apis::extract::types::ServiceCreds;
 use lab_auth::config as auth_config;
 use serde::{Deserialize, Serialize, Serializer};
+use tempfile::NamedTempFile;
 
 pub const DEFAULT_MCPREGISTRY_URL: &str = "https://registry.modelcontextprotocol.io";
 pub const WEB_UI_AUTH_DISABLED_ENV: &str = "LAB_WEB_UI_AUTH_DISABLED";
 pub const WEB_UI_AUTH_DISABLED_LEGACY_ENV: &str = "LAB_WEB_UI_DISABLE_AUTH";
+
+#[cfg(test)]
+static TEST_CONFIG_TOML_PATH: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn set_test_config_toml_path(path: Option<PathBuf>) {
+    let slot = TEST_CONFIG_TOML_PATH.get_or_init(|| Mutex::new(None));
+    *slot.lock().expect("test config path lock") = path;
+}
 
 /// Fully-resolved `lab` configuration, assembled from env + TOML.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -988,11 +1001,26 @@ pub struct AdminPreferences {
 }
 
 /// Per-service preference overrides (non-secret values only).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServicePreferences {
+    /// Enable built-in integrations that call external service APIs.
+    ///
+    /// Default: true. When false, runtime registries keep bootstrap/operator
+    /// tools available but remove built-in upstream API integrations.
+    #[serde(default = "default_true")]
+    pub built_in_upstream_apis_enabled: bool,
     /// Tailscale preferences.
     #[serde(default)]
     pub tailscale: TailscalePreferences,
+}
+
+impl Default for ServicePreferences {
+    fn default() -> Self {
+        Self {
+            built_in_upstream_apis_enabled: true,
+            tailscale: TailscalePreferences::default(),
+        }
+    }
 }
 
 /// Tailscale non-secret preferences.
@@ -1039,6 +1067,74 @@ pub fn load_toml(candidates: &[PathBuf]) -> Result<LabConfig> {
         }
     }
     Ok(LabConfig::default())
+}
+
+/// Patch the non-secret built-in upstream API preference without rewriting
+/// unrelated TOML content.
+///
+/// This intentionally edits only `[services].built_in_upstream_apis_enabled`.
+/// It preserves comments, unknown keys, and plugin-owned sections that the
+/// full typed `LabConfig` serializer cannot round-trip.
+pub fn patch_built_in_upstream_apis_enabled(path: &Path, enabled: bool) -> Result<LabConfig> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    let lock_path = config_lock_path(path);
+    let lock_file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("open {}", lock_path.display()))?;
+    let mut lock = fd_lock::RwLock::new(lock_file);
+    let _guard = lock
+        .try_write()
+        .with_context(|| format!("config is locked: {}", lock_path.display()))?;
+
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => {
+            return Err(anyhow::Error::new(e).context(format!("failed to read {}", path.display())));
+        }
+    };
+    let mut document = raw
+        .parse::<toml_edit::DocumentMut>()
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+
+    document["services"]["built_in_upstream_apis_enabled"] = toml_edit::value(enabled);
+    let patched = document.to_string();
+    let mut cfg = toml::from_str::<LabConfig>(&patched)
+        .with_context(|| format!("failed to parse patched {}", path.display()))?;
+    cfg.normalize_legacy_tool_search(root_tool_search_present(&patched));
+    cfg.validate()
+        .with_context(|| format!("invalid patched config {}", path.display()))?;
+
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut tmp = NamedTempFile::new_in(parent)
+        .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
+    tmp.write_all(patched.as_bytes())
+        .context("failed to write temp config")?;
+    tmp.as_file()
+        .sync_all()
+        .context("failed to sync temp config")?;
+    tmp.persist(path)
+        .map_err(|e| anyhow::Error::new(e.error))
+        .with_context(|| format!("failed to persist {}", path.display()))?;
+
+    Ok(cfg)
+}
+
+fn config_lock_path(path: &Path) -> PathBuf {
+    let mut lock = path.to_path_buf();
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("config.toml");
+    lock.set_file_name(format!("{file_name}.lock"));
+    lock
 }
 
 /// Load `.env` files into the process environment.
@@ -1137,6 +1233,16 @@ pub fn dotenv_path() -> Option<PathBuf> {
 }
 
 pub fn config_toml_path() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(path) = TEST_CONFIG_TOML_PATH
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("test config path lock")
+        .clone()
+    {
+        return Some(path);
+    }
+
     toml_candidates()
         .into_iter()
         .find(|path| path.exists())
@@ -1636,6 +1742,52 @@ mod tests {
         pairs
             .iter()
             .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+    }
+
+    #[test]
+    fn service_preferences_default_enable_upstream_apis() {
+        let cfg = toml::from_str::<LabConfig>("").expect("empty config should parse");
+        assert!(cfg.services.built_in_upstream_apis_enabled);
+    }
+
+    #[test]
+    fn service_preferences_can_disable_upstream_apis() {
+        let cfg = toml::from_str::<LabConfig>(
+            r"
+            [services]
+            built_in_upstream_apis_enabled = false
+            ",
+        )
+        .expect("services config should parse");
+
+        assert!(!cfg.services.built_in_upstream_apis_enabled);
+    }
+
+    #[test]
+    fn patch_built_in_upstream_apis_preserves_comments_and_unknown_sections() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"# operator note
+[services]
+# keep this comment
+built_in_upstream_apis_enabled = true
+
+[plugin_owned]
+future = "keep"
+"#,
+        )
+        .unwrap();
+
+        let cfg = patch_built_in_upstream_apis_enabled(&path, false).unwrap();
+        assert!(!cfg.services.built_in_upstream_apis_enabled);
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("# operator note"));
+        assert!(raw.contains("# keep this comment"));
+        assert!(raw.contains("[plugin_owned]"));
+        assert!(raw.contains("future = \"keep\""));
+        assert!(raw.contains("built_in_upstream_apis_enabled = false"));
     }
 
     #[test]

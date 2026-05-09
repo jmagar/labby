@@ -24,8 +24,10 @@ pub struct SupportedServiceView {
     pub default_port: Option<u16>,
 }
 
-pub fn supported_services() -> Vec<SupportedServiceView> {
-    crate::registry::build_default_registry()
+pub fn supported_services_from_registry(
+    registry: &crate::registry::ToolRegistry,
+) -> Vec<SupportedServiceView> {
+    registry
         .services()
         .iter()
         .filter_map(|service| crate::registry::service_meta(service.name))

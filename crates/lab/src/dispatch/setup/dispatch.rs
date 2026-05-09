@@ -19,6 +19,7 @@ use serde_json::{Value, json};
 use std::time::Duration;
 
 use crate::config::env_merge::{self, EnvEntry, MergeRequest, snapshot_mtime};
+use crate::config::{config_toml_path, patch_built_in_upstream_apis_enabled};
 
 /// Maximum elapsed time for the inline doctor.audit.full call inside
 /// setup.draft.commit. A misconfigured probe (network hang, dead host)
@@ -32,7 +33,10 @@ const AUDIT_TIMEOUT: Duration = Duration::from_secs(30);
 const REDACTED_LOG_ACTIONS: &[&str] = &["draft.set", "draft.commit", "finalize"];
 use crate::dispatch::error::ToolError;
 use crate::dispatch::helpers::{action_schema, help_payload, to_json};
-use crate::registry::service_meta;
+use crate::registry::{
+    RegisteredService, RegisteredServiceKind, bootstrap_operator_services,
+    built_in_upstream_api_services, service_meta,
+};
 
 use super::catalog::ACTIONS;
 use super::claude_plugins;
@@ -64,6 +68,8 @@ async fn dispatch_inner(action: &str, params: &Value) -> Result<Value, ToolError
         "draft.get" => draft_get_action(),
         "draft.set" => draft_set_action(params).await,
         "draft.commit" => draft_commit_action(params).await,
+        "settings.state" => settings_state_action(),
+        "settings.update" => settings_update_action(params),
         "installed_plugins" => installed_plugins_action(params).await,
         "services_status" => services_status_action().await,
         "install_plugin" => install_plugin_action(params).await,
@@ -115,12 +121,12 @@ fn schema_get_action(params: &Value) -> Result<Value, ToolError> {
         let Some(meta) = service_meta(entry.name) else {
             continue;
         };
-        services_out.insert(entry.name.to_string(), service_schema(meta));
+        services_out.insert(entry.name.to_string(), service_schema(entry, meta));
     }
     Ok(json!({ "services": Value::Object(services_out) }))
 }
 
-fn service_schema(meta: &PluginMeta) -> Value {
+fn service_schema(entry: &RegisteredService, meta: &PluginMeta) -> Value {
     let env_var_to_schema = |is_required: bool, var: &lab_apis::core::EnvVar| -> Value {
         let mut entry = serde_json::Map::new();
         entry.insert("name".into(), json!(var.name));
@@ -150,7 +156,206 @@ fn service_schema(meta: &PluginMeta) -> Value {
         "category": format!("{:?}", meta.category).to_lowercase(),
         "supports_multi_instance": meta.supports_multi_instance,
         "default_port": meta.default_port,
+        "built_in_upstream_api": entry.kind == RegisteredServiceKind::BuiltInUpstreamApi,
         "env": env_array,
+    })
+}
+
+fn settings_state_action() -> Result<Value, ToolError> {
+    let path = config_toml_path().ok_or_else(|| ToolError::Sdk {
+        sdk_kind: "internal_error".into(),
+        message: "HOME env var not set; cannot resolve config.toml path".into(),
+    })?;
+    let cfg = load_settings_config(&path)?;
+    let restart_required = cfg.services.built_in_upstream_apis_enabled
+        != crate::registry::runtime_built_in_upstream_apis_enabled();
+    Ok(settings_state_json(
+        &cfg,
+        path.display().to_string(),
+        restart_required,
+        false,
+        None,
+    ))
+}
+
+fn settings_update_action(params: &Value) -> Result<Value, ToolError> {
+    let path = config_toml_path().ok_or_else(|| ToolError::Sdk {
+        sdk_kind: "internal_error".into(),
+        message: "HOME env var not set; cannot resolve config.toml path".into(),
+    })?;
+    let enabled = parse_built_in_upstream_apis_enabled(params)?;
+    let current = load_settings_config(&path)?;
+    let previous_enabled = current.services.built_in_upstream_apis_enabled;
+    let changed = previous_enabled != enabled;
+    let cfg = if changed {
+        patch_built_in_upstream_apis_enabled(&path, enabled).map_err(config_io_error)?
+    } else {
+        current
+    };
+    let restart_required = enabled != crate::registry::runtime_built_in_upstream_apis_enabled();
+    Ok(settings_state_json(
+        &cfg,
+        path.display().to_string(),
+        restart_required,
+        changed,
+        Some(previous_enabled),
+    ))
+}
+
+fn load_settings_config(path: &std::path::Path) -> Result<crate::config::LabConfig, ToolError> {
+    crate::config::load_toml(&[path.to_path_buf()]).map_err(config_io_error)
+}
+
+fn config_io_error(error: anyhow::Error) -> ToolError {
+    ToolError::InvalidParam {
+        message: format!("invalid settings config: {error}"),
+        param: "config.toml".into(),
+    }
+}
+
+fn parse_built_in_upstream_apis_enabled(params: &Value) -> Result<bool, ToolError> {
+    let flat_key = "services.built_in_upstream_apis_enabled";
+    let object = params.as_object().ok_or_else(|| ToolError::InvalidParam {
+        message: "settings.update requires an object patch".into(),
+        param: "params".into(),
+    })?;
+
+    for key in object.keys() {
+        if key != flat_key && key != "services" && key != "confirm" {
+            return Err(ToolError::InvalidParam {
+                message: format!("unknown settings.update parameter `{key}`"),
+                param: key.clone(),
+            });
+        }
+    }
+
+    let mut parsed = parse_optional_bool(params.get(flat_key), flat_key)?;
+    if let Some(services) = params.get("services") {
+        let services = services
+            .as_object()
+            .ok_or_else(|| ToolError::InvalidParam {
+                message: "services must be an object".into(),
+                param: "services".into(),
+            })?;
+        for key in services.keys() {
+            if key != "built_in_upstream_apis_enabled" {
+                return Err(ToolError::InvalidParam {
+                    message: format!("unknown settings.update services parameter `{key}`"),
+                    param: format!("services.{key}"),
+                });
+            }
+        }
+        if let Some(value) = services.get("built_in_upstream_apis_enabled") {
+            let nested = parse_required_bool(value, "services.built_in_upstream_apis_enabled")?;
+            if let Some(flat) = parsed
+                && flat != nested
+            {
+                return Err(ToolError::InvalidParam {
+                    message: "conflicting values for services.built_in_upstream_apis_enabled"
+                        .into(),
+                    param: flat_key.into(),
+                });
+            }
+            parsed = Some(nested);
+        }
+    }
+
+    parsed.ok_or_else(|| ToolError::InvalidParam {
+        message: "settings.update requires services.built_in_upstream_apis_enabled".into(),
+        param: flat_key.into(),
+    })
+}
+
+fn parse_optional_bool(
+    value: Option<&Value>,
+    param: &'static str,
+) -> Result<Option<bool>, ToolError> {
+    value
+        .map(|value| parse_required_bool(value, param))
+        .transpose()
+}
+
+fn parse_required_bool(value: &Value, param: &'static str) -> Result<bool, ToolError> {
+    value.as_bool().ok_or_else(|| ToolError::InvalidParam {
+        message: format!("{param} must be a boolean"),
+        param: param.into(),
+    })
+}
+
+fn settings_state_json(
+    cfg: &crate::config::LabConfig,
+    config_path: String,
+    restart_required: bool,
+    changed: bool,
+    previous_built_in_upstream_apis_enabled: Option<bool>,
+) -> Value {
+    let registry = cached_registry();
+    json!({
+        "config_path": config_path,
+        "changed": changed,
+        "previous": {
+            "services": {
+                "built_in_upstream_apis_enabled": previous_built_in_upstream_apis_enabled,
+            },
+        },
+        "restart_required": restart_required,
+        "restart_note": "Changes to built-in upstream API services take effect after restarting labby serve.",
+        "services": {
+            "built_in_upstream_apis_enabled": cfg.services.built_in_upstream_apis_enabled,
+            "built_in_upstream_api_services": built_in_upstream_api_services(registry),
+            "bootstrap_services": bootstrap_operator_services(registry),
+        },
+        "surfaces": settings_surfaces_json(cfg),
+    })
+}
+
+fn settings_surfaces_json(cfg: &crate::config::LabConfig) -> Value {
+    let mcp_transport = std::env::var("LAB_MCP_TRANSPORT")
+        .ok()
+        .or_else(|| cfg.mcp.transport.clone())
+        .unwrap_or_else(|| "http".into());
+    let mcp_host = std::env::var("LAB_MCP_HTTP_HOST")
+        .ok()
+        .or_else(|| cfg.mcp.host.clone())
+        .unwrap_or_else(|| "127.0.0.1".into());
+    let mcp_port = std::env::var("LAB_MCP_HTTP_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .or(cfg.mcp.port)
+        .unwrap_or(8765);
+    let web_auth_disabled = std::env::var(crate::config::WEB_UI_AUTH_DISABLED_ENV)
+        .ok()
+        .or_else(|| std::env::var(crate::config::WEB_UI_AUTH_DISABLED_LEGACY_ENV).ok())
+        .and_then(|value| match value.as_str() {
+            "1" | "true" | "TRUE" | "yes" | "YES" => Some(true),
+            "0" | "false" | "FALSE" | "no" | "NO" => Some(false),
+            _ => None,
+        })
+        .or(cfg.web.disable_auth)
+        .unwrap_or(false);
+    let auth_mode = std::env::var("LAB_AUTH_MODE")
+        .ok()
+        .or_else(|| cfg.auth.as_ref().and_then(|auth| auth.mode.clone()))
+        .unwrap_or_else(|| "bearer".into());
+    let public_url = std::env::var("LAB_PUBLIC_URL")
+        .ok()
+        .or_else(|| cfg.auth.as_ref().and_then(|auth| auth.public_url.clone()));
+
+    json!({
+        "mcp": {
+            "transport": mcp_transport,
+            "host": mcp_host,
+            "port": mcp_port,
+            "stateful": cfg.mcp.stateful,
+        },
+        "web": {
+            "auth_disabled": web_auth_disabled,
+            "assets_dir": cfg.web.assets_dir.as_ref().map(|path| path.display().to_string()),
+        },
+        "auth": {
+            "mode": auth_mode,
+            "public_url": public_url,
+        },
     })
 }
 
@@ -388,6 +593,9 @@ fn assert_action_count_const() {
 mod tests {
     use super::*;
     use crate::registry::build_default_registry;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[tokio::test]
     async fn unknown_action_returns_unknown_action() {
@@ -399,6 +607,131 @@ mod tests {
     async fn help_returns_catalog() {
         let v = dispatch("help", Value::Null).await.unwrap();
         assert!(v.get("actions").is_some());
+    }
+
+    #[test]
+    fn setup_actions_are_unique() {
+        let mut seen = std::collections::BTreeSet::new();
+        for action in ACTIONS {
+            assert!(
+                seen.insert(action.name),
+                "duplicate setup action {}",
+                action.name
+            );
+        }
+    }
+
+    #[test]
+    fn setup_catalog_covers_dispatch_actions() {
+        let names: std::collections::BTreeSet<&str> =
+            ACTIONS.iter().map(|action| action.name).collect();
+
+        for required in [
+            "schema.get",
+            "state",
+            "draft.set",
+            "draft.commit",
+            "settings.state",
+            "settings.update",
+            "finalize",
+            "installed_plugins",
+            "services_status",
+            "install_plugin",
+            "uninstall_plugin",
+        ] {
+            assert!(names.contains(required), "missing setup action {required}");
+        }
+    }
+
+    #[test]
+    fn settings_update_accepts_flat_and_nested_toggle_param() {
+        assert_eq!(
+            parse_built_in_upstream_apis_enabled(
+                &json!({"services.built_in_upstream_apis_enabled": false})
+            )
+            .unwrap(),
+            false
+        );
+        assert_eq!(
+            parse_built_in_upstream_apis_enabled(
+                &json!({"services": {"built_in_upstream_apis_enabled": true}})
+            )
+            .unwrap(),
+            true
+        );
+    }
+
+    #[test]
+    fn settings_update_rejects_empty_and_unknown_toggle_patches() {
+        for params in [
+            json!({}),
+            json!({"services": {}}),
+            json!({"services": {"built_in_upstream_api_enabled": false}}),
+            json!({"unexpected": false}),
+        ] {
+            let err = parse_built_in_upstream_apis_enabled(&params).unwrap_err();
+            assert_eq!(err.kind(), "invalid_param", "{params}");
+        }
+    }
+
+    #[test]
+    fn settings_update_catalog_requires_toggle_param() {
+        let action = ACTIONS
+            .iter()
+            .find(|action| action.name == "settings.update")
+            .expect("settings.update action");
+        assert!(action.destructive);
+        let param = action
+            .params
+            .iter()
+            .find(|param| param.name == "services.built_in_upstream_apis_enabled")
+            .expect("toggle param");
+        assert!(param.required);
+    }
+
+    #[tokio::test]
+    async fn settings_update_dispatch_persists_and_preserves_config_toml() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let previous_runtime = crate::registry::runtime_built_in_upstream_apis_enabled();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_dir = temp.path().join(".config/lab");
+        std::fs::create_dir_all(&config_dir).expect("config dir");
+        let config_path = config_dir.join("config.toml");
+        std::fs::write(
+            &config_path,
+            "# keep me\n[services]\n# upstream policy\nbuilt_in_upstream_apis_enabled = true\n[plugin_owned]\nfuture = \"keep\"\n",
+        )
+        .expect("write config");
+        crate::config::set_test_config_toml_path(Some(config_path.clone()));
+        crate::registry::set_runtime_built_in_upstream_apis_enabled(true);
+
+        let updated = dispatch(
+            "settings.update",
+            json!({"services": {"built_in_upstream_apis_enabled": false}, "confirm": true}),
+        )
+        .await
+        .expect("settings update");
+        assert_eq!(updated["services"]["built_in_upstream_apis_enabled"], false);
+        assert_eq!(updated["changed"], true);
+        assert_eq!(updated["restart_required"], true);
+        assert_eq!(
+            updated["previous"]["services"]["built_in_upstream_apis_enabled"],
+            true
+        );
+
+        let persisted = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(persisted.contains("# keep me"));
+        assert!(persisted.contains("[plugin_owned]"));
+        assert!(persisted.contains("built_in_upstream_apis_enabled = false"));
+
+        let state = dispatch("settings.state", json!({}))
+            .await
+            .expect("settings state");
+        assert_eq!(state["services"]["built_in_upstream_apis_enabled"], false);
+        assert_eq!(state["restart_required"], true);
+
+        crate::registry::set_runtime_built_in_upstream_apis_enabled(previous_runtime);
+        crate::config::set_test_config_toml_path(None);
     }
 
     #[tokio::test]

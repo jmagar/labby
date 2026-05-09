@@ -192,8 +192,8 @@ pub fn build_route_docs(service_names: &[String]) -> Vec<RouteDoc> {
             "development marketplace mock API",
         ),
         dev("GET", "/dev/api/nodeinfo", "development node info mock API"),
-        dev("GET", "/dev", "development mockup"),
-        dev("GET", "/dev/{name}", "named development mockup"),
+        dev("GET", "/dev/mockup", "development mockup"),
+        dev("GET", "/dev/mockup/{name}", "named development mockup"),
     ];
 
     for service in service_names {

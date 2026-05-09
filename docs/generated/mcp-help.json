@@ -910,7 +910,7 @@
             },
             {
               "name": "force",
-              "ty": "bool",
+              "ty": "boolean",
               "required": false,
               "description": "Overwrite conflicting draft keys (default false)"
             }
@@ -924,12 +924,33 @@
           "params": [
             {
               "name": "force",
-              "ty": "bool",
+              "ty": "boolean",
               "required": false,
               "description": "Overwrite conflicting .env keys (default false)"
             }
           ],
           "returns": "CommitOutcome"
+        },
+        {
+          "name": "settings.state",
+          "description": "Return non-secret operator settings and runtime service policy state",
+          "destructive": false,
+          "params": [],
+          "returns": "SettingsState"
+        },
+        {
+          "name": "settings.update",
+          "description": "Update non-secret operator settings with validation",
+          "destructive": true,
+          "params": [
+            {
+              "name": "services.built_in_upstream_apis_enabled",
+              "ty": "boolean",
+              "required": true,
+              "description": "Enable built-in upstream API service integrations"
+            }
+          ],
+          "returns": "SettingsState"
         },
         {
           "name": "installed_plugins",
@@ -938,7 +959,7 @@
           "params": [
             {
               "name": "force",
-              "ty": "bool",
+              "ty": "boolean",
               "required": false,
               "description": "Bypass the short in-process cache"
             }
@@ -987,54 +1008,12 @@
           "params": [
             {
               "name": "force",
-              "ty": "bool",
+              "ty": "boolean",
               "required": false,
               "description": "Overwrite conflicting .env keys (default false)"
             }
           ],
           "returns": "CommitOutcome"
-        },
-        {
-          "name": "installed_plugins",
-          "description": "List installed Claude Code lab service plugins",
-          "destructive": false,
-          "params": [],
-          "returns": "InstalledPlugin[]"
-        },
-        {
-          "name": "services_status",
-          "description": "Join service schema, configured-env state, and installed plugin state",
-          "destructive": false,
-          "params": [],
-          "returns": "ServiceStatus[]"
-        },
-        {
-          "name": "install_plugin",
-          "description": "Install the Claude Code plugin for a registered lab service",
-          "destructive": true,
-          "params": [
-            {
-              "name": "service",
-              "ty": "string",
-              "required": true,
-              "description": "Registered lab service slug"
-            }
-          ],
-          "returns": "PluginLifecycleOutcome"
-        },
-        {
-          "name": "uninstall_plugin",
-          "description": "Uninstall the Claude Code plugin for a registered lab service",
-          "destructive": true,
-          "params": [
-            {
-              "name": "service",
-              "ty": "string",
-              "required": true,
-              "description": "Registered lab service slug"
-            }
-          ],
-          "returns": "PluginLifecycleOutcome"
         }
       ]
     },
@@ -12248,7 +12227,7 @@
     {
       "name": "dozzle",
       "description": "Read-only container log observation through Dozzle",
-      "category": "bootstrap",
+      "category": "network",
       "status": "available",
       "requires_http_subject": false,
       "actions": [

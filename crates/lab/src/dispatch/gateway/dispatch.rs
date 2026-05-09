@@ -25,6 +25,7 @@ fn parse_params<T: DeserializeOwned>(params_value: Value) -> Result<T, ToolError
     })
 }
 
+#[allow(clippy::large_stack_frames)]
 pub async fn dispatch_with_manager(
     manager: &GatewayManager,
     action: &str,
@@ -96,7 +97,11 @@ pub async fn dispatch_with_manager(
             let params: VirtualServerNameParams = parse_params(params_value)?;
             to_json(manager.get_server(&params.id).await?)
         }
-        "gateway.supported_services" => to_json(super::service_catalog::supported_services()),
+        "gateway.supported_services" => {
+            to_json(super::service_catalog::supported_services_from_registry(
+                manager.builtin_service_registry(),
+            ))
+        }
         "gateway.protected_route.list" => to_json(manager.protected_route_list().await),
         "gateway.protected_route.get" => {
             let params: ProtectedRouteNameParams = parse_params(params_value)?;
@@ -160,7 +165,7 @@ pub async fn dispatch_with_manager(
         "gateway.virtual_server.set_mcp_policy" => {
             let params: VirtualServerMcpPolicyParams = parse_params(params_value)?;
             let service = manager.service_for_virtual_server_id(&params.id).await?;
-            let valid_actions = compiled_service_actions(&service)?;
+            let valid_actions = compiled_service_actions(manager, &service)?;
             for action in &params.allowed_actions {
                 if !valid_actions
                     .iter()
@@ -195,7 +200,7 @@ pub async fn dispatch_with_manager(
         }
         "gateway.service_actions" => {
             let params: ServiceConfigGetParams = parse_params(params_value)?;
-            to_json(compiled_service_actions(&params.service)?)
+            to_json(compiled_service_actions(manager, &params.service)?)
         }
         "gateway.get" => {
             let params: GatewayNameParams = parse_params(params_value)?;
@@ -383,9 +388,12 @@ pub async fn dispatch_with_manager(
     }
 }
 
-fn compiled_service_actions(service: &str) -> Result<Vec<ServiceActionView>, ToolError> {
-    let registry = crate::registry::build_default_registry();
-    let entry = registry
+fn compiled_service_actions(
+    manager: &GatewayManager,
+    service: &str,
+) -> Result<Vec<ServiceActionView>, ToolError> {
+    let entry = manager
+        .builtin_service_registry()
         .service(service)
         .ok_or_else(|| ToolError::InvalidParam {
             message: format!("unknown service `{service}`"),
@@ -730,6 +738,71 @@ mod tests {
         let services = value.as_array().expect("array");
         #[cfg(feature = "plex")]
         assert!(services.iter().any(|service| service["key"] == "plex"));
+    }
+
+    #[tokio::test]
+    async fn supported_services_omits_upstreams_when_policy_disabled() {
+        let registry = crate::registry::filter_built_in_upstream_apis(
+            crate::registry::build_default_registry(),
+            false,
+        );
+        let manager = test_manager().with_builtin_service_registry(registry);
+        let value = dispatch_with_manager(&manager, "gateway.supported_services", json!({}))
+            .await
+            .expect("supported services");
+
+        let services = value.as_array().expect("array");
+        assert!(!services.iter().any(|service| service["key"] == "plex"));
+        assert!(!services.iter().any(|service| service["key"] == "openai"));
+    }
+
+    #[tokio::test]
+    async fn service_actions_rejects_disabled_upstream_service() {
+        let registry = crate::registry::filter_built_in_upstream_apis(
+            crate::registry::build_default_registry(),
+            false,
+        );
+        let manager = test_manager().with_builtin_service_registry(registry);
+        let err = dispatch_with_manager(
+            &manager,
+            "gateway.service_actions",
+            json!({"service": "plex"}),
+        )
+        .await
+        .expect_err("disabled service should be unknown");
+
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[tokio::test]
+    async fn virtual_server_enable_rejects_disabled_upstream_service() {
+        let registry = crate::registry::filter_built_in_upstream_apis(
+            crate::registry::build_default_registry(),
+            false,
+        );
+        let manager = test_manager().with_builtin_service_registry(registry);
+        manager
+            .seed_config(crate::config::LabConfig {
+                virtual_servers: vec![crate::config::VirtualServerConfig {
+                    id: "plex".to_string(),
+                    service: "plex".to_string(),
+                    enabled: false,
+                    surfaces: crate::config::VirtualServerSurfacesConfig::default(),
+                    mcp_policy: None,
+                }],
+                ..crate::config::LabConfig::default()
+            })
+            .await;
+
+        let err = dispatch_with_manager(
+            &manager,
+            "gateway.virtual_server.enable",
+            json!({"id": "plex"}),
+        )
+        .await
+        .expect_err("disabled upstream virtual server should be unavailable");
+
+        assert_eq!(err.kind(), "not_found");
     }
 
     #[tokio::test]

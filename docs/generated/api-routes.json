@@ -144,22 +144,6 @@
     "notes": "OAuth authorization endpoint"
   },
   {
-    "method": "GET",
-    "path": "/dev",
-    "surface": "api",
-    "handler_group": "dev",
-    "feature": null,
-    "runtime_condition": "development/mockup routes",
-    "auth_required": true,
-    "bearer_only": false,
-    "session_cookie_allowed": true,
-    "csrf_required": false,
-    "host_validation": false,
-    "master_only": true,
-    "cache_posture": "not cacheable",
-    "notes": "development mockup"
-  },
-  {
     "method": "POST",
     "path": "/dev/api/marketplace",
     "surface": "api",
@@ -193,7 +177,23 @@
   },
   {
     "method": "GET",
-    "path": "/dev/{name}",
+    "path": "/dev/mockup",
+    "surface": "api",
+    "handler_group": "dev",
+    "feature": null,
+    "runtime_condition": "development/mockup routes",
+    "auth_required": true,
+    "bearer_only": false,
+    "session_cookie_allowed": true,
+    "csrf_required": false,
+    "host_validation": false,
+    "master_only": true,
+    "cache_posture": "not cacheable",
+    "notes": "development mockup"
+  },
+  {
+    "method": "GET",
+    "path": "/dev/mockup/{name}",
     "surface": "api",
     "handler_group": "dev",
     "feature": null,
