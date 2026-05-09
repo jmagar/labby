@@ -295,17 +295,11 @@ async fn authenticate_protected_route_request(
     };
     let claims = auth_state
         .signing_keys
-        .validate_access_token(&token, &resource)
+        .validate_access_token_with_issuer(&token, &resource, &expected_issuer)
         .map_err(|error| {
             tracing::debug!(error = %error, resource = %resource, "protected route JWT validation failed");
             auth_error_response("invalid bearer token", Some(&route_metadata_url(route)))
         })?;
-    if claims.iss != expected_issuer {
-        return Err(auth_error_response(
-            "invalid bearer token",
-            Some(&route_metadata_url(route)),
-        ));
-    }
     let required_scopes = route.scopes.iter().map(String::as_str).collect::<Vec<_>>();
     let granted = claims.scope.split_whitespace().collect::<Vec<_>>();
     if !required_scopes
@@ -518,18 +512,12 @@ async fn authenticate_request(
                 ));
             };
             let expected_aud = lab_auth::metadata::canonical_resource_url(auth_state);
-            match auth_state
-                .signing_keys
-                .validate_access_token(&token, &expected_aud)
-            {
+            match auth_state.signing_keys.validate_access_token_with_issuer(
+                &token,
+                &expected_aud,
+                &expected_issuer,
+            ) {
                 Ok(claims) => {
-                    if claims.iss != expected_issuer {
-                        return Ok(auth_error_response(
-                            "invalid bearer token",
-                            resource_url.as_deref(),
-                        ));
-                    }
-
                     request
                         .extensions_mut()
                         .insert(crate::api::oauth::AuthContext {

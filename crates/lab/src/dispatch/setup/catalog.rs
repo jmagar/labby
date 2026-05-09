@@ -62,7 +62,7 @@ pub const ACTIONS: &[ActionSpec] = &[
             },
             ParamSpec {
                 name: "force",
-                ty: "bool",
+                ty: "boolean",
                 required: false,
                 description: "Overwrite conflicting draft keys (default false)",
             },
@@ -75,7 +75,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         returns: "CommitOutcome",
         params: &[ParamSpec {
             name: "force",
-            ty: "bool",
+            ty: "boolean",
             required: false,
             description: "Overwrite conflicting .env keys (default false)",
         }],
@@ -94,8 +94,8 @@ pub const ACTIONS: &[ActionSpec] = &[
         returns: "SettingsState",
         params: &[ParamSpec {
             name: "services.built_in_upstream_apis_enabled",
-            ty: "bool",
-            required: false,
+            ty: "boolean",
+            required: true,
             description: "Enable built-in upstream API service integrations",
         }],
     },
@@ -106,7 +106,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         returns: "InstalledPlugin[]",
         params: &[ParamSpec {
             name: "force",
-            ty: "bool",
+            ty: "boolean",
             required: false,
             description: "Bypass the short in-process cache",
         }],
@@ -149,7 +149,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         returns: "CommitOutcome",
         params: &[ParamSpec {
             name: "force",
-            ty: "bool",
+            ty: "boolean",
             required: false,
             description: "Overwrite conflicting .env keys (default false)",
         }],

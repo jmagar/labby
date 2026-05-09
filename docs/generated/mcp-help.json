@@ -910,7 +910,7 @@
             },
             {
               "name": "force",
-              "ty": "bool",
+              "ty": "boolean",
               "required": false,
               "description": "Overwrite conflicting draft keys (default false)"
             }
@@ -924,7 +924,7 @@
           "params": [
             {
               "name": "force",
-              "ty": "bool",
+              "ty": "boolean",
               "required": false,
               "description": "Overwrite conflicting .env keys (default false)"
             }
@@ -945,8 +945,8 @@
           "params": [
             {
               "name": "services.built_in_upstream_apis_enabled",
-              "ty": "bool",
-              "required": false,
+              "ty": "boolean",
+              "required": true,
               "description": "Enable built-in upstream API service integrations"
             }
           ],
@@ -959,7 +959,7 @@
           "params": [
             {
               "name": "force",
-              "ty": "bool",
+              "ty": "boolean",
               "required": false,
               "description": "Bypass the short in-process cache"
             }
@@ -1008,7 +1008,7 @@
           "params": [
             {
               "name": "force",
-              "ty": "bool",
+              "ty": "boolean",
               "required": false,
               "description": "Overwrite conflicting .env keys (default false)"
             }
@@ -12227,7 +12227,7 @@
     {
       "name": "dozzle",
       "description": "Read-only container log observation through Dozzle",
-      "category": "bootstrap",
+      "category": "network",
       "status": "available",
       "requires_http_subject": false,
       "actions": [

@@ -216,10 +216,7 @@ pub struct AuthService<S> {
 
 impl<S> Service<Request<Body>> for AuthService<S>
 where
-    S: Service<Request<Body>, Response = Response, Error = Infallible>
-        + Clone
-        + Send
-        + 'static,
+    S: Service<Request<Body>, Response = Response, Error = Infallible> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
     type Response = Response;
@@ -366,10 +363,8 @@ async fn authenticate(
                     }
                 }
 
-                let actor_key = derive_actor_key(
-                    layer.actor_key_deriver.as_deref(),
-                    &session.subject,
-                );
+                let actor_key =
+                    derive_actor_key(layer.actor_key_deriver.as_deref(), &session.subject);
                 request.extensions_mut().insert(AuthContext {
                     actor_key,
                     sub: session.subject,
@@ -528,8 +523,8 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn missing_bearer_token_returns_401_with_www_authenticate() {
-        let layer = AuthLayer::new()
-            .with_resource_url(Some(Arc::<str>::from("https://lab.example.com")));
+        let layer =
+            AuthLayer::new().with_resource_url(Some(Arc::<str>::from("https://lab.example.com")));
         let app = echo_app(layer);
         let response = app
             .oneshot(
@@ -561,9 +556,11 @@ mod tests {
         let app = Router::new()
             .route(
                 "/probe",
-                get(|axum::Extension(ctx): axum::Extension<AuthContext>| async move {
-                    ctx.scopes.join(",")
-                }),
+                get(
+                    |axum::Extension(ctx): axum::Extension<AuthContext>| async move {
+                        ctx.scopes.join(",")
+                    },
+                ),
             )
             .route_layer(layer);
 
@@ -578,14 +575,15 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
         assert_eq!(&body[..], b"syslog:read,syslog:admin");
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn wrong_static_bearer_rejected() {
-        let layer = AuthLayer::new()
-            .with_static_token(Some(Arc::<str>::from("super-secret")));
+        let layer = AuthLayer::new().with_static_token(Some(Arc::<str>::from("super-secret")));
         let app = echo_app(layer);
 
         let response = app
@@ -626,9 +624,11 @@ mod tests {
         let app = Router::new()
             .route(
                 "/probe",
-                get(|axum::Extension(ctx): axum::Extension<AuthContext>| async move {
-                    format!("{}|{}", ctx.sub, ctx.scopes.join(","))
-                }),
+                get(
+                    |axum::Extension(ctx): axum::Extension<AuthContext>| async move {
+                        format!("{}|{}", ctx.sub, ctx.scopes.join(","))
+                    },
+                ),
             )
             .route_layer(layer);
 
@@ -643,7 +643,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
         assert_eq!(&body[..], b"user@example.com|syslog:read,syslog:admin");
     }
 
@@ -784,8 +786,7 @@ mod tests {
         let state = Arc::new(test_auth_state_with_config(config).await);
 
         let token: Arc<str> = Arc::from("super-secret");
-        let layer = AuthLayer::from_state(state)
-            .with_static_token(Some(token.clone()));
+        let layer = AuthLayer::from_state(state).with_static_token(Some(token.clone()));
         let app = echo_app(layer);
 
         let response = app

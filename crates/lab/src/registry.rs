@@ -7,8 +7,20 @@ use lab_apis::core::action::ActionSpec;
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::dispatch::error::ToolError;
+
+static RUNTIME_BUILT_IN_UPSTREAM_APIS_ENABLED: AtomicBool = AtomicBool::new(true);
+
+pub fn set_runtime_built_in_upstream_apis_enabled(enabled: bool) {
+    RUNTIME_BUILT_IN_UPSTREAM_APIS_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+#[must_use]
+pub fn runtime_built_in_upstream_apis_enabled() -> bool {
+    RUNTIME_BUILT_IN_UPSTREAM_APIS_ENABLED.load(Ordering::Relaxed)
+}
 
 /// A dispatch function pointer: takes an owned action name and params,
 /// returns a boxed future resolving to `Result<Value, ToolError>`.
@@ -147,7 +159,7 @@ pub enum RegisteredServiceKind {
 }
 
 /// Collection of registered services, built at startup.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ToolRegistry {
     services: Vec<RegisteredService>,
     action_names: Vec<&'static str>,
@@ -755,8 +767,14 @@ const fn category_slug(cat: lab_apis::core::Category) -> &'static str {
 
 fn registered_service_kind(
     name: &'static str,
-    _category: lab_apis::core::Category,
+    category: lab_apis::core::Category,
 ) -> RegisteredServiceKind {
+    use lab_apis::core::Category;
+
+    if matches!(category, Category::Bootstrap | Category::Marketplace) {
+        return RegisteredServiceKind::BootstrapOperator;
+    }
+
     match name {
         "extract" | "doctor" | "setup" | "marketplace" | "beads" | "deploy" | "acp" | "stash"
         | "loggifly" => RegisteredServiceKind::BootstrapOperator,

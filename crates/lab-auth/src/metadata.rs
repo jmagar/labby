@@ -1,4 +1,4 @@
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 
 use crate::state::AuthState;
 use crate::types::{AuthorizationServerMetadata, ProtectedResourceMetadata};

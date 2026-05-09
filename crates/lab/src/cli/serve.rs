@@ -202,6 +202,9 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         return run_node_mode(transport, args.command.as_ref(), config, node_runtime, port).await;
     }
 
+    crate::registry::set_runtime_built_in_upstream_apis_enabled(
+        config.services.built_in_upstream_apis_enabled,
+    );
     let registry = build_default_registry();
     let registry = crate::registry::filter_built_in_upstream_apis(
         registry,
@@ -323,6 +326,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         config_toml_path().unwrap_or_else(|| "config.toml".into()),
         gateway_runtime.clone(),
     )
+    .with_builtin_service_registry(registry.clone())
     .with_service_clients(service_clients);
     if let Some(rt) = upstream_oauth_runtime {
         gateway_manager = gateway_manager

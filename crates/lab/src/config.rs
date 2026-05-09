@@ -16,6 +16,8 @@
 
 pub mod env_merge;
 
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
 use std::{
     collections::BTreeMap,
     collections::HashMap,
@@ -33,6 +35,15 @@ use tempfile::NamedTempFile;
 pub const DEFAULT_MCPREGISTRY_URL: &str = "https://registry.modelcontextprotocol.io";
 pub const WEB_UI_AUTH_DISABLED_ENV: &str = "LAB_WEB_UI_AUTH_DISABLED";
 pub const WEB_UI_AUTH_DISABLED_LEGACY_ENV: &str = "LAB_WEB_UI_DISABLE_AUTH";
+
+#[cfg(test)]
+static TEST_CONFIG_TOML_PATH: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn set_test_config_toml_path(path: Option<PathBuf>) {
+    let slot = TEST_CONFIG_TOML_PATH.get_or_init(|| Mutex::new(None));
+    *slot.lock().expect("test config path lock") = path;
+}
 
 /// Fully-resolved `lab` configuration, assembled from env + TOML.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1141,6 +1152,16 @@ pub fn dotenv_path() -> Option<PathBuf> {
 }
 
 pub fn config_toml_path() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(path) = TEST_CONFIG_TOML_PATH
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("test config path lock")
+        .clone()
+    {
+        return Some(path);
+    }
+
     toml_candidates()
         .into_iter()
         .find(|path| path.exists())
@@ -1651,10 +1672,10 @@ mod tests {
     #[test]
     fn service_preferences_can_disable_upstream_apis() {
         let cfg = toml::from_str::<LabConfig>(
-            r#"
+            r"
             [services]
             built_in_upstream_apis_enabled = false
-            "#,
+            ",
         )
         .expect("services config should parse");
 

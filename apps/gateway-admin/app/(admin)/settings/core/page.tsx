@@ -126,7 +126,7 @@ export default function CorePage(): React.ReactElement {
                       }))
                     }
                     onBlur={() => {
-                      if (state.value !== '') void commitField(field.key, state.value)
+                      void commitField(field.key, state.value)
                     }}
                   />
                   <SaveBadge state={state} />

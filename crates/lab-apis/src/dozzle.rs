@@ -18,7 +18,7 @@ pub const META: PluginMeta = PluginMeta {
     name: "dozzle",
     display_name: "Dozzle",
     description: "Read-only container log observation through Dozzle",
-    category: Category::Bootstrap,
+    category: Category::Network,
     docs_url: "https://dozzle.dev/guide/",
     required_env: &[EnvVar {
         name: "DOZZLE_URL",

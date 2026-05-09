@@ -8995,7 +8995,7 @@
         "type": "object",
         "properties": {
           "force": {
-            "type": "string"
+            "type": "boolean"
           }
         }
       },
@@ -9009,7 +9009,7 @@
             "type": "string"
           },
           "force": {
-            "type": "string"
+            "type": "boolean"
           }
         }
       },
@@ -9017,7 +9017,7 @@
         "type": "object",
         "properties": {
           "force": {
-            "type": "string"
+            "type": "boolean"
           }
         }
       },
@@ -9036,7 +9036,7 @@
         "type": "object",
         "properties": {
           "force": {
-            "type": "string"
+            "type": "boolean"
           }
         }
       },
@@ -9064,9 +9064,12 @@
       },
       "SetupSettingsUpdateParams": {
         "type": "object",
+        "required": [
+          "services.built_in_upstream_apis_enabled"
+        ],
         "properties": {
           "services.built_in_upstream_apis_enabled": {
-            "type": "string"
+            "type": "boolean"
           }
         }
       },

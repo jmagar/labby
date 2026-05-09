@@ -272,6 +272,12 @@ export interface ServicesStatusResponse {
 
 export interface SettingsState {
   config_path: string
+  changed: boolean
+  previous: {
+    services: {
+      built_in_upstream_apis_enabled: boolean | null
+    }
+  }
   restart_required: boolean
   restart_note: string
   services: {
@@ -298,8 +304,8 @@ export interface SettingsState {
 }
 
 export interface SettingsUpdate {
-  services?: {
-    built_in_upstream_apis_enabled?: boolean
+  services: {
+    built_in_upstream_apis_enabled: boolean
   }
 }
 
@@ -334,6 +340,12 @@ export const setupApi = {
       signal?.throwIfAborted?.()
       return Promise.resolve({
         config_path: '~/.config/lab/config.toml',
+        changed: false,
+        previous: {
+          services: {
+            built_in_upstream_apis_enabled: null,
+          },
+        },
         restart_required: false,
         restart_note: 'Changes to built-in upstream API services take effect after restarting labby serve.',
         services: {
@@ -350,13 +362,19 @@ export const setupApi = {
   settingsUpdate(patch: SettingsUpdate, signal?: AbortSignal): Promise<SettingsState> {
     if (USE_MOCK_DATA) {
       signal?.throwIfAborted?.()
+      const enabled = patch.services.built_in_upstream_apis_enabled
       return Promise.resolve({
         config_path: '~/.config/lab/config.toml',
+        changed: true,
+        previous: {
+          services: {
+            built_in_upstream_apis_enabled: !enabled,
+          },
+        },
         restart_required: true,
         restart_note: 'Changes to built-in upstream API services take effect after restarting labby serve.',
         services: {
-          built_in_upstream_apis_enabled:
-            patch.services?.built_in_upstream_apis_enabled ?? true,
+          built_in_upstream_apis_enabled: enabled,
           built_in_upstream_api_services: Object.keys(MOCK_SERVICES),
           bootstrap_services: ['setup', 'doctor', 'extract', 'gateway'],
         },
@@ -365,7 +383,7 @@ export const setupApi = {
     }
     return setupAction<SettingsState>(
       'settings.update',
-      { ...(patch as Record<string, unknown>), confirm: true },
+      { services: patch.services, confirm: true },
       signal,
     )
   },

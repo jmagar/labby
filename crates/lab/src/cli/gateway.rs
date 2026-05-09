@@ -16,6 +16,7 @@ use crate::dispatch::gateway::install_gateway_manager;
 use crate::dispatch::gateway::manager::{GatewayManager, GatewayRuntimeHandle};
 use crate::dispatch::upstream::pool::UpstreamPool;
 use crate::output::OutputFormat;
+use crate::registry::ToolRegistry;
 
 #[derive(Debug, Args)]
 pub struct GatewayArgs {
@@ -267,8 +268,8 @@ struct GatewayOauthStatusView {
 
 async fn build_manager(config: &LabConfig, discover_upstreams: bool) -> Arc<GatewayManager> {
     let runtime = GatewayRuntimeHandle::default();
+    let registry = filtered_builtin_service_registry(config);
     if discover_upstreams {
-        let registry = crate::registry::build_default_registry();
         let pool = Arc::new(UpstreamPool::new());
         pool.discover_all_with_in_process_peers(&config.upstream, &registry)
             .await;
@@ -280,11 +281,19 @@ async fn build_manager(config: &LabConfig, discover_upstreams: bool) -> Arc<Gate
             config_toml_path().unwrap_or_else(|| "config.toml".into()),
             runtime,
         )
+        .with_builtin_service_registry(registry)
         .with_service_clients(SharedServiceClients::from_env()),
     );
     manager.seed_config(config.clone()).await;
     install_gateway_manager(Arc::clone(&manager));
     manager
+}
+
+fn filtered_builtin_service_registry(config: &LabConfig) -> ToolRegistry {
+    crate::registry::filter_built_in_upstream_apis(
+        crate::registry::build_default_registry(),
+        config.services.built_in_upstream_apis_enabled,
+    )
 }
 
 fn protected_route_from_args(args: GatewayProtectedRouteUpsertArgs) -> ProtectedMcpRouteConfig {
