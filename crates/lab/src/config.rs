@@ -277,6 +277,29 @@ impl LabConfig {
         Ok(())
     }
 
+    pub fn normalize_protected_mcp_routes(&mut self) -> Result<(), ConfigError> {
+        for route in &mut self.protected_mcp_routes {
+            route.upstream = route
+                .upstream
+                .take()
+                .map(|name| name.trim().to_string())
+                .filter(|name| !name.is_empty());
+            if route.upstream.is_some() && route.backend_url.trim().is_empty() {
+                route.backend_url = String::new();
+            } else {
+                route.backend_url =
+                    normalize_protected_backend_url(&route.backend_url, &route.backend_mcp_path)
+                        .map_err(|_| ConfigError::InvalidProtectedRoute {
+                            name: route.name.clone(),
+                            field: "backend_url",
+                            value: route.backend_url.clone(),
+                        })?;
+            }
+            route.backend_mcp_path = default_mcp_path();
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn controller_host(&self) -> Option<&str> {
         self.node
@@ -407,10 +430,21 @@ pub struct ProtectedMcpRouteConfig {
     pub public_host: String,
     /// Public path prefix on that host, e.g. `/syslog`.
     pub public_path: String,
-    /// Backend origin only, e.g. `http://100.88.16.79:3100`.
+    /// Optional named Gateway upstream to publish at this protected route.
+    /// When set, Lab uses the upstream registry and its configured upstream
+    /// auth instead of proxying directly to `backend_url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<String>,
+    /// Full backend MCP endpoint URL, e.g. `http://100.88.16.79:3100/mcp`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub backend_url: String,
-    /// Backend MCP endpoint path. Defaults to `/mcp`.
-    #[serde(default = "default_mcp_path")]
+    /// Deprecated compatibility field. New configs put the MCP path in
+    /// `backend_url`; this field is folded into `backend_url` when loading
+    /// older origin-only route entries.
+    #[serde(
+        default = "default_mcp_path",
+        skip_serializing_if = "is_default_mcp_path"
+    )]
     pub backend_mcp_path: String,
     /// OAuth scopes advertised and enforced for this route.
     #[serde(default = "default_mcp_scopes")]
@@ -431,8 +465,47 @@ fn default_mcp_path() -> String {
     "/mcp".to_string()
 }
 
+fn is_default_mcp_path(path: &str) -> bool {
+    path == "/mcp"
+}
+
 fn default_mcp_scopes() -> Vec<String> {
     vec!["mcp:read".to_string(), "mcp:write".to_string()]
+}
+
+fn normalize_protected_backend_url(
+    raw: &str,
+    legacy_path: &str,
+) -> Result<String, url::ParseError> {
+    let mut parsed = url::Url::parse(raw.trim())?;
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(url::ParseError::RelativeUrlWithoutBase);
+    }
+
+    let current_path = parsed.path();
+    if current_path.is_empty() || current_path == "/" {
+        parsed.set_path(&normalize_mcp_route_path(legacy_path));
+    }
+    Ok(parsed.to_string().trim_end_matches('/').to_string())
+}
+
+fn normalize_mcp_route_path(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let with_slash = if trimmed.starts_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("/{trimmed}")
+    };
+    let normalized = with_slash
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join("/");
+    if normalized.is_empty() {
+        "/mcp".to_string()
+    } else {
+        format!("/{normalized}")
+    }
 }
 
 impl UpstreamConfig {
@@ -505,6 +578,12 @@ pub enum ConfigError {
     InvalidToolSearchTopKDefault { value: usize },
     #[error("gateway tool_search.max_tools={value} is invalid — expected 1..=10000")]
     InvalidToolSearchMaxTools { value: usize },
+    #[error("protected MCP route '{name}' has invalid {field}: {value}")]
+    InvalidProtectedRoute {
+        name: String,
+        field: &'static str,
+        value: String,
+    },
 }
 
 /// Outbound OAuth configuration for an upstream MCP server.
@@ -942,6 +1021,8 @@ pub fn load_toml(candidates: &[PathBuf]) -> Result<LabConfig> {
                 let mut cfg = toml::from_str::<LabConfig>(&raw)
                     .with_context(|| format!("failed to parse {}", path.display()))?;
                 cfg.normalize_legacy_tool_search(root_tool_search_present(&raw));
+                cfg.normalize_protected_mcp_routes()
+                    .with_context(|| format!("invalid config {}", path.display()))?;
                 // Validate all upstream configs eagerly at startup so that
                 // invalid configuration (conflicting auth, bad URL scheme, etc.)
                 // is discovered immediately rather than at first OAuth attempt.
@@ -2093,6 +2174,56 @@ url = "https://acme.example.com/mcp"
         assert_eq!(cfg.tool_search.top_k_default, 20);
         assert_eq!(cfg.tool_search.max_tools, 8000);
         cfg.validate().expect("root tool_search validates");
+    }
+
+    #[test]
+    fn protected_route_legacy_backend_path_folds_into_backend_url() {
+        let mut cfg = toml::from_str::<LabConfig>(
+            r#"
+[[protected_mcp_routes]]
+name = "tools"
+enabled = true
+public_host = "mcp.example.com"
+public_path = "/tools"
+backend_url = "http://10.0.0.12:3100"
+backend_mcp_path = "/mcp"
+"#,
+        )
+        .expect("protected route parses");
+
+        cfg.normalize_protected_mcp_routes()
+            .expect("protected route normalizes");
+
+        assert_eq!(
+            cfg.protected_mcp_routes[0].backend_url,
+            "http://10.0.0.12:3100/mcp"
+        );
+        assert_eq!(cfg.protected_mcp_routes[0].backend_mcp_path, "/mcp");
+    }
+
+    #[test]
+    fn protected_route_named_upstream_allows_empty_backend_url() {
+        let mut cfg = toml::from_str::<LabConfig>(
+            r#"
+[[protected_mcp_routes]]
+name = "syslog"
+enabled = true
+public_host = "mcp.example.com"
+public_path = "/syslog"
+upstream = " syslog "
+"#,
+        )
+        .expect("protected route parses");
+
+        cfg.normalize_protected_mcp_routes()
+            .expect("upstream route normalizes");
+
+        assert_eq!(
+            cfg.protected_mcp_routes[0].upstream.as_deref(),
+            Some("syslog")
+        );
+        assert_eq!(cfg.protected_mcp_routes[0].backend_url, "");
+        assert_eq!(cfg.protected_mcp_routes[0].backend_mcp_path, "/mcp");
     }
 
     #[test]

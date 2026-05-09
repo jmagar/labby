@@ -18,6 +18,12 @@ pub fn load_gateway_config(path: &Path) -> Result<LabConfig, ToolError> {
                 message: format!("failed to parse {}: {e}", path.display()),
             })?;
             cfg.normalize_legacy_tool_search(crate::config::root_tool_search_present(&raw));
+            cfg.normalize_protected_mcp_routes()
+                .map_err(|e| ToolError::Sdk {
+                    sdk_kind: "internal_error".to_string(),
+                    message: format!("invalid config {}: {e}", path.display()),
+                })?;
+            normalize_config(&mut cfg)?;
             validate_config(&cfg)?;
             Ok(cfg)
         }
@@ -348,6 +354,13 @@ fn validate_config(cfg: &LabConfig) -> Result<(), ToolError> {
     validate_protected_mcp_routes(&cfg.protected_mcp_routes)
 }
 
+fn normalize_config(cfg: &mut LabConfig) -> Result<(), ToolError> {
+    for route in &mut cfg.protected_mcp_routes {
+        normalize_protected_mcp_route(route)?;
+    }
+    Ok(())
+}
+
 pub fn validate_tool_search(
     tool_search: &crate::config::ToolSearchConfig,
 ) -> Result<(), ToolError> {
@@ -387,8 +400,18 @@ fn normalize_protected_mcp_route(route: &mut ProtectedMcpRouteConfig) -> Result<
     route.name = route.name.trim().to_string();
     route.public_host = normalize_public_host(&route.public_host)?;
     route.public_path = normalize_route_path(&route.public_path, "public_path")?;
-    route.backend_url = normalize_backend_origin(&route.backend_url)?;
-    route.backend_mcp_path = normalize_route_path(&route.backend_mcp_path, "backend_mcp_path")?;
+    route.upstream = route
+        .upstream
+        .take()
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty());
+    let legacy_backend_path = normalize_route_path(&route.backend_mcp_path, "backend_mcp_path")?;
+    route.backend_url = if route.backend_url.trim().is_empty() {
+        String::new()
+    } else {
+        normalize_backend_url(&route.backend_url, &legacy_backend_path)?
+    };
+    route.backend_mcp_path = default_backend_mcp_path();
     route.scopes = normalize_scopes(&route.scopes)?;
     if let Some(path) = route.health_path.take() {
         let trimmed = path.trim();
@@ -409,7 +432,23 @@ fn validate_protected_mcp_route(route: &ProtectedMcpRouteConfig) -> Result<(), T
         });
     }
     validate_safe_public_path(&route.public_path)?;
-    validate_backend_target(&route.backend_url)?;
+    match (route.upstream.as_deref(), route.backend_url.is_empty()) {
+        (Some(_), true) => {}
+        (None, false) => validate_backend_target(&route.backend_url)?,
+        (Some(_), false) => {
+            return Err(ToolError::InvalidParam {
+                message: "protected MCP route must set either upstream or backend_url, not both"
+                    .to_string(),
+                param: "upstream".to_string(),
+            });
+        }
+        (None, true) => {
+            return Err(ToolError::InvalidParam {
+                message: "protected MCP route must set upstream or backend_url".to_string(),
+                param: "backend_url".to_string(),
+            });
+        }
+    }
     Ok(())
 }
 
@@ -443,7 +482,7 @@ fn normalize_route_path(raw: &str, param: &str) -> Result<String, ToolError> {
     Ok(trimmed.to_string())
 }
 
-fn normalize_backend_origin(raw: &str) -> Result<String, ToolError> {
+fn normalize_backend_url(raw: &str, default_path: &str) -> Result<String, ToolError> {
     let parsed = url::Url::parse(raw.trim()).map_err(|e| ToolError::InvalidParam {
         message: format!("invalid backend_url: {e}"),
         param: "backend_url".to_string(),
@@ -459,26 +498,30 @@ fn normalize_backend_origin(raw: &str) -> Result<String, ToolError> {
     }
     if parsed.host_str().is_none() || parsed.query().is_some() || parsed.fragment().is_some() {
         return Err(ToolError::InvalidParam {
-            message: "backend_url must be an origin without query or fragment".to_string(),
+            message: "backend_url must not include query or fragment".to_string(),
             param: "backend_url".to_string(),
         });
     }
-    if parsed.path() != "/" {
-        return Err(ToolError::InvalidParam {
-            message: "backend_url must be an origin; use backend_mcp_path for /mcp".to_string(),
-            param: "backend_url".to_string(),
-        });
-    }
-    let mut origin = format!(
+    let path = if parsed.path() == "/" {
+        default_path.to_string()
+    } else {
+        normalize_route_path(parsed.path(), "backend_url")?
+    };
+    let mut backend = format!(
         "{}://{}",
         parsed.scheme(),
         parsed.host_str().unwrap_or_default().to_ascii_lowercase()
     );
     if let Some(port) = parsed.port() {
-        origin.push(':');
-        origin.push_str(&port.to_string());
+        backend.push(':');
+        backend.push_str(&port.to_string());
     }
-    Ok(origin)
+    backend.push_str(&path);
+    Ok(backend)
+}
+
+fn default_backend_mcp_path() -> String {
+    "/mcp".to_string()
 }
 
 fn normalize_scopes(raw: &[String]) -> Result<Vec<String>, ToolError> {
@@ -842,6 +885,7 @@ mod tests {
             enabled: true,
             public_host: "MCP.Tootie.TV".to_string(),
             public_path: "/syslog/".to_string(),
+            upstream: None,
             backend_url: "http://100.88.16.79:3100".to_string(),
             backend_mcp_path: "/mcp".to_string(),
             scopes: vec![],
@@ -1061,10 +1105,37 @@ args = ["server.js"]
 
         assert_eq!(route.public_host, "mcp.tootie.tv");
         assert_eq!(route.public_path, "/syslog");
-        assert_eq!(route.backend_url, "http://100.88.16.79:3100");
+        assert_eq!(route.backend_url, "http://100.88.16.79:3100/mcp");
         assert_eq!(route.scopes, ["mcp:read", "mcp:write"]);
         assert_eq!(route.public_resource(), "https://mcp.tootie.tv/syslog");
         assert_eq!(cfg.protected_mcp_routes.len(), 1);
+    }
+
+    #[test]
+    fn insert_protected_route_accepts_named_upstream_without_backend_url() {
+        let mut cfg = LabConfig::default();
+        let mut route = sample_protected_route("axon");
+        route.public_path = "/axon".to_string();
+        route.upstream = Some(" axon ".to_string());
+        route.backend_url = String::new();
+
+        let route = insert_protected_mcp_route(&mut cfg, route).expect("insert route");
+
+        assert_eq!(route.upstream.as_deref(), Some("axon"));
+        assert_eq!(route.backend_url, "");
+        assert_eq!(route.public_resource(), "https://mcp.tootie.tv/axon");
+    }
+
+    #[test]
+    fn insert_protected_route_rejects_ambiguous_backend_and_upstream() {
+        let mut cfg = LabConfig::default();
+        let mut route = sample_protected_route("axon");
+        route.upstream = Some("axon".to_string());
+
+        let err = insert_protected_mcp_route(&mut cfg, route)
+            .expect_err("route should not set backend_url and upstream");
+
+        assert_eq!(err.kind(), "invalid_param");
     }
 
     #[test]
@@ -1096,7 +1167,7 @@ args = ["server.js"]
             "http://localhost:3100",
             "http://127.0.0.1:3100",
             "http://169.254.169.254",
-            "http://100.88.16.79:3100/mcp",
+            "http://100.88.16.79:3100/mcp?token=secret",
         ] {
             let mut cfg = LabConfig::default();
             let mut route = sample_protected_route("bad");

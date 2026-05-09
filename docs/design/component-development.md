@@ -131,17 +131,17 @@ This keeps implementation review grounded in the actual approved design, not an 
 
 Replace the render with real application components that use live backend data.
 
-For `/dev/<feature-name>`, the component must be fully live but read-only. Users should be able to navigate, filter, search, open panels, switch view modes, preview dialogs, and inspect live data. Users must not be able to perform real mutations from unauthenticated `/dev/*` routes.
+For `/dev/<feature-name>`, the component must be fully live but read-only. Users should be able to navigate, filter, search, open panels, switch view modes, preview dialogs, and inspect live data. Users must not be able to perform real mutations from `/dev/*` routes, including local no-auth development runs.
 
 Production routes may use the same components, but mutating behavior must remain behind the normal authenticated product route.
 
-**`AppSidebar` and shared layout components.** The `/dev/` layout in `apps/gateway-admin/app/dev/layout.tsx` uses the full `AppSidebar`. `AppSidebar` is safe for unauthenticated visitors because it makes no API calls of its own — all its data comes from the session store singleton, and the user card in the footer renders only when `session.status === 'authenticated'`. `AuthBootstrap` (which calls `loadBrowserSession()`) is present only in the `(admin)` layout, so on `/dev/*` routes the session store stays at `loading`. This means unauthenticated visitors see clean navigation and theme toggle with no network errors and no broken layout.
+**`AppSidebar` and shared layout components.** The `/dev/` layout in `apps/gateway-admin/app/dev/layout.tsx` uses the full `AppSidebar`. `AppSidebar` is safe in local no-auth preview runs because it makes no API calls of its own — all its data comes from the session store singleton, and the user card in the footer renders only when `session.status === 'authenticated'`. `AuthBootstrap` (which calls `loadBrowserSession()`) is present only in the `(admin)` layout, so on `/dev/*` routes the session store stays at `loading` unless the route is reached through the authenticated server shell. This keeps navigation and theme controls clean without adding auth-gated API calls to preview layouts.
 
 When adding new `/dev/*` layouts that include components beyond `AppSidebar`, verify that each new component handles the `loading` and `unauthenticated` session states without making auth-gated API calls.
 
 ## `/dev/*` Read-Only Contract
 
-`/dev/*` routes are intentionally not protected by OAuth. That makes read-only enforcement mandatory.
+`/dev/*` routes are authenticated whenever bearer or OAuth auth is configured. They are only open when Lab is intentionally running with no auth configured for local development. Read-only enforcement is still mandatory because component previews bypass the normal product workflow boundaries and must remain safe in both authenticated and local no-auth dev runs.
 
 Read-only protection must be implemented in two layers.
 

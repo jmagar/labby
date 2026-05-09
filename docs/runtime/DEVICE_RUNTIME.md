@@ -162,7 +162,7 @@ Request body:
 ```json
 {
   "bind_addr": "127.0.0.1:38935",
-  "target_url": "http://100.88.16.79:38935/callback/dookie",
+  "target_url": "http://node.internal.example:38935/callback/dookie",
   "default_port": 38935,
   "request_timeout_ms": 30000
 }

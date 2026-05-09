@@ -9,6 +9,40 @@ pub struct UpstreamOauthStatusView {
     pub authenticated: bool,
     pub upstream: String,
     pub expires_within_5m: bool,
+    pub state: UpstreamOauthConnectionState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_token_expires_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seconds_until_expiry: Option<i64>,
+    #[serde(default)]
+    pub refresh_token_present: bool,
+    #[serde(default)]
+    pub refresh_attempted: bool,
+    #[serde(default)]
+    pub refreshed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_error_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_error: Option<String>,
+    #[serde(default)]
+    pub discovery_checked: bool,
+    #[serde(default)]
+    pub discovered_tool_count: usize,
+    #[serde(default)]
+    pub exposed_tool_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discovery_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UpstreamOauthConnectionState {
+    Connected,
+    Expiring,
+    Expired,
+    RefreshFailed,
+    DiscoveryFailed,
+    Disconnected,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -3761,6 +3761,155 @@
   },
   {
     "service": "gateway",
+    "action": "gateway.protected_route.add",
+    "description": "Add a Gateway-managed protected MCP route",
+    "destructive": true,
+    "params": [
+      {
+        "name": "route",
+        "ty": "json",
+        "required": true,
+        "description": "Protected MCP route config to validate and persist"
+      }
+    ],
+    "returns": "ProtectedMcpRouteConfig",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "gateway",
+    "action": "gateway.protected_route.get",
+    "description": "Get one Gateway-managed protected MCP route",
+    "destructive": false,
+    "params": [
+      {
+        "name": "name",
+        "ty": "string",
+        "required": true,
+        "description": "Gateway name"
+      }
+    ],
+    "returns": "ProtectedMcpRouteConfig",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "gateway",
+    "action": "gateway.protected_route.list",
+    "description": "List Gateway-managed public MCP routes protected by Lab OAuth",
+    "destructive": false,
+    "params": [],
+    "returns": "ProtectedMcpRouteConfig[]",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "gateway",
+    "action": "gateway.protected_route.remove",
+    "description": "Remove a Gateway-managed protected MCP route",
+    "destructive": true,
+    "params": [
+      {
+        "name": "name",
+        "ty": "string",
+        "required": true,
+        "description": "Gateway name"
+      }
+    ],
+    "returns": "ProtectedMcpRouteConfig",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "gateway",
+    "action": "gateway.protected_route.test",
+    "description": "Validate a proposed protected MCP route without saving it",
+    "destructive": false,
+    "params": [
+      {
+        "name": "route",
+        "ty": "json",
+        "required": true,
+        "description": "Protected MCP route config to validate"
+      }
+    ],
+    "returns": "ProtectedMcpRouteTestResult",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "gateway",
+    "action": "gateway.protected_route.update",
+    "description": "Replace a Gateway-managed protected MCP route",
+    "destructive": true,
+    "params": [
+      {
+        "name": "name",
+        "ty": "string",
+        "required": true,
+        "description": "Gateway name"
+      },
+      {
+        "name": "route",
+        "ty": "json",
+        "required": true,
+        "description": "Replacement protected MCP route config"
+      }
+    ],
+    "returns": "ProtectedMcpRouteConfig",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "gateway",
     "action": "gateway.reload",
     "description": "Reload gateways from config and reconcile runtime state",
     "destructive": true,

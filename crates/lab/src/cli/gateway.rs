@@ -143,9 +143,11 @@ pub struct GatewayProtectedRouteUpdateArgs {
     #[arg(long)]
     pub public_path: String,
     #[arg(long)]
-    pub backend_url: String,
-    #[arg(long, default_value = "/mcp")]
-    pub backend_mcp_path: String,
+    pub upstream: Option<String>,
+    #[arg(long)]
+    pub backend_url: Option<String>,
+    #[arg(long, hide = true)]
+    pub backend_mcp_path: Option<String>,
     #[arg(long = "scope")]
     pub scopes: Vec<String>,
     #[arg(long)]
@@ -163,9 +165,11 @@ pub struct GatewayProtectedRouteUpsertArgs {
     #[arg(long)]
     pub public_path: String,
     #[arg(long)]
-    pub backend_url: String,
-    #[arg(long, default_value = "/mcp")]
-    pub backend_mcp_path: String,
+    pub upstream: Option<String>,
+    #[arg(long)]
+    pub backend_url: Option<String>,
+    #[arg(long, hide = true)]
+    pub backend_mcp_path: Option<String>,
     #[arg(long = "scope")]
     pub scopes: Vec<String>,
     #[arg(long)]
@@ -293,8 +297,9 @@ fn protected_route_from_args(args: GatewayProtectedRouteUpsertArgs) -> Protected
         enabled: args.enabled,
         public_host: args.public_host,
         public_path: args.public_path,
-        backend_url: args.backend_url,
-        backend_mcp_path: args.backend_mcp_path,
+        upstream: args.upstream,
+        backend_url: args.backend_url.unwrap_or_default(),
+        backend_mcp_path: args.backend_mcp_path.unwrap_or_else(|| "/mcp".to_string()),
         scopes: args.scopes,
         health_path: args.health_path,
     }
@@ -508,8 +513,9 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                                 enabled: args.enabled.unwrap_or(true),
                                 public_host: args.public_host,
                                 public_path: args.public_path,
-                                backend_url: args.backend_url,
-                                backend_mcp_path: args.backend_mcp_path,
+                                upstream: args.upstream,
+                                backend_url: args.backend_url.unwrap_or_default(),
+                                backend_mcp_path: args.backend_mcp_path.unwrap_or_else(|| "/mcp".to_string()),
                                 scopes: args.scopes,
                                 health_path: args.health_path,
                             }

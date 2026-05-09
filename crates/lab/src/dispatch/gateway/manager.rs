@@ -25,6 +25,7 @@ use crate::oauth::upstream::manager::UpstreamOauthManager;
 use crate::registry::ToolRegistry;
 use lab_apis::extract::types::ServiceCreds;
 
+use super::SHARED_GATEWAY_OAUTH_SUBJECT;
 use super::config::{
     default_gateway_bearer_env_name, insert_protected_mcp_route, insert_upstream,
     load_gateway_config, remove_protected_mcp_route, remove_upstream, update_protected_mcp_route,
@@ -204,10 +205,6 @@ impl GatewayManager {
         *self.protected_route_index.write().await =
             ProtectedRouteIndex::from_routes(&config.protected_mcp_routes);
         *self.config.write().await = config;
-    }
-
-    pub async fn protected_route_resources(&self) -> Vec<String> {
-        self.protected_route_index.read().await.resources()
     }
 
     pub async fn resolve_protected_route(
@@ -523,9 +520,16 @@ impl GatewayManager {
         };
         ensure_stdio_admin_ack("gateway.test", &upstream, allow_stdio)?;
 
-        let pool = UpstreamPool::new();
-        pool.discover_all_with_in_process_peers(&[upstream.clone()], builtin_service_registry())
-            .await;
+        let pool = match &self.oauth_client_cache {
+            Some(cache) => UpstreamPool::new().with_oauth_client_cache(cache.clone()),
+            None => UpstreamPool::new(),
+        };
+        pool.discover_all_for_subject_with_in_process_peers(
+            &[upstream.clone()],
+            SHARED_GATEWAY_OAUTH_SUBJECT,
+            builtin_service_registry(),
+        )
+        .await;
 
         Ok(runtime_view(Some(&pool), &upstream.name, None).await)
     }
@@ -958,6 +962,16 @@ impl GatewayManager {
             })
     }
 
+    pub async fn upstream_config(&self, name: &str) -> Option<UpstreamConfig> {
+        self.config
+            .read()
+            .await
+            .upstream
+            .iter()
+            .find(|upstream| upstream.name == name)
+            .cloned()
+    }
+
     pub async fn protected_route_add(
         &self,
         route: ProtectedMcpRouteConfig,
@@ -966,6 +980,20 @@ impl GatewayManager {
         let mut cfg = self.config.read().await.clone();
         let route = insert_protected_mcp_route(&mut cfg, route)?;
         self.persist_config(cfg).await?;
+        tracing::info!(
+            surface = "dispatch",
+            service = "gateway",
+            action = "gateway.protected_route.add",
+            route = %route.name,
+            public_host = %route.public_host,
+            public_path = %route.public_path,
+            upstream = ?route.upstream,
+            backend_url = %route.backend_url,
+            backend_mcp_path = %route.backend_mcp_path,
+            enabled = route.enabled,
+            scopes = ?route.scopes,
+            "protected MCP route added"
+        );
         Ok(route)
     }
 
@@ -978,6 +1006,21 @@ impl GatewayManager {
         let mut cfg = self.config.read().await.clone();
         let route = update_protected_mcp_route(&mut cfg, name, route)?;
         self.persist_config(cfg).await?;
+        tracing::info!(
+            surface = "dispatch",
+            service = "gateway",
+            action = "gateway.protected_route.update",
+            route = %route.name,
+            previous_name = %name,
+            public_host = %route.public_host,
+            public_path = %route.public_path,
+            upstream = ?route.upstream,
+            backend_url = %route.backend_url,
+            backend_mcp_path = %route.backend_mcp_path,
+            enabled = route.enabled,
+            scopes = ?route.scopes,
+            "protected MCP route updated"
+        );
         Ok(route)
     }
 
@@ -989,6 +1032,18 @@ impl GatewayManager {
         let mut cfg = self.config.read().await.clone();
         let route = remove_protected_mcp_route(&mut cfg, name)?;
         self.persist_config(cfg).await?;
+        tracing::info!(
+            surface = "dispatch",
+            service = "gateway",
+            action = "gateway.protected_route.remove",
+            route = %route.name,
+            public_host = %route.public_host,
+            public_path = %route.public_path,
+            upstream = ?route.upstream,
+            backend_url = %route.backend_url,
+            backend_mcp_path = %route.backend_mcp_path,
+            "protected MCP route removed"
+        );
         Ok(route)
     }
 
@@ -1002,6 +1057,19 @@ impl GatewayManager {
         let metadata_url = format!(
             "https://{}/.well-known/oauth-protected-resource{}",
             route.public_host, route.public_path
+        );
+        tracing::info!(
+            surface = "dispatch",
+            service = "gateway",
+            action = "gateway.protected_route.test",
+            route = %route.name,
+            resource = %resource,
+            metadata_url = %metadata_url,
+            upstream = ?route.upstream,
+            backend_url = %route.backend_url,
+            backend_mcp_path = %route.backend_mcp_path,
+            scopes = ?route.scopes,
+            "protected MCP route validated"
         );
         Ok(serde_json::json!({
             "ok": true,
@@ -1111,8 +1179,12 @@ impl GatewayManager {
                     .with_runtime_origin(runtime_origin_tag(origin))
                     .with_runtime_owner(owner),
             );
-            pool.discover_all_with_in_process_peers(&cfg.upstream, builtin_service_registry())
-                .await;
+            pool.discover_all_for_subject_with_in_process_peers(
+                &cfg.upstream,
+                SHARED_GATEWAY_OAUTH_SUBJECT,
+                builtin_service_registry(),
+            )
+            .await;
             Some(pool)
         };
         tracing::info!(
@@ -1808,6 +1880,8 @@ impl GatewayManager {
         tokio::task::spawn_blocking(move || write_gateway_config(&path, &cfg_clone))
             .await
             .map_err(|e| ToolError::internal_message(format!("config write task failed: {e}")))??;
+        *self.protected_route_index.write().await =
+            ProtectedRouteIndex::from_routes(&cfg.protected_mcp_routes);
         *self.config.write().await = cfg;
         tracing::info!(
             action = "gateway.config.write",
@@ -1931,8 +2005,8 @@ mod tests {
     use std::sync::Arc;
 
     use crate::config::{
-        UpstreamConfig, UpstreamOauthConfig, UpstreamOauthMode, UpstreamOauthRegistration,
-        VirtualServerConfig, VirtualServerSurfacesConfig,
+        ProtectedMcpRouteConfig, UpstreamConfig, UpstreamOauthConfig, UpstreamOauthMode,
+        UpstreamOauthRegistration, VirtualServerConfig, VirtualServerSurfacesConfig,
     };
     use crate::oauth::upstream::cache::OauthClientCache;
     use crate::tui::events::ServiceHealth;
@@ -1963,6 +2037,52 @@ mod tests {
             oauth: None,
             tool_search: ToolSearchConfig::default(),
         }
+    }
+
+    fn fixture_protected_route(name: &str) -> ProtectedMcpRouteConfig {
+        ProtectedMcpRouteConfig {
+            name: name.to_string(),
+            enabled: true,
+            public_host: "mcp.tootie.tv".to_string(),
+            public_path: "/syslog".to_string(),
+            upstream: None,
+            backend_url: "http://100.88.16.79:3100".to_string(),
+            backend_mcp_path: "/mcp".to_string(),
+            scopes: vec!["mcp:read".to_string(), "mcp:write".to_string()],
+            health_path: Some("/health".to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn protected_route_add_updates_live_resolver_index() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
+
+        manager
+            .protected_route_add(fixture_protected_route("syslog"))
+            .await
+            .expect("add protected route");
+
+        assert_eq!(
+            manager
+                .resolve_protected_route("mcp.tootie.tv", "/syslog")
+                .await
+                .expect("route should be live")
+                .name,
+            "syslog"
+        );
+        assert_eq!(
+            manager
+                .resolve_protected_route_metadata(
+                    "mcp.tootie.tv",
+                    "/.well-known/oauth-protected-resource/syslog",
+                )
+                .await
+                .expect("metadata route should be live")
+                .name,
+            "syslog"
+        );
     }
 
     #[test]

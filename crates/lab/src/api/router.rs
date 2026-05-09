@@ -2,7 +2,7 @@
 //! and the MCP streamable HTTP transport at `/mcp`.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::{
     Json, Router,
@@ -23,6 +23,8 @@ use tower_http::{
 };
 use tracing::Level;
 
+use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
+use crate::dispatch::upstream::auth::configured_bearer_token;
 use lab_auth::error::AuthError as LabAuthError;
 
 const DEV_MARKETPLACE_READ_ACTIONS: &[&str] = &[
@@ -98,7 +100,17 @@ async fn app_auth_state_with_protected_routes(
 ) -> Result<lab_auth::state::AuthState, LabAuthError> {
     let auth_state = app_auth_state(state)?;
     if let Some(manager) = state.gateway_manager.as_ref() {
-        auth_state.set_allowed_resource_urls(manager.protected_route_resources().await);
+        let routes = manager.protected_route_list().await;
+        tracing::debug!(
+            route_count = routes.iter().filter(|route| route.enabled).count(),
+            "oauth protected resource scope map refreshed from gateway routes"
+        );
+        auth_state.set_allowed_resource_scopes(
+            routes
+                .into_iter()
+                .filter(|route| route.enabled)
+                .map(|route| (route.public_resource(), route.scopes)),
+        );
     }
     Ok(auth_state)
 }
@@ -118,6 +130,14 @@ async fn auth_protected_resource_metadata(
             .resolve_protected_route_metadata(&host, request.uri().path())
             .await
     {
+        tracing::info!(
+            host = %host,
+            path = %request.uri().path(),
+            route = %route.name,
+            resource = %route.public_resource(),
+            scopes = ?route.scopes,
+            "oauth protected resource metadata served"
+        );
         let auth_state = app_auth_state_with_protected_routes(&state).await?;
         let public_url = auth_state
             .config
@@ -146,8 +166,21 @@ async fn protected_route_resource_metadata(
     };
     let path = request.uri().path();
     let Some(route) = manager.resolve_protected_route_metadata(&host, path).await else {
+        tracing::warn!(
+            host = %host,
+            path = %path,
+            "oauth protected resource metadata not found"
+        );
         return StatusCode::NOT_FOUND.into_response();
     };
+    tracing::info!(
+        host = %host,
+        path = %path,
+        route = %route.name,
+        resource = %route.public_resource(),
+        scopes = ?route.scopes,
+        "oauth protected resource metadata served"
+    );
     protected_route_metadata_response(&state, route).await
 }
 
@@ -159,6 +192,11 @@ async fn protected_route_metadata_response(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     let Some(public_url) = auth_state.config.public_url.as_ref() else {
+        tracing::error!(
+            route = %route.name,
+            resource = %route.public_resource(),
+            "oauth protected resource metadata failed: LAB_PUBLIC_URL missing"
+        );
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     let mut response = Json(lab_auth::types::ProtectedResourceMetadata {
@@ -239,6 +277,30 @@ fn auth_error_response(message: &str, resource_url: Option<&str>) -> axum::respo
     response
 }
 
+fn auth_error_response_with_challenge(
+    message: &str,
+    metadata_url: &str,
+    scopes: &[String],
+) -> axum::response::Response {
+    let err = ToolError::Sdk {
+        sdk_kind: "auth_failed".into(),
+        message: message.into(),
+    };
+    let mut response = err.into_response();
+    let scope = scopes
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let www_auth = format!("Bearer resource_metadata=\"{metadata_url}\", scope=\"{scope}\"");
+    if let Ok(value) = HeaderValue::from_str(&www_auth) {
+        response
+            .headers_mut()
+            .insert(header::WWW_AUTHENTICATE, value);
+    }
+    response
+}
+
 fn request_host(request: &Request<Body>) -> Option<String> {
     request
         .headers()
@@ -251,10 +313,11 @@ fn request_host(request: &Request<Body>) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn route_metadata_url(route: &crate::config::ProtectedMcpRouteConfig) -> String {
+fn route_resource_metadata_url(route: &crate::config::ProtectedMcpRouteConfig) -> String {
     format!(
         "https://{}/.well-known/oauth-protected-resource{}",
-        route.public_host, route.public_path
+        route.public_host,
+        route.public_path.trim_end_matches('/')
     )
 }
 
@@ -271,15 +334,29 @@ async fn authenticate_protected_route_request(
         .and_then(|v| v.to_str().ok())
         .and_then(parse_bearer_token);
     let Some(token) = auth_header else {
-        return Err(auth_error_response(
+        tracing::warn!(
+            route = %route.name,
+            resource = %resource,
+            method = %request.method(),
+            path = %request.uri().path(),
+            "protected MCP route auth failed: missing bearer token"
+        );
+        return Err(auth_error_response_with_challenge(
             "missing bearer token",
-            Some(&route_metadata_url(route)),
+            &route_resource_metadata_url(route),
+            &route.scopes,
         ));
     };
     let Some(auth_state) = auth_state else {
-        return Err(auth_error_response(
+        tracing::error!(
+            route = %route.name,
+            resource = %resource,
+            "protected MCP route auth failed: oauth auth state missing"
+        );
+        return Err(auth_error_response_with_challenge(
             "oauth auth state is not configured",
-            Some(&route_metadata_url(route)),
+            &route_resource_metadata_url(route),
+            &route.scopes,
         ));
     };
     let Some(expected_issuer) = auth_state
@@ -288,42 +365,72 @@ async fn authenticate_protected_route_request(
         .as_ref()
         .map(|url| url.as_str().trim_end_matches('/').to_string())
     else {
-        return Err(auth_error_response(
+        tracing::error!(
+            route = %route.name,
+            resource = %resource,
+            "protected MCP route auth failed: LAB_PUBLIC_URL missing"
+        );
+        return Err(auth_error_response_with_challenge(
             "server misconfigured: LAB_PUBLIC_URL required for JWT validation",
-            Some(&route_metadata_url(route)),
+            &route_resource_metadata_url(route),
+            &route.scopes,
         ));
     };
     let claims = auth_state
         .signing_keys
-        .validate_access_token(&token, &resource)
+        .validate_access_token_with_issuer(&token, &resource, &expected_issuer)
         .map_err(|error| {
-            tracing::debug!(error = %error, resource = %resource, "protected route JWT validation failed");
-            auth_error_response("invalid bearer token", Some(&route_metadata_url(route)))
+            tracing::warn!(
+                error = %error,
+                route = %route.name,
+                resource = %resource,
+                method = %request.method(),
+                path = %request.uri().path(),
+                "protected MCP route auth failed: JWT validation failed"
+            );
+            auth_error_response_with_challenge(
+                "invalid bearer token",
+                &route_resource_metadata_url(route),
+                &route.scopes,
+            )
         })?;
-    if claims.iss != expected_issuer {
-        return Err(auth_error_response(
-            "invalid bearer token",
-            Some(&route_metadata_url(route)),
-        ));
-    }
     let required_scopes = route.scopes.iter().map(String::as_str).collect::<Vec<_>>();
     let granted = claims.scope.split_whitespace().collect::<Vec<_>>();
     if !required_scopes
         .iter()
         .all(|required| granted.iter().any(|scope| scope == required))
     {
+        tracing::warn!(
+            route = %route.name,
+            resource = %resource,
+            subject_id = %lab_auth::util::fingerprint(&claims.sub),
+            required_scopes = ?required_scopes,
+            granted_scopes = ?granted,
+            "protected MCP route auth failed: insufficient scope"
+        );
         return Err(ToolError::Sdk {
             sdk_kind: "forbidden".into(),
             message: "insufficient OAuth scope for protected MCP route".into(),
         }
         .into_response());
     }
+    let subject_id = lab_auth::util::fingerprint(&claims.sub);
+    let issuer = claims.iss.clone();
+    let granted_scopes = granted.iter().map(|scope| (*scope).to_string()).collect();
+    tracing::info!(
+        route = %route.name,
+        resource = %resource,
+        subject_id = %subject_id,
+        issuer = %issuer,
+        granted_scopes = ?granted,
+        "protected MCP route auth accepted"
+    );
     request
         .extensions_mut()
         .insert(crate::api::oauth::AuthContext {
             actor_key: derive_actor_key(actor_key_deriver, &claims.sub),
             sub: claims.sub,
-            scopes: granted.into_iter().map(ToOwned::to_owned).collect(),
+            scopes: granted_scopes,
             issuer: claims.iss,
             via_session: false,
             csrf_token: None,
@@ -333,31 +440,50 @@ async fn authenticate_protected_route_request(
 }
 
 async fn proxy_protected_mcp_route(
+    state: &AppState,
     request: Request<Body>,
     route: crate::config::ProtectedMcpRouteConfig,
 ) -> axum::response::Response {
+    let started = Instant::now();
     let suffix = request
         .uri()
         .path()
         .strip_prefix(&route.public_path)
         .unwrap_or("");
-    let mut upstream = match reqwest::Url::parse(&route.backend_url) {
-        Ok(url) => url,
-        Err(_) => return StatusCode::BAD_GATEWAY.into_response(),
-    };
-    let mut backend_path = route.backend_mcp_path.trim_end_matches('/').to_string();
-    if !suffix.is_empty() {
+
+    let (mut upstream, upstream_auth_token, upstream_target) =
+        match protected_route_upstream_target(state, &route).await {
+            Ok(target) => target,
+            Err(response) => return response,
+        };
+
+    let mut backend_path = upstream.path().trim_end_matches('/').to_string();
+    if backend_path.is_empty() {
         backend_path.push('/');
+    }
+    if !suffix.is_empty() {
+        if !backend_path.ends_with('/') {
+            backend_path.push('/');
+        }
         backend_path.push_str(suffix.trim_start_matches('/'));
     }
     upstream.set_path(&backend_path);
     upstream.set_query(request.uri().query());
 
     let method = request.method().clone();
+    let original_path = request.uri().path().to_string();
     let headers = request.headers().clone();
     let body = match axum::body::to_bytes(request.into_body(), 50 * 1024 * 1024).await {
         Ok(body) => body,
         Err(error) => {
+            tracing::warn!(
+                route = %route.name,
+                resource = %route.public_resource(),
+                method = %method,
+                path = %original_path,
+                error = %error,
+                "protected MCP route proxy failed: request body read error"
+            );
             return ToolError::Sdk {
                 sdk_kind: "bad_request".into(),
                 message: format!("failed to read MCP request body: {error}"),
@@ -365,7 +491,19 @@ async fn proxy_protected_mcp_route(
             .into_response();
         }
     };
-    let mut builder = reqwest::Client::new().request(method, upstream);
+    tracing::info!(
+        route = %route.name,
+        resource = %route.public_resource(),
+        method = %method,
+        path = %original_path,
+        upstream = %upstream_target,
+        upstream_auth = upstream_auth_token.is_some(),
+        "protected MCP route proxy start"
+    );
+    let mut builder = reqwest::Client::new().request(method.clone(), upstream);
+    if let Some(token) = upstream_auth_token {
+        builder = builder.bearer_auth(token);
+    }
     for header_name in [
         header::ACCEPT,
         header::CONTENT_TYPE,
@@ -380,6 +518,16 @@ async fn proxy_protected_mcp_route(
     let upstream_response = match builder.body(body).send().await {
         Ok(response) => response,
         Err(error) => {
+            tracing::warn!(
+                route = %route.name,
+                resource = %route.public_resource(),
+                method = %method,
+                path = %original_path,
+                upstream = %upstream_target,
+                elapsed_ms = started.elapsed().as_millis(),
+                error = %error,
+                "protected MCP route proxy failed: backend request failed"
+            );
             return ToolError::Sdk {
                 sdk_kind: "bad_gateway".into(),
                 message: format!("protected MCP backend request failed: {error}"),
@@ -389,6 +537,16 @@ async fn proxy_protected_mcp_route(
     };
     let status = StatusCode::from_u16(upstream_response.status().as_u16())
         .unwrap_or(StatusCode::BAD_GATEWAY);
+    tracing::info!(
+        route = %route.name,
+        resource = %route.public_resource(),
+        method = %method,
+        path = %original_path,
+        upstream = %upstream_target,
+        status = status.as_u16(),
+        elapsed_ms = started.elapsed().as_millis(),
+        "protected MCP route proxy finish"
+    );
     let mut response = axum::response::Response::builder().status(status);
     for header_name in [
         header::CONTENT_TYPE,
@@ -403,12 +561,147 @@ async fn proxy_protected_mcp_route(
     response
         .body(Body::from_stream(upstream_response.bytes_stream()))
         .unwrap_or_else(|error| {
+            tracing::warn!(
+                route = %route.name,
+                resource = %route.public_resource(),
+                elapsed_ms = started.elapsed().as_millis(),
+                error = %error,
+                "protected MCP route proxy failed: response build failed"
+            );
             ToolError::Sdk {
                 sdk_kind: "bad_gateway".into(),
                 message: format!("failed to build protected MCP response: {error}"),
             }
             .into_response()
         })
+}
+
+async fn protected_route_upstream_target(
+    state: &AppState,
+    route: &crate::config::ProtectedMcpRouteConfig,
+) -> Result<(reqwest::Url, Option<String>, String), axum::response::Response> {
+    let Some(upstream_name) = route.upstream.as_deref() else {
+        let url = reqwest::Url::parse(&route.backend_url).map_err(|error| {
+            tracing::warn!(
+                route = %route.name,
+                resource = %route.public_resource(),
+                error = %error,
+                "protected MCP route proxy failed: invalid backend_url"
+            );
+            StatusCode::BAD_GATEWAY.into_response()
+        })?;
+        return Ok((url, None, "backend_url".to_string()));
+    };
+
+    let Some(manager) = state.gateway_manager.as_ref() else {
+        tracing::error!(
+            route = %route.name,
+            resource = %route.public_resource(),
+            upstream = %upstream_name,
+            "protected MCP route proxy failed: gateway manager missing"
+        );
+        return Err(ToolError::Sdk {
+            sdk_kind: "bad_gateway".into(),
+            message: "gateway manager is not available for upstream protected route".into(),
+        }
+        .into_response());
+    };
+    let Some(upstream_config) = manager.upstream_config(upstream_name).await else {
+        tracing::warn!(
+            route = %route.name,
+            resource = %route.public_resource(),
+            upstream = %upstream_name,
+            "protected MCP route proxy failed: configured upstream not found"
+        );
+        return Err(ToolError::Sdk {
+            sdk_kind: "not_found".into(),
+            message: format!("upstream `{upstream_name}` not found for protected MCP route"),
+        }
+        .into_response());
+    };
+    let Some(raw_url) = upstream_config.url.as_deref() else {
+        tracing::warn!(
+            route = %route.name,
+            resource = %route.public_resource(),
+            upstream = %upstream_name,
+            "protected MCP route proxy failed: upstream has no HTTP URL"
+        );
+        return Err(ToolError::Sdk {
+            sdk_kind: "bad_gateway".into(),
+            message: format!("upstream `{upstream_name}` does not have an HTTP MCP URL"),
+        }
+        .into_response());
+    };
+    let url = reqwest::Url::parse(raw_url).map_err(|error| {
+        tracing::warn!(
+            route = %route.name,
+            resource = %route.public_resource(),
+            upstream = %upstream_name,
+            error = %error,
+            "protected MCP route proxy failed: invalid upstream URL"
+        );
+        StatusCode::BAD_GATEWAY.into_response()
+    })?;
+
+    let token = if upstream_config.oauth.is_some() {
+        let Some(oauth_manager) = manager.upstream_oauth_manager(upstream_name) else {
+            tracing::warn!(
+                route = %route.name,
+                resource = %route.public_resource(),
+                upstream = %upstream_name,
+                subject = %SHARED_GATEWAY_OAUTH_SUBJECT,
+                "protected MCP route proxy failed: upstream oauth manager missing"
+            );
+            return Err(ToolError::Sdk {
+                sdk_kind: "oauth_needs_reauth".into(),
+                message: format!("upstream `{upstream_name}` is not connected with OAuth"),
+            }
+            .into_response());
+        };
+        let auth_client = oauth_manager
+            .build_auth_client(SHARED_GATEWAY_OAUTH_SUBJECT)
+            .await
+            .map_err(|error| {
+                tracing::warn!(
+                    route = %route.name,
+                    resource = %route.public_resource(),
+                    upstream = %upstream_name,
+                    subject = %SHARED_GATEWAY_OAUTH_SUBJECT,
+                    kind = error.kind(),
+                    error = %error,
+                    "protected MCP route proxy failed: upstream oauth auth client unavailable"
+                );
+                ToolError::Sdk {
+                    sdk_kind: error.kind().to_string(),
+                    message: format!(
+                        "upstream `{upstream_name}` OAuth authorization required: {error}"
+                    ),
+                }
+                .into_response()
+            })?;
+        Some(auth_client.get_access_token().await.map_err(|error| {
+            tracing::warn!(
+                route = %route.name,
+                resource = %route.public_resource(),
+                upstream = %upstream_name,
+                subject = %SHARED_GATEWAY_OAUTH_SUBJECT,
+                error = %error,
+                "protected MCP route proxy failed: upstream oauth token unavailable"
+            );
+            ToolError::Sdk {
+                sdk_kind: "oauth_needs_reauth".into(),
+                message: format!("upstream `{upstream_name}` OAuth token unavailable: {error}"),
+            }
+            .into_response()
+        })?)
+    } else {
+        upstream_config
+            .bearer_token_env
+            .as_deref()
+            .and_then(configured_bearer_token)
+    };
+
+    Ok((url, token, format!("upstream:{upstream_name}")))
 }
 
 async fn protected_mcp_route_entry(
@@ -421,12 +714,25 @@ async fn protected_mcp_route_entry(
         route.public_path.trim_end_matches('/')
     );
     if *request.method() == Method::GET && request.uri().path() == compatibility_metadata_path {
+        tracing::info!(
+            route = %route.name,
+            resource = %route.public_resource(),
+            path = %request.uri().path(),
+            "oauth protected resource compatibility metadata served"
+        );
         return protected_route_metadata_response(&state, route).await;
     }
     if !matches!(
         *request.method(),
         Method::GET | Method::POST | Method::DELETE
     ) {
+        tracing::warn!(
+            route = %route.name,
+            resource = %route.public_resource(),
+            method = %request.method(),
+            path = %request.uri().path(),
+            "protected MCP route rejected unsupported method"
+        );
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
     if let Err(response) = authenticate_protected_route_request(
@@ -439,7 +745,7 @@ async fn protected_mcp_route_entry(
     {
         return response;
     }
-    proxy_protected_mcp_route(request, route).await
+    proxy_protected_mcp_route(&state, request, route).await
 }
 
 async fn protected_mcp_intercept(
@@ -457,6 +763,13 @@ async fn protected_mcp_intercept(
         None
     };
     if let Some(route) = route {
+        tracing::info!(
+            route = %route.name,
+            resource = %route.public_resource(),
+            method = %request.method(),
+            path = %request.uri().path(),
+            "protected MCP route matched"
+        );
         return Ok(protected_mcp_route_entry(state, request, route).await);
     }
     Ok(next.run(request).await)
@@ -518,18 +831,12 @@ async fn authenticate_request(
                 ));
             };
             let expected_aud = lab_auth::metadata::canonical_resource_url(auth_state);
-            match auth_state
-                .signing_keys
-                .validate_access_token(&token, &expected_aud)
-            {
+            match auth_state.signing_keys.validate_access_token_with_issuer(
+                &token,
+                &expected_aud,
+                &expected_issuer,
+            ) {
                 Ok(claims) => {
-                    if claims.iss != expected_issuer {
-                        return Ok(auth_error_response(
-                            "invalid bearer token",
-                            resource_url.as_deref(),
-                        ));
-                    }
-
                     request
                         .extensions_mut()
                         .insert(crate::api::oauth::AuthContext {
@@ -1056,13 +1363,13 @@ pub fn build_router(
         state = state.with_oauth_state(auth_state.clone());
     }
     if let Some(auth_state) = auth_state.as_ref() {
-        auth_state.set_allowed_resource_urls(
+        auth_state.set_allowed_resource_scopes(
             state
                 .config
                 .protected_mcp_routes
                 .iter()
                 .filter(|route| route.enabled)
-                .map(crate::config::ProtectedMcpRouteConfig::public_resource),
+                .map(|route| (route.public_resource(), route.scopes.clone())),
         );
     }
     let static_token = bearer_token.map(Arc::<str>::from);
@@ -2309,6 +2616,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn protected_mcp_route_unauthorized_header_points_to_route_metadata() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+            tempdir.path().join("gateway.toml"),
+            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+        ));
+        let config =
+            protected_route_config("syslog", "mcp.tootie.tv", "/syslog", "http://10.0.0.2:3100");
+        manager.seed_config(config.clone()).await;
+        let state = AppState::new()
+            .with_config(config)
+            .with_gateway_manager(manager);
+        let auth_state = test_lab_auth_state().await;
+        let app = build_router(state, None, Some(auth_state), None, &[]);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/syslog")
+                    .header(header::HOST, "mcp.tootie.tv")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response.headers().get(header::WWW_AUTHENTICATE).unwrap(),
+            "Bearer resource_metadata=\"https://mcp.tootie.tv/.well-known/oauth-protected-resource/syslog\", scope=\"mcp:read mcp:write\""
+        );
+    }
+
+    #[tokio::test]
     async fn protected_mcp_route_proxies_with_route_audience_token() {
         let backend = MockServer::start().await;
         Mock::given(method("POST"))
@@ -2362,6 +2704,91 @@ mod tests {
         assert_eq!(
             String::from_utf8(body.to_vec()).unwrap(),
             r#"{"jsonrpc":"2.0","result":{}}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn protected_mcp_route_can_publish_named_upstream() {
+        let backend = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/mcp/extra"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_string(r#"{"jsonrpc":"2.0","result":{"upstream":true}}"#),
+            )
+            .mount(&backend)
+            .await;
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+            tempdir.path().join("gateway.toml"),
+            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+        ));
+        let config = crate::config::LabConfig {
+            upstream: vec![crate::config::UpstreamConfig {
+                name: "axon".to_string(),
+                enabled: true,
+                url: Some(format!("{}/mcp", backend.uri())),
+                bearer_token_env: None,
+                command: None,
+                args: Vec::new(),
+                proxy_resources: true,
+                proxy_prompts: true,
+                expose_tools: None,
+                expose_resources: None,
+                expose_prompts: None,
+                oauth: None,
+                tool_search: crate::config::ToolSearchConfig::default(),
+            }],
+            protected_mcp_routes: vec![crate::config::ProtectedMcpRouteConfig {
+                name: "axon".to_string(),
+                enabled: true,
+                public_host: "mcp.tootie.tv".to_string(),
+                public_path: "/axon".to_string(),
+                upstream: Some("axon".to_string()),
+                backend_url: String::new(),
+                backend_mcp_path: "/mcp".to_string(),
+                scopes: vec!["mcp:read".to_string(), "mcp:write".to_string()],
+                health_path: None,
+            }],
+            ..crate::config::LabConfig::default()
+        };
+        manager.seed_config(config.clone()).await;
+        let state = AppState::new()
+            .with_config(config)
+            .with_gateway_manager(manager);
+        let auth_state = test_lab_auth_state().await;
+        let token = issue_test_route_token(&auth_state, "https://mcp.tootie.tv/axon");
+        let app = build_router(
+            state,
+            Some("static-token".to_string()),
+            Some(auth_state),
+            None,
+            &[],
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/axon/extra")
+                    .header(header::HOST, "mcp.tootie.tv")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"jsonrpc":"2.0","method":"ping"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(body.to_vec()).unwrap(),
+            r#"{"jsonrpc":"2.0","result":{"upstream":true}}"#
         );
     }
 
@@ -2677,13 +3104,15 @@ mod tests {
         path: &str,
         backend_url: &str,
     ) -> crate::config::LabConfig {
+        let backend_url = format!("{}/mcp", backend_url.trim_end_matches('/'));
         crate::config::LabConfig {
             protected_mcp_routes: vec![crate::config::ProtectedMcpRouteConfig {
                 name: name.to_string(),
                 enabled: true,
                 public_host: host.to_string(),
                 public_path: path.to_string(),
-                backend_url: backend_url.to_string(),
+                upstream: None,
+                backend_url,
                 backend_mcp_path: "/mcp".to_string(),
                 scopes: vec!["mcp:read".to_string(), "mcp:write".to_string()],
                 health_path: None,

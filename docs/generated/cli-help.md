@@ -1048,6 +1048,7 @@ Commands:
   update
   remove
   quarantine
+  protected-route
   tool-search
   reload
   mcp
@@ -1300,6 +1301,231 @@ Options:
 
           [default: auto]
           [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway protected-route`
+
+```text
+Usage: protected-route [OPTIONS] <COMMAND>
+
+Commands:
+  list
+  get
+  add
+  update
+  remove
+  test
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway protected-route list`
+
+```text
+Usage: list [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway protected-route get`
+
+```text
+Usage: get [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway protected-route add`
+
+```text
+Usage: add [OPTIONS] --name <NAME> --public-host <PUBLIC_HOST> --public-path <PUBLIC_PATH>
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --name <NAME>
+
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --enabled
+
+
+      --public-host <PUBLIC_HOST>
+
+
+      --public-path <PUBLIC_PATH>
+
+
+      --upstream <UPSTREAM>
+
+
+      --backend-url <BACKEND_URL>
+
+
+      --scope <SCOPES>
+
+
+      --health-path <HEALTH_PATH>
+
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway protected-route update`
+
+```text
+Usage: update [OPTIONS] --public-host <PUBLIC_HOST> --public-path <PUBLIC_PATH> <NAME>
+
+Arguments:
+  <NAME>
+
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --new-name <NEW_NAME>
+
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --enabled <ENABLED>
+          [possible values: true, false]
+
+      --public-host <PUBLIC_HOST>
+
+
+      --public-path <PUBLIC_PATH>
+
+
+      --upstream <UPSTREAM>
+
+
+      --backend-url <BACKEND_URL>
+
+
+      --scope <SCOPES>
+
+
+      --health-path <HEALTH_PATH>
+
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway protected-route remove`
+
+```text
+Usage: remove [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway protected-route test`
+
+```text
+Usage: test [OPTIONS] --name <NAME> --public-host <PUBLIC_HOST> --public-path <PUBLIC_PATH>
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --name <NAME>
+
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --enabled
+
+
+      --public-host <PUBLIC_HOST>
+
+
+      --public-path <PUBLIC_PATH>
+
+
+      --upstream <UPSTREAM>
+
+
+      --backend-url <BACKEND_URL>
+
+
+      --scope <SCOPES>
+
+
+      --health-path <HEALTH_PATH>
+
 
   -h, --help
           Print help

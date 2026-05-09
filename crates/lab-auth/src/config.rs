@@ -99,9 +99,8 @@ pub struct AuthConfig {
     pub bootstrap_secret: Option<String>,
     pub allowed_client_redirect_uris: Vec<String>,
     /// Single bootstrap admin email permitted to log in via Google OAuth.
-    /// Required when `mode == AuthMode::OAuth`. Additional users will be
-    /// granted access through a future SQLite-backed allowlist managed via
-    /// the web UI.
+    /// Required when `mode == AuthMode::OAuth`. Additional users are granted
+    /// through the SQLite-backed allowlist managed via the web UI.
     pub admin_email: String,
     pub google: GoogleConfig,
     pub access_token_ttl: Duration,

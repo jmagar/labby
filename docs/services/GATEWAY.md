@@ -218,7 +218,8 @@ Gateway-managed protected MCP routes let Lab publish an arbitrary MCP backend at
 a public host/path while Lab owns the OAuth protected-resource metadata,
 challenge, token validation, and public error contract. The edge proxy points
 the public MCP URL at Lab; Lab then proxies accepted Streamable HTTP MCP traffic
-to the configured backend origin and MCP path.
+either to a raw backend MCP endpoint URL or to an existing named Gateway
+upstream.
 
 Use this for inline MCP services that should look like their own public OAuth
 protected resources instead of appearing only as tools merged into Lab's `/mcp`
@@ -233,7 +234,7 @@ https://mcp.example.com/syslog
 Example backend target:
 
 ```text
-http://100.88.16.79:3100/mcp
+http://node.internal.example:3100/mcp
 ```
 
 Persisted config lives in `[[protected_mcp_routes]]` entries in
@@ -245,11 +246,28 @@ name = "syslog"
 enabled = true
 public_host = "mcp.example.com"
 public_path = "/syslog"
-backend_url = "http://100.88.16.79:3100"
-backend_mcp_path = "/mcp"
+backend_url = "http://node.internal.example:3100/mcp"
 scopes = ["mcp:read", "mcp:write"]
 health_path = "/health"
 ```
+
+Protected routes can also publish an existing named Gateway upstream instead of
+proxying directly to a raw backend URL:
+
+```toml
+[[protected_mcp_routes]]
+name = "axon"
+enabled = true
+public_host = "mcp.example.com"
+public_path = "/axon"
+upstream = "axon"
+scopes = ["mcp:read", "mcp:write"]
+```
+
+When `upstream` is set, the protected route does not need `backend_url`. Lab
+resolves the target URL and auth mode from the named `[[upstream]]` entry. For
+OAuth upstreams, Lab uses the upstream OAuth credential stored for the shared
+Gateway subject `gateway`.
 
 Fields:
 
@@ -258,9 +276,10 @@ Fields:
 | `name` | Stable operator-facing route id. |
 | `enabled` | Whether the route participates in metadata, challenge, auth, and proxy resolution. Defaults to `true`. |
 | `public_host` | Bare public host only. Do not include scheme, port, or path. |
-| `public_path` | Public MCP path prefix. Must include a service segment and cannot use Lab-reserved paths like `/mcp`, `/.well-known/*`, or `/v1/*`. |
-| `backend_url` | Backend origin only, for example `http://100.88.16.79:3100`. Put `/mcp` in `backend_mcp_path`, not here. |
-| `backend_mcp_path` | Backend Streamable HTTP MCP endpoint path. Defaults to `/mcp`. |
+| `public_path` | Public MCP path prefix. Must include a service segment and cannot use Lab-reserved paths like `/.well-known/*` or `/v1/*`. |
+| `upstream` | Optional named Gateway upstream to publish at this path. If the upstream uses OAuth, Lab uses the shared Gateway upstream OAuth credential when proxying. Mutually exclusive with `backend_url`; when set, `backend_url` is intentionally empty. |
+| `backend_url` | Full backend Streamable HTTP MCP endpoint URL, for example `http://node.internal.example:3100/mcp`. Origin-only URLs are accepted as legacy input and default to `/mcp`. Mutually exclusive with `upstream`. |
+| `backend_mcp_path` | Deprecated compatibility field for older configs. New routes should put the path in `backend_url`. |
 | `scopes` | OAuth scopes advertised and enforced for this route. Defaults to `mcp:read` and `mcp:write`. |
 | `health_path` | Optional backend health path used by route test actions. |
 
@@ -269,9 +288,11 @@ Management actions:
 ```json
 { "action": "gateway.protected_route.list", "params": {} }
 { "action": "gateway.protected_route.get", "params": { "name": "syslog" } }
-{ "action": "gateway.protected_route.test", "params": { "route": { "name": "syslog", "public_host": "mcp.example.com", "public_path": "/syslog", "backend_url": "http://100.88.16.79:3100", "backend_mcp_path": "/mcp" } } }
-{ "action": "gateway.protected_route.add", "params": { "route": { "name": "syslog", "public_host": "mcp.example.com", "public_path": "/syslog", "backend_url": "http://100.88.16.79:3100", "backend_mcp_path": "/mcp", "scopes": ["mcp:read", "mcp:write"] } } }
-{ "action": "gateway.protected_route.update", "params": { "name": "syslog", "route": { "name": "syslog", "enabled": false, "public_host": "mcp.example.com", "public_path": "/syslog", "backend_url": "http://100.88.16.79:3100", "backend_mcp_path": "/mcp" } } }
+{ "action": "gateway.protected_route.test", "params": { "route": { "name": "syslog", "public_host": "mcp.example.com", "public_path": "/syslog", "backend_url": "http://node.internal.example:3100/mcp" } } }
+{ "action": "gateway.protected_route.test", "params": { "route": { "name": "axon", "public_host": "mcp.example.com", "public_path": "/axon", "upstream": "axon" } } }
+{ "action": "gateway.protected_route.add", "params": { "route": { "name": "axon", "public_host": "mcp.example.com", "public_path": "/axon", "upstream": "axon", "scopes": ["mcp:read", "mcp:write"] } } }
+{ "action": "gateway.protected_route.add", "params": { "route": { "name": "syslog", "public_host": "mcp.example.com", "public_path": "/syslog", "backend_url": "http://node.internal.example:3100/mcp", "scopes": ["mcp:read", "mcp:write"] } } }
+{ "action": "gateway.protected_route.update", "params": { "name": "syslog", "route": { "name": "syslog", "enabled": false, "public_host": "mcp.example.com", "public_path": "/syslog", "backend_url": "http://node.internal.example:3100/mcp" } } }
 { "action": "gateway.protected_route.remove", "params": { "name": "syslog" } }
 ```
 
@@ -284,21 +305,30 @@ labby gateway protected-route test \
   --name syslog \
   --public-host mcp.example.com \
   --public-path /syslog \
-  --backend-url http://100.88.16.79:3100 \
-  --backend-mcp-path /mcp
+  --backend-url http://node.internal.example:3100/mcp
+labby gateway protected-route test \
+  --name axon \
+  --public-host mcp.example.com \
+  --public-path /axon \
+  --upstream axon
 labby gateway protected-route add \
   --name syslog \
   --public-host mcp.example.com \
   --public-path /syslog \
-  --backend-url http://100.88.16.79:3100 \
-  --backend-mcp-path /mcp \
+  --backend-url http://node.internal.example:3100/mcp \
+  --scope mcp:read \
+  --scope mcp:write
+labby gateway protected-route add \
+  --name axon \
+  --public-host mcp.example.com \
+  --public-path /axon \
+  --upstream axon \
   --scope mcp:read \
   --scope mcp:write
 labby gateway protected-route update syslog \
   --public-host mcp.example.com \
   --public-path /syslog \
-  --backend-url http://100.88.16.79:3100 \
-  --backend-mcp-path /mcp \
+  --backend-url http://node.internal.example:3100/mcp \
   --enabled false
 labby gateway protected-route remove syslog
 ```
@@ -315,14 +345,14 @@ Gateway-managed route instead:
 | Public host from the URL clients used | `public_host` |
 | Public path from the URL clients used | `public_path` |
 | Backend origin from `MCP_<SERVICE>_BACKEND` | `backend_url` |
-| Backend MCP path from `MCP_<SERVICE>_BACKEND` | `backend_mcp_path` |
+| Backend MCP endpoint from `MCP_<SERVICE>_BACKEND` | `backend_url` |
 | Required OAuth scope policy | `scopes` |
 
 For example, replace:
 
 ```bash
 MCP_SYSLOG_URLS=https://mcp.example.com/syslog
-MCP_SYSLOG_BACKEND=http://100.88.16.79:3100/mcp
+MCP_SYSLOG_BACKEND=http://node.internal.example:3100/mcp
 ```
 
 with:
@@ -332,8 +362,7 @@ labby gateway protected-route add \
   --name syslog \
   --public-host mcp.example.com \
   --public-path /syslog \
-  --backend-url http://100.88.16.79:3100 \
-  --backend-mcp-path /mcp
+  --backend-url http://node.internal.example:3100/mcp
 ```
 
 The same fields are exposed in the Lab Gateway UI. Prefer the UI/CLI fields over
@@ -355,8 +384,10 @@ the configured public resource:
 
 Public route OAuth is not the same as Lab's static bearer compatibility path.
 `Authorization: Bearer $LAB_MCP_HTTP_TOKEN` remains an operator/admin shortcut
-for Lab-protected routes and must not be treated as an OAuth-authenticated
-public MCP route unless the route is explicitly configured to accept that mode.
+for Lab's admin/API routes, but public Gateway-managed MCP routes validate Lab
+OAuth JWTs for the route resource, for example
+`https://mcp.example.com/syslog`. Do not use the static bearer token as the
+public MCP client credential for these routes.
 
 Public errors must not leak backend origins, backend paths, private IPs, token
 env var names, or upstream transport errors. Unknown, disabled, unhealthy, and
@@ -481,6 +512,12 @@ Use the advertised authorization server to request a token for resource
 `https://mcp.example.com/syslog` and the configured scopes. The resulting access
 token must be presented to the public route, not to the backend.
 
+If the protected route publishes a named upstream that also uses OAuth, Lab
+performs a second, separate auth step behind the route: it uses the upstream
+OAuth credential stored for the shared Gateway subject when proxying to the
+private upstream MCP server. The public Lab token is never passed through to the
+upstream authorization server.
+
 Streamable HTTP initialize:
 
 ```bash
@@ -582,6 +619,12 @@ These actions now operate on the shared gateway OAuth subject `gateway`, so the
 web UI, CLI, and MCP tool surface all refer to the same stored upstream
 credential row.
 
+When an OAuth upstream is also published through a protected MCP route with
+`upstream = "<name>"`, successful upstream authorization is required before the
+route can proxy MCP traffic. `gateway.test` and the Gateway UI capability
+checks use the same shared subject and should report discovered tools/resources
+after authorization.
+
 Callback security invariants (enforced in code, spec-required):
 
 - The callback is a browser-facing redirect endpoint. Subject is resolved from
@@ -598,6 +641,8 @@ Callback security invariants (enforced in code, spec-required):
 
 - `gateway.reload` eagerly evicts all cached `AuthClient` entries for every
   OAuth upstream in the current config, then rebuilds a fresh upstream pool.
+  OAuth upstreams are rediscovered with the shared `gateway` subject when the
+  upstream OAuth runtime is configured.
   It does **not** delete persisted credential rows — `AuthClient`s are rebuilt
   on the next request using whatever credentials are in the store.
 - `clear_credentials` is the only way to invalidate a persisted credential.

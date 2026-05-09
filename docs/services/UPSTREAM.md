@@ -27,6 +27,11 @@ To proxy an upstream server through `lab`, you configure one or more `[[upstream
 3. merge discovered tools into its own MCP catalog
 4. serve the combined catalog through whichever MCP transport you expose from `lab`
 
+OAuth upstreams are discovered at startup only when Lab has upstream OAuth
+runtime state and a stored credential for the shared Gateway subject. Without
+that credential, subject-less discovery deliberately skips OAuth upstreams so a
+user-specific token view is not cached globally.
+
 That means the client connects only to `lab`:
 
 - `labby mcp` for stdio clients such as Claude Desktop
@@ -150,11 +155,13 @@ Operator browser flow lives in [GATEWAY.md](./GATEWAY.md).
 
 - HTTP upstream transport only. Stdio upstreams cannot use OAuth in this phase
   because stdio sessions do not carry a stable authenticated subject.
-- OAuth-tagged upstreams are attempted during startup discovery but fail unhealthy
-  because discovery requires an authenticated credential that is not available at
-  startup. They are **not** included in the merged tool list until an operator
-  completes the OAuth flow for the shared gateway credential. The authorization initiation flow
-  (`POST /v1/gateway/oauth/start`) requires an HTTP session.
+- Subject-less discovery skips OAuth upstreams. The hosted gateway startup,
+  `gateway.reload`, and `gateway.test` use the explicit shared subject
+  `gateway` so configured OAuth upstreams can be discovered after an operator
+  completes the upstream OAuth flow. If no credential exists yet, they remain
+  configured but report no discovered capabilities until authorization succeeds.
+  The authorization initiation flow (`POST /v1/gateway/oauth/start`) requires
+  an authenticated HTTP session.
 - `/mcp` over HTTP and the hosted web UI are the supported call surfaces.
 
 ### Flow
@@ -226,13 +233,13 @@ that changes an upstream's `client_id` evicts cached entries with a stale
 where a config edit would otherwise keep old credentials attached to a new
 upstream definition.
 
-OAuth-tagged upstreams are attempted during startup discovery (`discover_all`)
-but fail unhealthy because discovery requires an authenticated subject that is
-not available at startup. They appear as unhealthy in the startup catalog and
-are not included in the merged tool list until an operator completes the OAuth
-  flow. The circuit breaker and catalog merging infrastructure applies to
-  static-bearer upstreams; OAuth upstreams are connected per-request, not
-  pooled.
+OAuth-tagged upstreams are never discovered by the subject-less
+`discover_all` path. Gateway-owned startup/reload/test discovery uses an
+explicit subject-scoped path with the shared `gateway` subject; MCP request
+paths that need a real user subject use the per-request subject-scoped helpers.
+The circuit breaker and catalog merging infrastructure applies to
+static-bearer upstreams; OAuth upstreams are connected through the
+subject-scoped auth client cache.
 
 ### Refresh Semantics
 

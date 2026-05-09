@@ -1,9 +1,9 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::{Mutex, RwLock};
 use std::time::Instant;
 
-use tracing::info;
+use tracing::{debug, info};
 use url::Url;
 
 use crate::config::{AuthConfig, AuthMode};
@@ -69,7 +69,7 @@ pub struct AuthState {
     pub store: SqliteStore,
     pub signing_keys: Arc<SigningKeys>,
     pub google: Arc<GoogleProvider>,
-    allowed_resource_urls: Arc<RwLock<BTreeSet<String>>>,
+    allowed_resource_scopes: Arc<RwLock<BTreeMap<String, BTreeSet<String>>>>,
     authorize_limiter: RateLimiter,
     register_limiter: RateLimiter,
 }
@@ -117,7 +117,7 @@ impl AuthState {
             store,
             signing_keys: Arc::new(signing_keys),
             google: Arc::new(google),
-            allowed_resource_urls: Arc::new(RwLock::new(BTreeSet::new())),
+            allowed_resource_scopes: Arc::new(RwLock::new(BTreeMap::new())),
             authorize_limiter,
             register_limiter,
         })
@@ -129,24 +129,59 @@ impl AuthState {
     /// to publish Gateway-managed protected MCP resources such as
     /// `https://mcp.example.com/syslog` or `https://syslog.example.com/mcp`.
     pub fn set_allowed_resource_urls(&self, resources: impl IntoIterator<Item = String>) {
+        self.set_allowed_resource_scopes(resources.into_iter().map(|resource| {
+            (
+                resource,
+                self.config
+                    .scopes_supported
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            )
+        }));
+    }
+
+    /// Replace the extra OAuth resource audiences and the scopes each resource accepts.
+    pub fn set_allowed_resource_scopes(
+        &self,
+        resources: impl IntoIterator<Item = (String, Vec<String>)>,
+    ) {
         let mut allowed = self
-            .allowed_resource_urls
+            .allowed_resource_scopes
             .write()
-            .expect("allowed resource url lock");
+            .expect("allowed resource scope lock");
         allowed.clear();
-        allowed.extend(
-            resources
+        for (resource, scopes) in resources {
+            let resource = resource.trim().trim_end_matches('/').to_string();
+            if resource.is_empty() {
+                continue;
+            }
+            let scopes = scopes
                 .into_iter()
-                .map(|resource| resource.trim().trim_end_matches('/').to_string())
-                .filter(|resource| !resource.is_empty()),
+                .map(|scope| scope.trim().to_string())
+                .filter(|scope| !scope.is_empty())
+                .collect::<BTreeSet<_>>();
+            allowed.insert(resource, scopes);
+        }
+        debug!(
+            resource_count = allowed.len(),
+            "oauth allowed protected resource scopes refreshed"
         );
     }
 
     pub fn is_allowed_resource_url(&self, resource: &str) -> bool {
-        self.allowed_resource_urls
+        self.allowed_resource_scopes
             .read()
-            .expect("allowed resource url lock")
-            .contains(resource.trim().trim_end_matches('/'))
+            .expect("allowed resource scope lock")
+            .contains_key(resource.trim().trim_end_matches('/'))
+    }
+
+    pub fn allowed_resource_scopes(&self, resource: &str) -> Option<Vec<String>> {
+        self.allowed_resource_scopes
+            .read()
+            .expect("allowed resource scope lock")
+            .get(resource.trim().trim_end_matches('/'))
+            .map(|scopes| scopes.iter().cloned().collect())
     }
 
     /// Rate-limit guard for `/authorize` and `/browser_login` endpoints.
@@ -218,7 +253,7 @@ impl AuthState {
             store,
             signing_keys: Arc::new(signing_keys),
             google: Arc::new(google),
-            allowed_resource_urls: Arc::new(RwLock::new(BTreeSet::new())),
+            allowed_resource_scopes: Arc::new(RwLock::new(BTreeMap::new())),
             authorize_limiter,
             register_limiter,
         }

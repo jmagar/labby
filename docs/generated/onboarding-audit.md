@@ -63,7 +63,7 @@ Audit findings are reported here, but audit failures do not fail docs freshness 
 | `apprise` | 30 | 0 | 0 |
 | `arcane` | 28 | 1 | 1 |
 | `beads` | 30 | 0 | 0 |
-| `bytestash` | 26 | 3 | 1 |
+| `bytestash` | 27 | 3 | 0 |
 | `deploy` | 0 | 0 | 1 |
 | `device` | 0 | 0 | 1 |
 | `doctor` | 0 | 0 | 1 |

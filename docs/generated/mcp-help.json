@@ -193,6 +193,89 @@
           "returns": "SupportedServiceView[]"
         },
         {
+          "name": "gateway.protected_route.list",
+          "description": "List Gateway-managed public MCP routes protected by Lab OAuth",
+          "destructive": false,
+          "params": [],
+          "returns": "ProtectedMcpRouteConfig[]"
+        },
+        {
+          "name": "gateway.protected_route.get",
+          "description": "Get one Gateway-managed protected MCP route",
+          "destructive": false,
+          "params": [
+            {
+              "name": "name",
+              "ty": "string",
+              "required": true,
+              "description": "Gateway name"
+            }
+          ],
+          "returns": "ProtectedMcpRouteConfig"
+        },
+        {
+          "name": "gateway.protected_route.add",
+          "description": "Add a Gateway-managed protected MCP route",
+          "destructive": true,
+          "params": [
+            {
+              "name": "route",
+              "ty": "json",
+              "required": true,
+              "description": "Protected MCP route config to validate and persist"
+            }
+          ],
+          "returns": "ProtectedMcpRouteConfig"
+        },
+        {
+          "name": "gateway.protected_route.update",
+          "description": "Replace a Gateway-managed protected MCP route",
+          "destructive": true,
+          "params": [
+            {
+              "name": "name",
+              "ty": "string",
+              "required": true,
+              "description": "Gateway name"
+            },
+            {
+              "name": "route",
+              "ty": "json",
+              "required": true,
+              "description": "Replacement protected MCP route config"
+            }
+          ],
+          "returns": "ProtectedMcpRouteConfig"
+        },
+        {
+          "name": "gateway.protected_route.remove",
+          "description": "Remove a Gateway-managed protected MCP route",
+          "destructive": true,
+          "params": [
+            {
+              "name": "name",
+              "ty": "string",
+              "required": true,
+              "description": "Gateway name"
+            }
+          ],
+          "returns": "ProtectedMcpRouteConfig"
+        },
+        {
+          "name": "gateway.protected_route.test",
+          "description": "Validate a proposed protected MCP route without saving it",
+          "destructive": false,
+          "params": [
+            {
+              "name": "route",
+              "ty": "json",
+              "required": true,
+              "description": "Protected MCP route config to validate"
+            }
+          ],
+          "returns": "ProtectedMcpRouteTestResult"
+        },
+        {
           "name": "gateway.virtual_server.enable",
           "description": "Enable a configured Lab-backed service as a virtual server",
           "destructive": true,

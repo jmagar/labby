@@ -530,6 +530,7 @@ mod tests {
             enabled: true,
             public_host: "mcp.tootie.tv".to_string(),
             public_path: "/syslog".to_string(),
+            upstream: None,
             backend_url: "http://100.88.16.79:3100".to_string(),
             backend_mcp_path: "/mcp".to_string(),
             scopes: Vec::new(),

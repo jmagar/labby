@@ -1,5 +1,6 @@
 services:
   labby-master:
+    container_name: labby
     image: labby:dev
     build:
       context: .
@@ -61,7 +62,19 @@ services:
       - ${HOME}/.agents/plugins:/home/lab/.agents/plugins:ro
       - ${HOME}/.codex/config.toml:/home/lab/.codex/config.toml:ro
       - ${HOME}/.codex/cache:/home/lab/.codex/cache:ro
+      # Runtime MCP gateways imported from Codex can reference plugin
+      # entrypoints by absolute host path. Mirror those paths for stdio
+      # gateways such as Bitwarden.
+      - ${HOME}/.codex/plugins:${HOME}/.codex/plugins:ro
+      # Bitwarden MCP validates the host-managed BW_SESSION file and shells
+      # out to the Bitwarden CLI before starting the pinned MCP package.
+      - /run/user/1000/bitwarden-mcp:/run/user/1000/bitwarden-mcp:ro
+      - ${HOME}/.config/Bitwarden CLI:/home/lab/.config/Bitwarden CLI
+      - ${HOME}/.local/share/fnm/node-versions/v24.13.0/installation:${HOME}/.local/share/fnm/node-versions/v24.13.0/installation:ro
       - ${HOME}/.gemini:/home/lab/.gemini
+      # Open Design's MCP daemon is a local workspace service referenced by
+      # absolute path in Codex config.
+      - ${HOME}/workspace/open-design:${HOME}/workspace/open-design
       - .:/workspace/lab
       - .:${HOME}/workspace/lab
 

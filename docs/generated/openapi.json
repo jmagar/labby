@@ -4707,6 +4707,65 @@
           }
         }
       },
+      "GatewayGatewayProtected_routeAddParams": {
+        "type": "object",
+        "required": [
+          "route"
+        ],
+        "properties": {
+          "route": {
+            "type": "string"
+          }
+        }
+      },
+      "GatewayGatewayProtected_routeGetParams": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "GatewayGatewayProtected_routeRemoveParams": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "GatewayGatewayProtected_routeTestParams": {
+        "type": "object",
+        "required": [
+          "route"
+        ],
+        "properties": {
+          "route": {
+            "type": "string"
+          }
+        }
+      },
+      "GatewayGatewayProtected_routeUpdateParams": {
+        "type": "object",
+        "required": [
+          "name",
+          "route"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "route": {
+            "type": "string"
+          }
+        }
+      },
       "GatewayGatewayRemoveParams": {
         "type": "object",
         "required": [

@@ -53,11 +53,37 @@ export function UpstreamOauthCard({ name }: UpstreamOauthCardProps) {
 
   const badge = (() => {
     if (!status) return <Badge variant="outline">Loading…</Badge>
-    if (status.authenticated && status.expires_within_5m)
-      return <Badge variant="outline" className="border-aurora-warn/40 text-aurora-warn">Expiring</Badge>
-    if (status.authenticated)
-      return <Badge variant="outline" className="border-aurora-success/40 text-aurora-success">Connected</Badge>
-    return <Badge variant="outline" className="text-aurora-text-muted">Disconnected</Badge>
+    switch (status.state) {
+      case 'connected':
+        return <Badge variant="outline" className="border-aurora-success/40 text-aurora-success">Connected</Badge>
+      case 'expiring':
+        return <Badge variant="outline" className="border-aurora-warn/40 text-aurora-warn">Expiring</Badge>
+      case 'expired':
+        return <Badge variant="outline" className="border-aurora-error/40 text-aurora-error">Expired</Badge>
+      case 'refresh_failed':
+        return <Badge variant="outline" className="border-aurora-error/40 text-aurora-error">Refresh failed</Badge>
+      case 'discovery_failed':
+        return <Badge variant="outline" className="border-aurora-error/40 text-aurora-error">Unavailable</Badge>
+      case 'disconnected':
+        return <Badge variant="outline" className="text-aurora-text-muted">Disconnected</Badge>
+      default:
+        if (status.authenticated && status.expires_within_5m)
+          return <Badge variant="outline" className="border-aurora-warn/40 text-aurora-warn">Expiring</Badge>
+        if (status.authenticated)
+          return <Badge variant="outline" className="border-aurora-success/40 text-aurora-success">Connected</Badge>
+        return <Badge variant="outline" className="text-aurora-text-muted">Disconnected</Badge>
+    }
+  })()
+
+  const statusDetail = (() => {
+    if (!status) return null
+    if (status.refresh_error) return status.refresh_error
+    if (status.discovery_error) return status.discovery_error
+    if (status.refreshed) return 'Token refreshed'
+    if (status.state === 'expired') return 'Access token expired'
+    if (status.state === 'connected' && status.discovered_tool_count !== undefined)
+      return `${status.exposed_tool_count ?? status.discovered_tool_count} of ${status.discovered_tool_count} tools exposed`
+    return null
   })()
 
   return (
@@ -70,6 +96,7 @@ export function UpstreamOauthCard({ name }: UpstreamOauthCardProps) {
       </CardHeader>
       <CardContent className="flex flex-col gap-2 pt-0">
         {error && <p className="text-xs text-destructive">{error}</p>}
+        {statusDetail && <p className="text-xs text-aurora-text-muted">{statusDetail}</p>}
         <div className="flex items-center gap-2">
           {status?.authenticated ? (
             <Button variant="outline" size="sm" onClick={handleDisconnect}>

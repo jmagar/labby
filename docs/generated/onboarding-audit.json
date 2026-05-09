@@ -641,9 +641,7 @@
         ],
         [
           "tests.sdk",
-          {
-            "Skip": "not yet present: ./crates/lab-apis/tests/bytestash_client.rs"
-          }
+          "Pass"
         ],
         [
           "impl.dispatch",

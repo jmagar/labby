@@ -20,9 +20,9 @@ use tokio::sync::mpsc;
 use crate::api::AppState;
 use crate::config::{LabConfig, config_toml_path, resolve_auth};
 use crate::dispatch::clients::SharedServiceClients;
-use crate::dispatch::gateway::install_gateway_manager;
 use crate::dispatch::gateway::manager::{GatewayManager, GatewayRuntimeHandle};
 use crate::dispatch::gateway::types::CatalogChangeNotifier;
+use crate::dispatch::gateway::{SHARED_GATEWAY_OAUTH_SUBJECT, install_gateway_manager};
 use crate::dispatch::logs::client::{
     bootstrap_running_log_system, resolve_queue_capacity, resolve_retention, resolve_store_path,
     resolve_subscriber_capacity,
@@ -294,8 +294,17 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
     // In MCP-only (stdio) mode skip upstream discovery entirely — no child processes
     // should be spawned, making the axon↔lab recursion cycle physically impossible.
     if !stdio_mode {
-        pool.discover_all_with_in_process_peers(&config.upstream, &registry)
+        if upstream_oauth_runtime.is_some() {
+            pool.discover_all_for_subject_with_in_process_peers(
+                &config.upstream,
+                SHARED_GATEWAY_OAUTH_SUBJECT,
+                &registry,
+            )
             .await;
+        } else {
+            pool.discover_all_with_in_process_peers(&config.upstream, &registry)
+                .await;
+        }
         tracing::info!(
             subsystem = "gateway_client",
             phase = "discovery.finish",

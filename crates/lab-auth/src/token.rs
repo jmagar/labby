@@ -26,6 +26,7 @@ pub async fn token(
     info!(
         grant_type = %request.grant_type,
         client_id = request.client_id.as_deref().unwrap_or("<missing>"),
+        requested_resource = request.resource.as_deref().unwrap_or("<default>"),
         "oauth token request received"
     );
     let response = match request.grant_type.as_str() {
@@ -88,6 +89,7 @@ async fn authorization_code_grant(
         client_id = %client_id,
         auth_code_id = %auth_code_id,
         redirect_uri = %redirect_uri,
+        requested_resource = requested_resource.as_deref().unwrap_or("<authorization-code-resource>"),
         "oauth authorization_code grant redeeming local code"
     );
 
@@ -146,6 +148,7 @@ async fn authorization_code_grant(
             client_id = %row.client_id,
             auth_code_id = %auth_code_id,
             subject_id = %fingerprint(&row.subject),
+            resource = %row.resource,
             scope = %row.scope,
             "oauth authorization_code grant issued lab access token and refresh token"
         );
@@ -156,6 +159,7 @@ async fn authorization_code_grant(
             client_id = %row.client_id,
             auth_code_id = %auth_code_id,
             subject_id = %fingerprint(&row.subject),
+            resource = %row.resource,
             scope = %row.scope,
             "oauth authorization_code grant issued lab access token without refresh token"
         );
@@ -190,6 +194,7 @@ async fn refresh_token_grant(
         grant_type = "refresh_token",
         client_id = %client_id,
         refresh_token_id = %refresh_token_id,
+        requested_resource = %requested_resource,
         "oauth refresh_token grant received"
     );
     let stored = state
@@ -266,6 +271,7 @@ async fn refresh_token_grant(
         client_id = %stored.client_id,
         refresh_token_id = %refresh_token_id,
         subject_id = %fingerprint(&google.subject),
+        resource = %stored_resource,
         scope = %stored.scope,
         "oauth refresh_token grant issued new lab access token"
     );
@@ -294,18 +300,28 @@ fn build_token_response(
         state.config.access_token_ttl,
         "LAB_AUTH_ACCESS_TOKEN_TTL_SECS",
     )?;
+    let subject_id = fingerprint(&subject);
     let access_token = state.signing_keys.issue_access_token(&AccessClaims {
         iss: issuer,
-        sub: subject,
-        aud: resource,
+        sub: subject.clone(),
+        aud: resource.clone(),
         exp: now.checked_add(access_token_ttl).ok_or_else(|| {
             AuthError::Config("LAB_AUTH_ACCESS_TOKEN_TTL_SECS exceeds supported range".to_string())
         })?,
         iat: now,
         jti: random_token(18)?,
         scope: scope.clone(),
-        azp: client_id,
+        azp: client_id.clone(),
     })?;
+    info!(
+        client_id = %client_id,
+        subject_id = %subject_id,
+        resource = %resource,
+        scope = %scope,
+        expires_in_secs = state.config.access_token_ttl.as_secs(),
+        refresh_token_issued = refresh_token.is_some(),
+        "oauth token response minted access token"
+    );
     Ok(TokenResponse {
         access_token,
         token_type: "Bearer".to_string(),

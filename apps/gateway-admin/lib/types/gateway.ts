@@ -213,8 +213,9 @@ export interface ProtectedMcpRoute {
   enabled: boolean
   public_host: string
   public_path: string
-  backend_url: string
-  backend_mcp_path: string
+  upstream?: string | null
+  backend_url?: string
+  backend_mcp_path?: string
   scopes: string[]
   health_path?: string | null
 }

@@ -145,6 +145,12 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `gateway` | `gateway.oauth.probe` | false | true | `url*: string` | `ProbeResult` | cli, mcp, api, web |
 | `gateway` | `gateway.oauth.start` | false | false | `upstream*: string`<br>`subject: string` | `BeginAuthorization` | cli, mcp, api, web |
 | `gateway` | `gateway.oauth.status` | false | false | `upstream*: string`<br>`subject: string` | `UpstreamOauthStatusView` | cli, mcp, api, web |
+| `gateway` | `gateway.protected_route.add` | false | true | `route*: json` | `ProtectedMcpRouteConfig` | cli, mcp, api, web |
+| `gateway` | `gateway.protected_route.get` | false | false | `name*: string` | `ProtectedMcpRouteConfig` | cli, mcp, api, web |
+| `gateway` | `gateway.protected_route.list` | false | false |  | `ProtectedMcpRouteConfig[]` | cli, mcp, api, web |
+| `gateway` | `gateway.protected_route.remove` | false | true | `name*: string` | `ProtectedMcpRouteConfig` | cli, mcp, api, web |
+| `gateway` | `gateway.protected_route.test` | false | false | `route*: json` | `ProtectedMcpRouteTestResult` | cli, mcp, api, web |
+| `gateway` | `gateway.protected_route.update` | false | true | `name*: string`<br>`route*: json` | `ProtectedMcpRouteConfig` | cli, mcp, api, web |
 | `gateway` | `gateway.reload` | false | true |  | `GatewayCatalogDiff` | cli, mcp, api, web |
 | `gateway` | `gateway.remove` | false | true | `name*: string` | `GatewayView` | cli, mcp, api, web |
 | `gateway` | `gateway.server.get` | false | false | `id*: string` | `ServerView` | cli, mcp, api, web |
