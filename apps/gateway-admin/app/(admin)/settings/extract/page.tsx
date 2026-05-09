@@ -73,6 +73,13 @@ export default function ExtractPanel(): React.ReactElement {
     }
   }
 
+  const previewEntries = report
+    ? [...selected]
+        .map((idx) => report.creds[idx])
+        .filter((cred): cred is ExtractCredential => Boolean(cred?.url))
+        .map((cred) => ({ key: `${cred.service.toUpperCase()}_URL`, value: cred.url! }))
+    : []
+
   return (
     <>
       <h1 className="sr-only">Extract settings</h1>
@@ -128,6 +135,25 @@ export default function ExtractPanel(): React.ReactElement {
                 </li>
               ))}
             </ul>
+            <div className="rounded-md border p-3">
+              <p className="text-sm font-medium">Draft preview</p>
+              {previewEntries.length > 0 ? (
+                <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                  {previewEntries.map((entry) => (
+                    <li key={entry.key} className="font-mono">
+                      {entry.key} = {entry.value}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Selected credentials do not include writable URL values.
+                </p>
+              )}
+              <p className="mt-2 text-xs text-muted-foreground">
+                Redacted secrets are not written by extract; enter them on each service page.
+              </p>
+            </div>
             <div className="flex items-center gap-2">
               <Button onClick={applyToDraft} disabled={applying || selected.size === 0}>
                 {applying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}

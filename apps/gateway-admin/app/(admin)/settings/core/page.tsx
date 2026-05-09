@@ -66,10 +66,8 @@ export default function CorePage(): React.ReactElement {
       [key]: { ...prev[key]!, status: 'saving', error: undefined },
     }))
     try {
-      if (value !== '') {
-        await setupApi.draftSet([{ key, value }], { force: true })
-        await setupApi.draftCommit({ force: true })
-      }
+      await setupApi.draftSet([{ key, value }], { force: true })
+      await setupApi.draftCommit({ force: true })
       setFields((prev) => ({
         ...prev,
         [key]: { ...prev[key]!, status: 'saved' },
@@ -128,7 +126,7 @@ export default function CorePage(): React.ReactElement {
                       }))
                     }
                     onBlur={() => {
-                      if (state.value !== '') void commitField(field.key, state.value)
+                      void commitField(field.key, state.value)
                     }}
                   />
                   <SaveBadge state={state} />

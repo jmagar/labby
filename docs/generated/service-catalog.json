@@ -213,7 +213,7 @@
     "name": "dozzle",
     "display_name": "Dozzle",
     "description": "Read-only container log observation through Dozzle",
-    "category": "bootstrap",
+    "category": "network",
     "status": "available",
     "feature": "dozzle",
     "exposure": "feature_gated",

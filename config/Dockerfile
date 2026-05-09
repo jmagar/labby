@@ -22,6 +22,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates/lab/Cargo.toml      crates/lab/Cargo.toml
 COPY crates/lab-apis/Cargo.toml crates/lab-apis/Cargo.toml
 COPY crates/lab-auth/Cargo.toml crates/lab-auth/Cargo.toml
+COPY crates/vendor/agent-client-protocol/Cargo.toml crates/vendor/agent-client-protocol/Cargo.toml
 
 # Create stub source + test files so cargo can parse ALL manifests without error.
 #
@@ -33,6 +34,9 @@ COPY crates/lab-auth/Cargo.toml crates/lab-auth/Cargo.toml
 #
 # lab/ has both [[bin]] (main.rs) and [lib] (lib.rs) targets — stub both.
 #
+# The workspace patches agent-client-protocol to a vendored local crate, so the
+# dependency-cache build also needs a stub for that patched crate.
+#
 # We also need apps/gateway-admin/out/ to exist for include_dir!() in web.rs,
 # but we copy the real one below — for the dep-cache step a stub dir suffices.
 RUN mkdir -p \
@@ -40,6 +44,9 @@ RUN mkdir -p \
       crates/lab-apis/src \
       crates/lab-apis/tests \
       crates/lab-auth/src \
+      crates/vendor/agent-client-protocol/src \
+      crates/vendor/agent-client-protocol/examples \
+      crates/vendor/agent-client-protocol/tests \
       apps/gateway-admin/out \
  && echo 'fn main(){}' > crates/lab/src/main.rs \
  && touch \
@@ -50,12 +57,25 @@ RUN mkdir -p \
       crates/lab-apis/tests/openacp_client.rs \
       crates/lab-apis/tests/jellyfin_client.rs \
       crates/lab-auth/src/lib.rs \
+      crates/vendor/agent-client-protocol/src/lib.rs \
+      crates/vendor/agent-client-protocol/examples/simple_agent.rs \
+      crates/vendor/agent-client-protocol/examples/yolo_one_shot_client.rs \
+      crates/vendor/agent-client-protocol/tests/derive_macros.rs \
+      crates/vendor/agent-client-protocol/tests/jsonrpc_advanced.rs \
+      crates/vendor/agent-client-protocol/tests/jsonrpc_connection_builder.rs \
+      crates/vendor/agent-client-protocol/tests/jsonrpc_edge_cases.rs \
+      crates/vendor/agent-client-protocol/tests/jsonrpc_error_handling.rs \
+      crates/vendor/agent-client-protocol/tests/jsonrpc_hello.rs \
+      crates/vendor/agent-client-protocol/tests/match_dispatch.rs \
  && cargo build --workspace --all-features --release \
  && cargo clean -p labby \
  && cargo clean -p lab-apis \
  && cargo clean -p lab-auth \
  && rm -rf \
       crates/*/src \
+      crates/vendor/agent-client-protocol/src \
+      crates/vendor/agent-client-protocol/examples \
+      crates/vendor/agent-client-protocol/tests \
       crates/lab-apis/tests \
       apps/gateway-admin/out \
       target/release/labby

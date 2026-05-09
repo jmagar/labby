@@ -202,7 +202,14 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         return run_node_mode(transport, args.command.as_ref(), config, node_runtime, port).await;
     }
 
+    crate::registry::set_runtime_built_in_upstream_apis_enabled(
+        config.services.built_in_upstream_apis_enabled,
+    );
     let registry = build_default_registry();
+    let registry = crate::registry::filter_built_in_upstream_apis(
+        registry,
+        config.services.built_in_upstream_apis_enabled,
+    );
     let registry = filter_registry(registry, &args.services)?;
     tracing::info!(
         subsystem = "startup",
@@ -328,6 +335,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         config_toml_path().unwrap_or_else(|| "config.toml".into()),
         gateway_runtime.clone(),
     )
+    .with_builtin_service_registry(registry.clone())
     .with_service_clients(service_clients);
     if let Some(rt) = upstream_oauth_runtime {
         gateway_manager = gateway_manager
@@ -1491,13 +1499,14 @@ mod tests {
 
     use super::{
         McpArgs, PeerNotifier, ServeCommand, Transport, allowed_hosts, bind_addr,
-        build_http_router, is_loopback_host, resolve_lab_spawn_depth, resolve_port,
-        resolve_session_ttl_secs, resolve_stateful_mode, resolve_transport,
+        build_http_router, filter_registry, is_loopback_host, resolve_lab_spawn_depth,
+        resolve_port, resolve_session_ttl_secs, resolve_stateful_mode, resolve_transport,
         resolve_web_ui_auth_disabled, should_run_stdio,
     };
     use crate::api::AppState;
     use crate::cli::Cli;
     use crate::config::{LabConfig, McpPreferences, WebPreferences};
+    use crate::registry::{build_default_registry, filter_built_in_upstream_apis};
     use clap::Parser;
 
     #[test]
@@ -1545,6 +1554,14 @@ mod tests {
         );
         assert_eq!(resolve_port(None, None, Some(7777)).unwrap(), 7777);
         assert_eq!(resolve_port(None, None, None).unwrap(), 8765);
+    }
+
+    #[test]
+    fn services_allowlist_does_not_reenable_globally_disabled_upstreams() {
+        let reg = filter_built_in_upstream_apis(build_default_registry(), false);
+        let error = filter_registry(reg, &["radarr".to_string()])
+            .expect_err("disabled radarr should be unknown to --services");
+        assert!(error.to_string().contains("unknown service"));
     }
 
     #[test]

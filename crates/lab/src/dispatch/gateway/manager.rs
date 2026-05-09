@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex as StdMutex, OnceLock};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use arc_swap::ArcSwapOption;
@@ -62,8 +62,6 @@ pub fn diff_catalogs(
         prompts_changed: before.prompts != after.prompts,
     }
 }
-
-static BUILTIN_SERVICE_REGISTRY: OnceLock<ToolRegistry> = OnceLock::new();
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct VirtualServerMigration {
@@ -129,6 +127,7 @@ pub struct GatewayManager {
     notifier: Option<CatalogChangeNotifier>,
     pub(super) oauth_client_cache: Option<OauthClientCache>,
     pub(super) upstream_oauth_managers: Option<Arc<dashmap::DashMap<String, UpstreamOauthManager>>>,
+    builtin_service_registry: Arc<ToolRegistry>,
     /// Resources needed to build transient OAuth managers for probed upstreams.
     pub(super) oauth_sqlite: Option<lab_auth::sqlite::SqliteStore>,
     pub(super) oauth_key: Option<EncryptionKey>,
@@ -148,12 +147,32 @@ impl GatewayManager {
             notifier: None,
             oauth_client_cache: None,
             upstream_oauth_managers: None,
+            builtin_service_registry: Arc::new(crate::registry::build_default_registry()),
             oauth_sqlite: None,
             oauth_key: None,
             oauth_redirect_uri: None,
             tool_indexes: Arc::new(dashmap::DashMap::new()),
             protected_route_index: Arc::new(RwLock::new(ProtectedRouteIndex::default())),
         }
+    }
+
+    #[must_use]
+    pub fn with_builtin_service_registry(mut self, registry: ToolRegistry) -> Self {
+        self.builtin_service_registry = Arc::new(registry);
+        self
+    }
+
+    pub(crate) fn builtin_service_registry(&self) -> &ToolRegistry {
+        &self.builtin_service_registry
+    }
+
+    fn registered_service_meta(
+        &self,
+        service: &str,
+    ) -> Option<&'static lab_apis::core::PluginMeta> {
+        self.builtin_service_registry()
+            .service(service)
+            .and_then(|entry| service_meta(entry.name))
     }
 
     #[must_use]
@@ -260,10 +279,12 @@ impl GatewayManager {
     }
 
     pub async fn get_service_config(&self, service: &str) -> Result<ServiceConfigView, ToolError> {
-        let meta = service_meta(service).ok_or_else(|| ToolError::InvalidParam {
-            message: format!("unknown service `{service}`"),
-            param: "service".to_string(),
-        })?;
+        let meta =
+            self.registered_service_meta(service)
+                .ok_or_else(|| ToolError::InvalidParam {
+                    message: format!("unknown service `{service}`"),
+                    param: "service".to_string(),
+                })?;
         let values = read_env_values(&self.env_path())?;
         Ok(service_config_view(meta, &values))
     }
@@ -273,10 +294,12 @@ impl GatewayManager {
         service: &str,
         values: &BTreeMap<String, String>,
     ) -> Result<ServiceConfigView, ToolError> {
-        let meta = service_meta(service).ok_or_else(|| ToolError::InvalidParam {
-            message: format!("unknown service `{service}`"),
-            param: "service".to_string(),
-        })?;
+        let meta =
+            self.registered_service_meta(service)
+                .ok_or_else(|| ToolError::InvalidParam {
+                    message: format!("unknown service `{service}`"),
+                    param: "service".to_string(),
+                })?;
 
         for field in values.keys() {
             let valid = meta
@@ -401,7 +424,7 @@ impl GatewayManager {
     }
 
     pub async fn surface_enabled_for_service(&self, service: &str, surface: &str) -> bool {
-        if service_meta(service).is_none() {
+        if self.registered_service_meta(service).is_none() {
             return true;
         }
 
@@ -424,7 +447,7 @@ impl GatewayManager {
     }
 
     pub async fn allowed_mcp_actions_for_service(&self, service: &str) -> Option<Vec<String>> {
-        if service_meta(service).is_none() {
+        if self.registered_service_meta(service).is_none() {
             return None;
         }
 
@@ -446,7 +469,7 @@ impl GatewayManager {
     }
 
     pub async fn mcp_action_allowed_for_service(&self, service: &str, action: &str) -> bool {
-        if service_meta(service).is_none() {
+        if self.registered_service_meta(service).is_none() {
             return true;
         }
 
@@ -527,7 +550,7 @@ impl GatewayManager {
         pool.discover_all_for_subject_with_in_process_peers(
             &[upstream.clone()],
             SHARED_GATEWAY_OAUTH_SUBJECT,
-            builtin_service_registry(),
+            self.builtin_service_registry(),
         )
         .await;
 
@@ -592,7 +615,7 @@ impl GatewayManager {
                 message: format!("quarantined virtual server `{id}` not found"),
             })?;
         let restored = cfg.quarantined_virtual_servers.remove(index);
-        if service_meta(&restored.service).is_none() {
+        if self.registered_service_meta(&restored.service).is_none() {
             return Err(ToolError::Sdk {
                 sdk_kind: "unknown_service".to_string(),
                 message: format!(
@@ -1106,7 +1129,8 @@ impl GatewayManager {
         let cfg = tokio::task::spawn_blocking(move || load_gateway_config(&path))
             .await
             .map_err(|e| ToolError::internal_message(format!("config read task failed: {e}")))??;
-        let (cfg, migration) = quarantine_unregistered_virtual_servers(cfg);
+        let (cfg, migration) =
+            quarantine_unregistered_virtual_servers(cfg, self.builtin_service_registry());
         if migration.changed() {
             tracing::warn!(
                 action = "gateway.config.migrate",
@@ -1182,7 +1206,7 @@ impl GatewayManager {
             pool.discover_all_for_subject_with_in_process_peers(
                 &cfg.upstream,
                 SHARED_GATEWAY_OAUTH_SUBJECT,
-                builtin_service_registry(),
+                self.builtin_service_registry(),
             )
             .await;
             Some(pool)
@@ -1769,10 +1793,12 @@ impl GatewayManager {
         let index = if let Some(index) = existing_index {
             index
         } else {
-            let meta = service_meta(id).ok_or_else(|| ToolError::Sdk {
-                sdk_kind: "not_found".to_string(),
-                message: format!("virtual server `{id}` not found"),
-            })?;
+            let meta = self
+                .registered_service_meta(id)
+                .ok_or_else(|| ToolError::Sdk {
+                    sdk_kind: "not_found".to_string(),
+                    message: format!("virtual server `{id}` not found"),
+                })?;
             let values = read_env_values(&self.env_path())?;
             let configured = service_config_view(meta, &values).configured;
             if !configured {
@@ -1797,6 +1823,16 @@ impl GatewayManager {
             .virtual_servers
             .get_mut(index)
             .expect("virtual server index should exist");
+        if enabled
+            && self
+                .registered_service_meta(&virtual_server.service)
+                .is_none()
+        {
+            return Err(ToolError::Sdk {
+                sdk_kind: "not_found".to_string(),
+                message: format!("virtual server `{id}` not found"),
+            });
+        }
         virtual_server.enabled = enabled;
         if enabled {
             virtual_server.surfaces.mcp = true;
@@ -1941,12 +1977,13 @@ fn find_virtual_server_for_service<'a>(
 
 fn quarantine_unregistered_virtual_servers(
     mut cfg: LabConfig,
+    registry: &ToolRegistry,
 ) -> (LabConfig, VirtualServerMigration) {
     let mut migration = VirtualServerMigration::default();
     let mut active = Vec::with_capacity(cfg.virtual_servers.len());
 
     for virtual_server in std::mem::take(&mut cfg.virtual_servers) {
-        if service_meta(&virtual_server.service).is_some() {
+        if registry.service(&virtual_server.service).is_some() {
             active.push(virtual_server);
             continue;
         }
@@ -1963,10 +2000,6 @@ fn quarantine_unregistered_virtual_servers(
 
     cfg.virtual_servers = active;
     (cfg, migration)
-}
-
-fn builtin_service_registry() -> &'static ToolRegistry {
-    BUILTIN_SERVICE_REGISTRY.get_or_init(crate::registry::build_default_registry)
 }
 
 async fn snapshot_from_pool(pool: Option<Arc<UpstreamPool>>) -> GatewayCatalogSnapshot {
@@ -2530,10 +2563,14 @@ mod tests {
             mcp_policy: None,
         };
 
-        let (migrated, migration) = quarantine_unregistered_virtual_servers(LabConfig {
-            quarantined_virtual_servers: vec![stale],
-            ..LabConfig::default()
-        });
+        let registry = crate::registry::build_default_registry();
+        let (migrated, migration) = quarantine_unregistered_virtual_servers(
+            LabConfig {
+                quarantined_virtual_servers: vec![stale],
+                ..LabConfig::default()
+            },
+            &registry,
+        );
 
         assert!(!migration.changed());
         assert!(migrated.virtual_servers.is_empty());

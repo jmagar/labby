@@ -20,6 +20,7 @@ fn logs_registry() -> labby::registry::ToolRegistry {
         name: "logs",
         description: "Search and stream local-master runtime logs",
         category: "bootstrap",
+        kind: labby::registry::RegisteredServiceKind::BootstrapOperator,
         status: "available",
         actions: labby::dispatch::logs::ACTIONS,
         dispatch: |action, params| {

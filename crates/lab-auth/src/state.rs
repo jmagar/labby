@@ -129,16 +129,11 @@ impl AuthState {
     /// to publish Gateway-managed protected MCP resources such as
     /// `https://mcp.example.com/syslog` or `https://syslog.example.com/mcp`.
     pub fn set_allowed_resource_urls(&self, resources: impl IntoIterator<Item = String>) {
-        self.set_allowed_resource_scopes(resources.into_iter().map(|resource| {
-            (
-                resource,
-                self.config
-                    .scopes_supported
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<_>>(),
-            )
-        }));
+        self.set_allowed_resource_scopes(
+            resources
+                .into_iter()
+                .map(|resource| (resource, self.config.scopes_supported.to_vec())),
+        );
     }
 
     /// Replace the extra OAuth resource audiences and the scopes each resource accepts.

@@ -3308,7 +3308,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/dev/example")
+                    .uri("/dev/mockup/example")
                     .body(Body::empty())
                     .unwrap(),
             )
