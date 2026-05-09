@@ -298,8 +298,7 @@ test('gatewayApi protected route actions use gateway service action payloads', a
     enabled: true,
     public_host: 'mcp.example.com',
     public_path: '/tools',
-    backend_url: 'http://localhost:3100',
-    backend_mcp_path: '/mcp',
+    backend_url: 'http://localhost:3100/mcp',
     scopes: ['mcp:read'],
     health_path: '/health',
   }

@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::config::UpstreamConfig;
 
-pub(super) fn configured_bearer_token(env_name: &str) -> Option<String> {
+pub(crate) fn configured_bearer_token(env_name: &str) -> Option<String> {
     let dotenv_path = crate::config::dotenv_path();
     configured_bearer_token_with_dotenv(env_name, dotenv_path.as_deref())
 }

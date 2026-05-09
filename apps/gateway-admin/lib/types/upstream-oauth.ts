@@ -6,6 +6,18 @@ export interface UpstreamOauthStatus {
   authenticated: boolean
   upstream: string
   expires_within_5m: boolean
+  state?: 'connected' | 'expiring' | 'expired' | 'refresh_failed' | 'discovery_failed' | 'disconnected'
+  access_token_expires_at?: number
+  seconds_until_expiry?: number
+  refresh_token_present?: boolean
+  refresh_attempted?: boolean
+  refreshed?: boolean
+  refresh_error_kind?: string
+  refresh_error?: string
+  discovery_checked?: boolean
+  discovered_tool_count?: number
+  exposed_tool_count?: number
+  discovery_error?: string
 }
 
 export interface StartResponse {

@@ -32,8 +32,8 @@ type RouteDraft = {
   enabled: boolean
   public_host: string
   public_path: string
+  upstream: string
   backend_url: string
-  backend_mcp_path: string
   scopes: string
   health_path: string
 }
@@ -43,8 +43,8 @@ const EMPTY_DRAFT: RouteDraft = {
   enabled: true,
   public_host: '',
   public_path: '/',
+  upstream: '',
   backend_url: '',
-  backend_mcp_path: '/mcp',
   scopes: '',
   health_path: '',
 }
@@ -55,8 +55,8 @@ function draftFromRoute(route: ProtectedMcpRoute): RouteDraft {
     enabled: route.enabled,
     public_host: route.public_host,
     public_path: route.public_path,
-    backend_url: route.backend_url,
-    backend_mcp_path: route.backend_mcp_path,
+    upstream: route.upstream ?? '',
+    backend_url: route.backend_url ?? '',
     scopes: route.scopes.join(', '),
     health_path: route.health_path ?? '',
   }
@@ -68,8 +68,8 @@ function routeFromDraft(draft: RouteDraft): ProtectedMcpRouteInput {
     enabled: draft.enabled,
     public_host: draft.public_host.trim(),
     public_path: draft.public_path.trim(),
+    upstream: draft.upstream.trim() || null,
     backend_url: draft.backend_url.trim(),
-    backend_mcp_path: draft.backend_mcp_path.trim() || '/mcp',
     scopes: draft.scopes
       .split(',')
       .map((scope) => scope.trim())
@@ -84,11 +84,10 @@ function routeResource(route: ProtectedMcpRoute) {
 
 function isRouteComplete(draft: RouteDraft) {
   return Boolean(
-    draft.name.trim() &&
+      draft.name.trim() &&
       draft.public_host.trim() &&
       draft.public_path.trim() &&
-      draft.backend_url.trim() &&
-      draft.backend_mcp_path.trim(),
+      (draft.backend_url.trim() || draft.upstream.trim()),
   )
 }
 
@@ -144,7 +143,7 @@ export function ProtectedMcpRoutesPanel() {
 
   const handleTest = async () => {
     if (!isRouteComplete(draft)) {
-      setFormError('Name, public host, public path, backend URL, and backend MCP path are required before testing.')
+      setFormError('Name, public host, public path, and backend URL are required before testing.')
       return
     }
 
@@ -166,7 +165,7 @@ export function ProtectedMcpRoutesPanel() {
 
   const handleSave = async () => {
     if (!isRouteComplete(draft)) {
-      setFormError('Name, public host, public path, backend URL, and backend MCP path are required.')
+      setFormError('Name, public host, public path, and backend URL are required.')
       return
     }
 
@@ -278,7 +277,7 @@ export function ProtectedMcpRoutesPanel() {
                     </TableCell>
                     <TableCell className="align-top">
                       <p className="break-all font-mono text-xs text-aurora-text-primary">
-                        {route.backend_url}{route.backend_mcp_path}
+                        {route.upstream ? `upstream:${route.upstream}` : route.backend_url}
                       </p>
                       {route.health_path ? (
                         <p className="mt-1 font-mono text-xs text-aurora-text-muted">health {route.health_path}</p>
@@ -324,7 +323,7 @@ export function ProtectedMcpRoutesPanel() {
                 {isEditing ? `Edit ${editingName}` : 'Add protected route'}
               </h4>
               <p className="mt-1 text-xs text-aurora-text-muted">
-                Paths should be public prefixes such as /tools and backend MCP usually stays /mcp.
+                Paths should be public prefixes such as /tools. Set a Gateway upstream or a backend MCP URL.
               </p>
             </div>
             <Switch
@@ -353,25 +352,23 @@ export function ProtectedMcpRoutesPanel() {
                 placeholder="mcp.example.net"
               />
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="grid gap-1.5">
-                <Label htmlFor="protected-route-public-path">Public path</Label>
-                <Input
-                  id="protected-route-public-path"
-                  value={draft.public_path}
-                  onChange={(event) => updateDraft('public_path', event.target.value)}
-                  placeholder="/tools"
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="protected-route-backend-mcp-path">Backend MCP path</Label>
-                <Input
-                  id="protected-route-backend-mcp-path"
-                  value={draft.backend_mcp_path}
-                  onChange={(event) => updateDraft('backend_mcp_path', event.target.value)}
-                  placeholder="/mcp"
-                />
-              </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="protected-route-public-path">Public path</Label>
+              <Input
+                id="protected-route-public-path"
+                value={draft.public_path}
+                onChange={(event) => updateDraft('public_path', event.target.value)}
+                placeholder="/tools"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="protected-route-upstream">Gateway upstream</Label>
+              <Input
+                id="protected-route-upstream"
+                value={draft.upstream}
+                onChange={(event) => updateDraft('upstream', event.target.value)}
+                placeholder="axon"
+              />
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="protected-route-backend-url">Backend URL</Label>
@@ -379,7 +376,7 @@ export function ProtectedMcpRoutesPanel() {
                 id="protected-route-backend-url"
                 value={draft.backend_url}
                 onChange={(event) => updateDraft('backend_url', event.target.value)}
-                placeholder="http://localhost:3100"
+                placeholder="http://host:3100/mcp"
               />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
