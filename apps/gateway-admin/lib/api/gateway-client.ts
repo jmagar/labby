@@ -277,7 +277,11 @@ async function mutateGatewayEnabled(
   signal?: AbortSignal,
 ): Promise<Gateway> {
   if (action === 'gateway.mcp.enable') {
-    const view = await gatewayAction<BackendGatewayView>(action, confirmGatewayParams({ name: id }), signal)
+    const view = await gatewayAction<BackendGatewayView>(
+      action,
+      confirmGatewayParams({ name: id }),
+      signal,
+    )
     return normalizeGatewayView(view, true, undefined, signal)
   }
 

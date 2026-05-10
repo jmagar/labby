@@ -1,7 +1,7 @@
 use axum::extract::{Form, State};
 use axum::{
     Json,
-    http::{HeaderValue, header},
+    http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use base64::Engine;
@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tracing::{info, warn};
 
-use crate::error::AuthError;
+use crate::error::{AuthError, AuthErrorKind};
 use crate::jwt::AccessClaims;
 use crate::state::AuthState;
 use crate::types::AuthorizationCodeRow;
@@ -19,34 +19,122 @@ use crate::util::{
     duration_secs_usize, expires_at, fingerprint, now_unix, random_token, timestamp_usize,
 };
 
-pub async fn token(
-    State(state): State<AuthState>,
-    Form(request): Form<TokenRequest>,
-) -> Result<impl IntoResponse, AuthError> {
+pub async fn token(State(state): State<AuthState>, Form(request): Form<TokenRequest>) -> Response {
     info!(
         grant_type = %request.grant_type,
         client_id = request.client_id.as_deref().unwrap_or("<missing>"),
         requested_resource = request.resource.as_deref().unwrap_or("<default>"),
         "oauth token request received"
     );
-    let response = match request.grant_type.as_str() {
-        "authorization_code" => authorization_code_grant(state, request)
-            .await
-            .map(|response| TokenResponseWithCache(Json(response))),
-        "refresh_token" => refresh_token_grant(state, request)
-            .await
-            .map(|response| TokenResponseWithCache(Json(response))),
-        other => {
-            warn!(grant_type = %other, "oauth token rejected: unsupported grant type");
-            Err(AuthError::Validation(format!(
-                "unsupported grant_type `{other}`"
-            )))
-        }
-    };
+    let response: Result<TokenResponseWithCache, TokenEndpointError> =
+        match request.grant_type.as_str() {
+            "authorization_code" => authorization_code_grant(state, request)
+                .await
+                .map(|response| TokenResponseWithCache(Json(response)))
+                .map_err(TokenEndpointError::Auth),
+            "refresh_token" => refresh_token_grant(state, request)
+                .await
+                .map(|response| TokenResponseWithCache(Json(response)))
+                .map_err(TokenEndpointError::Auth),
+            other => {
+                warn!(grant_type = %other, "oauth token rejected: unsupported grant type");
+                Err(TokenEndpointError::UnsupportedGrantType(other.to_string()))
+            }
+        };
 
     match response {
-        Ok(response) => Ok(response),
-        Err(error) => Err(error),
+        Ok(response) => response.into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+
+enum TokenEndpointError {
+    Auth(AuthError),
+    UnsupportedGrantType(String),
+}
+
+impl TokenEndpointError {
+    fn oauth_error(&self) -> &'static str {
+        match self {
+            Self::Auth(AuthError::InvalidGrant(_)) => "invalid_grant",
+            Self::UnsupportedGrantType(_) => "unsupported_grant_type",
+            Self::Auth(AuthError::AuthFailed(_) | AuthError::InvalidAccessToken) => {
+                "invalid_client"
+            }
+            Self::Auth(AuthError::RateLimited { .. }) => "temporarily_unavailable",
+            Self::Auth(AuthError::Validation(_)) => "invalid_request",
+            Self::Auth(
+                AuthError::Config(_)
+                | AuthError::Storage(_)
+                | AuthError::Network(_)
+                | AuthError::Server(_)
+                | AuthError::Decode(_)
+                | AuthError::InsecurePermissions { .. },
+            ) => "server_error",
+        }
+    }
+
+    fn log_kind(&self) -> &'static str {
+        match self {
+            Self::Auth(error) => error.kind(),
+            Self::UnsupportedGrantType(_) => "unsupported_grant_type",
+        }
+    }
+
+    fn status(&self) -> StatusCode {
+        match self {
+            Self::Auth(AuthError::InvalidGrant(_))
+            | Self::Auth(AuthError::Validation(_))
+            | Self::UnsupportedGrantType(_) => StatusCode::BAD_REQUEST,
+            Self::Auth(AuthError::AuthFailed(_) | AuthError::InvalidAccessToken) => {
+                StatusCode::UNAUTHORIZED
+            }
+            Self::Auth(AuthError::RateLimited { .. }) => StatusCode::TOO_MANY_REQUESTS,
+            Self::Auth(
+                AuthError::Config(_)
+                | AuthError::Storage(_)
+                | AuthError::Network(_)
+                | AuthError::Server(_)
+                | AuthError::Decode(_)
+                | AuthError::InsecurePermissions { .. },
+            ) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    fn description(&self) -> String {
+        match self {
+            Self::Auth(error) => error.to_string(),
+            Self::UnsupportedGrantType(grant_type) => {
+                format!("unsupported grant_type `{grant_type}`")
+            }
+        }
+    }
+
+    fn retry_after_ms(&self) -> Option<u64> {
+        match self {
+            Self::Auth(AuthError::RateLimited { retry_after_ms, .. }) => Some(*retry_after_ms),
+            _ => None,
+        }
+    }
+}
+
+impl IntoResponse for TokenEndpointError {
+    fn into_response(self) -> Response {
+        let status = self.status();
+        let log_kind = self.log_kind();
+        let retry_after_ms = self.retry_after_ms();
+        let body = Json(serde_json::json!({
+            "error": self.oauth_error(),
+            "error_description": self.description(),
+        }));
+        let mut response = (status, body).into_response();
+        response.extensions_mut().insert(AuthErrorKind(log_kind));
+        if let Some(retry_after_ms) = retry_after_ms
+            && let Ok(value) = HeaderValue::from_str(&(retry_after_ms / 1_000).max(1).to_string())
+        {
+            response.headers_mut().insert(header::RETRY_AFTER, value);
+        }
+        apply_token_cache_headers(response)
     }
 }
 
@@ -568,6 +656,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn token_endpoint_errors_use_oauth_error_shape() {
+        let state = test_auth_state_with_registered_client().await;
+        let app = router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/token")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(
+                        "grant_type=refresh_token&refresh_token=missing&client_id=client",
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .and_then(|value| value.to_str().ok()),
+            Some("no-store")
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(header::PRAGMA)
+                .and_then(|value| value.to_str().ok()),
+            Some("no-cache")
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "invalid_grant");
+        assert_eq!(json["error_description"], "unknown refresh_token");
+        assert!(json.get("kind").is_none());
+        assert!(json.get("message").is_none());
+    }
+
+    #[tokio::test]
+    async fn token_endpoint_unsupported_grant_type_uses_oauth_error_shape() {
+        let state = test_auth_state_with_registered_client().await;
+        let app = router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/token")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from("grant_type=password&client_id=client"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "unsupported_grant_type");
+        assert_eq!(
+            json["error_description"],
+            "unsupported grant_type `password`"
+        );
+    }
+
+    #[tokio::test]
     async fn token_endpoint_refresh_grant_sets_cache_headers() {
         let state = test_auth_state_with_mock_google().await;
         state
@@ -634,7 +791,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

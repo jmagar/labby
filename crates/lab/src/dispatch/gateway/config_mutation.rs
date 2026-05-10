@@ -2,27 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use lab_apis::extract::types::ServiceCreds;
 
-use crate::config::UpstreamConfig;
 use crate::dispatch::error::ToolError;
-
-pub(super) fn ensure_stdio_admin_ack(
-    action: &str,
-    upstream: &UpstreamConfig,
-    allow_stdio: bool,
-) -> Result<(), ToolError> {
-    if upstream.command.is_none() || !upstream.enabled || allow_stdio {
-        return Ok(());
-    }
-
-    Err(ToolError::InvalidParam {
-        message: format!(
-            "{action} would execute local command `{}` for stdio gateway `{}`; resend with `allow_stdio: true` only after operator approval",
-            upstream.command.as_deref().unwrap_or("<unknown>"),
-            upstream.name
-        ),
-        param: "allow_stdio".to_string(),
-    })
-}
 
 pub(super) fn read_env_values(
     path: &std::path::Path,

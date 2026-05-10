@@ -246,13 +246,9 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
 
   const handleSave = async (input: CreateGatewayInput | UpdateGatewayInput) => {
     if (!gateway) return
-    try {
-      await updateGateway(gateway.id, input as UpdateGatewayInput)
-      toast.success('Gateway updated successfully')
-      setEditOpen(false)
-    } catch (error) {
-      toast.error(getErrorMessage(error, 'Failed to update gateway'))
-    }
+    await updateGateway(gateway.id, input as UpdateGatewayInput)
+    toast.success('Gateway updated successfully')
+    setEditOpen(false)
   }
 
   const handleDelete = async () => {

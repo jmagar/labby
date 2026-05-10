@@ -96,6 +96,42 @@ test('gatewayApi.create sends confirm=true with destructive gateway adds', async
   )
 })
 
+test('gatewayApi.create does not send allow_stdio for stdio gateway adds', async () => {
+  await withGatewayFetch(
+    {
+      'gateway.add': () => ({
+        ...standardGatewayView,
+        config: {
+          name: 'fixture-stdio',
+          command: 'example-mcp-server',
+          args: ['--stdio'],
+          proxy_resources: false,
+        },
+      }),
+      'gateway.mcp.list': () => [],
+      'gateway.test': () => standardGatewayView.runtime,
+      'gateway.discovered_tools': () => ['tool.alpha'],
+      'gateway.discovered_resources': () => ['lab://resource.alpha'],
+      'gateway.discovered_prompts': () => ['prompt.alpha'],
+    },
+    async (requests) => {
+      await gatewayApi.create({
+        name: 'fixture-stdio',
+        transport: 'stdio',
+        config: {
+          command: 'example-mcp-server',
+          args: ['--stdio'],
+        },
+      } as never)
+
+      assert.equal(
+        requests.find((request) => request.action === 'gateway.add')?.params.allow_stdio,
+        undefined,
+      )
+    },
+  )
+})
+
 test('gatewayApi.create sends pasted bearer tokens as a separate payload field', async () => {
   await withGatewayFetch(
     {
@@ -164,6 +200,45 @@ test('gatewayApi.update sends confirm=true with destructive gateway updates', as
       assert.equal(
         requests.find((request) => request.action === 'gateway.update')?.params.confirm,
         true,
+      )
+    },
+  )
+})
+
+test('gatewayApi.update does not send allow_stdio for stdio gateway updates', async () => {
+  await withGatewayFetch(
+    {
+      'gateway.update': () => ({
+        ...standardGatewayView,
+        config: {
+          name: 'fixture-stdio',
+          command: 'example-mcp-server',
+          args: ['--stdio'],
+          proxy_resources: false,
+        },
+      }),
+      'gateway.mcp.list': () => [],
+      'gateway.test': () => standardGatewayView.runtime,
+      'gateway.discovered_tools': () => ['tool.alpha'],
+      'gateway.discovered_resources': () => ['lab://resource.alpha'],
+      'gateway.discovered_prompts': () => ['prompt.alpha'],
+    },
+    async (requests) => {
+      await gatewayApi.update(
+        'fixture-stdio',
+        {
+          name: 'fixture-stdio',
+          transport: 'stdio',
+          config: {
+            command: 'example-mcp-server',
+            args: ['--stdio'],
+          },
+        } as never,
+      )
+
+      assert.equal(
+        requests.find((request) => request.action === 'gateway.update')?.params.allow_stdio,
+        undefined,
       )
     },
   )

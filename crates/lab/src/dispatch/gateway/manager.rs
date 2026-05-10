@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
-use arc_swap::ArcSwapOption;
+use arc_swap::{ArcSwap, ArcSwapOption};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
@@ -31,7 +31,7 @@ use super::config::{
     load_gateway_config, remove_protected_mcp_route, remove_upstream, update_protected_mcp_route,
     update_upstream, validate_bearer_token_env_name, validate_tool_search, write_gateway_config,
 };
-use super::config_mutation::{ensure_stdio_admin_ack, read_env_values, values_to_service_creds};
+use super::config_mutation::{read_env_values, values_to_service_creds};
 use super::index::{SearchHit, ToolIndex};
 use super::params::GatewayUpdatePatch;
 use super::projection::*;
@@ -127,7 +127,7 @@ pub struct GatewayManager {
     notifier: Option<CatalogChangeNotifier>,
     pub(super) oauth_client_cache: Option<OauthClientCache>,
     pub(super) upstream_oauth_managers: Option<Arc<dashmap::DashMap<String, UpstreamOauthManager>>>,
-    builtin_service_registry: Arc<ToolRegistry>,
+    builtin_service_registry: Arc<ArcSwap<ToolRegistry>>,
     /// Resources needed to build transient OAuth managers for probed upstreams.
     pub(super) oauth_sqlite: Option<lab_auth::sqlite::SqliteStore>,
     pub(super) oauth_key: Option<EncryptionKey>,
@@ -147,7 +147,9 @@ impl GatewayManager {
             notifier: None,
             oauth_client_cache: None,
             upstream_oauth_managers: None,
-            builtin_service_registry: Arc::new(crate::registry::build_default_registry()),
+            builtin_service_registry: Arc::new(ArcSwap::from_pointee(
+                crate::registry::build_default_registry(),
+            )),
             oauth_sqlite: None,
             oauth_key: None,
             oauth_redirect_uri: None,
@@ -158,12 +160,16 @@ impl GatewayManager {
 
     #[must_use]
     pub fn with_builtin_service_registry(mut self, registry: ToolRegistry) -> Self {
-        self.builtin_service_registry = Arc::new(registry);
+        self.builtin_service_registry = Arc::new(ArcSwap::from_pointee(registry));
         self
     }
 
-    pub(crate) fn builtin_service_registry(&self) -> &ToolRegistry {
-        &self.builtin_service_registry
+    pub fn set_builtin_service_registry(&self, registry: ToolRegistry) {
+        self.builtin_service_registry.store(Arc::new(registry));
+    }
+
+    pub(crate) fn builtin_service_registry(&self) -> Arc<ToolRegistry> {
+        self.builtin_service_registry.load_full()
     }
 
     fn registered_service_meta(
@@ -525,7 +531,7 @@ impl GatewayManager {
     pub async fn test(
         &self,
         spec_or_name: Result<&UpstreamConfig, &str>,
-        allow_stdio: bool,
+        _allow_stdio: bool,
     ) -> Result<GatewayRuntimeView, ToolError> {
         let upstream = match spec_or_name {
             Ok(spec) => spec.clone(),
@@ -541,16 +547,16 @@ impl GatewayManager {
                     })?
             }
         };
-        ensure_stdio_admin_ack("gateway.test", &upstream, allow_stdio)?;
 
         let pool = match &self.oauth_client_cache {
             Some(cache) => UpstreamPool::new().with_oauth_client_cache(cache.clone()),
             None => UpstreamPool::new(),
         };
+        let registry = self.builtin_service_registry();
         pool.discover_all_for_subject_with_in_process_peers(
             &[upstream.clone()],
             SHARED_GATEWAY_OAUTH_SUBJECT,
-            self.builtin_service_registry(),
+            &registry,
         )
         .await;
 
@@ -736,7 +742,7 @@ impl GatewayManager {
         &self,
         mut spec: UpstreamConfig,
         bearer_token_value: Option<String>,
-        allow_stdio: bool,
+        _allow_stdio: bool,
         origin: Option<&str>,
         owner: Option<UpstreamRuntimeOwner>,
     ) -> Result<GatewayView, ToolError> {
@@ -761,8 +767,6 @@ impl GatewayManager {
             validate_bearer_token_env_name(&trimmed)?;
             spec.bearer_token_env = Some(trimmed);
         }
-
-        ensure_stdio_admin_ack("gateway.add", &spec, allow_stdio)?;
 
         if let Some(token_value) = bearer_token_value.as_deref().map(str::trim)
             && !token_value.is_empty()
@@ -800,7 +804,7 @@ impl GatewayManager {
         name: &str,
         patch: GatewayUpdatePatch,
         bearer_token_value: Option<String>,
-        allow_stdio: bool,
+        _allow_stdio: bool,
         origin: Option<&str>,
         owner: Option<UpstreamRuntimeOwner>,
     ) -> Result<GatewayView, ToolError> {
@@ -858,28 +862,26 @@ impl GatewayManager {
             };
             patch.bearer_token_env = Some(Some(env_name.clone()));
             update_upstream(&mut cfg, name, patch)?;
-            let updated = cfg
-                .upstream
+            cfg.upstream
                 .iter()
-                .find(|u| u.name == updated_name)
+                .any(|u| u.name == updated_name)
+                .then_some(())
                 .ok_or_else(|| ToolError::Sdk {
                     sdk_kind: "not_found".to_string(),
                     message: format!("gateway `{updated_name}` not found after update"),
                 })?;
-            ensure_stdio_admin_ack("gateway.update", updated, allow_stdio)?;
             self.persist_gateway_bearer_token(&env_name, token_value)
                 .await?;
         } else {
             update_upstream(&mut cfg, name, patch)?;
-            let updated = cfg
-                .upstream
+            cfg.upstream
                 .iter()
-                .find(|u| u.name == updated_name)
+                .any(|u| u.name == updated_name)
+                .then_some(())
                 .ok_or_else(|| ToolError::Sdk {
                     sdk_kind: "not_found".to_string(),
                     message: format!("gateway `{updated_name}` not found after update"),
                 })?;
-            ensure_stdio_admin_ack("gateway.update", updated, allow_stdio)?;
         }
         self.persist_config(cfg).await?;
         let diff = self.reload_with_origin_unlocked(origin, owner).await?;
@@ -1129,8 +1131,8 @@ impl GatewayManager {
         let cfg = tokio::task::spawn_blocking(move || load_gateway_config(&path))
             .await
             .map_err(|e| ToolError::internal_message(format!("config read task failed: {e}")))??;
-        let (cfg, migration) =
-            quarantine_unregistered_virtual_servers(cfg, self.builtin_service_registry());
+        let registry = self.builtin_service_registry();
+        let (cfg, migration) = quarantine_unregistered_virtual_servers(cfg, &registry);
         if migration.changed() {
             tracing::warn!(
                 action = "gateway.config.migrate",
@@ -1203,10 +1205,11 @@ impl GatewayManager {
                     .with_runtime_origin(runtime_origin_tag(origin))
                     .with_runtime_owner(owner),
             );
+            let registry = self.builtin_service_registry();
             pool.discover_all_for_subject_with_in_process_peers(
                 &cfg.upstream,
                 SHARED_GATEWAY_OAUTH_SUBJECT,
-                self.builtin_service_registry(),
+                &registry,
             )
             .await;
             Some(pool)

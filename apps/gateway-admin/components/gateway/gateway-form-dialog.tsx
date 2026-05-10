@@ -20,7 +20,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { FieldGroup, Field, FieldLabel, FieldDescription } from '@/components/ui/field'
-import { useGatewayMutations, useServiceConfig, useSupportedServices } from '@/lib/hooks/use-gateways'
+import {
+  useGatewayMutations,
+  useProtectedMcpRoutes,
+  useServiceConfig,
+  useSupportedServices,
+} from '@/lib/hooks/use-gateways'
 import type {
   Gateway,
   CreateGatewayInput,
@@ -38,6 +43,7 @@ import { GatewayApiError } from '@/lib/api/gateway-client-core'
 import { upstreamOauthApi } from '@/lib/api/upstream-oauth-client'
 import { useUpstreamOauthStatus } from '@/lib/hooks/use-upstream-oauth'
 import type { OAuthConnectState } from '@/lib/types/upstream-oauth'
+import { formatStdioCommandLine, parseStdioCommandLine } from '@/lib/stdio-command'
 import { Badge } from '@/components/ui/badge'
 import {
   SERVICE_BRANDS,
@@ -73,7 +79,7 @@ function normalizeProtectedPublicPath(raw: string): string {
   const normalized = withSlash.replace(/\/+/g, '/').replace(/\/$/, '')
 
   if (!normalized || normalized === '/') {
-    throw new Error('Use a non-root path such as /tools')
+    throw new Error('Use a non-root path such as tools')
   }
   if (!/^\/[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(normalized)) {
     throw new Error('Use letters, numbers, dots, underscores, hyphens, and slashes')
@@ -147,7 +153,6 @@ const emptyCustomState = {
   name: '',
   url: '',
   command: '',
-  args: '',
   bearerTokenEnv: '',
   proxyResources: true,
   proxyPrompts: true,
@@ -171,6 +176,7 @@ export function GatewayFormDialog({
   const nameAutoRef = useRef(false)
   const skipUrlOauthResetRef = useRef(false)
   const { data: supportedServices } = useSupportedServices()
+  const { data: protectedRoutes = [] } = useProtectedMcpRoutes()
   const { testGateway, saveServiceConfig, enableVirtualServer, disableVirtualServer, addProtectedRoute, updateProtectedRoute } =
     useGatewayMutations()
 
@@ -180,7 +186,6 @@ export function GatewayFormDialog({
   const [url, setUrl] = useState('')
   const [protectedPublicPath, setProtectedPublicPath] = useState('')
   const [command, setCommand] = useState('')
-  const [args, setArgs] = useState('')
   const [authMode, setAuthMode] = useState<GatewayAuthMode>('none')
   const [authSource, setAuthSource] = useState<GatewayAuthSource>('paste')
   const [bearerTokenEnv, setBearerTokenEnv] = useState('')
@@ -211,6 +216,18 @@ export function GatewayFormDialog({
     [selectedService, supportedServices],
   )
   const serviceEnvFields = useMemo(() => serviceFields(serviceMeta), [serviceMeta])
+  const protectedRoutePathOptions = useMemo(() => {
+    const seen = new Set<string>()
+    return protectedRoutes
+      .filter((route) => route.enabled && route.public_host === PROTECTED_MCP_PUBLIC_HOST)
+      .map((route) => route.public_path)
+      .filter((path) => {
+        if (seen.has(path)) return false
+        seen.add(path)
+        return true
+      })
+      .sort((left, right) => left.localeCompare(right))
+  }, [protectedRoutes])
   const { data: serviceConfig } = useServiceConfig(mode === 'lab' && selectedService ? selectedService : null)
 
   const oauthUpstream = oauthState.kind === 'authorizing' || oauthState.kind === 'connected' || oauthState.kind === 'discovered'
@@ -338,8 +355,7 @@ export function GatewayFormDialog({
         skipUrlOauthResetRef.current = initialAuthMode === 'oauth'
         setUrl(gateway.config.url || '')
         setProtectedPublicPath('')
-        setCommand(gateway.config.command || '')
-        setArgs(gateway.config.args?.join(' ') || '')
+        setCommand(formatStdioCommandLine(gateway.config.command, gateway.config.args))
         setAuthMode(initialAuthMode)
         if (initialAuthMode === 'oauth') {
           setOauthState({ kind: 'connected', upstream: gateway.name, registration_strategy: 'preregistered', scopes: undefined })
@@ -358,7 +374,6 @@ export function GatewayFormDialog({
         setUrl(emptyCustomState.url)
         setProtectedPublicPath('')
         setCommand(emptyCustomState.command)
-        setArgs(emptyCustomState.args)
         setAuthMode('none')
         setAuthSource('paste')
         setBearerTokenEnv(emptyCustomState.bearerTokenEnv)
@@ -385,6 +400,15 @@ export function GatewayFormDialog({
     setOauthState({ kind: 'idle' })
     setOauthProbed(null)
   }, [url])
+
+  useEffect(() => {
+    if (transport !== 'stdio') return
+    setAuthMode('none')
+    setOauthState({ kind: 'idle' })
+    setOauthProbed(null)
+    setBearerTokenEnv('')
+    setBearerTokenValue('')
+  }, [transport])
 
   useEffect(() => {
     if (!serviceMeta || !serviceConfig) return
@@ -416,26 +440,31 @@ export function GatewayFormDialog({
         }
       }
 
-      if (protectedPublicPath.trim()) {
-        try {
-          normalizeProtectedPublicPath(protectedPublicPath)
-        } catch (error) {
-          newErrors.protectedPublicPath = error instanceof Error
-            ? error.message
-            : 'Invalid protected route path'
-        }
+    } else {
+      try {
+        parseStdioCommandLine(command)
+      } catch (error) {
+        newErrors.command = error instanceof Error ? error.message : 'Invalid command'
       }
-    } else if (!command.trim()) {
-      newErrors.command = 'Command is required'
     }
 
-    if (authMode === 'oauth') {
+    if (protectedPublicPath.trim()) {
+      try {
+        normalizeProtectedPublicPath(protectedPublicPath)
+      } catch (error) {
+        newErrors.protectedPublicPath = error instanceof Error
+          ? error.message
+          : 'Invalid protected route path'
+      }
+    }
+
+    if (transport === 'http' && authMode === 'oauth') {
       if (oauthState.kind !== 'connected' && !oauthStatus?.authenticated) {
         newErrors.oauth = 'Complete OAuth authorization before saving'
       }
     }
 
-    if (authMode === 'bearer') {
+    if (transport === 'http' && authMode === 'bearer') {
       if (authSource === 'env') {
         if (!bearerTokenEnv.trim()) {
           newErrors.bearerTokenEnv = 'Environment variable name is required'
@@ -479,34 +508,39 @@ export function GatewayFormDialog({
     return Object.keys(newErrors).length === 0
   }
 
-  const buildInput = (): CreateGatewayInput => ({
-    name,
-    transport,
-    config: {
-      ...(transport === 'http'
-        ? { url }
-        : {
-            command,
-            args: args.trim() ? args.split(/\s+/) : undefined,
-          }),
-      bearer_token_env:
-        authMode === 'none' || authMode === 'oauth'
-          ? ''
-          : authSource === 'env'
-            ? bearerTokenEnv
-            : bearerTokenEnv || undefined,
-      bearer_token_value:
-        authMode === 'bearer' && authSource === 'paste'
-          ? bearerTokenValue
-          : undefined,
-      oauth:
-        authMode === 'oauth' && oauthState.kind === 'connected' && oauthState.registration_strategy !== 'unknown'
-          ? { registration_strategy: oauthState.registration_strategy, scopes: oauthState.scopes }
-          : undefined,
-      proxy_resources: proxyResources,
-      proxy_prompts: proxyPrompts,
-    },
-  })
+  const buildInput = (): CreateGatewayInput => {
+    const stdio = transport === 'stdio' ? parseStdioCommandLine(command) : null
+    const authEnabled = transport === 'http'
+    return {
+      name,
+      transport,
+      config: {
+        ...(transport === 'http'
+          ? { url }
+          : {
+              command: stdio?.command,
+              args: stdio && stdio.args.length > 0 ? stdio.args : undefined,
+            }),
+        bearer_token_env: !authEnabled
+          ? undefined
+          : authMode === 'none' || authMode === 'oauth'
+            ? ''
+            : authSource === 'env'
+              ? bearerTokenEnv
+              : bearerTokenEnv || undefined,
+        bearer_token_value:
+          authEnabled && authMode === 'bearer' && authSource === 'paste'
+            ? bearerTokenValue
+            : undefined,
+        oauth:
+          authEnabled && authMode === 'oauth' && oauthState.kind === 'connected' && oauthState.registration_strategy !== 'unknown'
+            ? { registration_strategy: oauthState.registration_strategy, scopes: oauthState.scopes }
+            : undefined,
+        proxy_resources: proxyResources,
+        proxy_prompts: proxyPrompts,
+      },
+    }
+  }
 
   const buildProtectedRouteInput = (publicPath: string): ProtectedMcpRouteInput => ({
     name: name.trim(),
@@ -519,14 +553,24 @@ export function GatewayFormDialog({
     health_path: null,
   })
 
-  const saveProtectedRoute = async (publicPath: string, signal?: AbortSignal) => {
+  const saveProtectedRoute = async (publicPath: string, signal?: AbortSignal): Promise<{ reused: boolean }> => {
     const route = buildProtectedRouteInput(publicPath)
+    const existingRoute = protectedRoutes.find(
+      (item) =>
+        item.enabled &&
+        item.public_host === route.public_host &&
+        item.public_path === route.public_path,
+    )
+    if (existingRoute && existingRoute.name !== route.name) {
+      return { reused: true }
+    }
     try {
       await addProtectedRoute(route, signal)
+      return { reused: false }
     } catch (error) {
       if (error instanceof GatewayApiError && error.status === 409) {
         await updateProtectedRoute(route.name, route, signal)
-        return
+        return { reused: false }
       }
       throw error
     }
@@ -606,17 +650,19 @@ export function GatewayFormDialog({
 
       if (!validateCustom()) return
       setSaveError(null)
-      const normalizedProtectedPath = transport === 'http'
-        ? normalizeProtectedPublicPath(protectedPublicPath)
-        : ''
+      const normalizedProtectedPath = normalizeProtectedPublicPath(protectedPublicPath)
       await onSave(buildInput())
+      let reusedProtectedRoute = false
       if (normalizedProtectedPath) {
-        await saveProtectedRoute(normalizedProtectedPath, controller.signal)
+        const protectedRouteResult = await saveProtectedRoute(normalizedProtectedPath, controller.signal)
+        reusedProtectedRoute = protectedRouteResult.reused
       }
       if (controller.signal.aborted) return
       toast.success(
         normalizedProtectedPath
-          ? `Gateway saved and protected at https://${PROTECTED_MCP_PUBLIC_HOST}${normalizedProtectedPath}`
+          ? reusedProtectedRoute
+            ? `Gateway saved and joined https://${PROTECTED_MCP_PUBLIC_HOST}${normalizedProtectedPath}`
+            : `Gateway saved and protected at https://${PROTECTED_MCP_PUBLIC_HOST}${normalizedProtectedPath}`
           : isEditing
             ? 'Gateway updated successfully'
             : 'Gateway created successfully',
@@ -677,10 +723,16 @@ export function GatewayFormDialog({
       const u = url.trim()
       if (u) cfg.url = u
     } else {
-      const cmd = command.trim()
-      if (cmd) cfg.command = cmd
-      const a = args.trim()
-      if (a) cfg.args = a.split(/\s+/).filter(Boolean)
+      const trimmed = command.trim()
+      if (trimmed) {
+        try {
+          const parsed = parseStdioCommandLine(trimmed)
+          cfg.command = parsed.command
+          if (parsed.args.length > 0) cfg.args = parsed.args
+        } catch {
+          cfg.command = trimmed
+        }
+      }
     }
     return { [n]: cfg }
   }
@@ -702,7 +754,7 @@ export function GatewayFormDialog({
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { onFormChange() }, [name, url, command, args, transport, jsonDrawerOpen])
+  useEffect(() => { onFormChange() }, [name, url, command, transport, jsonDrawerOpen])
 
   const parseJsonToForm = (text: string) => {
     if (syncingRef.current) return
@@ -723,10 +775,7 @@ export function GatewayFormDialog({
         setUrl(cfg.url)
       } else if (typeof cfg.command === 'string') {
         setTransport('stdio')
-        setCommand(cfg.command)
-        if (Array.isArray(cfg.args)) {
-          setArgs((cfg.args as string[]).join(' '))
-        }
+        setCommand(formatStdioCommandLine(cfg.command, Array.isArray(cfg.args) ? cfg.args as string[] : []))
       }
       // Defer reset — same reason as onFormChange: the useEffect fires after React
       // flushes the setName/setUrl/setTransport calls; guard must still be true then.
@@ -966,60 +1015,65 @@ export function GatewayFormDialog({
                   </div>
                   {errors.url && <p className="text-sm text-destructive">{errors.url}</p>}
                 </Field>
-                <Field>
-                  <FieldLabel htmlFor="protected-public-path">Protected route path</FieldLabel>
-                  <div className="flex overflow-hidden rounded-md border border-aurora-border-strong bg-aurora-control-surface focus-within:ring-2 focus-within:ring-ring">
-                    <span className="hidden items-center border-r border-aurora-border-strong px-3 text-sm text-aurora-text-muted sm:flex">
-                      https://{PROTECTED_MCP_PUBLIC_HOST}
-                    </span>
-                    <Input
-                      id="protected-public-path"
-                      value={protectedPublicPath}
-                      onChange={(event) => setProtectedPublicPath(event.target.value)}
-                      placeholder="/tools"
-                      className={cn(
-                        'border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0',
-                        errors.protectedPublicPath && 'text-destructive',
-                      )}
-                    />
-                  </div>
-                  {errors.protectedPublicPath ? (
-                    <p className="text-sm text-destructive">{errors.protectedPublicPath}</p>
-                  ) : (
-                    <FieldDescription>
-                      Optional. When set, Lab publishes this server through Google OAuth at that public path.
-                    </FieldDescription>
-                  )}
-                </Field>
               </FieldGroup>
             )}
 
             {transport === 'stdio' && (
               <FieldGroup>
                 <Field>
-                  <FieldLabel htmlFor="command">Command</FieldLabel>
+                  <FieldLabel htmlFor="command">Command line</FieldLabel>
                   <Input
                     id="command"
                     value={command}
                     onChange={(event) => setCommand(event.target.value)}
-                    placeholder="npx"
+                    placeholder="npx -y @modelcontextprotocol/server-filesystem /path"
                     className={errors.command ? 'border-destructive' : ''}
                   />
                   {errors.command && <p className="text-sm text-destructive">{errors.command}</p>}
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="args">Arguments</FieldLabel>
-                  <Input
-                    id="args"
-                    value={args}
-                    onChange={(event) => setArgs(event.target.value)}
-                    placeholder="-y @modelcontextprotocol/server-filesystem /path"
-                  />
-                  <FieldDescription>Space-separated command arguments</FieldDescription>
+                  <FieldDescription>
+                    Enter the full stdio launch command. Quoted arguments with spaces are preserved.
+                  </FieldDescription>
                 </Field>
               </FieldGroup>
             )}
 
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="protected-public-path">Protected route path</FieldLabel>
+                <div className="flex overflow-hidden rounded-md border border-aurora-border-strong bg-aurora-control-surface focus-within:ring-2 focus-within:ring-ring">
+                  <span className="hidden items-center border-r border-aurora-border-strong px-3 text-sm text-aurora-text-muted sm:flex">
+                    https://{PROTECTED_MCP_PUBLIC_HOST}/
+                  </span>
+                  <Input
+                    id="protected-public-path"
+                    list="protected-route-path-options"
+                    value={protectedPublicPath}
+                    onChange={(event) => setProtectedPublicPath(event.target.value)}
+                    placeholder="tools"
+                    className={cn(
+                      'border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0',
+                      errors.protectedPublicPath && 'text-destructive',
+                    )}
+                  />
+                  <datalist id="protected-route-path-options">
+                    {protectedRoutePathOptions.map((path) => (
+                      <option key={path} value={path.replace(/^\//, '')}>
+                        {`https://${PROTECTED_MCP_PUBLIC_HOST}${path}`}
+                      </option>
+                    ))}
+                  </datalist>
+                </div>
+                {errors.protectedPublicPath ? (
+                  <p className="text-sm text-destructive">{errors.protectedPublicPath}</p>
+                ) : (
+                  <FieldDescription>
+                    Optional. When set, Lab publishes this gateway through Google OAuth at that public path.
+                  </FieldDescription>
+                )}
+              </Field>
+            </FieldGroup>
+
+            {transport === 'http' && (
             <FieldGroup>
               <Field className="space-y-4">
                 <div className="space-y-1">
@@ -1217,38 +1271,47 @@ export function GatewayFormDialog({
                 )}
               </Field>
             </FieldGroup>
+            )}
 
-            <div className="flex items-center justify-between rounded-lg border p-4">
-              <div className="space-y-0.5">
-                <Label htmlFor="proxy-resources" className="font-medium">
-                  Proxy Resources
-                </Label>
-                <p className="text-sm text-aurora-text-muted">
-                  Forward MCP resource requests to this gateway
-                </p>
-              </div>
-              <Switch
-                id="proxy-resources"
-                checked={proxyResources}
-                onCheckedChange={setProxyResources}
-              />
-            </div>
+            <details className="group rounded-lg border p-4">
+              <summary className="flex cursor-pointer select-none list-none items-center gap-2 text-sm font-medium [&::-webkit-details-marker]:hidden">
+                <ChevronRight className="size-4 transition-transform group-open:rotate-90" />
+                Advanced
+              </summary>
+              <div className="mt-4 space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="proxy-resources" className="font-medium">
+                      Proxy Resources
+                    </Label>
+                    <p className="text-sm text-aurora-text-muted">
+                      Forward MCP resource requests to this gateway
+                    </p>
+                  </div>
+                  <Switch
+                    id="proxy-resources"
+                    checked={proxyResources}
+                    onCheckedChange={setProxyResources}
+                  />
+                </div>
 
-            <div className="flex items-center justify-between rounded-lg border p-4">
-              <div className="space-y-0.5">
-                <Label htmlFor="proxy-prompts" className="font-medium">
-                  Proxy Prompts
-                </Label>
-                <p className="text-sm text-aurora-text-muted">
-                  Forward MCP prompt requests to this gateway
-                </p>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="proxy-prompts" className="font-medium">
+                      Proxy Prompts
+                    </Label>
+                    <p className="text-sm text-aurora-text-muted">
+                      Forward MCP prompt requests to this gateway
+                    </p>
+                  </div>
+                  <Switch
+                    id="proxy-prompts"
+                    checked={proxyPrompts}
+                    onCheckedChange={setProxyPrompts}
+                  />
+                </div>
               </div>
-              <Switch
-                id="proxy-prompts"
-                checked={proxyPrompts}
-                onCheckedChange={setProxyPrompts}
-              />
-            </div>
+            </details>
           </TabsContent>
         </Tabs>
         </div>

@@ -95,8 +95,36 @@ FROM debian:trixie-slim AS runtime
 # ca-certificates: reqwest uses rustls for TLS but still validates against the
 # system CA bundle — required for outbound HTTPS calls.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
+ && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+ && mkdir -p /etc/apt/keyrings \
+ && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+    | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+ && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" \
+    > /etc/apt/sources.list.d/nodesource.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends nodejs zsh \
  && rm -rf /var/lib/apt/lists/*
+
+# Agent CLIs used by ACP adapters and by stdio MCP servers that shell out to
+# provider tools. Keep these deterministic so container behavior matches the
+# host credential/runtime format expected by local development.
+RUN mkdir -p /opt/agent-clis \
+ && cd /opt/agent-clis \
+ && npm init -y >/dev/null \
+ && npm install --omit=dev --no-audit --no-fund \
+      @anthropic-ai/claude-code@2.1.132 \
+      @openai/codex@0.130.0 \
+ && ln -sf /opt/agent-clis/node_modules/.bin/claude /usr/local/bin/claude \
+ && ln -sf /opt/agent-clis/node_modules/.bin/codex /usr/local/bin/codex \
+ && npm cache clean --force \
+ && claude --version \
+ && codex --version
+
+# Python MCP servers commonly use `uvx` as their stdio launcher. Install uv
+# into PATH for gateway child processes.
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
+ && uv --version \
+ && uvx --version
 
 # Pre-create XDG directories so the binary never needs mkdir at runtime.
 #   ~/.local/state/lab  — master.lock and runtime state

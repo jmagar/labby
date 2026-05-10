@@ -277,8 +277,9 @@ async fn handle_gateway_actions(
             to_json(manager.get_server(&params.id).await?)
         }
         "gateway.supported_services" => {
+            let registry = manager.builtin_service_registry();
             to_json(super::service_catalog::supported_services_from_registry(
-                manager.builtin_service_registry(),
+                &registry,
             ))
         }
         "gateway.get" => {
@@ -495,8 +496,8 @@ fn compiled_service_actions(
     manager: &GatewayManager,
     service: &str,
 ) -> Result<Vec<ServiceActionView>, ToolError> {
-    let entry = manager
-        .builtin_service_registry()
+    let registry = manager.builtin_service_registry();
+    let entry = registry
         .service(service)
         .ok_or_else(|| ToolError::InvalidParam {
             message: format!("unknown service `{service}`"),
@@ -1201,27 +1202,51 @@ mod tests {
     async fn gateway_test_accepts_name_or_spec() {
         let manager = test_manager();
         manager
-            .replace_config_for_tests(vec![UpstreamConfig {
-                enabled: true,
-                name: "fixture-http".to_string(),
-                url: Some("http://127.0.0.1:9001".to_string()),
-                bearer_token_env: None,
-                command: None,
-                args: Vec::new(),
-                proxy_resources: false,
-                proxy_prompts: false,
-                expose_tools: None,
-                expose_resources: None,
-                expose_prompts: None,
-                oauth: None,
-                tool_search: crate::config::ToolSearchConfig::default(),
-            }])
+            .replace_config_for_tests(vec![
+                UpstreamConfig {
+                    enabled: true,
+                    name: "fixture-http".to_string(),
+                    url: Some("http://127.0.0.1:9001".to_string()),
+                    bearer_token_env: None,
+                    command: None,
+                    args: Vec::new(),
+                    proxy_resources: false,
+                    proxy_prompts: false,
+                    expose_tools: None,
+                    expose_resources: None,
+                    expose_prompts: None,
+                    oauth: None,
+                    tool_search: crate::config::ToolSearchConfig::default(),
+                },
+                UpstreamConfig {
+                    enabled: true,
+                    name: "configured-stdio".to_string(),
+                    url: None,
+                    bearer_token_env: None,
+                    command: Some("echo".to_string()),
+                    args: vec!["hello".to_string()],
+                    proxy_resources: false,
+                    proxy_prompts: false,
+                    expose_tools: None,
+                    expose_resources: None,
+                    expose_prompts: None,
+                    oauth: None,
+                    tool_search: crate::config::ToolSearchConfig::default(),
+                },
+            ])
             .await;
 
         let named =
             dispatch_with_manager(&manager, "gateway.test", json!({"name": "fixture-http"}))
                 .await
                 .expect("named test");
+        let named_stdio = dispatch_with_manager(
+            &manager,
+            "gateway.test",
+            json!({"name": "configured-stdio"}),
+        )
+        .await
+        .expect("configured stdio test should not require allow_stdio");
         let proposed_without_ack = dispatch_with_manager(
             &manager,
             "gateway.test",
@@ -1232,8 +1257,7 @@ mod tests {
             }}),
         )
         .await
-        .expect_err("stdio spec requires explicit allow_stdio acknowledgement");
-        assert_eq!(proposed_without_ack.kind(), "invalid_param");
+        .expect("stdio spec test should not require allow_stdio");
 
         let proposed = dispatch_with_manager(
             &manager,
@@ -1248,6 +1272,8 @@ mod tests {
         .expect("spec test");
 
         assert_eq!(named["name"], "fixture-http");
+        assert_eq!(named_stdio["name"], "configured-stdio");
+        assert_eq!(proposed_without_ack["name"], "fixture-stdio");
         assert_eq!(proposed["name"], "fixture-stdio");
     }
 
@@ -1296,10 +1322,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gateway_add_rejects_enabled_stdio_without_explicit_ack() {
+    async fn gateway_add_allows_enabled_stdio_without_extra_ack() {
         let manager = test_manager();
 
-        let err = dispatch_with_manager(
+        let added = dispatch_with_manager(
             &manager,
             "gateway.add",
             json!({"spec": {
@@ -1309,18 +1335,18 @@ mod tests {
             }}),
         )
         .await
-        .expect_err("stdio add should require acknowledgement");
+        .expect("stdio add should be allowed");
 
-        assert_eq!(err.kind(), "invalid_param");
+        assert_eq!(added["config"]["name"], "fixture-stdio");
     }
 
     #[tokio::test]
-    async fn gateway_update_rejects_enabled_stdio_without_explicit_ack() {
+    async fn gateway_update_allows_enabled_stdio_without_extra_ack() {
         let manager = test_manager();
         dispatch_with_manager(
             &manager,
             "gateway.add",
-            json!({"allow_stdio": true, "spec": {
+            json!({"spec": {
                 "name": "fixture-stdio",
                 "command": "echo",
                 "args": ["hello"]
@@ -1329,15 +1355,15 @@ mod tests {
         .await
         .expect("add stdio");
 
-        let err = dispatch_with_manager(
+        let updated = dispatch_with_manager(
             &manager,
             "gateway.update",
             json!({"name": "fixture-stdio", "patch": {"proxy_resources": true}}),
         )
         .await
-        .expect_err("stdio update should require acknowledgement");
+        .expect("stdio update should be allowed");
 
-        assert_eq!(err.kind(), "invalid_param");
+        assert_eq!(updated["config"]["proxy_resources"], true);
     }
 
     #[tokio::test]

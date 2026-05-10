@@ -15,10 +15,12 @@ use crate::dispatch::gateway::manager::GatewayManager;
 use crate::dispatch::gateway::projection::{redacted_gateway_target, upstream_summary};
 use crate::dispatch::upstream::pool::UpstreamPool;
 use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
-#[cfg(target_os = "linux")]
-use crate::process::unix::read_cmdline;
+#[cfg(all(unix, target_os = "linux"))]
+use crate::process::unix::terminate_process_group_sigkill;
 #[cfg(unix)]
 use crate::process::unix::{pid_is_alive, terminate_sigkill};
+#[cfg(target_os = "linux")]
+use crate::process::unix::{process_group_id, process_has_ancestor, read_cmdline};
 
 #[derive(Clone, Default)]
 pub struct GatewayRuntimeHandle {
@@ -116,7 +118,9 @@ impl GatewayManager {
         pool: Option<&UpstreamPool>,
     ) -> Result<PersistedGatewayRuntimeState, ToolError> {
         let mut state = self.load_runtime_state().await;
-        state.entries.retain(|entry| process_is_alive(entry.pid));
+        state
+            .entries
+            .retain(persisted_runtime_process_still_matches);
 
         if let Some(pool) = pool {
             for upstream in &cfg.upstream {
@@ -176,10 +180,19 @@ impl GatewayManager {
                 .iter()
                 .filter(|entry| entry.upstream == upstream.name)
                 .collect();
-            let stale_count = persisted_rows
+            let persisted_stale_count = persisted_rows
                 .iter()
                 .filter(|entry| Some(entry.pid) != live_pid)
                 .count();
+            let live_stale_count = if upstream.command.is_some() {
+                likely_stale_process_group_count(
+                    upstream,
+                    live_pid.zip(runtime.as_ref().and_then(|meta| meta.pgid)),
+                )
+            } else {
+                0
+            };
+            let stale_count = persisted_stale_count.max(live_stale_count);
             let fallback = if let Some(pid) = live_pid {
                 persisted_rows.into_iter().find(|entry| entry.pid == pid)
             } else {
@@ -332,6 +345,35 @@ fn local_cleanup_patterns() -> Vec<String> {
     ]
 }
 
+#[cfg(target_os = "linux")]
+fn likely_stale_process_group_count(
+    upstream: &UpstreamConfig,
+    live_runtime: Option<(u32, u32)>,
+) -> usize {
+    let patterns = upstream_cleanup_patterns(upstream, false);
+    let mut groups = BTreeSet::new();
+    for matched in matching_processes(&patterns) {
+        for pid in matched.pids {
+            let group = process_group_id(pid).unwrap_or(pid);
+            if live_runtime.is_some_and(|(live_pid, live_pgid)| {
+                group == live_pgid || process_has_ancestor(pid, live_pid)
+            }) {
+                continue;
+            }
+            groups.insert(group);
+        }
+    }
+    groups.len()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn likely_stale_process_group_count(
+    _upstream: &UpstreamConfig,
+    _live_runtime: Option<(u32, u32)>,
+) -> usize {
+    0
+}
+
 pub(super) fn upstream_cleanup_patterns(
     upstream: &UpstreamConfig,
     aggressive: bool,
@@ -354,7 +396,7 @@ pub(super) fn upstream_cleanup_patterns(
         }
         patterns.push(joined);
         for arg in &upstream.args {
-            if arg.contains("mcp") || arg.contains(&upstream.name) {
+            if arg.contains(&upstream.name) {
                 patterns.push(arg.clone());
             }
         }
@@ -438,6 +480,21 @@ fn process_is_alive(_pid: u32) -> bool {
     false
 }
 
+#[cfg(target_os = "linux")]
+fn persisted_runtime_process_still_matches(entry: &PersistedGatewayRuntimeEntry) -> bool {
+    if !process_is_alive(entry.pid) {
+        return false;
+    }
+    entry
+        .pgid
+        .is_none_or(|stored_pgid| process_group_id(entry.pid) == Some(stored_pgid))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn persisted_runtime_process_still_matches(entry: &PersistedGatewayRuntimeEntry) -> bool {
+    process_is_alive(entry.pid)
+}
+
 #[derive(Debug, Clone, Default)]
 struct GatewayCleanupMatch {
     pattern: String,
@@ -518,14 +575,60 @@ fn count_matched_processes(matches: &[GatewayCleanupMatch]) -> usize {
 }
 
 fn kill_matched_processes(matches: &[GatewayCleanupMatch]) -> usize {
-    let mut unique = BTreeSet::new();
+    let mut unique_pids = BTreeSet::new();
+    let mut unique_groups = BTreeSet::new();
     for matched in matches {
-        unique.extend(matched.pids.iter().copied());
+        for pid in matched.pids.iter().copied() {
+            let target = process_kill_target(pid);
+            match target {
+                ProcessKillTarget::Pid(pid) => {
+                    unique_pids.insert(pid);
+                }
+                ProcessKillTarget::Group(pgid) => {
+                    unique_groups.insert(pgid);
+                }
+            }
+        }
     }
-    for pid in &unique {
+    for pgid in &unique_groups {
+        let _ = terminate_process_group(*pgid);
+    }
+    for pid in &unique_pids {
         let _ = terminate_process(*pid);
     }
-    unique.len()
+    unique_groups.len() + unique_pids.len()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ProcessKillTarget {
+    Pid(u32),
+    Group(u32),
+}
+
+#[cfg(target_os = "linux")]
+fn process_kill_target(pid: u32) -> ProcessKillTarget {
+    let pgid = process_group_id(pid).unwrap_or(pid);
+    let current_pgid = process_group_id(std::process::id());
+    if Some(pgid) == current_pgid {
+        ProcessKillTarget::Pid(pid)
+    } else {
+        ProcessKillTarget::Group(pgid)
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_kill_target(pid: u32) -> ProcessKillTarget {
+    ProcessKillTarget::Pid(pid)
+}
+
+#[cfg(all(unix, target_os = "linux"))]
+fn terminate_process_group(pgid: u32) -> Result<(), Errno> {
+    terminate_process_group_sigkill(pgid)
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn terminate_process_group(pgid: u32) -> Result<(), Errno> {
+    terminate_process(pgid)
 }
 
 #[cfg(unix)]
@@ -535,5 +638,10 @@ fn terminate_process(pid: u32) -> Result<(), Errno> {
 
 #[cfg(not(unix))]
 fn terminate_process(_pid: u32) -> Result<(), ()> {
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn terminate_process_group(_pid: u32) -> Result<(), ()> {
     Ok(())
 }

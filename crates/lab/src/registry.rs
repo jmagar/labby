@@ -771,12 +771,16 @@ fn registered_service_kind(
 ) -> RegisteredServiceKind {
     use lab_apis::core::Category;
 
+    if name == "beads" {
+        return RegisteredServiceKind::BuiltInUpstreamApi;
+    }
+
     if matches!(category, Category::Bootstrap | Category::Marketplace) {
         return RegisteredServiceKind::BootstrapOperator;
     }
 
     match name {
-        "extract" | "doctor" | "setup" | "marketplace" | "beads" | "deploy" | "acp" | "stash"
+        "extract" | "doctor" | "setup" | "marketplace" | "deploy" | "acp" | "stash"
         | "loggifly" => RegisteredServiceKind::BootstrapOperator,
         _ => RegisteredServiceKind::BuiltInUpstreamApi,
     }
@@ -876,7 +880,6 @@ mod tests {
             "deploy",
             "fs",
             "lab_admin",
-            "beads",
             "loggifly",
         ] {
             assert!(
@@ -901,6 +904,7 @@ mod tests {
             "openai",
             "uptime-kuma",
             "dozzle",
+            "beads",
         ];
         for removed in removed_services {
             assert!(

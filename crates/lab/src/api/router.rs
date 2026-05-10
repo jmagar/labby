@@ -257,7 +257,7 @@ async fn auth_token(
         State(app_auth_state_with_protected_routes(&state).await?),
         form,
     )
-    .await?)
+    .await)
 }
 
 fn auth_error_response(message: &str, resource_url: Option<&str>) -> axum::response::Response {
@@ -1527,6 +1527,10 @@ pub fn build_router(
                 get(auth_authorization_server_metadata),
             )
             .route(
+                "/.well-known/oauth-authorization-server/{*route}",
+                get(auth_authorization_server_metadata),
+            )
+            .route(
                 "/.well-known/oauth-protected-resource/{*route}",
                 get(protected_route_resource_metadata),
             )
@@ -2543,6 +2547,38 @@ mod tests {
             .to_str()
             .unwrap();
         assert!(header.contains("resource_metadata="));
+    }
+
+    #[tokio::test]
+    async fn authorization_server_metadata_suffix_returns_json_not_spa() {
+        let state = AppState::new();
+        let auth_state = test_lab_auth_state().await;
+        let app = build_router(state, None, Some(auth_state), None, &[]);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/.well-known/oauth-authorization-server/mcp")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("application/json")
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["issuer"], "https://lab.example.com");
+        assert_eq!(json["token_endpoint"], "https://lab.example.com/token");
     }
 
     #[tokio::test]

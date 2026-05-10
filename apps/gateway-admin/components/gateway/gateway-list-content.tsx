@@ -426,24 +426,15 @@ export function GatewayListContent() {
   }
 
   const handleSave = async (input: CreateGatewayInput | UpdateGatewayInput) => {
-    try {
-      if (editingGateway) {
-        await updateGateway(editingGateway.id, input as UpdateGatewayInput)
-        toast.success('Gateway updated successfully')
-      } else {
-        await createGateway(input as CreateGatewayInput)
-        toast.success('Gateway created successfully')
-      }
-      setFormOpen(false)
-      setEditingGateway(null)
-    } catch (requestError) {
-      toast.error(
-        getErrorMessage(
-          requestError,
-          editingGateway ? 'Failed to update gateway' : 'Failed to create gateway',
-        ),
-      )
+    if (editingGateway) {
+      await updateGateway(editingGateway.id, input as UpdateGatewayInput)
+      toast.success('Gateway updated successfully')
+    } else {
+      await createGateway(input as CreateGatewayInput)
+      toast.success('Gateway created successfully')
     }
+    setFormOpen(false)
+    setEditingGateway(null)
   }
 
   const activeSearch = showToolsView ? toolFilters.search : lastGatewayFilters.search

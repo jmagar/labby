@@ -28,6 +28,10 @@ use crate::dispatch::redact::{redact_stdio_value, redact_url};
 use crate::mcp::logging::logging_level_rank;
 use crate::mcp::server::LabMcpServer;
 use crate::oauth::upstream::cache::OauthClientCache;
+#[cfg(unix)]
+use crate::process::unix::{
+    pid_is_alive, terminate_process_group_sigkill, terminate_process_group_sigterm,
+};
 use crate::registry::{RegisteredService, ToolRegistry};
 
 use super::auth::{configured_bearer_token, websocket_authorization_header};
@@ -57,6 +61,7 @@ const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
 const IN_PROCESS_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
 /// Per-request timeout for upstream tool/resource/prompt RPCs.
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const STDIO_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Default maximum response size from upstream servers (10 MB).
 const DEFAULT_MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
@@ -552,6 +557,75 @@ impl std::fmt::Debug for UpstreamConnection {
     }
 }
 
+impl UpstreamConnection {
+    async fn shutdown(mut self, upstream_name: &str, reason: &'static str) {
+        let runtime = self.runtime.clone();
+        let started = Instant::now();
+        let result = self
+            ._client_service
+            .close_with_timeout(STDIO_SHUTDOWN_TIMEOUT)
+            .await;
+        if let Some(server_task) = self._server_task.take() {
+            server_task.abort();
+        }
+
+        #[cfg(unix)]
+        if let (Some(pid), Some(pgid)) = (runtime.pid, runtime.pgid)
+            && pid_is_alive(pid)
+        {
+            let _ = terminate_process_group_sigterm(pgid);
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            if pid_is_alive(pid) {
+                let _ = terminate_process_group_sigkill(pgid);
+            }
+        }
+
+        match result {
+            Ok(Some(_)) => tracing::debug!(
+                surface = "dispatch",
+                service = "upstream.pool",
+                action = "upstream.connection.shutdown",
+                event = "finish",
+                operation = "connection.shutdown",
+                upstream = upstream_name,
+                reason,
+                pid = ?runtime.pid,
+                pgid = ?runtime.pgid,
+                elapsed_ms = started.elapsed().as_millis(),
+                "upstream connection shutdown finished"
+            ),
+            Ok(None) => tracing::warn!(
+                surface = "dispatch",
+                service = "upstream.pool",
+                action = "upstream.connection.shutdown",
+                event = "timeout",
+                operation = "connection.shutdown",
+                upstream = upstream_name,
+                reason,
+                pid = ?runtime.pid,
+                pgid = ?runtime.pgid,
+                timeout_ms = STDIO_SHUTDOWN_TIMEOUT.as_millis(),
+                elapsed_ms = started.elapsed().as_millis(),
+                "upstream connection shutdown timed out"
+            ),
+            Err(error) => tracing::warn!(
+                surface = "dispatch",
+                service = "upstream.pool",
+                action = "upstream.connection.shutdown",
+                event = "error",
+                operation = "connection.shutdown",
+                upstream = upstream_name,
+                reason,
+                pid = ?runtime.pid,
+                pgid = ?runtime.pgid,
+                error = %error,
+                elapsed_ms = started.elapsed().as_millis(),
+                "upstream connection shutdown failed"
+            ),
+        }
+    }
+}
+
 impl UpstreamPool {
     /// Create a new empty pool.
     #[must_use]
@@ -685,7 +759,11 @@ impl UpstreamPool {
         let drained_connection_count = {
             let mut connections = self.connections.write().await;
             let count = connections.len();
-            connections.clear();
+            let drained = connections.drain().collect::<Vec<_>>();
+            drop(connections);
+            for (upstream_name, connection) in drained {
+                connection.shutdown(&upstream_name, reason).await;
+            }
             count
         };
         let drained_catalog_count = {
@@ -1210,6 +1288,16 @@ impl UpstreamPool {
                 kind = "upstream_not_connected",
                 "upstream reprobe found no existing connection"
             );
+        }
+
+        let stale_connection = {
+            let mut connections = self.connections.write().await;
+            connections.remove(&config.name)
+        };
+        if let Some(connection) = stale_connection {
+            connection
+                .shutdown(&config.name, "upstream.reprobe.reconnect")
+                .await;
         }
 
         let (conn, tools) = connect_upstream(

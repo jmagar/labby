@@ -332,7 +332,7 @@ mod tests {
     async fn gateway_test_accepts_proposed_spec() {
         let response = post_gateway_fresh(json!({
             "action":"gateway.test",
-            "params":{"allow_stdio":true,"spec":{"name":"fixture-stdio","command":"echo","args":["hello"]}}
+            "params":{"spec":{"name":"fixture-stdio","command":"echo","args":["hello"]}}
         }))
         .await;
         assert_eq!(response.status(), StatusCode::OK);

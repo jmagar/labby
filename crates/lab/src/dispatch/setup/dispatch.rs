@@ -32,6 +32,7 @@ const AUDIT_TIMEOUT: Duration = Duration::from_secs(30);
 /// `value` parameter or commits the draft must be listed here.
 const REDACTED_LOG_ACTIONS: &[&str] = &["draft.set", "draft.commit", "finalize"];
 use crate::dispatch::error::ToolError;
+use crate::dispatch::gateway::current_gateway_manager;
 use crate::dispatch::helpers::{action_schema, help_payload, to_json};
 use crate::registry::{
     RegisteredService, RegisteredServiceKind, bootstrap_operator_services,
@@ -192,7 +193,16 @@ fn settings_update_action(params: &Value) -> Result<Value, ToolError> {
     } else {
         current
     };
-    let restart_required = enabled != crate::registry::runtime_built_in_upstream_apis_enabled();
+    if changed {
+        crate::registry::set_runtime_built_in_upstream_apis_enabled(enabled);
+        if let Some(manager) = current_gateway_manager() {
+            manager.set_builtin_service_registry(crate::registry::filter_built_in_upstream_apis(
+                crate::registry::build_default_registry(),
+                enabled,
+            ));
+        }
+    }
+    let restart_required = false;
     Ok(settings_state_json(
         &cfg,
         path.display().to_string(),
@@ -299,7 +309,7 @@ fn settings_state_json(
             },
         },
         "restart_required": restart_required,
-        "restart_note": "Changes to built-in upstream API services take effect after restarting labby serve.",
+        "restart_note": "Changes to built-in upstream API services apply to gateway discovery immediately. Restart labby serve only if you need HTTP route mounting to match the new policy.",
         "services": {
             "built_in_upstream_apis_enabled": cfg.services.built_in_upstream_apis_enabled,
             "built_in_upstream_api_services": built_in_upstream_api_services(registry),
@@ -713,11 +723,12 @@ mod tests {
         .expect("settings update");
         assert_eq!(updated["services"]["built_in_upstream_apis_enabled"], false);
         assert_eq!(updated["changed"], true);
-        assert_eq!(updated["restart_required"], true);
+        assert_eq!(updated["restart_required"], false);
         assert_eq!(
             updated["previous"]["services"]["built_in_upstream_apis_enabled"],
             true
         );
+        assert!(!crate::registry::runtime_built_in_upstream_apis_enabled());
 
         let persisted = std::fs::read_to_string(&config_path).expect("read config");
         assert!(persisted.contains("# keep me"));
@@ -728,7 +739,7 @@ mod tests {
             .await
             .expect("settings state");
         assert_eq!(state["services"]["built_in_upstream_apis_enabled"], false);
-        assert_eq!(state["restart_required"], true);
+        assert_eq!(state["restart_required"], false);
 
         crate::registry::set_runtime_built_in_upstream_apis_enabled(previous_runtime);
         crate::config::set_test_config_toml_path(None);
