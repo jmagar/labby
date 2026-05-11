@@ -40,6 +40,13 @@ import { defaultGatewayBearerEnvName, validateBearerTokenEnvName } from '@/lib/g
 import { validateGatewayName } from '@/lib/utils/gateway-name'
 import { isAbortError } from '@/lib/api/service-action-client'
 import { GatewayApiError } from '@/lib/api/gateway-client-core'
+import {
+  initialGatewayAuthMode,
+  normalizeProtectedPublicPath,
+  protectedRouteForGateway,
+  protectedRoutePathInputValue,
+  type GatewayAuthMode,
+} from '@/lib/gateway-protected-route'
 import { upstreamOauthApi } from '@/lib/api/upstream-oauth-client'
 import { useUpstreamOauthStatus } from '@/lib/hooks/use-upstream-oauth'
 import type { OAuthConnectState } from '@/lib/types/upstream-oauth'
@@ -62,33 +69,10 @@ interface GatewayFormDialogProps {
 }
 
 type FormMode = 'custom' | 'lab'
-type GatewayAuthMode = 'none' | 'bearer' | 'oauth'
 type GatewayAuthSource = 'paste' | 'env'
 
 const PROTECTED_MCP_PUBLIC_HOST = process.env.NEXT_PUBLIC_PROTECTED_MCP_HOST || 'mcp.tootie.tv'
 const PROTECTED_ROUTE_SCOPES = ['mcp:read', 'mcp:write']
-
-function normalizeProtectedPublicPath(raw: string): string {
-  const trimmed = raw.trim()
-  if (!trimmed) return ''
-
-  const withoutOrigin = trimmed.startsWith('http://') || trimmed.startsWith('https://')
-    ? new URL(trimmed).pathname
-    : trimmed
-  const withSlash = withoutOrigin.startsWith('/') ? withoutOrigin : `/${withoutOrigin}`
-  const normalized = withSlash.replace(/\/+/g, '/').replace(/\/$/, '')
-
-  if (!normalized || normalized === '/') {
-    throw new Error('Use a non-root path such as tools')
-  }
-  if (!/^\/[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(normalized)) {
-    throw new Error('Use letters, numbers, dots, underscores, hyphens, and slashes')
-  }
-  if (normalized.split('/').some((segment) => segment === '..')) {
-    throw new Error('Path cannot contain .. segments')
-  }
-  return normalized
-}
 
 function valuePreview(fieldName: string, preview?: string | null) {
   return preview ?? (fieldName.endsWith('_URL') ? 'http://localhost' : '')
@@ -175,9 +159,11 @@ export function GatewayFormDialog({
   const probeInfoRef = useRef<{ registration_strategy: string; scopes?: string[] } | null>(null)
   const nameAutoRef = useRef(false)
   const skipUrlOauthResetRef = useRef(false)
+  const protectedRouteHydratedForRef = useRef<string | null>(null)
+  const protectedRouteTouchedRef = useRef(false)
   const { data: supportedServices } = useSupportedServices()
   const { data: protectedRoutes = [] } = useProtectedMcpRoutes()
-  const { testGateway, saveServiceConfig, enableVirtualServer, disableVirtualServer, addProtectedRoute, updateProtectedRoute } =
+  const { testGateway, saveServiceConfig, enableVirtualServer, disableVirtualServer, addProtectedRoute, updateProtectedRoute, removeProtectedRoute } =
     useGatewayMutations()
 
   const [mode, setMode] = useState<FormMode>('custom')
@@ -216,6 +202,10 @@ export function GatewayFormDialog({
     [selectedService, supportedServices],
   )
   const serviceEnvFields = useMemo(() => serviceFields(serviceMeta), [serviceMeta])
+  const existingProtectedRoute = useMemo(
+    () => protectedRouteForGateway(gateway, protectedRoutes, PROTECTED_MCP_PUBLIC_HOST),
+    [gateway, protectedRoutes],
+  )
   const protectedRoutePathOptions = useMemo(() => {
     const seen = new Set<string>()
     return protectedRoutes
@@ -256,7 +246,7 @@ export function GatewayFormDialog({
     if (transport !== 'http' || !url.trim()) {
       setOauthProbed(null)
       setIsProbing(false)
-      if (authMode === 'oauth') setAuthMode('none')
+      if (authMode === 'oauth' && !protectedPublicPath.trim()) setAuthMode('none')
       return
     }
     setOauthProbed(null)
@@ -349,17 +339,22 @@ export function GatewayFormDialog({
         setMode('custom')
         setTransport(gateway.transport === 'in_process' ? 'http' : gateway.transport)
         setName(gateway.name)
-        const initialAuthMode = gateway.config.oauth_enabled ? 'oauth'
-          : gateway.config.bearer_token_env ? 'bearer'
-          : 'none'
+        const protectedRoute = protectedRouteForGateway(gateway, protectedRoutes, PROTECTED_MCP_PUBLIC_HOST)
+        const protectedPath = protectedRoutePathInputValue(protectedRoute)
+        const initialAuthMode = initialGatewayAuthMode(gateway, protectedRoute)
+        protectedRouteHydratedForRef.current = protectedRoute ? gateway.id : null
+        protectedRouteTouchedRef.current = false
         skipUrlOauthResetRef.current = initialAuthMode === 'oauth'
         setUrl(gateway.config.url || '')
-        setProtectedPublicPath('')
+        setProtectedPublicPath(protectedPath)
         setCommand(formatStdioCommandLine(gateway.config.command, gateway.config.args))
         setAuthMode(initialAuthMode)
-        if (initialAuthMode === 'oauth') {
+        if (gateway.config.oauth_enabled) {
           setOauthState({ kind: 'connected', upstream: gateway.name, registration_strategy: 'preregistered', scopes: undefined })
           setOauthProbed({ oauth_discovered: true, upstream: gateway.name })
+        } else {
+          setOauthState({ kind: 'idle' })
+          setOauthProbed(null)
         }
         setAuthSource(gateway.config.bearer_token_env ? 'env' : 'paste')
         setBearerTokenEnv(gateway.config.bearer_token_env || '')
@@ -373,6 +368,8 @@ export function GatewayFormDialog({
         setName(emptyCustomState.name)
         setUrl(emptyCustomState.url)
         setProtectedPublicPath('')
+        protectedRouteHydratedForRef.current = null
+        protectedRouteTouchedRef.current = false
         setCommand(emptyCustomState.command)
         setAuthMode('none')
         setAuthSource('paste')
@@ -386,7 +383,19 @@ export function GatewayFormDialog({
         nameAutoRef.current = false
       }
     setErrors({})
-  }, [open, gateway])
+  }, [open, gateway, protectedRoutes])
+
+  useEffect(() => {
+    if (!open || !gateway || gateway.source === 'in_process') return
+    if (protectedRouteHydratedForRef.current === gateway.id) return
+    if (protectedRouteTouchedRef.current) return
+    const protectedRoute = existingProtectedRoute
+    if (!protectedRoute) return
+
+    protectedRouteHydratedForRef.current = gateway.id
+    setProtectedPublicPath(protectedRoutePathInputValue(protectedRoute))
+    setAuthMode((current) => (current === 'bearer' ? current : 'oauth'))
+  }, [existingProtectedRoute, gateway, open])
 
   useEffect(() => {
     setServiceValues({})
@@ -403,12 +412,14 @@ export function GatewayFormDialog({
 
   useEffect(() => {
     if (transport !== 'stdio') return
-    setAuthMode('none')
+    if (!protectedPublicPath.trim()) {
+      setAuthMode('none')
+    }
     setOauthState({ kind: 'idle' })
     setOauthProbed(null)
     setBearerTokenEnv('')
     setBearerTokenValue('')
-  }, [transport])
+  }, [protectedPublicPath, transport])
 
   useEffect(() => {
     if (!serviceMeta || !serviceConfig) return
@@ -458,7 +469,7 @@ export function GatewayFormDialog({
       }
     }
 
-    if (transport === 'http' && authMode === 'oauth') {
+    if (transport === 'http' && authMode === 'oauth' && !protectedPublicPath.trim()) {
       if (oauthState.kind !== 'connected' && !oauthStatus?.authenticated) {
         newErrors.oauth = 'Complete OAuth authorization before saving'
       }
@@ -576,6 +587,15 @@ export function GatewayFormDialog({
     }
   }
 
+  const removeExistingProtectedRouteIfCleared = async (
+    publicPath: string,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    if (!existingProtectedRoute || existingProtectedRoute.name !== gateway?.name) return
+    if (existingProtectedRoute.public_path === publicPath) return
+    await removeProtectedRoute(existingProtectedRoute.name, signal)
+  }
+
   const handleTest = async () => {
     if (isSaving) return
     if (!gateway || gateway.source === 'in_process') {
@@ -657,6 +677,7 @@ export function GatewayFormDialog({
         const protectedRouteResult = await saveProtectedRoute(normalizedProtectedPath, controller.signal)
         reusedProtectedRoute = protectedRouteResult.reused
       }
+      await removeExistingProtectedRouteIfCleared(normalizedProtectedPath, controller.signal)
       if (controller.signal.aborted) return
       toast.success(
         normalizedProtectedPath
@@ -1048,7 +1069,10 @@ export function GatewayFormDialog({
                     id="protected-public-path"
                     list="protected-route-path-options"
                     value={protectedPublicPath}
-                    onChange={(event) => setProtectedPublicPath(event.target.value)}
+                    onChange={(event) => {
+                      protectedRouteTouchedRef.current = true
+                      setProtectedPublicPath(event.target.value)
+                    }}
                     placeholder="tools"
                     className={cn(
                       'border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0',

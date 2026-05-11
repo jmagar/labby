@@ -8,6 +8,23 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.15.1] — 2026-05-11
+
+### Highlights
+
+- **gateway protected-route editing**: editing an existing gateway now hydrates the protected-route path and auth mode from persisted protected route state, including late-arriving route data and stdio gateways with OAuth-protected endpoints.
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | fix(gateway): restore protected route edit state |
+
+### Version bumps
+
+- Rust workspace: `0.15.0 → 0.15.1`
+- Gateway admin package: `0.15.0 → 0.15.1`
+
+---
+
 ## [0.15.0] — 2026-05-05
 
 ### Highlights
