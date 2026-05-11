@@ -7,8 +7,8 @@ import {
   findAppCommandItemById,
 } from './app-command-palette'
 
-test('app command palette ranks gateway searches first', () => {
-  const state = buildAppCommandState('gateway')
+test('app command palette ranks server searches first', () => {
+  const state = buildAppCommandState('server')
 
   assert.equal(state.activeItemId, 'destination-gateways')
   assert.equal(state.groups[0]?.key, 'best-match')

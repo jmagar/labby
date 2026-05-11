@@ -132,6 +132,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `fs` | `help` | true | false |  | `HelpPayload` | mcp, api, web |
 | `fs` | `schema` | true | false | `action*: string` | `ActionSpec` | mcp, api, web |
 | `gateway` | `gateway.add` | false | true | `spec*: json`<br>`bearer_token_value: string`<br>`allow_stdio: boolean` | `GatewayView` | cli, mcp, api, web |
+| `gateway` | `gateway.client_config.get` | false | false | `name*: string` | `McpClientConfigView` | cli, mcp, api, web |
 | `gateway` | `gateway.discovered_prompts` | false | false | `name*: string` | `string[]` | cli, mcp, api, web |
 | `gateway` | `gateway.discovered_resources` | false | false | `name*: string` | `string[]` | cli, mcp, api, web |
 | `gateway` | `gateway.discovered_tools` | false | false | `name*: string` | `GatewayToolExposureRowView[]` | cli, mcp, api, web |

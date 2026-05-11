@@ -20,6 +20,10 @@ fn tool_error_from_oauth(error: OauthError) -> ToolError {
     }
 }
 
+fn should_use_dynamic_registration(upstream: &str, supports_dynamic: bool) -> bool {
+    supports_dynamic && upstream != "swag"
+}
+
 fn validate_probe_url(raw: &str) -> Result<Url, ToolError> {
     let parsed = Url::parse(raw).map_err(|_| ToolError::InvalidParam {
         message: "invalid upstream URL".to_string(),
@@ -233,7 +237,8 @@ impl GatewayManager {
         };
 
         let supports_dynamic = metadata.registration_endpoint.is_some();
-        let strategy = if supports_dynamic {
+        let use_dynamic_registration = should_use_dynamic_registration(&name, supports_dynamic);
+        let strategy = if use_dynamic_registration {
             "dynamic"
         } else {
             "client_metadata_document"
@@ -299,7 +304,7 @@ impl GatewayManager {
                         "upstream oauth probe: reusing existing manager"
                     );
                 } else {
-                    let registration = if supports_dynamic {
+                    let registration = if use_dynamic_registration {
                         UpstreamOauthRegistration::Dynamic
                     } else {
                         // No RFC 7591 dynamic registration — use the Client ID Metadata
@@ -484,44 +489,27 @@ impl GatewayManager {
         );
 
         if let Some(oauth_config) = manager.upstream_config().oauth.clone() {
-            let manager_for_persist = self.clone();
-            let upstream_for_persist = upstream.to_string();
-            tokio::spawn(async move {
-                let _mutation_guard = manager_for_persist.config_mutation.lock().await;
-                let mut cfg = manager_for_persist.config.read().await.clone();
-                let Some(existing) = cfg
-                    .upstream
-                    .iter_mut()
-                    .find(|u| u.name == upstream_for_persist.as_str())
-                else {
-                    tracing::debug!(
-                        service = "upstream_oauth",
-                        action = "callback",
-                        upstream = %upstream_for_persist,
-                        "upstream oauth callback: no matching gateway in config; skipping oauth persistence"
-                    );
-                    return;
-                };
-                if existing.oauth.is_some() {
-                    return;
-                }
+            let _mutation_guard = self.config_mutation.lock().await;
+            let mut cfg = self.config.read().await.clone();
+            let Some(existing) = cfg.upstream.iter_mut().find(|u| u.name == upstream) else {
+                tracing::debug!(
+                    service = "upstream_oauth",
+                    action = "callback",
+                    upstream = %upstream,
+                    "upstream oauth callback: no matching gateway in config; skipping oauth persistence"
+                );
+                return Ok(());
+            };
+            if existing.oauth.is_none() {
                 tracing::info!(
                     service = "upstream_oauth",
                     action = "callback",
-                    upstream = %upstream_for_persist,
+                    upstream = %upstream,
                     "upstream oauth callback: persisting oauth config for probe-created manager"
                 );
                 existing.oauth = Some(oauth_config);
-                if let Err(e) = manager_for_persist.persist_config(cfg).await {
-                    tracing::warn!(
-                        service = "upstream_oauth",
-                        action = "callback",
-                        upstream = upstream_for_persist,
-                        error = %e,
-                        "upstream oauth callback: failed to persist oauth config (non-fatal)"
-                    );
-                }
-            });
+                self.persist_config(cfg).await?;
+            }
         }
 
         Ok(())
@@ -755,7 +743,10 @@ impl GatewayManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{probe_manager_key, validate_probe_upstream_name, validate_probe_url};
+    use super::{
+        probe_manager_key, should_use_dynamic_registration, validate_probe_upstream_name,
+        validate_probe_url,
+    };
 
     #[test]
     fn validate_probe_url_rejects_userinfo() {
@@ -789,5 +780,12 @@ mod tests {
     fn validate_probe_upstream_name_rejects_path_like_values() {
         let error = validate_probe_upstream_name("../plex").unwrap_err();
         assert_eq!(error.kind(), "invalid_param");
+    }
+
+    #[test]
+    fn swag_uses_client_metadata_document_even_when_dynamic_registration_is_advertised() {
+        assert!(!should_use_dynamic_registration("swag", true));
+        assert!(should_use_dynamic_registration("github", true));
+        assert!(!should_use_dynamic_registration("github", false));
     }
 }

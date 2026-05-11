@@ -39,7 +39,14 @@ import { cn, getErrorMessage } from '@/lib/utils'
 import { defaultGatewayBearerEnvName, validateBearerTokenEnvName } from '@/lib/gateway-env'
 import { validateGatewayName } from '@/lib/utils/gateway-name'
 import { isAbortError } from '@/lib/api/service-action-client'
-import { GatewayApiError } from '@/lib/api/gateway-client-core'
+import { GatewayApiError } from '@/lib/api/gateway-client'
+import {
+  initialGatewayAuthMode,
+  normalizeProtectedPublicPath,
+  protectedRouteForGateway,
+  protectedRoutePathInputValue,
+  type GatewayAuthMode,
+} from '@/lib/gateway-protected-route'
 import { upstreamOauthApi } from '@/lib/api/upstream-oauth-client'
 import { useUpstreamOauthStatus } from '@/lib/hooks/use-upstream-oauth'
 import type { OAuthConnectState } from '@/lib/types/upstream-oauth'
@@ -62,33 +69,10 @@ interface GatewayFormDialogProps {
 }
 
 type FormMode = 'custom' | 'lab'
-type GatewayAuthMode = 'none' | 'bearer' | 'oauth'
 type GatewayAuthSource = 'paste' | 'env'
 
 const PROTECTED_MCP_PUBLIC_HOST = process.env.NEXT_PUBLIC_PROTECTED_MCP_HOST || 'mcp.tootie.tv'
 const PROTECTED_ROUTE_SCOPES = ['mcp:read', 'mcp:write']
-
-function normalizeProtectedPublicPath(raw: string): string {
-  const trimmed = raw.trim()
-  if (!trimmed) return ''
-
-  const withoutOrigin = trimmed.startsWith('http://') || trimmed.startsWith('https://')
-    ? new URL(trimmed).pathname
-    : trimmed
-  const withSlash = withoutOrigin.startsWith('/') ? withoutOrigin : `/${withoutOrigin}`
-  const normalized = withSlash.replace(/\/+/g, '/').replace(/\/$/, '')
-
-  if (!normalized || normalized === '/') {
-    throw new Error('Use a non-root path such as tools')
-  }
-  if (!/^\/[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(normalized)) {
-    throw new Error('Use letters, numbers, dots, underscores, hyphens, and slashes')
-  }
-  if (normalized.split('/').some((segment) => segment === '..')) {
-    throw new Error('Path cannot contain .. segments')
-  }
-  return normalized
-}
 
 function valuePreview(fieldName: string, preview?: string | null) {
   return preview ?? (fieldName.endsWith('_URL') ? 'http://localhost' : '')
@@ -162,6 +146,36 @@ function serviceFields(serviceMeta: SupportedService | null) {
   return serviceMeta ? [...serviceMeta.required_env, ...serviceMeta.optional_env] : []
 }
 
+export function shouldAutoConnectOauth({
+  open,
+  isEditing,
+  transport,
+  authMode,
+  oauthDiscovered,
+  upstream,
+}: {
+  open: boolean
+  isEditing: boolean
+  transport: TransportType
+  authMode: GatewayAuthMode
+  oauthDiscovered: boolean
+  upstream?: string
+}) {
+  return open
+    && !isEditing
+    && transport === 'http'
+    && authMode === 'none'
+    && oauthDiscovered
+    && !!upstream?.trim()
+}
+
+export function oauthConnectButtonLabel(state: OAuthConnectState) {
+  if (state.kind === 'probing') return 'Detecting OAuth...'
+  if (state.kind === 'authorizing') return 'Waiting...'
+  if (state.kind === 'blocked') return 'Click to authorize'
+  return 'Connect via OAuth'
+}
+
 export function GatewayFormDialog({
   open,
   onOpenChange,
@@ -173,11 +187,15 @@ export function GatewayFormDialog({
   const prevOpenRef = useRef(false)
   const abortControllerRef = useRef<AbortController | null>(null)
   const probeInfoRef = useRef<{ registration_strategy: string; scopes?: string[] } | null>(null)
+  const currentProbeUrlRef = useRef('')
   const nameAutoRef = useRef(false)
   const skipUrlOauthResetRef = useRef(false)
+  const autoOauthAttemptedForRef = useRef<string | null>(null)
+  const protectedRouteHydratedForRef = useRef<string | null>(null)
+  const protectedRouteTouchedRef = useRef(false)
   const { data: supportedServices } = useSupportedServices()
   const { data: protectedRoutes = [] } = useProtectedMcpRoutes()
-  const { testGateway, saveServiceConfig, enableVirtualServer, disableVirtualServer, addProtectedRoute, updateProtectedRoute } =
+  const { testGateway, saveServiceConfig, enableVirtualServer, disableVirtualServer, addProtectedRoute, updateProtectedRoute, removeProtectedRoute } =
     useGatewayMutations()
 
   const [mode, setMode] = useState<FormMode>('custom')
@@ -216,6 +234,10 @@ export function GatewayFormDialog({
     [selectedService, supportedServices],
   )
   const serviceEnvFields = useMemo(() => serviceFields(serviceMeta), [serviceMeta])
+  const existingProtectedRoute = useMemo(
+    () => protectedRouteForGateway(gateway, protectedRoutes, PROTECTED_MCP_PUBLIC_HOST),
+    [gateway, protectedRoutes],
+  )
   const protectedRoutePathOptions = useMemo(() => {
     const seen = new Set<string>()
     return protectedRoutes
@@ -230,7 +252,10 @@ export function GatewayFormDialog({
   }, [protectedRoutes])
   const { data: serviceConfig } = useServiceConfig(mode === 'lab' && selectedService ? selectedService : null)
 
-  const oauthUpstream = oauthState.kind === 'authorizing' || oauthState.kind === 'connected' || oauthState.kind === 'discovered'
+  const oauthUpstream = oauthState.kind === 'authorizing'
+    || oauthState.kind === 'connected'
+    || oauthState.kind === 'discovered'
+    || oauthState.kind === 'blocked'
     ? (oauthState as { upstream: string }).upstream
     : null
   const { data: oauthStatus } = useUpstreamOauthStatus(
@@ -253,20 +278,24 @@ export function GatewayFormDialog({
   // Auto-probe the URL for OAuth support when transport is HTTP and URL looks valid.
   // Resets probed state and authMode when URL changes so stale OAuth option disappears.
   useEffect(() => {
+    currentProbeUrlRef.current = url.trim()
     if (transport !== 'http' || !url.trim()) {
       setOauthProbed(null)
       setIsProbing(false)
-      if (authMode === 'oauth') setAuthMode('none')
+      if (authMode === 'oauth' && !protectedPublicPath.trim()) setAuthMode('none')
       return
     }
+    const requestedUrl = url.trim()
     setOauthProbed(null)
     const ac = new AbortController()
     const timer = setTimeout(() => {
       setIsProbing(true)
-      upstreamOauthApi.probe(url.trim(), ac.signal).then((result) => {
+      upstreamOauthApi.probe(requestedUrl, ac.signal).then((result) => {
+        if (ac.signal.aborted || currentProbeUrlRef.current !== requestedUrl) return
         setOauthProbed(result); setIsProbing(false)
       }).catch((err: unknown) => {
         if (isAbortError(err)) return
+        if (ac.signal.aborted || currentProbeUrlRef.current !== requestedUrl) return
         setOauthProbed({ oauth_discovered: false, upstream: '' }); setIsProbing(false)
       })
     }, 600)
@@ -277,6 +306,26 @@ export function GatewayFormDialog({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, transport])
+
+  useEffect(() => {
+    if (!oauthProbed) return
+    if (!shouldAutoConnectOauth({
+      open,
+      isEditing,
+      transport,
+      authMode,
+      oauthDiscovered: oauthProbed.oauth_discovered,
+      upstream: oauthProbed.upstream,
+    })) return
+
+    const attemptKey = `${url.trim()}::${oauthProbed.upstream}`
+    if (autoOauthAttemptedForRef.current === attemptKey) return
+    autoOauthAttemptedForRef.current = attemptKey
+
+    setAuthMode('oauth')
+    void runOauthConnect({ authTab: null, auto: true, probeOverride: oauthProbed })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authMode, isEditing, oauthProbed, open, transport, url])
 
   // Auto-fill the name from the URL hostname when the user hasn't typed a name yet.
   useEffect(() => {
@@ -298,38 +347,58 @@ export function GatewayFormDialog({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url])
 
-  async function handleOauthConnect() {
+  async function runOauthConnect({
+    authTab,
+    auto,
+    probeOverride,
+  }: {
+    authTab: Window | null
+    auto: boolean
+    probeOverride?: NonNullable<typeof oauthProbed>
+  }) {
     if (!url.trim()) return
-    // Open a blank tab synchronously — must happen directly in the click handler
-    // before any await, otherwise browsers treat it as an unsolicited popup and block it.
-    const authTab = window.open('about:blank', '_blank')
     setOauthState({ kind: 'probing' })
     try {
-      // Reuse already-probed result to avoid a duplicate round-trip.
       const requestedUpstream = name.trim() || undefined
-      const reusableProbe = oauthProbed?.oauth_discovered
-        && (!requestedUpstream || oauthProbed.upstream === requestedUpstream)
+      const reusableProbe = probeOverride?.oauth_discovered
+        && (!requestedUpstream || probeOverride.upstream === requestedUpstream)
       const probe = reusableProbe
-        ? oauthProbed
+        ? probeOverride
         : await upstreamOauthApi.probe(url.trim(), undefined, requestedUpstream)
       if (!probe.oauth_discovered) {
         authTab?.close()
         setOauthState({ kind: 'error', message: 'This server does not advertise OAuth support' })
         return
       }
+      setOauthProbed(probe)
       setOauthState({ kind: 'discovered', upstream: probe.upstream, issuer: probe.issuer, scopes: probe.scopes })
       probeInfoRef.current = { registration_strategy: probe.registration_strategy ?? 'dynamic', scopes: probe.scopes }
       const { authorization_url } = await upstreamOauthApi.start(probe.upstream)
-      if (!authTab || authTab.closed) {
-        setOauthState({ kind: 'error', message: 'Authorization tab was closed. Please try again.' })
+
+      const targetTab = authTab ?? window.open(authorization_url, '_blank')
+      if (!targetTab || targetTab.closed) {
+        setOauthState(
+          auto
+            ? { kind: 'blocked', upstream: probe.upstream, issuer: probe.issuer, scopes: probe.scopes }
+            : { kind: 'error', message: 'Authorization tab was closed. Please try again.' },
+        )
         return
       }
-      authTab.location.href = authorization_url
+      if (authTab) {
+        authTab.location.href = authorization_url
+      }
       setOauthState({ kind: 'authorizing', upstream: probe.upstream })
     } catch (err: unknown) {
       authTab?.close()
       setOauthState({ kind: 'error', message: err instanceof Error ? err.message : 'OAuth connection failed' })
     }
+  }
+
+  async function handleOauthConnect() {
+    if (!url.trim()) return
+    // Open a blank tab synchronously in the click handler so browsers allow it.
+    const authTab = window.open('about:blank', '_blank')
+    await runOauthConnect({ authTab, auto: false, probeOverride: oauthProbed ?? undefined })
   }
 
   useEffect(() => {
@@ -349,17 +418,22 @@ export function GatewayFormDialog({
         setMode('custom')
         setTransport(gateway.transport === 'in_process' ? 'http' : gateway.transport)
         setName(gateway.name)
-        const initialAuthMode = gateway.config.oauth_enabled ? 'oauth'
-          : gateway.config.bearer_token_env ? 'bearer'
-          : 'none'
+        const protectedRoute = protectedRouteForGateway(gateway, protectedRoutes, PROTECTED_MCP_PUBLIC_HOST)
+        const protectedPath = protectedRoutePathInputValue(protectedRoute)
+        const initialAuthMode = initialGatewayAuthMode(gateway, protectedRoute)
+        protectedRouteHydratedForRef.current = protectedRoute ? gateway.id : null
+        protectedRouteTouchedRef.current = false
         skipUrlOauthResetRef.current = initialAuthMode === 'oauth'
         setUrl(gateway.config.url || '')
-        setProtectedPublicPath('')
+        setProtectedPublicPath(protectedPath)
         setCommand(formatStdioCommandLine(gateway.config.command, gateway.config.args))
         setAuthMode(initialAuthMode)
-        if (initialAuthMode === 'oauth') {
+        if (gateway.config.oauth_enabled) {
           setOauthState({ kind: 'connected', upstream: gateway.name, registration_strategy: 'preregistered', scopes: undefined })
           setOauthProbed({ oauth_discovered: true, upstream: gateway.name })
+        } else {
+          setOauthState({ kind: 'idle' })
+          setOauthProbed(null)
         }
         setAuthSource(gateway.config.bearer_token_env ? 'env' : 'paste')
         setBearerTokenEnv(gateway.config.bearer_token_env || '')
@@ -373,6 +447,9 @@ export function GatewayFormDialog({
         setName(emptyCustomState.name)
         setUrl(emptyCustomState.url)
         setProtectedPublicPath('')
+        protectedRouteHydratedForRef.current = null
+        protectedRouteTouchedRef.current = false
+        autoOauthAttemptedForRef.current = null
         setCommand(emptyCustomState.command)
         setAuthMode('none')
         setAuthSource('paste')
@@ -386,7 +463,19 @@ export function GatewayFormDialog({
         nameAutoRef.current = false
       }
     setErrors({})
-  }, [open, gateway])
+  }, [open, gateway, protectedRoutes])
+
+  useEffect(() => {
+    if (!open || !gateway || gateway.source === 'in_process') return
+    if (protectedRouteHydratedForRef.current === gateway.id) return
+    if (protectedRouteTouchedRef.current) return
+    const protectedRoute = existingProtectedRoute
+    if (!protectedRoute) return
+
+    protectedRouteHydratedForRef.current = gateway.id
+    setProtectedPublicPath(protectedRoutePathInputValue(protectedRoute))
+    setAuthMode((current) => (current === 'bearer' ? current : 'oauth'))
+  }, [existingProtectedRoute, gateway, open])
 
   useEffect(() => {
     setServiceValues({})
@@ -397,18 +486,21 @@ export function GatewayFormDialog({
       skipUrlOauthResetRef.current = false
       return
     }
+    autoOauthAttemptedForRef.current = null
     setOauthState({ kind: 'idle' })
     setOauthProbed(null)
   }, [url])
 
   useEffect(() => {
     if (transport !== 'stdio') return
-    setAuthMode('none')
+    if (!protectedPublicPath.trim()) {
+      setAuthMode('none')
+    }
     setOauthState({ kind: 'idle' })
     setOauthProbed(null)
     setBearerTokenEnv('')
     setBearerTokenValue('')
-  }, [transport])
+  }, [protectedPublicPath, transport])
 
   useEffect(() => {
     if (!serviceMeta || !serviceConfig) return
@@ -458,7 +550,7 @@ export function GatewayFormDialog({
       }
     }
 
-    if (transport === 'http' && authMode === 'oauth') {
+    if (transport === 'http' && authMode === 'oauth' && !protectedPublicPath.trim()) {
       if (oauthState.kind !== 'connected' && !oauthStatus?.authenticated) {
         newErrors.oauth = 'Complete OAuth authorization before saving'
       }
@@ -553,33 +645,57 @@ export function GatewayFormDialog({
     health_path: null,
   })
 
-  const saveProtectedRoute = async (publicPath: string, signal?: AbortSignal): Promise<{ reused: boolean }> => {
+  const saveProtectedRoute = async (publicPath: string, signal?: AbortSignal): Promise<void> => {
     const route = buildProtectedRouteInput(publicPath)
-    const existingRoute = protectedRoutes.find(
+    const existingPathRoute = protectedRoutes.find(
       (item) =>
         item.enabled &&
         item.public_host === route.public_host &&
         item.public_path === route.public_path,
     )
-    if (existingRoute && existingRoute.name !== route.name) {
-      return { reused: true }
+    if (
+      existingPathRoute &&
+      existingPathRoute.name !== route.name &&
+      existingPathRoute.name !== existingProtectedRoute?.name
+    ) {
+      throw new GatewayApiError(
+        `Protected route ${route.public_path} is already assigned to ${existingPathRoute.upstream ?? existingPathRoute.name}. Choose a different path or edit that route first.`,
+        409,
+      )
     }
+
+    if (existingProtectedRoute) {
+      await updateProtectedRoute(existingProtectedRoute.name, {
+        ...route,
+        name: existingProtectedRoute.name,
+      }, signal)
+      return
+    }
+
     try {
       await addProtectedRoute(route, signal)
-      return { reused: false }
     } catch (error) {
       if (error instanceof GatewayApiError && error.status === 409) {
         await updateProtectedRoute(route.name, route, signal)
-        return { reused: false }
+        return
       }
       throw error
     }
   }
 
+  const removeExistingProtectedRouteIfCleared = async (
+    publicPath: string,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    if (!existingProtectedRoute) return
+    if (existingProtectedRoute.public_path === publicPath) return
+    await removeProtectedRoute(existingProtectedRoute.name, signal)
+  }
+
   const handleTest = async () => {
     if (isSaving) return
     if (!gateway || gateway.source === 'in_process') {
-      toast.info('Save and enable the gateway first, then test from the detail page.')
+      toast.info('Save and enable the server first, then test from the detail page.')
       return
     }
 
@@ -643,7 +759,7 @@ export function GatewayFormDialog({
         if (!saved) {
           return
         }
-        toast.success(isEditing ? 'Lab gateway updated successfully' : 'Lab gateway configured successfully')
+        toast.success(isEditing ? 'Lab server updated successfully' : 'Lab server configured successfully')
         onOpenChange(false)
         return
       }
@@ -652,20 +768,18 @@ export function GatewayFormDialog({
       setSaveError(null)
       const normalizedProtectedPath = normalizeProtectedPublicPath(protectedPublicPath)
       await onSave(buildInput())
-      let reusedProtectedRoute = false
       if (normalizedProtectedPath) {
-        const protectedRouteResult = await saveProtectedRoute(normalizedProtectedPath, controller.signal)
-        reusedProtectedRoute = protectedRouteResult.reused
+        await saveProtectedRoute(normalizedProtectedPath, controller.signal)
+      } else {
+        await removeExistingProtectedRouteIfCleared(normalizedProtectedPath, controller.signal)
       }
       if (controller.signal.aborted) return
       toast.success(
         normalizedProtectedPath
-          ? reusedProtectedRoute
-            ? `Gateway saved and joined https://${PROTECTED_MCP_PUBLIC_HOST}${normalizedProtectedPath}`
-            : `Gateway saved and protected at https://${PROTECTED_MCP_PUBLIC_HOST}${normalizedProtectedPath}`
+          ? `Server saved and protected at https://${PROTECTED_MCP_PUBLIC_HOST}${normalizedProtectedPath}`
           : isEditing
-            ? 'Gateway updated successfully'
-            : 'Gateway created successfully',
+            ? 'Server updated successfully'
+            : 'Server created successfully',
       )
       onOpenChange(false)
     } catch (error) {
@@ -678,10 +792,10 @@ export function GatewayFormDialog({
         getErrorMessage(
           error,
           mode === 'lab'
-            ? 'Failed to save Lab gateway'
+            ? 'Failed to save Lab server'
             : isEditing
-              ? 'Failed to update gateway'
-              : 'Failed to create gateway',
+              ? 'Failed to update server'
+              : 'Failed to create server',
         ),
       )
     } finally {
@@ -802,10 +916,10 @@ export function GatewayFormDialog({
         <DialogHeader className="shrink-0">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex min-w-0 flex-col gap-1">
-              <DialogTitle>{isEditing ? 'Edit Gateway' : 'Add Gateway'}</DialogTitle>
+              <DialogTitle>{isEditing ? 'Edit Server' : 'Add Server'}</DialogTitle>
               <DialogDescription>
                 {isEditing
-                  ? 'Edit gateway settings.'
+                  ? 'Edit server settings.'
                   : mode === 'lab'
                     ? 'Connect a built-in Lab service.'
                     : 'Connect an upstream MCP server.'}
@@ -938,10 +1052,10 @@ export function GatewayFormDialog({
             <div className="flex items-center justify-between rounded-lg border p-4">
               <div className="space-y-0.5">
                 <Label htmlFor="enable-virtual-server" className="font-medium">
-                  Enable gateway
+                  Enable server
                 </Label>
                 <p className="text-sm text-aurora-text-muted">
-                  Save canonical service config and expose this Lab service as a visible gateway.
+                  Save canonical service config and expose this Lab service as a visible server.
                 </p>
               </div>
               <Switch
@@ -1048,7 +1162,14 @@ export function GatewayFormDialog({
                     id="protected-public-path"
                     list="protected-route-path-options"
                     value={protectedPublicPath}
-                    onChange={(event) => setProtectedPublicPath(event.target.value)}
+                    onChange={(event) => {
+                      protectedRouteTouchedRef.current = true
+                      if (!event.target.value.trim() && existingProtectedRoute && authMode === 'oauth') {
+                        setAuthMode('none')
+                        setOauthState({ kind: 'idle' })
+                      }
+                      setProtectedPublicPath(event.target.value)
+                    }}
                     placeholder="tools"
                     className={cn(
                       'border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0',
@@ -1067,7 +1188,7 @@ export function GatewayFormDialog({
                   <p className="text-sm text-destructive">{errors.protectedPublicPath}</p>
                 ) : (
                   <FieldDescription>
-                    Optional. When set, Lab publishes this gateway through Google OAuth at that public path.
+                    Optional. When set, Lab publishes this server through Google OAuth at that public path.
                   </FieldDescription>
                 )}
               </Field>
@@ -1079,7 +1200,7 @@ export function GatewayFormDialog({
                 <div className="space-y-1">
                   <FieldLabel>Authentication</FieldLabel>
                   <FieldDescription>
-                    Choose how this gateway should authenticate upstream requests.
+                    Choose how this server should authenticate upstream requests.
                   </FieldDescription>
                 </div>
 
@@ -1151,8 +1272,10 @@ export function GatewayFormDialog({
                           {!url.trim()
                             ? 'Enter a URL above, then connect.'
                             : oauthState.kind === 'authorizing'
-                              ? 'Complete authorization in the new tab…'
-                              : 'Connect this gateway via OAuth. A popup will open for you to authorize.'}
+                              ? 'Complete authorization in the new tab.'
+                              : oauthState.kind === 'blocked'
+                                ? 'OAuth detected. Click to authorize; the browser blocked the automatic popup.'
+                                : 'Connect this server via OAuth. A popup will open for you to authorize.'}
                         </p>
                         {oauthState.kind === 'error' && (
                           <div className="flex items-start gap-2 text-sm text-destructive">
@@ -1163,14 +1286,18 @@ export function GatewayFormDialog({
                         <Button
                           type="button"
                           size="sm"
+                          variant={oauthState.kind === 'blocked' ? 'default' : 'secondary'}
                           onClick={() => void handleOauthConnect()}
                           disabled={!url.trim() || oauthState.kind === 'probing' || oauthState.kind === 'authorizing'}
+                          className={cn(
+                            oauthState.kind === 'blocked'
+                              && 'ring-2 ring-aurora-accent-primary/45 ring-offset-2 ring-offset-aurora-page-bg',
+                          )}
                         >
                           {(oauthState.kind === 'probing' || oauthState.kind === 'authorizing') && (
                             <Loader2 className="size-4 mr-2 animate-spin" />
                           )}
-                          {oauthState.kind === 'probing' ? 'Detecting OAuth…' :
-                           oauthState.kind === 'authorizing' ? 'Waiting…' : 'Connect via OAuth'}
+                          {oauthConnectButtonLabel(oauthState)}
                         </Button>
                       </>
                     )}
@@ -1285,7 +1412,7 @@ export function GatewayFormDialog({
                       Proxy Resources
                     </Label>
                     <p className="text-sm text-aurora-text-muted">
-                      Forward MCP resource requests to this gateway
+                      Forward MCP resource requests to this server
                     </p>
                   </div>
                   <Switch
@@ -1301,7 +1428,7 @@ export function GatewayFormDialog({
                       Proxy Prompts
                     </Label>
                     <p className="text-sm text-aurora-text-muted">
-                      Forward MCP prompt requests to this gateway
+                      Forward MCP prompt requests to this server
                     </p>
                   </div>
                   <Switch
@@ -1490,7 +1617,7 @@ export function GatewayFormDialog({
                 : 'Configure Service'
               : isEditing
                 ? 'Save Changes'
-                : 'Add Gateway'}
+                : 'Add Server'}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -171,7 +171,7 @@ export function GatewayFilters({
         </>
       ) : (
         <>
-          <FilterGroup label="Gateway">
+          <FilterGroup label="Server">
             {gatewayOptions.map((option) => (
               <FilterCheckbox
                 key={option.value}
@@ -234,9 +234,9 @@ export function GatewayFilters({
         <div data-mobile-search={mode} className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-aurora-text-muted" />
           <Input
-            aria-label={mode === 'tools' ? 'Search tools' : 'Search gateways'}
+            aria-label={mode === 'tools' ? 'Search tools' : 'Search servers'}
             name={mode === 'tools' ? 'gateway-tools-search-mobile' : 'gateways-search-mobile'}
-            placeholder={mode === 'tools' ? 'Search tools' : 'Search gateways'}
+            placeholder={mode === 'tools' ? 'Search tools' : 'Search servers'}
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             className={cn(
@@ -318,9 +318,9 @@ export function GatewayFilters({
           <div className="relative">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-aurora-text-muted" />
             <Input
-              aria-label={mode === 'tools' ? 'Search tools' : 'Search gateways'}
+              aria-label={mode === 'tools' ? 'Search tools' : 'Search servers'}
               name={mode === 'tools' ? 'gateway-tools-search' : 'gateways-search'}
-              placeholder={mode === 'tools' ? 'Search tools, descriptions, or gateways' : 'Search gateways, commands, or endpoints'}
+              placeholder={mode === 'tools' ? 'Search tools, descriptions, or servers' : 'Search servers, commands, or endpoints'}
               value={search}
               onChange={(e) => onSearchChange(e.target.value)}
               className={cn(

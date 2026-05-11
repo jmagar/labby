@@ -9,12 +9,12 @@ use super::catalog::ACTIONS;
 use super::client::require_gateway_manager;
 use super::manager::GatewayManager;
 use super::params::{
-    GatewayAddParams, GatewayMcpCleanupParams, GatewayMcpToggleParams, GatewayNameParams,
-    GatewayOauthNameParams, GatewayReloadParams, GatewayStatusParams, GatewayTestParams,
-    GatewayUpdateParams, GatewayUpdatePatch, ProtectedRouteNameParams, ProtectedRouteSpecParams,
-    ProtectedRouteUpdateParams, ServiceConfigGetParams, ServiceConfigSetParams, ToolInvokeParams,
-    ToolSearchParams, ToolSearchSetParams, VirtualServerMcpPolicyParams, VirtualServerNameParams,
-    VirtualServerSurfaceParams,
+    GatewayAddParams, GatewayClientConfigParams, GatewayMcpCleanupParams, GatewayMcpToggleParams,
+    GatewayNameParams, GatewayOauthNameParams, GatewayReloadParams, GatewayStatusParams,
+    GatewayTestParams, GatewayUpdateParams, GatewayUpdatePatch, ProtectedRouteNameParams,
+    ProtectedRouteSpecParams, ProtectedRouteUpdateParams, ServiceConfigGetParams,
+    ServiceConfigSetParams, ToolInvokeParams, ToolSearchParams, ToolSearchSetParams,
+    VirtualServerMcpPolicyParams, VirtualServerNameParams, VirtualServerSurfaceParams,
 };
 use super::types::ServiceActionView;
 
@@ -49,6 +49,7 @@ pub async fn dispatch_with_manager(
         | "gateway.remove"
         | "gateway.reload"
         | "gateway.status"
+        | "gateway.client_config.get"
         | "gateway.discovered_tools"
         | "gateway.discovered_resources"
         | "gateway.discovered_prompts" => {
@@ -354,6 +355,10 @@ async fn handle_gateway_actions(
             let params: GatewayStatusParams = parse_params(params_value)?;
             to_json(manager.status(params.name.as_deref()).await?)
         }
+        "gateway.client_config.get" => {
+            let params: GatewayClientConfigParams = parse_params(params_value)?;
+            to_json(manager.client_config(&params.name).await?)
+        }
         "gateway.discovered_tools" => {
             let params: GatewayNameParams = parse_params(params_value)?;
             to_json(manager.discovered_tools(&params.name).await?)
@@ -559,6 +564,7 @@ mod tests {
         assert!(names.contains(&"gateway.remove"));
         assert!(names.contains(&"gateway.reload"));
         assert!(names.contains(&"gateway.status"));
+        assert!(names.contains(&"gateway.client_config.get"));
         assert!(names.contains(&"gateway.discovered_tools"));
         assert!(names.contains(&"gateway.discovered_resources"));
         assert!(names.contains(&"gateway.discovered_prompts"));
@@ -634,6 +640,68 @@ mod tests {
         assert_eq!(row["exposed_resource_count"], 0);
         assert_eq!(row["discovered_prompt_count"], 0);
         assert_eq!(row["exposed_prompt_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn gateway_client_config_get_returns_http_and_stdio_configs() {
+        let manager = test_manager();
+        manager
+            .replace_config_for_tests(vec![
+                UpstreamConfig {
+                    enabled: true,
+                    name: "fixture-http".to_string(),
+                    url: Some("http://127.0.0.1:9001/mcp".to_string()),
+                    bearer_token_env: Some("FIXTURE_HTTP_TOKEN".to_string()),
+                    command: None,
+                    args: Vec::new(),
+                    proxy_resources: false,
+                    proxy_prompts: false,
+                    expose_tools: None,
+                    expose_resources: None,
+                    expose_prompts: None,
+                    oauth: None,
+                    tool_search: crate::config::ToolSearchConfig::default(),
+                },
+                UpstreamConfig {
+                    enabled: true,
+                    name: "fixture-stdio".to_string(),
+                    url: None,
+                    bearer_token_env: None,
+                    command: Some("npx".to_string()),
+                    args: vec!["-y".to_string(), "fixture-server".to_string()],
+                    proxy_resources: false,
+                    proxy_prompts: false,
+                    expose_tools: None,
+                    expose_resources: None,
+                    expose_prompts: None,
+                    oauth: None,
+                    tool_search: crate::config::ToolSearchConfig::default(),
+                },
+            ])
+            .await;
+
+        let http = dispatch_with_manager(
+            &manager,
+            "gateway.client_config.get",
+            json!({"name":"fixture-http"}),
+        )
+        .await
+        .expect("http client config");
+        assert_eq!(http["name"], "fixture-http");
+        assert_eq!(http["type"], "http");
+        assert_eq!(http["url"], "http://127.0.0.1:9001/mcp");
+
+        let stdio = dispatch_with_manager(
+            &manager,
+            "gateway.client_config.get",
+            json!({"name":"fixture-stdio"}),
+        )
+        .await
+        .expect("stdio client config");
+        assert_eq!(stdio["name"], "fixture-stdio");
+        assert_eq!(stdio["type"], "stdio");
+        assert_eq!(stdio["command"], "npx");
+        assert_eq!(stdio["args"], json!(["-y", "fixture-server"]));
     }
 
     fn protected_route_fixture(name: &str) -> ProtectedMcpRouteConfig {
@@ -1587,6 +1655,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn gateway_mcp_disable_with_cleanup_returns_gateway_and_cleanup_payload() {
+        use std::os::unix::process::CommandExt;
         use std::process::{Command, Stdio};
         use std::time::Duration;
 
@@ -1611,13 +1680,16 @@ mod tests {
             }])
             .await;
 
-        let mut child = Command::new("python3")
+        let mut command = Command::new("python3");
+        command
             .args(["-c", "import time; time.sleep(60)", runtime_arg])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn github chat stand-in");
+            .stderr(Stdio::null());
+        // The cleanup path kills process groups for child runtimes. Keep this
+        // stand-in out of nextest's process group so the test process survives.
+        command.process_group(0);
+        let mut child = command.spawn().expect("spawn github chat stand-in");
 
         tokio::time::sleep(Duration::from_millis(150)).await;
 

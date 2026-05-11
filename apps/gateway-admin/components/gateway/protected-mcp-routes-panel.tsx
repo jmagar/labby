@@ -470,7 +470,7 @@ export function ProtectedMcpRoutesPanel() {
                 {isEditing ? `Edit ${editingName}` : 'Add protected route'}
               </h4>
               <p className="mt-1 text-xs text-aurora-text-muted">
-                Paths should be public prefixes such as /tools. Set a Gateway upstream or a backend MCP URL.
+                Paths should be public prefixes such as /tools. Set a server upstream or a backend MCP URL.
               </p>
             </div>
             <Switch
@@ -509,7 +509,7 @@ export function ProtectedMcpRoutesPanel() {
               />
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="protected-route-upstream">Gateway upstream</Label>
+              <Label htmlFor="protected-route-upstream">Server upstream</Label>
               <Input
                 id="protected-route-upstream"
                 value={draft.upstream}

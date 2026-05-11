@@ -666,10 +666,20 @@ impl UpstreamOauthManager {
             return Ok(meta);
         }
 
-        let metadata = manager
+        let mut metadata = manager
             .discover_metadata()
             .await
             .map_err(|e| OauthError::Internal(format!("discover metadata: {e}")))?;
+
+        if self.upstream.name == "swag" {
+            metadata.authorization_endpoint = metadata
+                .authorization_endpoint
+                .replace("/mcp/authorize", "/authorize");
+            metadata.token_endpoint = metadata.token_endpoint.replace("/mcp/token", "/token");
+            if let Some(reg) = metadata.registration_endpoint.as_ref() {
+                metadata.registration_endpoint = Some(reg.replace("/mcp/register", "/register"));
+            }
+        }
 
         self.verify_issuer_binding(&metadata)?;
 

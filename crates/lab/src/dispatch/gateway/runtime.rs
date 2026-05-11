@@ -602,6 +602,8 @@ fn kill_matched_processes(matches: &[GatewayCleanupMatch]) -> usize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ProcessKillTarget {
     Pid(u32),
+    // constructed only on Linux; match arm retained for exhaustiveness on all platforms
+    #[allow(dead_code)]
     Group(u32),
 }
 

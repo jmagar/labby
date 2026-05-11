@@ -122,7 +122,9 @@ mod tests {
 
     use crate::api::oauth::AuthContext;
     use crate::api::{router::build_router_with_bearer, state::AppState};
-    use crate::config::{LabConfig, VirtualServerConfig, VirtualServerSurfacesConfig};
+    use crate::config::{
+        LabConfig, UpstreamConfig, VirtualServerConfig, VirtualServerSurfacesConfig,
+    };
     use crate::dispatch::gateway::config::{load_gateway_config, write_gateway_config};
     use crate::dispatch::gateway::manager::{GatewayManager, GatewayRuntimeHandle};
     use crate::registry::build_default_registry;
@@ -372,6 +374,43 @@ mod tests {
         )
         .await;
         assert_eq!(reloaded.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn gateway_client_config_get_route_matches_advertised_action() {
+        let manager = test_manager();
+        manager
+            .replace_config_for_tests(vec![UpstreamConfig {
+                enabled: true,
+                name: "fixture-http".to_string(),
+                url: Some("https://fixture.example.com/mcp".to_string()),
+                bearer_token_env: Some("FIXTURE_HTTP_TOKEN".to_string()),
+                command: None,
+                args: Vec::new(),
+                proxy_resources: false,
+                proxy_prompts: false,
+                expose_tools: None,
+                expose_resources: None,
+                expose_prompts: None,
+                oauth: None,
+                tool_search: crate::config::ToolSearchConfig::default(),
+            }])
+            .await;
+
+        let response = post_gateway(
+            test_app_with_manager(manager),
+            json!({"action":"gateway.client_config.get","params":{"name":"fixture-http"}}),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let payload: serde_json::Value = serde_json::from_slice(&body).expect("json");
+        assert_eq!(payload["name"], "fixture-http");
+        assert_eq!(payload["type"], "http");
+        assert_eq!(payload["url"], "https://fixture.example.com/mcp");
     }
 
     #[tokio::test]

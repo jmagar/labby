@@ -8,6 +8,7 @@ import {
   Pencil,
   Trash2,
   Copy,
+  Check,
   AlertTriangle,
   Clock,
   FileText,
@@ -117,6 +118,7 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
   const [isReloading, setIsReloading] = useState(false)
   const [isCleaningRuntime, setIsCleaningRuntime] = useState(false)
   const [isAggressiveCleanup, setIsAggressiveCleanup] = useState(false)
+  const [configCopied, setConfigCopied] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [disableOpen, setDisableOpen] = useState(false)
@@ -187,19 +189,19 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
       <>
         <AppHeader
           breadcrumbs={[
-            { label: 'Gateways', href: '/gateways' },
-            { label: 'Missing Gateway' }
+            { label: 'Servers', href: '/gateways' },
+            { label: 'Missing Server' }
           ]}
         />
         <div className="flex-1 p-6">
           <div className="rounded-lg border bg-aurora-panel-medium p-8 text-center">
             <AlertTriangle className="size-8 mx-auto text-destructive mb-3" />
-            <p className="font-medium">No gateway selected</p>
+            <p className="font-medium">No server selected</p>
             <p className="text-sm text-aurora-text-muted mt-1">
-              Open this page from the gateway list or provide a gateway id in the URL query string.
+              Open this page from the server list or provide a server id in the URL query string.
             </p>
             <Button variant="outline" className="mt-4" onClick={() => router.push('/gateways')}>
-              Back to Gateways
+              Back to Servers
             </Button>
           </div>
         </div>
@@ -221,7 +223,7 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
         toast.error(result.error || result.message)
       }
     } catch (error) {
-      toast.error(getErrorMessage(error, 'Failed to test gateway'))
+      toast.error(getErrorMessage(error, 'Failed to test server'))
     } finally {
       setIsTesting(false)
     }
@@ -233,21 +235,32 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
     try {
       const result = await reloadGateway(gateway.id)
       if (result.success) {
-        toast.success(`Gateway reloaded: ${result.new_tool_count} tools discovered`)
+        toast.success(`Server reloaded: ${result.new_tool_count} tools discovered`)
       } else {
         toast.error(result.message)
       }
     } catch (error) {
-      toast.error(getErrorMessage(error, 'Failed to reload gateway'))
+      toast.error(getErrorMessage(error, 'Failed to reload server'))
     } finally {
       setIsReloading(false)
+    }
+  }
+
+  const handleCopyConfig = async () => {
+    try {
+      await navigator.clipboard.writeText(clientConfigJson)
+      setConfigCopied(true)
+      toast.success('Configuration copied to clipboard')
+      setTimeout(() => setConfigCopied(false), 2000)
+    } catch {
+      toast.error('Failed to copy configuration to clipboard')
     }
   }
 
   const handleSave = async (input: CreateGatewayInput | UpdateGatewayInput) => {
     if (!gateway) return
     await updateGateway(gateway.id, input as UpdateGatewayInput)
-    toast.success('Gateway updated successfully')
+    toast.success('Server updated successfully')
     setEditOpen(false)
   }
 
@@ -255,10 +268,10 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
     if (!gateway) return
     try {
       await removeGateway(gateway.id)
-      toast.success('Gateway removed successfully')
+      toast.success('Server removed successfully')
       router.push('/gateways')
     } catch (error) {
-      toast.error(getErrorMessage(error, 'Failed to remove gateway'))
+      toast.error(getErrorMessage(error, 'Failed to remove server'))
     }
   }
 
@@ -275,9 +288,9 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
       } else {
         await enableGateway(gateway.id)
       }
-      toast.success('Gateway enabled. Catalog change sent to clients.')
+      toast.success('Server enabled. Catalog change sent to clients.')
     } catch (error) {
-      toast.error(getErrorMessage(error, 'Failed to update gateway state'))
+      toast.error(getErrorMessage(error, 'Failed to update server state'))
     }
   }
 
@@ -289,10 +302,10 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
       } else {
         await disableGateway(gateway.id)
       }
-      toast.success('Gateway disabled. Catalog change sent and runtime cleanup requested.')
+      toast.success('Server disabled. Catalog change sent and runtime cleanup requested.')
       setDisableOpen(false)
     } catch (error) {
-      toast.error(getErrorMessage(error, 'Failed to update gateway state'))
+      toast.error(getErrorMessage(error, 'Failed to update server state'))
     }
   }
 
@@ -311,7 +324,7 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
       <>
         <AppHeader
           breadcrumbs={[
-            { label: 'Gateways', href: '/gateways' },
+            { label: 'Servers', href: '/gateways' },
             { label: 'Loading...' }
           ]}
         />
@@ -339,19 +352,19 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
       <>
         <AppHeader
           breadcrumbs={[
-            { label: 'Gateways', href: '/gateways' },
+            { label: 'Servers', href: '/gateways' },
             { label: 'Error' }
           ]}
         />
         <div className="flex-1 p-6">
           <div className="rounded-lg border bg-aurora-panel-medium p-8 text-center">
             <AlertTriangle className="size-8 mx-auto text-destructive mb-3" />
-            <p className="font-medium">Failed to load gateway</p>
+            <p className="font-medium">Failed to load server</p>
             <p className="text-sm text-aurora-text-muted mt-1">
-              {error?.message || 'Gateway not found'}
+              {error?.message || 'Server not found'}
             </p>
             <Button variant="outline" className="mt-4" onClick={() => router.push('/gateways')}>
-              Back to Gateways
+              Back to Servers
             </Button>
           </div>
         </div>
@@ -492,8 +505,8 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
           size="icon"
           onClick={handleTest}
           disabled={isTesting || !(gateway.enabled ?? true)}
-          aria-label="Test gateway"
-          title="Test gateway"
+          aria-label="Test server"
+          title="Test server"
         >
           {isTesting ? (
             <Loader2 className="size-4 animate-spin" />
@@ -508,8 +521,8 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
           size="icon"
           onClick={handleReload}
           disabled={isReloading || !(gateway.enabled ?? true)}
-          aria-label="Reload gateway"
-          title="Reload gateway"
+          aria-label="Reload server"
+          title="Reload server"
         >
           <RefreshCw className={`size-4 ${isReloading ? 'animate-spin' : ''}`} />
         </Button>
@@ -518,8 +531,8 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
         variant="outline"
         size="icon"
         onClick={() => setEditOpen(true)}
-        aria-label="Edit gateway"
-        title="Edit gateway"
+        aria-label="Edit server"
+        title="Edit server"
       >
         <Pencil className="size-4" />
       </Button>
@@ -527,8 +540,8 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
         variant="outline"
         size="icon"
         onClick={() => setDeleteOpen(true)}
-        aria-label="Remove gateway"
-        title="Remove gateway"
+        aria-label="Remove server"
+        title="Remove server"
       >
         <Trash2 className="size-4" />
       </Button>
@@ -540,14 +553,14 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
     gateway.transport === 'http'
       ? (gateway.config.url ?? '')
       : isLabGateway
-        ? gateway.config.url ?? 'Lab-managed gateway configuration'
+        ? gateway.config.url ?? 'Lab-managed server configuration'
         : [gateway.config.command, ...(gateway.config.args ?? [])].join(' ')
 
   return (
     <>
       <AppHeader
         breadcrumbs={[
-          { label: 'Gateways', href: '/gateways' },
+          { label: 'Servers', href: '/gateways' },
           { label: gateway.name }
         ]}
         actions={headerActions}
@@ -558,9 +571,9 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
           <div className="mb-4 flex items-start gap-3 rounded-lg border border-aurora-warn/30 bg-aurora-warn/10 px-4 py-3">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-aurora-warn" />
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-aurora-text-primary">Gateway disabled</p>
+              <p className="text-sm font-semibold text-aurora-text-primary">Server disabled</p>
               <p className="mt-1 text-sm text-aurora-text-muted">
-                This gateway is excluded from the active catalog. Clients should no longer see its tools, resources, or prompts until you re-enable it.
+                This server is excluded from the active catalog. Clients should no longer see its tools, resources, or prompts until you re-enable it.
               </p>
             </div>
           </div>
@@ -780,7 +793,7 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
               {(inventoryFilter === 'all' || inventoryFilter === 'resources') ? (
                 <PrimitiveExposureTable
                   title="Discovered MCP Resources"
-                  description="Search and manage which upstream resources are exposed through this gateway."
+                  description="Search and manage which upstream resources are exposed through this server."
                   searchPlaceholder="Search resources"
                   manageLabel="Manage resources"
                   emptyLabel="No resources discovered"
@@ -813,7 +826,7 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
               {(inventoryFilter === 'all' || inventoryFilter === 'prompts') ? (
                 <PrimitiveExposureTable
                   title="Discovered MCP Prompts"
-                  description="Search and manage which upstream prompts are exposed through this gateway."
+                  description="Search and manage which upstream prompts are exposed through this server."
                   searchPlaceholder="Search prompts"
                   manageLabel="Manage prompts"
                   emptyLabel="No prompts discovered"
@@ -853,12 +866,21 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
               <div className="mb-4">
                 <h2 className="text-lg font-semibold">Client Configuration</h2>
                 <p className="text-sm text-aurora-text-muted mt-1">
-                  Add this JSON block to your MCP client configuration to connect to this gateway.
+                  Add this JSON block to your MCP client configuration to connect to this server.
                 </p>
               </div>
               <div className="overflow-hidden rounded-aurora-2 border bg-aurora-page-bg">
-                <div className="border-b px-4 py-3">
+                <div className="flex items-center justify-between border-b px-4 py-3">
                   <p className="text-xs font-medium uppercase tracking-[0.16em] text-aurora-text-muted">Client JSON</p>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-aurora-text-muted hover:text-aurora-text-primary"
+                    onClick={handleCopyConfig}
+                    title="Copy to clipboard"
+                  >
+                    {configCopied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                  </Button>
                 </div>
                 <pre className="aurora-scrollbar overflow-x-auto whitespace-pre-wrap break-all px-4 py-4 text-sm leading-6 text-aurora-text-primary">
                   <code>{clientConfigJson}</code>
@@ -870,9 +892,9 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
           <TabsContent value="settings">
             <div className="rounded-lg border bg-aurora-panel-medium p-5 space-y-5">
               <div>
-                <h2 className="text-lg font-semibold">Gateway settings</h2>
+                <h2 className="text-lg font-semibold">Server settings</h2>
                 <p className="mt-1 text-sm text-aurora-text-muted">
-                  Control gateway availability, exposure of MCP resources and prompts, and individual lab surface toggles.
+                  Control server availability, exposure of MCP resources and prompts, and individual lab surface toggles.
                 </p>
               </div>
 
@@ -880,12 +902,12 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
                 <div className="rounded-lg border bg-aurora-page-bg p-4">
                   <div className="flex items-center gap-2">
                     <Power className="size-4 text-aurora-text-muted" />
-                    <h3 className="text-sm font-semibold text-aurora-text-primary">Gateway state</h3>
+                    <h3 className="text-sm font-semibold text-aurora-text-primary">Server state</h3>
                   </div>
                   <div className="mt-4">
                     <SettingRow
-                      title="Gateway enabled"
-                      description="Controls whether this gateway participates in the active catalog and serves tools, resources, and prompts."
+                      title="Server enabled"
+                      description="Controls whether this server participates in the active catalog and serves tools, resources, and prompts."
                       checked={gateway.enabled ?? true}
                       onCheckedChange={handleEnabledToggle}
                     />
@@ -900,13 +922,13 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
                   <div className="mt-4 space-y-3">
                     <SettingRow
                       title="Expose resources"
-                      description="Allow discovered MCP resources to be exposed through this gateway."
+                      description="Allow discovered MCP resources to be exposed through this server."
                       checked={resourceExposureEnabled}
                       onCheckedChange={handleProxyResourcesToggle}
                     />
                     <SettingRow
                       title="Expose prompts"
-                      description="Allow discovered MCP prompts to be exposed through this gateway."
+                      description="Allow discovered MCP prompts to be exposed through this server."
                       checked={promptExposureEnabled}
                       onCheckedChange={handleProxyPromptsToggle}
                     />
@@ -953,7 +975,7 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
               <div>
                 <h2 className="text-lg font-semibold">Runtime details</h2>
                 <p className="text-sm text-aurora-text-muted mt-1">
-                  Live process metadata comes from the active gateway pool. If the gateway restarted, orphaned upstream
+                  Live process metadata comes from the active server pool. If the server restarted, orphaned upstream
                   processes are reconciled from the persisted runtime snapshot and shown here as stale runtime state.
                 </p>
               </div>
@@ -965,7 +987,7 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
                     {gateway.status.connected ? 'Connected' : 'Not connected'}
                   </p>
                   <p className="mt-1 text-xs text-aurora-text-muted">
-                    {gateway.enabled ?? false ? 'Gateway enabled' : 'Gateway disabled'}
+                    {gateway.enabled ?? false ? 'Server enabled' : 'Server disabled'}
                   </p>
                 </div>
                 <div className="rounded-lg border bg-aurora-page-bg p-4">
@@ -1091,7 +1113,7 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
                     <div className="rounded-md border bg-aurora-control-surface/10 p-3">
                       <p className="text-xs uppercase tracking-[0.14em] text-aurora-text-muted">Origin</p>
                       <p className="mt-2 text-sm font-semibold text-aurora-text-primary">
-                        {gateway.status.origin ?? 'gateway-managed'}
+                        {gateway.status.origin ?? 'server-managed'}
                       </p>
                     </div>
                     <div className="rounded-md border bg-aurora-control-surface/10 p-3">
@@ -1108,8 +1130,8 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
                     </div>
                   </div>
                   <ul className="mt-4 space-y-3 text-sm text-aurora-text-muted">
-                    <li>Active runtime metadata is recorded when the gateway spawns stdio upstreams.</li>
-                    <li>Runtime snapshots are written to disk beside the gateway config and survive gateway restarts.</li>
+                    <li>Active runtime metadata is recorded when the server spawns stdio upstreams.</li>
+                    <li>Runtime snapshots are written to disk beside the server config and survive server restarts.</li>
                     <li>Dead PIDs are pruned during runtime reconciliation; surviving non-current PIDs count as stale runtime state.</li>
                   </ul>
                 </div>
@@ -1120,7 +1142,7 @@ export function GatewayDetailContent({ gatewayId }: GatewayDetailContentProps) {
           {gateway.warnings.length > 0 && (
             <TabsContent value="warnings">
               <div className="rounded-lg border bg-aurora-panel-medium p-6">
-                <h2 className="text-lg font-semibold mb-4">Gateway Warnings</h2>
+                <h2 className="text-lg font-semibold mb-4">Server Warnings</h2>
                 <div className="space-y-2">
                   {gateway.warnings.map((warning, index) => (
                     <div

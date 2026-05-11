@@ -45,7 +45,7 @@ export const primarySidebarNavigation = [
     icon: LayoutDashboard,
   },
   {
-    title: 'Gateways',
+    title: 'Servers',
     url: '/gateways',
     icon: Cable,
   },

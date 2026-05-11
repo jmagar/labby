@@ -104,8 +104,10 @@ struct ClearQuery {
 
 #[derive(Debug, Deserialize)]
 struct CallbackQuery {
-    code: String,
+    code: Option<String>,
     state: String,
+    error: Option<String>,
+    error_description: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -529,11 +531,62 @@ async fn callback(
         }
     }
 
+    if let Some(auth_error) = &query.error {
+        warn!(
+            surface = "api",
+            service = "upstream_oauth",
+            action = "callback",
+            upstream = %upstream,
+            error = %auth_error,
+            error_description = ?query.error_description,
+            "upstream oauth callback received error from authorization server"
+        );
+        if let Err(revoke_err) = sqlite
+            .delete_upstream_oauth_state_by_csrf(&query.state, now)
+            .await
+        {
+            warn!(
+                surface = "api",
+                service = "upstream_oauth",
+                action = "callback",
+                "failed to revoke oauth state token after authorization error: {revoke_err}"
+            );
+        }
+        redirect_url
+            .query_pairs_mut()
+            .append_pair("upstream", &upstream)
+            .append_pair("status", "fail")
+            .append_pair("error_kind", "authorization_failed");
+        return Redirect::to(redirect_url.as_str()).into_response();
+    }
+
+    let code = match &query.code {
+        Some(code) => code,
+        None => {
+            if let Err(revoke_err) = sqlite
+                .delete_upstream_oauth_state_by_csrf(&query.state, now)
+                .await
+            {
+                warn!(
+                    surface = "api",
+                    service = "upstream_oauth",
+                    action = "callback",
+                    "failed to revoke oauth state token after malformed callback: {revoke_err}"
+                );
+            }
+            return ToolError::InvalidParam {
+                message: "Callback missing code parameter".to_string(),
+                param: "code".to_string(),
+            }
+            .into_response();
+        }
+    };
+
     let result = crate::dispatch::gateway::oauth::complete_authorization_callback(
         &manager,
         &upstream,
         SHARED_GATEWAY_OAUTH_SUBJECT,
-        &query.code,
+        code,
         &query.state,
     )
     .await;
@@ -608,6 +661,8 @@ async fn result_page(Query(query): Query<ResultQuery>) -> Html<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use axum::{
         Extension,
         body::{self, Body},
@@ -620,7 +675,16 @@ mod tests {
     use tower::ServiceExt;
 
     use super::{browser_routes, callback_subject, gateway_routes};
-    use crate::{api::oauth::AuthContext, api::state::AppState, config::NodeRole};
+    use crate::{
+        api::oauth::AuthContext,
+        api::state::AppState,
+        config::NodeRole,
+        dispatch::gateway::{
+            SHARED_GATEWAY_OAUTH_SUBJECT,
+            manager::{GatewayManager, GatewayRuntimeHandle},
+        },
+        oauth::upstream::encryption::load_key,
+    };
 
     #[tokio::test]
     async fn callback_rejects_non_master_requests() {
@@ -672,6 +736,61 @@ mod tests {
         let html = String::from_utf8(body.to_vec()).unwrap();
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
         assert!(!html.contains("<script>alert(1)</script>"));
+    }
+
+    #[tokio::test]
+    async fn callback_authorization_error_consumes_oauth_state() {
+        let (_dir, store, state) = callback_test_state().await;
+        let app = browser_routes(state.clone()).with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/auth/upstream/callback?state=csrf-error&error=access_denied")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let location = response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .expect("location");
+        assert!(location.contains("status=fail"));
+        assert!(location.contains("error_kind=authorization_failed"));
+        let owner = store
+            .find_upstream_oauth_state_owner("csrf-error", now_seconds())
+            .await
+            .unwrap();
+        assert!(owner.is_none());
+    }
+
+    #[tokio::test]
+    async fn callback_missing_code_consumes_oauth_state() {
+        let (_dir, store, state) = callback_test_state().await;
+        let app = browser_routes(state.clone()).with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/auth/upstream/callback?state=csrf-missing-code")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let owner = store
+            .find_upstream_oauth_state_owner("csrf-missing-code", now_seconds())
+            .await
+            .unwrap();
+        assert!(owner.is_none());
     }
 
     #[tokio::test]
@@ -818,5 +937,49 @@ mod tests {
             ..AuthConfig::default()
         };
         AuthState::new(config).await.unwrap()
+    }
+
+    fn now_seconds() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64
+    }
+
+    async fn callback_test_state() -> (tempfile::TempDir, lab_auth::sqlite::SqliteStore, AppState) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = lab_auth::sqlite::SqliteStore::open(dir.path().join("auth.db"))
+            .await
+            .unwrap();
+        for csrf in ["csrf-error", "csrf-missing-code"] {
+            let now = now_seconds();
+            store
+                .save_upstream_oauth_state(lab_auth::types::UpstreamOauthStateRow {
+                    upstream_name: "fixture".to_string(),
+                    subject: SHARED_GATEWAY_OAUTH_SUBJECT.to_string(),
+                    csrf_token: csrf.to_string(),
+                    pkce_verifier: "verifier".to_string(),
+                    created_at: now,
+                    expires_at: now + 300,
+                })
+                .await
+                .unwrap();
+        }
+        let key = load_key("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=").unwrap();
+        let manager = Arc::new(
+            GatewayManager::new(dir.path().join("lab.toml"), GatewayRuntimeHandle::default())
+                .with_oauth_resources(
+                    store.clone(),
+                    key,
+                    "https://lab.example.com/auth/upstream/callback".to_string(),
+                ),
+        );
+        let state = AppState::new()
+            .with_auth_config(AuthConfig {
+                public_url: Some(url::Url::parse("https://lab.example.com").unwrap()),
+                ..AuthConfig::default()
+            })
+            .with_gateway_manager(manager);
+        (dir, store, state)
     }
 }

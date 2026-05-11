@@ -41,7 +41,8 @@ use super::runtime::runtime_origin_tag;
 use super::service_catalog::service_meta;
 use super::types::{
     CatalogChangeNotifier, GatewayCatalogDiff, GatewayRuntimeView, GatewayToolExposureRowView,
-    GatewayView, ServiceConfigView, VirtualServerMcpPolicyView,
+    GatewayView, McpClientConfigView, McpClientTransportType, ServiceConfigView,
+    VirtualServerMcpPolicyView,
 };
 use super::view_models::ServerView;
 
@@ -995,6 +996,43 @@ impl GatewayManager {
             .iter()
             .find(|upstream| upstream.name == name)
             .cloned()
+    }
+
+    pub async fn client_config(&self, name: &str) -> Result<McpClientConfigView, ToolError> {
+        let upstream = self
+            .upstream_config(name)
+            .await
+            .ok_or_else(|| ToolError::Sdk {
+                sdk_kind: "not_found".to_string(),
+                message: format!("gateway `{name}` not found"),
+            })?;
+
+        if let Some(url) = upstream.url.clone() {
+            return Ok(McpClientConfigView {
+                name: upstream.name,
+                r#type: McpClientTransportType::Http,
+                url: Some(url),
+                command: None,
+                args: None,
+                env: None,
+            });
+        }
+
+        let Some(command) = upstream.command.clone() else {
+            return Err(ToolError::Sdk {
+                sdk_kind: "invalid_config".to_string(),
+                message: format!("gateway `{name}` has neither url nor command configured"),
+            });
+        };
+
+        Ok(McpClientConfigView {
+            name: upstream.name,
+            r#type: McpClientTransportType::Stdio,
+            url: None,
+            command: Some(command),
+            args: (!upstream.args.is_empty()).then_some(upstream.args),
+            env: None,
+        })
     }
 
     pub async fn protected_route_add(
@@ -2179,6 +2217,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn cleanup_upstream_processes_kills_matching_github_chat_runtime() {
+        use std::os::unix::process::CommandExt;
         use std::process::{Command, Stdio};
         use std::time::Duration;
 
@@ -2206,13 +2245,16 @@ mod tests {
             }])
             .await;
 
-        let mut child = Command::new("python3")
+        let mut command = Command::new("python3");
+        command
             .args(["-c", "import time; time.sleep(60)", runtime_arg])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn github chat stand-in");
+            .stderr(Stdio::null());
+        // The cleanup path kills process groups for child runtimes. Keep this
+        // stand-in out of nextest's process group so the test process survives.
+        command.process_group(0);
+        let mut child = command.spawn().expect("spawn github chat stand-in");
 
         tokio::time::sleep(Duration::from_millis(150)).await;
 

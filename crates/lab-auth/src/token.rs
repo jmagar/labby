@@ -83,8 +83,7 @@ impl TokenEndpointError {
 
     fn status(&self) -> StatusCode {
         match self {
-            Self::Auth(AuthError::InvalidGrant(_))
-            | Self::Auth(AuthError::Validation(_))
+            Self::Auth(AuthError::InvalidGrant(_) | AuthError::Validation(_))
             | Self::UnsupportedGrantType(_) => StatusCode::BAD_REQUEST,
             Self::Auth(AuthError::AuthFailed(_) | AuthError::InvalidAccessToken) => {
                 StatusCode::UNAUTHORIZED
@@ -273,8 +272,13 @@ async fn refresh_token_grant(
     state: AuthState,
     request: TokenRequest,
 ) -> Result<TokenResponse, AuthError> {
-    let requested_resource =
-        crate::authorize::validate_resource(&state, request.resource.as_deref())?;
+    let requested_resource = request
+        .resource
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| crate::authorize::validate_resource(&state, Some(value)))
+        .transpose()?;
     let client_id = require_field(request.client_id, "client_id")?;
     let refresh_token = require_field(request.refresh_token, "refresh_token")?;
     let refresh_token_id = fingerprint(&refresh_token);
@@ -282,7 +286,7 @@ async fn refresh_token_grant(
         grant_type = "refresh_token",
         client_id = %client_id,
         refresh_token_id = %refresh_token_id,
-        requested_resource = %requested_resource,
+        requested_resource = requested_resource.as_deref().unwrap_or("<refresh-token-resource>"),
         "oauth refresh_token grant received"
     );
     let stored = state
@@ -313,7 +317,9 @@ async fn refresh_token_grant(
     } else {
         stored.resource.clone()
     };
-    if requested_resource != stored_resource {
+    if let Some(requested_resource) = requested_resource
+        && requested_resource != stored_resource
+    {
         warn!(
             refresh_token_id = %refresh_token_id,
             requested_resource = %requested_resource,
@@ -770,6 +776,50 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("no-cache")
         );
+    }
+
+    #[tokio::test]
+    async fn token_endpoint_refresh_grant_preserves_stored_resource_when_omitted() {
+        let state = test_auth_state_with_mock_google().await;
+        state
+            .store
+            .upsert_refresh_token(crate::types::RefreshTokenRow {
+                refresh_token: "refresh-token".to_string(),
+                client_id: "client".to_string(),
+                subject: "google-subject-123".to_string(),
+                resource: "https://mcp.example.com/syslog".to_string(),
+                scope: "mcp:read mcp:write".to_string(),
+                provider_refresh_token: Some("provider-refresh".to_string()),
+                created_at: crate::util::now_unix() - 60,
+                expires_at: crate::util::now_unix() + 3600,
+            })
+            .await
+            .unwrap();
+        let app = router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/token")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(
+                        "grant_type=refresh_token&refresh_token=refresh-token&client_id=client",
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let access_token = json["access_token"].as_str().expect("access token string");
+        let claims = insecure_decode::<crate::jwt::AccessClaims>(access_token)
+            .expect("decode access token")
+            .claims;
+        assert_eq!(claims.aud, "https://mcp.example.com/syslog");
+        assert_eq!(claims.scope, "mcp:read mcp:write");
     }
 
     #[tokio::test]

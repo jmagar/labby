@@ -3391,10 +3391,35 @@
         "name": "allow_stdio",
         "ty": "boolean",
         "required": false,
-        "description": "Required when spec.command is set because reconcile starts a local command"
+        "description": "Deprecated compatibility flag; ignored by current Lab versions"
       }
     ],
     "returns": "GatewayView",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "gateway",
+    "action": "gateway.client_config.get",
+    "description": "Get the MCP client configuration JSON for one gateway",
+    "destructive": false,
+    "params": [
+      {
+        "name": "name",
+        "ty": "string",
+        "required": true,
+        "description": "Gateway name"
+      }
+    ],
+    "returns": "McpClientConfigView",
     "surface_availability": {
       "cli": true,
       "mcp": true,
@@ -4122,7 +4147,7 @@
         "name": "allow_stdio",
         "ty": "boolean",
         "required": false,
-        "description": "Required when testing a stdio gateway because it starts a local command"
+        "description": "Deprecated compatibility flag; ignored by current Lab versions"
       }
     ],
     "returns": "GatewayTestResult",
@@ -4220,7 +4245,7 @@
         "name": "allow_stdio",
         "ty": "boolean",
         "required": false,
-        "description": "Required when the resulting enabled gateway uses stdio because reconcile starts a local command"
+        "description": "Deprecated compatibility flag; ignored by current Lab versions"
       }
     ],
     "returns": "GatewayView",

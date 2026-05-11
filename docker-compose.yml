@@ -28,9 +28,6 @@ services:
       # Host config file — also visible via the .lab bind mount above, but
       # the explicit :ro mount here makes the intent clear.
       - ${HOME}/.lab/config.toml:/home/lab/.config/lab/config.toml:ro
-      # Secrets — mounted :ro so the container cannot modify the host .env.
-      # File-level mount wins over the parent directory bind mount above.
-      - ${HOME}/.lab/.env:/home/lab/.lab/.env:ro
       # Host identity used for controller/node role resolution. Without this,
       # Docker's container ID hostname would be mistaken for the machine name.
       - /etc/hostname:/run/host/hostname:ro

@@ -290,7 +290,7 @@ export function GatewayTable({
     <>
       <div className={cn(AURORA_GATEWAY_TABLE_SHELL, 'overflow-hidden md:hidden')}>
         <div className="grid grid-cols-[minmax(0,1fr)_82px_24px] gap-2 border-b border-aurora-border-strong px-2.5 py-2">
-          <div className={AURORA_MUTED_LABEL}>Gateway</div>
+          <div className={AURORA_MUTED_LABEL}>Server</div>
           <div className={cn(AURORA_MUTED_LABEL, 'text-right')}>State</div>
           <div />
         </div>
@@ -385,18 +385,18 @@ export function GatewayTable({
                       </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => onEdit(gateway)}>
                         <Pencil className="size-4 mr-2" />
-                        Edit gateway
+                        Edit server
                       </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => onToggleEnabled(gateway)}>
                         {gateway.enabled ?? true ? (
                           <>
                             <Trash2 className="size-4 mr-2" />
-                            Disable gateway
+                            Disable server
                           </>
                         ) : (
                           <>
                             <Play className="size-4 mr-2" />
-                            Enable gateway
+                            Enable server
                           </>
                         )}
                       </DropdownMenuItem>
@@ -409,7 +409,7 @@ export function GatewayTable({
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => onReload(gateway)}>
                             <RefreshCw className="size-4 mr-2" />
-                            Reload gateway
+                            Reload server
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => onCleanup(gateway, false, true)}>
                             <Search className="size-4 mr-2" />
@@ -443,7 +443,7 @@ export function GatewayTable({
                           <DropdownMenuSeparator />
                           <DropdownMenuItem onClick={() => onDelete(gateway)} className="text-aurora-error focus:text-aurora-error">
                             <Trash2 className="size-4 mr-2" />
-                            {gateway.source === 'in_process' ? 'Remove stale service' : 'Remove gateway'}
+                            {gateway.source === 'in_process' ? 'Remove stale service' : 'Remove server'}
                           </DropdownMenuItem>
                         </>
                       ) : null}
@@ -460,7 +460,7 @@ export function GatewayTable({
         <Table className="table-fixed">
           <TableHeader>
             <TableRow className="border-b border-aurora-border-strong bg-[rgba(7,17,26,0.48)] hover:bg-[rgba(7,17,26,0.48)]">
-              <TableHead className={cn(AURORA_MUTED_LABEL, 'w-[44%] px-6 py-4')}>Gateway</TableHead>
+              <TableHead className={cn(AURORA_MUTED_LABEL, 'w-[44%] px-6 py-4')}>Server</TableHead>
               <TableHead className={cn(AURORA_MUTED_LABEL, 'w-[9%] px-2 py-4 text-center')}>
                 <SortHeader label="Transport" sort="transport" />
               </TableHead>
@@ -582,7 +582,7 @@ export function GatewayTable({
                           onClick={() => onToggleEnabled(gateway)}
                         >
                           <Power className="size-4" />
-                          <span className="sr-only">{gateway.enabled ?? true ? 'Disable gateway' : 'Enable gateway'}</span>
+                          <span className="sr-only">{gateway.enabled ?? true ? 'Disable server' : 'Enable server'}</span>
                         </Button>
                       ) : null}
                       {supportsProbeControls && density === 'comfortable' ? (
@@ -606,7 +606,7 @@ export function GatewayTable({
                           disabled={isLoading(gateway.id, 'reload')}
                         >
                           <RefreshCw className={`size-4 ${isLoading(gateway.id, 'reload') ? 'animate-spin' : ''}`} />
-                          <span className="sr-only">Reload gateway</span>
+                          <span className="sr-only">Reload server</span>
                         </Button>
                       ) : null}
                       {isStaleVirtualServer(gateway) && density === 'comfortable' ? (
@@ -636,18 +636,18 @@ export function GatewayTable({
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => onEdit(gateway)}>
                             <Pencil className="mr-2 size-4" />
-                            Edit gateway
+                            Edit server
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => onToggleEnabled(gateway)}>
                             {gateway.enabled ?? true ? (
                               <>
                                 <Trash2 className="mr-2 size-4" />
-                                Disable gateway
+                                Disable server
                               </>
                             ) : (
                               <>
                                 <Play className="mr-2 size-4" />
-                                Enable gateway
+                                Enable server
                               </>
                             )}
                           </DropdownMenuItem>
@@ -660,7 +660,7 @@ export function GatewayTable({
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => onReload(gateway)}>
                                 <RefreshCw className="mr-2 size-4" />
-                                Reload gateway
+                                Reload server
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => onCleanup(gateway, false, true)}>
                                 <Search className="mr-2 size-4" />
@@ -694,7 +694,7 @@ export function GatewayTable({
                               <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={() => onDelete(gateway)} className="text-destructive focus:text-destructive">
                                 <Trash2 className="mr-2 size-4" />
-                                {gateway.source === 'in_process' ? 'Remove stale service' : 'Remove gateway'}
+                                {gateway.source === 'in_process' ? 'Remove stale service' : 'Remove server'}
                               </DropdownMenuItem>
                             </>
                           ) : null}

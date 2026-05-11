@@ -31,7 +31,7 @@ export function EmptyState({
       <div className="flex size-14 items-center justify-center rounded-full border border-aurora-border-strong bg-[linear-gradient(180deg,rgba(18,40,56,0.96),rgba(14,31,44,0.98))] shadow-[0_10px_18px_rgba(0,0,0,0.16),var(--aurora-highlight-medium)]">
         {icon || <Cable className="size-6 text-aurora-accent-strong" />}
       </div>
-      <p className={cn(AURORA_MUTED_LABEL, 'mt-5')}>Gateway fleet</p>
+      <p className={cn(AURORA_MUTED_LABEL, 'mt-5')}>Server fleet</p>
       <h3 className={cn(AURORA_DISPLAY_2, 'mt-2 text-aurora-text-primary')}>{title}</h3>
       <p className="mt-2 max-w-sm text-sm leading-6 text-aurora-text-muted">
         {description}

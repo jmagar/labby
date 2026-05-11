@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import useSWR from 'swr'
 import { upstreamOauthApi } from '@/lib/api/upstream-oauth-client'
 import type { UpstreamEntry, UpstreamOauthStatus } from '@/lib/types/upstream-oauth'
@@ -24,6 +24,21 @@ export function useUpstreamOauthStatus(
 ) {
   const { pollWhilePending = false, maxPollDuration = 300_000 } = options
   const pollStartRef = useRef<number | null>(null)
+  const previousPollWhilePendingRef = useRef(pollWhilePending)
+
+  useEffect(() => {
+    pollStartRef.current = null
+  }, [name])
+
+  useEffect(() => {
+    if (pollWhilePending && !previousPollWhilePendingRef.current) {
+      pollStartRef.current = null
+    }
+    if (!pollWhilePending) {
+      pollStartRef.current = null
+    }
+    previousPollWhilePendingRef.current = pollWhilePending
+  }, [pollWhilePending])
 
   return useSWR<UpstreamOauthStatus, Error>(
     name ? `/v1/gateway/oauth/status/${name}` : null,

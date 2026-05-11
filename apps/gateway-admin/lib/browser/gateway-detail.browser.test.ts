@@ -186,44 +186,44 @@ test('gateway detail disable flow shows confirmation, persists disabled state, a
   })
   await page.reload({ waitUntil: 'networkidle' })
 
-  const enabledSwitch = page.getByRole('switch', { name: 'Gateway enabled' })
+  const enabledSwitch = page.getByRole('switch', { name: 'Server enabled' })
   await assert.doesNotReject(() => enabledSwitch.waitFor())
   assert.equal(await enabledSwitch.getAttribute('aria-checked'), 'true')
 
   await enabledSwitch.focus()
   await page.keyboard.press('Space')
-  await assert.doesNotReject(() => page.getByText('Disable gateway?').waitFor())
+  await assert.doesNotReject(() => page.getByText('Disable server?').waitFor())
   await assert.doesNotReject(() =>
     page.getByText('Connected clients should no longer have access').waitFor(),
   )
 
-  await page.getByRole('button', { name: 'Disable gateway' }).click()
+  await page.getByRole('button', { name: 'Disable server' }).click()
   await assert.doesNotReject(() =>
-    page.getByText('Gateway disabled. Catalog change sent and runtime cleanup requested.').waitFor(),
+    page.getByText('Server disabled. Catalog change sent and runtime cleanup requested.').waitFor(),
   )
   await assert.doesNotReject(() =>
     page
-      .getByText('This gateway is excluded from the active catalog. Clients should no longer see its tools, resources, or prompts until you re-enable it.')
+      .getByText('This server is excluded from the active catalog. Clients should no longer see its tools, resources, or prompts until you re-enable it.')
       .waitFor(),
   )
   assert.equal(await enabledSwitch.getAttribute('aria-checked'), 'false')
-  assert.equal(await page.getByRole('button', { name: 'Test gateway' }).isDisabled(), true)
-  assert.equal(await page.getByRole('button', { name: 'Reload gateway' }).isDisabled(), true)
+  assert.equal(await page.getByRole('button', { name: 'Test server' }).isDisabled(), true)
+  assert.equal(await page.getByRole('button', { name: 'Reload server' }).isDisabled(), true)
 
   await enabledSwitch.focus()
   await page.keyboard.press('Space')
   await assert.doesNotReject(() =>
-    page.getByText('Gateway enabled. Catalog change sent to clients.').waitFor(),
+    page.getByText('Server enabled. Catalog change sent to clients.').waitFor(),
   )
   assert.equal(await enabledSwitch.getAttribute('aria-checked'), 'true')
   assert.equal(
     await page
-      .getByText('This gateway is excluded from the active catalog. Clients should no longer see its tools, resources, or prompts until you re-enable it.')
+      .getByText('This server is excluded from the active catalog. Clients should no longer see its tools, resources, or prompts until you re-enable it.')
       .count(),
     0,
   )
-  assert.equal(await page.getByRole('button', { name: 'Test gateway' }).isDisabled(), false)
-  assert.equal(await page.getByRole('button', { name: 'Reload gateway' }).isDisabled(), false)
+  assert.equal(await page.getByRole('button', { name: 'Test server' }).isDisabled(), false)
+  assert.equal(await page.getByRole('button', { name: 'Reload server' }).isDisabled(), false)
 })
 
 test('gateway list row action disable flow opens and completes successfully', { concurrency: false }, async (t) => {
@@ -242,14 +242,14 @@ test('gateway list row action disable flow opens and completes successfully', { 
   await page.reload({ waitUntil: 'networkidle' })
 
   const githubRow = page.locator('tr').filter({ has: page.getByText('github-server') }).first()
-  const disableButton = githubRow.getByRole('button', { name: 'Disable gateway' })
+  const disableButton = githubRow.getByRole('button', { name: 'Disable server' })
   await assert.doesNotReject(() => disableButton.waitFor())
 
   await disableButton.click()
-  await assert.doesNotReject(() => page.getByText('Disable gateway?').waitFor())
-  await page.getByRole('button', { name: 'Disable gateway' }).click()
+  await assert.doesNotReject(() => page.getByText('Disable server?').waitFor())
+  await page.getByRole('button', { name: 'Disable server' }).click()
 
   await assert.doesNotReject(() =>
-    page.getByText('Gateway disabled. Catalog change sent and runtime cleanup requested.').waitFor(),
+    page.getByText('Server disabled. Catalog change sent and runtime cleanup requested.').waitFor(),
   )
 })

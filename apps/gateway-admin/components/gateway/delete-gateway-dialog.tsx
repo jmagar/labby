@@ -28,7 +28,7 @@ export function DeleteGatewayDialog({
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const isVirtualServer = gateway?.source === 'in_process'
-  const noun = isVirtualServer ? 'Service' : 'Gateway'
+  const noun = isVirtualServer ? 'Service' : 'Server'
 
   const handleConfirm = async () => {
     setIsDeleting(true)
@@ -37,7 +37,7 @@ export function DeleteGatewayDialog({
       await onConfirm()
       onOpenChange(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove gateway')
+      setError(err instanceof Error ? err.message : 'Failed to remove server')
     } finally {
       setIsDeleting(false)
     }
@@ -54,7 +54,7 @@ export function DeleteGatewayDialog({
             <AlertDialogTitle>Remove {noun}</AlertDialogTitle>
           </div>
           <AlertDialogDescription className="pt-2">
-            Are you sure you want to remove <strong>{gateway?.name}</strong>? This action cannot be undone and permanently deletes the {isVirtualServer ? 'Lab service gateway entry' : 'gateway configuration'}.
+            Are you sure you want to remove <strong>{gateway?.name}</strong>? This action cannot be undone and permanently deletes the {isVirtualServer ? 'Lab service server entry' : 'server configuration'}.
           </AlertDialogDescription>
         </AlertDialogHeader>
         {error ? (

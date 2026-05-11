@@ -37,6 +37,7 @@ export type OAuthConnectState =
   | { kind: 'idle' }
   | { kind: 'probing' }
   | { kind: 'discovered'; upstream: string; issuer?: string; scopes?: string[] }
+  | { kind: 'blocked'; upstream: string; issuer?: string; scopes?: string[] }
   | { kind: 'authorizing'; upstream: string }
   | { kind: 'connected'; upstream: string; registration_strategy: string; scopes?: string[] }
   | { kind: 'error'; message: string }

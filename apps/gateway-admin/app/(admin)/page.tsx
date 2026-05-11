@@ -91,10 +91,10 @@ export default function OverviewPage() {
         <div className={cn(AURORA_STRONG_PANEL, 'px-6 py-5')}>
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-2xl space-y-2">
-              <p className={AURORA_MUTED_LABEL}>Gateway Fleet</p>
+              <p className={AURORA_MUTED_LABEL}>Server Fleet</p>
               <h1 className={cn(AURORA_DISPLAY_1, 'text-aurora-text-primary')}>Operational overview</h1>
               <p className="text-sm text-aurora-text-muted sm:text-base">
-                Keep an eye on reachability, exposure, and recent gateway changes before clients start depending on them.
+                Keep an eye on reachability, exposure, and recent server changes before clients start depending on them.
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
@@ -102,7 +102,7 @@ export default function OverviewPage() {
                 <Link href="/activity">Review activity</Link>
               </Button>
               <Button asChild>
-                <Link href="/gateways">Manage gateways</Link>
+                <Link href="/gateways">Manage servers</Link>
               </Button>
             </div>
           </div>
@@ -113,7 +113,7 @@ export default function OverviewPage() {
           <Card variant="medium">
             <CardContent className="p-0">
               <StatCard
-                label="Total Gateways"
+                label="Total Servers"
                 value={stats.totalGateways}
                 detail="Managed upstream MCP connections."
                 icon={Cable}
@@ -169,24 +169,24 @@ export default function OverviewPage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="font-semibold text-aurora-warn">
-                    {stats.totalWarnings} warning{stats.totalWarnings !== 1 ? 's' : ''} across gateways
+                    {stats.totalWarnings} warning{stats.totalWarnings !== 1 ? 's' : ''} across servers
                   </p>
                   <p className="text-sm text-aurora-text-muted">
-                    Review unhealthy or overexposed gateways before publishing more downstream tools.
+                    Review unhealthy or overexposed servers before publishing more downstream tools.
                   </p>
                 </div>
               </div>
               <Button variant="outline" size="sm" className="w-full sm:w-auto" asChild>
-                <Link href="/gateways">View gateways</Link>
+                <Link href="/gateways">View servers</Link>
               </Button>
             </div>
           </div>
         )}
 
-        {/* Recent Gateways */}
+        {/* Recent Servers */}
         <div>
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-aurora-text-primary">Recent Gateways</h2>
+            <h2 className="text-lg font-semibold text-aurora-text-primary">Recent Servers</h2>
             <Button variant="ghost" size="sm" asChild>
               <Link href="/gateways">
                 View all
@@ -213,12 +213,12 @@ export default function OverviewPage() {
               <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-full border border-aurora-border-strong bg-aurora-control-surface shadow-[0_8px_16px_rgba(0,0,0,0.16)]">
                 <Cable className="size-7 text-aurora-accent-strong" />
               </div>
-              <p className="text-lg font-semibold text-aurora-text-primary">No gateways configured</p>
+              <p className="text-lg font-semibold text-aurora-text-primary">No servers configured</p>
               <p className="mt-1 text-sm text-aurora-text-muted">
-                Add your first MCP gateway to get started
+                Add your first MCP server to get started
               </p>
               <Button className="mt-5" asChild>
-                <Link href="/gateways">Add Gateway</Link>
+                <Link href="/gateways">Add Server</Link>
               </Button>
             </div>
           ) : (

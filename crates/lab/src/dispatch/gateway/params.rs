@@ -47,6 +47,11 @@ pub struct GatewayNameParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayClientConfigParams {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProtectedRouteNameParams {
     pub name: String,
 }

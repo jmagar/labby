@@ -461,6 +461,20 @@
           "returns": "GatewayView"
         },
         {
+          "name": "gateway.client_config.get",
+          "description": "Get the MCP client configuration JSON for one gateway",
+          "destructive": false,
+          "params": [
+            {
+              "name": "name",
+              "ty": "string",
+              "required": true,
+              "description": "Gateway name"
+            }
+          ],
+          "returns": "McpClientConfigView"
+        },
+        {
           "name": "gateway.test",
           "description": "Test a configured or proposed gateway without saving it",
           "destructive": false,
@@ -481,7 +495,7 @@
               "name": "allow_stdio",
               "ty": "boolean",
               "required": false,
-              "description": "Required when testing a stdio gateway because it starts a local command"
+              "description": "Deprecated compatibility flag; ignored by current Lab versions"
             }
           ],
           "returns": "GatewayTestResult"
@@ -507,7 +521,7 @@
               "name": "allow_stdio",
               "ty": "boolean",
               "required": false,
-              "description": "Required when spec.command is set because reconcile starts a local command"
+              "description": "Deprecated compatibility flag; ignored by current Lab versions"
             }
           ],
           "returns": "GatewayView"
@@ -539,7 +553,7 @@
               "name": "allow_stdio",
               "ty": "boolean",
               "required": false,
-              "description": "Required when the resulting enabled gateway uses stdio because reconcile starts a local command"
+              "description": "Deprecated compatibility flag; ignored by current Lab versions"
             }
           ],
           "returns": "GatewayView"

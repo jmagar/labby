@@ -311,6 +311,13 @@ pub const ACTIONS: &[ActionSpec] = &[
         params: &[NAME_PARAM],
     },
     ActionSpec {
+        name: "gateway.client_config.get",
+        description: "Get the MCP client configuration JSON for one gateway",
+        destructive: false,
+        returns: "McpClientConfigView",
+        params: &[NAME_PARAM],
+    },
+    ActionSpec {
         name: "gateway.test",
         description: "Test a configured or proposed gateway without saving it",
         destructive: false,

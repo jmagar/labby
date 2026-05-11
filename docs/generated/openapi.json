@@ -4565,6 +4565,17 @@
           }
         }
       },
+      "GatewayGatewayClient_configGetParams": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "GatewayGatewayDiscovered_promptsParams": {
         "type": "object",
         "required": [
