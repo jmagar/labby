@@ -567,6 +567,15 @@ pub const ACTIONS: &[ActionSpec] = &[
             },
         ],
     },
+    ActionSpec {
+        name: "gateway.public_urls.get",
+        description: "Read the resolved canonical public URL pair (app and MCP gateway). \
+                       Merges LAB_PUBLIC_URL / LAB_MCP_GATEWAY_URL env vars over config.toml \
+                       [public_urls] section and the legacy [auth].public_url field.",
+        destructive: false,
+        returns: "ResolvedPublicUrls",
+        params: &[],
+    },
 ];
 
 #[cfg(test)]

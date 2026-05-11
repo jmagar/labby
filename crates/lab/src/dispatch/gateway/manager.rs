@@ -278,6 +278,13 @@ impl GatewayManager {
         }
     }
 
+    /// Return the resolved canonical public URL pair for the app and MCP gateway.
+    ///
+    /// Merges env vars over config file over legacy `[auth].public_url` field.
+    pub async fn public_urls(&self) -> crate::config::ResolvedPublicUrls {
+        self.config.read().await.public_urls()
+    }
+
     pub async fn get_service_config(&self, service: &str) -> Result<ServiceConfigView, ToolError> {
         let meta =
             self.registered_service_meta(service)

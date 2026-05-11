@@ -113,6 +113,45 @@ pub struct LabConfig {
     /// Deploy service preferences (feature-gated at the consumer level).
     #[serde(default)]
     pub deploy: Option<DeployPreferences>,
+    /// Canonical public URL model for the app and MCP gateway.
+    ///
+    /// Use [`LabConfig::public_urls()`] to read resolved values with env-var
+    /// precedence rather than accessing this field directly.
+    #[serde(default)]
+    pub public_urls: Option<PublicUrlsConfig>,
+}
+
+impl LabConfig {
+    /// Resolve the canonical public URL pair after env-over-config merge.
+    ///
+    /// Precedence (highest wins):
+    ///   1. `LAB_PUBLIC_URL` env var (app), `LAB_MCP_GATEWAY_URL` env var (gateway)
+    ///   2. `config.toml` `[public_urls]` section
+    ///   3. Legacy `[auth].public_url` field (app only, for backward compat)
+    pub fn public_urls(&self) -> ResolvedPublicUrls {
+        // Env wins
+        let env_app = std::env::var("LAB_PUBLIC_URL")
+            .ok()
+            .filter(|v| !v.is_empty());
+        let env_gw = std::env::var("LAB_MCP_GATEWAY_URL")
+            .ok()
+            .filter(|v| !v.is_empty());
+
+        let app = env_app
+            .or_else(|| self.public_urls.as_ref().and_then(|p| p.app.clone()))
+            .or_else(|| {
+                // Backward compat: fall back to [auth].public_url
+                self.auth.as_ref().and_then(|a| a.public_url.clone())
+            });
+
+        let mcp_gateway = env_gw.or_else(|| {
+            self.public_urls
+                .as_ref()
+                .and_then(|p| p.mcp_gateway.clone())
+        });
+
+        ResolvedPublicUrls { app, mcp_gateway }
+    }
 }
 
 /// Deploy service preferences — defaults plus per-host overrides.
@@ -695,8 +734,48 @@ pub struct McpPreferences {
     pub allowed_hosts: Option<Vec<String>>,
 }
 
+/// Canonical public URL model.
+///
+/// `app` is the Lab UI and OAuth issuer, e.g. `https://lab.example.com`.
+/// `mcp_gateway` is the MCP endpoint base URL when hosted on a separate hostname,
+/// e.g. `https://mcp.example.com`.  When absent the gateway is assumed to be
+/// reachable at the app URL.
+///
+/// Values are read from config.toml; env vars `LAB_PUBLIC_URL` (app) and
+/// `LAB_MCP_GATEWAY_URL` (mcp_gateway) take precedence and may be set in
+/// `~/.lab/.env`.
+///
+/// Accessor: [`LabConfig::public_urls()`] returns a resolved [`ResolvedPublicUrls`].
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PublicUrlsConfig {
+    /// Public app (UI + OAuth) base URL, e.g. `https://lab.example.com`.
+    #[serde(default)]
+    pub app: Option<String>,
+    /// Separate MCP gateway base URL, e.g. `https://mcp.example.com`.
+    /// Leave blank when the app and MCP gateway share the same hostname.
+    #[serde(default)]
+    pub mcp_gateway: Option<String>,
+}
+
+/// Resolved public URLs after env-over-config merge.
+#[derive(Debug, Clone)]
+pub struct ResolvedPublicUrls {
+    /// Public app URL.  May be `None` when the operator has not configured one.
+    pub app: Option<String>,
+    /// Public MCP gateway URL.  Falls back to `app` when not separately configured.
+    pub mcp_gateway: Option<String>,
+}
+
+impl ResolvedPublicUrls {
+    /// Convenience: return the effective MCP gateway URL, preferring a
+    /// separately configured gateway URL over the app URL.
+    pub fn effective_mcp_gateway(&self) -> Option<&str> {
+        self.mcp_gateway.as_deref().or(self.app.as_deref())
+    }
+}
+
 /// File-backed auth preferences merged with environment variables at startup.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AuthFileConfig {
     /// `bearer` preserves LAB_MCP_HTTP_TOKEN; `oauth` enables the internal auth server.
     #[serde(default)]
@@ -742,9 +821,33 @@ pub struct AuthFileConfig {
     pub admin_email: Option<String>,
 }
 
+/// Resolve auth configuration from a full `LabConfig`.
+///
+/// This is the preferred entry point. It propagates the `[public_urls].app`
+/// value as the `LAB_PUBLIC_URL` fallback when `[auth].public_url` is absent,
+/// making `[public_urls]` the canonical source of truth for the app URL.
+pub fn resolve_auth_for_config(cfg: &LabConfig) -> Result<auth_config::AuthConfig> {
+    // Compute the effective public URL: [auth].public_url > [public_urls].app.
+    // The env var LAB_PUBLIC_URL is handled downstream by resolve_auth().
+    let effective_public_url = cfg
+        .auth
+        .as_ref()
+        .and_then(|a| a.public_url.clone())
+        .or_else(|| cfg.public_urls().app);
+
+    // Build a synthetic auth config that overlays the effective public URL.
+    let mut auth = cfg.auth.clone().unwrap_or_default();
+    if auth.public_url.is_none() {
+        auth.public_url = effective_public_url;
+    }
+    resolve_auth(Some(&auth))
+}
+
 /// Resolve auth configuration from config file + environment variables.
 ///
 /// Env vars take precedence over config file values.
+/// Prefer [`resolve_auth_for_config`] when a full `LabConfig` is available,
+/// so that `[public_urls].app` is used as a fallback for `LAB_PUBLIC_URL`.
 pub fn resolve_auth(config: Option<&AuthFileConfig>) -> Result<auth_config::AuthConfig> {
     let mut merged: HashMap<String, String> = HashMap::new();
 

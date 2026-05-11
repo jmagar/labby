@@ -452,6 +452,13 @@ fn validate_protected_mcp_route(route: &ProtectedMcpRouteConfig) -> Result<(), T
     Ok(())
 }
 
+fn app_public_host(cfg: &LabConfig) -> Option<String> {
+    let public_url = cfg.public_urls().app?;
+    url::Url::parse(&public_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+}
+
 fn normalize_public_host(raw: &str) -> Result<String, ToolError> {
     let trimmed = raw.trim().trim_end_matches('.');
     if trimmed.is_empty()

@@ -479,6 +479,14 @@ async fn handle_mcp_actions(
                     .await?,
             )
         }
+        "gateway.public_urls.get" => {
+            let urls = manager.public_urls().await;
+            to_json(serde_json::json!({
+                "app": urls.app,
+                "mcp_gateway": urls.mcp_gateway,
+                "effective_mcp_gateway": urls.effective_mcp_gateway(),
+            }))
+        }
         unknown => unknown_action(unknown),
     }
 }
@@ -568,6 +576,7 @@ mod tests {
         assert!(names.contains(&"gateway.mcp.enable"));
         assert!(names.contains(&"gateway.mcp.disable"));
         assert!(names.contains(&"gateway.mcp.cleanup"));
+        assert!(names.contains(&"gateway.public_urls.get"));
 
         for name in [
             "gateway.add",
