@@ -5,6 +5,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use crate::at_rest::TokenEncryptionKey;
 use crate::error::AuthError;
 
 const DEFAULT_CALLBACK_PATH: &str = "/auth/google/callback";
@@ -144,6 +145,13 @@ pub struct AuthConfig {
     /// token whenever OAuth is active. Defaults to `false` (lab keeps the
     /// historical break-glass behavior); syslog-mcp overrides to `true`.
     pub disable_static_token_with_oauth: bool,
+    /// Optional at-rest encryption key for upstream provider refresh tokens.
+    ///
+    /// When present, provider refresh tokens are encrypted with
+    /// ChaCha20-Poly1305 before being written to SQLite.  Set via
+    /// `{PREFIX}_TOKEN_ENCRYPTION_KEY` (64 hex digits or 43 base64url chars).
+    /// When absent, tokens are stored as plaintext (backward-compatible).
+    pub token_encryption_key: Option<TokenEncryptionKey>,
 }
 
 impl Default for AuthConfig {
@@ -174,6 +182,7 @@ impl Default for AuthConfig {
             login_path: DEFAULT_LOGIN_PATH.to_string(),
             enable_dynamic_registration: false,
             disable_static_token_with_oauth: false,
+            token_encryption_key: None,
         }
     }
 }
@@ -388,6 +397,7 @@ impl AuthConfigBuilder {
         let key_reg_rpm = env_key(&prefix, "AUTH_REGISTER_REQUESTS_PER_MINUTE");
         let key_az_rpm = env_key(&prefix, "AUTH_AUTHORIZE_REQUESTS_PER_MINUTE");
         let key_max_pending = env_key(&prefix, "AUTH_MAX_PENDING_OAUTH_STATES");
+        let key_enc_key = env_key(&prefix, "TOKEN_ENCRYPTION_KEY");
 
         let mode = AuthMode::parse(vars.get(&key_mode).map(String::as_str), &key_mode)?;
         let admin_email = read_string(&vars, &key_admin)
@@ -439,6 +449,9 @@ impl AuthConfigBuilder {
             login_path: self.login_path,
             enable_dynamic_registration: self.enable_dynamic_registration,
             disable_static_token_with_oauth: self.disable_static_token_with_oauth,
+            token_encryption_key: read_string(&vars, &key_enc_key)
+                .map(|raw| TokenEncryptionKey::from_str(&raw))
+                .transpose()?,
         };
 
         config.validate()?;
