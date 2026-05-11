@@ -100,6 +100,7 @@ test('protectedRouteForGateway does not match when upstream differs even if name
   assert.equal(found, null)
 })
 
+
 test('initialGatewayAuthMode shows OAuth for protected public routes', () => {
   assert.equal(initialGatewayAuthMode(gateway(), route()), 'oauth')
   assert.equal(initialGatewayAuthMode(gateway({ config: { bearer_token_env: 'TOKEN' } }), null), 'bearer')
@@ -121,6 +122,7 @@ test('initialGatewayAuthMode returns oauth when oauth_enabled regardless of bear
     'oauth',
   )
 })
+
 
 test('normalizeProtectedPublicPath accepts slugs and URLs', () => {
   assert.equal(normalizeProtectedPublicPath('tools'), '/tools')

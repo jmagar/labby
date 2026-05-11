@@ -39,7 +39,7 @@ import { cn, getErrorMessage } from '@/lib/utils'
 import { defaultGatewayBearerEnvName, validateBearerTokenEnvName } from '@/lib/gateway-env'
 import { validateGatewayName } from '@/lib/utils/gateway-name'
 import { isAbortError } from '@/lib/api/service-action-client'
-import { GatewayApiError } from '@/lib/api/gateway-client'
+import { GatewayApiError } from '@/lib/api/gateway-client-core'
 import {
   initialGatewayAuthMode,
   normalizeProtectedPublicPath,
@@ -687,7 +687,7 @@ export function GatewayFormDialog({
     publicPath: string,
     signal?: AbortSignal,
   ): Promise<void> => {
-    if (!existingProtectedRoute) return
+    if (!existingProtectedRoute || existingProtectedRoute.name !== gateway?.name) return
     if (existingProtectedRoute.public_path === publicPath) return
     await removeProtectedRoute(existingProtectedRoute.name, signal)
   }
@@ -773,6 +773,7 @@ export function GatewayFormDialog({
       } else {
         await removeExistingProtectedRouteIfCleared(normalizedProtectedPath, controller.signal)
       }
+      await removeExistingProtectedRouteIfCleared(normalizedProtectedPath, controller.signal)
       if (controller.signal.aborted) return
       toast.success(
         normalizedProtectedPath
