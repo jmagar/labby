@@ -777,7 +777,9 @@ export function GatewayFormDialog({
       if (controller.signal.aborted) return
       toast.success(
         normalizedProtectedPath
-          ? `Server saved and protected at https://${PROTECTED_MCP_PUBLIC_HOST}${normalizedProtectedPath}`
+          ? reusedProtectedRoute
+            ? `Server saved and joined https://${PROTECTED_MCP_PUBLIC_HOST}${normalizedProtectedPath}`
+            : `Server saved and protected at https://${PROTECTED_MCP_PUBLIC_HOST}${normalizedProtectedPath}`
           : isEditing
             ? 'Server updated successfully'
             : 'Server created successfully',
