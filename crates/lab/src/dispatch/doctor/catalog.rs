@@ -61,4 +61,40 @@ pub const ACTIONS: &[ActionSpec] = &[
         returns: "DoctorReport",
         params: &[],
     },
+    ActionSpec {
+        name: "proxy.check",
+        description: "Check public Lab and protected MCP proxy endpoints from caller-visible URLs. \
+                       Probes: app health, protected-resource metadata, OAuth bearer challenge, \
+                       wrong-path 404 behavior, and (when backend_url is provided) backend-leak \
+                       redaction.",
+        destructive: false,
+        returns: "DoctorReport",
+        params: &[
+            ParamSpec {
+                name: "app_url",
+                ty: "string",
+                required: true,
+                description: "Public Lab app URL, e.g. https://lab.example.com",
+            },
+            ParamSpec {
+                name: "mcp_url",
+                ty: "string",
+                required: true,
+                description: "Public MCP gateway URL, e.g. https://mcp.example.com",
+            },
+            ParamSpec {
+                name: "route",
+                ty: "string",
+                required: true,
+                description: "Protected MCP public route path, e.g. /syslog",
+            },
+            ParamSpec {
+                name: "backend_url",
+                ty: "string",
+                required: false,
+                description: "Optional private backend origin, e.g. http://mcp-backend:3100. \
+                               When provided, enables the backend-leak redaction probe.",
+            },
+        ],
+    },
 ];

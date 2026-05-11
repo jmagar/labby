@@ -4,10 +4,10 @@
 //! and `cli/doctor.rs` without creating a cli → dispatch dependency.
 
 use lab_apis::core::plugin::EnvVar;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Severity of a single doctor finding.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
     Ok,
@@ -16,7 +16,7 @@ pub enum Severity {
 }
 
 /// One entry in the doctor report.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {
     pub service: String,
     pub check: String,
@@ -25,7 +25,7 @@ pub struct Finding {
 }
 
 /// Full doctor report.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
     pub findings: Vec<Finding>,
 }
