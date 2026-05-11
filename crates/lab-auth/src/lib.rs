@@ -1,3 +1,4 @@
+pub mod at_rest;
 pub mod auth_context;
 pub mod authorize;
 pub mod config;
