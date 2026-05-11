@@ -1304,6 +1304,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "acp_registry")]
     #[test]
     fn binary_asset_without_integrity_metadata_fails_closed() {
         let asset = BinaryAsset {
@@ -1319,6 +1320,7 @@ mod tests {
         assert_eq!(err.kind(), "integrity_missing");
     }
 
+    #[cfg(feature = "acp_registry")]
     #[test]
     fn binary_asset_digest_metadata_is_normalized() {
         let asset = BinaryAsset {
@@ -1334,6 +1336,7 @@ mod tests {
         assert_eq!(expected, "a".repeat(64));
     }
 
+    #[cfg(feature = "acp_registry")]
     #[test]
     fn digest_mismatch_verification_helper_fails() {
         let expected = "a".repeat(64);
@@ -1407,6 +1410,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "acp_registry")]
     #[test]
     fn install_executable_atomically_replaces_file_contents() {
         let dir = tempfile::tempdir().expect("tempdir");
