@@ -1,9 +1,9 @@
+use axum::Router;
 use axum::extract::Request;
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::routing::{get, post};
-use axum::Router;
 use std::time::Instant;
 
 use crate::authorize::{authorize, browser_login, callback, register_client};
