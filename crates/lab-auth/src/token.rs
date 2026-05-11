@@ -195,29 +195,45 @@ async fn refresh_token_grant(
     };
     let google = state.google.refresh(&provider_refresh_token).await?;
 
-    state
+    let new_refresh_token = random_token(24)?;
+    let new_expires_at = expires_at(
+        now_unix(),
+        state.config.refresh_token_ttl,
+        "LAB_AUTH_REFRESH_TOKEN_TTL_SECS",
+    )?;
+    let rotated = state
         .store
-        .upsert_refresh_token(RefreshTokenRow {
-            refresh_token: refresh_token.clone(),
-            client_id: stored.client_id.clone(),
-            subject: google.subject.clone(),
-            scope: stored.scope.clone(),
-            provider_refresh_token: google.refresh_token.or(Some(provider_refresh_token)),
-            created_at: stored.created_at,
-            expires_at: expires_at(
-                now_unix(),
-                state.config.refresh_token_ttl,
-                "LAB_AUTH_REFRESH_TOKEN_TTL_SECS",
-            )?,
-        })
+        .rotate_refresh_token(
+            &refresh_token,
+            RefreshTokenRow {
+                refresh_token: new_refresh_token.clone(),
+                client_id: stored.client_id.clone(),
+                subject: google.subject.clone(),
+                scope: stored.scope.clone(),
+                provider_refresh_token: google.refresh_token.or(Some(provider_refresh_token)),
+                created_at: stored.created_at,
+                expires_at: new_expires_at,
+            },
+        )
         .await?;
+    if rotated.is_none() {
+        // Token was invalidated between lookup and rotation — treat as replay.
+        warn!(
+            refresh_token_id = %refresh_token_id,
+            client_id = %stored.client_id,
+            "oauth token rejected: refresh token expired or already rotated (replay)"
+        );
+        return Err(AuthError::InvalidGrant(
+            "refresh token has already been used or has expired".to_string(),
+        ));
+    }
     info!(
         grant_type = "refresh_token",
         client_id = %stored.client_id,
         refresh_token_id = %refresh_token_id,
         subject_id = %fingerprint(&google.subject),
         scope = %stored.scope,
-        "oauth refresh_token grant issued new lab access token"
+        "oauth refresh_token grant rotated refresh token and issued new access token"
     );
 
     build_token_response(
@@ -225,7 +241,7 @@ async fn refresh_token_grant(
         stored.client_id,
         google.subject,
         stored.scope,
-        Some(refresh_token),
+        Some(new_refresh_token),
     )
 }
 
@@ -739,5 +755,109 @@ mod tests {
             })
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn refresh_grant_rotates_token_on_success() {
+        let state = test_auth_state_with_mock_google().await;
+        state
+            .store
+            .upsert_refresh_token(crate::types::RefreshTokenRow {
+                refresh_token: "original-token".to_string(),
+                client_id: "client".to_string(),
+                subject: "google-subject-123".to_string(),
+                scope: "lab".to_string(),
+                provider_refresh_token: Some("provider-refresh".to_string()),
+                created_at: crate::util::now_unix() - 60,
+                expires_at: crate::util::now_unix() + 3600,
+            })
+            .await
+            .unwrap();
+        let app = router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/token")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(
+                        "grant_type=refresh_token&refresh_token=original-token&client_id=client",
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let new_token = json["refresh_token"].as_str().expect("new refresh_token");
+        // The new token must differ from the original.
+        assert_ne!(new_token, "original-token", "token must rotate on use");
+        // The original token must no longer be valid.
+        assert!(
+            state
+                .store
+                .find_refresh_token("original-token")
+                .await
+                .unwrap()
+                .is_none(),
+            "old refresh token must be invalidated after rotation"
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_grant_rejects_replay_of_old_token() {
+        let state = test_auth_state_with_mock_google().await;
+        state
+            .store
+            .upsert_refresh_token(crate::types::RefreshTokenRow {
+                refresh_token: "once-only-token".to_string(),
+                client_id: "client".to_string(),
+                subject: "google-subject-123".to_string(),
+                scope: "lab".to_string(),
+                provider_refresh_token: Some("provider-refresh".to_string()),
+                created_at: crate::util::now_unix() - 60,
+                expires_at: crate::util::now_unix() + 3600,
+            })
+            .await
+            .unwrap();
+        let app = router(state);
+        // First use — succeeds and rotates.
+        let first = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/token")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(
+                        "grant_type=refresh_token&refresh_token=once-only-token&client_id=client",
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        // Second use of the same token — must be rejected as a replay.
+        let replay = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/token")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(
+                        "grant_type=refresh_token&refresh_token=once-only-token&client_id=client",
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            replay.status(),
+            StatusCode::BAD_REQUEST,
+            "replayed refresh token must be rejected"
+        );
     }
 }
