@@ -481,10 +481,11 @@ async fn handle_mcp_actions(
         }
         "gateway.public_urls.get" => {
             let urls = manager.public_urls().await;
+            let effective_mcp_gateway = urls.effective_mcp_gateway().map(str::to_owned);
             to_json(serde_json::json!({
                 "app": urls.app,
                 "mcp_gateway": urls.mcp_gateway,
-                "effective_mcp_gateway": urls.effective_mcp_gateway(),
+                "effective_mcp_gateway": effective_mcp_gateway,
             }))
         }
         unknown => unknown_action(unknown),
