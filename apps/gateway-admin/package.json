@@ -10,7 +10,7 @@
     "preview": "python3 -m http.server 3000 -d out",
     "lint": "eslint .",
     "test": "pnpm run test:unit",
-    "test:unit": "tsx --test lib/*.test.ts lib/acp/*.test.ts lib/chat/*.test.ts lib/server/**/*.test.ts lib/api/**/*.test.ts lib/dashboard/**/*.test.ts lib/fs/**/*.test.ts lib/dev/**/*.test.ts components/**/*.test.tsx",
+    "test:unit": "tsx --test lib/*.test.ts lib/acp/*.test.ts lib/chat/*.test.ts lib/server/**/*.test.ts lib/api/**/*.test.ts lib/dashboard/**/*.test.ts lib/fs/**/*.test.ts lib/dev/**/*.test.ts lib/setup/*.test.ts components/**/*.test.tsx",
     "test:acp": "tsx --test lib/acp/*.test.ts lib/chat/*.test.ts",
     "test:browser": "node --test --experimental-strip-types lib/browser/**/*.test.ts"
   },

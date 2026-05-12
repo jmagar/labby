@@ -317,6 +317,17 @@ The same catalog builder must feed:
 - `lab://catalog`
 - CLI help/catalog rendering
 
+Generated/static docs (including `docs/generated/` artifacts) use `build_docs_registry()` and do not change based on local operator config. Runtime discovery reflects the config value at server start.
+
+## Settings Actions
+
+The `setup` Bootstrap service exposes two settings actions for reading and updating non-secret operator preferences:
+
+- `setup({ "action": "settings.state" })` — returns the current non-secret settings including the service runtime policy state, config file path, and surface configuration (MCP transport, auth mode, etc.). No secrets are returned; the response is safe to display verbatim.
+- `setup({ "action": "settings.update", "params": { "services": { "built_in_upstream_apis_enabled": false } } })` — writes the updated setting to `config.toml` (preserves comments and unknown keys) and applies the new policy to gateway discovery immediately. Returns the new settings state with `changed` and `restart_required` fields.
+
+`settings.update` is marked `destructive: true` and requires `"confirm": true` in params (HTTP) or MCP elicitation (stdio). Changes to `built_in_upstream_apis_enabled` take effect for gateway discovery immediately but require a `labby serve` restart for HTTP route mounting to reflect the new policy.
+
 ## Upstream Tool Merging
 
 When upstream MCP servers are configured (see [UPSTREAM.md](./UPSTREAM.md)), their tools are merged into the `list_tools` response alongside built-in service tools.

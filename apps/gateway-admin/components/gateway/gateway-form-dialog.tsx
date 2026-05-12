@@ -39,7 +39,7 @@ import { cn, getErrorMessage } from '@/lib/utils'
 import { defaultGatewayBearerEnvName, validateBearerTokenEnvName } from '@/lib/gateway-env'
 import { validateGatewayName } from '@/lib/utils/gateway-name'
 import { isAbortError } from '@/lib/api/service-action-client'
-import { GatewayApiError } from '@/lib/api/gateway-client'
+import { GatewayApiError } from '@/lib/api/gateway-client-core'
 import {
   initialGatewayAuthMode,
   normalizeProtectedPublicPath,
@@ -491,6 +491,9 @@ export function GatewayFormDialog({
     setOauthProbed(null)
   }, [url])
 
+  // Stdio connections don't support upstream authentication, so clear all OAuth
+  // and bearer state whenever the transport is stdio. If a protected public path
+  // is also absent we additionally reset the auth mode to 'none'.
   useEffect(() => {
     if (transport !== 'stdio') return
     if (!protectedPublicPath.trim()) {
@@ -688,7 +691,10 @@ export function GatewayFormDialog({
     signal?: AbortSignal,
   ): Promise<void> => {
     if (!existingProtectedRoute) return
-    if (existingProtectedRoute.public_path === publicPath) return
+    // Only remove when the protected-route field was explicitly cleared.
+    // If publicPath is non-empty, saveProtectedRoute already handled the
+    // update/replace; deleting here would silently discard the just-saved route.
+    if (publicPath) return
     await removeProtectedRoute(existingProtectedRoute.name, signal)
   }
 
@@ -773,10 +779,13 @@ export function GatewayFormDialog({
       } else {
         await removeExistingProtectedRouteIfCleared(normalizedProtectedPath, controller.signal)
       }
+      await removeExistingProtectedRouteIfCleared(normalizedProtectedPath, controller.signal)
       if (controller.signal.aborted) return
       toast.success(
         normalizedProtectedPath
-          ? `Server saved and protected at https://${PROTECTED_MCP_PUBLIC_HOST}${normalizedProtectedPath}`
+          ? reusedProtectedRoute
+            ? `Server saved and joined https://${PROTECTED_MCP_PUBLIC_HOST}${normalizedProtectedPath}`
+            : `Server saved and protected at https://${PROTECTED_MCP_PUBLIC_HOST}${normalizedProtectedPath}`
           : isEditing
             ? 'Server updated successfully'
             : 'Server created successfully',

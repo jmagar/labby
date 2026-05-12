@@ -6,9 +6,16 @@ export function normalizeProtectedPublicPath(raw: string): string {
   const trimmed = raw.trim()
   if (!trimmed) return ''
 
-  const withoutOrigin = trimmed.startsWith('http://') || trimmed.startsWith('https://')
-    ? new URL(trimmed).pathname
-    : trimmed
+  let withoutOrigin: string
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    try {
+      withoutOrigin = new URL(trimmed).pathname
+    } catch {
+      throw new Error('Enter a valid URL or a path starting with /')
+    }
+  } else {
+    withoutOrigin = trimmed
+  }
   const withSlash = withoutOrigin.startsWith('/') ? withoutOrigin : `/${withoutOrigin}`
   const normalized = withSlash.replace(/\/+/g, '/').replace(/\/$/, '')
 
@@ -36,7 +43,7 @@ export function protectedRouteForGateway(
   const matches = routes.filter((route) => {
     if (!route.enabled) return false
     if (route.public_host.toLowerCase() !== host) return false
-    return route.upstream != null ? route.upstream === gatewayName : route.name === gatewayName
+    return route.upstream === gatewayName || route.name === gatewayName
   })
 
   return matches.find((route) => route.upstream === gatewayName) ?? matches[0] ?? null
@@ -50,6 +57,9 @@ export function initialGatewayAuthMode(
   gateway: Gateway,
   protectedRoute: ProtectedMcpRoute | null,
 ): GatewayAuthMode {
+  // bearer_token_env and oauth_enabled are explicit gateway-level auth config;
+  // check them first so that a protected-route publication (which is orthogonal
+  // to upstream auth) cannot silently clear bearer credentials on re-save.
   if (gateway.config.oauth_enabled) return 'oauth'
   if (gateway.config.bearer_token_env) return 'bearer'
   if (protectedRoute) return 'oauth'
