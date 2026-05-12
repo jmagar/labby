@@ -107,22 +107,21 @@ test('initialGatewayAuthMode shows OAuth for protected public routes', () => {
   assert.equal(initialGatewayAuthMode(gateway(), null), 'none')
 })
 
-test('initialGatewayAuthMode prefers bearer over route-inferred oauth', () => {
-  // P1: gateway uses bearer auth for backend but also has a protected public route —
-  // bearer_token_env should win so the form does not incorrectly switch to oauth mode.
+test('initialGatewayAuthMode preserves bearer auth when a protected route is also present', () => {
+  // A gateway with bearer_token_env AND a protected route should retain 'bearer'
+  // so that saving the form does not clear upstream credentials.
   assert.equal(
-    initialGatewayAuthMode(gateway({ config: { bearer_token_env: 'TOKEN' } }), route()),
+    initialGatewayAuthMode(gateway({ config: { bearer_token_env: 'MY_TOKEN' } }), route()),
     'bearer',
   )
 })
 
-test('initialGatewayAuthMode returns oauth when oauth_enabled regardless of bearer_token_env', () => {
+test('initialGatewayAuthMode prefers oauth_enabled over bearer_token_env', () => {
   assert.equal(
-    initialGatewayAuthMode(gateway({ config: { oauth_enabled: true, bearer_token_env: 'TOKEN' } }), null),
+    initialGatewayAuthMode(gateway({ config: { oauth_enabled: true, bearer_token_env: 'MY_TOKEN' } }), null),
     'oauth',
   )
 })
-
 
 test('normalizeProtectedPublicPath accepts slugs and URLs', () => {
   assert.equal(normalizeProtectedPublicPath('tools'), '/tools')

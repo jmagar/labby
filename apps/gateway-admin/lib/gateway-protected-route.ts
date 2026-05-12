@@ -50,6 +50,9 @@ export function initialGatewayAuthMode(
   gateway: Gateway,
   protectedRoute: ProtectedMcpRoute | null,
 ): GatewayAuthMode {
+  // bearer_token_env and oauth_enabled are explicit gateway-level auth config;
+  // check them first so that a protected-route publication (which is orthogonal
+  // to upstream auth) cannot silently clear bearer credentials on re-save.
   if (gateway.config.oauth_enabled) return 'oauth'
   if (gateway.config.bearer_token_env) return 'bearer'
   if (protectedRoute) return 'oauth'
