@@ -563,6 +563,10 @@ fn verify_archive_sha256(expected: &str, actual: &str) -> Result<(), ToolError> 
     })
 }
 
+// Note: `NamedTempFile::persist(dest)` uses `rename(2)` which is atomic on
+// Linux.  Windows `MoveFileEx` without `MOVEFILE_REPLACE_EXISTING` fails when
+// the destination exists, but Windows is not a supported platform for this
+// binary, so no cross-platform fallback is implemented.
 #[cfg(feature = "acp_registry")]
 fn install_executable_atomically(src: &Path, dest: &Path) -> Result<(), ToolError> {
     let parent = dest
@@ -825,7 +829,7 @@ async fn cleanup_partial_archive(dest: &Path, action: &'static str) {
 
 fn archive_size_error(url: &str, size: u64) -> ToolError {
     ToolError::Sdk {
-        sdk_kind: "invalid_param".to_string(),
+        sdk_kind: "content_too_large".to_string(),
         message: format!("download of {url} exceeded maximum ACP archive size of {size} bytes"),
     }
 }
@@ -1390,7 +1394,7 @@ mod tests {
             enforce_archive_size_limit(&mut downloaded, 2, "https://example.com/agent.tar.gz")
                 .expect_err("oversized archive must fail");
 
-        assert_eq!(err.kind(), "invalid_param");
+        assert_eq!(err.kind(), "content_too_large");
         assert_eq!(downloaded, MAX_ACP_ARCHIVE_BYTES - 1);
     }
 
