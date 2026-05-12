@@ -49,8 +49,13 @@ marketplace: build-release
 install: build-release
     install -D -m 755 bin/labby ~/.local/bin/labby
 
+# Ensure host-side runtime directories are owned by the current user before
+# Docker can claim them as root during bind-mount creation.
+ensure-host-dirs:
+    scripts/ensure-host-dirs
+
 # Start the dev container for the first time (or after docker-compose changes)
-dev-up:
+dev-up: ensure-host-dirs
     docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 # Release build → hot-swap binary into running dev container (no image rebuild)

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Ensure host-side runtime directories that labby bind-mounts exist and are
+# owned by the current user before `docker compose up` runs.
+#
+# Docker creates missing bind-mount source directories automatically, but does
+# so as root — the resulting root-owned directory prevents the host-side
+# bitwarden session script from writing the session token file into it.
+#
+# Run via `just dev-up` (wired as a dependency) or directly.
+set -euo pipefail
+
+fix_dir() {
+    local dir="$1" mode="${2:-700}"
+    if [[ ! -d "$dir" ]]; then
+        mkdir -p "$dir"
+        chmod "$mode" "$dir"
+        echo "created: $dir"
+    elif [[ "$(stat -c '%u' "$dir")" != "$(id -u)" ]]; then
+        echo "fixing ownership: $dir (was root, now $(id -un))"
+        sudo chown "$(id -u):$(id -g)" "$dir"
+        chmod "$mode" "$dir"
+    fi
+}
+
+# Bitwarden MCP session directory — labby mounts this :ro so the bitwarden-mcp
+# stdio gateway inside the container can read the host-managed session token.
+# Without pre-creation Docker claims it as root and the host session script
+# cannot write the token file.
+fix_dir "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bitwarden-mcp" 700

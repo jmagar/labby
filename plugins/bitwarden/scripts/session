@@ -56,7 +56,7 @@ status() {
   local file
   file="$(session_file)"
 
-  [[ -r "$file" ]] || exit 1
+  [[ -r "$file" ]] || return 1
   BW_SESSION="$(<"$file")" bw unlock --check >/dev/null 2>&1
 }
 
