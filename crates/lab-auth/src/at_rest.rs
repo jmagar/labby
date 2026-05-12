@@ -15,10 +15,11 @@
 ///
 /// # Storage format
 ///
-/// Each ciphertext is a `base64url(nonce || tag || ciphertext)` string where:
+/// Each ciphertext is a `base64url(nonce || ciphertext+tag)` string where:
 /// - `nonce` is a randomly generated 12-byte ChaCha20-Poly1305 nonce
-/// - `tag` is the 16-byte authentication tag produced by AEAD encryption
-/// - `ciphertext` is the ChaCha20-Poly1305 encrypted payload
+/// - `ciphertext+tag` is the output of ChaCha20-Poly1305 AEAD encryption:
+///   the ciphertext bytes followed by the 16-byte authentication tag appended
+///   by the AEAD library
 ///
 /// The sentineled prefix `"enc:"` is prepended so that legacy plaintext values
 /// (or rows from databases without encryption) can be distinguished from
@@ -197,7 +198,7 @@ mod tests {
     #[test]
     fn encrypt_decrypt_round_trip() {
         let key = test_key();
-        let token = "ya29.google-upstream-refresh-token";
+        let token = "fake-google-refresh-token-for-tests";
         let encrypted = encrypt_provider_token(&key, token).unwrap();
         assert!(
             encrypted.starts_with(ENC_PREFIX),
@@ -211,7 +212,7 @@ mod tests {
     #[test]
     fn different_encryptions_of_same_token_differ() {
         let key = test_key();
-        let token = "ya29.same-token";
+        let token = "test-provider-token-same-value";
         let enc1 = encrypt_provider_token(&key, token).unwrap();
         let enc2 = encrypt_provider_token(&key, token).unwrap();
         assert_ne!(
