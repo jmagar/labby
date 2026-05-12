@@ -232,6 +232,12 @@ impl AuthConfig {
                 "scopes_supported must contain at least one scope".to_string(),
             ));
         }
+        if !self.scopes_supported.contains(&self.default_scope) {
+            return Err(AuthError::Config(format!(
+                "default_scope `{}` must be listed in scopes_supported",
+                self.default_scope
+            )));
+        }
 
         if matches!(self.mode, AuthMode::OAuth) {
             if self.public_url.is_none() {
@@ -450,7 +456,10 @@ impl AuthConfigBuilder {
             enable_dynamic_registration: self.enable_dynamic_registration,
             disable_static_token_with_oauth: self.disable_static_token_with_oauth,
             token_encryption_key: read_string(&vars, &key_enc_key)
-                .map(|raw| TokenEncryptionKey::from_str(&raw))
+                .map(|raw| {
+                    TokenEncryptionKey::from_str(&raw)
+                        .map_err(|e| AuthError::Config(format!("invalid {key_enc_key}: {e}")))
+                })
                 .transpose()?,
         };
 
