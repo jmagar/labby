@@ -301,7 +301,10 @@ async fn authenticate(
                 .map(|url| url.as_str().trim_end_matches('/').to_string())
             else {
                 return Err(auth_error_response(
-                    "server misconfigured: PUBLIC_URL required for JWT validation",
+                    &format!(
+                        "server misconfigured: {}_PUBLIC_URL required for JWT validation",
+                        auth_state.config.env_prefix
+                    ),
                     layer.resource_url.as_deref(),
                 ));
             };
@@ -459,7 +462,10 @@ fn csrf_error_response(message: &str) -> Response {
 fn percent_encode_path(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~' | b'/' | b'?') {
+        // Do NOT include `?` here — when return_to is used as a query-string
+        // value a literal `?` would be interpreted as the start of a nested
+        // query string by the redirect target.
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~' | b'/') {
             out.push(b as char);
         } else {
             out.push('%');
