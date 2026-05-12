@@ -50,7 +50,13 @@ export interface McpListOptions {
 }
 
 const MCP_LIST_PAGE_SIZE = 20
-const MCP_LIST_MAX_PAGES = 100
+// Generous upper bound to prevent runaway pagination.  The real protection
+// against infinite loops is the seen-cursor set (stalled-cursor guard) and
+// the empty-page-with-cursor guard, both of which throw before this cap is
+// reached for any well-behaved registry.  Raising this to 10 000 pages
+// (200 000 servers at page size 20) removes the artificial 2 000-server
+// ceiling without disabling the loop guard entirely.
+const MCP_LIST_MAX_PAGES = 10_000
 
 export async function listMcpServersPage(
   options: McpListOptions = {},
