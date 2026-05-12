@@ -687,8 +687,11 @@ export function GatewayFormDialog({
     publicPath: string,
     signal?: AbortSignal,
   ): Promise<void> => {
-    if (!existingProtectedRoute || existingProtectedRoute.name !== gateway?.name) return
-    if (existingProtectedRoute.public_path === publicPath) return
+    if (!existingProtectedRoute) return
+    // Only remove when the protected-route field was explicitly cleared.
+    // If publicPath is non-empty, saveProtectedRoute already handled the
+    // update/replace; deleting here would silently discard the just-saved route.
+    if (publicPath) return
     await removeProtectedRoute(existingProtectedRoute.name, signal)
   }
 
