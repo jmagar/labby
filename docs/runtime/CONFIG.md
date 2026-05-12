@@ -206,7 +206,7 @@ Example:
 
 ```toml
 [oauth.machines.dookie]
-target_url = "http://100.88.16.79:38935/callback/dookie"
+target_url = "http://node.internal.example:38935/callback/dookie"
 description = "dookie Codex callback listener"
 default_port = 38935
 ```
@@ -226,6 +226,18 @@ The node runtime reuses the same target model when `POST /v1/nodes/oauth/relay/s
 | Key | Env override | Default | Description |
 |-----|-------------|---------|-------------|
 | `enabled` | `LAB_ADMIN_ENABLED=1` | `false` | Enable the `lab_admin` MCP tool |
+
+### `[services]`
+
+| Key | Env override | Default | Description |
+|-----|-------------|---------|-------------|
+| `built_in_upstream_apis_enabled` | none | `true` | Enables all compiled built-in service integrations that call external service APIs. Set to `false` to keep bootstrap/operator tools online while removing built-in upstream API integrations from runtime discovery and dispatch on the next `labby serve` start. |
+
+When `built_in_upstream_apis_enabled = false`, Lab preserves stored service credentials and config on disk. Disablement controls runtime exposure only; it does not delete `.env` values.
+
+Persistent disablement wins over `labby serve --services` and `labby mcp --services` by default. The `--services` flag can narrow the already-enabled runtime registry, but it does not re-enable a built-in upstream API service disabled by `[services]`.
+
+Generated/static docs describe the compiled surface. Runtime discovery (`lab://catalog`, MCP list tools, HTTP route mounting, and action dispatch) reflects the config value captured when the server process started. Changing this setting through Settings writes `config.toml` without deleting comments or unknown keys, then reports `restart_required: true`; restart `labby serve` for the runtime registry and routes to change.
 
 ### `[services.tailscale]`
 
@@ -353,7 +365,7 @@ Full details in [OAUTH.md](./OAUTH.md).
 | `LAB_GOOGLE_CALLBACK_PATH` | no | Callback path appended to `LAB_PUBLIC_URL`. Defaults to `/auth/google/callback`. |
 | `LAB_GOOGLE_SCOPES` | no | Comma-separated Google scopes. Defaults to `openid,email,profile`. |
 | `LAB_AUTH_ALLOWED_REDIRECT_URIS` | no | Comma-separated non-loopback redirect URI patterns. Host wildcards must be full labels, not raw suffix globs. |
-| `LAB_AUTH_ADMIN_EMAIL` | oauth mode | Google email of the bootstrap admin permitted to log in. Normalized to lowercase. **Required** in oauth mode — startup fails if unset so no Google account can authenticate unless explicitly permitted. The id_token's `email_verified` claim is enforced (unverified accounts are rejected even when the address matches). Additional users will be granted via a SQLite-backed allowlist managed in the web UI (planned). |
+| `LAB_AUTH_ADMIN_EMAIL` | oauth mode | Google email of the bootstrap admin permitted to log in. Normalized to lowercase. **Required** in oauth mode — startup fails if unset so no Google account can authenticate unless explicitly permitted. The id_token's `email_verified` claim is enforced (unverified accounts are rejected even when the address matches). Additional users are granted through the SQLite-backed allowlist managed from Labby settings. |
 | `LAB_AUTH_ACCESS_TOKEN_TTL_SECS` | no | Override lab-issued JWT access token lifetime. Defaults to `3600`. |
 | `LAB_AUTH_REFRESH_TOKEN_TTL_SECS` | no | Override refresh token lifetime. Defaults to `2592000` (30 days). |
 | `LAB_AUTH_CODE_TTL_SECS` | no | Override authorization code lifetime. Defaults to `300`. |
@@ -395,7 +407,7 @@ There is not a separate `[node]` auth block in this implementation.
 
 ```toml
 [oauth.machines.dookie]
-target_url = "http://100.88.16.79:38935/callback/dookie"
+target_url = "http://node.internal.example:38935/callback/dookie"
 description = "Dookie Claude callback target"
 default_port = 38935
 ```
@@ -423,7 +435,7 @@ alias `LAB_WEB_UI_DISABLE_AUTH` is still accepted, but new configs should use
 
 Lab can proxy tool calls and resource reads to upstream MCP servers.
 
-Full details in [UPSTREAM.md](./UPSTREAM.md).
+Full details in [UPSTREAM.md](../services/UPSTREAM.md).
 
 ### config.toml
 
@@ -444,12 +456,75 @@ proxy_resources = false
 
 `expose_tools` is optional. When present, it limits which discovered upstream tools are republished by the gateway. Entries support exact names and simple `*` wildcards.
 
+### Gateway-Managed Protected MCP Routes
+
+Gateway-managed protected MCP routes are configured with
+`[[protected_mcp_routes]]`. They publish a public OAuth-protected MCP resource
+at `https://<public_host><public_path>` and proxy accepted Streamable HTTP MCP
+traffic either to a raw backend MCP endpoint (`backend_url`) or to an existing
+named Gateway upstream (`upstream`).
+
+Use these for inline public MCP routes that need Lab-owned OAuth protected
+resource metadata, 401 challenges, token validation, and redacted public errors.
+Do not model them with legacy `MCP_<SERVICE>_URLS` or
+`MCP_<SERVICE>_BACKEND` env vars; use the Gateway UI or
+`labby gateway protected-route ...` so validation and duplicate detection share
+the same source of truth.
+
+```toml
+[[protected_mcp_routes]]
+name = "syslog"
+enabled = true
+public_host = "mcp.example.com"
+public_path = "/syslog"
+backend_url = "http://node.internal.example:3100/mcp"
+scopes = ["mcp:read", "mcp:write"]
+health_path = "/health"
+```
+
+To publish a Gateway-managed upstream, use `upstream` instead of `backend_url`.
+Lab resolves the upstream by name and applies that upstream's configured auth,
+including upstream OAuth credentials stored for the shared Gateway subject.
+
+```toml
+[[protected_mcp_routes]]
+name = "axon"
+enabled = true
+public_host = "mcp.example.com"
+public_path = "/axon"
+upstream = "axon"
+scopes = ["mcp:read", "mcp:write"]
+```
+
+Rules:
+
+- `public_host` is a bare host with no scheme, port, or path.
+- `public_path` must include a service segment and cannot overlap Lab reserved
+  routes such as `/.well-known/*` or `/v1/*`.
+- Set exactly one of `upstream` or `backend_url`.
+- `upstream` publishes a named Gateway upstream and reuses its configured
+  upstream auth, including upstream OAuth. In this mode `backend_url` is
+  intentionally empty because the endpoint URL comes from the upstream config.
+- `backend_url` is the full backend MCP endpoint URL. Origin-only values are
+  accepted as legacy input and default to `/mcp`.
+- `backend_mcp_path` is deprecated compatibility input for older configs.
+- `scopes` defaults to `mcp:read` and `mcp:write` when omitted.
+- Disabled routes do not publish metadata, issue challenges, or proxy traffic.
+- Public errors must not reveal `backend_url`, `backend_mcp_path`, private IPs,
+  or token env var names.
+
+Full operator setup, SWAG/nginx, Traefik, tunnel guidance, migration examples,
+and curl verification live in [GATEWAY.md](../services/GATEWAY.md#gateway-managed-protected-mcp-routes).
+
 ### Upstream OAuth (authorization_code + PKCE)
 
 An upstream MCP server that advertises OAuth Protected Resource Metadata can be
-authenticated per-user via an `[upstream.oauth]` block instead of a shared
-bearer token. `oauth` and `bearer_token_env` are **mutually exclusive** — setting
-both is a config-validation error.
+authenticated via an `[upstream.oauth]` block instead of a shared bearer token.
+Current Gateway UI/API/CLI flows store credentials for the shared Gateway
+subject `gateway`; subject-scoped MCP internals still use the same per-subject
+cache shape so future per-user routing can remain isolated. `oauth` and
+`bearer_token_env` are **mutually exclusive** — setting both is a
+config-validation error.
 
 Shared shape:
 
@@ -503,7 +578,7 @@ strategy = "dynamic"
 ```
 
 Dynamic registration may require an initial access token; supply it via env
-(documented in [UPSTREAM.md](./UPSTREAM.md)). DCR-issued credentials are
+(documented in [UPSTREAM.md](../services/UPSTREAM.md)). DCR-issued credentials are
 persisted alongside tokens and reused on restart.
 
 Setting `oauth` and `bearer_token_env` on the same upstream produces a

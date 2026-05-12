@@ -7,8 +7,20 @@ use lab_apis::core::action::ActionSpec;
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::dispatch::error::ToolError;
+
+static RUNTIME_BUILT_IN_UPSTREAM_APIS_ENABLED: AtomicBool = AtomicBool::new(true);
+
+pub fn set_runtime_built_in_upstream_apis_enabled(enabled: bool) {
+    RUNTIME_BUILT_IN_UPSTREAM_APIS_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+#[must_use]
+pub fn runtime_built_in_upstream_apis_enabled() -> bool {
+    RUNTIME_BUILT_IN_UPSTREAM_APIS_ENABLED.load(Ordering::Relaxed)
+}
 
 /// A dispatch function pointer: takes an owned action name and params,
 /// returns a boxed future resolving to `Result<Value, ToolError>`.
@@ -68,6 +80,7 @@ macro_rules! register_service {
                 name: meta.name,
                 description: meta.description,
                 category: category_slug(meta.category),
+                kind: registered_service_kind(meta.name, meta.category),
                 status: if actions.is_empty() {
                     "stub"
                 } else {
@@ -88,6 +101,7 @@ macro_rules! register_service {
                 name: meta.name,
                 description: meta.description,
                 category: category_slug(meta.category),
+                kind: registered_service_kind(meta.name, meta.category),
                 status: if actions.is_empty() {
                     "stub"
                 } else {
@@ -109,6 +123,8 @@ pub struct RegisteredService {
     pub description: &'static str,
     /// Category slug.
     pub category: &'static str,
+    /// Runtime policy class used for global service filtering.
+    pub kind: RegisteredServiceKind,
     /// Implementation status: `"available"` (actions populated) or `"stub"` (empty actions).
     ///
     /// Agents reading `lab://catalog` should filter on `status == "available"` to find
@@ -127,13 +143,23 @@ impl std::fmt::Debug for RegisteredService {
             .field("name", &self.name)
             .field("description", &self.description)
             .field("category", &self.category)
+            .field("kind", &self.kind)
             .field("actions", &self.actions)
             .finish_non_exhaustive()
     }
 }
 
+/// Runtime policy classification for registered services.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegisteredServiceKind {
+    /// Local/bootstrap/operator surfaces that do not proxy a built-in upstream API.
+    BootstrapOperator,
+    /// Built-in integrations that call an external service API.
+    BuiltInUpstreamApi,
+}
+
 /// Collection of registered services, built at startup.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ToolRegistry {
     services: Vec<RegisteredService>,
     action_names: Vec<&'static str>,
@@ -271,6 +297,51 @@ pub fn service_configured_by_env(service: &str) -> bool {
     })
 }
 
+#[must_use]
+#[cfg(test)]
+pub fn is_built_in_upstream_api_service(service: &str) -> bool {
+    build_default_registry()
+        .service(service)
+        .is_some_and(|service| service.kind == RegisteredServiceKind::BuiltInUpstreamApi)
+}
+
+#[must_use]
+pub fn built_in_upstream_api_services(registry: &ToolRegistry) -> Vec<&'static str> {
+    registry
+        .services()
+        .iter()
+        .filter_map(|service| {
+            (service.kind == RegisteredServiceKind::BuiltInUpstreamApi).then_some(service.name)
+        })
+        .collect()
+}
+
+#[must_use]
+pub fn bootstrap_operator_services(registry: &ToolRegistry) -> Vec<&'static str> {
+    registry
+        .services()
+        .iter()
+        .filter_map(|service| {
+            (service.kind == RegisteredServiceKind::BootstrapOperator).then_some(service.name)
+        })
+        .collect()
+}
+
+#[must_use]
+pub fn filter_built_in_upstream_apis(registry: ToolRegistry, enabled: bool) -> ToolRegistry {
+    if enabled {
+        return registry;
+    }
+
+    let mut filtered = ToolRegistry::new();
+    for service in registry.services() {
+        if service.kind == RegisteredServiceKind::BootstrapOperator {
+            filtered.register(service.clone());
+        }
+    }
+    filtered
+}
+
 /// Build a registry with every feature-enabled service registered.
 ///
 /// This is the single place feature flags gate MCP tool availability.
@@ -305,6 +376,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
             name: meta.name,
             description: meta.description,
             category: category_slug(meta.category),
+            kind: registered_service_kind(meta.name, meta.category),
             status: if actions.is_empty() {
                 "stub"
             } else {
@@ -319,6 +391,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
         name: "gateway",
         description: "Manage proxied upstream MCP gateways",
         category: "bootstrap",
+        kind: RegisteredServiceKind::BootstrapOperator,
         status: "available",
         actions: crate::dispatch::gateway::ACTIONS,
         dispatch: dispatch_fn!(crate::dispatch::gateway::dispatch),
@@ -331,6 +404,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
             name: meta.name,
             description: meta.description,
             category: category_slug(meta.category),
+            kind: registered_service_kind(meta.name, meta.category),
             status: "available",
             actions: crate::dispatch::doctor::ACTIONS,
             dispatch: dispatch_fn!(crate::dispatch::doctor::dispatch),
@@ -343,6 +417,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
             name: meta.name,
             description: meta.description,
             category: category_slug(meta.category),
+            kind: registered_service_kind(meta.name, meta.category),
             status: "available",
             actions: crate::dispatch::setup::ACTIONS,
             dispatch: dispatch_fn!(crate::dispatch::setup::dispatch),
@@ -353,6 +428,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
         name: "logs",
         description: "Search and stream local-master runtime logs",
         category: "bootstrap",
+        kind: RegisteredServiceKind::BootstrapOperator,
         status: "available",
         actions: crate::dispatch::logs::ACTIONS,
         dispatch: dispatch_fn!(crate::dispatch::logs::dispatch),
@@ -362,6 +438,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
         name: "device",
         description: "Manage fleet device enrollments",
         category: "bootstrap",
+        kind: RegisteredServiceKind::BootstrapOperator,
         status: "available",
         actions: crate::mcp::services::nodes::ACTIONS,
         dispatch: dispatch_fn!(crate::mcp::services::nodes::dispatch),
@@ -374,6 +451,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
             name: meta.name,
             description: meta.description,
             category: category_slug(meta.category),
+            kind: registered_service_kind(meta.name, meta.category),
             status: "available",
             actions: crate::dispatch::marketplace::actions(),
             dispatch: dispatch_fn!(crate::dispatch::marketplace::dispatch),
@@ -387,6 +465,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
             name: meta.name,
             description: meta.description,
             category: category_slug(meta.category),
+            kind: registered_service_kind(meta.name, meta.category),
             status: "available",
             actions: crate::dispatch::acp::catalog::ACTIONS,
             dispatch: dispatch_fn!(crate::dispatch::acp::dispatch::dispatch),
@@ -400,6 +479,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
             name: meta.name,
             description: meta.description,
             category: category_slug(meta.category),
+            kind: registered_service_kind(meta.name, meta.category),
             status: "available",
             actions: crate::dispatch::stash::catalog::ACTIONS,
             dispatch: dispatch_fn!(crate::dispatch::stash::dispatch::dispatch),
@@ -527,6 +607,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
             name: "lab_admin",
             description: "Internal onboarding audit tool",
             category: "bootstrap",
+            kind: RegisteredServiceKind::BootstrapOperator,
             status: "available",
             actions: crate::dispatch::lab_admin::ACTIONS,
             dispatch: dispatch_fn!(crate::dispatch::lab_admin::dispatch),
@@ -560,6 +641,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
         name: "fs",
         description: "Workspace filesystem browser (read-only, deny-listed)",
         category: "bootstrap",
+        kind: RegisteredServiceKind::BootstrapOperator,
         status: "available",
         actions: crate::mcp::services::fs::ACTIONS,
         dispatch: dispatch_fn!(crate::mcp::services::fs::dispatch),
@@ -683,9 +765,33 @@ const fn category_slug(cat: lab_apis::core::Category) -> &'static str {
     }
 }
 
+fn registered_service_kind(
+    name: &'static str,
+    category: lab_apis::core::Category,
+) -> RegisteredServiceKind {
+    use lab_apis::core::Category;
+
+    if name == "beads" {
+        return RegisteredServiceKind::BuiltInUpstreamApi;
+    }
+
+    if matches!(category, Category::Bootstrap | Category::Marketplace) {
+        return RegisteredServiceKind::BootstrapOperator;
+    }
+
+    match name {
+        "extract" | "doctor" | "setup" | "marketplace" | "deploy" | "acp" | "stash"
+        | "loggifly" => RegisteredServiceKind::BootstrapOperator,
+        _ => RegisteredServiceKind::BuiltInUpstreamApi,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{RegisteredService, ToolRegistry, build_default_registry, service_meta};
+    use super::{
+        RegisteredService, RegisteredServiceKind, ToolRegistry, build_default_registry,
+        filter_built_in_upstream_apis, is_built_in_upstream_api_service, service_meta,
+    };
     use lab_apis::core::action::ActionSpec;
     use serde_json::Value;
     use std::future::Future;
@@ -757,6 +863,98 @@ mod tests {
         assert!(names.contains(&"tei"), "tei missing");
         #[cfg(feature = "apprise")]
         assert!(names.contains(&"apprise"), "apprise missing");
+    }
+
+    #[test]
+    fn bootstrap_services_are_not_built_in_upstream_apis() {
+        for service in [
+            "gateway",
+            "setup",
+            "doctor",
+            "extract",
+            "logs",
+            "device",
+            "marketplace",
+            "acp",
+            "stash",
+            "deploy",
+            "fs",
+            "lab_admin",
+            "loggifly",
+        ] {
+            assert!(
+                !is_built_in_upstream_api_service(service),
+                "{service} must remain available when upstream APIs are disabled"
+            );
+        }
+    }
+
+    #[test]
+    fn upstream_api_filter_removes_upstreams_and_keeps_bootstrap() {
+        let unfiltered = build_default_registry();
+        let unfiltered_names: std::collections::BTreeSet<&str> = unfiltered
+            .services()
+            .iter()
+            .map(|service| service.name)
+            .collect();
+        let removed_services = [
+            "radarr",
+            "sonarr",
+            "tailscale",
+            "openai",
+            "uptime-kuma",
+            "dozzle",
+            "beads",
+        ];
+        for removed in removed_services {
+            assert!(
+                unfiltered_names.contains(removed),
+                "{removed} should exist in the unfiltered registry"
+            );
+        }
+
+        let reg = filter_built_in_upstream_apis(unfiltered, false);
+        let names: std::collections::BTreeSet<&str> =
+            reg.services().iter().map(|service| service.name).collect();
+
+        for removed in removed_services {
+            assert!(!names.contains(removed), "{removed} should be disabled");
+        }
+
+        for kept in [
+            "setup",
+            "doctor",
+            "extract",
+            "gateway",
+            "marketplace",
+            "acp",
+            "stash",
+        ] {
+            assert!(names.contains(kept), "{kept} should stay available");
+        }
+    }
+
+    #[test]
+    fn every_registered_service_has_runtime_policy_classification() {
+        let reg = build_default_registry();
+        for service in reg.services() {
+            match service.kind {
+                RegisteredServiceKind::BootstrapOperator
+                | RegisteredServiceKind::BuiltInUpstreamApi => {}
+            }
+        }
+        assert!(
+            reg.services()
+                .iter()
+                .any(|service| service.kind == RegisteredServiceKind::BuiltInUpstreamApi),
+            "registry should include upstream API services in all-features builds"
+        );
+        assert!(
+            reg.services()
+                .iter()
+                .any(|service| service.kind == RegisteredServiceKind::BootstrapOperator),
+            "registry should include bootstrap/operator services"
+        );
     }
 
     #[test]
@@ -977,6 +1175,7 @@ mod tests {
             name: "one",
             description: "First test service",
             category: "test",
+            kind: RegisteredServiceKind::BuiltInUpstreamApi,
             status: "available",
             actions: ACTIONS_ONE,
             dispatch: noop_dispatch,
@@ -985,6 +1184,7 @@ mod tests {
             name: "two",
             description: "Second test service",
             category: "test",
+            kind: RegisteredServiceKind::BuiltInUpstreamApi,
             status: "available",
             actions: ACTIONS_TWO,
             dispatch: noop_dispatch,
@@ -1013,6 +1213,7 @@ mod tests {
             name: "one",
             description: "First test service",
             category: "test",
+            kind: RegisteredServiceKind::BuiltInUpstreamApi,
             status: "available",
             actions: ACTIONS_ONE,
             dispatch: noop_dispatch,
@@ -1021,6 +1222,7 @@ mod tests {
             name: "two",
             description: "Second test service",
             category: "test",
+            kind: RegisteredServiceKind::BuiltInUpstreamApi,
             status: "available",
             actions: ACTIONS_TWO,
             dispatch: noop_dispatch,

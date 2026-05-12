@@ -4565,6 +4565,17 @@
           }
         }
       },
+      "GatewayGatewayClient_configGetParams": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "GatewayGatewayDiscovered_promptsParams": {
         "type": "object",
         "required": [
@@ -4703,6 +4714,65 @@
             "type": "string"
           },
           "upstream": {
+            "type": "string"
+          }
+        }
+      },
+      "GatewayGatewayProtected_routeAddParams": {
+        "type": "object",
+        "required": [
+          "route"
+        ],
+        "properties": {
+          "route": {
+            "type": "string"
+          }
+        }
+      },
+      "GatewayGatewayProtected_routeGetParams": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "GatewayGatewayProtected_routeRemoveParams": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "GatewayGatewayProtected_routeTestParams": {
+        "type": "object",
+        "required": [
+          "route"
+        ],
+        "properties": {
+          "route": {
+            "type": "string"
+          }
+        }
+      },
+      "GatewayGatewayProtected_routeUpdateParams": {
+        "type": "object",
+        "required": [
+          "name",
+          "route"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "route": {
             "type": "string"
           }
         }
@@ -8936,7 +9006,7 @@
         "type": "object",
         "properties": {
           "force": {
-            "type": "string"
+            "type": "boolean"
           }
         }
       },
@@ -8950,7 +9020,7 @@
             "type": "string"
           },
           "force": {
-            "type": "string"
+            "type": "boolean"
           }
         }
       },
@@ -8958,7 +9028,7 @@
         "type": "object",
         "properties": {
           "force": {
-            "type": "string"
+            "type": "boolean"
           }
         }
       },
@@ -8977,7 +9047,7 @@
         "type": "object",
         "properties": {
           "force": {
-            "type": "string"
+            "type": "boolean"
           }
         }
       },
@@ -9000,6 +9070,17 @@
         "properties": {
           "action": {
             "type": "string"
+          }
+        }
+      },
+      "SetupSettingsUpdateParams": {
+        "type": "object",
+        "required": [
+          "services.built_in_upstream_apis_enabled"
+        ],
+        "properties": {
+          "services.built_in_upstream_apis_enabled": {
+            "type": "boolean"
           }
         }
       },

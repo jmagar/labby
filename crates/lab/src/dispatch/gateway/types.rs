@@ -89,6 +89,27 @@ pub struct GatewayView {
     pub runtime: GatewayRuntimeView,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum McpClientTransportType {
+    Http,
+    Stdio,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpClientConfigView {
+    pub name: String,
+    pub r#type: McpClientTransportType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub args: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env: Option<std::collections::HashMap<String, String>>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GatewayCatalogDiff {
     #[serde(default)]

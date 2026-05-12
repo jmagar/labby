@@ -11,7 +11,7 @@ import { ChevronRight, Loader2, CircleAlert, CircleCheck } from 'lucide-react'
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { PluginToggle } from '@/components/setup/PluginToggle'
-import { setupApi, type ServiceSchema, type SetupSnapshot, type ServiceStatus } from '@/lib/api/setup-client'
+import { setupApi, type ServiceSchema, type SetupSnapshot, type ServiceStatus, type SettingsState } from '@/lib/api/setup-client'
 
 interface ServiceRow {
   schema: ServiceSchema
@@ -22,6 +22,7 @@ interface ServiceRow {
 export default function ServicesIndex(): React.ReactElement {
   const [services, setServices] = useState<ServiceSchema[]>([])
   const [snapshot, setSnapshot] = useState<SetupSnapshot | undefined>()
+  const [settings, setSettings] = useState<SettingsState | undefined>()
   const [statuses, setStatuses] = useState<ServiceStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | undefined>()
@@ -32,8 +33,9 @@ export default function ServicesIndex(): React.ReactElement {
       setupApi.schemaGet(undefined, controller.signal),
       setupApi.state(controller.signal),
       setupApi.servicesStatus(controller.signal),
+      setupApi.settingsState(controller.signal),
     ])
-      .then(([schemaResponse, snap, statusResponse]) => {
+      .then(([schemaResponse, snap, statusResponse, settingsResponse]) => {
         if (controller.signal.aborted) return
         setServices(
           Object.values(schemaResponse.services).sort((a, b) =>
@@ -42,6 +44,7 @@ export default function ServicesIndex(): React.ReactElement {
         )
         setSnapshot(snap)
         setStatuses(statusResponse.services)
+        setSettings(settingsResponse)
       })
       .catch((err) => {
         if (controller.signal.aborted) return
@@ -72,25 +75,40 @@ export default function ServicesIndex(): React.ReactElement {
   }, [services, snapshot, statuses])
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Services</CardTitle>
-        <CardDescription>
-          Configure connection details for every Bootstrap service. Click a
-          row to edit its env vars; saves commit immediately to{' '}
-          <code>~/.lab/.env</code>.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> loading catalog
-          </div>
-        ) : null}
-        {error ? (
-          <p className="text-sm text-destructive">{error}</p>
-        ) : null}
-        {!loading && !error ? (
+    <>
+      <h1 className="sr-only">Service settings</h1>
+      <Card>
+        <CardHeader>
+          <CardTitle>Services</CardTitle>
+          <CardDescription>
+            Configure connection details for every Bootstrap service. Click a
+            row to edit its env vars; saves commit immediately to{' '}
+            <code>~/.lab/.env</code>.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {settings ? (
+            <div className="mb-4 rounded-md border p-3">
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Built-in upstream API services</p>
+                <p className="text-sm text-muted-foreground">
+                  {settings.services.built_in_upstream_apis_enabled
+                    ? 'Enabled from Features settings.'
+                    : 'Disabled from Features settings; saved credentials are preserved.'}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {settings.services.built_in_upstream_api_services.length} services classified as upstream API integrations.
+                </p>
+              </div>
+            </div>
+          ) : null}
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> loading catalog
+            </div>
+          ) : null}
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {!loading && !error ? (
           <ul className="divide-y rounded-md border">
             {rows.map(({ schema, configured, pluginInstalled }) => (
               <li key={schema.name}>
@@ -123,7 +141,8 @@ export default function ServicesIndex(): React.ReactElement {
             ))}
           </ul>
         ) : null}
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </>
   )
 }

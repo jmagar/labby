@@ -1,5 +1,6 @@
 services:
   labby-master:
+    container_name: labby
     image: labby:dev
     build:
       context: .
@@ -8,6 +9,7 @@ services:
     # Run Docker's tiny init as PID 1 so provider grandchildren orphaned by
     # launch wrappers such as npx are reaped after Lab terminates the process group.
     init: true
+    working_dir: /workspace/lab
 
     ports:
       # LAB_HOST_PORT lets you remap the host-side port without editing this file.
@@ -26,16 +28,13 @@ services:
       # Host config file — also visible via the .lab bind mount above, but
       # the explicit :ro mount here makes the intent clear.
       - ${HOME}/.lab/config.toml:/home/lab/.config/lab/config.toml:ro
-      # Secrets — mounted :ro so the container cannot modify the host .env.
-      # File-level mount wins over the parent directory bind mount above.
-      - ${HOME}/.lab/.env:/home/lab/.lab/.env:ro
       # Host identity used for controller/node role resolution. Without this,
       # Docker's container ID hostname would be mistaken for the machine name.
       - /etc/hostname:/run/host/hostname:ro
       # Docker-specific ACP provider file. Uses container-local paths for
       # provider commands; overrides whatever is in the host ~/.lab/. File-level
       # mount wins over the parent directory bind mount above.
-      - ./config/acp-providers.docker.json:/home/lab/.lab/acp-providers.json:ro
+      - ./config/acp-providers.docker.json:/home/lab/.lab/acp-providers.json
       # Claude credentials — sourced live from the host's ~/.claude/ so the
       # token the container uses stays in lockstep with whatever the host
       # `claude` CLI most recently refreshed. Without this the lab-stored copy
@@ -45,8 +44,36 @@ services:
       # claude-agent-sdk may rewrite the file on token refresh; that goes
       # straight back to the host source-of-truth.
       - ${HOME}/.claude/.credentials.json:/home/lab/.lab/acp/claude-home/.credentials.json
+      # Marketplace catalog state. The marketplace API reads Claude's known
+      # marketplaces, cached marketplace checkouts, and installed plugin index
+      # from ~/.claude/plugins; without this mount the web UI only sees the
+      # network-backed ACP/MCP registries.
+      - ${HOME}/.claude/plugins:/home/lab/.claude/plugins
+      # Claude stores absolute host paths in known_marketplaces.json. Mirror
+      # those paths inside the container so source counts and local marketplace
+      # entries resolve without rewriting the host-owned index.
+      - ${HOME}/.claude/plugins:${HOME}/.claude/plugins
+      # Codex marketplace catalog state. The Codex backend reads personal
+      # catalog manifests from ~/.agents/plugins and installed/cache metadata
+      # from ~/.codex.
+      - ${HOME}/.agents/plugins:/home/lab/.agents/plugins:ro
+      - ${HOME}/.codex/config.toml:/home/lab/.codex/config.toml:ro
+      - ${HOME}/.codex/cache:/home/lab/.codex/cache:ro
+      # Runtime MCP gateways imported from Codex can reference plugin
+      # entrypoints by absolute host path. Mirror those paths for stdio
+      # gateways such as Bitwarden.
+      - ${HOME}/.codex/plugins:${HOME}/.codex/plugins:ro
+      # Bitwarden MCP validates the host-managed BW_SESSION file and shells
+      # out to the Bitwarden CLI before starting the pinned MCP package.
+      - /run/user/1000/bitwarden-mcp:/run/user/1000/bitwarden-mcp:ro
+      - ${HOME}/.config/Bitwarden CLI:/home/lab/.config/Bitwarden CLI
+      - ${HOME}/.local/share/fnm/node-versions/v24.13.0/installation:${HOME}/.local/share/fnm/node-versions/v24.13.0/installation:ro
       - ${HOME}/.gemini:/home/lab/.gemini
+      # Open Design's MCP daemon is a local workspace service referenced by
+      # absolute path in Codex config.
+      - ${HOME}/workspace/open-design:${HOME}/workspace/open-design
       - .:/workspace/lab
+      - .:${HOME}/workspace/lab
 
     environment:
       # Bind to all container interfaces so the port mapping works.

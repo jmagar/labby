@@ -817,7 +817,7 @@ impl AcpSessionRegistry {
             Some(started.provider_session_id.clone()),
         );
         if let Some(old_runtime) = old_runtime {
-            drop(old_runtime.cancel().await);
+            drop(old_runtime.shutdown().await);
         }
 
         {
@@ -1739,7 +1739,7 @@ impl Default for AcpSessionRegistry {
 async fn cancel_and_drop_runtime(session: &Arc<Session>) {
     let runtime = { session.handle.lock().await.take() };
     if let Some(rt) = runtime {
-        drop(rt.cancel().await);
+        drop(rt.shutdown().await);
     }
 }
 

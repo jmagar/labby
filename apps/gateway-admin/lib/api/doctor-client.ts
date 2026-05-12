@@ -36,7 +36,7 @@ async function doctorAction<T>(
   })
 }
 
-export type Severity = 'ok' | 'warn' | 'error' | 'unknown'
+export type Severity = 'ok' | 'warn' | 'fail' | 'error' | 'unknown'
 
 export interface DoctorFinding {
   service?: string
@@ -49,6 +49,10 @@ export interface DoctorFinding {
 
 export interface DoctorReport {
   findings: DoctorFinding[]
+}
+
+export function isBlockingDoctorSeverity(severity: Severity): boolean {
+  return severity === 'error' || severity === 'fail'
 }
 
 const MOCK_DOCTOR_REPORT: DoctorReport = {
@@ -123,6 +127,26 @@ export const doctorApi = {
     const params: Record<string, unknown> = { service }
     if (instance) params.instance = instance
     return doctorAction<DoctorFinding>('service.probe', params, signal)
+  },
+
+  proxyCheck(
+    params: { app_url: string; mcp_url: string; route: string },
+    signal?: AbortSignal,
+  ): Promise<DoctorReport> {
+    if (USE_MOCK_DATA) {
+      signal?.throwIfAborted?.()
+      return Promise.resolve({
+        findings: [
+          {
+            category: 'proxy',
+            severity: 'ok',
+            message: 'Mock public proxy endpoints are reachable.',
+            elapsed_ms: 6,
+          },
+        ],
+      })
+    }
+    return doctorAction<DoctorReport>('proxy.check', params, signal)
   },
 
   auditFull(signal?: AbortSignal): Promise<DoctorReport> {

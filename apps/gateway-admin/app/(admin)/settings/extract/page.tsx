@@ -73,29 +73,38 @@ export default function ExtractPanel(): React.ReactElement {
     }
   }
 
+  const previewEntries = report
+    ? [...selected]
+        .map((idx) => report.creds[idx])
+        .filter((cred): cred is ExtractCredential => Boolean(cred?.url))
+        .map((cred) => ({ key: `${cred.service.toUpperCase()}_URL`, value: cred.url! }))
+    : []
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-start justify-between space-y-0">
-        <div>
-          <CardTitle>Extract</CardTitle>
-          <CardDescription>
-            Scan local + SSH hosts for existing service credentials and apply
-            the discovered URLs to your draft. Secret values are redacted in
-            transit; re-enter them in each service&apos;s settings page.
-          </CardDescription>
-        </div>
-        <Button variant="outline" size="sm" onClick={rescan} disabled={loading}>
-          <RefreshCw className={`mr-2 h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
-          {report ? 'Re-scan' : 'Scan'}
-        </Button>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> running extract.scan
+    <>
+      <h1 className="sr-only">Extract settings</h1>
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between space-y-0">
+          <div>
+            <CardTitle>Extract</CardTitle>
+            <CardDescription>
+              Scan local + SSH hosts for existing service credentials and apply
+              the discovered URLs to your draft. Secret values are redacted in
+              transit; re-enter them in each service&apos;s settings page.
+            </CardDescription>
           </div>
-        ) : null}
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          <Button variant="outline" size="sm" onClick={rescan} disabled={loading}>
+            <RefreshCw className={`mr-2 h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
+            {report ? 'Re-scan' : 'Scan'}
+          </Button>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> running extract.scan
+            </div>
+          ) : null}
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
         {report && report.creds.length === 0 ? (
           <p className="text-sm text-muted-foreground">
@@ -126,6 +135,25 @@ export default function ExtractPanel(): React.ReactElement {
                 </li>
               ))}
             </ul>
+            <div className="rounded-md border p-3">
+              <p className="text-sm font-medium">Draft preview</p>
+              {previewEntries.length > 0 ? (
+                <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                  {previewEntries.map((entry) => (
+                    <li key={entry.key} className="font-mono">
+                      {entry.key} = {entry.value}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Selected credentials do not include writable URL values.
+                </p>
+              )}
+              <p className="mt-2 text-xs text-muted-foreground">
+                Redacted secrets are not written by extract; enter them on each service page.
+              </p>
+            </div>
             <div className="flex items-center gap-2">
               <Button onClick={applyToDraft} disabled={applying || selected.size === 0}>
                 {applying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -152,7 +180,8 @@ export default function ExtractPanel(): React.ReactElement {
           </ul>
         ) : null}
       </CardContent>
-    </Card>
+      </Card>
+    </>
   )
 }
 

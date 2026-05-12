@@ -102,6 +102,37 @@ Auth-adjacent routes mounted on this server, including `/auth/session`,
 part of the same request-id and structured-error contract even when their
 payloads are not normal `/v1/{service}` dispatches.
 
+### Reverse Proxy Requirements For MCP Routes
+
+Streamable HTTP MCP routes are long-lived protocol routes, not ordinary JSON
+REST calls. This applies to Lab's own `/mcp` route and to Gateway-managed
+protected MCP routes such as `https://mcp.example.com/syslog`.
+
+Any SWAG/nginx, Traefik, or tunnel layer in front of Lab must:
+
+- preserve `Host`
+- set `X-Forwarded-Proto` to the original client scheme
+- forward `Authorization`, `Accept`, `Content-Type`, and MCP session headers
+- avoid request buffering and response buffering on the MCP route
+- avoid compression on the MCP route
+- use read/write/idle timeouts that allow long-lived SSE streams
+- keep the public path intact until Lab receives the request
+
+Gateway-managed protected MCP routes also need the matching route-specific
+metadata path to reach Lab, for example:
+
+```text
+/.well-known/oauth-protected-resource/syslog
+```
+
+Do not let a shared OAuth discovery include or edge auth layer swallow those
+path-suffixed metadata requests. Lab must generate the route-specific metadata
+and 401 `WWW-Authenticate` challenge so clients bind tokens to the public route
+resource, not to the private backend URL.
+
+See [GATEWAY.md](../services/GATEWAY.md#gateway-managed-protected-mcp-routes)
+for SWAG/nginx, Traefik, generic tunnel examples, and curl verification.
+
 ### Safety Gate
 
 Lab refuses to bind on a non-localhost address without auth:

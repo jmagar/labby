@@ -30,6 +30,9 @@ import type {
   SupportedService,
   ToolSearchConfig,
   ToolSearchConfigInput,
+  ProtectedMcpRoute,
+  ProtectedMcpRouteInput,
+  ProtectedMcpRouteTestResult,
 } from '@/lib/types/gateway'
 import { useCallback } from 'react'
 import { safeFanout } from '@/lib/api/service-action-client'
@@ -42,6 +45,18 @@ const DEFAULT_TOOL_SEARCH_CONFIG: ToolSearchConfig = {
   max_tools: 5000,
 }
 let mockToolSearchConfig: ToolSearchConfig = DEFAULT_TOOL_SEARCH_CONFIG
+let mockProtectedRoutes: ProtectedMcpRoute[] = [
+  {
+    name: 'tools',
+    enabled: true,
+    public_host: 'mcp.example.net',
+    public_path: '/tools',
+    upstream: null,
+    backend_url: 'http://localhost:3100/mcp',
+    scopes: ['mcp:read'],
+    health_path: '/health',
+  },
+]
 
 // Simulate network delay for mock data
 const mockDelay = (ms: number = 500) => new Promise(resolve => setTimeout(resolve, ms))
@@ -185,6 +200,14 @@ const fetchToolSearchConfig = async (): Promise<ToolSearchConfig> => {
   return gatewayApi.getToolSearchConfig()
 }
 
+const fetchProtectedRoutes = async (): Promise<ProtectedMcpRoute[]> => {
+  if (USE_MOCK_DATA) {
+    await mockDelay()
+    return mockProtectedRoutes
+  }
+  return gatewayApi.listProtectedRoutes()
+}
+
 // SWR Keys
 export const GATEWAYS_KEY = '/gateways'
 export const gatewayKey = (id: string) => `/gateways/${id}`
@@ -193,6 +216,7 @@ export const SUPPORTED_SERVICES_KEY = '/gateway-supported-services'
 export const serviceConfigKey = (service: string) => `/gateway-service-config/${service}`
 export const serviceActionsKey = (service: string) => `/gateway-service-actions/${service}`
 export const TOOL_SEARCH_CONFIG_KEY = '/gateway-tool-search-config'
+export const PROTECTED_MCP_ROUTES_KEY = '/gateway-protected-mcp-routes'
 
 async function refreshGatewayCache(id?: string, extraKeys: string[] = []) {
   const keys = [GATEWAYS_KEY, ...(id ? [gatewayKey(id)] : []), ...extraKeys]
@@ -268,6 +292,14 @@ export function useGatewayToolSearchConfig() {
   return useSWR<ToolSearchConfig>(TOOL_SEARCH_CONFIG_KEY, fetchToolSearchConfig, {
     revalidateOnFocus: false,
     fallbackData: USE_MOCK_DATA ? DEFAULT_TOOL_SEARCH_CONFIG : undefined,
+    revalidateOnMount: !USE_MOCK_DATA,
+  })
+}
+
+export function useProtectedMcpRoutes() {
+  return useSWR<ProtectedMcpRoute[]>(PROTECTED_MCP_ROUTES_KEY, fetchProtectedRoutes, {
+    revalidateOnFocus: false,
+    fallbackData: USE_MOCK_DATA ? mockProtectedRoutes : undefined,
     revalidateOnMount: !USE_MOCK_DATA,
   })
 }
@@ -504,6 +536,81 @@ export function useGatewayMutations() {
     return result
   }, [])
 
+  const addProtectedRoute = useCallback(
+    async (route: ProtectedMcpRouteInput, signal?: AbortSignal): Promise<ProtectedMcpRoute> => {
+      if (USE_MOCK_DATA) {
+        await abortableMockDelay(300, signal)
+        if (mockProtectedRoutes.some((item) => item.name === route.name)) {
+          throw new Error(`Protected route ${route.name} already exists`)
+        }
+        mockProtectedRoutes = [...mockProtectedRoutes, route]
+        await mutate(PROTECTED_MCP_ROUTES_KEY, mockProtectedRoutes, false)
+        return route
+      }
+      const result = await gatewayApi.addProtectedRoute(route, signal)
+      await mutate(PROTECTED_MCP_ROUTES_KEY)
+      return result
+    },
+    [],
+  )
+
+  const updateProtectedRoute = useCallback(
+    async (
+      name: string,
+      route: ProtectedMcpRouteInput,
+      signal?: AbortSignal,
+    ): Promise<ProtectedMcpRoute> => {
+      if (USE_MOCK_DATA) {
+        await abortableMockDelay(300, signal)
+        mockProtectedRoutes = mockProtectedRoutes.map((item) => (item.name === name ? route : item))
+        await mutate(PROTECTED_MCP_ROUTES_KEY, mockProtectedRoutes, false)
+        return route
+      }
+      const result = await gatewayApi.updateProtectedRoute(name, route, signal)
+      await mutate(PROTECTED_MCP_ROUTES_KEY)
+      return result
+    },
+    [],
+  )
+
+  const removeProtectedRoute = useCallback(
+    async (name: string, signal?: AbortSignal): Promise<ProtectedMcpRoute> => {
+      if (USE_MOCK_DATA) {
+        await abortableMockDelay(300, signal)
+        const removed = mockProtectedRoutes.find((item) => item.name === name)
+        if (!removed) {
+          throw new Error(`Protected route ${name} not found`)
+        }
+        mockProtectedRoutes = mockProtectedRoutes.filter((item) => item.name !== name)
+        await mutate(PROTECTED_MCP_ROUTES_KEY, mockProtectedRoutes, false)
+        return removed
+      }
+      const result = await gatewayApi.removeProtectedRoute(name, signal)
+      await mutate(PROTECTED_MCP_ROUTES_KEY)
+      return result
+    },
+    [],
+  )
+
+  const testProtectedRoute = useCallback(
+    async (
+      route: ProtectedMcpRouteInput,
+      signal?: AbortSignal,
+    ): Promise<ProtectedMcpRouteTestResult> => {
+      if (USE_MOCK_DATA) {
+        await abortableMockDelay(250, signal)
+        return {
+          ok: true,
+          route,
+          resource: `https://${route.public_host}${route.public_path}`,
+          metadata_url: `https://${route.public_host}/.well-known/oauth-protected-resource${route.public_path}`,
+        }
+      }
+      return gatewayApi.testProtectedRoute(route, signal)
+    },
+    [],
+  )
+
   const enableVirtualServer = useCallback(async (id: string): Promise<Gateway> => {
     if (USE_MOCK_DATA) {
       await mockDelay()
@@ -628,6 +735,10 @@ export function useGatewayMutations() {
     previewExposurePolicy,
     saveServiceConfig,
     setToolSearchConfig,
+    addProtectedRoute,
+    updateProtectedRoute,
+    removeProtectedRoute,
+    testProtectedRoute,
     enableVirtualServer,
     disableVirtualServer,
     enableGateway,

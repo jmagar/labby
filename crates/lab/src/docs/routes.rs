@@ -84,6 +84,24 @@ pub fn build_route_docs(service_names: &[String]) -> Vec<RouteDoc> {
         auth("POST", "/v1/gateway", "gateway", "gateway action dispatch"),
         auth("POST", "/v1/acp", "acp", "ACP action dispatch"),
         auth("POST", "/v1/stash", "stash", "stash action dispatch"),
+        auth(
+            "GET",
+            "/v1/auth/allowed-emails",
+            "auth",
+            "list OAuth email allowlist",
+        ),
+        auth(
+            "POST",
+            "/v1/auth/allowed-emails",
+            "auth",
+            "add OAuth email allowlist entry",
+        ),
+        auth(
+            "DELETE",
+            "/v1/auth/allowed-emails/{email}",
+            "auth",
+            "remove OAuth email allowlist entry",
+        ),
         host_validated_auth("POST", "/v1/extract", "extract", "extract action dispatch"),
         host_validated_auth(
             "POST",
@@ -174,8 +192,8 @@ pub fn build_route_docs(service_names: &[String]) -> Vec<RouteDoc> {
             "development marketplace mock API",
         ),
         dev("GET", "/dev/api/nodeinfo", "development node info mock API"),
-        dev("GET", "/dev", "development mockup"),
-        dev("GET", "/dev/{name}", "named development mockup"),
+        dev("GET", "/dev/mockup", "development mockup"),
+        dev("GET", "/dev/mockup/{name}", "named development mockup"),
     ];
 
     for service in service_names {

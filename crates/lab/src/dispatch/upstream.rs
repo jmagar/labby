@@ -10,7 +10,7 @@
 // support. The blanket allow prevents false-positive warnings on partially
 // wired public APIs.
 #[allow(dead_code)]
-mod auth;
+pub(crate) mod auth;
 #[allow(dead_code)]
 pub mod pool;
 #[allow(dead_code)]

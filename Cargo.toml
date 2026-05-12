@@ -10,7 +10,7 @@ members = ["crates/lab-apis", "crates/lab", "crates/lab-auth"]
 agent-client-protocol = { path = "crates/vendor/agent-client-protocol" }
 
 [workspace.package]
-version = "0.15.0"
+version = "0.15.2"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"

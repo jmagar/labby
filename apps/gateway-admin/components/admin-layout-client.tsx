@@ -98,7 +98,9 @@ export function AdminLayoutClient({
   return (
     <ChatSessionProvider isMobileViewport={isMobileViewport} autoBootstrap={autoBootstrap}>
       <PageContextSync />
-      {children}
+      <div className={!isOnChatPage ? 'pb-20 md:pb-0' : undefined}>
+        {children}
+      </div>
       {!isOnChatPage && (
         <>
           <FloatingChatFab

@@ -54,9 +54,9 @@ export default function SettingsPage() {
         top_k_default: toolSearchConfig.top_k_default,
         max_tools: toolSearchConfig.max_tools,
       })
-      toast.success(enabled ? 'Gateway tool search enabled.' : 'Gateway tool search disabled.')
+      toast.success(enabled ? 'Server tool search enabled.' : 'Server tool search disabled.')
     } catch (requestError) {
-      toast.error(getErrorMessage(requestError, 'Failed to update gateway tool search'))
+      toast.error(getErrorMessage(requestError, 'Failed to update server tool search'))
     } finally {
       isSavingRef.current = false
       setIsToolSearchSaving(false)
@@ -71,7 +71,7 @@ export default function SettingsPage() {
         <p className={AURORA_MUTED_LABEL}>Doctor</p>
         <h1 className={cn(AURORA_DISPLAY_1, 'mt-2 text-aurora-text-primary')}>Fleet Posture</h1>
         <p className="mt-2 text-sm text-aurora-text-muted">
-          Control-plane posture and effective defaults for the gateway fleet.
+          Control-plane posture and effective defaults for the server fleet.
         </p>
       </div>
 
@@ -84,7 +84,7 @@ export default function SettingsPage() {
           </div>
         ) : error || !snapshot ? (
           <div className="rounded-[1rem] border border-aurora-error/30 bg-aurora-error/8 p-4 text-sm text-aurora-error">
-            Failed to load settings because the gateway list is unavailable.
+            Failed to load settings because the server list is unavailable.
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -103,14 +103,14 @@ export default function SettingsPage() {
               <p className={cn(AURORA_DISPLAY_NUMBER, 'mt-2 text-[22px]', snapshot.warningCount > 0 ? 'text-aurora-warn' : 'text-aurora-text-primary')}>
                 {snapshot.warningCount}
               </p>
-              <p className="mt-1 text-sm text-aurora-text-muted">Warnings across all configured gateways.</p>
+              <p className="mt-1 text-sm text-aurora-text-muted">Warnings across all configured servers.</p>
             </div>
             <div className={cn(AURORA_MEDIUM_PANEL, 'px-5 py-4')}>
               <p className={AURORA_MUTED_LABEL}>Disconnected</p>
               <p className={cn(AURORA_DISPLAY_NUMBER, 'mt-2 text-[22px]', snapshot.disconnectedGateways > 0 ? 'text-aurora-error' : 'text-aurora-text-primary')}>
                 {snapshot.disconnectedGateways}
               </p>
-              <p className="mt-1 text-sm text-aurora-text-muted">Gateways that currently need operator attention.</p>
+              <p className="mt-1 text-sm text-aurora-text-muted">Servers that currently need operator attention.</p>
             </div>
           </div>
         )}
@@ -120,7 +120,7 @@ export default function SettingsPage() {
           <div className={cn(AURORA_STRONG_PANEL, 'px-6 py-5')}>
             <p className="text-base font-semibold text-aurora-text-primary">Control-plane posture</p>
             <p className="mt-1 text-sm text-aurora-text-muted">
-              A read-only summary of the admin surface and the current gateway fleet.
+              A read-only summary of the admin surface and the current server fleet.
             </p>
 
             {isLoading ? (
@@ -131,7 +131,7 @@ export default function SettingsPage() {
               </div>
             ) : error || !snapshot ? (
               <div className="mt-5 rounded-[1rem] border border-aurora-error/30 bg-aurora-error/8 p-4 text-sm text-aurora-error">
-                Failed to load settings because the gateway list is unavailable.
+                Failed to load settings because the server list is unavailable.
               </div>
             ) : (
               <div className="mt-5 grid gap-3 md:grid-cols-2">
@@ -161,9 +161,9 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-3">
                     <PlugZap className="size-5 text-aurora-accent-primary" />
                     <div>
-                      <p className="font-medium text-aurora-text-primary">Gateway reachability</p>
+                      <p className="font-medium text-aurora-text-primary">Server reachability</p>
                       <p className="text-sm text-aurora-text-muted">
-                        {snapshot.connectedGateways} of {snapshot.totalGateways} gateways are connected.
+                        {snapshot.connectedGateways} of {snapshot.totalGateways} servers are connected.
                       </p>
                     </div>
                   </div>
@@ -174,7 +174,7 @@ export default function SettingsPage() {
                     <div>
                       <p className="font-medium text-aurora-text-primary">Protected upstreams</p>
                       <p className="text-sm text-aurora-text-muted">
-                        {snapshot.bearerTokenGateways} gateways require bearer-token env wiring.
+                        {snapshot.bearerTokenGateways} servers require bearer-token env wiring.
                       </p>
                     </div>
                   </div>
@@ -193,7 +193,7 @@ export default function SettingsPage() {
               </div>
             ) : error || !snapshot ? (
               <div className="mt-4 rounded-[1rem] border border-aurora-error/30 bg-aurora-error/8 p-4 text-sm text-aurora-error">
-                Effective defaults are unavailable until the gateway list loads successfully.
+                Effective defaults are unavailable until the server list loads successfully.
               </div>
             ) : (
               <div className="mt-4 space-y-2 text-sm text-aurora-text-muted">
@@ -204,7 +204,7 @@ export default function SettingsPage() {
                       <div>
                         <p className="font-medium text-aurora-text-primary">Tool search mode</p>
                         <p className="mt-1 text-sm text-aurora-text-muted">
-                          Expose gateway-wide <code className="rounded bg-aurora-panel-strong px-1.5 py-0.5 text-aurora-text-primary">tool_search</code> and <code className="rounded bg-aurora-panel-strong px-1.5 py-0.5 text-aurora-text-primary">tool_invoke</code> instead of listing every upstream tool directly.
+                          Expose server-wide <code className="rounded bg-aurora-panel-strong px-1.5 py-0.5 text-aurora-text-primary">tool_search</code> and <code className="rounded bg-aurora-panel-strong px-1.5 py-0.5 text-aurora-text-primary">tool_invoke</code> instead of listing every upstream tool directly.
                         </p>
                       </div>
                     </div>
@@ -230,10 +230,10 @@ export default function SettingsPage() {
                 </div>
                 <div className="flex items-center justify-between rounded-aurora-1 border border-aurora-border-strong bg-aurora-control-surface px-4 py-3">
                   <span>Proxy resources enabled</span>
-                  <Badge variant="secondary">{snapshot.proxyResourceGateways} gateways</Badge>
+                  <Badge variant="secondary">{snapshot.proxyResourceGateways} servers</Badge>
                 </div>
                 <div className="flex items-center justify-between rounded-aurora-1 border border-aurora-border-strong bg-aurora-control-surface px-4 py-3">
-                  <span>Disconnected gateways</span>
+                  <span>Disconnected servers</span>
                   <Badge variant="secondary" status={snapshot.disconnectedGateways === 0 ? 'default' : 'error'}>
                     {snapshot.disconnectedGateways}
                   </Badge>
@@ -245,7 +245,7 @@ export default function SettingsPage() {
                   </Badge>
                 </div>
                 <div className="rounded-aurora-1 border border-aurora-border-strong border-dashed p-4 text-aurora-text-muted">
-                  Tool search is managed here as a gateway-wide setting. Other global defaults are still surfaced as effective posture until their backend write APIs exist.
+                  Tool search is managed here as a server-wide setting. Other global defaults are still surfaced as effective posture until their backend write APIs exist.
                 </div>
               </div>
             )}

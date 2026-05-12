@@ -108,6 +108,7 @@ export function ChatShell() {
 
   return (
     <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-aurora-page-bg">
+      <h1 className="sr-only">Chat</h1>
       <header
         role="banner"
         className="sticky top-0 z-20 flex h-[calc(3rem+env(safe-area-inset-top,0px))] shrink-0 items-center gap-2 border-b border-aurora-border-default bg-aurora-nav-bg px-2.5 pt-[env(safe-area-inset-top,0px)] sm:px-3 md:static md:z-auto md:h-12 md:pt-0"
@@ -247,6 +248,7 @@ export function ChatShell() {
           <MessageThread
             run={selectedRun}
             messages={messages}
+            workingLabel={`${selectedAgent.name} is working`}
             connectionState={connectionState}
             canRetryMessages={providerReady}
             canEditMessages

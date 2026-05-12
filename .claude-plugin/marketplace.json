@@ -93,6 +93,14 @@
             "description": "Skills for working with the AI SDK and AI Elements."
         },
         {
+            "name": "agent-browser",
+            "source": {
+                "source": "github",
+                "repo": "vercel-labs/agent-browser"
+            },
+            "description": "Browser automation plugin for agent-driven web app testing, inspection, and debugging."
+        },
+        {
             "name": "apprise",
             "source": "./plugins/apprise",
             "description": "Skill for operating Apprise via the lab MCP server / CLI."
@@ -139,6 +147,14 @@
             "name": "codex",
             "source": "./plugins/codex",
             "description": "Codex plugin, skill, agent, and workflow reference skills."
+        },
+        {
+            "name": "codex-plugin-cc",
+            "source": {
+                "source": "github",
+                "repo": "openai/codex-plugin-cc"
+            },
+            "description": "OpenAI Codex plugin for Claude Code interoperability."
         },
         {
             "name": "discrawl",

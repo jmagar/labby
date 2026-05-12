@@ -1,16 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex as StdMutex, OnceLock};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
-use arc_swap::ArcSwapOption;
+use arc_swap::{ArcSwap, ArcSwapOption};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
 use crate::config::{
-    LabConfig, ToolSearchConfig, UpstreamConfig, backup_env, env_is_up_to_date, write_env,
+    LabConfig, ProtectedMcpRouteConfig, ToolSearchConfig, UpstreamConfig, backup_env,
+    env_is_up_to_date, write_env,
 };
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::error::ToolError;
@@ -24,20 +25,24 @@ use crate::oauth::upstream::manager::UpstreamOauthManager;
 use crate::registry::ToolRegistry;
 use lab_apis::extract::types::ServiceCreds;
 
+use super::SHARED_GATEWAY_OAUTH_SUBJECT;
 use super::config::{
-    default_gateway_bearer_env_name, insert_upstream, load_gateway_config, remove_upstream,
+    default_gateway_bearer_env_name, insert_protected_mcp_route, insert_upstream,
+    load_gateway_config, remove_protected_mcp_route, remove_upstream, update_protected_mcp_route,
     update_upstream, validate_bearer_token_env_name, validate_tool_search, write_gateway_config,
 };
-use super::config_mutation::{ensure_stdio_admin_ack, read_env_values, values_to_service_creds};
+use super::config_mutation::{read_env_values, values_to_service_creds};
 use super::index::{SearchHit, ToolIndex};
 use super::params::GatewayUpdatePatch;
 use super::projection::*;
+use super::protected_routes::ProtectedRouteIndex;
 pub use super::runtime::GatewayRuntimeHandle;
 use super::runtime::runtime_origin_tag;
 use super::service_catalog::service_meta;
 use super::types::{
     CatalogChangeNotifier, GatewayCatalogDiff, GatewayRuntimeView, GatewayToolExposureRowView,
-    GatewayView, ServiceConfigView, VirtualServerMcpPolicyView,
+    GatewayView, McpClientConfigView, McpClientTransportType, ServiceConfigView,
+    VirtualServerMcpPolicyView,
 };
 use super::view_models::ServerView;
 
@@ -58,8 +63,6 @@ pub fn diff_catalogs(
         prompts_changed: before.prompts != after.prompts,
     }
 }
-
-static BUILTIN_SERVICE_REGISTRY: OnceLock<ToolRegistry> = OnceLock::new();
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct VirtualServerMigration {
@@ -125,11 +128,13 @@ pub struct GatewayManager {
     notifier: Option<CatalogChangeNotifier>,
     pub(super) oauth_client_cache: Option<OauthClientCache>,
     pub(super) upstream_oauth_managers: Option<Arc<dashmap::DashMap<String, UpstreamOauthManager>>>,
+    builtin_service_registry: Arc<ArcSwap<ToolRegistry>>,
     /// Resources needed to build transient OAuth managers for probed upstreams.
     pub(super) oauth_sqlite: Option<lab_auth::sqlite::SqliteStore>,
     pub(super) oauth_key: Option<EncryptionKey>,
     pub(super) oauth_redirect_uri: Option<Arc<String>>,
     tool_indexes: Arc<dashmap::DashMap<String, GatewayToolIndexState>>,
+    protected_route_index: Arc<RwLock<ProtectedRouteIndex>>,
 }
 
 impl GatewayManager {
@@ -143,11 +148,38 @@ impl GatewayManager {
             notifier: None,
             oauth_client_cache: None,
             upstream_oauth_managers: None,
+            builtin_service_registry: Arc::new(ArcSwap::from_pointee(
+                crate::registry::build_default_registry(),
+            )),
             oauth_sqlite: None,
             oauth_key: None,
             oauth_redirect_uri: None,
             tool_indexes: Arc::new(dashmap::DashMap::new()),
+            protected_route_index: Arc::new(RwLock::new(ProtectedRouteIndex::default())),
         }
+    }
+
+    #[must_use]
+    pub fn with_builtin_service_registry(mut self, registry: ToolRegistry) -> Self {
+        self.builtin_service_registry = Arc::new(ArcSwap::from_pointee(registry));
+        self
+    }
+
+    pub fn set_builtin_service_registry(&self, registry: ToolRegistry) {
+        self.builtin_service_registry.store(Arc::new(registry));
+    }
+
+    pub(crate) fn builtin_service_registry(&self) -> Arc<ToolRegistry> {
+        self.builtin_service_registry.load_full()
+    }
+
+    fn registered_service_meta(
+        &self,
+        service: &str,
+    ) -> Option<&'static lab_apis::core::PluginMeta> {
+        self.builtin_service_registry()
+            .service(service)
+            .and_then(|entry| service_meta(entry.name))
     }
 
     #[must_use]
@@ -196,7 +228,28 @@ impl GatewayManager {
         // config.rs normalizes legacy tool_search before calling seed_config;
         // do not re-normalize here with false — that would incorrectly promote
         // legacy upstream config when the root [tool_search] is explicitly disabled.
+        *self.protected_route_index.write().await =
+            ProtectedRouteIndex::from_routes(&config.protected_mcp_routes);
         *self.config.write().await = config;
+    }
+
+    pub async fn resolve_protected_route(
+        &self,
+        host: &str,
+        path: &str,
+    ) -> Option<ProtectedMcpRouteConfig> {
+        self.protected_route_index.read().await.resolve(host, path)
+    }
+
+    pub async fn resolve_protected_route_metadata(
+        &self,
+        host: &str,
+        path: &str,
+    ) -> Option<ProtectedMcpRouteConfig> {
+        self.protected_route_index
+            .read()
+            .await
+            .resolve_exact_metadata_path(host, path)
     }
 
     pub async fn current_pool(&self) -> Option<Arc<UpstreamPool>> {
@@ -233,10 +286,12 @@ impl GatewayManager {
     }
 
     pub async fn get_service_config(&self, service: &str) -> Result<ServiceConfigView, ToolError> {
-        let meta = service_meta(service).ok_or_else(|| ToolError::InvalidParam {
-            message: format!("unknown service `{service}`"),
-            param: "service".to_string(),
-        })?;
+        let meta =
+            self.registered_service_meta(service)
+                .ok_or_else(|| ToolError::InvalidParam {
+                    message: format!("unknown service `{service}`"),
+                    param: "service".to_string(),
+                })?;
         let values = read_env_values(&self.env_path())?;
         Ok(service_config_view(meta, &values))
     }
@@ -246,10 +301,12 @@ impl GatewayManager {
         service: &str,
         values: &BTreeMap<String, String>,
     ) -> Result<ServiceConfigView, ToolError> {
-        let meta = service_meta(service).ok_or_else(|| ToolError::InvalidParam {
-            message: format!("unknown service `{service}`"),
-            param: "service".to_string(),
-        })?;
+        let meta =
+            self.registered_service_meta(service)
+                .ok_or_else(|| ToolError::InvalidParam {
+                    message: format!("unknown service `{service}`"),
+                    param: "service".to_string(),
+                })?;
 
         for field in values.keys() {
             let valid = meta
@@ -374,7 +431,7 @@ impl GatewayManager {
     }
 
     pub async fn surface_enabled_for_service(&self, service: &str, surface: &str) -> bool {
-        if service_meta(service).is_none() {
+        if self.registered_service_meta(service).is_none() {
             return true;
         }
 
@@ -397,7 +454,7 @@ impl GatewayManager {
     }
 
     pub async fn allowed_mcp_actions_for_service(&self, service: &str) -> Option<Vec<String>> {
-        if service_meta(service).is_none() {
+        if self.registered_service_meta(service).is_none() {
             return None;
         }
 
@@ -419,7 +476,7 @@ impl GatewayManager {
     }
 
     pub async fn mcp_action_allowed_for_service(&self, service: &str, action: &str) -> bool {
-        if service_meta(service).is_none() {
+        if self.registered_service_meta(service).is_none() {
             return true;
         }
 
@@ -475,7 +532,7 @@ impl GatewayManager {
     pub async fn test(
         &self,
         spec_or_name: Result<&UpstreamConfig, &str>,
-        allow_stdio: bool,
+        _allow_stdio: bool,
     ) -> Result<GatewayRuntimeView, ToolError> {
         let upstream = match spec_or_name {
             Ok(spec) => spec.clone(),
@@ -491,11 +548,18 @@ impl GatewayManager {
                     })?
             }
         };
-        ensure_stdio_admin_ack("gateway.test", &upstream, allow_stdio)?;
 
-        let pool = UpstreamPool::new();
-        pool.discover_all_with_in_process_peers(&[upstream.clone()], builtin_service_registry())
-            .await;
+        let pool = match &self.oauth_client_cache {
+            Some(cache) => UpstreamPool::new().with_oauth_client_cache(cache.clone()),
+            None => UpstreamPool::new(),
+        };
+        let registry = self.builtin_service_registry();
+        pool.discover_all_for_subject_with_in_process_peers(
+            &[upstream.clone()],
+            SHARED_GATEWAY_OAUTH_SUBJECT,
+            &registry,
+        )
+        .await;
 
         Ok(runtime_view(Some(&pool), &upstream.name, None).await)
     }
@@ -558,7 +622,7 @@ impl GatewayManager {
                 message: format!("quarantined virtual server `{id}` not found"),
             })?;
         let restored = cfg.quarantined_virtual_servers.remove(index);
-        if service_meta(&restored.service).is_none() {
+        if self.registered_service_meta(&restored.service).is_none() {
             return Err(ToolError::Sdk {
                 sdk_kind: "unknown_service".to_string(),
                 message: format!(
@@ -679,7 +743,7 @@ impl GatewayManager {
         &self,
         mut spec: UpstreamConfig,
         bearer_token_value: Option<String>,
-        allow_stdio: bool,
+        _allow_stdio: bool,
         origin: Option<&str>,
         owner: Option<UpstreamRuntimeOwner>,
     ) -> Result<GatewayView, ToolError> {
@@ -704,8 +768,6 @@ impl GatewayManager {
             validate_bearer_token_env_name(&trimmed)?;
             spec.bearer_token_env = Some(trimmed);
         }
-
-        ensure_stdio_admin_ack("gateway.add", &spec, allow_stdio)?;
 
         if let Some(token_value) = bearer_token_value.as_deref().map(str::trim)
             && !token_value.is_empty()
@@ -743,7 +805,7 @@ impl GatewayManager {
         name: &str,
         patch: GatewayUpdatePatch,
         bearer_token_value: Option<String>,
-        allow_stdio: bool,
+        _allow_stdio: bool,
         origin: Option<&str>,
         owner: Option<UpstreamRuntimeOwner>,
     ) -> Result<GatewayView, ToolError> {
@@ -801,28 +863,26 @@ impl GatewayManager {
             };
             patch.bearer_token_env = Some(Some(env_name.clone()));
             update_upstream(&mut cfg, name, patch)?;
-            let updated = cfg
-                .upstream
+            cfg.upstream
                 .iter()
-                .find(|u| u.name == updated_name)
+                .any(|u| u.name == updated_name)
+                .then_some(())
                 .ok_or_else(|| ToolError::Sdk {
                     sdk_kind: "not_found".to_string(),
                     message: format!("gateway `{updated_name}` not found after update"),
                 })?;
-            ensure_stdio_admin_ack("gateway.update", updated, allow_stdio)?;
             self.persist_gateway_bearer_token(&env_name, token_value)
                 .await?;
         } else {
             update_upstream(&mut cfg, name, patch)?;
-            let updated = cfg
-                .upstream
+            cfg.upstream
                 .iter()
-                .find(|u| u.name == updated_name)
+                .any(|u| u.name == updated_name)
+                .then_some(())
                 .ok_or_else(|| ToolError::Sdk {
                     sdk_kind: "not_found".to_string(),
                     message: format!("gateway `{updated_name}` not found after update"),
                 })?;
-            ensure_stdio_admin_ack("gateway.update", updated, allow_stdio)?;
         }
         self.persist_config(cfg).await?;
         let diff = self.reload_with_origin_unlocked(origin, owner).await?;
@@ -907,6 +967,181 @@ impl GatewayManager {
         Ok(self.tool_search_config().await)
     }
 
+    pub async fn protected_route_list(&self) -> Vec<ProtectedMcpRouteConfig> {
+        self.config.read().await.protected_mcp_routes.clone()
+    }
+
+    pub async fn protected_route_get(
+        &self,
+        name: &str,
+    ) -> Result<ProtectedMcpRouteConfig, ToolError> {
+        self.config
+            .read()
+            .await
+            .protected_mcp_routes
+            .iter()
+            .find(|route| route.name == name)
+            .cloned()
+            .ok_or_else(|| ToolError::Sdk {
+                sdk_kind: "not_found".to_string(),
+                message: format!("protected MCP route `{name}` not found"),
+            })
+    }
+
+    pub async fn upstream_config(&self, name: &str) -> Option<UpstreamConfig> {
+        self.config
+            .read()
+            .await
+            .upstream
+            .iter()
+            .find(|upstream| upstream.name == name)
+            .cloned()
+    }
+
+    pub async fn client_config(&self, name: &str) -> Result<McpClientConfigView, ToolError> {
+        let upstream = self
+            .upstream_config(name)
+            .await
+            .ok_or_else(|| ToolError::Sdk {
+                sdk_kind: "not_found".to_string(),
+                message: format!("gateway `{name}` not found"),
+            })?;
+
+        if let Some(url) = upstream.url.clone() {
+            return Ok(McpClientConfigView {
+                name: upstream.name,
+                r#type: McpClientTransportType::Http,
+                url: Some(url),
+                command: None,
+                args: None,
+                env: None,
+            });
+        }
+
+        let Some(command) = upstream.command.clone() else {
+            return Err(ToolError::Sdk {
+                sdk_kind: "invalid_config".to_string(),
+                message: format!("gateway `{name}` has neither url nor command configured"),
+            });
+        };
+
+        Ok(McpClientConfigView {
+            name: upstream.name,
+            r#type: McpClientTransportType::Stdio,
+            url: None,
+            command: Some(command),
+            args: (!upstream.args.is_empty()).then_some(upstream.args),
+            env: None,
+        })
+    }
+
+    pub async fn protected_route_add(
+        &self,
+        route: ProtectedMcpRouteConfig,
+    ) -> Result<ProtectedMcpRouteConfig, ToolError> {
+        let _mutation_guard = self.config_mutation.lock().await;
+        let mut cfg = self.config.read().await.clone();
+        let route = insert_protected_mcp_route(&mut cfg, route)?;
+        self.persist_config(cfg).await?;
+        tracing::info!(
+            surface = "dispatch",
+            service = "gateway",
+            action = "gateway.protected_route.add",
+            route = %route.name,
+            public_host = %route.public_host,
+            public_path = %route.public_path,
+            upstream = ?route.upstream,
+            backend_url = %route.backend_url,
+            backend_mcp_path = %route.backend_mcp_path,
+            enabled = route.enabled,
+            scopes = ?route.scopes,
+            "protected MCP route added"
+        );
+        Ok(route)
+    }
+
+    pub async fn protected_route_update(
+        &self,
+        name: &str,
+        route: ProtectedMcpRouteConfig,
+    ) -> Result<ProtectedMcpRouteConfig, ToolError> {
+        let _mutation_guard = self.config_mutation.lock().await;
+        let mut cfg = self.config.read().await.clone();
+        let route = update_protected_mcp_route(&mut cfg, name, route)?;
+        self.persist_config(cfg).await?;
+        tracing::info!(
+            surface = "dispatch",
+            service = "gateway",
+            action = "gateway.protected_route.update",
+            route = %route.name,
+            previous_name = %name,
+            public_host = %route.public_host,
+            public_path = %route.public_path,
+            upstream = ?route.upstream,
+            backend_url = %route.backend_url,
+            backend_mcp_path = %route.backend_mcp_path,
+            enabled = route.enabled,
+            scopes = ?route.scopes,
+            "protected MCP route updated"
+        );
+        Ok(route)
+    }
+
+    pub async fn protected_route_remove(
+        &self,
+        name: &str,
+    ) -> Result<ProtectedMcpRouteConfig, ToolError> {
+        let _mutation_guard = self.config_mutation.lock().await;
+        let mut cfg = self.config.read().await.clone();
+        let route = remove_protected_mcp_route(&mut cfg, name)?;
+        self.persist_config(cfg).await?;
+        tracing::info!(
+            surface = "dispatch",
+            service = "gateway",
+            action = "gateway.protected_route.remove",
+            route = %route.name,
+            public_host = %route.public_host,
+            public_path = %route.public_path,
+            upstream = ?route.upstream,
+            backend_url = %route.backend_url,
+            backend_mcp_path = %route.backend_mcp_path,
+            "protected MCP route removed"
+        );
+        Ok(route)
+    }
+
+    pub async fn protected_route_test(
+        &self,
+        route: ProtectedMcpRouteConfig,
+    ) -> Result<serde_json::Value, ToolError> {
+        let mut cfg = LabConfig::default();
+        let route = insert_protected_mcp_route(&mut cfg, route)?;
+        let resource = route.public_resource();
+        let metadata_url = format!(
+            "https://{}/.well-known/oauth-protected-resource{}",
+            route.public_host, route.public_path
+        );
+        tracing::info!(
+            surface = "dispatch",
+            service = "gateway",
+            action = "gateway.protected_route.test",
+            route = %route.name,
+            resource = %resource,
+            metadata_url = %metadata_url,
+            upstream = ?route.upstream,
+            backend_url = %route.backend_url,
+            backend_mcp_path = %route.backend_mcp_path,
+            scopes = ?route.scopes,
+            "protected MCP route validated"
+        );
+        Ok(serde_json::json!({
+            "ok": true,
+            "route": route,
+            "resource": resource,
+            "metadata_url": metadata_url,
+        }))
+    }
+
     pub async fn reload_with_origin(
         &self,
         origin: Option<&str>,
@@ -934,7 +1169,8 @@ impl GatewayManager {
         let cfg = tokio::task::spawn_blocking(move || load_gateway_config(&path))
             .await
             .map_err(|e| ToolError::internal_message(format!("config read task failed: {e}")))??;
-        let (cfg, migration) = quarantine_unregistered_virtual_servers(cfg);
+        let registry = self.builtin_service_registry();
+        let (cfg, migration) = quarantine_unregistered_virtual_servers(cfg, &registry);
         if migration.changed() {
             tracing::warn!(
                 action = "gateway.config.migrate",
@@ -1007,8 +1243,13 @@ impl GatewayManager {
                     .with_runtime_origin(runtime_origin_tag(origin))
                     .with_runtime_owner(owner),
             );
-            pool.discover_all_with_in_process_peers(&cfg.upstream, builtin_service_registry())
-                .await;
+            let registry = self.builtin_service_registry();
+            pool.discover_all_for_subject_with_in_process_peers(
+                &cfg.upstream,
+                SHARED_GATEWAY_OAUTH_SUBJECT,
+                &registry,
+            )
+            .await;
             Some(pool)
         };
         tracing::info!(
@@ -1052,6 +1293,8 @@ impl GatewayManager {
                 "gateway old upstream pool drain finish"
             );
         }
+        *self.protected_route_index.write().await =
+            ProtectedRouteIndex::from_routes(&cfg.protected_mcp_routes);
         *self.config.write().await = cfg;
         let current_cfg = self.config.read().await.clone();
         let current_pool = self.runtime.current_pool().await;
@@ -1591,10 +1834,12 @@ impl GatewayManager {
         let index = if let Some(index) = existing_index {
             index
         } else {
-            let meta = service_meta(id).ok_or_else(|| ToolError::Sdk {
-                sdk_kind: "not_found".to_string(),
-                message: format!("virtual server `{id}` not found"),
-            })?;
+            let meta = self
+                .registered_service_meta(id)
+                .ok_or_else(|| ToolError::Sdk {
+                    sdk_kind: "not_found".to_string(),
+                    message: format!("virtual server `{id}` not found"),
+                })?;
             let values = read_env_values(&self.env_path())?;
             let configured = service_config_view(meta, &values).configured;
             if !configured {
@@ -1619,6 +1864,16 @@ impl GatewayManager {
             .virtual_servers
             .get_mut(index)
             .expect("virtual server index should exist");
+        if enabled
+            && self
+                .registered_service_meta(&virtual_server.service)
+                .is_none()
+        {
+            return Err(ToolError::Sdk {
+                sdk_kind: "not_found".to_string(),
+                message: format!("virtual server `{id}` not found"),
+            });
+        }
         virtual_server.enabled = enabled;
         if enabled {
             virtual_server.surfaces.mcp = true;
@@ -1702,6 +1957,8 @@ impl GatewayManager {
         tokio::task::spawn_blocking(move || write_gateway_config(&path, &cfg_clone))
             .await
             .map_err(|e| ToolError::internal_message(format!("config write task failed: {e}")))??;
+        *self.protected_route_index.write().await =
+            ProtectedRouteIndex::from_routes(&cfg.protected_mcp_routes);
         *self.config.write().await = cfg;
         tracing::info!(
             action = "gateway.config.write",
@@ -1761,12 +2018,13 @@ fn find_virtual_server_for_service<'a>(
 
 fn quarantine_unregistered_virtual_servers(
     mut cfg: LabConfig,
+    registry: &ToolRegistry,
 ) -> (LabConfig, VirtualServerMigration) {
     let mut migration = VirtualServerMigration::default();
     let mut active = Vec::with_capacity(cfg.virtual_servers.len());
 
     for virtual_server in std::mem::take(&mut cfg.virtual_servers) {
-        if service_meta(&virtual_server.service).is_some() {
+        if registry.service(&virtual_server.service).is_some() {
             active.push(virtual_server);
             continue;
         }
@@ -1783,10 +2041,6 @@ fn quarantine_unregistered_virtual_servers(
 
     cfg.virtual_servers = active;
     (cfg, migration)
-}
-
-fn builtin_service_registry() -> &'static ToolRegistry {
-    BUILTIN_SERVICE_REGISTRY.get_or_init(crate::registry::build_default_registry)
 }
 
 async fn snapshot_from_pool(pool: Option<Arc<UpstreamPool>>) -> GatewayCatalogSnapshot {
@@ -1825,8 +2079,8 @@ mod tests {
     use std::sync::Arc;
 
     use crate::config::{
-        UpstreamConfig, UpstreamOauthConfig, UpstreamOauthMode, UpstreamOauthRegistration,
-        VirtualServerConfig, VirtualServerSurfacesConfig,
+        ProtectedMcpRouteConfig, UpstreamConfig, UpstreamOauthConfig, UpstreamOauthMode,
+        UpstreamOauthRegistration, VirtualServerConfig, VirtualServerSurfacesConfig,
     };
     use crate::oauth::upstream::cache::OauthClientCache;
     use crate::tui::events::ServiceHealth;
@@ -1857,6 +2111,52 @@ mod tests {
             oauth: None,
             tool_search: ToolSearchConfig::default(),
         }
+    }
+
+    fn fixture_protected_route(name: &str) -> ProtectedMcpRouteConfig {
+        ProtectedMcpRouteConfig {
+            name: name.to_string(),
+            enabled: true,
+            public_host: "mcp.tootie.tv".to_string(),
+            public_path: "/syslog".to_string(),
+            upstream: None,
+            backend_url: "http://100.88.16.79:3100".to_string(),
+            backend_mcp_path: "/mcp".to_string(),
+            scopes: vec!["mcp:read".to_string(), "mcp:write".to_string()],
+            health_path: Some("/health".to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn protected_route_add_updates_live_resolver_index() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
+
+        manager
+            .protected_route_add(fixture_protected_route("syslog"))
+            .await
+            .expect("add protected route");
+
+        assert_eq!(
+            manager
+                .resolve_protected_route("mcp.tootie.tv", "/syslog")
+                .await
+                .expect("route should be live")
+                .name,
+            "syslog"
+        );
+        assert_eq!(
+            manager
+                .resolve_protected_route_metadata(
+                    "mcp.tootie.tv",
+                    "/.well-known/oauth-protected-resource/syslog",
+                )
+                .await
+                .expect("metadata route should be live")
+                .name,
+            "syslog"
+        );
     }
 
     #[test]
@@ -1917,6 +2217,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn cleanup_upstream_processes_kills_matching_github_chat_runtime() {
+        use std::os::unix::process::CommandExt;
         use std::process::{Command, Stdio};
         use std::time::Duration;
 
@@ -1944,13 +2245,16 @@ mod tests {
             }])
             .await;
 
-        let mut child = Command::new("python3")
+        let mut command = Command::new("python3");
+        command
             .args(["-c", "import time; time.sleep(60)", runtime_arg])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn github chat stand-in");
+            .stderr(Stdio::null());
+        // The cleanup path kills process groups for child runtimes. Keep this
+        // stand-in out of nextest's process group so the test process survives.
+        command.process_group(0);
+        let mut child = command.spawn().expect("spawn github chat stand-in");
 
         tokio::time::sleep(Duration::from_millis(150)).await;
 
@@ -2304,10 +2608,14 @@ mod tests {
             mcp_policy: None,
         };
 
-        let (migrated, migration) = quarantine_unregistered_virtual_servers(LabConfig {
-            quarantined_virtual_servers: vec![stale],
-            ..LabConfig::default()
-        });
+        let registry = crate::registry::build_default_registry();
+        let (migrated, migration) = quarantine_unregistered_virtual_servers(
+            LabConfig {
+                quarantined_virtual_servers: vec![stale],
+                ..LabConfig::default()
+            },
+            &registry,
+        );
 
         assert!(!migration.changed());
         assert!(migrated.virtual_servers.is_empty());

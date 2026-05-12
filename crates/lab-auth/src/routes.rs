@@ -20,6 +20,10 @@ pub fn router(state: AuthState) -> Router {
             get(authorization_server_metadata),
         )
         .route(
+            "/.well-known/oauth-authorization-server/{*route}",
+            get(authorization_server_metadata),
+        )
+        .route(
             "/.well-known/oauth-protected-resource",
             get(protected_resource_metadata),
         )
@@ -54,6 +58,10 @@ pub fn bearer_only_router(state: AuthState) -> Router {
             get(authorization_server_metadata),
         )
         .route(
+            "/.well-known/oauth-authorization-server/{*route}",
+            get(authorization_server_metadata),
+        )
+        .route(
             "/.well-known/oauth-protected-resource",
             get(protected_resource_metadata),
         )
@@ -73,6 +81,7 @@ pub fn bearer_only_router(state: AuthState) -> Router {
 /// (REVIEW-APPLIED #9).
 pub const BEARER_ONLY_ROUTER_PATHS: &[(&str, &str)] = &[
     ("GET", "/.well-known/oauth-authorization-server"),
+    ("GET", "/.well-known/oauth-authorization-server/mcp"),
     ("GET", "/.well-known/oauth-protected-resource"),
     ("GET", "/authorize"),
     ("GET", "/auth/google/callback"),
@@ -150,6 +159,9 @@ fn auth_dispatch_action(path: &str) -> &'static str {
         "/auth/login" => "oauth.browser_login",
         "/auth/google/callback" => "oauth.callback",
         "/token" => "oauth.token",
+        _ if path.starts_with("/.well-known/oauth-authorization-server/") => {
+            "oauth.metadata.authorization_server"
+        }
         _ => "oauth.unknown",
     }
 }

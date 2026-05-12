@@ -154,18 +154,16 @@ pub async fn authorize(
     state.check_authorize_rate_limit()?;
     state.ensure_pending_oauth_state_capacity().await?;
     validate_response_type(&query.response_type)?;
-    validate_resource(&state, query.resource.as_deref())?;
-    let scope = validate_scope(
-        &query.scope,
-        &state.config.default_scope,
-        &state.config.scopes_supported,
-    )?;
+    let resource = validate_resource(&state, query.resource.as_deref())?;
+    let scope = validate_scope(&state, &resource, &query.scope)?;
     let client_state_id = fingerprint(&query.state);
     info!(
         client_id = %query.client_id,
         redirect_uri = %query.redirect_uri,
         client_state_id = %client_state_id,
+        resource = %resource,
         requested_scope = %query.scope,
+        normalized_scope = %scope,
         "oauth authorize request received"
     );
     let client = state
@@ -220,6 +218,7 @@ pub async fn authorize(
             client_id: query.client_id.clone(),
             redirect_uri: query.redirect_uri.clone(),
             client_state: query.state.clone(),
+            resource: resource.clone(),
             scope: scope.clone(),
             provider_code_verifier,
             code_challenge: query.code_challenge.clone(),
@@ -231,7 +230,7 @@ pub async fn authorize(
 
     let location = state.google.authorize_url(&AuthorizeUrlRequest {
         state: request_state,
-        scope,
+        scope: scope.clone(),
         code_challenge: provider_code_challenge,
         code_challenge_method: "S256".to_string(),
     })?;
@@ -240,6 +239,8 @@ pub async fn authorize(
         redirect_uri = %query.redirect_uri,
         client_state_id = %client_state_id,
         oauth_state_id = %oauth_state_id,
+        resource = %resource,
+        scope = %scope,
         provider = "google",
         "oauth authorize request redirected to upstream provider"
     );
@@ -305,6 +306,8 @@ pub async fn callback(
         redirect_uri = %request.redirect_uri,
         oauth_state_id = %oauth_state_id,
         client_state_id = %fingerprint(&request.client_state),
+        resource = %request.resource,
+        scope = %request.scope,
         "oauth callback state redeemed"
     );
     let google = state
@@ -342,6 +345,9 @@ pub async fn callback(
     );
     let auth_code = random_token(24)?;
     let auth_code_id = fingerprint(&auth_code);
+    let request_client_id = request.client_id.clone();
+    let request_resource = request.resource.clone();
+    let request_scope = request.scope.clone();
     state
         .store
         .insert_auth_code(AuthorizationCodeRow {
@@ -349,6 +355,7 @@ pub async fn callback(
             client_id: request.client_id,
             subject: google.subject,
             redirect_uri: request.redirect_uri.clone(),
+            resource: request.resource,
             scope: request.scope,
             code_challenge: request.code_challenge,
             code_challenge_method: request.code_challenge_method,
@@ -364,6 +371,9 @@ pub async fn callback(
     info!(
         auth_code_id = %auth_code_id,
         oauth_state_id = %oauth_state_id,
+        client_id = %request_client_id,
+        resource = %request_resource,
+        scope = %request_scope,
         redirect_uri = %request.redirect_uri,
         "oauth callback issued local authorization code"
     );
@@ -432,53 +442,91 @@ fn validate_response_type(response_type: &str) -> Result<(), AuthError> {
     }
 }
 
-fn validate_scope(
-    scope: &str,
-    default_scope: &str,
-    scopes_supported: &[String],
-) -> Result<String, AuthError> {
+fn validate_scope(state: &AuthState, resource: &str, scope: &str) -> Result<String, AuthError> {
+    let canonical = crate::metadata::canonical_resource_url(state);
+    let supported = if resource.trim_end_matches('/') == canonical {
+        state.config.scopes_supported.clone()
+    } else {
+        state
+            .allowed_resource_scopes(resource)
+            .filter(|scopes| !scopes.is_empty())
+            .ok_or_else(|| {
+                AuthError::Validation(format!(
+                    "resource must be `{canonical}` or a configured protected MCP route"
+                ))
+            })?
+    };
     let normalized = scope.trim();
     if normalized.is_empty() {
-        return Ok(default_scope.to_string());
-    }
-    // Accept any space-separated combination where every token is in scopes_supported.
-    // Falls back to exact-match against default_scope when scopes_supported is empty.
-    if !scopes_supported.is_empty() {
-        let all_valid = normalized
-            .split_whitespace()
-            .all(|s| scopes_supported.iter().any(|sup| sup == s));
-        if all_valid {
-            return Ok(normalized.to_string());
+        if resource.trim_end_matches('/') == canonical {
+            let scope = state.config.default_scope.clone();
+            debug!(
+                resource = %resource,
+                scope = %scope,
+                "oauth authorize defaulted scope"
+            );
+            return Ok(scope);
         }
-    } else if normalized == default_scope {
-        return Ok(normalized.to_string());
+        let scope = supported.join(" ");
+        debug!(
+            resource = %resource,
+            scope = %scope,
+            "oauth authorize defaulted protected resource scope"
+        );
+        return Ok(scope);
     }
-    warn!(scope = %normalized, "oauth authorize rejected: unsupported scope");
+    let requested = normalized.split_whitespace().collect::<Vec<_>>();
+    if requested
+        .iter()
+        .all(|scope| supported.iter().any(|allowed| allowed == scope))
+    {
+        let scope = requested.join(" ");
+        debug!(
+            resource = %resource,
+            requested_scope = %normalized,
+            normalized_scope = %scope,
+            "oauth authorize scope accepted"
+        );
+        return Ok(scope);
+    }
+    warn!(
+        scope = %normalized,
+        resource = %resource,
+        supported_scopes = ?supported,
+        "oauth authorize rejected: unsupported scope"
+    );
     Err(AuthError::Validation(format!(
         "scope must be one of: {}",
-        scopes_supported.join(", ")
+        supported.join(", ")
     )))
 }
 
 pub(crate) fn validate_resource(
     state: &AuthState,
     requested: Option<&str>,
-) -> Result<(), AuthError> {
+) -> Result<String, AuthError> {
+    let canonical = crate::metadata::canonical_resource_url(state);
     let Some(requested) = requested.map(str::trim).filter(|value| !value.is_empty()) else {
-        return Ok(());
+        return Ok(canonical);
     };
-    let expected = crate::metadata::canonical_resource_url(state);
-    if requested == expected {
-        return Ok(());
+    let requested = requested.trim_end_matches('/');
+    if requested == canonical || state.is_allowed_resource_url(requested) {
+        debug!(
+            requested_resource = %requested,
+            canonical_resource = %canonical,
+            protected_resource = requested != canonical,
+            "oauth resource accepted"
+        );
+        return Ok(requested.to_string());
     }
 
     warn!(
         requested_resource = %requested,
-        expected_resource = %expected,
-        "oauth request rejected: resource does not match canonical MCP endpoint"
+        expected_resource = %canonical,
+        "oauth request rejected: resource does not match an allowed MCP endpoint"
     );
     Err(AuthError::Validation(format!(
-        "resource must be `{expected}`"
+        "resource must be `{canonical}` or a configured protected MCP route"
     )))
 }
 
@@ -794,6 +842,28 @@ pub mod tests {
     }
 
     #[tokio::test]
+    async fn authorize_accepts_configured_protected_resource_scopes() {
+        let state = test_auth_state_with_registered_client().await;
+        state.set_allowed_resource_scopes([(
+            "https://mcp.example.com/syslog".to_string(),
+            vec!["mcp:read".to_string(), "mcp:write".to_string()],
+        )]);
+        let app = router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/authorize?response_type=code&client_id=client&redirect_uri=http://127.0.0.1:7777/callback&state=abc&resource=https%3A%2F%2Fmcp.example.com%2Fsyslog&scope=mcp%3Aread%20mcp%3Awrite&code_challenge=pkce&code_challenge_method=S256")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FOUND);
+    }
+
+    #[tokio::test]
     async fn authorize_is_rate_limited_after_configured_burst() {
         let mut config = test_auth_config();
         config.authorize_requests_per_minute = 1;
@@ -991,6 +1061,7 @@ pub mod tests {
                 client_id: "client".to_string(),
                 redirect_uri: "http://127.0.0.1:7777/callback".to_string(),
                 client_state: "client-abc".to_string(),
+                resource: "https://lab.example.com/mcp".to_string(),
                 scope: "lab".to_string(),
                 provider_code_verifier: "provider-verifier".to_string(),
                 code_challenge: "challenge".to_string(),
@@ -1174,37 +1245,24 @@ pub mod tests {
         }
     }
 
-    #[test]
-    fn validate_scope_accepts_configured_default_and_rejects_others() {
-        // Empty scope falls back to configured default.
+    #[tokio::test]
+    async fn validate_scope_accepts_configured_default_and_rejects_others() {
+        let state = test_auth_state().await;
+        let canonical = crate::metadata::canonical_resource_url(&state);
+        // Empty scope falls back to configured default ("lab").
         assert_eq!(
-            super::validate_scope(
-                "",
-                "syslog:read",
-                &["syslog:read".to_string(), "syslog:admin".to_string()]
-            )
-            .unwrap(),
-            "syslog:read"
+            super::validate_scope(&state, &canonical, "").unwrap(),
+            "lab"
         );
         // Matching scope passes through.
         assert_eq!(
-            super::validate_scope(
-                "syslog:read",
-                "syslog:read",
-                &["syslog:read".to_string(), "syslog:admin".to_string()]
-            )
-            .unwrap(),
-            "syslog:read"
+            super::validate_scope(&state, &canonical, "lab").unwrap(),
+            "lab"
         );
         // Anything else is rejected — and the error mentions the configured
         // default (proving the LAB_SCOPE constant is gone).
-        let err = super::validate_scope(
-            "lab",
-            "syslog:read",
-            &["syslog:read".to_string(), "syslog:admin".to_string()],
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("syslog:read"), "got: {err}");
+        let err = super::validate_scope(&state, &canonical, "lab:admin").unwrap_err();
+        assert!(err.to_string().contains("lab"), "got: {err}");
     }
 
     #[tokio::test]
@@ -1247,6 +1305,7 @@ pub mod tests {
                 client_id: "client".to_string(),
                 redirect_uri: "http://127.0.0.1:7777/callback".to_string(),
                 client_state: "client-state".to_string(),
+                resource: "https://lab.example.com/mcp".to_string(),
                 scope: "lab".to_string(),
                 provider_code_verifier: "provider-verifier".to_string(),
                 code_challenge: "challenge".to_string(),
@@ -1277,7 +1336,7 @@ pub mod tests {
         AuthState::new(config).await.unwrap()
     }
 
-    pub fn test_auth_config() -> AuthConfig {
+    pub(crate) fn test_auth_config() -> AuthConfig {
         let dir = Box::leak(Box::new(tempfile::tempdir().unwrap()));
         AuthConfig {
             mode: AuthMode::OAuth,
@@ -1285,6 +1344,7 @@ pub mod tests {
             sqlite_path: dir.path().join("auth.db"),
             key_path: dir.path().join("auth-jwt.pem"),
             bootstrap_secret: Some("bootstrap-secret".to_string()),
+            enable_dynamic_registration: true,
             allowed_client_redirect_uris: Vec::new(),
             // Matches the mock id_token email returned by signed_test_id_token,
             // so happy-path callback tests pass the allowlist check.
@@ -1342,6 +1402,7 @@ pub mod tests {
                 client_id: "client".to_string(),
                 redirect_uri: "http://127.0.0.1:7777/callback".to_string(),
                 client_state: "client-state".to_string(),
+                resource: "https://lab.example.com/mcp".to_string(),
                 scope: "lab".to_string(),
                 provider_code_verifier: "provider-verifier".to_string(),
                 code_challenge: "challenge".to_string(),
@@ -1629,6 +1690,7 @@ Iy60nwnOxK6B5mZV2Cs+kv8=
                     client_id: "client".to_string(),
                     redirect_uri: "http://127.0.0.1:7777/callback".to_string(),
                     client_state: "client-xyz".to_string(),
+                    resource: "https://lab.example.com/mcp".to_string(),
                     scope: "lab".to_string(),
                     provider_code_verifier: "provider-verifier".to_string(),
                     code_challenge: "challenge".to_string(),

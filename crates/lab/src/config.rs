@@ -16,9 +16,12 @@
 
 pub mod env_merge;
 
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
 use std::{
     collections::BTreeMap,
     collections::HashMap,
+    fs::OpenOptions,
     io::Write as _,
     path::{Path, PathBuf},
 };
@@ -27,10 +30,20 @@ use anyhow::{Context, Result};
 use lab_apis::extract::types::ServiceCreds;
 use lab_auth::config as auth_config;
 use serde::{Deserialize, Serialize, Serializer};
+use tempfile::NamedTempFile;
 
 pub const DEFAULT_MCPREGISTRY_URL: &str = "https://registry.modelcontextprotocol.io";
 pub const WEB_UI_AUTH_DISABLED_ENV: &str = "LAB_WEB_UI_AUTH_DISABLED";
 pub const WEB_UI_AUTH_DISABLED_LEGACY_ENV: &str = "LAB_WEB_UI_DISABLE_AUTH";
+
+#[cfg(test)]
+static TEST_CONFIG_TOML_PATH: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn set_test_config_toml_path(path: Option<PathBuf>) {
+    let slot = TEST_CONFIG_TOML_PATH.get_or_init(|| Mutex::new(None));
+    *slot.lock().expect("test config path lock") = path;
+}
 
 /// Fully-resolved `lab` configuration, assembled from env + TOML.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -84,6 +97,13 @@ pub struct LabConfig {
     /// Upstream MCP servers to proxy through the gateway.
     #[serde(default)]
     pub upstream: Vec<UpstreamConfig>,
+    /// Public HTTP MCP routes protected by Lab OAuth and proxied by Lab.
+    ///
+    /// These are intentionally separate from `upstream`: upstreams import tools
+    /// into Lab, while protected MCP routes expose a backend MCP server through
+    /// Lab as an OAuth resource server.
+    #[serde(default)]
+    pub protected_mcp_routes: Vec<ProtectedMcpRouteConfig>,
     /// Virtual MCP servers backed by canonically configured Lab services.
     #[serde(default)]
     pub virtual_servers: Vec<VirtualServerConfig>,
@@ -270,6 +290,29 @@ impl LabConfig {
         Ok(())
     }
 
+    pub fn normalize_protected_mcp_routes(&mut self) -> Result<(), ConfigError> {
+        for route in &mut self.protected_mcp_routes {
+            route.upstream = route
+                .upstream
+                .take()
+                .map(|name| name.trim().to_string())
+                .filter(|name| !name.is_empty());
+            if route.upstream.is_some() && route.backend_url.trim().is_empty() {
+                route.backend_url = String::new();
+            } else {
+                route.backend_url =
+                    normalize_protected_backend_url(&route.backend_url, &route.backend_mcp_path)
+                        .map_err(|_| ConfigError::InvalidProtectedRoute {
+                            name: route.name.clone(),
+                            field: "backend_url",
+                            value: route.backend_url.clone(),
+                        })?;
+            }
+            route.backend_mcp_path = default_mcp_path();
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn controller_host(&self) -> Option<&str> {
         self.node
@@ -388,6 +431,96 @@ pub struct UpstreamConfig {
     pub tool_search: ToolSearchConfig,
 }
 
+/// Gateway-managed public MCP route protected by Lab OAuth.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtectedMcpRouteConfig {
+    /// Stable operator-facing identifier.
+    pub name: String,
+    /// Whether this route is active for metadata, auth, and proxy resolution.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Public host that reaches Lab through the edge proxy, e.g. `mcp.tootie.tv`.
+    pub public_host: String,
+    /// Public path prefix on that host, e.g. `/syslog`.
+    pub public_path: String,
+    /// Optional named Gateway upstream to publish at this protected route.
+    /// When set, Lab uses the upstream registry and its configured upstream
+    /// auth instead of proxying directly to `backend_url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<String>,
+    /// Full backend MCP endpoint URL, e.g. `http://100.88.16.79:3100/mcp`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub backend_url: String,
+    /// Deprecated compatibility field. New configs put the MCP path in
+    /// `backend_url`; this field is folded into `backend_url` when loading
+    /// older origin-only route entries.
+    #[serde(
+        default = "default_mcp_path",
+        skip_serializing_if = "is_default_mcp_path"
+    )]
+    pub backend_mcp_path: String,
+    /// OAuth scopes advertised and enforced for this route.
+    #[serde(default = "default_mcp_scopes")]
+    pub scopes: Vec<String>,
+    /// Optional backend health path used by route test actions.
+    #[serde(default)]
+    pub health_path: Option<String>,
+}
+
+impl ProtectedMcpRouteConfig {
+    #[must_use]
+    pub fn public_resource(&self) -> String {
+        format!("https://{}{}", self.public_host, self.public_path)
+    }
+}
+
+fn default_mcp_path() -> String {
+    "/mcp".to_string()
+}
+
+fn is_default_mcp_path(path: &str) -> bool {
+    path == "/mcp"
+}
+
+fn default_mcp_scopes() -> Vec<String> {
+    vec!["mcp:read".to_string(), "mcp:write".to_string()]
+}
+
+fn normalize_protected_backend_url(
+    raw: &str,
+    legacy_path: &str,
+) -> Result<String, url::ParseError> {
+    let mut parsed = url::Url::parse(raw.trim())?;
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(url::ParseError::RelativeUrlWithoutBase);
+    }
+
+    let current_path = parsed.path();
+    if current_path.is_empty() || current_path == "/" {
+        parsed.set_path(&normalize_mcp_route_path(legacy_path));
+    }
+    Ok(parsed.to_string().trim_end_matches('/').to_string())
+}
+
+fn normalize_mcp_route_path(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let with_slash = if trimmed.starts_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("/{trimmed}")
+    };
+    let normalized = with_slash
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join("/");
+    if normalized.is_empty() {
+        "/mcp".to_string()
+    } else {
+        format!("/{normalized}")
+    }
+}
+
 impl UpstreamConfig {
     /// Validate mutually-exclusive auth shapes. `bearer_token_env` and `oauth`
     /// both configured is a config error.
@@ -458,6 +591,12 @@ pub enum ConfigError {
     InvalidToolSearchTopKDefault { value: usize },
     #[error("gateway tool_search.max_tools={value} is invalid — expected 1..=10000")]
     InvalidToolSearchMaxTools { value: usize },
+    #[error("protected MCP route '{name}' has invalid {field}: {value}")]
+    InvalidProtectedRoute {
+        name: String,
+        field: &'static str,
+        value: String,
+    },
 }
 
 /// Outbound OAuth configuration for an upstream MCP server.
@@ -862,11 +1001,26 @@ pub struct AdminPreferences {
 }
 
 /// Per-service preference overrides (non-secret values only).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServicePreferences {
+    /// Enable built-in integrations that call external service APIs.
+    ///
+    /// Default: true. When false, runtime registries keep bootstrap/operator
+    /// tools available but remove built-in upstream API integrations.
+    #[serde(default = "default_true")]
+    pub built_in_upstream_apis_enabled: bool,
     /// Tailscale preferences.
     #[serde(default)]
     pub tailscale: TailscalePreferences,
+}
+
+impl Default for ServicePreferences {
+    fn default() -> Self {
+        Self {
+            built_in_upstream_apis_enabled: true,
+            tailscale: TailscalePreferences::default(),
+        }
+    }
 }
 
 /// Tailscale non-secret preferences.
@@ -895,6 +1049,8 @@ pub fn load_toml(candidates: &[PathBuf]) -> Result<LabConfig> {
                 let mut cfg = toml::from_str::<LabConfig>(&raw)
                     .with_context(|| format!("failed to parse {}", path.display()))?;
                 cfg.normalize_legacy_tool_search(root_tool_search_present(&raw));
+                cfg.normalize_protected_mcp_routes()
+                    .with_context(|| format!("invalid config {}", path.display()))?;
                 // Validate all upstream configs eagerly at startup so that
                 // invalid configuration (conflicting auth, bad URL scheme, etc.)
                 // is discovered immediately rather than at first OAuth attempt.
@@ -911,6 +1067,74 @@ pub fn load_toml(candidates: &[PathBuf]) -> Result<LabConfig> {
         }
     }
     Ok(LabConfig::default())
+}
+
+/// Patch the non-secret built-in upstream API preference without rewriting
+/// unrelated TOML content.
+///
+/// This intentionally edits only `[services].built_in_upstream_apis_enabled`.
+/// It preserves comments, unknown keys, and plugin-owned sections that the
+/// full typed `LabConfig` serializer cannot round-trip.
+pub fn patch_built_in_upstream_apis_enabled(path: &Path, enabled: bool) -> Result<LabConfig> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    let lock_path = config_lock_path(path);
+    let lock_file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("open {}", lock_path.display()))?;
+    let mut lock = fd_lock::RwLock::new(lock_file);
+    let _guard = lock
+        .try_write()
+        .with_context(|| format!("config is locked: {}", lock_path.display()))?;
+
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => {
+            return Err(anyhow::Error::new(e).context(format!("failed to read {}", path.display())));
+        }
+    };
+    let mut document = raw
+        .parse::<toml_edit::DocumentMut>()
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+
+    document["services"]["built_in_upstream_apis_enabled"] = toml_edit::value(enabled);
+    let patched = document.to_string();
+    let mut cfg = toml::from_str::<LabConfig>(&patched)
+        .with_context(|| format!("failed to parse patched {}", path.display()))?;
+    cfg.normalize_legacy_tool_search(root_tool_search_present(&patched));
+    cfg.validate()
+        .with_context(|| format!("invalid patched config {}", path.display()))?;
+
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut tmp = NamedTempFile::new_in(parent)
+        .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
+    tmp.write_all(patched.as_bytes())
+        .context("failed to write temp config")?;
+    tmp.as_file()
+        .sync_all()
+        .context("failed to sync temp config")?;
+    tmp.persist(path)
+        .map_err(|e| anyhow::Error::new(e.error))
+        .with_context(|| format!("failed to persist {}", path.display()))?;
+
+    Ok(cfg)
+}
+
+fn config_lock_path(path: &Path) -> PathBuf {
+    let mut lock = path.to_path_buf();
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("config.toml");
+    lock.set_file_name(format!("{file_name}.lock"));
+    lock
 }
 
 /// Load `.env` files into the process environment.
@@ -1009,6 +1233,16 @@ pub fn dotenv_path() -> Option<PathBuf> {
 }
 
 pub fn config_toml_path() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(path) = TEST_CONFIG_TOML_PATH
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("test config path lock")
+        .clone()
+    {
+        return Some(path);
+    }
+
     toml_candidates()
         .into_iter()
         .find(|path| path.exists())
@@ -1508,6 +1742,52 @@ mod tests {
         pairs
             .iter()
             .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+    }
+
+    #[test]
+    fn service_preferences_default_enable_upstream_apis() {
+        let cfg = toml::from_str::<LabConfig>("").expect("empty config should parse");
+        assert!(cfg.services.built_in_upstream_apis_enabled);
+    }
+
+    #[test]
+    fn service_preferences_can_disable_upstream_apis() {
+        let cfg = toml::from_str::<LabConfig>(
+            r"
+            [services]
+            built_in_upstream_apis_enabled = false
+            ",
+        )
+        .expect("services config should parse");
+
+        assert!(!cfg.services.built_in_upstream_apis_enabled);
+    }
+
+    #[test]
+    fn patch_built_in_upstream_apis_preserves_comments_and_unknown_sections() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"# operator note
+[services]
+# keep this comment
+built_in_upstream_apis_enabled = true
+
+[plugin_owned]
+future = "keep"
+"#,
+        )
+        .unwrap();
+
+        let cfg = patch_built_in_upstream_apis_enabled(&path, false).unwrap();
+        assert!(!cfg.services.built_in_upstream_apis_enabled);
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("# operator note"));
+        assert!(raw.contains("# keep this comment"));
+        assert!(raw.contains("[plugin_owned]"));
+        assert!(raw.contains("future = \"keep\""));
+        assert!(raw.contains("built_in_upstream_apis_enabled = false"));
     }
 
     #[test]
@@ -2046,6 +2326,56 @@ url = "https://acme.example.com/mcp"
         assert_eq!(cfg.tool_search.top_k_default, 20);
         assert_eq!(cfg.tool_search.max_tools, 8000);
         cfg.validate().expect("root tool_search validates");
+    }
+
+    #[test]
+    fn protected_route_legacy_backend_path_folds_into_backend_url() {
+        let mut cfg = toml::from_str::<LabConfig>(
+            r#"
+[[protected_mcp_routes]]
+name = "tools"
+enabled = true
+public_host = "mcp.example.com"
+public_path = "/tools"
+backend_url = "http://10.0.0.12:3100"
+backend_mcp_path = "/mcp"
+"#,
+        )
+        .expect("protected route parses");
+
+        cfg.normalize_protected_mcp_routes()
+            .expect("protected route normalizes");
+
+        assert_eq!(
+            cfg.protected_mcp_routes[0].backend_url,
+            "http://10.0.0.12:3100/mcp"
+        );
+        assert_eq!(cfg.protected_mcp_routes[0].backend_mcp_path, "/mcp");
+    }
+
+    #[test]
+    fn protected_route_named_upstream_allows_empty_backend_url() {
+        let mut cfg = toml::from_str::<LabConfig>(
+            r#"
+[[protected_mcp_routes]]
+name = "syslog"
+enabled = true
+public_host = "mcp.example.com"
+public_path = "/syslog"
+upstream = " syslog "
+"#,
+        )
+        .expect("protected route parses");
+
+        cfg.normalize_protected_mcp_routes()
+            .expect("upstream route normalizes");
+
+        assert_eq!(
+            cfg.protected_mcp_routes[0].upstream.as_deref(),
+            Some("syslog")
+        );
+        assert_eq!(cfg.protected_mcp_routes[0].backend_url, "");
+        assert_eq!(cfg.protected_mcp_routes[0].backend_mcp_path, "/mcp");
     }
 
     #[test]

@@ -100,7 +100,7 @@ export function CleanupResultPanel({ result, onClose }: CleanupResultPanelProps)
                 {totalPrimary} process{totalPrimary === 1 ? '' : 'es'} {laneVerb}.
               </p>
               <p className="mt-2 text-xs text-aurora-text-muted">
-                Gateway-side tracked matches, local leaked session workers, and the aggressive fallback lane are reported separately below.
+                Server-side tracked matches, local leaked session workers, and the aggressive fallback lane are reported separately below.
               </p>
             </div>
           </div>
@@ -109,7 +109,7 @@ export function CleanupResultPanel({ result, onClose }: CleanupResultPanelProps)
             <h4 className="text-sm font-medium text-aurora-text-muted">Cleanup breakdown</h4>
             <div className="grid gap-3">
               <div className="flex items-center justify-between rounded-lg border px-4 py-3">
-                <span className="text-sm">Gateway runtime {laneLabel}</span>
+                <span className="text-sm">Server runtime {laneLabel}</span>
                 <span className="text-sm font-medium tabular-nums">
                   {isPreview ? (cleanup.gateway_matched ?? cleanup.gateway_killed) : cleanup.gateway_killed}
                 </span>
@@ -134,7 +134,7 @@ export function CleanupResultPanel({ result, onClose }: CleanupResultPanelProps)
           </div>
 
           <div className="space-y-4">
-            {renderMatches('Gateway runtime patterns', cleanup.gateway_matches)}
+            {renderMatches('Server runtime patterns', cleanup.gateway_matches)}
             {renderMatches('Local client/session patterns', cleanup.local_matches)}
             {cleanup.aggressive && renderMatches('Aggressive fallback patterns', cleanup.aggressive_matches)}
           </div>

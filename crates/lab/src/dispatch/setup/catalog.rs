@@ -62,7 +62,7 @@ pub const ACTIONS: &[ActionSpec] = &[
             },
             ParamSpec {
                 name: "force",
-                ty: "bool",
+                ty: "boolean",
                 required: false,
                 description: "Overwrite conflicting draft keys (default false)",
             },
@@ -75,9 +75,28 @@ pub const ACTIONS: &[ActionSpec] = &[
         returns: "CommitOutcome",
         params: &[ParamSpec {
             name: "force",
-            ty: "bool",
+            ty: "boolean",
             required: false,
             description: "Overwrite conflicting .env keys (default false)",
+        }],
+    },
+    ActionSpec {
+        name: "settings.state",
+        description: "Return non-secret operator settings and runtime service policy state",
+        destructive: false,
+        returns: "SettingsState",
+        params: &[],
+    },
+    ActionSpec {
+        name: "settings.update",
+        description: "Update non-secret operator settings with validation",
+        destructive: true,
+        returns: "SettingsState",
+        params: &[ParamSpec {
+            name: "services.built_in_upstream_apis_enabled",
+            ty: "boolean",
+            required: true,
+            description: "Enable built-in upstream API service integrations",
         }],
     },
     ActionSpec {
@@ -87,7 +106,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         returns: "InstalledPlugin[]",
         params: &[ParamSpec {
             name: "force",
-            ty: "bool",
+            ty: "boolean",
             required: false,
             description: "Bypass the short in-process cache",
         }],
@@ -130,47 +149,9 @@ pub const ACTIONS: &[ActionSpec] = &[
         returns: "CommitOutcome",
         params: &[ParamSpec {
             name: "force",
-            ty: "bool",
+            ty: "boolean",
             required: false,
             description: "Overwrite conflicting .env keys (default false)",
-        }],
-    },
-    ActionSpec {
-        name: "installed_plugins",
-        description: "List installed Claude Code lab service plugins",
-        destructive: false,
-        returns: "InstalledPlugin[]",
-        params: &[],
-    },
-    ActionSpec {
-        name: "services_status",
-        description: "Join service schema, configured-env state, and installed plugin state",
-        destructive: false,
-        returns: "ServiceStatus[]",
-        params: &[],
-    },
-    ActionSpec {
-        name: "install_plugin",
-        description: "Install the Claude Code plugin for a registered lab service",
-        destructive: true,
-        returns: "PluginLifecycleOutcome",
-        params: &[ParamSpec {
-            name: "service",
-            ty: "string",
-            required: true,
-            description: "Registered lab service slug",
-        }],
-    },
-    ActionSpec {
-        name: "uninstall_plugin",
-        description: "Uninstall the Claude Code plugin for a registered lab service",
-        destructive: true,
-        returns: "PluginLifecycleOutcome",
-        params: &[ParamSpec {
-            name: "service",
-            ty: "string",
-            required: true,
-            description: "Registered lab service slug",
         }],
     },
 ];

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, type ReactNode } from 'react'
+import { useDeferredValue, useMemo, useState, type ReactNode } from 'react'
 import {
   Activity,
   ArrowLeft,
@@ -137,6 +137,8 @@ export function GatewayListContent() {
   const [toolFilters, setToolFilters] = useState<ToolFilterState>(DEFAULT_TOOL_FILTERS)
   const [density, setDensity] = useState<'comfortable' | 'condensed'>(DEFAULT_DENSITY)
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
+  const deferredGatewayFilters = useDeferredValue(lastGatewayFilters)
+  const deferredToolFilters = useDeferredValue(toolFilters)
 
   const [formOpen, setFormOpen] = useState(false)
   const [editingGateway, setEditingGateway] = useState<Gateway | null>(null)
@@ -165,12 +167,14 @@ export function GatewayListContent() {
     return { configured, healthy, disconnected, tools }
   }, [items])
 
-  const filteredGateways = useMemo(() => filterGateways(items, lastGatewayFilters), [items, lastGatewayFilters])
+  const toolRows = useMemo(() => aggregateToolsFromGateways(items), [items])
 
-  const filteredToolRows = useMemo(() => {
-    const rows = aggregateToolsFromGateways(items)
-    return sortToolRows(filterTools(rows, toolFilters))
-  }, [items, toolFilters])
+  const filteredGateways = useMemo(() => filterGateways(items, deferredGatewayFilters), [items, deferredGatewayFilters])
+
+  const filteredToolRows = useMemo(
+    () => sortToolRows(filterTools(toolRows, deferredToolFilters)),
+    [deferredToolFilters, toolRows],
+  )
 
   const gatewayOptions = useMemo(
     () => items.map((gateway) => ({ value: gateway.id, label: gateway.name })),
@@ -300,7 +304,7 @@ export function GatewayListContent() {
         toast.error(result.error || result.message)
       }
     } catch (requestError) {
-      toast.error(getErrorMessage(requestError, 'Failed to test gateway'))
+      toast.error(getErrorMessage(requestError, 'Failed to test server'))
     }
   }
 
@@ -308,12 +312,12 @@ export function GatewayListContent() {
     try {
       const result = await reloadGateway(gateway.id)
       if (result.success) {
-        toast.success(`Gateway reloaded: ${result.new_tool_count} tools discovered`)
+        toast.success(`Server reloaded: ${result.new_tool_count} tools discovered`)
       } else {
         toast.error(result.message)
       }
     } catch (requestError) {
-      toast.error(getErrorMessage(requestError, 'Failed to reload gateway'))
+      toast.error(getErrorMessage(requestError, 'Failed to reload server'))
     }
   }
 
@@ -326,11 +330,11 @@ export function GatewayListContent() {
         toast.success('Stale service removed successfully')
       } else {
         await removeGateway(deleteGateway.id)
-        toast.success('Gateway removed successfully')
+        toast.success('Server removed successfully')
       }
       setDeleteGateway(null)
     } catch (requestError) {
-      toast.error(getErrorMessage(requestError, 'Failed to remove gateway'))
+      toast.error(getErrorMessage(requestError, 'Failed to remove server'))
     }
   }
 
@@ -382,7 +386,7 @@ export function GatewayListContent() {
         )
       }
     } catch (requestError) {
-      toast.error(getErrorMessage(requestError, 'Failed to cleanup gateway runtime'))
+      toast.error(getErrorMessage(requestError, 'Failed to cleanup server runtime'))
     }
   }
 
@@ -403,9 +407,9 @@ export function GatewayListContent() {
 
     try {
       await enableGateway(gateway.id)
-      toast.success('Gateway enabled. Catalog change sent to clients.')
+      toast.success('Server enabled. Catalog change sent to clients.')
     } catch (requestError) {
-      toast.error(getErrorMessage(requestError, 'Failed to update gateway state'))
+      toast.error(getErrorMessage(requestError, 'Failed to update server state'))
     }
   }
 
@@ -414,32 +418,23 @@ export function GatewayListContent() {
 
     try {
       await disableGateway(disableGatewayTarget.id)
-      toast.success('Gateway disabled. Catalog change sent and runtime cleanup requested.')
+      toast.success('Server disabled. Catalog change sent and runtime cleanup requested.')
       setDisableGatewayTarget(null)
     } catch (requestError) {
-      toast.error(getErrorMessage(requestError, 'Failed to disable gateway'))
+      toast.error(getErrorMessage(requestError, 'Failed to disable server'))
     }
   }
 
   const handleSave = async (input: CreateGatewayInput | UpdateGatewayInput) => {
-    try {
-      if (editingGateway) {
-        await updateGateway(editingGateway.id, input as UpdateGatewayInput)
-        toast.success('Gateway updated successfully')
-      } else {
-        await createGateway(input as CreateGatewayInput)
-        toast.success('Gateway created successfully')
-      }
-      setFormOpen(false)
-      setEditingGateway(null)
-    } catch (requestError) {
-      toast.error(
-        getErrorMessage(
-          requestError,
-          editingGateway ? 'Failed to update gateway' : 'Failed to create gateway',
-        ),
-      )
+    if (editingGateway) {
+      await updateGateway(editingGateway.id, input as UpdateGatewayInput)
+      toast.success('Server updated successfully')
+    } else {
+      await createGateway(input as CreateGatewayInput)
+      toast.success('Server created successfully')
     }
+    setFormOpen(false)
+    setEditingGateway(null)
   }
 
   const activeSearch = showToolsView ? toolFilters.search : lastGatewayFilters.search
@@ -541,7 +536,7 @@ export function GatewayListView({
   return (
     <>
       <AppHeader
-        breadcrumbs={[{ label: 'Gateways' }]}
+        breadcrumbs={[{ label: 'Servers' }]}
         actions={
           <div className="flex items-center gap-2">
             {showToolsView ? (
@@ -555,7 +550,7 @@ export function GatewayListView({
                 )}
               >
                 <ArrowLeft className="mr-1.5 size-4" />
-                Back to gateways
+                Back to servers
               </Button>
             ) : null}
             {!showToolsView ? (
@@ -612,7 +607,7 @@ export function GatewayListView({
               )}
             >
               <Plus className="mr-2 size-4" />
-              Add Gateway
+              Add Server
             </Button>
             <Button
               onClick={onCreate}
@@ -621,13 +616,14 @@ export function GatewayListView({
                 gatewayActionTone('accent'),
                 'size-9 border sm:hidden',
               )}
-              aria-label="Add gateway"
+              aria-label="Add server"
             >
               <Plus className="size-3.5" />
             </Button>
           </div>
         }
       />
+      <h1 className="sr-only">Servers</h1>
 
       <div
         className={cn(
@@ -729,7 +725,7 @@ export function GatewayListView({
                 <GatewayTableSkeleton />
               ) : errorMessage ? (
                 <div className={cn(AURORA_STRONG_PANEL, 'p-8 text-center')}>
-                  <p className="text-aurora-error">Failed to load gateways</p>
+                  <p className="text-aurora-error">Failed to load servers</p>
                   <p className="mt-1 text-sm text-aurora-text-muted">{errorMessage}</p>
                 </div>
               ) : showToolsView ? (
@@ -737,8 +733,8 @@ export function GatewayListView({
                   itemsCount === 0 || summary.tools === 0 ? (
                     <EmptyState
                       title="No discovered tools"
-                      description="Reload or add a gateway to build the aggregated tools inventory."
-                      action={itemsCount === 0 ? { label: 'Add Gateway', onClick: onCreate } : undefined}
+                      description="Reload or add a server to build the aggregated tools inventory."
+                      action={itemsCount === 0 ? { label: 'Add Server', onClick: onCreate } : undefined}
                     />
                   ) : (
                     <EmptyState
@@ -752,13 +748,13 @@ export function GatewayListView({
               ) : filteredGateways.length === 0 ? (
                 itemsCount === 0 ? (
                   <EmptyState
-                    title="No gateways configured"
-                    description="Get started by adding your first MCP gateway connection to manage upstream gateway tools."
-                    action={{ label: 'Add Gateway', onClick: onCreate }}
+                    title="No servers configured"
+                    description="Get started by adding your first MCP server connection to manage upstream server tools."
+                    action={{ label: 'Add Server', onClick: onCreate }}
                   />
                 ) : (
                   <EmptyState
-                    title="No matching gateways"
+                    title="No matching servers"
                     description="Try adjusting your filters to find what you're looking for."
                   />
                 )

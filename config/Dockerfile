@@ -22,6 +22,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates/lab/Cargo.toml      crates/lab/Cargo.toml
 COPY crates/lab-apis/Cargo.toml crates/lab-apis/Cargo.toml
 COPY crates/lab-auth/Cargo.toml crates/lab-auth/Cargo.toml
+COPY crates/vendor/agent-client-protocol/Cargo.toml crates/vendor/agent-client-protocol/Cargo.toml
 
 # Create stub source + test files so cargo can parse ALL manifests without error.
 #
@@ -33,6 +34,9 @@ COPY crates/lab-auth/Cargo.toml crates/lab-auth/Cargo.toml
 #
 # lab/ has both [[bin]] (main.rs) and [lib] (lib.rs) targets — stub both.
 #
+# The workspace patches agent-client-protocol to a vendored local crate, so the
+# dependency-cache build also needs a stub for that patched crate.
+#
 # We also need apps/gateway-admin/out/ to exist for include_dir!() in web.rs,
 # but we copy the real one below — for the dep-cache step a stub dir suffices.
 RUN mkdir -p \
@@ -40,6 +44,9 @@ RUN mkdir -p \
       crates/lab-apis/src \
       crates/lab-apis/tests \
       crates/lab-auth/src \
+      crates/vendor/agent-client-protocol/src \
+      crates/vendor/agent-client-protocol/examples \
+      crates/vendor/agent-client-protocol/tests \
       apps/gateway-admin/out \
  && echo 'fn main(){}' > crates/lab/src/main.rs \
  && touch \
@@ -50,12 +57,25 @@ RUN mkdir -p \
       crates/lab-apis/tests/openacp_client.rs \
       crates/lab-apis/tests/jellyfin_client.rs \
       crates/lab-auth/src/lib.rs \
+      crates/vendor/agent-client-protocol/src/lib.rs \
+      crates/vendor/agent-client-protocol/examples/simple_agent.rs \
+      crates/vendor/agent-client-protocol/examples/yolo_one_shot_client.rs \
+      crates/vendor/agent-client-protocol/tests/derive_macros.rs \
+      crates/vendor/agent-client-protocol/tests/jsonrpc_advanced.rs \
+      crates/vendor/agent-client-protocol/tests/jsonrpc_connection_builder.rs \
+      crates/vendor/agent-client-protocol/tests/jsonrpc_edge_cases.rs \
+      crates/vendor/agent-client-protocol/tests/jsonrpc_error_handling.rs \
+      crates/vendor/agent-client-protocol/tests/jsonrpc_hello.rs \
+      crates/vendor/agent-client-protocol/tests/match_dispatch.rs \
  && cargo build --workspace --all-features --release \
  && cargo clean -p labby \
  && cargo clean -p lab-apis \
  && cargo clean -p lab-auth \
  && rm -rf \
       crates/*/src \
+      crates/vendor/agent-client-protocol/src \
+      crates/vendor/agent-client-protocol/examples \
+      crates/vendor/agent-client-protocol/tests \
       crates/lab-apis/tests \
       apps/gateway-admin/out \
       target/release/labby
@@ -75,8 +95,36 @@ FROM debian:trixie-slim AS runtime
 # ca-certificates: reqwest uses rustls for TLS but still validates against the
 # system CA bundle — required for outbound HTTPS calls.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
+ && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+ && mkdir -p /etc/apt/keyrings \
+ && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+    | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+ && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" \
+    > /etc/apt/sources.list.d/nodesource.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends nodejs zsh \
  && rm -rf /var/lib/apt/lists/*
+
+# Agent CLIs used by ACP adapters and by stdio MCP servers that shell out to
+# provider tools. Keep these deterministic so container behavior matches the
+# host credential/runtime format expected by local development.
+RUN mkdir -p /opt/agent-clis \
+ && cd /opt/agent-clis \
+ && npm init -y >/dev/null \
+ && npm install --omit=dev --no-audit --no-fund \
+      @anthropic-ai/claude-code@2.1.132 \
+      @openai/codex@0.130.0 \
+ && ln -sf /opt/agent-clis/node_modules/.bin/claude /usr/local/bin/claude \
+ && ln -sf /opt/agent-clis/node_modules/.bin/codex /usr/local/bin/codex \
+ && npm cache clean --force \
+ && claude --version \
+ && codex --version
+
+# Python MCP servers commonly use `uvx` as their stdio launcher. Install uv
+# into PATH for gateway child processes.
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
+ && uv --version \
+ && uvx --version
 
 # Pre-create XDG directories so the binary never needs mkdir at runtime.
 #   ~/.local/state/lab  — master.lock and runtime state

@@ -258,6 +258,7 @@ mod tests {
             name: "radarr",
             description: "Manage movies and Radarr queues",
             category: "media",
+            kind: crate::registry::RegisteredServiceKind::BuiltInUpstreamApi,
             status: "available",
             actions: ACTIONS,
             dispatch: |_action, _params| Box::pin(async { Ok(Value::Null) }),

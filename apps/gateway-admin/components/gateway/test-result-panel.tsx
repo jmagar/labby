@@ -80,8 +80,8 @@ export function TestResultPanel({ result, onClose }: TestResultPanelProps) {
               {(isWarning || !testResult.success) && (
                 <p className="mt-2 text-xs text-aurora-text-muted">
                   {isWarning
-                    ? 'The gateway connected, but at least one optional MCP primitive could not be discovered. The note above is the exact operator-facing guidance returned by the gateway backend.'
-                    : 'Check the gateway transport, auth source, and any required stdio environment variables. The probe message above is the exact last failure returned by the gateway backend.'}
+                    ? 'The server connected, but at least one optional MCP primitive could not be discovered. The note above is the exact operator-facing guidance returned by the server backend.'
+                    : 'Check the server transport, auth source, and any required stdio environment variables. The probe message above is the exact last failure returned by the server backend.'}
                 </p>
               )}
             </div>

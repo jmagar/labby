@@ -35,15 +35,18 @@ Detect the project type and bump the version based on the nature of the changes 
 1. Read the current version from the primary manifest (first match: `Cargo.toml`, `package.json`, `pyproject.toml`)
 2. Determine bump type from the changes in context (the commit prefix you'll write in step 4 should match)
 3. Calculate the new version
-4. **Update the version in ALL of these files that exist in the repo:**
+4. **Update the version in ALL version-bearing files that exist in the repo:**
    - `Cargo.toml` — `version = "X.Y.Z"` in `[package]` (or `[workspace.package]` for Rust workspaces)
-   - `package.json` — `"version": "X.Y.Z"`
+   - every tracked `package.json` with a top-level `"version"` field, including app packages such as `apps/*/package.json`; skip dependency folders such as `node_modules`, build output, and vendored third-party packages
    - `pyproject.toml` — `version = "X.Y.Z"` in `[project]`
    - `.claude-plugin/plugin.json` — `"version": "X.Y.Z"`
    - `.codex-plugin/plugin.json` — `"version": "X.Y.Z"`
    - `gemini-extension.json` — `"version": "X.Y.Z"`
-5. If Rust: run `cargo check` to update `Cargo.lock` (it records the version) — if `cargo check` fails, stop and report the error
-6. Report: `Version: X.Y.Z → A.B.C (bump type)` and list which files were updated
+   - `README.md` version line/badge when present, for common forms like `Version: X.Y.Z`, `version-X.Y.Z`, or `vX.Y.Z`
+5. If a repo has a release checklist or other explicit version-sync contract, follow it before committing. Prefer repo-local tests/scripts for this if present.
+6. If Rust: run `cargo check` to update `Cargo.lock` (it records the version) — if `cargo check` fails, stop and report the error
+7. Verify version sync before staging. At minimum, search for stale old-version references in tracked manifest/readme/changelog/plugin metadata files and fix any that represent the current project version rather than historical release notes.
+8. Report: `Version: X.Y.Z → A.B.C (bump type)` and list which files were updated
 
 **Skip conditions:**
 - Version is `0.0.0` or `0.0.1` (project not yet versioned)
@@ -52,6 +55,7 @@ Detect the project type and bump the version based on the nature of the changes 
 
 ### 3. Update CHANGELOG.md (before staging)
 If a `CHANGELOG.md` exists in the repo root:
+- If the version was bumped, ensure the changelog has a release section for the new version, e.g. `## [A.B.C] - YYYY-MM-DD`, and move the current change summary out of `## [Unreleased]` when the repo uses Keep a Changelog style.
 - Find the most recently documented commit in the changelog (look for commit hashes in the table)
 - Run `git log --oneline <last_documented_sha>..HEAD` to get undocumented commits
 - If there are new commits, update the changelog:

@@ -282,7 +282,7 @@ async fn install_local(
             version: agent.version.clone(),
             distribution: "binary".to_string(),
             command: cmd_path.to_string_lossy().into_owned(),
-            args: Vec::new(),
+            args: asset.args.clone(),
             cwd: None,
             env: std::collections::BTreeMap::new(),
             installed_at: jiff::Timestamp::now().to_string(),
@@ -649,23 +649,14 @@ async fn download_archive(url: &str, dest: &std::path::Path) -> Result<String, T
     /// from the overall `.timeout()` — catches stalled connections.
     const DOWNLOAD_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+    const MAX_DOWNLOAD_REDIRECTS: usize = 5;
+
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(300))
         .build()
         .map_err(|e| ToolError::internal_message(format!("build http client: {e}")))?;
-
-    let resp = client.get(url).send().await.map_err(|e| ToolError::Sdk {
-        sdk_kind: "network_error".to_string(),
-        message: format!("GET {url}: {e}"),
-    })?;
-
-    if !resp.status().is_success() {
-        return Err(ToolError::Sdk {
-            sdk_kind: "network_error".to_string(),
-            message: format!("GET {url}: HTTP {}", resp.status()),
-        });
-    }
+    let (download_url, resp) = open_archive_response(&client, url, MAX_DOWNLOAD_REDIRECTS).await?;
 
     let mut file = tokio::fs::File::create(dest)
         .await
@@ -682,7 +673,7 @@ async fn download_archive(url: &str, dest: &std::path::Path) -> Result<String, T
             Ok(Some(chunk_result)) => {
                 let chunk = chunk_result.map_err(|e| ToolError::Sdk {
                     sdk_kind: "network_error".to_string(),
-                    message: format!("read body chunk from {url}: {e}"),
+                    message: format!("read body chunk from {download_url}: {e}"),
                 })?;
                 hasher.update(&chunk);
                 file.write_all(&chunk).await.map_err(|e| {
@@ -716,7 +707,7 @@ async fn download_archive(url: &str, dest: &std::path::Path) -> Result<String, T
                 return Err(ToolError::Sdk {
                     sdk_kind: "install_timeout".to_string(),
                     message: format!(
-                        "download of {url} stalled for more than {:?}; aborted",
+                        "download of {download_url} stalled for more than {:?}; aborted",
                         DOWNLOAD_STALL_TIMEOUT
                     ),
                 });
@@ -736,6 +727,65 @@ async fn download_archive(url: &str, dest: &std::path::Path) -> Result<String, T
         .map_err(|e| ToolError::internal_message(format!("fsync {}: {e}", dest.display())))?;
 
     Ok(hex::encode(hasher.finalize()))
+}
+
+async fn open_archive_response(
+    client: &reqwest::Client,
+    url: &str,
+    max_redirects: usize,
+) -> Result<(String, reqwest::Response), ToolError> {
+    let mut current = reqwest::Url::parse(url).map_err(|e| ToolError::Sdk {
+        sdk_kind: "invalid_param".to_string(),
+        message: format!("invalid archive URL `{url}`: {e}"),
+    })?;
+
+    for redirect_count in 0..=max_redirects {
+        validate_archive_url(current.as_str())?;
+        let resp = client
+            .get(current.clone())
+            .send()
+            .await
+            .map_err(|e| ToolError::Sdk {
+                sdk_kind: "network_error".to_string(),
+                message: format!("GET {current}: {e}"),
+            })?;
+
+        if resp.status().is_success() {
+            return Ok((current.to_string(), resp));
+        }
+
+        if resp.status().is_redirection() {
+            if redirect_count == max_redirects {
+                return Err(ToolError::Sdk {
+                    sdk_kind: "network_error".to_string(),
+                    message: format!("GET {current}: too many redirects (>{max_redirects})"),
+                });
+            }
+            let location = resp
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| ToolError::Sdk {
+                    sdk_kind: "network_error".to_string(),
+                    message: format!("GET {current}: redirect missing Location header"),
+                })?;
+            current = current.join(location).map_err(|e| ToolError::Sdk {
+                sdk_kind: "network_error".to_string(),
+                message: format!("GET {current}: invalid redirect Location `{location}`: {e}"),
+            })?;
+            continue;
+        }
+
+        return Err(ToolError::Sdk {
+            sdk_kind: "network_error".to_string(),
+            message: format!("GET {current}: HTTP {}", resp.status()),
+        });
+    }
+
+    Err(ToolError::Sdk {
+        sdk_kind: "network_error".to_string(),
+        message: format!("GET {url}: too many redirects (>{max_redirects})"),
+    })
 }
 
 /// Extract `archive` into `dest_dir` using system `tar` or `unzip`.

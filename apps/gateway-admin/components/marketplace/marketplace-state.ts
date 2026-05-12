@@ -43,6 +43,8 @@ export interface MarketplaceCatalogItem {
   avatar?: MarketplaceCatalogAvatar
   tags: string[]
   raw: unknown
+  searchText: string
+  updatedAtMs: number
 }
 
 export interface MarketplaceCatalogAvatar {
@@ -119,6 +121,14 @@ const RUNTIME_LABELS: Record<MarketplaceRuntime, string> = {
   claude: 'Claude',
   codex: 'Codex',
   gemini: 'Gemini',
+}
+
+const CATALOG_COLLATOR = new Intl.Collator(undefined, { sensitivity: 'base' })
+const SEARCH_KIND_BOOST: Partial<Record<MarketplaceCatalogKind, number>> = {
+  plugin: 40,
+  mcp_server: 20,
+  acp_agent: 20,
+  source: 10,
 }
 
 export const MCP_REGISTRY_SOURCE_ID = 'mcp-registry'
@@ -266,9 +276,37 @@ function componentDescription(component: PluginComponent, plugin: Plugin): strin
   return typeof description === 'string' && description.trim() ? description : plugin.description || plugin.desc || ''
 }
 
-function mcpEntryTimestamp(entry: ReturnType<typeof normalizeMcpServer>): number {
-  const timestamp = new Date(entry.updatedAt ?? 0).getTime()
+type MarketplaceCatalogItemInput = Omit<MarketplaceCatalogItem, 'searchText' | 'updatedAtMs'>
+
+function catalogSearchText(item: MarketplaceCatalogItemInput): string {
+  return [
+    item.name,
+    item.subtitle,
+    item.description,
+    item.sourceName ?? '',
+    item.distribution ?? '',
+    item.ecosystem,
+    ...item.tags,
+  ]
+    .join(' ')
+    .toLowerCase()
+}
+
+function catalogUpdatedAtMs(updatedAt?: string): number {
+  const timestamp = new Date(updatedAt ?? 0).getTime()
   return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function catalogItem(item: MarketplaceCatalogItemInput): MarketplaceCatalogItem {
+  return {
+    ...item,
+    searchText: catalogSearchText(item),
+    updatedAtMs: catalogUpdatedAtMs(item.updatedAt),
+  }
+}
+
+function mcpEntryTimestamp(entry: ReturnType<typeof normalizeMcpServer>): number {
+  return catalogUpdatedAtMs(entry.updatedAt)
 }
 
 function dedupeMcpServers(entries: Array<McpServer | McpRegistryEnvelope>): Array<ReturnType<typeof normalizeMcpServer>> {
@@ -295,7 +333,7 @@ function pluginComponentItems(
 ): MarketplaceCatalogItem[] {
   return (plugin.components ?? []).map((component): MarketplaceCatalogItem => {
     const kind = componentCatalogKind(component.kind)
-    return {
+    return catalogItem({
       id: `component:${plugin.id}:${component.kind}:${component.path}`,
       kind,
       name: component.name || component.path,
@@ -313,7 +351,7 @@ function pluginComponentItems(
       avatar: sourceAvatars.get(plugin.marketplaceId),
       tags: [plugin.name, component.path, ...(plugin.tags ?? [])],
       raw: { plugin, component } satisfies PluginComponentCatalogRaw,
-    }
+    })
   })
 }
 
@@ -365,7 +403,7 @@ export function buildMarketplaceCatalogItems({
 
   return [
     ...plugins.flatMap((plugin): MarketplaceCatalogItem[] => [
-      {
+      catalogItem({
         id: `plugin:${plugin.id}`,
         kind: 'plugin',
         name: plugin.name,
@@ -383,11 +421,11 @@ export function buildMarketplaceCatalogItems({
         avatar: sourceAvatars.get(plugin.marketplaceId),
         tags: plugin.tags ?? [],
         raw: plugin,
-      },
+      }),
       ...pluginComponentItems(plugin, sourceNames, sourceAvatars),
     ]),
     ...dedupeMcpServers(mcpServers).map(({ server, updatedAt, raw }): MarketplaceCatalogItem => {
-      return {
+      return catalogItem({
         id: `mcp:${mcpIdentifier(server)}`,
         kind: 'mcp_server',
         name: mcpDisplayName(server),
@@ -405,9 +443,9 @@ export function buildMarketplaceCatalogItems({
         avatar: githubAvatar(githubOwnerFromMcpServer(server)),
         tags: [server.transport?.[0], server.packages?.[0]?.registryType, server.remotes?.[0]?.type].filter(Boolean) as string[],
         raw,
-      }
+      })
     }),
-    ...acpAgents.map((agent): MarketplaceCatalogItem => ({
+    ...acpAgents.map((agent): MarketplaceCatalogItem => catalogItem({
       id: `agent:${agent.id}`,
       kind: 'acp_agent',
       name: agent.name,
@@ -426,7 +464,7 @@ export function buildMarketplaceCatalogItems({
       tags: [agent.license, ...(agent.authors ?? [])].filter(Boolean) as string[],
       raw: agent,
     })),
-    ...sources.map((source): MarketplaceCatalogItem => ({
+    ...sources.map((source): MarketplaceCatalogItem => catalogItem({
       id: `source:${source.id}`,
       kind: 'source',
       name: sourceDisplayName(source),
@@ -501,34 +539,44 @@ function matchesInstallFacets(item: MarketplaceCatalogItem, facets: MarketplaceI
   return facets.some((facet) => actual.has(facet))
 }
 
-function matchesSearch(item: MarketplaceCatalogItem, search: string): boolean {
-  const normalized = search.trim().toLowerCase()
-  if (!normalized) return true
-  return [
-    item.name,
-    item.subtitle,
-    item.description,
-    item.sourceName ?? '',
-    item.distribution ?? '',
-    item.ecosystem,
-    ...item.tags,
-  ]
-    .join(' ')
-    .toLowerCase()
-    .includes(normalized)
+function matchesSearch(item: MarketplaceCatalogItem, normalizedSearch: string): boolean {
+  if (!normalizedSearch) return true
+  return item.searchText.includes(normalizedSearch)
 }
 
 function matchesAny<T extends string>(selected: T[], actual?: T): boolean {
   return selected.length === 0 || (actual !== undefined && selected.includes(actual))
 }
 
+function searchRank(item: MarketplaceCatalogItem, normalizedSearch: string): number {
+  if (!normalizedSearch) return 0
+
+  const kindBoost = SEARCH_KIND_BOOST[item.kind] ?? 0
+  const name = item.name.toLowerCase()
+  const subtitle = item.subtitle.toLowerCase()
+  const sourceName = item.sourceName?.toLowerCase() ?? ''
+  const distribution = item.distribution?.toLowerCase() ?? ''
+  const tags = item.tags.map((tag) => tag.toLowerCase())
+
+  if (name === normalizedSearch) return 700 + kindBoost
+  if (name.startsWith(normalizedSearch)) return 600 + kindBoost
+  if (name.includes(normalizedSearch)) return 500 + kindBoost
+  if (subtitle.includes(normalizedSearch)) return 400 + kindBoost
+  if (sourceName.includes(normalizedSearch)) return 350 + kindBoost
+  if (distribution.includes(normalizedSearch)) return 300 + kindBoost
+  if (tags.some((tag) => tag === normalizedSearch || tag.startsWith(normalizedSearch))) return 250 + kindBoost
+  if (tags.some((tag) => tag.includes(normalizedSearch))) return 200 + kindBoost
+  return 100
+}
+
 export function filterMarketplaceCatalogItems(
   items: MarketplaceCatalogItem[],
   state: MarketplaceCatalogFilterState,
 ): MarketplaceCatalogItem[] {
+  const normalizedSearch = state.search.trim().toLowerCase()
   return items.filter((item) => {
     if (!matchesLens(item, state.lens)) return false
-    if (!matchesSearch(item, state.search)) return false
+    if (!matchesSearch(item, normalizedSearch)) return false
     if (!matchesAny(state.types, item.kind)) return false
     if (!matchesInstallFacets(item, state.installStates)) return false
     if (!matchesAny(state.ecosystems, item.ecosystem)) return false
@@ -541,8 +589,15 @@ export function filterMarketplaceCatalogItems(
 export function sortMarketplaceCatalogItems(
   items: MarketplaceCatalogItem[],
   sort: MarketplaceSort,
+  search = '',
 ): MarketplaceCatalogItem[] {
+  const normalizedSearch = search.trim().toLowerCase()
   return [...items].sort((left, right) => {
+    if (normalizedSearch) {
+      const bySearch = searchRank(right, normalizedSearch) - searchRank(left, normalizedSearch)
+      if (bySearch !== 0) return bySearch
+    }
+
     if (sort === 'installed') {
       if (left.installed !== right.installed) return left.installed ? -1 : 1
       if (left.hasUpdate !== right.hasUpdate) return left.hasUpdate ? -1 : 1
@@ -551,20 +606,19 @@ export function sortMarketplaceCatalogItems(
     if (sort === 'updated') {
       if (left.kind === 'source' && right.kind !== 'source') return 1
       if (right.kind === 'source' && left.kind !== 'source') return -1
-      const leftTime = new Date(left.updatedAt ?? 0).getTime()
-      const rightTime = new Date(right.updatedAt ?? 0).getTime()
+      const leftTime = left.updatedAtMs
+      const rightTime = right.updatedAtMs
       if (leftTime !== rightTime) return rightTime - leftTime
     }
 
     if (sort === 'source') {
-      const bySource = (left.sourceName ?? left.sourceId ?? left.subtitle).localeCompare(
+      const bySource = CATALOG_COLLATOR.compare(
+        left.sourceName ?? left.sourceId ?? left.subtitle,
         right.sourceName ?? right.sourceId ?? right.subtitle,
-        undefined,
-        { sensitivity: 'base' },
       )
       if (bySource !== 0) return bySource
     }
 
-    return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' })
+    return CATALOG_COLLATOR.compare(left.name, right.name)
   })
 }

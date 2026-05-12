@@ -341,7 +341,7 @@ async fn dispatch_mcp_install_inner(
         // Delegate to gateway.add — confirm:true because the caller already confirmed.
         match crate::dispatch::gateway::dispatch(
             "gateway.add",
-            serde_json::json!({ "spec": spec, "confirm": true, "allow_stdio": true }),
+            serde_json::json!({ "spec": spec, "confirm": true }),
         )
         .await
         {

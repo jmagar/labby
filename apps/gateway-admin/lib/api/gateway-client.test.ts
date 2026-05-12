@@ -96,6 +96,42 @@ test('gatewayApi.create sends confirm=true with destructive gateway adds', async
   )
 })
 
+test('gatewayApi.create does not send allow_stdio for stdio gateway adds', async () => {
+  await withGatewayFetch(
+    {
+      'gateway.add': () => ({
+        ...standardGatewayView,
+        config: {
+          name: 'fixture-stdio',
+          command: 'example-mcp-server',
+          args: ['--stdio'],
+          proxy_resources: false,
+        },
+      }),
+      'gateway.mcp.list': () => [],
+      'gateway.test': () => standardGatewayView.runtime,
+      'gateway.discovered_tools': () => ['tool.alpha'],
+      'gateway.discovered_resources': () => ['lab://resource.alpha'],
+      'gateway.discovered_prompts': () => ['prompt.alpha'],
+    },
+    async (requests) => {
+      await gatewayApi.create({
+        name: 'fixture-stdio',
+        transport: 'stdio',
+        config: {
+          command: 'example-mcp-server',
+          args: ['--stdio'],
+        },
+      } as never)
+
+      assert.equal(
+        requests.find((request) => request.action === 'gateway.add')?.params.allow_stdio,
+        undefined,
+      )
+    },
+  )
+})
+
 test('gatewayApi.create sends pasted bearer tokens as a separate payload field', async () => {
   await withGatewayFetch(
     {
@@ -164,6 +200,45 @@ test('gatewayApi.update sends confirm=true with destructive gateway updates', as
       assert.equal(
         requests.find((request) => request.action === 'gateway.update')?.params.confirm,
         true,
+      )
+    },
+  )
+})
+
+test('gatewayApi.update does not send allow_stdio for stdio gateway updates', async () => {
+  await withGatewayFetch(
+    {
+      'gateway.update': () => ({
+        ...standardGatewayView,
+        config: {
+          name: 'fixture-stdio',
+          command: 'example-mcp-server',
+          args: ['--stdio'],
+          proxy_resources: false,
+        },
+      }),
+      'gateway.mcp.list': () => [],
+      'gateway.test': () => standardGatewayView.runtime,
+      'gateway.discovered_tools': () => ['tool.alpha'],
+      'gateway.discovered_resources': () => ['lab://resource.alpha'],
+      'gateway.discovered_prompts': () => ['prompt.alpha'],
+    },
+    async (requests) => {
+      await gatewayApi.update(
+        'fixture-stdio',
+        {
+          name: 'fixture-stdio',
+          transport: 'stdio',
+          config: {
+            command: 'example-mcp-server',
+            args: ['--stdio'],
+          },
+        } as never,
+      )
+
+      assert.equal(
+        requests.find((request) => request.action === 'gateway.update')?.params.allow_stdio,
+        undefined,
       )
     },
   )
@@ -288,6 +363,56 @@ test('gatewayApi.setToolSearchConfig sends confirm=true for gateway-wide updates
       assert.equal(config.max_tools, 10_000)
       assert.equal(requests[0]?.action, 'gateway.tool_search.set')
       assert.equal(requests[0]?.params.confirm, true)
+    },
+  )
+})
+
+test('gatewayApi protected route actions use gateway service action payloads', async () => {
+  const route = {
+    name: 'tools',
+    enabled: true,
+    public_host: 'mcp.example.com',
+    public_path: '/tools',
+    backend_url: 'http://localhost:3100/mcp',
+    scopes: ['mcp:read'],
+    health_path: '/health',
+  }
+
+  await withGatewayFetch(
+    {
+      'gateway.protected_route.list': () => [route],
+      'gateway.protected_route.get': () => route,
+      'gateway.protected_route.test': () => ({
+        ok: true,
+        route,
+        resource: 'https://mcp.example.com/tools',
+        metadata_url: 'https://mcp.example.com/.well-known/oauth-protected-resource/tools',
+      }),
+      'gateway.protected_route.add': () => route,
+      'gateway.protected_route.update': () => route,
+      'gateway.protected_route.remove': () => route,
+    },
+    async (requests) => {
+      assert.deepEqual(await gatewayApi.listProtectedRoutes(), [route])
+      assert.deepEqual(await gatewayApi.getProtectedRoute('tools'), route)
+      assert.equal((await gatewayApi.testProtectedRoute(route)).ok, true)
+      await gatewayApi.addProtectedRoute(route)
+      await gatewayApi.updateProtectedRoute('tools', route)
+      await gatewayApi.removeProtectedRoute('tools')
+
+      assert.deepEqual(requests.map((request) => request.action), [
+        'gateway.protected_route.list',
+        'gateway.protected_route.get',
+        'gateway.protected_route.test',
+        'gateway.protected_route.add',
+        'gateway.protected_route.update',
+        'gateway.protected_route.remove',
+      ])
+      assert.deepEqual(requests[1]?.params, { name: 'tools' })
+      assert.deepEqual(requests[2]?.params, { route })
+      assert.equal(requests[3]?.params.confirm, true)
+      assert.equal(requests[4]?.params.confirm, true)
+      assert.equal(requests[5]?.params.confirm, true)
     },
   )
 })

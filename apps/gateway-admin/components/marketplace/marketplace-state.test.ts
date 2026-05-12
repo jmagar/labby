@@ -205,7 +205,7 @@ const baseFilters: MarketplaceCatalogFilterState = {
 test('buildMarketplaceCatalogItems creates unified plugin mcp agent and source rows', () => {
   const items = buildMarketplaceCatalogItems({ plugins, sources, mcpServers, acpAgents })
 
-  assert.deepEqual(items.map((item) => item.kind), ['plugin', 'plugin', 'agent', 'skill', 'command', 'mcp_server', 'lsp_server', 'monitor', 'executable', 'settings', 'output_style', 'theme', 'channel', 'mcp_server', 'acp_agent', 'source'])
+  assert.deepEqual(items.map((item) => item.kind), ['plugin', 'plugin', 'agent', 'skill', 'command', 'mcp_server', 'lsp_server', 'monitor', 'executable', 'settings', 'output_style', 'theme', 'channel', 'mcp_server', 'acp_agent', 'source', 'source'])
   assert.equal(items.find((item) => item.id === 'plugin:gateway-audit')?.ecosystem, 'Claude')
   assert.equal(items.find((item) => item.id === 'component:codex-helper:agents:agents/reviewer.md')?.kind, 'agent')
   assert.equal(items.find((item) => item.id === 'component:codex-helper:agents:agents/reviewer.md')?.name, 'code-reviewer')
@@ -479,7 +479,16 @@ test('sortMarketplaceCatalogItems supports install state and source sorting', ()
   )
   assert.deepEqual(
     sortMarketplaceCatalogItems(items, 'source').map((item) => item.id).slice(0, 2),
-    ['agent:codex-cli', 'mcp:filesystem'],
+    ['source:acp-registry', 'agent:codex-cli'],
+  )
+})
+
+test('sortMarketplaceCatalogItems ranks search matches before the selected sort order', () => {
+  const items = buildMarketplaceCatalogItems({ plugins, sources, mcpServers, acpAgents })
+
+  assert.deepEqual(
+    sortMarketplaceCatalogItems(items, 'updated', 'codex').map((item) => item.id).slice(0, 2),
+    ['plugin:codex-helper', 'agent:codex-cli'],
   )
 })
 

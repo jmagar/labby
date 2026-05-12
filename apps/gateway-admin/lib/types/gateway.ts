@@ -208,6 +208,27 @@ export interface ToolSearchConfigInput {
   max_tools?: number
 }
 
+export interface ProtectedMcpRoute {
+  name: string
+  enabled: boolean
+  public_host: string
+  public_path: string
+  upstream?: string | null
+  backend_url?: string
+  backend_mcp_path?: string
+  scopes: string[]
+  health_path?: string | null
+}
+
+export type ProtectedMcpRouteInput = ProtectedMcpRoute
+
+export interface ProtectedMcpRouteTestResult {
+  ok: boolean
+  route: ProtectedMcpRoute
+  resource: string
+  metadata_url: string
+}
+
 // Exposure policy types
 export interface ExposurePolicy {
   mode: 'expose_all' | 'allowlist'

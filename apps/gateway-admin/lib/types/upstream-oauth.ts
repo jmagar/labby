@@ -6,6 +6,18 @@ export interface UpstreamOauthStatus {
   authenticated: boolean
   upstream: string
   expires_within_5m: boolean
+  state?: 'connected' | 'expiring' | 'expired' | 'refresh_failed' | 'discovery_failed' | 'disconnected'
+  access_token_expires_at?: number
+  seconds_until_expiry?: number
+  refresh_token_present?: boolean
+  refresh_attempted?: boolean
+  refreshed?: boolean
+  refresh_error_kind?: string
+  refresh_error?: string
+  discovery_checked?: boolean
+  discovered_tool_count?: number
+  exposed_tool_count?: number
+  discovery_error?: string
 }
 
 export interface StartResponse {
@@ -25,6 +37,7 @@ export type OAuthConnectState =
   | { kind: 'idle' }
   | { kind: 'probing' }
   | { kind: 'discovered'; upstream: string; issuer?: string; scopes?: string[] }
+  | { kind: 'blocked'; upstream: string; issuer?: string; scopes?: string[] }
   | { kind: 'authorizing'; upstream: string }
   | { kind: 'connected'; upstream: string; registration_strategy: string; scopes?: string[] }
   | { kind: 'error'; message: string }

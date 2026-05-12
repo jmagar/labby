@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use base64::Engine;
 use lab_auth::sqlite::SqliteStore;
+use lab_auth::types::UpstreamOauthCredentialRow;
 use labby::config::{
     UpstreamConfig, UpstreamOauthConfig, UpstreamOauthMode, UpstreamOauthRegistration,
     canonicalize_upstream_url,
@@ -123,6 +124,20 @@ impl Harness {
             .await;
     }
 
+    async fn mount_metadata_with_registration(&self) {
+        Mock::given(method("GET"))
+            .and(path("/.well-known/oauth-authorization-server"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "issuer": self.as_url(),
+                "authorization_endpoint": format!("{}/authorize", self.as_url()),
+                "token_endpoint": format!("{}/token", self.as_url()),
+                "registration_endpoint": format!("{}/register", self.as_url()),
+                "code_challenge_methods_supported": ["S256"]
+            })))
+            .mount(&self.mock)
+            .await;
+    }
+
     /// Mock the resource-metadata probe to 404 so rmcp falls through to
     /// direct AS discovery at `.well-known/oauth-authorization-server`.
     async fn mount_no_resource_metadata(&self) {
@@ -188,6 +203,10 @@ fn preregistered() -> UpstreamOauthRegistration {
         client_id: "lab-client".into(),
         client_secret_env: None,
     }
+}
+
+fn dynamic() -> UpstreamOauthRegistration {
+    UpstreamOauthRegistration::Dynamic
 }
 
 // ---------- tests ----------
@@ -353,6 +372,62 @@ async fn cimd_registration_uses_metadata_url_as_client_id() {
         .find(|(k, _)| k == "client_id")
         .map(|(_, v)| v.into_owned());
     assert_eq!(client_id.as_deref(), Some(cimd_url));
+}
+
+#[tokio::test]
+async fn dynamic_begin_authorization_reregisters_when_pending_client_is_stale() {
+    let h = Harness::new().await;
+    h.mount_no_resource_metadata().await;
+    h.mount_metadata_with_registration().await;
+    h.sqlite
+        .save_dynamic_client_registration("test", "alice", "stale-client")
+        .await
+        .expect("seed stale dynamic registration");
+    h.sqlite
+        .upsert_upstream_oauth_credentials(UpstreamOauthCredentialRow {
+            upstream_name: "test".into(),
+            subject: "alice".into(),
+            client_id: "stale-client".into(),
+            granted_scopes_json: "[]".into(),
+            token_blob: Vec::new(),
+            token_blob_nonce: Vec::new(),
+            token_received_at: 0,
+            access_token_expires_at: 0,
+            refresh_token_present: false,
+        })
+        .await
+        .expect("seed stale stored credentials");
+    Mock::given(method("POST"))
+        .and(path("/register"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "client_id": "fresh-client",
+            "redirect_uris": ["https://lab.example/v1/gateway/oauth/callback"],
+            "token_endpoint_auth_method": "none"
+        })))
+        .mount(&h.mock)
+        .await;
+    let m = h.manager(h.upstream_cfg(dynamic()));
+
+    let begin = m.begin_authorization("alice").await.expect("begin");
+    let u = Url::parse(&begin.authorization_url).expect("authorize url parses");
+    let client_id = u
+        .query_pairs()
+        .find(|(k, _)| k == "client_id")
+        .map(|(_, v)| v.into_owned());
+    let stored_client_id = h
+        .sqlite
+        .find_dynamic_client_registration("test", "alice")
+        .await
+        .expect("dynamic registration lookup");
+
+    assert_eq!(client_id.as_deref(), Some("fresh-client"));
+    assert_eq!(stored_client_id.as_deref(), Some("fresh-client"));
+    let recorded = h.mock.received_requests().await.expect("record enabled");
+    let register_count = recorded
+        .iter()
+        .filter(|request| request.method.as_str() == "POST" && request.url.path() == "/register")
+        .count();
+    assert_eq!(register_count, 1);
 }
 
 #[tokio::test]

@@ -26,6 +26,45 @@ fn path_check(service: &str, label: &str, path: &str, severity_on_missing: Sever
     }
 }
 
+fn writable_check(service: &str, label: &str, path: &str) -> Finding {
+    let path_obj = std::path::Path::new(path);
+    if !path_obj.exists() {
+        return Finding {
+            service: service.to_string(),
+            check: label.to_string(),
+            severity: Severity::Warn,
+            message: format!("{path} not found; cannot check writability"),
+        };
+    }
+
+    let result = if path_obj.is_dir() {
+        let test_path = path_obj.join(".doctor_write_test");
+        std::fs::write(&test_path, "test").inspect(|_| {
+            drop(std::fs::remove_file(test_path));
+        })
+    } else {
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(path_obj)
+            .map(|_| ())
+    };
+
+    match result {
+        Ok(()) => Finding {
+            service: service.to_string(),
+            check: label.to_string(),
+            severity: Severity::Ok,
+            message: format!("{path} is writable"),
+        },
+        Err(e) => Finding {
+            service: service.to_string(),
+            check: label.to_string(),
+            severity: Severity::Fail,
+            message: format!("{path} is NOT writable: {e}"),
+        },
+    }
+}
+
 fn command_check(service: &str, label: &str, cmd: &str) -> Finding {
     let found = std::process::Command::new("which")
         .arg(cmd)
@@ -101,12 +140,22 @@ pub fn run_system_checks() -> Vec<Finding> {
 
     // --- Lab config files ---
     let home = std::env::var("HOME").unwrap_or_default();
+    let env_path = format!("{home}/.lab/.env");
     findings.push(path_check(
         "lab",
         "config:~/.lab/.env",
-        &format!("{home}/.lab/.env"),
+        &env_path,
         Severity::Warn,
     ));
+    findings.push(writable_check(
+        "lab",
+        "config:~/.lab/.env:writable",
+        &env_path,
+    ));
+
+    let lab_dir = format!("{home}/.lab");
+    findings.push(writable_check("lab", "config:~/.lab:writable", &lab_dir));
+
     findings.push(path_check(
         "lab",
         "config:~/.lab/config.toml",
@@ -182,6 +231,51 @@ fn disk_check(findings: &mut Vec<Finding>) {
 
 #[cfg(not(target_os = "linux"))]
 fn disk_check(_findings: &mut Vec<Finding>) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writable_check_warns_when_target_is_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let finding = writable_check(
+            "lab",
+            "config:missing:writable",
+            dir.path().join("missing.env").to_str().expect("utf8"),
+        );
+        assert!(matches!(finding.severity, Severity::Warn));
+    }
+
+    #[test]
+    fn writable_check_accepts_writable_directory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let finding = writable_check("lab", "config:dir:writable", dir.path().to_str().unwrap());
+        assert!(matches!(finding.severity, Severity::Ok));
+        assert!(!dir.path().join(".doctor_write_test").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writable_check_tests_actual_file_not_sibling() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(".env");
+        std::fs::write(&path, "LAB=value\n").expect("write");
+        let mut permissions = std::fs::metadata(&path).expect("metadata").permissions();
+        permissions.set_mode(0o444);
+        std::fs::set_permissions(&path, permissions).expect("readonly");
+
+        let finding = writable_check("lab", "config:file:writable", path.to_str().unwrap());
+
+        let mut restore = std::fs::metadata(&path).expect("metadata").permissions();
+        restore.set_mode(0o644);
+        std::fs::set_permissions(&path, restore).expect("restore");
+
+        assert!(matches!(finding.severity, Severity::Fail));
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Auth / OAuth checks

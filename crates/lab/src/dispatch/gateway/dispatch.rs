@@ -9,11 +9,12 @@ use super::catalog::ACTIONS;
 use super::client::require_gateway_manager;
 use super::manager::GatewayManager;
 use super::params::{
-    GatewayAddParams, GatewayMcpCleanupParams, GatewayMcpToggleParams, GatewayNameParams,
-    GatewayOauthNameParams, GatewayReloadParams, GatewayStatusParams, GatewayTestParams,
-    GatewayUpdateParams, GatewayUpdatePatch, ServiceConfigGetParams, ServiceConfigSetParams,
-    ToolInvokeParams, ToolSearchParams, ToolSearchSetParams, VirtualServerMcpPolicyParams,
-    VirtualServerNameParams, VirtualServerSurfaceParams,
+    GatewayAddParams, GatewayClientConfigParams, GatewayMcpCleanupParams, GatewayMcpToggleParams,
+    GatewayNameParams, GatewayOauthNameParams, GatewayReloadParams, GatewayStatusParams,
+    GatewayTestParams, GatewayUpdateParams, GatewayUpdatePatch, ProtectedRouteNameParams,
+    ProtectedRouteSpecParams, ProtectedRouteUpdateParams, ServiceConfigGetParams,
+    ServiceConfigSetParams, ToolInvokeParams, ToolSearchParams, ToolSearchSetParams,
+    VirtualServerMcpPolicyParams, VirtualServerNameParams, VirtualServerSurfaceParams,
 };
 use super::types::ServiceActionView;
 
@@ -35,6 +36,50 @@ pub async fn dispatch_with_manager(
             let action_name = require_str(&params_value, "action")?;
             action_schema(ACTIONS, action_name)
         }
+        "tool_search" | "tool_invoke" | "gateway.tool_search.get" | "gateway.tool_search.set" => {
+            handle_tool_actions(manager, action, params_value).await
+        }
+        "gateway.list"
+        | "gateway.server.get"
+        | "gateway.supported_services"
+        | "gateway.get"
+        | "gateway.test"
+        | "gateway.add"
+        | "gateway.update"
+        | "gateway.remove"
+        | "gateway.reload"
+        | "gateway.status"
+        | "gateway.client_config.get"
+        | "gateway.discovered_tools"
+        | "gateway.discovered_resources"
+        | "gateway.discovered_prompts" => {
+            handle_gateway_actions(manager, action, params_value).await
+        }
+        action if action.starts_with("gateway.protected_route.") => {
+            handle_protected_route_actions(manager, action, params_value).await
+        }
+        action if action.starts_with("gateway.virtual_server.") => {
+            handle_virtual_server_actions(manager, action, params_value).await
+        }
+        action if action.starts_with("gateway.service_") => {
+            handle_service_actions(manager, action, params_value).await
+        }
+        action if action.starts_with("gateway.oauth.") => {
+            handle_oauth_actions(manager, action, params_value).await
+        }
+        action if action.starts_with("gateway.mcp.") => {
+            handle_mcp_actions(manager, action, params_value).await
+        }
+        unknown => unknown_action(unknown),
+    }
+}
+
+async fn handle_tool_actions(
+    manager: &GatewayManager,
+    action: &str,
+    params_value: Value,
+) -> Result<Value, ToolError> {
+    match action {
         "tool_search" => {
             let params: ToolSearchParams = parse_params(params_value)?;
             let top_k = match params.top_k {
@@ -90,12 +135,51 @@ pub async fn dispatch_with_manager(
             }
             to_json(manager.set_tool_search_config(next, None, None).await?)
         }
-        "gateway.list" => to_json(manager.list().await?),
-        "gateway.server.get" => {
-            let params: VirtualServerNameParams = parse_params(params_value)?;
-            to_json(manager.get_server(&params.id).await?)
+        unknown => unknown_action(unknown),
+    }
+}
+
+async fn handle_protected_route_actions(
+    manager: &GatewayManager,
+    action: &str,
+    params_value: Value,
+) -> Result<Value, ToolError> {
+    match action {
+        "gateway.protected_route.list" => to_json(manager.protected_route_list().await),
+        "gateway.protected_route.get" => {
+            let params: ProtectedRouteNameParams = parse_params(params_value)?;
+            to_json(manager.protected_route_get(&params.name).await?)
         }
-        "gateway.supported_services" => to_json(super::service_catalog::supported_services()),
+        "gateway.protected_route.add" => {
+            let params: ProtectedRouteSpecParams = parse_params(params_value)?;
+            to_json(manager.protected_route_add(params.route).await?)
+        }
+        "gateway.protected_route.update" => {
+            let params: ProtectedRouteUpdateParams = parse_params(params_value)?;
+            to_json(
+                manager
+                    .protected_route_update(&params.name, params.route)
+                    .await?,
+            )
+        }
+        "gateway.protected_route.remove" => {
+            let params: ProtectedRouteNameParams = parse_params(params_value)?;
+            to_json(manager.protected_route_remove(&params.name).await?)
+        }
+        "gateway.protected_route.test" => {
+            let params: ProtectedRouteSpecParams = parse_params(params_value)?;
+            to_json(manager.protected_route_test(params.route).await?)
+        }
+        unknown => unknown_action(unknown),
+    }
+}
+
+async fn handle_virtual_server_actions(
+    manager: &GatewayManager,
+    action: &str,
+    params_value: Value,
+) -> Result<Value, ToolError> {
+    match action {
         "gateway.virtual_server.enable" => {
             let params: VirtualServerNameParams = parse_params(params_value)?;
             to_json(manager.enable_virtual_server(&params.id).await?)
@@ -134,17 +218,14 @@ pub async fn dispatch_with_manager(
         "gateway.virtual_server.set_mcp_policy" => {
             let params: VirtualServerMcpPolicyParams = parse_params(params_value)?;
             let service = manager.service_for_virtual_server_id(&params.id).await?;
-            let valid_actions = compiled_service_actions(&service)?;
+            let valid_actions = compiled_service_actions(manager, &service)?;
             for action in &params.allowed_actions {
                 if !valid_actions
                     .iter()
                     .any(|candidate| candidate.name == action.as_str())
                 {
                     return Err(ToolError::InvalidParam {
-                        message: format!(
-                            "action `{action}` is not valid for service `{}`",
-                            service
-                        ),
+                        message: format!("action `{action}` is not valid for service `{service}`"),
                         param: "allowed_actions".to_string(),
                     });
                 }
@@ -155,6 +236,16 @@ pub async fn dispatch_with_manager(
                     .await?,
             )
         }
+        unknown => unknown_action(unknown),
+    }
+}
+
+async fn handle_service_actions(
+    manager: &GatewayManager,
+    action: &str,
+    params_value: Value,
+) -> Result<Value, ToolError> {
+    match action {
         "gateway.service_config.get" => {
             let params: ServiceConfigGetParams = parse_params(params_value)?;
             to_json(manager.get_service_config(&params.service).await?)
@@ -169,7 +260,28 @@ pub async fn dispatch_with_manager(
         }
         "gateway.service_actions" => {
             let params: ServiceConfigGetParams = parse_params(params_value)?;
-            to_json(compiled_service_actions(&params.service)?)
+            to_json(compiled_service_actions(manager, &params.service)?)
+        }
+        unknown => unknown_action(unknown),
+    }
+}
+
+async fn handle_gateway_actions(
+    manager: &GatewayManager,
+    action: &str,
+    params_value: Value,
+) -> Result<Value, ToolError> {
+    match action {
+        "gateway.list" => to_json(manager.list().await?),
+        "gateway.server.get" => {
+            let params: VirtualServerNameParams = parse_params(params_value)?;
+            to_json(manager.get_server(&params.id).await?)
+        }
+        "gateway.supported_services" => {
+            let registry = manager.builtin_service_registry();
+            to_json(super::service_catalog::supported_services_from_registry(
+                &registry,
+            ))
         }
         "gateway.get" => {
             let params: GatewayNameParams = parse_params(params_value)?;
@@ -243,6 +355,10 @@ pub async fn dispatch_with_manager(
             let params: GatewayStatusParams = parse_params(params_value)?;
             to_json(manager.status(params.name.as_deref()).await?)
         }
+        "gateway.client_config.get" => {
+            let params: GatewayClientConfigParams = parse_params(params_value)?;
+            to_json(manager.client_config(&params.name).await?)
+        }
         "gateway.discovered_tools" => {
             let params: GatewayNameParams = parse_params(params_value)?;
             to_json(manager.discovered_tools(&params.name).await?)
@@ -255,6 +371,16 @@ pub async fn dispatch_with_manager(
             let params: GatewayNameParams = parse_params(params_value)?;
             to_json(manager.discovered_prompts(&params.name).await?)
         }
+        unknown => unknown_action(unknown),
+    }
+}
+
+async fn handle_oauth_actions(
+    manager: &GatewayManager,
+    action: &str,
+    params_value: Value,
+) -> Result<Value, ToolError> {
+    match action {
         "gateway.oauth.probe" => {
             let url = require_str(&params_value, "url")?;
             to_json(crate::dispatch::gateway::oauth::probe(manager, url).await?)
@@ -293,6 +419,16 @@ pub async fn dispatch_with_manager(
             crate::dispatch::gateway::oauth::clear(manager, &params.upstream, subject).await?;
             to_json(serde_json::json!({ "ok": true }))
         }
+        unknown => unknown_action(unknown),
+    }
+}
+
+async fn handle_mcp_actions(
+    manager: &GatewayManager,
+    action: &str,
+    params_value: Value,
+) -> Result<Value, ToolError> {
+    match action {
         "gateway.mcp.enable" => {
             let params: GatewayNameParams = parse_params(params_value)?;
             to_json(
@@ -349,16 +485,23 @@ pub async fn dispatch_with_manager(
                     .await?,
             )
         }
-        unknown => Err(ToolError::UnknownAction {
-            message: format!("unknown action '{unknown}'"),
-            valid: ACTIONS.iter().map(|a| a.name.to_string()).collect(),
-            hint: None,
-        }),
+        unknown => unknown_action(unknown),
     }
 }
 
-fn compiled_service_actions(service: &str) -> Result<Vec<ServiceActionView>, ToolError> {
-    let registry = crate::registry::build_default_registry();
+fn unknown_action(unknown: &str) -> Result<Value, ToolError> {
+    Err(ToolError::UnknownAction {
+        message: format!("unknown action '{unknown}'"),
+        valid: ACTIONS.iter().map(|a| a.name.to_string()).collect(),
+        hint: None,
+    })
+}
+
+fn compiled_service_actions(
+    manager: &GatewayManager,
+    service: &str,
+) -> Result<Vec<ServiceActionView>, ToolError> {
+    let registry = manager.builtin_service_registry();
     let entry = registry
         .service(service)
         .ok_or_else(|| ToolError::InvalidParam {
@@ -386,7 +529,7 @@ pub async fn dispatch(action: &str, params_value: Value) -> Result<Value, ToolEr
 mod tests {
     use serde_json::json;
 
-    use crate::config::UpstreamConfig;
+    use crate::config::{ProtectedMcpRouteConfig, UpstreamConfig};
 
     use super::super::manager::GatewayRuntimeHandle;
     use super::*;
@@ -397,6 +540,12 @@ mod tests {
         assert!(names.contains(&"gateway.list"));
         assert!(names.contains(&"gateway.server.get"));
         assert!(names.contains(&"gateway.supported_services"));
+        assert!(names.contains(&"gateway.protected_route.list"));
+        assert!(names.contains(&"gateway.protected_route.get"));
+        assert!(names.contains(&"gateway.protected_route.add"));
+        assert!(names.contains(&"gateway.protected_route.update"));
+        assert!(names.contains(&"gateway.protected_route.remove"));
+        assert!(names.contains(&"gateway.protected_route.test"));
         assert!(names.contains(&"gateway.virtual_server.enable"));
         assert!(names.contains(&"gateway.virtual_server.disable"));
         assert!(names.contains(&"gateway.virtual_server.remove"));
@@ -415,6 +564,7 @@ mod tests {
         assert!(names.contains(&"gateway.remove"));
         assert!(names.contains(&"gateway.reload"));
         assert!(names.contains(&"gateway.status"));
+        assert!(names.contains(&"gateway.client_config.get"));
         assert!(names.contains(&"gateway.discovered_tools"));
         assert!(names.contains(&"gateway.discovered_resources"));
         assert!(names.contains(&"gateway.discovered_prompts"));
@@ -430,6 +580,9 @@ mod tests {
             "gateway.add",
             "gateway.update",
             "gateway.remove",
+            "gateway.protected_route.add",
+            "gateway.protected_route.update",
+            "gateway.protected_route.remove",
             "gateway.virtual_server.remove",
             "gateway.virtual_server.quarantine.restore",
             "gateway.reload",
@@ -487,6 +640,115 @@ mod tests {
         assert_eq!(row["exposed_resource_count"], 0);
         assert_eq!(row["discovered_prompt_count"], 0);
         assert_eq!(row["exposed_prompt_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn gateway_client_config_get_returns_http_and_stdio_configs() {
+        let manager = test_manager();
+        manager
+            .replace_config_for_tests(vec![
+                UpstreamConfig {
+                    enabled: true,
+                    name: "fixture-http".to_string(),
+                    url: Some("http://127.0.0.1:9001/mcp".to_string()),
+                    bearer_token_env: Some("FIXTURE_HTTP_TOKEN".to_string()),
+                    command: None,
+                    args: Vec::new(),
+                    proxy_resources: false,
+                    proxy_prompts: false,
+                    expose_tools: None,
+                    expose_resources: None,
+                    expose_prompts: None,
+                    oauth: None,
+                    tool_search: crate::config::ToolSearchConfig::default(),
+                },
+                UpstreamConfig {
+                    enabled: true,
+                    name: "fixture-stdio".to_string(),
+                    url: None,
+                    bearer_token_env: None,
+                    command: Some("npx".to_string()),
+                    args: vec!["-y".to_string(), "fixture-server".to_string()],
+                    proxy_resources: false,
+                    proxy_prompts: false,
+                    expose_tools: None,
+                    expose_resources: None,
+                    expose_prompts: None,
+                    oauth: None,
+                    tool_search: crate::config::ToolSearchConfig::default(),
+                },
+            ])
+            .await;
+
+        let http = dispatch_with_manager(
+            &manager,
+            "gateway.client_config.get",
+            json!({"name":"fixture-http"}),
+        )
+        .await
+        .expect("http client config");
+        assert_eq!(http["name"], "fixture-http");
+        assert_eq!(http["type"], "http");
+        assert_eq!(http["url"], "http://127.0.0.1:9001/mcp");
+
+        let stdio = dispatch_with_manager(
+            &manager,
+            "gateway.client_config.get",
+            json!({"name":"fixture-stdio"}),
+        )
+        .await
+        .expect("stdio client config");
+        assert_eq!(stdio["name"], "fixture-stdio");
+        assert_eq!(stdio["type"], "stdio");
+        assert_eq!(stdio["command"], "npx");
+        assert_eq!(stdio["args"], json!(["-y", "fixture-server"]));
+    }
+
+    fn protected_route_fixture(name: &str) -> ProtectedMcpRouteConfig {
+        ProtectedMcpRouteConfig {
+            name: name.to_string(),
+            enabled: true,
+            public_host: "mcp.tootie.tv".to_string(),
+            public_path: "/syslog".to_string(),
+            upstream: None,
+            backend_url: "http://100.88.16.79:3100".to_string(),
+            backend_mcp_path: "/mcp".to_string(),
+            scopes: Vec::new(),
+            health_path: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn protected_route_dispatch_add_list_and_test_share_gateway_actions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manager = GatewayManager::new(
+            dir.path().join("config.toml"),
+            GatewayRuntimeHandle::default(),
+        );
+
+        let tested = dispatch_with_manager(
+            &manager,
+            "gateway.protected_route.test",
+            json!({ "route": protected_route_fixture("syslog") }),
+        )
+        .await
+        .expect("test route");
+        assert_eq!(tested["resource"], "https://mcp.tootie.tv/syslog");
+
+        let added = dispatch_with_manager(
+            &manager,
+            "gateway.protected_route.add",
+            json!({ "route": protected_route_fixture("syslog") }),
+        )
+        .await
+        .expect("add route");
+        assert_eq!(added["name"], "syslog");
+
+        let listed = dispatch_with_manager(&manager, "gateway.protected_route.list", json!({}))
+            .await
+            .expect("list routes");
+        assert_eq!(listed.as_array().expect("array").len(), 1);
+        assert_eq!(listed[0]["public_host"], "mcp.tootie.tv");
     }
 
     #[tokio::test]
@@ -648,6 +910,71 @@ mod tests {
         let services = value.as_array().expect("array");
         #[cfg(feature = "plex")]
         assert!(services.iter().any(|service| service["key"] == "plex"));
+    }
+
+    #[tokio::test]
+    async fn supported_services_omits_upstreams_when_policy_disabled() {
+        let registry = crate::registry::filter_built_in_upstream_apis(
+            crate::registry::build_default_registry(),
+            false,
+        );
+        let manager = test_manager().with_builtin_service_registry(registry);
+        let value = dispatch_with_manager(&manager, "gateway.supported_services", json!({}))
+            .await
+            .expect("supported services");
+
+        let services = value.as_array().expect("array");
+        assert!(!services.iter().any(|service| service["key"] == "plex"));
+        assert!(!services.iter().any(|service| service["key"] == "openai"));
+    }
+
+    #[tokio::test]
+    async fn service_actions_rejects_disabled_upstream_service() {
+        let registry = crate::registry::filter_built_in_upstream_apis(
+            crate::registry::build_default_registry(),
+            false,
+        );
+        let manager = test_manager().with_builtin_service_registry(registry);
+        let err = dispatch_with_manager(
+            &manager,
+            "gateway.service_actions",
+            json!({"service": "plex"}),
+        )
+        .await
+        .expect_err("disabled service should be unknown");
+
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[tokio::test]
+    async fn virtual_server_enable_rejects_disabled_upstream_service() {
+        let registry = crate::registry::filter_built_in_upstream_apis(
+            crate::registry::build_default_registry(),
+            false,
+        );
+        let manager = test_manager().with_builtin_service_registry(registry);
+        manager
+            .seed_config(crate::config::LabConfig {
+                virtual_servers: vec![crate::config::VirtualServerConfig {
+                    id: "plex".to_string(),
+                    service: "plex".to_string(),
+                    enabled: false,
+                    surfaces: crate::config::VirtualServerSurfacesConfig::default(),
+                    mcp_policy: None,
+                }],
+                ..crate::config::LabConfig::default()
+            })
+            .await;
+
+        let err = dispatch_with_manager(
+            &manager,
+            "gateway.virtual_server.enable",
+            json!({"id": "plex"}),
+        )
+        .await
+        .expect_err("disabled upstream virtual server should be unavailable");
+
+        assert_eq!(err.kind(), "not_found");
     }
 
     #[tokio::test]
@@ -943,27 +1270,51 @@ mod tests {
     async fn gateway_test_accepts_name_or_spec() {
         let manager = test_manager();
         manager
-            .replace_config_for_tests(vec![UpstreamConfig {
-                enabled: true,
-                name: "fixture-http".to_string(),
-                url: Some("http://127.0.0.1:9001".to_string()),
-                bearer_token_env: None,
-                command: None,
-                args: Vec::new(),
-                proxy_resources: false,
-                proxy_prompts: false,
-                expose_tools: None,
-                expose_resources: None,
-                expose_prompts: None,
-                oauth: None,
-                tool_search: crate::config::ToolSearchConfig::default(),
-            }])
+            .replace_config_for_tests(vec![
+                UpstreamConfig {
+                    enabled: true,
+                    name: "fixture-http".to_string(),
+                    url: Some("http://127.0.0.1:9001".to_string()),
+                    bearer_token_env: None,
+                    command: None,
+                    args: Vec::new(),
+                    proxy_resources: false,
+                    proxy_prompts: false,
+                    expose_tools: None,
+                    expose_resources: None,
+                    expose_prompts: None,
+                    oauth: None,
+                    tool_search: crate::config::ToolSearchConfig::default(),
+                },
+                UpstreamConfig {
+                    enabled: true,
+                    name: "configured-stdio".to_string(),
+                    url: None,
+                    bearer_token_env: None,
+                    command: Some("echo".to_string()),
+                    args: vec!["hello".to_string()],
+                    proxy_resources: false,
+                    proxy_prompts: false,
+                    expose_tools: None,
+                    expose_resources: None,
+                    expose_prompts: None,
+                    oauth: None,
+                    tool_search: crate::config::ToolSearchConfig::default(),
+                },
+            ])
             .await;
 
         let named =
             dispatch_with_manager(&manager, "gateway.test", json!({"name": "fixture-http"}))
                 .await
                 .expect("named test");
+        let named_stdio = dispatch_with_manager(
+            &manager,
+            "gateway.test",
+            json!({"name": "configured-stdio"}),
+        )
+        .await
+        .expect("configured stdio test should not require allow_stdio");
         let proposed_without_ack = dispatch_with_manager(
             &manager,
             "gateway.test",
@@ -974,8 +1325,7 @@ mod tests {
             }}),
         )
         .await
-        .expect_err("stdio spec requires explicit allow_stdio acknowledgement");
-        assert_eq!(proposed_without_ack.kind(), "invalid_param");
+        .expect("stdio spec test should not require allow_stdio");
 
         let proposed = dispatch_with_manager(
             &manager,
@@ -990,6 +1340,8 @@ mod tests {
         .expect("spec test");
 
         assert_eq!(named["name"], "fixture-http");
+        assert_eq!(named_stdio["name"], "configured-stdio");
+        assert_eq!(proposed_without_ack["name"], "fixture-stdio");
         assert_eq!(proposed["name"], "fixture-stdio");
     }
 
@@ -1038,10 +1390,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gateway_add_rejects_enabled_stdio_without_explicit_ack() {
+    async fn gateway_add_allows_enabled_stdio_without_extra_ack() {
         let manager = test_manager();
 
-        let err = dispatch_with_manager(
+        let added = dispatch_with_manager(
             &manager,
             "gateway.add",
             json!({"spec": {
@@ -1051,18 +1403,18 @@ mod tests {
             }}),
         )
         .await
-        .expect_err("stdio add should require acknowledgement");
+        .expect("stdio add should be allowed");
 
-        assert_eq!(err.kind(), "invalid_param");
+        assert_eq!(added["config"]["name"], "fixture-stdio");
     }
 
     #[tokio::test]
-    async fn gateway_update_rejects_enabled_stdio_without_explicit_ack() {
+    async fn gateway_update_allows_enabled_stdio_without_extra_ack() {
         let manager = test_manager();
         dispatch_with_manager(
             &manager,
             "gateway.add",
-            json!({"allow_stdio": true, "spec": {
+            json!({"spec": {
                 "name": "fixture-stdio",
                 "command": "echo",
                 "args": ["hello"]
@@ -1071,15 +1423,15 @@ mod tests {
         .await
         .expect("add stdio");
 
-        let err = dispatch_with_manager(
+        let updated = dispatch_with_manager(
             &manager,
             "gateway.update",
             json!({"name": "fixture-stdio", "patch": {"proxy_resources": true}}),
         )
         .await
-        .expect_err("stdio update should require acknowledgement");
+        .expect("stdio update should be allowed");
 
-        assert_eq!(err.kind(), "invalid_param");
+        assert_eq!(updated["config"]["proxy_resources"], true);
     }
 
     #[tokio::test]
@@ -1303,6 +1655,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn gateway_mcp_disable_with_cleanup_returns_gateway_and_cleanup_payload() {
+        use std::os::unix::process::CommandExt;
         use std::process::{Command, Stdio};
         use std::time::Duration;
 
@@ -1327,13 +1680,16 @@ mod tests {
             }])
             .await;
 
-        let mut child = Command::new("python3")
+        let mut command = Command::new("python3");
+        command
             .args(["-c", "import time; time.sleep(60)", runtime_arg])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn github chat stand-in");
+            .stderr(Stdio::null());
+        // The cleanup path kills process groups for child runtimes. Keep this
+        // stand-in out of nextest's process group so the test process survives.
+        command.process_group(0);
+        let mut child = command.spawn().expect("spawn github chat stand-in");
 
         tokio::time::sleep(Duration::from_millis(150)).await;
 

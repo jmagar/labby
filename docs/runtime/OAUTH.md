@@ -9,7 +9,7 @@ Lab supports two HTTP auth modes:
 
 This document covers mode selection, startup behavior, registration and token flow, JWT validation, and operator-facing constraints.
 For the complete generated route/auth matrix, see
-[generated/api-routes.md](./generated/api-routes.md).
+[generated/api-routes.md](../generated/api-routes.md).
 
 ## Configuration
 
@@ -27,7 +27,7 @@ OAuth mode is configured through env vars and/or `config.toml`. Env vars take pr
 | `LAB_AUTH_SQLITE_PATH` | no | Override path for the SQLite auth database. |
 | `LAB_AUTH_KEY_PATH` | no | Override path for the persisted JWT signing key. |
 | `LAB_AUTH_ALLOWED_REDIRECT_URIS` | no | Comma-separated redirect URI patterns allowed for dynamic client registration in addition to loopback callbacks. |
-| `LAB_AUTH_ADMIN_EMAIL` | oauth mode | Google email address of the bootstrap admin permitted to log in. Normalized to lowercase at startup. **Required** when `LAB_AUTH_MODE=oauth`: startup fails if unset so no Google account can authenticate unless explicitly permitted. The `email_verified` claim in Google's id_token is enforced — accounts with unverified email addresses are rejected even if the address matches. Additional users will be granted access through a SQLite-backed allowlist managed via the web UI (planned). |
+| `LAB_AUTH_ADMIN_EMAIL` | oauth mode | Google email address of the bootstrap admin permitted to log in. Normalized to lowercase at startup. **Required** when `LAB_AUTH_MODE=oauth`: startup fails if unset so no Google account can authenticate unless explicitly permitted. The `email_verified` claim in Google's id_token is enforced — accounts with unverified email addresses are rejected even if the address matches. Additional users are granted through the SQLite-backed allowlist managed from Labby settings. |
 | `LAB_GOOGLE_CALLBACK_PATH` | no | Callback path appended to `LAB_PUBLIC_URL`. Defaults to `/auth/google/callback`. |
 | `LAB_GOOGLE_SCOPES` | no | Comma-separated Google scopes. Defaults to `openid,email,profile`. |
 | `LAB_AUTH_REGISTER_REQUESTS_PER_MINUTE` | no | Process-local rate limit for `POST /register`. Defaults to `20`. |
@@ -94,7 +94,7 @@ Google-specific notes:
 
 ```bash
 labby oauth relay-local --machine dookie --port 38935
-labby oauth relay-local --forward-base http://100.88.16.79:38935/callback/dookie --port 38935
+labby oauth relay-local --forward-base http://node.internal.example:38935/callback/dookie --port 38935
 ```
 
 This helper exists for cases where:
@@ -128,7 +128,7 @@ Example body:
 ```json
 {
   "bind_addr": "127.0.0.1:38935",
-  "target_url": "http://100.88.16.79:38935/callback/dookie",
+  "target_url": "http://node.internal.example:38935/callback/dookie",
   "default_port": 38935,
   "request_timeout_ms": 30000
 }
@@ -307,12 +307,63 @@ WWW-Authenticate: Bearer resource_metadata="https://lab.example.com/.well-known/
 
 This header is only included when `LAB_PUBLIC_URL` is configured. If not, the header is omitted rather than advertising localhost.
 
+## Gateway-Managed Route Metadata
+
+Gateway-managed protected MCP routes publish route-specific OAuth protected
+resource metadata under the public route host:
+
+```http
+GET /.well-known/oauth-protected-resource/<route-path>
+```
+
+For a route configured as `public_host = "mcp.example.com"` and
+`public_path = "/syslog"`, clients discover:
+
+```http
+GET https://mcp.example.com/.well-known/oauth-protected-resource/syslog
+```
+
+The metadata `resource` value is the public MCP resource:
+
+```json
+{
+  "resource": "https://mcp.example.com/syslog",
+  "authorization_servers": ["https://lab.example.com"],
+  "scopes_supported": ["mcp:read", "mcp:write"],
+  "bearer_methods_supported": ["header"]
+}
+```
+
+An unauthenticated request to the route returns a route-specific challenge:
+
+```http
+WWW-Authenticate: Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/syslog"
+```
+
+OAuth clients must request a token for the route resource
+`https://mcp.example.com/syslog` and present that token to
+`https://mcp.example.com/syslog`. The backend MCP URL remains private and must
+not appear in public metadata, public challenges, or public error bodies.
+
+Static bearer compatibility does not make a public protected MCP route an OAuth
+resource credential. `LAB_MCP_HTTP_TOKEN` is an operator/admin shortcut for
+Lab admin/API surfaces; Gateway-managed public MCP routes validate Lab OAuth
+JWTs whose audience is the route resource.
+
+Disabled or unknown protected routes must not advertise protected-resource
+metadata or proxy to a backend. They should fail with a stable public error that
+does not leak backend origins, backend paths, private IPs, or token env var
+names.
+
+Full route configuration and curl verification examples live in
+[GATEWAY.md](../services/GATEWAY.md#gateway-managed-protected-mcp-routes).
+
 ## Auth Precedence
 
 When both static bearer and OAuth are configured, auth is checked in this order:
 
 1. **Static bearer token** — constant-time comparison via `LAB_MCP_HTTP_TOKEN`. If it matches, the request is authenticated with implicit `lab:read` and `lab:admin` scopes.
-2. **OAuth JWT** — if the static bearer check fails (or no static token is configured), the token is validated as a JWT against the cached JWKS. OAuth-issued tokens currently carry the single supported scope `lab`.
+2. **OAuth JWT** — if the static bearer check fails (or no static token is configured), the token is validated as a JWT against the cached JWKS. Tokens for Lab's own `/mcp` resource use the configured Lab scope; Gateway-managed protected MCP routes may advertise and enforce route-specific scopes such as `mcp:read mcp:write`.
 3. **401** — if both checks fail (or neither auth method is configured for the token presented).
 
 Static bearer tokens bypass all JWT validation. This allows operators to use a simple token for automation while also supporting OAuth for interactive or multi-tenant use.
@@ -411,5 +462,5 @@ Auth-specific items `labby doctor` covers (or should cover):
 
 - [CONFIG.md](./CONFIG.md) — config loading and env var conventions
 - [TRANSPORT.md](./TRANSPORT.md) — HTTP transport setup and middleware
-- [ERRORS.md](./ERRORS.md) — `auth_failed` error kind
-- [RMCP.md](./RMCP.md) — RMCP auth ownership contract
+- [ERRORS.md](../dev/ERRORS.md) — `auth_failed` error kind
+- [RMCP.md](../surfaces/RMCP.md) — RMCP auth ownership contract

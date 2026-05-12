@@ -28,6 +28,10 @@ use crate::dispatch::redact::{redact_stdio_value, redact_url};
 use crate::mcp::logging::logging_level_rank;
 use crate::mcp::server::LabMcpServer;
 use crate::oauth::upstream::cache::OauthClientCache;
+#[cfg(unix)]
+use crate::process::unix::{
+    pid_is_alive, terminate_process_group_sigkill, terminate_process_group_sigterm,
+};
 use crate::registry::{RegisteredService, ToolRegistry};
 
 use super::auth::{configured_bearer_token, websocket_authorization_header};
@@ -57,6 +61,7 @@ const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
 const IN_PROCESS_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
 /// Per-request timeout for upstream tool/resource/prompt RPCs.
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const STDIO_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Default maximum response size from upstream servers (10 MB).
 const DEFAULT_MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
@@ -552,6 +557,75 @@ impl std::fmt::Debug for UpstreamConnection {
     }
 }
 
+impl UpstreamConnection {
+    async fn shutdown(mut self, upstream_name: &str, reason: &'static str) {
+        let runtime = self.runtime.clone();
+        let started = Instant::now();
+        let result = self
+            ._client_service
+            .close_with_timeout(STDIO_SHUTDOWN_TIMEOUT)
+            .await;
+        if let Some(server_task) = self._server_task.take() {
+            server_task.abort();
+        }
+
+        #[cfg(unix)]
+        if let (Some(pid), Some(pgid)) = (runtime.pid, runtime.pgid)
+            && pid_is_alive(pid)
+        {
+            let _ = terminate_process_group_sigterm(pgid);
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            if pid_is_alive(pid) {
+                let _ = terminate_process_group_sigkill(pgid);
+            }
+        }
+
+        match result {
+            Ok(Some(_)) => tracing::debug!(
+                surface = "dispatch",
+                service = "upstream.pool",
+                action = "upstream.connection.shutdown",
+                event = "finish",
+                operation = "connection.shutdown",
+                upstream = upstream_name,
+                reason,
+                pid = ?runtime.pid,
+                pgid = ?runtime.pgid,
+                elapsed_ms = started.elapsed().as_millis(),
+                "upstream connection shutdown finished"
+            ),
+            Ok(None) => tracing::warn!(
+                surface = "dispatch",
+                service = "upstream.pool",
+                action = "upstream.connection.shutdown",
+                event = "timeout",
+                operation = "connection.shutdown",
+                upstream = upstream_name,
+                reason,
+                pid = ?runtime.pid,
+                pgid = ?runtime.pgid,
+                timeout_ms = STDIO_SHUTDOWN_TIMEOUT.as_millis(),
+                elapsed_ms = started.elapsed().as_millis(),
+                "upstream connection shutdown timed out"
+            ),
+            Err(error) => tracing::warn!(
+                surface = "dispatch",
+                service = "upstream.pool",
+                action = "upstream.connection.shutdown",
+                event = "error",
+                operation = "connection.shutdown",
+                upstream = upstream_name,
+                reason,
+                pid = ?runtime.pid,
+                pgid = ?runtime.pgid,
+                error = %error,
+                elapsed_ms = started.elapsed().as_millis(),
+                "upstream connection shutdown failed"
+            ),
+        }
+    }
+}
+
 impl UpstreamPool {
     /// Create a new empty pool.
     #[must_use]
@@ -685,7 +759,11 @@ impl UpstreamPool {
         let drained_connection_count = {
             let mut connections = self.connections.write().await;
             let count = connections.len();
-            connections.clear();
+            let drained = connections.drain().collect::<Vec<_>>();
+            drop(connections);
+            for (upstream_name, connection) in drained {
+                connection.shutdown(&upstream_name, reason).await;
+            }
             count
         };
         let drained_catalog_count = {
@@ -717,7 +795,7 @@ impl UpstreamPool {
     /// upstream is marked unhealthy, but do not prevent other upstreams from
     /// connecting.
     #[allow(clippy::too_many_lines)]
-    pub async fn discover_all(&self, configs: &[UpstreamConfig]) {
+    async fn discover_all_inner(&self, configs: &[UpstreamConfig], oauth_subject: Option<&str>) {
         if configs.is_empty() {
             return;
         }
@@ -766,6 +844,18 @@ impl UpstreamPool {
             if config.name.contains('/') || config.name.contains('?') || config.name.contains('#') {
                 continue;
             }
+            // OAuth HTTP upstreams require an explicit subject to select the
+            // correct token set. Subject-less discovery must skip them so one
+            // user's tool view is never cached globally by accident.
+            if config.oauth.is_some() && oauth_subject.is_none() {
+                tracing::info!(
+                    upstream = %config.name,
+                    transport = upstream_transport(config),
+                    target = %upstream_target_redacted(config),
+                    "skipping shared upstream discovery for subject-scoped OAuth upstream"
+                );
+                continue;
+            }
             // Validate config
             if let Err(msg) = validate_upstream_config(config) {
                 tracing::warn!(
@@ -780,13 +870,18 @@ impl UpstreamPool {
             let oauth_client_cache = oauth_client_cache.clone();
             let runtime_origin = runtime_origin.clone();
             let runtime_owner = runtime_owner.clone();
+            let subject = config
+                .oauth
+                .as_ref()
+                .and(oauth_subject)
+                .map(ToOwned::to_owned);
             futures.push(async move {
                 let name = config.name.clone();
                 match tokio::time::timeout(
                     DISCOVERY_TIMEOUT,
                     connect_upstream(
                         &config,
-                        None,
+                        subject.as_deref(),
                         oauth_client_cache.as_ref(),
                         runtime_origin.as_deref(),
                         runtime_owner.as_ref(),
@@ -963,6 +1058,22 @@ impl UpstreamPool {
                 }
             }
         }
+    }
+
+    /// Connect to non-OAuth upstreams and discover their tools.
+    ///
+    /// OAuth upstreams are intentionally skipped because they need a request or
+    /// gateway subject to select the right upstream token set.
+    pub async fn discover_all(&self, configs: &[UpstreamConfig]) {
+        self.discover_all_inner(configs, None).await;
+    }
+
+    /// Connect to all configured upstreams, using `subject` for OAuth upstreams.
+    ///
+    /// This is for gateway-owned discovery where the subject is an explicit
+    /// shared identity, not for subject-less startup discovery.
+    pub async fn discover_all_for_subject(&self, configs: &[UpstreamConfig], subject: &str) {
+        self.discover_all_inner(configs, Some(subject)).await;
     }
 
     fn ensure_probe_task(&self, config: UpstreamConfig) {
@@ -1179,6 +1290,16 @@ impl UpstreamPool {
             );
         }
 
+        let stale_connection = {
+            let mut connections = self.connections.write().await;
+            connections.remove(&config.name)
+        };
+        if let Some(connection) = stale_connection {
+            connection
+                .shutdown(&config.name, "upstream.reprobe.reconnect")
+                .await;
+        }
+
         let (conn, tools) = connect_upstream(
             config,
             None,
@@ -1247,13 +1368,17 @@ impl UpstreamPool {
         registry: &ToolRegistry,
     ) {
         self.discover_all(configs).await;
-        let services: Vec<RegisteredService> = registry
-            .services()
-            .iter()
-            .filter(|service| !service.actions.is_empty())
-            .cloned()
-            .collect();
-        self.register_in_process_service_list(services).await;
+        self.register_in_process_service_peers(registry).await;
+    }
+
+    pub async fn discover_all_for_subject_with_in_process_peers(
+        &self,
+        configs: &[UpstreamConfig],
+        subject: &str,
+        registry: &ToolRegistry,
+    ) {
+        self.discover_all_for_subject(configs, subject).await;
+        self.register_in_process_service_peers(registry).await;
     }
 
     pub async fn register_in_process_service_peers(&self, registry: &ToolRegistry) {
@@ -3626,6 +3751,16 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn shared_discovery_skips_oauth_http_upstreams() {
+        let pool = UpstreamPool::new()
+            .with_oauth_client_cache(OauthClientCache::new(Arc::new(dashmap::DashMap::new())));
+        pool.discover_all(&[oauth_http_config()]).await;
+
+        assert_eq!(pool.upstream_count().await, 0);
+        assert!(pool.upstream_status().await.is_empty());
+    }
+
     #[test]
     fn merge_upstream_prompts_is_deterministic() {
         let left = Prompt::new("shared", Some("left"), None);
@@ -4406,6 +4541,7 @@ mod tests {
                 name,
                 description: "test service",
                 category: "test",
+                kind: crate::registry::RegisteredServiceKind::BuiltInUpstreamApi,
                 status: "available",
                 actions: ACTIONS,
                 dispatch,
@@ -4485,6 +4621,7 @@ mod tests {
                 name,
                 description: "test service",
                 category: "test",
+                kind: crate::registry::RegisteredServiceKind::BuiltInUpstreamApi,
                 status: "available",
                 actions: ACTIONS,
                 dispatch,

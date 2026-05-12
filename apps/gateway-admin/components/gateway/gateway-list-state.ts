@@ -31,6 +31,7 @@ export interface ToolInventoryRow {
   toolName: string
   description: string
   exposed: boolean
+  searchText?: string
 }
 
 export function gatewaySourceFacet(gateway: Pick<Gateway, 'source'>): GatewaySourceFacet {
@@ -65,27 +66,34 @@ function toolMatchesSearch(tool: DiscoveredTool, gateway: Gateway, search: strin
 }
 
 export function aggregateToolsFromGateways(gateways: Gateway[]): ToolInventoryRow[] {
-  return gateways.flatMap((gateway) =>
-    gateway.discovery.tools.map((tool) => ({
-      gatewayId: gateway.id,
-      gatewayName: gateway.name,
-      source: gateway.source ?? 'custom',
-      sourceFacet: gatewaySourceFacet(gateway),
-      transport: gateway.transport,
-      toolName: tool.name,
-      description: tool.description ?? '',
-      exposed: tool.exposed,
-    })),
-  )
+  return gateways.flatMap((gateway) => {
+    const source = gateway.source ?? 'custom'
+    const sourceFacet = gatewaySourceFacet(gateway)
+    return gateway.discovery.tools.map((tool) => {
+      const description = tool.description ?? ''
+      return {
+        gatewayId: gateway.id,
+        gatewayName: gateway.name,
+        source,
+        sourceFacet,
+        transport: gateway.transport,
+        toolName: tool.name,
+        description,
+        exposed: tool.exposed,
+        searchText: [tool.name, description, gateway.name].join(' ').toLowerCase(),
+      }
+    })
+  })
 }
 
 export function filterGateways(gateways: Gateway[], state: GatewayFilterState): Gateway[] {
+  const normalizedSearch = state.search.trim().toLowerCase()
   return gateways.filter((gateway) => {
     if (state.primaryLens === 'healthy' && !(gateway.status.healthy && gateway.status.connected)) return false
     if (state.primaryLens === 'disconnected' && gateway.status.connected) return false
     if (state.primaryLens === 'configured' && !(gateway.configured ?? true)) return false
 
-    if (state.search) {
+    if (normalizedSearch) {
       const haystack = [
         gateway.name,
         gateway.config.url ?? '',
@@ -97,7 +105,7 @@ export function filterGateways(gateways: Gateway[], state: GatewayFilterState): 
         .join(' ')
         .toLowerCase()
 
-      if (!haystack.includes(state.search.toLowerCase())) return false
+      if (!haystack.includes(normalizedSearch)) return false
     }
 
     if (!matchesGatewayStatusFacet(gateway, state.status)) return false
@@ -109,11 +117,12 @@ export function filterGateways(gateways: Gateway[], state: GatewayFilterState): 
 }
 
 export function filterTools(rows: ToolInventoryRow[], state: ToolFilterState): ToolInventoryRow[] {
+  const normalizedSearch = state.search.trim().toLowerCase()
   return rows.filter((row) => {
-    const haystack = [row.toolName, row.description, row.gatewayName].join(' ').toLowerCase()
-    const normalizedSearch = state.search.trim().toLowerCase()
-
-    if (normalizedSearch && !haystack.includes(normalizedSearch)) return false
+    if (normalizedSearch) {
+      const searchText = row.searchText ?? [row.toolName, row.description, row.gatewayName].join(' ').toLowerCase()
+      if (!searchText.includes(normalizedSearch)) return false
+    }
     if (state.gatewayIds.length > 0 && !state.gatewayIds.includes(row.gatewayId)) return false
     if (state.exposure === 'exposed' && !row.exposed) return false
     if (state.exposure === 'hidden' && row.exposed) return false

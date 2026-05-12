@@ -368,6 +368,7 @@ export function LogConsole({ initialText = "" }: { initialText?: string }) {
           </div>
         )}
       />
+      <h1 className="sr-only">Logs</h1>
 
       <div className={`relative min-h-[calc(100vh-3.5rem)] w-full overflow-hidden bg-aurora-page-bg text-aurora-text-primary ${AURORA_PAGE_SHELL}`}>
         <div className={AURORA_PAGE_FRAME}>

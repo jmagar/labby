@@ -132,6 +132,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `fs` | `help` | true | false |  | `HelpPayload` | mcp, api, web |
 | `fs` | `schema` | true | false | `action*: string` | `ActionSpec` | mcp, api, web |
 | `gateway` | `gateway.add` | false | true | `spec*: json`<br>`bearer_token_value: string`<br>`allow_stdio: boolean` | `GatewayView` | cli, mcp, api, web |
+| `gateway` | `gateway.client_config.get` | false | false | `name*: string` | `McpClientConfigView` | cli, mcp, api, web |
 | `gateway` | `gateway.discovered_prompts` | false | false | `name*: string` | `string[]` | cli, mcp, api, web |
 | `gateway` | `gateway.discovered_resources` | false | false | `name*: string` | `string[]` | cli, mcp, api, web |
 | `gateway` | `gateway.discovered_tools` | false | false | `name*: string` | `GatewayToolExposureRowView[]` | cli, mcp, api, web |
@@ -145,6 +146,12 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `gateway` | `gateway.oauth.probe` | false | true | `url*: string` | `ProbeResult` | cli, mcp, api, web |
 | `gateway` | `gateway.oauth.start` | false | false | `upstream*: string`<br>`subject: string` | `BeginAuthorization` | cli, mcp, api, web |
 | `gateway` | `gateway.oauth.status` | false | false | `upstream*: string`<br>`subject: string` | `UpstreamOauthStatusView` | cli, mcp, api, web |
+| `gateway` | `gateway.protected_route.add` | false | true | `route*: json` | `ProtectedMcpRouteConfig` | cli, mcp, api, web |
+| `gateway` | `gateway.protected_route.get` | false | false | `name*: string` | `ProtectedMcpRouteConfig` | cli, mcp, api, web |
+| `gateway` | `gateway.protected_route.list` | false | false |  | `ProtectedMcpRouteConfig[]` | cli, mcp, api, web |
+| `gateway` | `gateway.protected_route.remove` | false | true | `name*: string` | `ProtectedMcpRouteConfig` | cli, mcp, api, web |
+| `gateway` | `gateway.protected_route.test` | false | false | `route*: json` | `ProtectedMcpRouteTestResult` | cli, mcp, api, web |
+| `gateway` | `gateway.protected_route.update` | false | true | `name*: string`<br>`route*: json` | `ProtectedMcpRouteConfig` | cli, mcp, api, web |
 | `gateway` | `gateway.reload` | false | true |  | `GatewayCatalogDiff` | cli, mcp, api, web |
 | `gateway` | `gateway.remove` | false | true | `name*: string` | `GatewayView` | cli, mcp, api, web |
 | `gateway` | `gateway.server.get` | false | false | `id*: string` | `ServerView` | cli, mcp, api, web |
@@ -638,22 +645,20 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `scrutiny` | `help` | false | false |  | `Catalog` | cli, mcp, api |
 | `scrutiny` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api |
 | `scrutiny` | `server.health` | false | false |  | `null` | cli, mcp, api |
-| `setup` | `draft.commit` | false | true | `force: bool` | `CommitOutcome` | cli, mcp, api, web |
+| `setup` | `draft.commit` | false | true | `force: boolean` | `CommitOutcome` | cli, mcp, api, web |
 | `setup` | `draft.get` | false | false |  | `DraftEntry[]` | cli, mcp, api, web |
-| `setup` | `draft.set` | false | false | `entries*: DraftEntry[]`<br>`force: bool` | `DraftSetOutcome` | cli, mcp, api, web |
-| `setup` | `finalize` | false | true | `force: bool` | `CommitOutcome` | cli, mcp, api, web |
+| `setup` | `draft.set` | false | false | `entries*: DraftEntry[]`<br>`force: boolean` | `DraftSetOutcome` | cli, mcp, api, web |
+| `setup` | `finalize` | false | true | `force: boolean` | `CommitOutcome` | cli, mcp, api, web |
 | `setup` | `help` | false | false |  | `Catalog` | cli, mcp, api, web |
 | `setup` | `install_plugin` | false | true | `service*: string` | `PluginMutationResult` | cli, mcp, api, web |
-| `setup` | `install_plugin` | false | true | `service*: string` | `PluginLifecycleOutcome` | cli, mcp, api, web |
-| `setup` | `installed_plugins` | false | false | `force: bool` | `InstalledPlugin[]` | cli, mcp, api, web |
-| `setup` | `installed_plugins` | false | false |  | `InstalledPlugin[]` | cli, mcp, api, web |
+| `setup` | `installed_plugins` | false | false | `force: boolean` | `InstalledPlugin[]` | cli, mcp, api, web |
 | `setup` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api, web |
 | `setup` | `schema.get` | false | false | `services: string[]` | `ServiceSchemaMap` | cli, mcp, api, web |
 | `setup` | `services_status` | false | false |  | `ServiceStatus[]` | cli, mcp, api, web |
-| `setup` | `services_status` | false | false |  | `ServiceStatus[]` | cli, mcp, api, web |
+| `setup` | `settings.state` | false | false |  | `SettingsState` | cli, mcp, api, web |
+| `setup` | `settings.update` | false | true | `services.built_in_upstream_apis_enabled*: boolean` | `SettingsState` | cli, mcp, api, web |
 | `setup` | `state` | false | false |  | `SetupSnapshot` | cli, mcp, api, web |
 | `setup` | `uninstall_plugin` | false | true | `service*: string` | `PluginMutationResult` | cli, mcp, api, web |
-| `setup` | `uninstall_plugin` | false | true | `service*: string` | `PluginLifecycleOutcome` | cli, mcp, api, web |
 | `sonarr` | `blocklist.delete` | false | true | `id*: i64` | `void` | cli, mcp, api |
 | `sonarr` | `blocklist.list` | false | false |  | `BlocklistPage` | cli, mcp, api |
 | `sonarr` | `calendar.list` | false | false | `start: string`<br>`end: string`<br>`unmonitored: bool` | `Episode[]` | cli, mcp, api |

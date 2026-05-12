@@ -24,7 +24,7 @@ control plane.
 | MCP Registry aggregator | Serve Lab's local registry mirror on `/v0.1/*` as a drop-in replacement for the official MCP Registry API, while layering Lab-owned metadata such as featured/reviewed/recommended flags, tags, audit fields, and homelab-specific curation without mutating upstream registry data. |
 | ACP Registry agents | Search the ACP Registry for compatible agents, inspect agent details, and install or uninstall agent provider entries through the same marketplace service. ACP agent installs currently write controller-local provider config; remote ACP agent installation returns per-node errors until implemented. |
 | Upstream MCP proxy | Point MCP clients at Lab instead of every individual server. Lab connects to configured HTTP or stdio upstream MCP servers, discovers their tools, optionally proxies resources, normalizes errors, applies circuit-breaker health, and republishes the merged catalog behind Lab's authenticated `/mcp` endpoint. |
-| Gateway management | Add, test, reload, and remove upstream MCP servers without hand-editing config. Lab supports exposure filters, `tool_search`/`tool_invoke` helper paths, OAuth-backed upstream credentials, and Labby/CLI/API controls for the proxy pool. |
+| Gateway management | Add, test, reload, and remove upstream MCP servers without hand-editing config. Lab supports exposure filters, `tool_search`/`tool_invoke` helper paths, OAuth-backed upstream credentials, Gateway-managed protected MCP routes, and Labby/CLI/API controls for the proxy pool. |
 | Virtual Lab servers | Expose configured Lab-backed services as virtual gateway servers, toggle CLI/API/MCP/Web UI surfaces, inspect service action metadata, and set MCP action allowlists per virtual server. |
 | Authentication and OAuth | Protect hosted HTTP, MCP, Labby, registry, and gateway-management routes with static bearer auth or Lab's Google-backed OAuth mode. Lab also supports browser sessions, CSRF-protected web UI calls, OAuth metadata/JWKS endpoints, upstream MCP OAuth credential storage, and local or node-started OAuth callback relays. |
 | Fleet nodes | Run `labby serve` on multiple machines, enroll non-controller nodes, approve or deny devices, inspect node inventory and MCP client config metadata, run the local OAuth relay on a node, and route status/log events back to the controller over the fleet WebSocket. |
@@ -242,7 +242,7 @@ HTTP auth modes:
 | Mode | Required config | Notes |
 | --- | --- | --- |
 | Bearer | `LAB_AUTH_MODE=bearer` or default, plus `LAB_MCP_HTTP_TOKEN` for protected deployments | Uses constant-time static bearer-token comparison |
-| OAuth | `LAB_AUTH_MODE=oauth`, `LAB_PUBLIC_URL`, `LAB_GOOGLE_CLIENT_ID`, `LAB_GOOGLE_CLIENT_SECRET`, `LAB_AUTH_ADMIN_EMAIL` | Enables Lab's Google-backed auth server, JWT validation, metadata, browser sessions, and callback handling. `LAB_AUTH_ADMIN_EMAIL` is the bootstrap admin Google email; startup fails closed if unset so no Google account can authenticate without explicit permission. Additional users will be granted via a SQLite-backed allowlist managed in the Labby web UI (planned). |
+| OAuth | `LAB_AUTH_MODE=oauth`, `LAB_PUBLIC_URL`, `LAB_GOOGLE_CLIENT_ID`, `LAB_GOOGLE_CLIENT_SECRET`, `LAB_AUTH_ADMIN_EMAIL` | Enables Lab's Google-backed auth server, JWT validation, metadata, browser sessions, and callback handling. `LAB_AUTH_ADMIN_EMAIL` is the bootstrap admin Google email; startup fails closed if unset so no Google account can authenticate without explicit permission. Additional users are granted through the SQLite-backed allowlist managed from Labby settings. |
 
 Protected route behavior:
 
@@ -265,13 +265,17 @@ API/MCP clients.
 Gateway OAuth is separate from Lab login OAuth. Upstreams configured with
 `[upstream.oauth]` use `/v1/gateway/oauth/start`, `/auth/upstream/callback`,
 `/v1/gateway/oauth/status`, and `/v1/gateway/oauth/clear`; credentials are encrypted in
-Lab's auth store and shared by the web UI, CLI, and MCP gateway actions.
+Lab's auth store and shared by the web UI, CLI, and MCP gateway actions under
+the shared Gateway subject `gateway`. Protected MCP routes can publish these
+OAuth upstreams at public paths such as `https://mcp.example.com/syslog` while
+Lab validates public clients with Lab OAuth and separately authenticates to the
+upstream server with the stored upstream OAuth credential.
 
 Callback relay helpers cover split-browser/device flows:
 
 ```bash
 labby oauth relay-local --machine dookie --port 38935
-labby oauth relay-local --forward-base http://100.88.16.79:38935/callback/dookie --port 38935
+labby oauth relay-local --forward-base http://node.internal.example:38935/callback/dookie --port 38935
 ```
 
 The same local relay can be started through the node runtime with

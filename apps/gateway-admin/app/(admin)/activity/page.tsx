@@ -166,7 +166,7 @@ export default function ActivityPage() {
             <p className={AURORA_MUTED_LABEL}>Control Plane</p>
             <h1 className={cn(AURORA_DISPLAY_1, 'mt-2 text-aurora-text-primary')}>Activity</h1>
             <p className="mt-2 text-sm text-aurora-text-muted">
-              Live feed of gateway changes, service exposure, devices, chat sessions, artifacts, tools, resources, prompts, marketplace changes, settings, and OAuth flows from the log store.
+              Live feed of server changes, service exposure, devices, chat sessions, artifacts, tools, resources, prompts, marketplace changes, settings, and OAuth flows from the log store.
               Need structured search?{' '}
               <Link href="/logs" className="font-medium text-aurora-accent-primary underline-offset-4 hover:underline">
                 Open the log console

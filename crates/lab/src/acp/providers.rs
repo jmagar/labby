@@ -95,8 +95,52 @@ pub fn write_providers(entries: &[AcpProviderEntry]) -> Result<(), ToolError> {
             ),
         });
     }
-    tmp.persist(&path)
-        .map_err(|e| ToolError::internal_message(format!("persist {}: {e}", path.display())))?;
+    match tmp.persist(&path) {
+        Ok(_) => {}
+        Err(error) if error.error.raw_os_error() == Some(16) => {
+            write_mounted_provider_file_in_place(&path, &body)?;
+        }
+        Err(error) => {
+            return Err(ToolError::internal_message(format!(
+                "persist {}: {error}",
+                path.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn write_mounted_provider_file_in_place(path: &PathBuf, body: &[u8]) -> Result<(), ToolError> {
+    use std::io::Write;
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .map_err(|e| {
+            ToolError::internal_message(format!(
+                "open mounted provider file {} for fallback write: {e}",
+                path.display()
+            ))
+        })?;
+    file.write_all(body).map_err(|e| {
+        ToolError::internal_message(format!(
+            "write mounted provider file {}: {e}",
+            path.display()
+        ))
+    })?;
+    file.flush().map_err(|e| {
+        ToolError::internal_message(format!(
+            "flush mounted provider file {}: {e}",
+            path.display()
+        ))
+    })?;
+    file.sync_all().map_err(|e| {
+        ToolError::internal_message(format!(
+            "fsync mounted provider file {}: {e}",
+            path.display()
+        ))
+    })?;
     Ok(())
 }
 

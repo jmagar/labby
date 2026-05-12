@@ -107,6 +107,7 @@ export interface ServiceSchema {
   category: string
   supports_multi_instance: boolean
   default_port: number | null
+  built_in_upstream_api?: boolean
   env: ServiceEnvVar[]
 }
 
@@ -199,6 +200,25 @@ function mockSetupSnapshot(): SetupSnapshot {
   }
 }
 
+function mockSettingsSurfaces(): SettingsState['surfaces'] {
+  return {
+    mcp: {
+      transport: 'http',
+      host: '127.0.0.1',
+      port: 8765,
+      stateful: null,
+    },
+    web: {
+      auth_disabled: false,
+      assets_dir: null,
+    },
+    auth: {
+      mode: 'bearer',
+      public_url: null,
+    },
+  }
+}
+
 // ─── Drafts ─────────────────────────────────────────────────────────────
 
 export interface DraftEntry {
@@ -250,6 +270,45 @@ export interface ServicesStatusResponse {
   plugins: InstalledPlugin[]
 }
 
+export interface SettingsState {
+  config_path: string
+  changed: boolean
+  previous: {
+    services: {
+      built_in_upstream_apis_enabled: boolean | null
+    }
+  }
+  restart_required: boolean
+  restart_note: string
+  services: {
+    built_in_upstream_apis_enabled: boolean
+    built_in_upstream_api_services: string[]
+    bootstrap_services: string[]
+  }
+  surfaces: {
+    mcp: {
+      transport: string
+      host: string
+      port: number
+      stateful: boolean | null
+    }
+    web: {
+      auth_disabled: boolean
+      assets_dir: string | null
+    }
+    auth: {
+      mode: string
+      public_url: string | null
+    }
+  }
+}
+
+export interface SettingsUpdate {
+  services: {
+    built_in_upstream_apis_enabled: boolean
+  }
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────
 
 export const setupApi = {
@@ -274,6 +333,59 @@ export const setupApi = {
       })
     }
     return setupAction<SchemaGetResponse>('schema.get', services ? { services } : {}, signal)
+  },
+
+  settingsState(signal?: AbortSignal): Promise<SettingsState> {
+    if (USE_MOCK_DATA) {
+      signal?.throwIfAborted?.()
+      return Promise.resolve({
+        config_path: '~/.config/lab/config.toml',
+        changed: false,
+        previous: {
+          services: {
+            built_in_upstream_apis_enabled: null,
+          },
+        },
+        restart_required: false,
+        restart_note: 'Changes to built-in upstream API services take effect after restarting labby serve.',
+        services: {
+          built_in_upstream_apis_enabled: true,
+          built_in_upstream_api_services: Object.keys(MOCK_SERVICES),
+          bootstrap_services: ['setup', 'doctor', 'extract', 'gateway'],
+        },
+        surfaces: mockSettingsSurfaces(),
+      })
+    }
+    return setupAction<SettingsState>('settings.state', {}, signal)
+  },
+
+  settingsUpdate(patch: SettingsUpdate, signal?: AbortSignal): Promise<SettingsState> {
+    if (USE_MOCK_DATA) {
+      signal?.throwIfAborted?.()
+      const enabled = patch.services.built_in_upstream_apis_enabled
+      return Promise.resolve({
+        config_path: '~/.config/lab/config.toml',
+        changed: true,
+        previous: {
+          services: {
+            built_in_upstream_apis_enabled: !enabled,
+          },
+        },
+        restart_required: true,
+        restart_note: 'Changes to built-in upstream API services take effect after restarting labby serve.',
+        services: {
+          built_in_upstream_apis_enabled: enabled,
+          built_in_upstream_api_services: Object.keys(MOCK_SERVICES),
+          bootstrap_services: ['setup', 'doctor', 'extract', 'gateway'],
+        },
+        surfaces: mockSettingsSurfaces(),
+      })
+    }
+    return setupAction<SettingsState>(
+      'settings.update',
+      { services: patch.services, confirm: true },
+      signal,
+    )
   },
 
   draftGet(signal?: AbortSignal): Promise<{ entries: DraftEntry[] }> {

@@ -66,10 +66,8 @@ export default function CorePage(): React.ReactElement {
       [key]: { ...prev[key]!, status: 'saving', error: undefined },
     }))
     try {
-      if (value !== '') {
-        await setupApi.draftSet([{ key, value }], { force: true })
-        await setupApi.draftCommit({ force: true })
-      }
+      await setupApi.draftSet([{ key, value }], { force: true })
+      await setupApi.draftCommit({ force: true })
       setFields((prev) => ({
         ...prev,
         [key]: { ...prev[key]!, status: 'saved' },
@@ -93,52 +91,55 @@ export default function CorePage(): React.ReactElement {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Core</CardTitle>
-        <CardDescription>
-          Operator-level lab process defaults. Saved on blur to{' '}
-          <code>~/.lab/.env</code> via the setup dispatch service.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        {CORE_FIELDS.map((field) => {
-          const state = fields[field.key]!
-          return (
-            <div key={field.key} className="flex flex-col gap-1">
-              <Label htmlFor={field.key} className="font-mono text-xs">
-                {field.key}
-              </Label>
-              <p className="text-sm text-muted-foreground">{field.description}</p>
-              <div className="flex items-center gap-2">
-                <Input
-                  id={field.key}
-                  placeholder={field.example}
-                  value={state.value}
-                  onChange={(e) =>
-                    setFields((prev) => ({
-                      ...prev,
-                      [field.key]: {
-                        ...prev[field.key]!,
-                        value: e.target.value,
-                        status: 'idle',
-                      },
-                    }))
-                  }
-                  onBlur={() => {
-                    if (state.value !== '') void commitField(field.key, state.value)
-                  }}
-                />
-                <SaveBadge state={state} />
+    <>
+      <h1 className="sr-only">Core settings</h1>
+      <Card>
+        <CardHeader>
+          <CardTitle>Core</CardTitle>
+          <CardDescription>
+            Operator-level lab process defaults. Saved on blur to{' '}
+            <code>~/.lab/.env</code> via the setup dispatch service.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {CORE_FIELDS.map((field) => {
+            const state = fields[field.key]!
+            return (
+              <div key={field.key} className="flex flex-col gap-1">
+                <Label htmlFor={field.key} className="font-mono text-xs">
+                  {field.key}
+                </Label>
+                <p className="text-sm text-muted-foreground">{field.description}</p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id={field.key}
+                    placeholder={field.example}
+                    value={state.value}
+                    onChange={(e) =>
+                      setFields((prev) => ({
+                        ...prev,
+                        [field.key]: {
+                          ...prev[field.key]!,
+                          value: e.target.value,
+                          status: 'idle',
+                        },
+                      }))
+                    }
+                    onBlur={() => {
+                      void commitField(field.key, state.value)
+                    }}
+                  />
+                  <SaveBadge state={state} />
+                </div>
+                {state.status === 'error' && state.error ? (
+                  <p className="text-xs text-destructive">{state.error}</p>
+                ) : null}
               </div>
-              {state.status === 'error' && state.error ? (
-                <p className="text-xs text-destructive">{state.error}</p>
-              ) : null}
-            </div>
-          )
-        })}
-      </CardContent>
-    </Card>
+            )
+          })}
+        </CardContent>
+      </Card>
+    </>
   )
 }
 

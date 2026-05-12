@@ -9,6 +9,7 @@ pub mod oauth;
 mod oauth_lifecycle;
 mod params;
 mod projection;
+pub(crate) mod protected_routes;
 mod runtime;
 mod service_catalog;
 mod shared;

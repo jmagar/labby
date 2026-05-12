@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::acp::registry::AcpSessionRegistry;
 use crate::catalog::{Catalog, build_catalog};
@@ -11,6 +12,9 @@ use crate::dispatch::clients::ServiceClients;
 use crate::node::enrollment::store::EnrollmentStore;
 use crate::node::store::NodeStore;
 use crate::registry::{ToolRegistry, build_default_registry};
+
+const DEFAULT_PROTECTED_MCP_CONNECT_TIMEOUT_SECS: u64 = 10;
+const PROTECTED_MCP_CONNECT_TIMEOUT_ENV: &str = "LAB_PROTECTED_MCP_CONNECT_TIMEOUT_SECS";
 
 /// Application state passed to every axum handler via `State<AppState>`.
 #[derive(Clone)]
@@ -25,6 +29,8 @@ pub struct AppState {
     pub registry: Arc<ToolRegistry>,
     /// Pre-built service clients for connection pool reuse.
     pub clients: Arc<ServiceClients>,
+    /// Shared HTTP client for protected MCP reverse proxy requests.
+    pub protected_mcp_http_client: reqwest::Client,
     /// Runtime-enabled service names derived from the registry.
     ///
     /// The HTTP router checks this set to decide which per-service route groups
@@ -118,10 +124,12 @@ impl AppState {
             .collect();
         let catalog = Arc::new(build_catalog(&registry));
         let clients = Arc::new(ServiceClients::from_env());
+        let protected_mcp_http_client = build_protected_mcp_http_client();
         Self {
             catalog,
             registry: Arc::new(registry),
             clients,
+            protected_mcp_http_client,
             enabled_services: Arc::new(enabled_services),
             auth_config: None,
             config: Arc::new(LabConfig::default()),
@@ -309,6 +317,26 @@ impl AppState {
         self.registry_store = Some(store);
         self
     }
+}
+
+fn protected_mcp_connect_timeout() -> Duration {
+    std::env::var(PROTECTED_MCP_CONNECT_TIMEOUT_ENV)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|seconds| *seconds > 0)
+        .map_or(
+            Duration::from_secs(DEFAULT_PROTECTED_MCP_CONNECT_TIMEOUT_SECS),
+            Duration::from_secs,
+        )
+}
+
+fn build_protected_mcp_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        // Keep long-lived MCP streams possible, but fail unreachable upstreams
+        // instead of letting proxy connection attempts hang indefinitely.
+        .connect_timeout(protected_mcp_connect_timeout())
+        .build()
+        .expect("protected MCP HTTP client configuration is valid")
 }
 
 impl Default for AppState {

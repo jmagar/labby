@@ -7,8 +7,9 @@ use crate::config::{
 };
 use crate::dispatch::error::ToolError;
 use crate::dispatch::gateway::manager::GatewayManager;
-use crate::dispatch::gateway::oauth::UpstreamOauthStatusView;
+use crate::dispatch::gateway::oauth::{UpstreamOauthConnectionState, UpstreamOauthStatusView};
 use crate::dispatch::redact::redact_url;
+use crate::dispatch::upstream::pool::UpstreamPool;
 use crate::oauth::upstream::manager::UpstreamOauthManager;
 use crate::oauth::upstream::types::{BeginAuthorization, OauthError};
 
@@ -17,6 +18,10 @@ fn tool_error_from_oauth(error: OauthError) -> ToolError {
         sdk_kind: error.kind().to_string(),
         message: error.to_string(),
     }
+}
+
+fn should_use_dynamic_registration(upstream: &str, supports_dynamic: bool) -> bool {
+    supports_dynamic && upstream != "swag"
 }
 
 fn validate_probe_url(raw: &str) -> Result<Url, ToolError> {
@@ -232,7 +237,8 @@ impl GatewayManager {
         };
 
         let supports_dynamic = metadata.registration_endpoint.is_some();
-        let strategy = if supports_dynamic {
+        let use_dynamic_registration = should_use_dynamic_registration(&name, supports_dynamic);
+        let strategy = if use_dynamic_registration {
             "dynamic"
         } else {
             "client_metadata_document"
@@ -298,7 +304,7 @@ impl GatewayManager {
                         "upstream oauth probe: reusing existing manager"
                     );
                 } else {
-                    let registration = if supports_dynamic {
+                    let registration = if use_dynamic_registration {
                         UpstreamOauthRegistration::Dynamic
                     } else {
                         // No RFC 7591 dynamic registration — use the Client ID Metadata
@@ -483,44 +489,27 @@ impl GatewayManager {
         );
 
         if let Some(oauth_config) = manager.upstream_config().oauth.clone() {
-            let manager_for_persist = self.clone();
-            let upstream_for_persist = upstream.to_string();
-            tokio::spawn(async move {
-                let _mutation_guard = manager_for_persist.config_mutation.lock().await;
-                let mut cfg = manager_for_persist.config.read().await.clone();
-                let Some(existing) = cfg
-                    .upstream
-                    .iter_mut()
-                    .find(|u| u.name == upstream_for_persist.as_str())
-                else {
-                    tracing::debug!(
-                        service = "upstream_oauth",
-                        action = "callback",
-                        upstream = %upstream_for_persist,
-                        "upstream oauth callback: no matching gateway in config; skipping oauth persistence"
-                    );
-                    return;
-                };
-                if existing.oauth.is_some() {
-                    return;
-                }
+            let _mutation_guard = self.config_mutation.lock().await;
+            let mut cfg = self.config.read().await.clone();
+            let Some(existing) = cfg.upstream.iter_mut().find(|u| u.name == upstream) else {
+                tracing::debug!(
+                    service = "upstream_oauth",
+                    action = "callback",
+                    upstream = %upstream,
+                    "upstream oauth callback: no matching gateway in config; skipping oauth persistence"
+                );
+                return Ok(());
+            };
+            if existing.oauth.is_none() {
                 tracing::info!(
                     service = "upstream_oauth",
                     action = "callback",
-                    upstream = %upstream_for_persist,
+                    upstream = %upstream,
                     "upstream oauth callback: persisting oauth config for probe-created manager"
                 );
                 existing.oauth = Some(oauth_config);
-                if let Err(e) = manager_for_persist.persist_config(cfg).await {
-                    tracing::warn!(
-                        service = "upstream_oauth",
-                        action = "callback",
-                        upstream = upstream_for_persist,
-                        error = %e,
-                        "upstream oauth callback: failed to persist oauth config (non-fatal)"
-                    );
-                }
-            });
+                self.persist_config(cfg).await?;
+            }
         }
 
         Ok(())
@@ -546,7 +535,7 @@ impl GatewayManager {
             }
         })?;
 
-        let row = manager.credential_row(subject).await.map_err(|e| {
+        let mut row = manager.credential_row(subject).await.map_err(|e| {
             tracing::warn!(
                 service = "upstream_oauth",
                 action = "status",
@@ -562,8 +551,117 @@ impl GatewayManager {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        let authenticated = row.is_some();
-        let expires_within_5m = row.is_some_and(|row| row.access_token_expires_at - now <= 300);
+        let mut refresh_attempted = false;
+        let mut refreshed = false;
+        let mut refresh_error_kind = None;
+        let mut refresh_error = None;
+
+        if row
+            .as_ref()
+            .is_some_and(|row| row.access_token_expires_at - now <= 300)
+        {
+            refresh_attempted = true;
+            match manager.refresh_auth_client(subject).await {
+                Ok(()) => {
+                    refreshed = true;
+                    self.evict_subject_client(upstream, subject);
+                    if let Err(error) = self
+                        .reload_with_origin(Some("upstream-oauth.status.refresh"), None)
+                        .await
+                    {
+                        tracing::warn!(
+                            service = "upstream_oauth",
+                            action = "status",
+                            upstream,
+                            subject,
+                            kind = error.kind(),
+                            elapsed_ms = started.elapsed().as_millis(),
+                            "upstream oauth status: refreshed token but gateway rediscovery failed"
+                        );
+                    }
+                    row = manager.credential_row(subject).await.map_err(|e| {
+                        tracing::warn!(
+                            service = "upstream_oauth",
+                            action = "status",
+                            upstream,
+                            kind = e.kind(),
+                            elapsed_ms = started.elapsed().as_millis(),
+                            "upstream oauth status: credential lookup after refresh failed"
+                        );
+                        tool_error_from_oauth(e)
+                    })?;
+                }
+                Err(error) => {
+                    refresh_error_kind = Some(error.kind().to_string());
+                    refresh_error = Some(error.to_string());
+                    tracing::warn!(
+                        service = "upstream_oauth",
+                        action = "status",
+                        upstream,
+                        subject,
+                        kind = error.kind(),
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "upstream oauth status: proactive refresh failed"
+                    );
+                }
+            }
+        }
+
+        let (access_token_expires_at, seconds_until_expiry, refresh_token_present) = row
+            .as_ref()
+            .map(|row| {
+                (
+                    Some(row.access_token_expires_at),
+                    Some(row.access_token_expires_at - now),
+                    row.refresh_token_present,
+                )
+            })
+            .unwrap_or((None, None, false));
+        let expires_within_5m = seconds_until_expiry.is_some_and(|seconds| seconds <= 300);
+        let mut state = match (
+            row.is_some(),
+            refresh_error_kind.is_some(),
+            seconds_until_expiry,
+        ) {
+            (false, _, _) => UpstreamOauthConnectionState::Disconnected,
+            (true, true, _) => UpstreamOauthConnectionState::RefreshFailed,
+            (true, false, Some(seconds)) if seconds <= 0 => UpstreamOauthConnectionState::Expired,
+            (true, false, Some(seconds)) if seconds <= 300 => {
+                UpstreamOauthConnectionState::Expiring
+            }
+            (true, false, _) => UpstreamOauthConnectionState::Connected,
+        };
+        let authenticated = matches!(
+            state,
+            UpstreamOauthConnectionState::Connected | UpstreamOauthConnectionState::Expiring
+        );
+        let mut discovery_checked = false;
+        let mut discovered_tool_count = 0;
+        let mut exposed_tool_count = 0;
+        let mut discovery_error = None;
+
+        if authenticated {
+            discovery_checked = true;
+            let pool = match &self.oauth_client_cache {
+                Some(cache) => UpstreamPool::new().with_oauth_client_cache(cache.clone()),
+                None => UpstreamPool::new(),
+            };
+            let upstream_config = manager.upstream_config().clone();
+            pool.discover_all_for_subject(&[upstream_config], subject)
+                .await;
+            if let Some(summary) = pool.cached_upstream_summary(upstream).await {
+                discovered_tool_count = summary.discovered_tool_count;
+                exposed_tool_count = summary.exposed_tool_count;
+            }
+            if let Some(error) = pool.upstream_last_error(upstream).await {
+                discovery_error = Some(error);
+                state = UpstreamOauthConnectionState::DiscoveryFailed;
+            }
+        }
+        let authenticated = matches!(
+            state,
+            UpstreamOauthConnectionState::Connected | UpstreamOauthConnectionState::Expiring
+        );
 
         tracing::debug!(
             service = "upstream_oauth",
@@ -571,6 +669,12 @@ impl GatewayManager {
             upstream,
             authenticated,
             expires_within_5m,
+            refresh_attempted,
+            refreshed,
+            discovery_checked,
+            discovered_tool_count,
+            exposed_tool_count,
+            state = ?state,
             elapsed_ms = started.elapsed().as_millis(),
             "upstream oauth status: checked"
         );
@@ -578,6 +682,18 @@ impl GatewayManager {
             authenticated,
             upstream: upstream.to_string(),
             expires_within_5m,
+            state,
+            access_token_expires_at,
+            seconds_until_expiry,
+            refresh_token_present,
+            refresh_attempted,
+            refreshed,
+            refresh_error_kind,
+            refresh_error,
+            discovery_checked,
+            discovered_tool_count,
+            exposed_tool_count,
+            discovery_error,
         })
     }
 
@@ -627,7 +743,10 @@ impl GatewayManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{probe_manager_key, validate_probe_upstream_name, validate_probe_url};
+    use super::{
+        probe_manager_key, should_use_dynamic_registration, validate_probe_upstream_name,
+        validate_probe_url,
+    };
 
     #[test]
     fn validate_probe_url_rejects_userinfo() {
@@ -661,5 +780,12 @@ mod tests {
     fn validate_probe_upstream_name_rejects_path_like_values() {
         let error = validate_probe_upstream_name("../plex").unwrap_err();
         assert_eq!(error.kind(), "invalid_param");
+    }
+
+    #[test]
+    fn swag_uses_client_metadata_document_even_when_dynamic_registration_is_advertised() {
+        assert!(!should_use_dynamic_registration("swag", true));
+        assert!(should_use_dynamic_registration("github", true));
+        assert!(!should_use_dynamic_registration("github", false));
     }
 }

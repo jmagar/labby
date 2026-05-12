@@ -289,6 +289,8 @@ fn import_blocking(
     name: &str,
     label: Option<&str>,
 ) -> Result<StashComponent, ToolError> {
+    StashStore::validate_id(id)?;
+
     // Stat source without following symlinks.
     let source_meta = std::fs::symlink_metadata(source).map_err(|e| ToolError::Sdk {
         sdk_kind: "internal_error".into(),
@@ -366,52 +368,104 @@ fn import_blocking(
     // generate a new ULID here. store.ensure_dirs() is called by dispatch.rs before this function
     // is reached — no need to call it again here.
 
-    // Compute destination path.
-    let dst = store.workspace_path(&id, workspace_shape, filename.as_deref());
+    // Stage into a temporary sibling workspace, then swap under the component
+    // lock. This makes imports replace the workspace contents instead of
+    // overlaying stale files, and prevents saves from seeing a partial import.
+    let live_workspace = store.workspace_dir(&id);
+    let temp_workspace = live_workspace.with_file_name(format!(
+        ".{id}.import-{}",
+        ulid::Ulid::new().to_string().to_lowercase()
+    ));
+    if temp_workspace.exists() {
+        remove_workspace_dir(&temp_workspace)?;
+    }
+    let staged_dst = match workspace_shape {
+        lab_apis::stash::types::StashWorkspaceShape::File => {
+            temp_workspace.join(filename.as_deref().unwrap_or("file"))
+        }
+        lab_apis::stash::types::StashWorkspaceShape::Directory => temp_workspace.clone(),
+    };
 
-    // Copy source to workspace.
+    // Copy source to the staged workspace.
     if is_dir {
         // Single-pass walk: measure, enforce limits, reject symlinks, and copy.
         // Fixes lab-qz6a.27 (TOCTOU) and lab-qz6a.30 (double walk).
-        walk_measure_and_copy(source, &dst)?;
+        if let Err(err) = walk_measure_and_copy(source, &staged_dst) {
+            drop(remove_workspace_dir(&temp_workspace));
+            return Err(err);
+        }
     } else {
         // Ensure parent exists.
-        if let Some(parent) = dst.parent() {
+        if let Some(parent) = staged_dst.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::Sdk {
                 sdk_kind: "internal_error".into(),
                 message: format!("create_dir_all `{}`: {e}", parent.display()),
             })?;
         }
-        std::fs::copy(source, &dst).map_err(|e| ToolError::Sdk {
+        if let Err(err) = std::fs::copy(source, &staged_dst).map_err(|e| ToolError::Sdk {
             sdk_kind: "internal_error".into(),
-            message: format!("copy `{}` → `{}`: {e}", source.display(), dst.display()),
-        })?;
+            message: format!(
+                "copy `{}` → `{}`: {e}",
+                source.display(),
+                staged_dst.display()
+            ),
+        }) {
+            drop(remove_workspace_dir(&temp_workspace));
+            return Err(err);
+        }
     }
 
     // Build workspace root: the directory for dir-shaped, the file path itself
     // for file-shaped. Revision code derives filenames from workspace_root.file_name(),
     // so a file-shaped component must point at the file (not its parent directory).
-    let workspace_root = dst.clone();
+    let workspace_root = store.workspace_path(&id, workspace_shape, filename.as_deref());
 
     // Build and write component record under lock.
     let now = jiff::Timestamp::now().to_string();
-    let component = StashComponent {
-        id: id.to_string(),
-        kind,
-        name: name.to_string(),
-        label: label.map(str::to_string),
-        head_revision_id: None,
-        origin: None,
-        workspace_root,
-        workspace_shape,
-        unix_mode,
-        created_at: now.clone(),
-        updated_at: now,
-    };
+    let component = store.with_component_lock(&id, || {
+        let existing = store.read_component(&id)?;
 
-    store.with_component_lock(&id, || store.write_component(&component))?;
+        if live_workspace.exists() {
+            remove_workspace_dir(&live_workspace)?;
+        }
+        std::fs::rename(&temp_workspace, &live_workspace).map_err(|e| ToolError::Sdk {
+            sdk_kind: "internal_error".into(),
+            message: format!(
+                "rename staged workspace `{}` → `{}`: {e}",
+                temp_workspace.display(),
+                live_workspace.display()
+            ),
+        })?;
+
+        let component = StashComponent {
+            id: id.to_string(),
+            kind,
+            name: name.to_string(),
+            label: label.map(str::to_string),
+            head_revision_id: None,
+            origin: existing.as_ref().and_then(|c| c.origin.clone()),
+            workspace_root,
+            workspace_shape,
+            unix_mode,
+            created_at: existing.map_or_else(|| now.clone(), |c| c.created_at),
+            updated_at: now,
+        };
+        store.write_component(&component)?;
+        Ok(component)
+    })?;
 
     Ok(component)
+}
+
+fn remove_workspace_dir(path: &Path) -> Result<(), ToolError> {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(ToolError::Sdk {
+            sdk_kind: "internal_error".into(),
+            message: format!("remove workspace `{}`: {e}", path.display()),
+        }),
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -615,5 +669,37 @@ mod tests {
             updated_comp.head_revision_id.as_deref(),
             Some(rev.id.as_str())
         );
+    }
+
+    #[test]
+    fn import_replaces_existing_file_workspace_before_save() {
+        let (store, _dir) = make_store();
+
+        let component = super::super::service::component_create(
+            &store,
+            super::super::params::CreateParams {
+                kind: "settings".to_string(),
+                name: "my-settings".to_string(),
+                label: None,
+            },
+        )
+        .expect("component_create");
+        let id = component["id"].as_str().expect("component id").to_string();
+        assert!(store.workspace_dir(&id).join("file").exists());
+
+        let src_dir = tempdir().unwrap();
+        let src = src_dir.path().join("settings.json");
+        std::fs::write(&src, br#"{"theme": "dark"}"#).unwrap();
+
+        let comp = import_blocking(&store, &id, &src, None, "my-settings", None).unwrap();
+        assert_eq!(comp.workspace_shape, StashWorkspaceShape::File);
+        assert!(!store.workspace_dir(&id).join("file").exists());
+        assert!(store.workspace_dir(&id).join("settings.json").exists());
+
+        let rev = super::super::revision::save_revision_blocking(&store, &id, Some("v1")).unwrap();
+        assert_eq!(rev.file_count, 1);
+        let files_dir = store.revision_files_path(&rev.id);
+        assert!(files_dir.join("settings.json").exists());
+        assert!(!files_dir.join("file").exists());
     }
 }

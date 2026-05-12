@@ -27,7 +27,7 @@ export function DisableGatewayDialog({
     <AlertDialog open={Boolean(gateway)} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Disable gateway?</AlertDialogTitle>
+          <AlertDialogTitle>Disable server?</AlertDialogTitle>
           <AlertDialogDescription>
             {gateway ? (
               <>
@@ -37,7 +37,7 @@ export function DisableGatewayDialog({
                 also be requested automatically.
               </>
             ) : (
-              'This gateway will be removed from the active catalog until you re-enable it, and runtime cleanup will be requested automatically.'
+              'This server will be removed from the active catalog until you re-enable it, and runtime cleanup will be requested automatically.'
             )}
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -51,7 +51,7 @@ export function DisableGatewayDialog({
               }
             }}
           >
-            Disable gateway
+            Disable server
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

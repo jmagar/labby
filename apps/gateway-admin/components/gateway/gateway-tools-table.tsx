@@ -19,11 +19,20 @@ import {
 } from '@/components/gateway/gateway-theme'
 import type { ToolInventoryRow } from './gateway-list-state'
 
+const TOOL_RENDER_LIMIT = 300
+
 export function GatewayToolsTable({ rows }: { rows: ToolInventoryRow[] }) {
+  const renderedRows = rows.slice(0, TOOL_RENDER_LIMIT)
+
   return (
     <>
+      {rows.length > renderedRows.length ? (
+        <div className={cn(AURORA_MEDIUM_PANEL, 'mb-3 p-3 text-sm text-aurora-text-muted')}>
+          Showing the first {renderedRows.length} of {rows.length} tools. Search or filter to narrow the inventory.
+        </div>
+      ) : null}
       <div className="space-y-3 md:hidden">
-        {rows.map((row) => (
+        {renderedRows.map((row) => (
           <article key={`${row.gatewayId}:${row.toolName}`} className={cn(AURORA_MEDIUM_PANEL, 'space-y-3 p-4')}>
             <div className="space-y-1">
               <div className="flex flex-wrap items-center gap-2">
@@ -41,7 +50,7 @@ export function GatewayToolsTable({ rows }: { rows: ToolInventoryRow[] }) {
             </div>
             <div className="grid gap-2 rounded-aurora-1 border border-aurora-border-strong bg-aurora-control-surface px-3 py-3">
               <div className="flex items-center justify-between gap-3">
-                <span className={AURORA_MUTED_LABEL}>Gateway</span>
+                <span className={AURORA_MUTED_LABEL}>Server</span>
                 <span className="text-sm font-medium text-aurora-text-primary">{row.gatewayName}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
@@ -58,12 +67,12 @@ export function GatewayToolsTable({ rows }: { rows: ToolInventoryRow[] }) {
           <TableHeader>
             <TableRow className={cn('border-b border-aurora-border-strong hover:bg-inherit', AURORA_GATEWAY_SUBTLE_SURFACE)}>
               <TableHead className={cn(AURORA_MUTED_LABEL, 'px-6 py-4')}>Tool</TableHead>
-              <TableHead className={cn(AURORA_MUTED_LABEL, 'px-4 py-4')}>Gateway</TableHead>
+              <TableHead className={cn(AURORA_MUTED_LABEL, 'px-4 py-4')}>Server</TableHead>
               <TableHead className={cn(AURORA_MUTED_LABEL, 'px-4 py-4')}>State</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map((row) => (
+            {renderedRows.map((row) => (
               <TableRow
                 key={`${row.gatewayId}:${row.toolName}`}
                 className={AURORA_GATEWAY_ROW}

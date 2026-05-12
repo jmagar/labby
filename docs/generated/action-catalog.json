@@ -3391,10 +3391,35 @@
         "name": "allow_stdio",
         "ty": "boolean",
         "required": false,
-        "description": "Required when spec.command is set because reconcile starts a local command"
+        "description": "Deprecated compatibility flag; ignored by current Lab versions"
       }
     ],
     "returns": "GatewayView",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "gateway",
+    "action": "gateway.client_config.get",
+    "description": "Get the MCP client configuration JSON for one gateway",
+    "destructive": false,
+    "params": [
+      {
+        "name": "name",
+        "ty": "string",
+        "required": true,
+        "description": "Gateway name"
+      }
+    ],
+    "returns": "McpClientConfigView",
     "surface_availability": {
       "cli": true,
       "mcp": true,
@@ -3761,6 +3786,155 @@
   },
   {
     "service": "gateway",
+    "action": "gateway.protected_route.add",
+    "description": "Add a Gateway-managed protected MCP route",
+    "destructive": true,
+    "params": [
+      {
+        "name": "route",
+        "ty": "json",
+        "required": true,
+        "description": "Protected MCP route config to validate and persist"
+      }
+    ],
+    "returns": "ProtectedMcpRouteConfig",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "gateway",
+    "action": "gateway.protected_route.get",
+    "description": "Get one Gateway-managed protected MCP route",
+    "destructive": false,
+    "params": [
+      {
+        "name": "name",
+        "ty": "string",
+        "required": true,
+        "description": "Gateway name"
+      }
+    ],
+    "returns": "ProtectedMcpRouteConfig",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "gateway",
+    "action": "gateway.protected_route.list",
+    "description": "List Gateway-managed public MCP routes protected by Lab OAuth",
+    "destructive": false,
+    "params": [],
+    "returns": "ProtectedMcpRouteConfig[]",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "gateway",
+    "action": "gateway.protected_route.remove",
+    "description": "Remove a Gateway-managed protected MCP route",
+    "destructive": true,
+    "params": [
+      {
+        "name": "name",
+        "ty": "string",
+        "required": true,
+        "description": "Gateway name"
+      }
+    ],
+    "returns": "ProtectedMcpRouteConfig",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "gateway",
+    "action": "gateway.protected_route.test",
+    "description": "Validate a proposed protected MCP route without saving it",
+    "destructive": false,
+    "params": [
+      {
+        "name": "route",
+        "ty": "json",
+        "required": true,
+        "description": "Protected MCP route config to validate"
+      }
+    ],
+    "returns": "ProtectedMcpRouteTestResult",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "gateway",
+    "action": "gateway.protected_route.update",
+    "description": "Replace a Gateway-managed protected MCP route",
+    "destructive": true,
+    "params": [
+      {
+        "name": "name",
+        "ty": "string",
+        "required": true,
+        "description": "Gateway name"
+      },
+      {
+        "name": "route",
+        "ty": "json",
+        "required": true,
+        "description": "Replacement protected MCP route config"
+      }
+    ],
+    "returns": "ProtectedMcpRouteConfig",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "gateway",
     "action": "gateway.reload",
     "description": "Reload gateways from config and reconcile runtime state",
     "destructive": true,
@@ -3973,7 +4147,7 @@
         "name": "allow_stdio",
         "ty": "boolean",
         "required": false,
-        "description": "Required when testing a stdio gateway because it starts a local command"
+        "description": "Deprecated compatibility flag; ignored by current Lab versions"
       }
     ],
     "returns": "GatewayTestResult",
@@ -4071,7 +4245,7 @@
         "name": "allow_stdio",
         "ty": "boolean",
         "required": false,
-        "description": "Required when the resulting enabled gateway uses stdio because reconcile starts a local command"
+        "description": "Deprecated compatibility flag; ignored by current Lab versions"
       }
     ],
     "returns": "GatewayView",
@@ -16402,7 +16576,7 @@
     "params": [
       {
         "name": "force",
-        "ty": "bool",
+        "ty": "boolean",
         "required": false,
         "description": "Overwrite conflicting .env keys (default false)"
       }
@@ -16451,7 +16625,7 @@
       },
       {
         "name": "force",
-        "ty": "bool",
+        "ty": "boolean",
         "required": false,
         "description": "Overwrite conflicting draft keys (default false)"
       }
@@ -16476,7 +16650,7 @@
     "params": [
       {
         "name": "force",
-        "ty": "bool",
+        "ty": "boolean",
         "required": false,
         "description": "Overwrite conflicting .env keys (default false)"
       }
@@ -16538,60 +16712,17 @@
   },
   {
     "service": "setup",
-    "action": "install_plugin",
-    "description": "Install the Claude Code plugin for a registered lab service",
-    "destructive": true,
-    "params": [
-      {
-        "name": "service",
-        "ty": "string",
-        "required": true,
-        "description": "Registered lab service slug"
-      }
-    ],
-    "returns": "PluginLifecycleOutcome",
-    "surface_availability": {
-      "cli": true,
-      "mcp": true,
-      "api": true,
-      "web_ui": true
-    },
-    "requires_http_subject": false,
-    "auth_posture": "uses the selected transport auth and gateway visibility policy",
-    "inventory_scope": "global_inventory_not_active_runtime_exposure",
-    "builtin": false
-  },
-  {
-    "service": "setup",
     "action": "installed_plugins",
     "description": "List installed Claude Code lab plugins",
     "destructive": false,
     "params": [
       {
         "name": "force",
-        "ty": "bool",
+        "ty": "boolean",
         "required": false,
         "description": "Bypass the short in-process cache"
       }
     ],
-    "returns": "InstalledPlugin[]",
-    "surface_availability": {
-      "cli": true,
-      "mcp": true,
-      "api": true,
-      "web_ui": true
-    },
-    "requires_http_subject": false,
-    "auth_posture": "uses the selected transport auth and gateway visibility policy",
-    "inventory_scope": "global_inventory_not_active_runtime_exposure",
-    "builtin": false
-  },
-  {
-    "service": "setup",
-    "action": "installed_plugins",
-    "description": "List installed Claude Code lab service plugins",
-    "destructive": false,
-    "params": [],
     "returns": "InstalledPlugin[]",
     "surface_availability": {
       "cli": true,
@@ -16674,11 +16805,36 @@
   },
   {
     "service": "setup",
-    "action": "services_status",
-    "description": "Join service schema, configured-env state, and installed plugin state",
+    "action": "settings.state",
+    "description": "Return non-secret operator settings and runtime service policy state",
     "destructive": false,
     "params": [],
-    "returns": "ServiceStatus[]",
+    "returns": "SettingsState",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "settings.update",
+    "description": "Update non-secret operator settings with validation",
+    "destructive": true,
+    "params": [
+      {
+        "name": "services.built_in_upstream_apis_enabled",
+        "ty": "boolean",
+        "required": true,
+        "description": "Enable built-in upstream API service integrations"
+      }
+    ],
+    "returns": "SettingsState",
     "surface_availability": {
       "cli": true,
       "mcp": true,
@@ -16722,31 +16878,6 @@
       }
     ],
     "returns": "PluginMutationResult",
-    "surface_availability": {
-      "cli": true,
-      "mcp": true,
-      "api": true,
-      "web_ui": true
-    },
-    "requires_http_subject": false,
-    "auth_posture": "uses the selected transport auth and gateway visibility policy",
-    "inventory_scope": "global_inventory_not_active_runtime_exposure",
-    "builtin": false
-  },
-  {
-    "service": "setup",
-    "action": "uninstall_plugin",
-    "description": "Uninstall the Claude Code plugin for a registered lab service",
-    "destructive": true,
-    "params": [
-      {
-        "name": "service",
-        "ty": "string",
-        "required": true,
-        "description": "Registered lab service slug"
-      }
-    ],
-    "returns": "PluginLifecycleOutcome",
     "surface_availability": {
       "cli": true,
       "mcp": true,
