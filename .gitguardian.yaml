@@ -1,0 +1,8 @@
+version: 2
+ignore-patterns:
+  # Test-only credential-shaped strings — never real credentials
+  - filename: "**/*test*"
+    comment: "Test files may use fake credential-shaped strings for realistic token formatting"
+  - filename: "**/tests/**"
+    comment: "Integration test fixtures use fake credential-shaped strings"
+ignore-default-excludes: false
