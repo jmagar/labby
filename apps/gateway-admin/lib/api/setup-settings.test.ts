@@ -128,6 +128,10 @@ test('SettingsUpdate type accepts built_in_upstream_apis_enabled', () => {
 
 test('settingsUpdate mock response reflects the new enabled value', () => {
   function mockSettingsUpdate(patch: SettingsUpdate): SettingsState {
+    assert.ok(
+      patch.services != null && 'built_in_upstream_apis_enabled' in patch.services,
+      'patch.services.built_in_upstream_apis_enabled must be present'
+    )
     const enabled = patch.services.built_in_upstream_apis_enabled
     return {
       config_path: '~/.config/lab/config.toml',

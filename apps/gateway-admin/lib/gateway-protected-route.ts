@@ -6,9 +6,16 @@ export function normalizeProtectedPublicPath(raw: string): string {
   const trimmed = raw.trim()
   if (!trimmed) return ''
 
-  const withoutOrigin = trimmed.startsWith('http://') || trimmed.startsWith('https://')
-    ? new URL(trimmed).pathname
-    : trimmed
+  let withoutOrigin: string
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    try {
+      withoutOrigin = new URL(trimmed).pathname
+    } catch {
+      throw new Error('Enter a valid URL or a path starting with /')
+    }
+  } else {
+    withoutOrigin = trimmed
+  }
   const withSlash = withoutOrigin.startsWith('/') ? withoutOrigin : `/${withoutOrigin}`
   const normalized = withSlash.replace(/\/+/g, '/').replace(/\/$/, '')
 

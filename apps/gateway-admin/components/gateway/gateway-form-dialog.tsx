@@ -491,6 +491,9 @@ export function GatewayFormDialog({
     setOauthProbed(null)
   }, [url])
 
+  // Stdio connections don't support upstream authentication, so clear all OAuth
+  // and bearer state whenever the transport is stdio. If a protected public path
+  // is also absent we additionally reset the auth mode to 'none'.
   useEffect(() => {
     if (transport !== 'stdio') return
     if (!protectedPublicPath.trim()) {
