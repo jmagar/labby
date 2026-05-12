@@ -260,12 +260,18 @@ impl SqliteStore {
 
     /// Insert a new refresh token row, storing a SHA-256 hash of the raw token
     /// as the primary key.  The plaintext token is **never** persisted; only the
-    /// caller-returned value contains it.
+    /// caller-returned value contains it.  If an encryption key is configured,
+    /// `provider_refresh_token` is encrypted at rest before storage.
     ///
     /// Use [`rotate_refresh_token`] instead of calling this twice when replacing
     /// an existing token — that method performs the swap atomically.
     pub async fn upsert_refresh_token(&self, token: RefreshTokenRow) -> Result<(), AuthError> {
         let hash = hash_token(&token.refresh_token);
+        let encrypted_provider_rt = token
+            .provider_refresh_token
+            .as_deref()
+            .map(|raw| maybe_encrypt(self.enc_key.as_deref(), raw))
+            .transpose()?;
         self.with_conn(move |conn| {
             conn.execute(
                 "INSERT INTO refresh_tokens (
@@ -284,7 +290,7 @@ impl SqliteStore {
                     token.client_id,
                     token.subject,
                     token.scope,
-                    token.provider_refresh_token,
+                    encrypted_provider_rt,
                     token.created_at,
                     token.expires_at,
                 ],
@@ -300,6 +306,10 @@ impl SqliteStore {
     /// inserted; if the old token is not found or has expired the operation
     /// fails without inserting the new row (replay-safe).
     ///
+    /// Both the DELETE and the INSERT are wrapped in an explicit `BEGIN` /
+    /// `COMMIT` so a crash between the two statements cannot leave the database
+    /// without a valid refresh token.
+    ///
     /// Returns the newly issued `RefreshTokenRow` (with `refresh_token` set to
     /// the new plaintext value) on success.
     pub async fn rotate_refresh_token(
@@ -310,39 +320,65 @@ impl SqliteStore {
         let old_hash = hash_token(old_token);
         let new_hash = hash_token(&new_token.refresh_token);
         let now = now_unix();
+        let encrypted_provider_rt = new_token
+            .provider_refresh_token
+            .as_deref()
+            .map(|raw| maybe_encrypt(self.enc_key.as_deref(), raw))
+            .transpose()?;
         self.with_conn(move |conn| {
-            let deleted = conn
+            conn.execute_batch("BEGIN").map_err(sqlite_error)?;
+
+            let delete_result = conn
                 .execute(
                     "DELETE FROM refresh_tokens
                      WHERE refresh_token_hash = ?1
                        AND expires_at > ?2",
                     params![old_hash, now],
                 )
-                .map_err(sqlite_error)?;
+                .map_err(sqlite_error);
+
+            let deleted = match delete_result {
+                Ok(n) => n,
+                Err(e) => {
+                    let _ = conn.execute_batch("ROLLBACK");
+                    return Err(e);
+                }
+            };
 
             if deleted == 0 {
-                // Old token not found or already expired — reject.
+                // Old token not found or already expired — rollback and reject.
+                let _ = conn.execute_batch("ROLLBACK");
                 return Ok(None);
             }
 
-            conn.execute(
-                "INSERT INTO refresh_tokens (
+            let insert_result = conn
+                .execute(
+                    "INSERT INTO refresh_tokens (
                     refresh_token_hash, client_id, subject, scope,
                     provider_refresh_token, created_at, expires_at
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    new_hash,
-                    new_token.client_id,
-                    new_token.subject,
-                    new_token.scope,
-                    new_token.provider_refresh_token,
-                    new_token.created_at,
-                    new_token.expires_at,
-                ],
-            )
-            .map_err(sqlite_error)?;
+                    params![
+                        new_hash,
+                        new_token.client_id,
+                        new_token.subject,
+                        new_token.scope,
+                        encrypted_provider_rt,
+                        new_token.created_at,
+                        new_token.expires_at,
+                    ],
+                )
+                .map_err(sqlite_error);
 
-            Ok(Some(new_token))
+            match insert_result {
+                Ok(_) => {
+                    conn.execute_batch("COMMIT").map_err(sqlite_error)?;
+                    Ok(Some(new_token))
+                }
+                Err(e) => {
+                    let _ = conn.execute_batch("ROLLBACK");
+                    Err(e)
+                }
+            }
         })
         .await
     }
@@ -356,28 +392,43 @@ impl SqliteStore {
         // `refresh_token` populated (the DB never stores it).
         let plaintext = refresh_token.to_string();
         let now = now_unix();
+        let enc_key = self.enc_key.clone();
         self.with_conn(move |conn| {
-            conn.query_row(
-                "SELECT client_id, subject, scope,
+            let row = conn
+                .query_row(
+                    "SELECT client_id, subject, scope,
                         provider_refresh_token, created_at, expires_at
                  FROM refresh_tokens
                  WHERE refresh_token_hash = ?1
                    AND expires_at > ?2",
-                params![hash, now],
-                |row| {
-                    Ok(RefreshTokenRow {
-                        refresh_token: plaintext.clone(),
-                        client_id: row.get(0)?,
-                        subject: row.get(1)?,
-                        scope: row.get(2)?,
-                        provider_refresh_token: row.get(3)?,
-                        created_at: row.get(4)?,
-                        expires_at: row.get(5)?,
-                    })
-                },
-            )
-            .optional()
-            .map_err(sqlite_error)
+                    params![hash, now],
+                    |row| {
+                        Ok(RefreshTokenRow {
+                            refresh_token: plaintext.clone(),
+                            client_id: row.get(0)?,
+                            subject: row.get(1)?,
+                            scope: row.get(2)?,
+                            provider_refresh_token: row.get(3)?,
+                            created_at: row.get(4)?,
+                            expires_at: row.get(5)?,
+                        })
+                    },
+                )
+                .optional()
+                .map_err(sqlite_error)?;
+
+            // Decrypt provider_refresh_token if present and an enc key is
+            // configured.  maybe_decrypt is a no-op for plaintext values, so
+            // this is safe to call unconditionally once a row is found.
+            match row {
+                Some(mut r) => {
+                    if let Some(raw) = r.provider_refresh_token.as_deref() {
+                        r.provider_refresh_token = Some(maybe_decrypt(enc_key.as_deref(), raw)?);
+                    }
+                    Ok(Some(r))
+                }
+                None => Ok(None),
+            }
         })
         .await
     }
@@ -1111,6 +1162,17 @@ fn run_migrations(conn: &Connection) -> Result<(), AuthError> {
                 "migration v1: added refresh_token_hash column and backfilled existing rows — old plaintext tokens invalidated on next rotation"
             );
         }
+
+        // Ensure a UNIQUE index exists on refresh_token_hash so that
+        // ON CONFLICT(refresh_token_hash) works correctly on pre-existing
+        // databases where the column was added by ALTER TABLE (not declared as
+        // PRIMARY KEY).  On new databases the column is already PRIMARY KEY so
+        // this index is redundant but harmless.
+        conn.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_refresh_tokens_hash \
+             ON refresh_tokens(refresh_token_hash);",
+        )
+        .map_err(sqlite_error)?;
 
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
             .map_err(sqlite_error)?;
