@@ -193,14 +193,23 @@ async fn refresh_token_grant(
             "refresh token is not backed by an upstream refresh token".to_string(),
         ));
     };
-    let google = state.google.refresh(&provider_refresh_token).await?;
 
+    // TOCTOU fix: atomically claim the refresh token BEFORE calling Google.
+    // Two concurrent requests carrying the same token will both call
+    // find_refresh_token and both succeed, but only one will win the
+    // rotate_refresh_token DELETE.  The loser gets None here and is rejected
+    // as a replay.  If we lose the race we fail fast — no restore, no retry.
+    // If Google subsequently fails, the old token is already gone and the
+    // user must re-authenticate (acceptable: the window is tiny and retrying
+    // with a consumed token is safe to reject).
     let new_refresh_token = random_token(24)?;
     let new_expires_at = expires_at(
         now_unix(),
         state.config.refresh_token_ttl,
         "LAB_AUTH_REFRESH_TOKEN_TTL_SECS",
     )?;
+    // Rotate with the stored subject and provider token (not yet refreshed).
+    // If Google returns a new provider refresh token we update below.
     let rotated = state
         .store
         .rotate_refresh_token(
@@ -208,16 +217,16 @@ async fn refresh_token_grant(
             RefreshTokenRow {
                 refresh_token: new_refresh_token.clone(),
                 client_id: stored.client_id.clone(),
-                subject: google.subject.clone(),
+                subject: stored.subject.clone(),
                 scope: stored.scope.clone(),
-                provider_refresh_token: google.refresh_token.or(Some(provider_refresh_token)),
+                provider_refresh_token: Some(provider_refresh_token.clone()),
                 created_at: stored.created_at,
                 expires_at: new_expires_at,
             },
         )
         .await?;
     if rotated.is_none() {
-        // Token was invalidated between lookup and rotation — treat as replay.
+        // Old token not found or already expired — treat as replay.
         warn!(
             refresh_token_id = %refresh_token_id,
             client_id = %stored.client_id,
@@ -227,6 +236,29 @@ async fn refresh_token_grant(
             "refresh token has already been used or has expired".to_string(),
         ));
     }
+
+    // Now call Google. If this fails the old token is already gone; the user
+    // must re-authenticate. This is the safe failure mode — a stolen token
+    // cannot be retried by a second caller.
+    let google = state.google.refresh(&provider_refresh_token).await?;
+
+    // If Google issued a new provider refresh token, update the newly-rotated
+    // row so future refreshes use the latest upstream token.
+    if let Some(new_provider_rt) = google.refresh_token {
+        state
+            .store
+            .upsert_refresh_token(RefreshTokenRow {
+                refresh_token: new_refresh_token.clone(),
+                client_id: stored.client_id.clone(),
+                subject: google.subject.clone(),
+                scope: stored.scope.clone(),
+                provider_refresh_token: Some(new_provider_rt),
+                created_at: stored.created_at,
+                expires_at: new_expires_at,
+            })
+            .await?;
+    }
+
     info!(
         grant_type = "refresh_token",
         client_id = %stored.client_id,
