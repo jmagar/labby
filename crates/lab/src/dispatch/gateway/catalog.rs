@@ -573,7 +573,7 @@ pub const ACTIONS: &[ActionSpec] = &[
                        Merges LAB_PUBLIC_URL / LAB_MCP_GATEWAY_URL env vars over config.toml \
                        [public_urls] section and the legacy [auth].public_url field.",
         destructive: false,
-        returns: "ResolvedPublicUrls",
+        returns: "{app: string?, mcp_gateway: string?, effective_mcp_gateway: string?}",
         params: &[],
     },
 ];

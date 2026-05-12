@@ -95,5 +95,5 @@ mcp_gateway = "https://mcp.example.com"
 Read the resolved values at any time:
 
 ```bash
-labby gateway public_urls.get
+labby gateway public-urls
 ```

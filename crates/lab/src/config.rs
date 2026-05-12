@@ -823,9 +823,13 @@ pub struct AuthFileConfig {
 
 /// Resolve auth configuration from a full `LabConfig`.
 ///
-/// This is the preferred entry point. It propagates the `[public_urls].app`
-/// value as the `LAB_PUBLIC_URL` fallback when `[auth].public_url` is absent,
-/// making `[public_urls]` the canonical source of truth for the app URL.
+/// This is the preferred entry point. Precedence for the public URL is:
+/// 1. `[auth].public_url` (legacy field, preserved for backward compatibility)
+/// 2. `[public_urls].app` (canonical new location)
+/// 3. `LAB_PUBLIC_URL` env var (handled downstream by [`resolve_auth`])
+///
+/// When `[auth].public_url` is absent, `[public_urls].app` is promoted into the
+/// auth config so downstream code resolves a consistent effective URL.
 pub fn resolve_auth_for_config(cfg: &LabConfig) -> Result<auth_config::AuthConfig> {
     // Compute the effective public URL: [auth].public_url > [public_urls].app.
     // The env var LAB_PUBLIC_URL is handled downstream by resolve_auth().

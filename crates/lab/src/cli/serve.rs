@@ -18,7 +18,7 @@ use rmcp::transport::streamable_http_server::{
 use tokio::sync::mpsc;
 
 use crate::api::AppState;
-use crate::config::{LabConfig, config_toml_path, resolve_auth};
+use crate::config::{LabConfig, config_toml_path, resolve_auth_for_config};
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::gateway::manager::{GatewayManager, GatewayRuntimeHandle};
 use crate::dispatch::gateway::types::CatalogChangeNotifier;
@@ -256,7 +256,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
     let gateway_runtime = GatewayRuntimeHandle::default();
     let bearer_token = http_token();
     let auth_config =
-        resolve_auth(config.auth.as_ref()).context("invalid HTTP auth configuration")?;
+        resolve_auth_for_config(&config).context("invalid HTTP auth configuration")?;
     // SECURITY: Only log metadata — never resolved secret values.
     // Safe fields: enum names, booleans, counts. Forbidden: URL strings, token values, key material.
     tracing::info!(

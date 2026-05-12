@@ -37,6 +37,8 @@ pub enum GatewayCommand {
     ToolSearch(GatewayToolSearchArgs),
     Reload,
     Mcp(GatewayMcpArgs),
+    /// Show resolved public URL configuration (app and MCP gateway)
+    PublicUrls,
 }
 
 #[derive(Debug, Args)]
@@ -560,6 +562,7 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                     "gateway.reload".to_string(),
                     json!({ "origin": cli_origin, "owner": cli_owner }),
                 ),
+                GatewayCommand::PublicUrls => ("gateway.public_urls.get".to_string(), json!({})),
                 GatewayCommand::Mcp(_) => unreachable!("handled above"),
             };
 
