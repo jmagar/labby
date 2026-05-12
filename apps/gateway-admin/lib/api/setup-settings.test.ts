@@ -12,16 +12,18 @@ import type { SettingsState, SettingsUpdate } from './setup-client'
 function isSettingsState(v: unknown): v is SettingsState {
   if (typeof v !== 'object' || v === null) return false
   const obj = v as Record<string, unknown>
+  if (typeof obj.config_path !== 'string') return false
+  if (typeof obj.changed !== 'boolean') return false
+  if (typeof obj.restart_required !== 'boolean') return false
+  if (typeof obj.restart_note !== 'string') return false
+  // typeof null === 'object', so explicit null checks are required here.
+  if (typeof obj.services !== 'object' || obj.services === null) return false
+  if (typeof obj.surfaces !== 'object' || obj.surfaces === null) return false
+  const services = obj.services as Record<string, unknown>
   return (
-    typeof obj.config_path === 'string' &&
-    typeof obj.changed === 'boolean' &&
-    typeof obj.restart_required === 'boolean' &&
-    typeof obj.restart_note === 'string' &&
-    typeof obj.services === 'object' &&
-    typeof (obj.services as Record<string, unknown>).built_in_upstream_apis_enabled === 'boolean' &&
-    Array.isArray((obj.services as Record<string, unknown>).built_in_upstream_api_services) &&
-    Array.isArray((obj.services as Record<string, unknown>).bootstrap_services) &&
-    typeof obj.surfaces === 'object'
+    typeof services.built_in_upstream_apis_enabled === 'boolean' &&
+    Array.isArray(services.built_in_upstream_api_services) &&
+    Array.isArray(services.bootstrap_services)
   )
 }
 
@@ -180,4 +182,14 @@ test('settingsUpdate result has restart_required false when gateway is live-upda
     },
   }
   assert.equal(result.restart_required, false)
+})
+
+// ── isSettingsState null-safety guard ────────────────────────────────────────
+
+test('isSettingsState returns false when services is null', () => {
+  assert.equal(
+    isSettingsState({ services: null, surfaces: null }),
+    false,
+    'null services/surfaces must not pass the type guard',
+  )
 })
