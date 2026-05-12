@@ -428,7 +428,7 @@ export async function installServer(
     }
   }
 
-  return marketplaceMcpAction<InstallServerResult>(
+  const raw = await marketplaceMcpAction<InstallServerResult>(
     'mcp.install',
     confirmGatewayParams({
       name: params.name,
@@ -438,4 +438,22 @@ export async function installServer(
     }),
     signal,
   )
+
+  // The mcp.install action returns HTTP 200 even when individual gateway
+  // installs fail, collecting partial results rather than erroring at the
+  // transport level.  Surface any failed targets so callers see a genuine
+  // error instead of a silent success.
+  const failed = (raw.results ?? []).filter((r) => !r.ok)
+  if (failed.length > 0) {
+    const details = failed
+      .map((r) => `${r.gateway_id}: ${r.error ?? 'unknown error'}`)
+      .join('; ')
+    throw createRegistryError(
+      `mcp.install failed for ${failed.length} target(s): ${details}`,
+      502,
+      'install_failed',
+    )
+  }
+
+  return raw
 }
