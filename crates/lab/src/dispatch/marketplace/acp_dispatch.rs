@@ -967,65 +967,6 @@ async fn download_archive(url: &str, dest: &Path) -> Result<String, ToolError> {
     Ok(hex::encode(hasher.finalize()))
 }
 
-async fn open_archive_response(
-    client: &reqwest::Client,
-    url: &str,
-    max_redirects: usize,
-) -> Result<(String, reqwest::Response), ToolError> {
-    let mut current = reqwest::Url::parse(url).map_err(|e| ToolError::Sdk {
-        sdk_kind: "invalid_param".to_string(),
-        message: format!("invalid archive URL `{url}`: {e}"),
-    })?;
-
-    for redirect_count in 0..=max_redirects {
-        validate_archive_url(current.as_str())?;
-        let resp = client
-            .get(current.clone())
-            .send()
-            .await
-            .map_err(|e| ToolError::Sdk {
-                sdk_kind: "network_error".to_string(),
-                message: format!("GET {current}: {e}"),
-            })?;
-
-        if resp.status().is_success() {
-            return Ok((current.to_string(), resp));
-        }
-
-        if resp.status().is_redirection() {
-            if redirect_count == max_redirects {
-                return Err(ToolError::Sdk {
-                    sdk_kind: "network_error".to_string(),
-                    message: format!("GET {current}: too many redirects (>{max_redirects})"),
-                });
-            }
-            let location = resp
-                .headers()
-                .get(reqwest::header::LOCATION)
-                .and_then(|value| value.to_str().ok())
-                .ok_or_else(|| ToolError::Sdk {
-                    sdk_kind: "network_error".to_string(),
-                    message: format!("GET {current}: redirect missing Location header"),
-                })?;
-            current = current.join(location).map_err(|e| ToolError::Sdk {
-                sdk_kind: "network_error".to_string(),
-                message: format!("GET {current}: invalid redirect Location `{location}`: {e}"),
-            })?;
-            continue;
-        }
-
-        return Err(ToolError::Sdk {
-            sdk_kind: "network_error".to_string(),
-            message: format!("GET {current}: HTTP {}", resp.status()),
-        });
-    }
-
-    Err(ToolError::Sdk {
-        sdk_kind: "network_error".to_string(),
-        message: format!("GET {url}: too many redirects (>{max_redirects})"),
-    })
-}
-
 /// Extract `archive` into `dest_dir` using system `tar` or `unzip`.
 ///
 /// lab-zxx5.24: zip-slip defense via post-extract canonical-containment walk.
