@@ -69,12 +69,14 @@ Resolution rules (`crate::dispatch::marketplace::resolve_search_for_rest`):
 The same resolver is used by the `/v0.1/servers` GET surface — the two paths have
 identical filtering semantics.
 
-### `mcp.list` — `/v1` upstream vs `/v0.1/servers` store
+### `mcp.list` — Marketplace action and `/v0.1/servers` store
 
-`mcp.list` via the local `/v1/marketplace` action calls the upstream
-registry `/v0.1/servers` endpoint directly. Sort operates within the current
-page only. For full-dataset sort and offline availability, use the local
-`GET /v0.1/servers` store endpoint described below.
+`mcp.list` via the local `/v1/marketplace` action reads the local registry
+store and returns a bounded page. If `limit` is omitted, Marketplace uses a
+default page size of 10; the maximum accepted page size is 100. Follow
+`metadata.nextCursor` for additional pages. The wire-compatible
+`GET /v0.1/servers` endpoint reads the same local SQLite mirror and defaults
+to 20 rows per page for REST clients.
 
 ## Surface Coverage
 

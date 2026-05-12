@@ -12,7 +12,11 @@
 //! Remote install via fleet WS supports `npx` only — the device-side `DistType`
 //! has no `Uvx` or `Binary` variant.
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use serde_json::Value;
@@ -30,6 +34,11 @@ use crate::dispatch::node::send::send_rpc_to_node;
 use lab_apis::acp_registry::client::AcpRegistryClient;
 #[cfg(feature = "acp_registry")]
 use lab_apis::acp_registry::types::{Agent, BinaryAsset};
+
+#[cfg(feature = "acp_registry")]
+static BINARY_INSTALL_LOCKS: OnceLock<
+    std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+> = OnceLock::new();
 
 /// Dispatch an `agent.*` action using a freshly constructed client.
 pub async fn dispatch_acp(action: &str, params: Value) -> Result<Value, ToolError> {
@@ -454,7 +463,11 @@ async fn install_binary(
     agent_id: &str,
     asset: &BinaryAsset,
 ) -> Result<(PathBuf, String), ToolError> {
+    let expected_sha256 = expected_archive_sha256(asset)?;
     validate_archive_url(&asset.archive)?;
+
+    let install_lock = binary_install_lock(agent_id)?;
+    let _install_guard = install_lock.lock().await;
 
     let install_dir = agent_bin_dir(agent_id)?;
     std::fs::create_dir_all(&install_dir).map_err(|e| {
@@ -466,6 +479,7 @@ async fn install_binary(
         .map_err(|e| ToolError::internal_message(format!("temp archive: {e}")))?;
 
     let sha256 = download_archive(&asset.archive, tmp_archive.path()).await?;
+    verify_archive_sha256(&expected_sha256, &sha256)?;
 
     // Extract to a temp dir in the same parent so we can do an atomic move.
     let tmp_extract = tempfile::TempDir::new_in(&install_dir)
@@ -474,7 +488,7 @@ async fn install_binary(
     extract_archive(tmp_archive.path(), tmp_extract.path(), &asset.archive)?;
 
     // Locate the binary: `cmd` is like `"./my-agent"` or `"my-agent"`.
-    let binary_name = std::path::Path::new(asset.cmd.trim_start_matches("./"))
+    let binary_name = Path::new(asset.cmd.trim_start_matches("./"))
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or(asset.cmd.trim_start_matches("./"));
@@ -489,8 +503,77 @@ async fn install_binary(
 
     let dest = install_dir.join(binary_name);
 
-    // Symlink guard before writing.
-    if let Ok(meta) = std::fs::symlink_metadata(&dest)
+    install_executable_atomically(&src, &dest)?;
+
+    Ok((dest, sha256))
+}
+
+#[cfg(feature = "acp_registry")]
+fn binary_install_lock(agent_id: &str) -> Result<Arc<tokio::sync::Mutex<()>>, ToolError> {
+    let locks = BINARY_INSTALL_LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut locks = locks
+        .lock()
+        .map_err(|_| ToolError::internal_message("binary install lock poisoned"))?;
+    Ok(locks
+        .entry(agent_id.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone())
+}
+
+#[cfg(feature = "acp_registry")]
+fn expected_archive_sha256(asset: &BinaryAsset) -> Result<String, ToolError> {
+    if let Some(value) = asset.sha256.as_deref() {
+        return normalize_sha256(value, "sha256");
+    }
+    if let Some(value) = asset.digest.as_deref() {
+        return normalize_sha256(value, "digest");
+    }
+    Err(ToolError::Sdk {
+        sdk_kind: "integrity_missing".to_string(),
+        message: format!(
+            "binary archive `{}` has no SHA-256 integrity metadata; refusing install",
+            asset.archive
+        ),
+    })
+}
+
+#[cfg(feature = "acp_registry")]
+fn normalize_sha256(value: &str, field: &str) -> Result<String, ToolError> {
+    let trimmed = value.trim();
+    let hex = trimmed.strip_prefix("sha256:").unwrap_or(trimmed);
+    if hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Ok(hex.to_ascii_lowercase());
+    }
+    Err(ToolError::Sdk {
+        sdk_kind: "invalid_param".to_string(),
+        message: format!(
+            "binary archive `{field}` must be a SHA-256 digest as 64 hex chars or sha256:<hex>"
+        ),
+    })
+}
+
+#[cfg(feature = "acp_registry")]
+fn verify_archive_sha256(expected: &str, actual: &str) -> Result<(), ToolError> {
+    if expected.eq_ignore_ascii_case(actual) {
+        return Ok(());
+    }
+    Err(ToolError::Sdk {
+        sdk_kind: "integrity_mismatch".to_string(),
+        message: format!("binary archive SHA-256 mismatch: expected {expected}, got {actual}"),
+    })
+}
+
+// Note: `NamedTempFile::persist(dest)` uses `rename(2)` which is atomic on
+// Linux.  Windows `MoveFileEx` without `MOVEFILE_REPLACE_EXISTING` fails when
+// the destination exists, but Windows is not a supported platform for this
+// binary, so no cross-platform fallback is implemented.
+#[cfg(feature = "acp_registry")]
+fn install_executable_atomically(src: &Path, dest: &Path) -> Result<(), ToolError> {
+    let parent = dest
+        .parent()
+        .ok_or_else(|| ToolError::internal_message("install destination has no parent"))?;
+
+    if let Ok(meta) = std::fs::symlink_metadata(dest)
         && meta.file_type().is_symlink()
     {
         return Err(ToolError::Sdk {
@@ -502,24 +585,57 @@ async fn install_binary(
         });
     }
 
-    std::fs::copy(&src, &dest).map_err(|e| {
-        ToolError::internal_message(format!("copy binary to {}: {e}", dest.display()))
-    })?;
-
-    #[cfg(unix)]
+    let mut input = File::open(src)
+        .map_err(|e| ToolError::internal_message(format!("open {}: {e}", src.display())))?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|e| ToolError::internal_message(format!("temp executable: {e}")))?;
     {
-        // lab-zxx5.18: set exact 0o755 (rwxr-xr-x). Do NOT OR with existing
-        // permissions — that would preserve setuid/setgid bits (0o4000 /
-        // 0o2000) if they were set on the source. An attacker-controlled
-        // archive with setuid could silently install a privilege-escalation
-        // binary under ~/.lab/bin/. Explicitly clear.
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755)).map_err(|e| {
-            ToolError::internal_message(format!("chmod 0o755 {}: {e}", dest.display()))
+        let output = temp.as_file_mut();
+        std::io::copy(&mut input, output).map_err(|e| {
+            ToolError::internal_message(format!(
+                "copy {} to temp executable in {}: {e}",
+                src.display(),
+                parent.display()
+            ))
+        })?;
+        output.flush().map_err(|e| {
+            ToolError::internal_message(format!("flush temp executable {}: {e}", dest.display()))
         })?;
     }
 
-    Ok((dest, sha256))
+    #[cfg(unix)]
+    {
+        // Set exact 0o755 (rwxr-xr-x). Do not OR with source permissions:
+        // source archives may carry setuid/setgid bits.
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o755)).map_err(
+            |e| {
+                ToolError::internal_message(format!(
+                    "chmod 0o755 temp executable for {}: {e}",
+                    dest.display()
+                ))
+            },
+        )?;
+    }
+
+    temp.as_file().sync_all().map_err(|e| {
+        ToolError::internal_message(format!("fsync temp executable {}: {e}", dest.display()))
+    })?;
+    temp.persist(dest).map_err(|e| {
+        ToolError::internal_message(format!("atomic rename {}: {e}", dest.display()))
+    })?;
+    fsync_parent_dir(parent);
+    Ok(())
+}
+
+#[cfg(feature = "acp_registry")]
+fn fsync_parent_dir(parent: &Path) {
+    #[cfg(unix)]
+    if let Ok(dir) = File::open(parent) {
+        drop(dir.sync_all());
+    }
+    #[cfg(not(unix))]
+    let _ = parent;
 }
 
 /// Resolve `~/.lab/bin/<agent_id>/`.
@@ -570,11 +686,15 @@ fn validate_agent_id_for_path(agent_id: &str) -> Result<(), ToolError> {
 ///   covers `::1`)
 /// - reject common homelab private TLDs in addition to `.local`
 ///
-/// Known gap (DEFERRED): DNS rebinding is not mitigated here. The mitigation
-/// requires resolving the hostname AT CONNECT TIME and re-checking the
-/// resolved IP against the deny rules, which requires a custom
-/// `reqwest::dns::Resolve` implementation. Tracked as a follow-up.
+/// lab-qq8y.7 hardening: archive downloads resolve the host, reject blocked
+/// addresses, and pin those validated addresses into reqwest via
+/// `resolve_to_addrs` so reqwest does not perform a second DNS lookup during
+/// connect.
 fn validate_archive_url(url: &str) -> Result<(), ToolError> {
+    validated_archive_url(url).map(|_| ())
+}
+
+fn validated_archive_url(url: &str) -> Result<url::Url, ToolError> {
     const PRIVATE_SUFFIXES: &[&str] =
         &[".local", ".internal", ".lan", ".intranet", ".corp", ".home"];
 
@@ -588,46 +708,156 @@ fn validate_archive_url(url: &str) -> Result<(), ToolError> {
             message: format!("archive URL must use https, got `{}`", parsed.scheme()),
         });
     }
-    if let Some(host) = parsed.host_str() {
-        let host_lower = host.to_ascii_lowercase();
-        if host_lower == "localhost"
-            || host_lower.starts_with("127.")
-            || host_lower == "::1"
-            || host_lower == "0.0.0.0"
-            || PRIVATE_SUFFIXES.iter().any(|s| host_lower.ends_with(s))
-        {
-            return Err(ToolError::Sdk {
-                sdk_kind: "invalid_param".to_string(),
-                message: format!("archive URL host `{host}` is a local/loopback address"),
-            });
-        }
-        if let Ok(addr) = host.parse::<std::net::IpAddr>() {
-            // Normalize IPv4-mapped IPv6 (::ffff:127.0.0.1) to the underlying
-            // IPv4 so the same rules apply. Rust's stable IPv6Addr::is_loopback
-            // only matches `::1`, missing mapped-v4 loopback otherwise.
-            let addr = match addr {
-                std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
-                    Some(v4) => std::net::IpAddr::V4(v4),
-                    None => std::net::IpAddr::V6(v6),
-                },
-                other => other,
-            };
-            let is_private = match addr {
-                std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_link_local(),
-                std::net::IpAddr::V6(v6) => v6.is_unique_local() || v6.is_unicast_link_local(),
-            };
-            if is_private || addr.is_loopback() || addr.is_unspecified() {
-                return Err(ToolError::Sdk {
-                    sdk_kind: "invalid_param".to_string(),
-                    message: format!(
-                        "archive URL host `{host}` is a private/loopback/unspecified address"
-                    ),
-                });
-            }
-        }
+    let host = parsed.host_str().ok_or_else(|| ToolError::Sdk {
+        sdk_kind: "invalid_param".to_string(),
+        message: format!("archive URL has no host: {url}"),
+    })?;
+
+    let host_lower = host.to_ascii_lowercase();
+    if host_lower == "localhost"
+        || host_lower.starts_with("127.")
+        || host_lower == "::1"
+        || host_lower.contains("::ffff:")
+        || host_lower == "0.0.0.0"
+        || PRIVATE_SUFFIXES.iter().any(|s| host_lower.ends_with(s))
+    {
+        return Err(ToolError::Sdk {
+            sdk_kind: "invalid_param".to_string(),
+            message: format!("archive URL host `{host}` is a local/loopback address"),
+        });
     }
+    if let Ok(addr) = host.parse::<std::net::IpAddr>() {
+        check_archive_ip_not_private(addr, host)?;
+    }
+
+    Ok(parsed)
+}
+
+async fn archive_download_client(parsed: &url::Url) -> Result<reqwest::Client, ToolError> {
+    let host = parsed.host_str().ok_or_else(|| ToolError::Sdk {
+        sdk_kind: "invalid_param".to_string(),
+        message: format!("archive URL has no host: {parsed}"),
+    })?;
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let addrs = resolve_archive_host(host, port).await?;
+
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .resolve_to_addrs(host, &addrs)
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| ToolError::internal_message(format!("build http client: {e}")))
+}
+
+async fn resolve_archive_host(
+    host: &str,
+    port: u16,
+) -> Result<Vec<std::net::SocketAddr>, ToolError> {
+    let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|e| ToolError::Sdk {
+            sdk_kind: "network_error".to_string(),
+            message: format!("resolve archive URL host `{host}`: {e}"),
+        })?
+        .collect();
+
+    if addrs.is_empty() {
+        return Err(ToolError::Sdk {
+            sdk_kind: "network_error".to_string(),
+            message: format!("resolve archive URL host `{host}` returned no addresses"),
+        });
+    }
+
+    for addr in &addrs {
+        check_archive_ip_not_private(addr.ip(), host)?;
+    }
+
+    Ok(addrs)
+}
+
+fn check_archive_ip_not_private(ip: std::net::IpAddr, host: &str) -> Result<(), ToolError> {
+    let normalized = match ip {
+        std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => std::net::IpAddr::V4(v4),
+            None => std::net::IpAddr::V6(v6),
+        },
+        other => other,
+    };
+
+    let blocked = match normalized {
+        std::net::IpAddr::V4(v4) => {
+            let octets = v4.octets();
+            v4.is_private()
+                || v4.is_link_local()
+                || v4.is_loopback()
+                || v4.is_unspecified()
+                || (octets[0] == 100 && (64..=127).contains(&octets[1]))
+        }
+        std::net::IpAddr::V6(v6) => {
+            v6.is_unique_local()
+                || v6.is_unicast_link_local()
+                || v6.is_loopback()
+                || v6.is_unspecified()
+        }
+    };
+
+    if blocked {
+        return Err(ToolError::Sdk {
+            sdk_kind: "ssrf_blocked".to_string(),
+            message: format!(
+                "archive URL host `{host}` resolves to private/loopback/link-local address {ip}; blocked to prevent SSRF"
+            ),
+        });
+    }
+
     Ok(())
 }
+
+async fn cleanup_partial_archive(dest: &Path, action: &'static str) {
+    if let Err(e) = tokio::fs::remove_file(dest).await {
+        tracing::warn!(
+            surface = "dispatch",
+            service = "marketplace",
+            action,
+            path = %dest.display(),
+            error = %e,
+            "download-cleanup remove_file failed; partial archive retained"
+        );
+    }
+}
+
+fn archive_size_error(url: &str, size: u64) -> ToolError {
+    ToolError::Sdk {
+        sdk_kind: "content_too_large".to_string(),
+        message: format!("download of {url} exceeded maximum ACP archive size of {size} bytes"),
+    }
+}
+
+fn enforce_archive_size_limit(
+    downloaded: &mut u64,
+    chunk_len: usize,
+    url: &str,
+) -> Result<(), ToolError> {
+    let chunk_len =
+        u64::try_from(chunk_len).map_err(|_| archive_size_error(url, MAX_ACP_ARCHIVE_BYTES))?;
+    let next = downloaded
+        .checked_add(chunk_len)
+        .ok_or_else(|| archive_size_error(url, MAX_ACP_ARCHIVE_BYTES))?;
+    if next > MAX_ACP_ARCHIVE_BYTES {
+        return Err(archive_size_error(url, MAX_ACP_ARCHIVE_BYTES));
+    }
+    *downloaded = next;
+    Ok(())
+}
+
+/// Maximum bytes accepted for one ACP binary archive download.
+///
+/// The registry distributes small agent adapters; 256 MiB leaves enough room
+/// for bundled runtimes while preventing unbounded disk growth from hostile or
+/// misconfigured archive URLs. Oversized streams are aborted and partial files
+/// are removed before surfacing the error.
+const MAX_ACP_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Download `url` to `dest`, return the hex SHA-256 of the downloaded bytes.
 ///
@@ -640,7 +870,7 @@ fn validate_archive_url(url: &str) -> Result<(), ToolError> {
 /// returned. This is separate from the overall reqwest timeout, which
 /// caps the total duration; the watchdog catches a stalled connection
 /// that's neither fast-failing nor completing.
-async fn download_archive(url: &str, dest: &std::path::Path) -> Result<String, ToolError> {
+async fn download_archive(url: &str, dest: &Path) -> Result<String, ToolError> {
     use futures::StreamExt;
     use sha2::{Digest, Sha256};
     use tokio::io::AsyncWriteExt;
@@ -649,14 +879,25 @@ async fn download_archive(url: &str, dest: &std::path::Path) -> Result<String, T
     /// from the overall `.timeout()` — catches stalled connections.
     const DOWNLOAD_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-    const MAX_DOWNLOAD_REDIRECTS: usize = 5;
+    let parsed = validated_archive_url(url)?;
+    let client = archive_download_client(&parsed).await?;
 
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(300))
-        .build()
-        .map_err(|e| ToolError::internal_message(format!("build http client: {e}")))?;
-    let (download_url, resp) = open_archive_response(&client, url, MAX_DOWNLOAD_REDIRECTS).await?;
+    let resp = client.get(url).send().await.map_err(|e| ToolError::Sdk {
+        sdk_kind: "network_error".to_string(),
+        message: format!("GET {url}: {e}"),
+    })?;
+
+    if !resp.status().is_success() {
+        return Err(ToolError::Sdk {
+            sdk_kind: "network_error".to_string(),
+            message: format!("GET {url}: HTTP {}", resp.status()),
+        });
+    }
+    if let Some(content_length) = resp.content_length()
+        && content_length > MAX_ACP_ARCHIVE_BYTES
+    {
+        return Err(archive_size_error(url, MAX_ACP_ARCHIVE_BYTES));
+    }
 
     let mut file = tokio::fs::File::create(dest)
         .await
@@ -664,6 +905,7 @@ async fn download_archive(url: &str, dest: &std::path::Path) -> Result<String, T
 
     let mut hasher = Sha256::new();
     let mut stream = resp.bytes_stream();
+    let mut downloaded = 0_u64;
 
     loop {
         // Watchdog: each chunk fetch is wrapped in a stall timeout. A download
@@ -673,8 +915,13 @@ async fn download_archive(url: &str, dest: &std::path::Path) -> Result<String, T
             Ok(Some(chunk_result)) => {
                 let chunk = chunk_result.map_err(|e| ToolError::Sdk {
                     sdk_kind: "network_error".to_string(),
-                    message: format!("read body chunk from {download_url}: {e}"),
+                    message: format!("read body chunk from {url}: {e}"),
                 })?;
+                if let Err(e) = enforce_archive_size_limit(&mut downloaded, chunk.len(), url) {
+                    drop(file);
+                    cleanup_partial_archive(dest, "download_archive.size.cleanup").await;
+                    return Err(e);
+                }
                 hasher.update(&chunk);
                 file.write_all(&chunk).await.map_err(|e| {
                     ToolError::internal_message(format!("write chunk to {}: {e}", dest.display()))
@@ -694,20 +941,11 @@ async fn download_archive(url: &str, dest: &std::path::Path) -> Result<String, T
                 // visibility into orphan tempfiles. Don't promote to fatal —
                 // the install_timeout is the primary signal.
                 drop(file);
-                if let Err(e) = tokio::fs::remove_file(dest).await {
-                    tracing::warn!(
-                        surface = "dispatch",
-                        service = "marketplace",
-                        action = "download_archive.stall.cleanup",
-                        path = %dest.display(),
-                        error = %e,
-                        "stall-cleanup remove_file failed; partial archive retained"
-                    );
-                }
+                cleanup_partial_archive(dest, "download_archive.stall.cleanup").await;
                 return Err(ToolError::Sdk {
                     sdk_kind: "install_timeout".to_string(),
                     message: format!(
-                        "download of {download_url} stalled for more than {:?}; aborted",
+                        "download of {url} stalled for more than {:?}; aborted",
                         DOWNLOAD_STALL_TIMEOUT
                     ),
                 });
@@ -729,65 +967,6 @@ async fn download_archive(url: &str, dest: &std::path::Path) -> Result<String, T
     Ok(hex::encode(hasher.finalize()))
 }
 
-async fn open_archive_response(
-    client: &reqwest::Client,
-    url: &str,
-    max_redirects: usize,
-) -> Result<(String, reqwest::Response), ToolError> {
-    let mut current = reqwest::Url::parse(url).map_err(|e| ToolError::Sdk {
-        sdk_kind: "invalid_param".to_string(),
-        message: format!("invalid archive URL `{url}`: {e}"),
-    })?;
-
-    for redirect_count in 0..=max_redirects {
-        validate_archive_url(current.as_str())?;
-        let resp = client
-            .get(current.clone())
-            .send()
-            .await
-            .map_err(|e| ToolError::Sdk {
-                sdk_kind: "network_error".to_string(),
-                message: format!("GET {current}: {e}"),
-            })?;
-
-        if resp.status().is_success() {
-            return Ok((current.to_string(), resp));
-        }
-
-        if resp.status().is_redirection() {
-            if redirect_count == max_redirects {
-                return Err(ToolError::Sdk {
-                    sdk_kind: "network_error".to_string(),
-                    message: format!("GET {current}: too many redirects (>{max_redirects})"),
-                });
-            }
-            let location = resp
-                .headers()
-                .get(reqwest::header::LOCATION)
-                .and_then(|value| value.to_str().ok())
-                .ok_or_else(|| ToolError::Sdk {
-                    sdk_kind: "network_error".to_string(),
-                    message: format!("GET {current}: redirect missing Location header"),
-                })?;
-            current = current.join(location).map_err(|e| ToolError::Sdk {
-                sdk_kind: "network_error".to_string(),
-                message: format!("GET {current}: invalid redirect Location `{location}`: {e}"),
-            })?;
-            continue;
-        }
-
-        return Err(ToolError::Sdk {
-            sdk_kind: "network_error".to_string(),
-            message: format!("GET {current}: HTTP {}", resp.status()),
-        });
-    }
-
-    Err(ToolError::Sdk {
-        sdk_kind: "network_error".to_string(),
-        message: format!("GET {url}: too many redirects (>{max_redirects})"),
-    })
-}
-
 /// Extract `archive` into `dest_dir` using system `tar` or `unzip`.
 ///
 /// lab-zxx5.24: zip-slip defense via post-extract canonical-containment walk.
@@ -803,11 +982,7 @@ async fn open_archive_response(
 ///    success,
 /// 3. Post-extract, walk `dest_dir` and count files. If the count falls
 ///    below the expected minimum, fail closed.
-fn extract_archive(
-    archive: &std::path::Path,
-    dest_dir: &std::path::Path,
-    url: &str,
-) -> Result<(), ToolError> {
+fn extract_archive(archive: &Path, dest_dir: &Path, url: &str) -> Result<(), ToolError> {
     let archive_s = archive.to_string_lossy();
     let dest_s = dest_dir.to_string_lossy();
 
@@ -894,7 +1069,7 @@ fn extract_archive(
 /// Used by `extract_archive` as a pre-flight expectation. We count only
 /// regular-file-looking entries, not directories, to stay consistent with
 /// the post-extract walk in `validate_no_escape`.
-fn list_archive_file_count(archive: &std::path::Path, url: &str) -> Result<usize, ToolError> {
+fn list_archive_file_count(archive: &Path, url: &str) -> Result<usize, ToolError> {
     let archive_s = archive.to_string_lossy();
     let output = if url.ends_with(".zip") {
         // `unzip -Z -1` prints one entry per line; trailing `/` indicates a dir.
@@ -945,10 +1120,7 @@ fn list_archive_file_count(archive: &std::path::Path, url: &str) -> Result<usize
 /// an attacker-crafted permission-denied entry could evade rejection. A
 /// stat failure in a security-critical walk is treated as a refusal to
 /// validate the tree.
-fn validate_no_escape(
-    canonical_root: &std::path::Path,
-    dir: &std::path::Path,
-) -> Result<usize, ToolError> {
+fn validate_no_escape(canonical_root: &Path, dir: &Path) -> Result<usize, ToolError> {
     let rd = std::fs::read_dir(dir).map_err(|e| ToolError::Sdk {
         sdk_kind: "internal_error".to_string(),
         message: format!("walk extract dir {}: {e}", dir.display()),
@@ -998,7 +1170,7 @@ fn validate_no_escape(
 }
 
 /// Walk `dir` recursively to find the first file whose name matches `binary_name`.
-fn find_binary_in_dir(dir: &std::path::Path, binary_name: &str) -> Option<PathBuf> {
+fn find_binary_in_dir(dir: &Path, binary_name: &str) -> Option<PathBuf> {
     let entries = std::fs::read_dir(dir).ok()?;
     for entry in entries.flatten() {
         let path = entry.path();
@@ -1075,5 +1247,165 @@ mod tests {
         ] {
             assert!(source.contains(required), "missing {required}");
         }
+    }
+
+    #[cfg(feature = "acp_registry")]
+    #[test]
+    fn binary_asset_without_integrity_metadata_fails_closed() {
+        let asset = BinaryAsset {
+            archive: "https://example.com/agent.tar.gz".to_string(),
+            sha256: None,
+            digest: None,
+            cmd: "./agent".to_string(),
+            args: Vec::new(),
+        };
+
+        let err = expected_archive_sha256(&asset).expect_err("missing integrity must fail");
+
+        assert_eq!(err.kind(), "integrity_missing");
+    }
+
+    #[cfg(feature = "acp_registry")]
+    #[test]
+    fn binary_asset_digest_metadata_is_normalized() {
+        let asset = BinaryAsset {
+            archive: "https://example.com/agent.tar.gz".to_string(),
+            sha256: None,
+            digest: Some(format!("sha256:{}", "A".repeat(64))),
+            cmd: "./agent".to_string(),
+            args: Vec::new(),
+        };
+
+        let expected = expected_archive_sha256(&asset).expect("valid digest");
+
+        assert_eq!(expected, "a".repeat(64));
+    }
+
+    #[cfg(feature = "acp_registry")]
+    #[test]
+    fn digest_mismatch_verification_helper_fails() {
+        let expected = "a".repeat(64);
+        let actual = "b".repeat(64);
+
+        let err = verify_archive_sha256(&expected, &actual).expect_err("mismatch must fail");
+
+        assert_eq!(err.kind(), "integrity_mismatch");
+    }
+
+    #[test]
+    fn archive_url_rejects_local_and_private_hosts() {
+        for url in [
+            "http://example.com/agent.tar.gz",
+            "https://agent.local/agent.tar.gz",
+            "https://127.0.0.1/agent.tar.gz",
+            "https://[::ffff:127.0.0.1]/agent.tar.gz",
+        ] {
+            let err = validate_archive_url(url).expect_err(url);
+            assert_eq!(err.kind(), "invalid_param");
+        }
+
+        for url in ["https://192.168.1.20/agent.tar.gz"] {
+            let err = validate_archive_url(url).expect_err(url);
+            assert_eq!(err.kind(), "ssrf_blocked");
+        }
+    }
+
+    #[test]
+    fn archive_resolved_addresses_reject_private_and_rebound_ranges() {
+        for ip in [
+            "10.0.0.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "::1",
+            "fc00::1",
+            "fe80::1",
+            "::ffff:169.254.169.254",
+        ] {
+            let err = check_archive_ip_not_private(ip.parse().expect(ip), "registry.example.com")
+                .expect_err(ip);
+
+            assert_eq!(err.kind(), "ssrf_blocked");
+        }
+    }
+
+    #[test]
+    fn archive_size_limit_rejects_oversized_stream() {
+        let mut downloaded = MAX_ACP_ARCHIVE_BYTES - 1;
+        let err =
+            enforce_archive_size_limit(&mut downloaded, 2, "https://example.com/agent.tar.gz")
+                .expect_err("oversized archive must fail");
+
+        assert_eq!(err.kind(), "content_too_large");
+        assert_eq!(downloaded, MAX_ACP_ARCHIVE_BYTES - 1);
+    }
+
+    #[tokio::test]
+    async fn oversized_archive_cleanup_removes_partial_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let partial = dir.path().join("agent.tar.gz.partial");
+        tokio::fs::write(&partial, b"partial archive")
+            .await
+            .expect("write partial");
+
+        cleanup_partial_archive(&partial, "test.cleanup").await;
+
+        assert!(
+            tokio::fs::metadata(&partial).await.is_err(),
+            "partial archive should be removed"
+        );
+    }
+
+    #[cfg(feature = "acp_registry")]
+    #[test]
+    fn install_executable_atomically_replaces_file_contents() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let src = dir.path().join("src-agent");
+        let dest = dir.path().join("agent");
+        std::fs::write(&src, b"new agent").expect("write src");
+        std::fs::write(&dest, b"old agent").expect("write dest");
+
+        install_executable_atomically(&src, &dest).expect("atomic install");
+
+        assert_eq!(std::fs::read(&dest).expect("read dest"), b"new agent");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&dest)
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o755);
+        }
+    }
+
+    #[test]
+    fn provider_config_is_written_after_binary_install_returns() {
+        let source = include_str!("acp_dispatch.rs");
+        let install_pos = source
+            .find("let (cmd_path, digest) = install_binary(agent_id, asset).await?;")
+            .expect("install_binary call");
+        let upsert_pos = source
+            .find("upsert_provider(&entry)?;")
+            .expect("upsert_provider call");
+
+        assert!(
+            install_pos < upsert_pos,
+            "provider config must be written only after install_binary succeeds"
+        );
+    }
+
+    #[test]
+    fn archive_download_client_disables_proxy_dns_bypass() {
+        let source = include_str!("acp_dispatch.rs");
+        let no_proxy_pos = source.find(".no_proxy()").expect("no_proxy hardening");
+        let pin_pos = source
+            .find(".resolve_to_addrs(host, &addrs)")
+            .expect("resolved address pinning");
+
+        assert!(
+            no_proxy_pos < pin_pos,
+            "archive downloads must disable proxies before pinning resolved addresses"
+        );
     }
 }

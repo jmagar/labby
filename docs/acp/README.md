@@ -176,6 +176,10 @@ Landed:
   cookie auth alone.
 - ACP Registry installs validate `agent_id` before any path is constructed,
   blocking traversal and shell metacharacter injection in install dirs.
+- ACP Registry binary installs accept HTTPS archives only, reject local/private
+  archive hosts before download, pin validated resolved addresses into the
+  download client, and abort streams above the documented 256 MiB archive cap
+  while removing partial files.
 - Provider subprocesses spawn with `env_clear()` and a fixed allowlist
   (`PATH`, `HOME`, locale vars, terminal vars, Windows `SystemRoot`). Per-
   provider entries can extend this allowlist explicitly via the structured

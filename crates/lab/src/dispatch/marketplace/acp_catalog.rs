@@ -27,7 +27,7 @@ pub const ACP_ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "agent.install",
-        description: "Install an ACP agent on one or more devices. Writes a provider entry to `~/.lab/acp-providers.json`. Binary distributions are not yet supported in this build; npx/uvx distributions are config-only.",
+        description: "Install an ACP agent on one or more devices. Local installs write a provider entry to `~/.lab/acp-providers.json`; binary archives are downloaded only over HTTPS, SHA-256 verified, size-limited, and installed atomically.",
         destructive: true,
         returns: "InstallResults",
         params: &[

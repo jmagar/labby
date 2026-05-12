@@ -38,15 +38,84 @@ function marketplaceAction<T>(action: string, params: object, signal?: AbortSign
 
 export interface McpListResult {
   servers: McpServer[]
+  metadata?: {
+    count?: number
+    nextCursor?: string | null
+  }
+}
+
+export interface McpListOptions {
+  limit?: number
+  cursor?: string | null
+}
+
+const MCP_LIST_PAGE_SIZE = 20
+// Generous upper bound to prevent runaway pagination.  The real protection
+// against infinite loops is the seen-cursor set (stalled-cursor guard) and
+// the empty-page-with-cursor guard, both of which throw before this cap is
+// reached for any well-behaved registry.  Raising this to 10 000 pages
+// (200 000 servers at page size 20) removes the artificial 2 000-server
+// ceiling without disabling the loop guard entirely.
+const MCP_LIST_MAX_PAGES = 10_000
+
+export async function listMcpServersPage(
+  options: McpListOptions = {},
+  signal?: AbortSignal,
+): Promise<McpListResult> {
+  if (USE_MOCK_DATA) {
+    signal?.throwIfAborted?.()
+    const limit = options.limit ?? MCP_LIST_PAGE_SIZE
+    const offset = options.cursor ? Number.parseInt(options.cursor, 10) : 0
+    const servers = structuredClone(MOCK_MCP_SERVERS).slice(offset, offset + limit)
+    const nextCursor = offset + limit < MOCK_MCP_SERVERS.length ? String(offset + limit) : null
+    return { servers, metadata: { count: servers.length, nextCursor } }
+  }
+  const params: Record<string, string | number> = { limit: options.limit ?? MCP_LIST_PAGE_SIZE }
+  if (options.cursor) params.cursor = options.cursor
+  return marketplaceAction<McpListResult>('mcp.list', params, signal)
 }
 
 export async function listMcpServers(signal?: AbortSignal): Promise<McpServer[]> {
-  if (USE_MOCK_DATA) {
-    signal?.throwIfAborted?.()
-    return structuredClone(MOCK_MCP_SERVERS)
-  }
-  const res = await marketplaceAction<McpListResult>('mcp.list', {}, signal)
-  return res.servers ?? []
+  const servers: McpServer[] = []
+  let cursor: string | null | undefined = null
+  const seenCursors = new Set<string>()
+  let pageCount = 0
+
+  do {
+    pageCount += 1
+    if (pageCount > MCP_LIST_MAX_PAGES) {
+      throw new MarketplaceError(
+        `Marketplace MCP registry pagination exceeded ${MCP_LIST_MAX_PAGES} pages`,
+        502,
+        'pagination_limit_exceeded',
+      )
+    }
+
+    const res = await listMcpServersPage({ limit: MCP_LIST_PAGE_SIZE, cursor }, signal)
+    const pageServers = res.servers ?? []
+    servers.push(...pageServers)
+    const nextCursor = res.metadata?.nextCursor ?? null
+    if (nextCursor) {
+      if (pageServers.length === 0) {
+        throw new MarketplaceError(
+          `Marketplace MCP registry returned empty page with next cursor ${nextCursor}`,
+          502,
+          'pagination_empty_page',
+        )
+      }
+      if (seenCursors.has(nextCursor)) {
+        throw new MarketplaceError(
+          `Marketplace MCP registry pagination cursor did not advance: ${nextCursor}`,
+          502,
+          'pagination_cursor_stalled',
+        )
+      }
+      seenCursors.add(nextCursor)
+    }
+    cursor = nextCursor
+  } while (cursor)
+
+  return servers
 }
 
 export async function getMcpServer(name: string, signal?: AbortSignal): Promise<McpServer> {
