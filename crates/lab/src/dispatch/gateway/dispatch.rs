@@ -2130,3 +2130,111 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod discovery_shape_tests {
+    use std::collections::HashSet;
+
+    use crate::config::UpstreamConfig;
+    use crate::dispatch::gateway::discovery::DiscoveredServer;
+    use crate::dispatch::gateway::params::GatewayDiscoverParams;
+    use crate::dispatch::gateway::types::McpClientTransportType;
+
+    use super::shape_discovered_views;
+
+    fn upstream_fixture(
+        name: &str,
+        url: Option<String>,
+        command: Option<String>,
+    ) -> UpstreamConfig {
+        UpstreamConfig {
+            name: name.to_string(),
+            enabled: false,
+            url,
+            bearer_token_env: None,
+            command,
+            args: Vec::new(),
+            env: std::collections::BTreeMap::new(),
+            proxy_resources: false,
+            proxy_prompts: false,
+            expose_tools: None,
+            expose_resources: None,
+            expose_prompts: None,
+            oauth: None,
+            imported_from: None,
+            tool_search: crate::config::ToolSearchConfig::default(),
+        }
+    }
+
+    fn make_http_server(name: &str, url: &str) -> DiscoveredServer {
+        DiscoveredServer {
+            name: name.to_string(),
+            spec: upstream_fixture(name, Some(url.to_string()), None),
+            source_client: "test".to_string(),
+            source_path: "/tmp/test.json".to_string(),
+            env_key_count: 0,
+        }
+    }
+
+    fn make_stdio_server(name: &str, command: &str) -> DiscoveredServer {
+        DiscoveredServer {
+            name: name.to_string(),
+            spec: upstream_fixture(name, None, Some(command.to_string())),
+            source_client: "test".to_string(),
+            source_path: "/tmp/test.json".to_string(),
+            env_key_count: 2,
+        }
+    }
+
+    #[test]
+    fn http_server_gets_http_transport() {
+        let views = shape_discovered_views(
+            vec![make_http_server("srv", "https://example.com/mcp")],
+            &HashSet::new(),
+            &GatewayDiscoverParams::default(),
+        );
+        assert_eq!(views.len(), 1);
+        assert!(matches!(views[0].transport, McpClientTransportType::Http));
+        assert!(views[0].command_preview.is_none());
+    }
+
+    #[test]
+    fn stdio_server_gets_stdio_transport_and_command_preview() {
+        let views = shape_discovered_views(
+            vec![make_stdio_server("srv", "npx @some/mcp-server")],
+            &HashSet::new(),
+            &GatewayDiscoverParams::default(),
+        );
+        assert_eq!(views.len(), 1);
+        assert!(matches!(views[0].transport, McpClientTransportType::Stdio));
+        assert_eq!(views[0].command_preview.as_deref(), Some("npx"));
+    }
+
+    #[test]
+    fn already_configured_flag_set_when_name_in_existing() {
+        let mut existing = HashSet::new();
+        existing.insert("known-server".to_string());
+        let views = shape_discovered_views(
+            vec![make_http_server("known-server", "https://h/m")],
+            &existing,
+            &GatewayDiscoverParams {
+                include_existing: true,
+                clients: vec![],
+            },
+        );
+        assert_eq!(views.len(), 1);
+        assert!(views[0].already_configured);
+    }
+
+    #[test]
+    fn include_existing_false_filters_out_configured_servers() {
+        let mut existing = HashSet::new();
+        existing.insert("known-server".to_string());
+        let views = shape_discovered_views(
+            vec![make_http_server("known-server", "https://h/m")],
+            &existing,
+            &GatewayDiscoverParams::default(), // include_existing defaults to false
+        );
+        assert!(views.is_empty());
+    }
+}
