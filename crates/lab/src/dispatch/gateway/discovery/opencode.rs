@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use crate::dispatch::helpers::env_non_empty;
+
 use super::{DiscoveredServer, entry_to_upstream, env_key_count, read_json};
 
 /// OpenCode uses the `mcp` key only (no root fallback, no `mcpServers`).
@@ -34,13 +36,17 @@ pub fn discover(home: &Path) -> Vec<DiscoveredServer> {
 fn candidate_paths(home: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
-    // Env override
-    if let Ok(p) = std::env::var("OPENCODE_CONFIG") {
+    // Env override — reject empty strings; an empty OPENCODE_CONFIG would produce
+    // PathBuf::from("") which silently returns ENOENT, suppressing all discovery.
+    if let Some(p) = env_non_empty("OPENCODE_CONFIG") {
         paths.push(PathBuf::from(p));
         return paths; // explicit override wins
     }
 
-    let config_dir = std::env::var("OPENCODE_CONFIG_DIR").ok().map(PathBuf::from);
+    let config_dir = std::env::var("OPENCODE_CONFIG_DIR")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
 
     if let Some(ref dir) = config_dir {
         paths.push(dir.join("opencode.jsonc"));
