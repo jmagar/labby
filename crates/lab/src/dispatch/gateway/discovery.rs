@@ -230,11 +230,7 @@ pub(crate) fn entry_to_upstream(
         expose_resources: None,
         expose_prompts: None,
         oauth: None,
-        imported_from: Some(ImportSource {
-            client: source_client.to_string(),
-            path: source_path.to_string(),
-            imported_at: imported_at.to_string(),
-        }),
+        imported_from: Some(ImportSource::new(source_client, source_path, imported_at)),
         tool_search: Default::default(),
     })
 }

@@ -460,6 +460,24 @@ pub struct ImportSource {
     pub imported_at: String,
 }
 
+impl ImportSource {
+    pub fn new(
+        client: impl Into<String>,
+        path: impl Into<String>,
+        imported_at: impl Into<String>,
+    ) -> Self {
+        Self {
+            client: client.into(),
+            path: path.into(),
+            imported_at: imported_at.into(),
+        }
+    }
+
+    pub fn now(client: impl Into<String>, path: impl Into<String>) -> Self {
+        Self::new(client, path, jiff::Timestamp::now().to_string())
+    }
+}
+
 /// Configuration for a single upstream MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpstreamConfig {
