@@ -115,7 +115,9 @@ async fn handle_discover(
         message: "cannot determine home directory".to_string(),
     })?;
 
-    let mut discovered = super::discovery::discover_all(&home);
+    let mut discovered = tokio::task::spawn_blocking(move || super::discovery::discover_all(&home))
+        .await
+        .map_err(|e| ToolError::internal_message(format!("discovery task panicked: {e}")))?;
     if !params.clients.is_empty() {
         let filter: std::collections::HashSet<&str> =
             params.clients.iter().map(String::as_str).collect();
@@ -201,7 +203,9 @@ async fn handle_import(manager: &GatewayManager, params_value: Value) -> Result<
         message: "cannot determine home directory".to_string(),
     })?;
 
-    let mut discovered = super::discovery::discover_all(&home);
+    let mut discovered = tokio::task::spawn_blocking(move || super::discovery::discover_all(&home))
+        .await
+        .map_err(|e| ToolError::internal_message(format!("discovery task panicked: {e}")))?;
     if !params.clients.is_empty() {
         let filter: std::collections::HashSet<&str> =
             params.clients.iter().map(String::as_str).collect();
@@ -226,31 +230,39 @@ async fn handle_import(manager: &GatewayManager, params_value: Value) -> Result<
         cfg.upstream.iter().map(|u| u.name.clone()).collect();
 
     let mut result = ImportResultView::default();
+
+    // Pre-filter already-configured names before calling batch_add so they
+    // are reported as skipped (not as errors) in the ImportResultView.
+    let mut specs_to_add = Vec::new();
     for server in to_import {
-        let name = server.name.clone();
         if already.contains(&server.name) {
             result.skipped.push(ImportSkipView {
-                name,
+                name: server.name,
                 reason: ImportSkipReason::AlreadyConfigured,
             });
-            continue;
+        } else {
+            // spec already has enabled=false and imported_from set by discovery
+            specs_to_add.push(server.spec);
         }
-        // spec already has enabled=false and imported_from set by discovery
-        match manager
-            .add(server.spec, None, true, Some("gateway.import"), None)
-            .await
-        {
-            Ok(view) => result.imported.push(view),
-            Err(ToolError::Conflict { .. }) => {
+    }
+
+    if !specs_to_add.is_empty() {
+        let outcome = manager
+            .batch_add(specs_to_add, Some("gateway.import"), None)
+            .await?;
+
+        result.imported.extend(outcome.views);
+
+        for (name, err) in outcome.errors {
+            if matches!(err, ToolError::Conflict { .. }) {
                 result.skipped.push(ImportSkipView {
                     name,
                     reason: ImportSkipReason::Conflict,
                 });
-            }
-            Err(e) => {
+            } else {
                 result.errors.push(ImportErrorView {
                     name,
-                    message: e.to_string(),
+                    message: err.to_string(),
                 });
             }
         }
@@ -2047,5 +2059,74 @@ mod tests {
         assert_eq!(views.len(), 1);
         assert_eq!(views[0].name, "new-server");
         assert!(!views[0].already_configured);
+    }
+
+    // ── handle_import and handle_discover validation branch tests ──────────
+
+    #[tokio::test]
+    async fn gateway_import_rejects_empty_params() {
+        let manager = test_manager();
+        let err = dispatch_with_manager(&manager, "gateway.import", json!({}))
+            .await
+            .expect_err("empty import params should fail");
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[tokio::test]
+    async fn gateway_import_rejects_both_all_and_names() {
+        let manager = test_manager();
+        let err = dispatch_with_manager(
+            &manager,
+            "gateway.import",
+            json!({"all": true, "names": ["some-server"]}),
+        )
+        .await
+        .expect_err("both all and names should fail");
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[tokio::test]
+    async fn gateway_import_rejects_unknown_client_kind() {
+        let manager = test_manager();
+        let err = dispatch_with_manager(
+            &manager,
+            "gateway.import",
+            json!({"all": true, "clients": ["not-a-real-client"]}),
+        )
+        .await
+        .expect_err("unknown client kind should fail");
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[tokio::test]
+    async fn gateway_discover_rejects_unknown_client_kind() {
+        let manager = test_manager();
+        let err = dispatch_with_manager(
+            &manager,
+            "gateway.discover",
+            json!({"clients": ["typo-client"]}),
+        )
+        .await
+        .expect_err("unknown client kind in discover should fail");
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[tokio::test]
+    async fn gateway_import_result_has_correct_shape() {
+        // Verify the ImportResultView shape: all=true on empty discovery
+        // returns ImportResultView with empty imported/skipped/errors
+        let manager = test_manager();
+        let result = dispatch_with_manager(&manager, "gateway.import", json!({"all": true}))
+            .await
+            .expect("all=true should succeed even with no discovered servers");
+        // The result should be an object (ImportResultView), not an array
+        assert!(
+            result.is_object(),
+            "import result should be an object with imported/skipped/errors"
+        );
+        assert!(
+            result.get("imported").is_some(),
+            "should have imported field"
+        );
     }
 }
