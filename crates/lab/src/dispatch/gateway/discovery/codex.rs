@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use super::{DiscoveredServer, entry_to_upstream, env_key_count, now_iso8601};
+use super::{DiscoveredServer, entry_to_upstream, env_key_count};
 
 pub fn discover(home: &Path) -> Vec<DiscoveredServer> {
     let paths: &[PathBuf] = &[home.join(".codex").join("config.toml")];
-    let now = now_iso8601();
+    let now = jiff::Timestamp::now().to_string();
     let mut results = Vec::new();
 
     for path in paths {

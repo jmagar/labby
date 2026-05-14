@@ -2,16 +2,14 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use super::{
-    DiscoveredServer, entry_to_upstream, env_key_count, extract_mcp_entries, now_iso8601, read_json,
-};
+use super::{DiscoveredServer, entry_to_upstream, env_key_count, extract_mcp_entries, read_json};
 
 /// Claude Code stores MCP servers in several locations.
 /// Settings files (`settings.json`, `settings.local.json`) use strict key lookup
 /// (no root fallback). Legacy files (`.claude.json`, `.claude/mcp.json`) allow
 /// root fallback and also support per-project entries under `projects[path].mcpServers`.
 pub fn discover(home: &Path) -> Vec<DiscoveredServer> {
-    let now = now_iso8601();
+    let now = jiff::Timestamp::now().to_string();
     let mut results = Vec::new();
 
     // Strict-lookup settings files (no root fallback)

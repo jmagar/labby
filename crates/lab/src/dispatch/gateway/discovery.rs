@@ -214,6 +214,13 @@ pub(crate) fn entry_to_upstream(
         .map(String::from);
 
     if command.is_none() && url.is_none() {
+        tracing::trace!(
+            name = %name,
+            source_client = %source_client,
+            source_path = %source_path,
+            reason = "missing command and url",
+            "discovery: skipping entry with no command or url"
+        );
         return None;
     }
 
@@ -264,18 +271,13 @@ pub(crate) fn env_key_count(entry: &Value) -> usize {
         .map_or(0, serde_json::Map::len)
 }
 
-/// ISO 8601 timestamp for right now (seconds precision).
-pub(crate) fn now_iso8601() -> String {
-    jiff::Timestamp::now().to_string()
-}
-
 /// Scan a list of candidate paths and return discovered servers from the first one that parses.
 pub(crate) fn scan_paths(
     paths: &[PathBuf],
     source_client: &str,
     allow_root_fallback: bool,
 ) -> Vec<DiscoveredServer> {
-    let now = now_iso8601();
+    let now = jiff::Timestamp::now().to_string();
     let mut results = Vec::new();
 
     for path in paths {

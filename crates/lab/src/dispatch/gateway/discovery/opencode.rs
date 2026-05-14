@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use super::{DiscoveredServer, entry_to_upstream, env_key_count, now_iso8601, read_json};
+use super::{DiscoveredServer, entry_to_upstream, env_key_count, read_json};
 
 /// OpenCode uses the `mcp` key only (no root fallback, no `mcpServers`).
 pub fn discover(home: &Path) -> Vec<DiscoveredServer> {
-    let now = now_iso8601();
+    let now = jiff::Timestamp::now().to_string();
     let mut results = Vec::new();
 
     for path in candidate_paths(home) {
