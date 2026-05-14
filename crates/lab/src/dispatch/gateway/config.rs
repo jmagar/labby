@@ -619,6 +619,20 @@ fn validate_upstream(upstream: &UpstreamConfig) -> Result<(), ToolError> {
         });
     }
 
+    if upstream.name.len() > 128 {
+        return Err(ToolError::InvalidParam {
+            message: "gateway name must not exceed 128 characters".to_string(),
+            param: "name".to_string(),
+        });
+    }
+
+    if upstream.name.chars().any(|c| c.is_control()) {
+        return Err(ToolError::InvalidParam {
+            message: "gateway name must not contain control characters".to_string(),
+            param: "name".to_string(),
+        });
+    }
+
     // Validate bearer_token_env if present — reject raw token values.
     if let Some(env_name) = &upstream.bearer_token_env {
         validate_bearer_token_env_name(env_name)?;
