@@ -624,9 +624,35 @@ fn normalize_mcp_route_path(raw: &str) -> String {
 }
 
 impl UpstreamConfig {
-    /// Validate mutually-exclusive auth shapes. `bearer_token_env` and `oauth`
-    /// both configured is a config error.
+    /// Validate the upstream name and mutually-exclusive auth shapes.
+    /// `bearer_token_env` and `oauth` both configured is a config error.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        // Name must not be empty.
+        if self.name.trim().is_empty() {
+            return Err(ConfigError::InvalidName {
+                name: self.name.clone(),
+                reason: "must not be empty".to_string(),
+            });
+        }
+        // Name must not exceed 128 characters.
+        if self.name.len() > 128 {
+            return Err(ConfigError::InvalidName {
+                name: self.name.clone(),
+                reason: "must not exceed 128 characters".to_string(),
+            });
+        }
+        // Name must use only safe ASCII characters.
+        if !self
+            .name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        {
+            return Err(ConfigError::InvalidName {
+                name: self.name.clone(),
+                reason: "must contain only ASCII letters, digits, hyphens, underscores, and dots"
+                    .to_string(),
+            });
+        }
         if self.bearer_token_env.is_some() && self.oauth.is_some() {
             return Err(ConfigError::ConflictingAuth {
                 name: self.name.clone(),
@@ -683,6 +709,8 @@ pub fn canonicalize_upstream_url(raw: &str) -> Result<String, url::ParseError> {
 /// Config-layer errors surfaced by `UpstreamConfig::validate` and sibling helpers.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
+    #[error("upstream '{name}' has invalid name: {reason}")]
+    InvalidName { name: String, reason: String },
     #[error("upstream '{name}' has both bearer_token_env and oauth configured — pick one")]
     ConflictingAuth { name: String },
     #[error("upstream '{name}' has invalid url: {url}")]
