@@ -109,6 +109,17 @@ impl Default for GatewayToolIndexState {
     }
 }
 
+/// Outcome of a `batch_add` call.
+///
+/// `views` contains one [`GatewayView`] for each spec that was successfully
+/// inserted. `errors` contains `(name, error)` pairs for every spec that
+/// failed validation or insertion.
+#[derive(Debug, Default)]
+pub struct BatchAddOutcome {
+    pub views: Vec<GatewayView>,
+    pub errors: Vec<(String, ToolError)>,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct GatewayToolSearchResult {
     pub name: String,
@@ -815,6 +826,71 @@ impl GatewayManager {
             "gateway reconcile"
         );
         self.get(&spec.name).await
+    }
+
+    /// Add multiple upstream servers in a single config-persist + reload cycle.
+    ///
+    /// Each spec is validated and inserted individually. Specs that fail validation
+    /// are collected into `errors`; specs that succeed populate `views`. If every
+    /// spec fails the first error is returned as `Err`. Otherwise, a single
+    /// `persist_config` + `reload_with_origin_unlocked` is issued for all successes.
+    pub async fn batch_add(
+        &self,
+        specs: Vec<UpstreamConfig>,
+        origin: Option<&str>,
+        owner: Option<UpstreamRuntimeOwner>,
+    ) -> Result<BatchAddOutcome, ToolError> {
+        if specs.is_empty() {
+            return Ok(BatchAddOutcome::default());
+        }
+        let started = std::time::Instant::now();
+        let _mutation_guard = self.config_mutation.lock().await;
+        let mut cfg = self.config.read().await.clone();
+
+        let mut added_names = Vec::new();
+        let mut errors: Vec<(String, ToolError)> = Vec::new();
+        for mut spec in specs {
+            if let Some(ref env_name) = spec.bearer_token_env {
+                let trimmed = env_name.trim().to_string();
+                if let Err(e) = validate_bearer_token_env_name(&trimmed) {
+                    errors.push((spec.name, e));
+                    continue;
+                }
+                spec.bearer_token_env = Some(trimmed);
+            }
+            match insert_upstream(&mut cfg, spec.clone()) {
+                Ok(()) => added_names.push(spec.name),
+                Err(e) => errors.push((spec.name, e)),
+            }
+        }
+
+        if added_names.is_empty() && !errors.is_empty() {
+            // Every spec failed — return the first error to the caller.
+            return Err(errors.remove(0).1);
+        }
+
+        self.persist_config(cfg).await?;
+        let diff = self.reload_with_origin_unlocked(origin, owner).await?;
+
+        tracing::info!(
+            surface = "dispatch",
+            service = "gateway",
+            action = "gateway.import",
+            event = "batch_install.finish",
+            added = added_names.len(),
+            skipped = errors.len(),
+            tools_changed = diff.tools_changed,
+            elapsed_ms = started.elapsed().as_millis(),
+            "gateway batch reconcile"
+        );
+
+        let mut views = Vec::new();
+        for name in &added_names {
+            if let Ok(view) = self.get(name).await {
+                views.push(view);
+            }
+        }
+        Ok(BatchAddOutcome { views, errors })
     }
 
     pub async fn update(
