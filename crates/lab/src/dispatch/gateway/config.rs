@@ -612,35 +612,19 @@ fn validate_backend_target(origin: &str) -> Result<(), ToolError> {
 }
 
 fn validate_upstream(upstream: &UpstreamConfig) -> Result<(), ToolError> {
-    if upstream.name.trim().is_empty() {
-        return Err(ToolError::InvalidParam {
-            message: "gateway name must not be empty".to_string(),
-            param: "name".to_string(),
-        });
-    }
-
-    if upstream.name.len() > 128 {
-        return Err(ToolError::InvalidParam {
-            message: "gateway name must not exceed 128 characters".to_string(),
-            param: "name".to_string(),
-        });
-    }
-
-    if upstream.name.chars().any(|c| c.is_control()) {
-        return Err(ToolError::InvalidParam {
-            message: "gateway name must not contain control characters".to_string(),
-            param: "name".to_string(),
-        });
-    }
-
     // Validate bearer_token_env if present — reject raw token values.
     if let Some(env_name) = &upstream.bearer_token_env {
         validate_bearer_token_env_name(env_name)?;
     }
 
-    // Reject mutually-exclusive auth shapes and invalid URLs. Each ConfigError
-    // variant carries its own param attribution so the caller sees the right field.
+    // Reject invalid names, mutually-exclusive auth shapes, and invalid URLs.
+    // Name validation lives in UpstreamConfig::validate() so it runs on the
+    // TOML load path as well (lab-qxl8.2 / lab-wsed).
     upstream.validate().map_err(|e| match e {
+        crate::config::ConfigError::InvalidName { .. } => ToolError::InvalidParam {
+            message: e.to_string(),
+            param: "name".to_string(),
+        },
         crate::config::ConfigError::ConflictingAuth { .. } => ToolError::InvalidParam {
             message: e.to_string(),
             param: "bearer_token_env".to_string(),
