@@ -762,16 +762,6 @@ impl GatewayManager {
         owner: Option<UpstreamRuntimeOwner>,
     ) -> Result<GatewayView, ToolError> {
         let started = Instant::now();
-        tracing::info!(
-            surface = "dispatch",
-            service = "gateway",
-            action = "gateway.add",
-            event = "install.start",
-            phase = "start",
-            gateway = %spec.name,
-            target = ?redacted_gateway_target(&spec),
-            "gateway reconcile"
-        );
         let _mutation_guard = self.config_mutation.lock().await;
         let mut cfg = self.config.read().await.clone();
 
@@ -795,6 +785,19 @@ impl GatewayManager {
         } else {
             insert_upstream(&mut cfg, spec.clone())?;
         }
+
+        // Log only after validation (inside insert_upstream) has passed so
+        // spec.name is confirmed well-formed before it enters any log sink.
+        tracing::info!(
+            surface = "dispatch",
+            service = "gateway",
+            action = "gateway.add",
+            event = "install.start",
+            phase = "start",
+            gateway = %spec.name,
+            target = ?redacted_gateway_target(&spec),
+            "gateway reconcile"
+        );
         self.persist_config(cfg).await?;
         let diff = self.reload_with_origin_unlocked(origin, owner).await?;
         tracing::info!(
