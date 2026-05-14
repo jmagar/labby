@@ -367,7 +367,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "gateway.import",
         description: "Import discovered MCP servers into the gateway config as disabled-by-default entries. Servers are marked with their discovery source.",
         destructive: true,
-        returns: "GatewayView[]",
+        returns: "ImportResultView",
         params: &[
             ParamSpec {
                 name: "all",

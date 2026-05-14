@@ -17,7 +17,10 @@ use super::params::{
     ToolSearchSetParams, VirtualServerMcpPolicyParams, VirtualServerNameParams,
     VirtualServerSurfaceParams,
 };
-use super::types::{DiscoveredServerView, ServiceActionView};
+use super::types::{
+    DiscoveredServerView, ImportErrorView, ImportResultView, ImportSkipReason, ImportSkipView,
+    McpClientTransportType, ServiceActionView,
+};
 
 fn parse_params<T: DeserializeOwned>(params_value: Value) -> Result<T, ToolError> {
     serde_json::from_value(params_value).map_err(|e| ToolError::InvalidParam {
@@ -77,11 +80,36 @@ pub async fn dispatch_with_manager(
     }
 }
 
+const KNOWN_CLIENTS: &[&str] = &[
+    "cursor",
+    "claude-code",
+    "claude-desktop",
+    "codex",
+    "windsurf",
+    "opencode",
+    "vscode",
+    "gemini",
+];
+
 async fn handle_discover(
     manager: &GatewayManager,
     params_value: Value,
 ) -> Result<Value, ToolError> {
     let params: GatewayDiscoverParams = parse_params(params_value)?;
+
+    for client in &params.clients {
+        if !KNOWN_CLIENTS.contains(&client.as_str()) {
+            return Err(ToolError::InvalidParam {
+                message: format!(
+                    "unknown client kind: '{}'. Valid: {}",
+                    client,
+                    KNOWN_CLIENTS.join(", ")
+                ),
+                param: "clients".to_string(),
+            });
+        }
+    }
+
     let home = super::discovery::home_dir().ok_or_else(|| ToolError::Sdk {
         sdk_kind: "internal_error".to_string(),
         message: "cannot determine home directory".to_string(),
@@ -113,11 +141,10 @@ fn shape_discovered_views(
         .filter(|s| params.include_existing || !existing.contains(&s.name))
         .map(|s| {
             let transport = if s.spec.url.is_some() {
-                "http"
+                McpClientTransportType::Http
             } else {
-                "stdio"
-            }
-            .to_string();
+                McpClientTransportType::Stdio
+            };
             let command_preview = s.spec.command.as_ref().map(|c| {
                 c.split_whitespace()
                     .next()
@@ -156,6 +183,19 @@ async fn handle_import(manager: &GatewayManager, params_value: Value) -> Result<
         });
     }
 
+    for client in &params.clients {
+        if !KNOWN_CLIENTS.contains(&client.as_str()) {
+            return Err(ToolError::InvalidParam {
+                message: format!(
+                    "unknown client kind: '{}'. Valid: {}",
+                    client,
+                    KNOWN_CLIENTS.join(", ")
+                ),
+                param: "clients".to_string(),
+            });
+        }
+    }
+
     let home = super::discovery::home_dir().ok_or_else(|| ToolError::Sdk {
         sdk_kind: "internal_error".to_string(),
         message: "cannot determine home directory".to_string(),
@@ -185,9 +225,14 @@ async fn handle_import(manager: &GatewayManager, params_value: Value) -> Result<
     let already: std::collections::HashSet<String> =
         cfg.upstream.iter().map(|u| u.name.clone()).collect();
 
-    let mut imported = Vec::new();
+    let mut result = ImportResultView::default();
     for server in to_import {
+        let name = server.name.clone();
         if already.contains(&server.name) {
+            result.skipped.push(ImportSkipView {
+                name,
+                reason: ImportSkipReason::AlreadyConfigured,
+            });
             continue;
         }
         // spec already has enabled=false and imported_from set by discovery
@@ -195,13 +240,23 @@ async fn handle_import(manager: &GatewayManager, params_value: Value) -> Result<
             .add(server.spec, None, true, Some("gateway.import"), None)
             .await
         {
-            Ok(view) => imported.push(view),
-            Err(ToolError::Conflict { .. }) => {} // already exists, skip silently
-            Err(e) => return Err(e),
+            Ok(view) => result.imported.push(view),
+            Err(ToolError::Conflict { .. }) => {
+                result.skipped.push(ImportSkipView {
+                    name,
+                    reason: ImportSkipReason::Conflict,
+                });
+            }
+            Err(e) => {
+                result.errors.push(ImportErrorView {
+                    name,
+                    message: e.to_string(),
+                });
+            }
         }
     }
 
-    to_json(imported)
+    to_json(result)
 }
 
 fn redact_url_preview(raw: &str) -> String {
@@ -1937,7 +1992,7 @@ mod tests {
         let views = shape_discovered_views(discovered, &existing, &params);
 
         assert_eq!(views.len(), 1);
-        assert_eq!(views[0].transport, "http");
+        assert_eq!(views[0].transport, McpClientTransportType::Http);
         assert!(views[0].command_preview.is_none());
         assert_eq!(views[0].name, "my-http-server");
     }
@@ -1954,7 +2009,7 @@ mod tests {
         let views = shape_discovered_views(discovered, &existing, &params);
 
         assert_eq!(views.len(), 1);
-        assert_eq!(views[0].transport, "stdio");
+        assert_eq!(views[0].transport, McpClientTransportType::Stdio);
         assert_eq!(views[0].command_preview.as_deref(), Some("npx"));
     }
 

@@ -62,15 +62,15 @@ pub struct GatewayConfigView {
 }
 
 /// A server discovered from an external MCP config but not yet imported.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscoveredServerView {
     pub name: String,
     /// Which client config type it was found in (e.g. "cursor", "vscode", "gemini").
     pub source_client: String,
     /// Absolute path to the config file.
     pub source_path: String,
-    /// Transport kind: "http" or "stdio".
-    pub transport: String,
+    /// Transport kind.
+    pub transport: McpClientTransportType,
     /// First token of the command (stdio only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command_preview: Option<String>,
@@ -81,6 +81,38 @@ pub struct DiscoveredServerView {
     pub env_key_count: usize,
     /// True if a server with this name is already in the gateway config.
     pub already_configured: bool,
+}
+
+/// Why a server was skipped during `gateway.import`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportSkipReason {
+    AlreadyConfigured,
+    Conflict,
+}
+
+/// One skipped entry from a `gateway.import` call.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportSkipView {
+    pub name: String,
+    pub reason: ImportSkipReason,
+}
+
+/// One error entry from a `gateway.import` call.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportErrorView {
+    pub name: String,
+    pub message: String,
+}
+
+/// Structured result returned by `gateway.import`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ImportResultView {
+    pub imported: Vec<GatewayView>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<ImportSkipView>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<ImportErrorView>,
 }
 
 fn default_tool_search_top_k_default() -> usize {
@@ -116,7 +148,7 @@ pub struct GatewayView {
     pub runtime: GatewayRuntimeView,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum McpClientTransportType {
     Http,
