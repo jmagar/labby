@@ -1333,6 +1333,19 @@ impl UpstreamPool {
         &self,
         config: &UpstreamConfig,
     ) -> anyhow::Result<bool> {
+        if !config.enabled {
+            tracing::debug!(
+                surface = "dispatch",
+                service = "upstream.pool",
+                action = "upstream.reprobe",
+                event = "skipped",
+                operation = "health",
+                upstream = %config.name,
+                reason = "disabled",
+                "upstream reprobe skipped"
+            );
+            return Ok(false);
+        }
         self.reprobe_upstream(config).await
     }
 
@@ -3151,6 +3164,7 @@ async fn connect_stdio_upstream(
 
     let mut cmd = Command::new(command);
     cmd.args(args);
+    cmd.envs(config.env.iter());
 
     // Set bearer token env var on the child if configured
     if let Some(ref env_name) = config.bearer_token_env
@@ -3433,12 +3447,14 @@ mod tests {
             bearer_token_env: None,
             command: None,
             args: vec![],
+            env: std::collections::BTreeMap::new(),
             proxy_resources: false,
             proxy_prompts: false,
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
             oauth: None,
+            imported_from: None,
             tool_search: crate::config::ToolSearchConfig::default(),
         }
     }
@@ -3460,6 +3476,22 @@ mod tests {
         config.command = Some("--api-key=secret".into());
 
         assert_eq!(upstream_target_redacted(&config), "--api-key=[redacted]");
+    }
+
+    #[tokio::test]
+    async fn disabled_upstream_reprobe_is_inert() {
+        let pool = UpstreamPool::new();
+        let mut config = test_upstream_config();
+        config.enabled = false;
+        config.command = Some("definitely-not-spawned".to_string());
+
+        let result = pool
+            .reprobe_tools_for_upstream(&config)
+            .await
+            .expect("disabled reprobe should not error");
+
+        assert!(!result);
+        assert!(pool.find_tool("anything").await.is_none());
     }
 
     #[test]
@@ -3529,12 +3561,14 @@ mod tests {
             bearer_token_env: None,
             command: None,
             args: vec![],
+            env: std::collections::BTreeMap::new(),
             proxy_resources: false,
             proxy_prompts: false,
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
             oauth: None,
+            imported_from: None,
             tool_search: crate::config::ToolSearchConfig::default(),
         };
         assert!(validate_upstream_config(&config).is_err());
@@ -3549,12 +3583,14 @@ mod tests {
             bearer_token_env: None,
             command: None,
             args: vec![],
+            env: std::collections::BTreeMap::new(),
             proxy_resources: false,
             proxy_prompts: false,
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
             oauth: None,
+            imported_from: None,
             tool_search: crate::config::ToolSearchConfig::default(),
         };
         assert!(validate_upstream_config(&config).is_err());
@@ -3570,12 +3606,14 @@ mod tests {
                 bearer_token_env: None,
                 command: None,
                 args: vec![],
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             };
             assert!(
@@ -3594,12 +3632,14 @@ mod tests {
             bearer_token_env: None,
             command: None,
             args: vec![],
+            env: std::collections::BTreeMap::new(),
             proxy_resources: false,
             proxy_prompts: false,
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
             oauth: None,
+            imported_from: None,
             tool_search: crate::config::ToolSearchConfig::default(),
         };
         assert!(validate_upstream_config(&config).is_ok());
@@ -3615,12 +3655,14 @@ mod tests {
                 bearer_token_env: None,
                 command: None,
                 args: vec![],
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             };
             assert!(
@@ -3639,12 +3681,14 @@ mod tests {
             bearer_token_env: None,
             command: Some("my-mcp-server".into()),
             args: vec!["--port".into(), "8080".into()],
+            env: std::collections::BTreeMap::new(),
             proxy_resources: false,
             proxy_prompts: false,
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
             oauth: None,
+            imported_from: None,
             tool_search: crate::config::ToolSearchConfig::default(),
         };
         assert!(validate_upstream_config(&config).is_ok());
@@ -3659,12 +3703,14 @@ mod tests {
             bearer_token_env: None,
             command: Some("my-mcp-server".into()),
             args: vec![],
+            env: std::collections::BTreeMap::new(),
             proxy_resources: false,
             proxy_prompts: false,
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
             oauth: None,
+            imported_from: None,
             tool_search: crate::config::ToolSearchConfig::default(),
         };
         assert!(validate_upstream_config(&config).is_err());
@@ -3679,12 +3725,14 @@ mod tests {
             bearer_token_env: None,
             command: None,
             args: vec![],
+            env: std::collections::BTreeMap::new(),
             proxy_resources: false,
             proxy_prompts: false,
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
             oauth: None,
+            imported_from: None,
             tool_search: crate::config::ToolSearchConfig::default(),
         };
         assert!(validate_upstream_config(&config).is_err());
@@ -3698,6 +3746,7 @@ mod tests {
             bearer_token_env: None,
             command: None,
             args: vec![],
+            env: std::collections::BTreeMap::new(),
             proxy_resources: false,
             proxy_prompts: false,
             expose_tools: None,
@@ -3711,6 +3760,7 @@ mod tests {
                 },
                 scopes: None,
             }),
+            imported_from: None,
             tool_search: crate::config::ToolSearchConfig::default(),
         }
     }

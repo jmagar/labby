@@ -174,6 +174,7 @@ impl Harness {
             bearer_token_env: None,
             command: None,
             args: vec![],
+            env: std::collections::BTreeMap::new(),
             proxy_resources: false,
             proxy_prompts: false,
             expose_tools: None,
@@ -184,6 +185,7 @@ impl Harness {
                 registration,
                 scopes: Some(vec!["read".into()]),
             }),
+            imported_from: None,
             tool_search: labby::config::ToolSearchConfig::default(),
         }
     }

@@ -9,14 +9,18 @@ use super::catalog::ACTIONS;
 use super::client::require_gateway_manager;
 use super::manager::GatewayManager;
 use super::params::{
-    GatewayAddParams, GatewayClientConfigParams, GatewayMcpCleanupParams, GatewayMcpToggleParams,
-    GatewayNameParams, GatewayOauthNameParams, GatewayReloadParams, GatewayStatusParams,
-    GatewayTestParams, GatewayUpdateParams, GatewayUpdatePatch, ProtectedRouteNameParams,
-    ProtectedRouteSpecParams, ProtectedRouteUpdateParams, ServiceConfigGetParams,
-    ServiceConfigSetParams, ToolInvokeParams, ToolSearchParams, ToolSearchSetParams,
-    VirtualServerMcpPolicyParams, VirtualServerNameParams, VirtualServerSurfaceParams,
+    GatewayAddParams, GatewayClientConfigParams, GatewayDiscoverParams, GatewayImportParams,
+    GatewayMcpCleanupParams, GatewayMcpToggleParams, GatewayNameParams, GatewayOauthNameParams,
+    GatewayReloadParams, GatewayStatusParams, GatewayTestParams, GatewayUpdateParams,
+    GatewayUpdatePatch, ProtectedRouteNameParams, ProtectedRouteSpecParams,
+    ProtectedRouteUpdateParams, ServiceConfigGetParams, ServiceConfigSetParams,
+    ToolSearchSetParams, VirtualServerMcpPolicyParams, VirtualServerNameParams,
+    VirtualServerSurfaceParams,
 };
-use super::types::ServiceActionView;
+use super::types::{
+    DiscoveredServerView, ImportErrorView, ImportResultView, ImportSkipReason, ImportSkipView,
+    McpClientTransportType, ServiceActionView,
+};
 
 fn parse_params<T: DeserializeOwned>(params_value: Value) -> Result<T, ToolError> {
     serde_json::from_value(params_value).map_err(|e| ToolError::InvalidParam {
@@ -36,11 +40,11 @@ pub async fn dispatch_with_manager(
             let action_name = require_str(&params_value, "action")?;
             action_schema(ACTIONS, action_name)
         }
-        "tool_search"
-        | "tool_execute"
-        | "tool_invoke"
-        | "gateway.tool_search.get"
-        | "gateway.tool_search.set" => handle_tool_actions(manager, action, params_value).await,
+        "gateway.tool_search.get" | "gateway.tool_search.set" => {
+            handle_tool_actions(manager, action, params_value).await
+        }
+        "gateway.discover" => handle_discover(manager, params_value).await,
+        "gateway.import" => handle_import(manager, params_value).await,
         "gateway.list"
         | "gateway.server.get"
         | "gateway.supported_services"
@@ -76,54 +80,214 @@ pub async fn dispatch_with_manager(
     }
 }
 
+const KNOWN_CLIENTS: &[&str] = &[
+    "cursor",
+    "claude-code",
+    "claude-desktop",
+    "codex",
+    "windsurf",
+    "opencode",
+    "vscode",
+    "gemini",
+];
+
+async fn handle_discover(
+    manager: &GatewayManager,
+    params_value: Value,
+) -> Result<Value, ToolError> {
+    let params: GatewayDiscoverParams = parse_params(params_value)?;
+
+    for client in &params.clients {
+        if !KNOWN_CLIENTS.contains(&client.as_str()) {
+            return Err(ToolError::InvalidParam {
+                message: format!(
+                    "unknown client kind: '{}'. Valid: {}",
+                    client,
+                    KNOWN_CLIENTS.join(", ")
+                ),
+                param: "clients".to_string(),
+            });
+        }
+    }
+
+    let home = super::discovery::home_dir().ok_or_else(|| ToolError::Sdk {
+        sdk_kind: "internal_error".to_string(),
+        message: "cannot determine home directory".to_string(),
+    })?;
+
+    let mut discovered = tokio::task::spawn_blocking(move || super::discovery::discover_all(&home))
+        .await
+        .map_err(|e| ToolError::internal_message(format!("discovery task panicked: {e}")))?;
+    if !params.clients.is_empty() {
+        let filter: std::collections::HashSet<&str> =
+            params.clients.iter().map(String::as_str).collect();
+        discovered.retain(|s| filter.contains(s.source_client.as_str()));
+    }
+
+    let cfg = manager.current_config().await;
+    let existing: std::collections::HashSet<String> =
+        cfg.upstream.iter().map(|u| u.name.clone()).collect();
+
+    let views = shape_discovered_views(discovered, &existing, &params);
+
+    to_json(views)
+}
+
+fn shape_discovered_views(
+    discovered: Vec<super::discovery::DiscoveredServer>,
+    existing: &std::collections::HashSet<String>,
+    params: &GatewayDiscoverParams,
+) -> Vec<DiscoveredServerView> {
+    discovered
+        .into_iter()
+        .filter(|s| params.include_existing || !existing.contains(&s.name))
+        .map(|s| {
+            let transport = if s.spec.url.is_some() {
+                McpClientTransportType::Http
+            } else {
+                McpClientTransportType::Stdio
+            };
+            let command_preview = s.spec.command.as_ref().map(|c| {
+                c.split_whitespace()
+                    .next()
+                    .unwrap_or(c.as_str())
+                    .to_string()
+            });
+            DiscoveredServerView {
+                name: s.name,
+                source_client: s.source_client,
+                source_path: s.source_path,
+                transport,
+                command_preview,
+                url_preview: s.spec.url.as_deref().map(redact_url_preview),
+                env_key_count: s.env_key_count,
+                already_configured: existing.contains(&s.spec.name),
+            }
+        })
+        .collect()
+}
+
+async fn handle_import(manager: &GatewayManager, params_value: Value) -> Result<Value, ToolError> {
+    let params: GatewayImportParams = parse_params(params_value)?;
+
+    if !params.names.is_empty() && params.all {
+        return Err(ToolError::InvalidParam {
+            message: "gateway.import requires either `all` or `names`, not both".to_string(),
+            param: "names".to_string(),
+        });
+    }
+
+    if params.names.is_empty() && !params.all {
+        return Err(ToolError::InvalidParam {
+            message: "gateway.import requires either `all: true` or a non-empty `names` list"
+                .to_string(),
+            param: "names".to_string(),
+        });
+    }
+
+    for client in &params.clients {
+        if !KNOWN_CLIENTS.contains(&client.as_str()) {
+            return Err(ToolError::InvalidParam {
+                message: format!(
+                    "unknown client kind: '{}'. Valid: {}",
+                    client,
+                    KNOWN_CLIENTS.join(", ")
+                ),
+                param: "clients".to_string(),
+            });
+        }
+    }
+
+    let home = super::discovery::home_dir().ok_or_else(|| ToolError::Sdk {
+        sdk_kind: "internal_error".to_string(),
+        message: "cannot determine home directory".to_string(),
+    })?;
+
+    let mut discovered = tokio::task::spawn_blocking(move || super::discovery::discover_all(&home))
+        .await
+        .map_err(|e| ToolError::internal_message(format!("discovery task panicked: {e}")))?;
+    if !params.clients.is_empty() {
+        let filter: std::collections::HashSet<&str> =
+            params.clients.iter().map(String::as_str).collect();
+        discovered.retain(|s| filter.contains(s.source_client.as_str()));
+    }
+
+    // Reaching here: exactly one of `all=true` or a non-empty `names` list is set.
+    // (both-provided is rejected above; neither-provided is rejected above)
+    let to_import: Vec<_> = if params.all {
+        discovered
+    } else {
+        let wanted: std::collections::HashSet<&str> =
+            params.names.iter().map(String::as_str).collect();
+        discovered
+            .into_iter()
+            .filter(|s| wanted.contains(s.name.as_str()))
+            .collect()
+    };
+
+    let cfg = manager.current_config().await;
+    let already: std::collections::HashSet<String> =
+        cfg.upstream.iter().map(|u| u.name.clone()).collect();
+
+    let mut result = ImportResultView::default();
+
+    // Pre-filter already-configured names before calling batch_add so they
+    // are reported as skipped (not as errors) in the ImportResultView.
+    let mut specs_to_add = Vec::new();
+    for server in to_import {
+        if already.contains(&server.name) {
+            result.skipped.push(ImportSkipView {
+                name: server.name,
+                reason: ImportSkipReason::AlreadyConfigured,
+            });
+        } else {
+            // spec already has enabled=false and imported_from set by discovery
+            specs_to_add.push(server.spec);
+        }
+    }
+
+    if !specs_to_add.is_empty() {
+        let outcome = manager
+            .batch_add(specs_to_add, Some("gateway.import"), None)
+            .await?;
+
+        result.imported.extend(outcome.views);
+
+        for (name, err) in outcome.errors {
+            if matches!(err, ToolError::Conflict { .. }) {
+                result.skipped.push(ImportSkipView {
+                    name,
+                    reason: ImportSkipReason::Conflict,
+                });
+            } else {
+                result.errors.push(ImportErrorView {
+                    name,
+                    message: err.to_string(),
+                });
+            }
+        }
+    }
+
+    to_json(result)
+}
+
+fn redact_url_preview(raw: &str) -> String {
+    let Ok(mut parsed) = url::Url::parse(raw) else {
+        return "<redacted>".to_string();
+    };
+    let _ = parsed.set_username("");
+    let _ = parsed.set_password(None);
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    parsed.to_string()
+}
+
 async fn handle_tool_actions(
     manager: &GatewayManager,
     action: &str,
     params_value: Value,
 ) -> Result<Value, ToolError> {
     match action {
-        "tool_search" => {
-            let params: ToolSearchParams = parse_params(params_value)?;
-            let top_k = match params.top_k {
-                Some(top_k) => top_k,
-                None => manager.tool_search_config().await.top_k_default,
-            };
-            to_json(
-                manager
-                    .search_tools(&params.query, top_k, params.include_schema)
-                    .await?,
-            )
-        }
-        "tool_execute" | "tool_invoke" => {
-            let params: ToolInvokeParams = parse_params(params_value)?;
-            let (upstream_name, _) = manager.resolve_tool_invoke(&params.name).await?;
-            let pool = manager.current_pool().await.ok_or_else(|| ToolError::Sdk {
-                sdk_kind: "unknown_tool".to_string(),
-                message: format!("tool `{}` is not available", params.name),
-            })?;
-            let mut upstream_params = rmcp::model::CallToolRequestParams::new(params.name);
-            upstream_params.arguments = Some(match params.arguments {
-                Value::Object(map) => map,
-                _ => {
-                    return Err(ToolError::Sdk {
-                        sdk_kind: "invalid_param".to_string(),
-                        message: "arguments must be an object".to_string(),
-                    });
-                }
-            });
-            let result = pool
-                .call_tool(&upstream_name, upstream_params)
-                .await
-                .ok_or_else(|| ToolError::Sdk {
-                    sdk_kind: "upstream_error".to_string(),
-                    message: format!("upstream `{upstream_name}` is not connected"),
-                })?
-                .map_err(|error| ToolError::Sdk {
-                    sdk_kind: "upstream_error".to_string(),
-                    message: error,
-                })?;
-            to_json(result)
-        }
         "gateway.tool_search.get" => to_json(manager.tool_search_config().await),
         "gateway.tool_search.set" => {
             let params: ToolSearchSetParams = parse_params(params_value)?;
@@ -538,11 +702,15 @@ pub async fn dispatch(action: &str, params_value: Value) -> Result<Value, ToolEr
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use serde_json::json;
 
-    use crate::config::{ProtectedMcpRouteConfig, UpstreamConfig};
+    use crate::config::{ProtectedMcpRouteConfig, ToolSearchConfig, UpstreamConfig};
 
+    use super::super::discovery::DiscoveredServer;
     use super::super::manager::GatewayRuntimeHandle;
+    use super::super::params::GatewayDiscoverParams;
     use super::*;
 
     #[test]
@@ -619,6 +787,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn gateway_dispatch_rejects_synthetic_tool_execution_actions() {
+        let manager = test_manager();
+
+        for action in ["tool_execute", "tool_invoke", "tool_search"] {
+            let err = dispatch_with_manager(&manager, action, json!({}))
+                .await
+                .expect_err("synthetic top-level MCP tools are not gateway actions");
+            assert_eq!(err.kind(), "unknown_action", "{action}");
+        }
+    }
+
+    #[tokio::test]
     async fn gateway_list_returns_array() {
         let manager = test_manager();
         manager
@@ -629,12 +809,14 @@ mod tests {
                 bearer_token_env: Some("FIXTURE_HTTP_TOKEN".to_string()),
                 command: None,
                 args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }])
             .await;
@@ -666,12 +848,14 @@ mod tests {
                     bearer_token_env: Some("FIXTURE_HTTP_TOKEN".to_string()),
                     command: None,
                     args: Vec::new(),
+                    env: std::collections::BTreeMap::new(),
                     proxy_resources: false,
                     proxy_prompts: false,
                     expose_tools: None,
                     expose_resources: None,
                     expose_prompts: None,
                     oauth: None,
+                    imported_from: None,
                     tool_search: crate::config::ToolSearchConfig::default(),
                 },
                 UpstreamConfig {
@@ -681,12 +865,14 @@ mod tests {
                     bearer_token_env: None,
                     command: Some("npx".to_string()),
                     args: vec!["-y".to_string(), "fixture-server".to_string()],
+                    env: std::collections::BTreeMap::new(),
                     proxy_resources: false,
                     proxy_prompts: false,
                     expose_tools: None,
                     expose_resources: None,
                     expose_prompts: None,
                     oauth: None,
+                    imported_from: None,
                     tool_search: crate::config::ToolSearchConfig::default(),
                 },
             ])
@@ -774,12 +960,14 @@ mod tests {
                 bearer_token_env: Some("FIXTURE_HTTP_TOKEN".to_string()),
                 command: None,
                 args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }])
             .await;
@@ -808,12 +996,14 @@ mod tests {
                 bearer_token_env: None,
                 command: Some("noxa".to_string()),
                 args: vec!["mcp".to_string()],
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: true,
                 proxy_prompts: false,
                 expose_tools: Some(vec!["scrape".to_string()]),
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }])
             .await;
@@ -1290,12 +1480,14 @@ mod tests {
                     bearer_token_env: None,
                     command: None,
                     args: Vec::new(),
+                    env: std::collections::BTreeMap::new(),
                     proxy_resources: false,
                     proxy_prompts: false,
                     expose_tools: None,
                     expose_resources: None,
                     expose_prompts: None,
                     oauth: None,
+                    imported_from: None,
                     tool_search: crate::config::ToolSearchConfig::default(),
                 },
                 UpstreamConfig {
@@ -1305,12 +1497,14 @@ mod tests {
                     bearer_token_env: None,
                     command: Some("echo".to_string()),
                     args: vec!["hello".to_string()],
+                    env: std::collections::BTreeMap::new(),
                     proxy_resources: false,
                     proxy_prompts: false,
                     expose_tools: None,
                     expose_resources: None,
                     expose_prompts: None,
                     oauth: None,
+                    imported_from: None,
                     tool_search: crate::config::ToolSearchConfig::default(),
                 },
             ])
@@ -1570,12 +1764,14 @@ mod tests {
                 bearer_token_env: Some("FIXTURE_HTTP_TOKEN".to_string()),
                 command: None,
                 args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }])
             .await;
@@ -1612,12 +1808,14 @@ mod tests {
                 bearer_token_env: None,
                 command: Some("uvx".to_string()),
                 args: vec![runtime_arg.to_string()],
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }])
             .await;
@@ -1682,12 +1880,14 @@ mod tests {
                 bearer_token_env: None,
                 command: Some("uvx".to_string()),
                 args: vec![runtime_arg.to_string()],
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }])
             .await;
@@ -1730,5 +1930,311 @@ mod tests {
 
         drop(child.kill());
         panic!("github-chat stand-in process was not terminated by disable cleanup");
+    }
+
+    #[test]
+    fn discovery_url_preview_redacts_secret_url_parts() {
+        assert_eq!(
+            redact_url_preview("https://user:pass@example.com/mcp?token=secret#frag"),
+            "https://example.com/mcp"
+        );
+        assert_eq!(redact_url_preview("not a url token=secret"), "<redacted>");
+    }
+
+    // ── shape_discovered_views unit tests ──────────────────────────────────
+
+    fn make_discovered_http(name: &str) -> DiscoveredServer {
+        DiscoveredServer {
+            name: name.to_string(),
+            spec: UpstreamConfig {
+                name: name.to_string(),
+                enabled: false,
+                url: Some("http://127.0.0.1:9000".to_string()),
+                bearer_token_env: None,
+                command: None,
+                args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
+                proxy_resources: true,
+                proxy_prompts: true,
+                expose_tools: None,
+                expose_resources: None,
+                expose_prompts: None,
+                oauth: None,
+                imported_from: None,
+                tool_search: ToolSearchConfig::default(),
+            },
+            source_client: "cursor".to_string(),
+            source_path: "/home/user/.cursor/mcp.json".to_string(),
+            env_key_count: 0,
+        }
+    }
+
+    fn make_discovered_stdio(name: &str, command: &str) -> DiscoveredServer {
+        DiscoveredServer {
+            name: name.to_string(),
+            spec: UpstreamConfig {
+                name: name.to_string(),
+                enabled: false,
+                url: None,
+                bearer_token_env: None,
+                command: Some(command.to_string()),
+                args: vec!["--serve".to_string()],
+                env: std::collections::BTreeMap::new(),
+                proxy_resources: true,
+                proxy_prompts: true,
+                expose_tools: None,
+                expose_resources: None,
+                expose_prompts: None,
+                oauth: None,
+                imported_from: None,
+                tool_search: ToolSearchConfig::default(),
+            },
+            source_client: "claude-code".to_string(),
+            source_path: "/home/user/.claude/settings.json".to_string(),
+            env_key_count: 2,
+        }
+    }
+
+    #[test]
+    fn shape_http_server_gets_http_transport_no_command_preview() {
+        let discovered = vec![make_discovered_http("my-http-server")];
+        let existing: HashSet<String> = HashSet::new();
+        let params = GatewayDiscoverParams::default();
+
+        let views = shape_discovered_views(discovered, &existing, &params);
+
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].transport, McpClientTransportType::Http);
+        assert!(views[0].command_preview.is_none());
+        assert_eq!(views[0].name, "my-http-server");
+    }
+
+    #[test]
+    fn shape_stdio_server_gets_stdio_transport_and_command_preview_first_token() {
+        let discovered = vec![make_discovered_stdio(
+            "my-stdio-server",
+            "npx --yes some-mcp",
+        )];
+        let existing: HashSet<String> = HashSet::new();
+        let params = GatewayDiscoverParams::default();
+
+        let views = shape_discovered_views(discovered, &existing, &params);
+
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].transport, McpClientTransportType::Stdio);
+        assert_eq!(views[0].command_preview.as_deref(), Some("npx"));
+    }
+
+    #[test]
+    fn shape_already_configured_true_when_name_in_existing_set() {
+        let discovered = vec![make_discovered_http("configured-server")];
+        let mut existing: HashSet<String> = HashSet::new();
+        existing.insert("configured-server".to_string());
+        let params = GatewayDiscoverParams {
+            include_existing: true,
+            ..GatewayDiscoverParams::default()
+        };
+
+        let views = shape_discovered_views(discovered, &existing, &params);
+
+        assert_eq!(views.len(), 1);
+        assert!(views[0].already_configured);
+    }
+
+    #[test]
+    fn shape_include_existing_false_filters_out_already_configured_servers() {
+        let discovered = vec![
+            make_discovered_http("new-server"),
+            make_discovered_http("existing-server"),
+        ];
+        let mut existing: HashSet<String> = HashSet::new();
+        existing.insert("existing-server".to_string());
+        let params = GatewayDiscoverParams {
+            include_existing: false,
+            ..GatewayDiscoverParams::default()
+        };
+
+        let views = shape_discovered_views(discovered, &existing, &params);
+
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].name, "new-server");
+        assert!(!views[0].already_configured);
+    }
+
+    // ── handle_import and handle_discover validation branch tests ──────────
+
+    #[tokio::test]
+    async fn gateway_import_rejects_empty_params() {
+        let manager = test_manager();
+        let err = dispatch_with_manager(&manager, "gateway.import", json!({}))
+            .await
+            .expect_err("empty import params should fail");
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[tokio::test]
+    async fn gateway_import_rejects_both_all_and_names() {
+        let manager = test_manager();
+        let err = dispatch_with_manager(
+            &manager,
+            "gateway.import",
+            json!({"all": true, "names": ["some-server"]}),
+        )
+        .await
+        .expect_err("both all and names should fail");
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[tokio::test]
+    async fn gateway_import_rejects_unknown_client_kind() {
+        let manager = test_manager();
+        let err = dispatch_with_manager(
+            &manager,
+            "gateway.import",
+            json!({"all": true, "clients": ["not-a-real-client"]}),
+        )
+        .await
+        .expect_err("unknown client kind should fail");
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[tokio::test]
+    async fn gateway_discover_rejects_unknown_client_kind() {
+        let manager = test_manager();
+        let err = dispatch_with_manager(
+            &manager,
+            "gateway.discover",
+            json!({"clients": ["typo-client"]}),
+        )
+        .await
+        .expect_err("unknown client kind in discover should fail");
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[tokio::test]
+    async fn gateway_import_result_has_correct_shape() {
+        // Verify the ImportResultView shape: all=true on empty discovery
+        // returns ImportResultView with empty imported/skipped/errors
+        let manager = test_manager();
+        let result = dispatch_with_manager(&manager, "gateway.import", json!({"all": true}))
+            .await
+            .expect("all=true should succeed even with no discovered servers");
+        // The result should be an object (ImportResultView), not an array
+        assert!(
+            result.is_object(),
+            "import result should be an object with imported/skipped/errors"
+        );
+        assert!(
+            result.get("imported").is_some(),
+            "should have imported field"
+        );
+    }
+}
+
+#[cfg(test)]
+mod discovery_shape_tests {
+    use std::collections::HashSet;
+
+    use crate::config::UpstreamConfig;
+    use crate::dispatch::gateway::discovery::DiscoveredServer;
+    use crate::dispatch::gateway::params::GatewayDiscoverParams;
+    use crate::dispatch::gateway::types::McpClientTransportType;
+
+    use super::shape_discovered_views;
+
+    fn upstream_fixture(
+        name: &str,
+        url: Option<String>,
+        command: Option<String>,
+    ) -> UpstreamConfig {
+        UpstreamConfig {
+            name: name.to_string(),
+            enabled: false,
+            url,
+            bearer_token_env: None,
+            command,
+            args: Vec::new(),
+            env: std::collections::BTreeMap::new(),
+            proxy_resources: false,
+            proxy_prompts: false,
+            expose_tools: None,
+            expose_resources: None,
+            expose_prompts: None,
+            oauth: None,
+            imported_from: None,
+            tool_search: crate::config::ToolSearchConfig::default(),
+        }
+    }
+
+    fn make_http_server(name: &str, url: &str) -> DiscoveredServer {
+        DiscoveredServer {
+            name: name.to_string(),
+            spec: upstream_fixture(name, Some(url.to_string()), None),
+            source_client: "test".to_string(),
+            source_path: "/tmp/test.json".to_string(),
+            env_key_count: 0,
+        }
+    }
+
+    fn make_stdio_server(name: &str, command: &str) -> DiscoveredServer {
+        DiscoveredServer {
+            name: name.to_string(),
+            spec: upstream_fixture(name, None, Some(command.to_string())),
+            source_client: "test".to_string(),
+            source_path: "/tmp/test.json".to_string(),
+            env_key_count: 2,
+        }
+    }
+
+    #[test]
+    fn http_server_gets_http_transport() {
+        let views = shape_discovered_views(
+            vec![make_http_server("srv", "https://example.com/mcp")],
+            &HashSet::new(),
+            &GatewayDiscoverParams::default(),
+        );
+        assert_eq!(views.len(), 1);
+        assert!(matches!(views[0].transport, McpClientTransportType::Http));
+        assert!(views[0].command_preview.is_none());
+    }
+
+    #[test]
+    fn stdio_server_gets_stdio_transport_and_command_preview() {
+        let views = shape_discovered_views(
+            vec![make_stdio_server("srv", "npx @some/mcp-server")],
+            &HashSet::new(),
+            &GatewayDiscoverParams::default(),
+        );
+        assert_eq!(views.len(), 1);
+        assert!(matches!(views[0].transport, McpClientTransportType::Stdio));
+        assert_eq!(views[0].command_preview.as_deref(), Some("npx"));
+    }
+
+    #[test]
+    fn already_configured_flag_set_when_name_in_existing() {
+        let mut existing = HashSet::new();
+        existing.insert("known-server".to_string());
+        let views = shape_discovered_views(
+            vec![make_http_server("known-server", "https://h/m")],
+            &existing,
+            &GatewayDiscoverParams {
+                include_existing: true,
+                clients: vec![],
+            },
+        );
+        assert_eq!(views.len(), 1);
+        assert!(views[0].already_configured);
+    }
+
+    #[test]
+    fn include_existing_false_filters_out_configured_servers() {
+        let mut existing = HashSet::new();
+        existing.insert("known-server".to_string());
+        let views = shape_discovered_views(
+            vec![make_http_server("known-server", "https://h/m")],
+            &existing,
+            &GatewayDiscoverParams::default(), // include_existing defaults to false
+        );
+        assert!(views.is_empty());
     }
 }

@@ -349,6 +349,7 @@ impl GatewayManager {
                         bearer_token_env: None,
                         command: None,
                         args: vec![],
+                        env: std::collections::BTreeMap::new(),
                         proxy_resources: false,
                         proxy_prompts: false,
                         expose_tools: None,
@@ -359,6 +360,7 @@ impl GatewayManager {
                             registration,
                             scopes: metadata.scopes_supported.clone(),
                         }),
+                        imported_from: None,
                         tool_search: ToolSearchConfig::default(),
                     };
                     let manager = UpstreamOauthManager::new(

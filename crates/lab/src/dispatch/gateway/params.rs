@@ -226,15 +226,6 @@ pub struct GatewayOauthNameParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolSearchParams {
-    pub query: String,
-    #[serde(default)]
-    pub top_k: Option<usize>,
-    #[serde(default)]
-    pub include_schema: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolSearchSetParams {
     pub enabled: bool,
     #[serde(default)]
@@ -243,8 +234,28 @@ pub struct ToolSearchSetParams {
     pub max_tools: Option<usize>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolInvokeParams {
-    pub name: String,
-    pub arguments: serde_json::Value,
+/// Parameters for `gateway.discover` — read-only scan of external MCP configs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GatewayDiscoverParams {
+    /// Limit discovery to these client kinds (e.g. ["cursor", "vscode"]).
+    /// Empty means scan all supported clients.
+    #[serde(default)]
+    pub clients: Vec<String>,
+    /// Also return servers whose name already exists in the gateway config.
+    #[serde(default)]
+    pub include_existing: bool,
+}
+
+/// Parameters for `gateway.import` — import discovered servers (disabled by default).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GatewayImportParams {
+    /// Specific server names to import. Mutually exclusive with `all`.
+    #[serde(default)]
+    pub names: Vec<String>,
+    /// Import every discovered server not already in the gateway config.
+    #[serde(default)]
+    pub all: bool,
+    /// Limit discovery to these client kinds. Empty means scan all.
+    #[serde(default)]
+    pub clients: Vec<String>,
 }

@@ -27,6 +27,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+// Gateway startup/reload writes this process-wide flag whenever root
+// `[tool_search]` changes. In-process peer MCP servers do not hold a
+// GatewayManager, but they must still hide raw built-in tools when the root
+// server is operating in synthetic `tool_search`/`tool_execute` mode.
 static PROCESS_TOOL_SEARCH_ENABLED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn set_process_tool_search_enabled(enabled: bool) {
@@ -445,6 +449,35 @@ impl ToolSearchConfig {
     }
 }
 
+/// Provenance record for an upstream imported from an external MCP config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportSource {
+    /// Which client config type this was discovered in (e.g. "cursor", "claude-code", "vscode").
+    pub client: String,
+    /// Absolute path to the config file the server was read from.
+    pub path: String,
+    /// ISO 8601 timestamp of when the import was recorded.
+    pub imported_at: String,
+}
+
+impl ImportSource {
+    pub fn new(
+        client: impl Into<String>,
+        path: impl Into<String>,
+        imported_at: impl Into<String>,
+    ) -> Self {
+        Self {
+            client: client.into(),
+            path: path.into(),
+            imported_at: imported_at.into(),
+        }
+    }
+
+    pub fn now(client: impl Into<String>, path: impl Into<String>) -> Self {
+        Self::new(client, path, jiff::Timestamp::now().to_string())
+    }
+}
+
 /// Configuration for a single upstream MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpstreamConfig {
@@ -466,6 +499,11 @@ pub struct UpstreamConfig {
     /// Arguments to pass to the stdio command.
     #[serde(default)]
     pub args: Vec<String>,
+    /// Environment variables to inject when spawning a stdio transport process.
+    /// Import discovery records env key counts, but does not copy raw values from
+    /// external config files into Lab config.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
     /// Whether to proxy resources from this upstream. Defaults to true.
     #[serde(default = "default_true")]
     pub proxy_resources: bool,
@@ -485,6 +523,10 @@ pub struct UpstreamConfig {
     /// `bearer_token_env` — setting both is a config error.
     #[serde(default)]
     pub oauth: Option<UpstreamOauthConfig>,
+    /// Import provenance — present when this upstream was discovered from an
+    /// external MCP config rather than added manually. Omitted for manual entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_from: Option<ImportSource>,
     /// Deprecated compatibility field. Tool search is gateway-wide via root
     /// `[tool_search]`; this field is only read to migrate older configs.
     #[serde(default, skip_serializing)]
@@ -582,9 +624,35 @@ fn normalize_mcp_route_path(raw: &str) -> String {
 }
 
 impl UpstreamConfig {
-    /// Validate mutually-exclusive auth shapes. `bearer_token_env` and `oauth`
-    /// both configured is a config error.
+    /// Validate the upstream name and mutually-exclusive auth shapes.
+    /// `bearer_token_env` and `oauth` both configured is a config error.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        // Name must not be empty.
+        if self.name.trim().is_empty() {
+            return Err(ConfigError::InvalidName {
+                name: self.name.clone(),
+                reason: "must not be empty".to_string(),
+            });
+        }
+        // Name must not exceed 128 characters.
+        if self.name.len() > 128 {
+            return Err(ConfigError::InvalidName {
+                name: self.name.clone(),
+                reason: "must not exceed 128 characters".to_string(),
+            });
+        }
+        // Name must use only safe ASCII characters.
+        if !self
+            .name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        {
+            return Err(ConfigError::InvalidName {
+                name: self.name.clone(),
+                reason: "must contain only ASCII letters, digits, hyphens, underscores, and dots"
+                    .to_string(),
+            });
+        }
         if self.bearer_token_env.is_some() && self.oauth.is_some() {
             return Err(ConfigError::ConflictingAuth {
                 name: self.name.clone(),
@@ -641,6 +709,8 @@ pub fn canonicalize_upstream_url(raw: &str) -> Result<String, url::ParseError> {
 /// Config-layer errors surfaced by `UpstreamConfig::validate` and sibling helpers.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
+    #[error("upstream '{name}' has invalid name: {reason}")]
+    InvalidName { name: String, reason: String },
     #[error("upstream '{name}' has both bearer_token_env and oauth configured — pick one")]
     ConflictingAuth { name: String },
     #[error("upstream '{name}' has invalid url: {url}")]

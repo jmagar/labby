@@ -344,6 +344,52 @@ pub const ACTIONS: &[ActionSpec] = &[
         ],
     },
     ActionSpec {
+        name: "gateway.discover",
+        description: "Scan the machine for MCP server configs from known editors and tools (cursor, claude-code, claude-desktop, codex, windsurf, opencode, vscode, gemini). Read-only — does not modify config.",
+        destructive: false,
+        returns: "DiscoveredServerView[]",
+        params: &[
+            ParamSpec {
+                name: "clients",
+                ty: "string[]",
+                required: false,
+                description: "Limit scan to these client kinds (e.g. [\"cursor\",\"vscode\"]). Empty means scan all.",
+            },
+            ParamSpec {
+                name: "include_existing",
+                ty: "boolean",
+                required: false,
+                description: "Also return servers already present in the gateway config",
+            },
+        ],
+    },
+    ActionSpec {
+        name: "gateway.import",
+        description: "Import discovered MCP servers into the gateway config as disabled-by-default entries. Servers are marked with their discovery source.",
+        destructive: true,
+        returns: "ImportResultView",
+        params: &[
+            ParamSpec {
+                name: "all",
+                ty: "boolean",
+                required: false,
+                description: "Import every discovered server not already in the gateway config",
+            },
+            ParamSpec {
+                name: "names",
+                ty: "string[]",
+                required: false,
+                description: "Specific server names to import. Mutually exclusive with `all`.",
+            },
+            ParamSpec {
+                name: "clients",
+                ty: "string[]",
+                required: false,
+                description: "Limit discovery to these client kinds. Empty means scan all.",
+            },
+        ],
+    },
+    ActionSpec {
         name: "gateway.add",
         description: "Add a gateway and reconcile runtime state",
         destructive: true,
@@ -597,6 +643,7 @@ mod tests {
             "gateway.remove",
             "gateway.reload",
             "gateway.oauth.probe",
+            "gateway.import",
         ] {
             let spec = ACTIONS
                 .iter()
@@ -618,6 +665,7 @@ mod tests {
             "gateway.discovered_resources",
             "gateway.discovered_prompts",
             "gateway.mcp.list",
+            "gateway.discover",
         ] {
             let spec = ACTIONS
                 .iter()

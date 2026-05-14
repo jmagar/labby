@@ -612,21 +612,19 @@ fn validate_backend_target(origin: &str) -> Result<(), ToolError> {
 }
 
 fn validate_upstream(upstream: &UpstreamConfig) -> Result<(), ToolError> {
-    if upstream.name.trim().is_empty() {
-        return Err(ToolError::InvalidParam {
-            message: "gateway name must not be empty".to_string(),
-            param: "name".to_string(),
-        });
-    }
-
     // Validate bearer_token_env if present — reject raw token values.
     if let Some(env_name) = &upstream.bearer_token_env {
         validate_bearer_token_env_name(env_name)?;
     }
 
-    // Reject mutually-exclusive auth shapes and invalid URLs. Each ConfigError
-    // variant carries its own param attribution so the caller sees the right field.
+    // Reject invalid names, mutually-exclusive auth shapes, and invalid URLs.
+    // Name validation lives in UpstreamConfig::validate() so it runs on the
+    // TOML load path as well (lab-qxl8.2 / lab-wsed).
     upstream.validate().map_err(|e| match e {
+        crate::config::ConfigError::InvalidName { .. } => ToolError::InvalidParam {
+            message: e.to_string(),
+            param: "name".to_string(),
+        },
         crate::config::ConfigError::ConflictingAuth { .. } => ToolError::InvalidParam {
             message: e.to_string(),
             param: "bearer_token_env".to_string(),
@@ -851,12 +849,14 @@ mod tests {
                     bearer_token_env: None,
                     command: None,
                     args: Vec::new(),
+                    env: std::collections::BTreeMap::new(),
                     proxy_resources: false,
                     proxy_prompts: false,
                     expose_tools: None,
                     expose_resources: None,
                     expose_prompts: None,
                     oauth: None,
+                    imported_from: None,
                     tool_search: crate::config::ToolSearchConfig::default(),
                 },
                 UpstreamConfig {
@@ -866,12 +866,14 @@ mod tests {
                     bearer_token_env: None,
                     command: Some("node".to_string()),
                     args: vec!["server.js".to_string()],
+                    env: std::collections::BTreeMap::new(),
                     proxy_resources: false,
                     proxy_prompts: false,
                     expose_tools: None,
                     expose_resources: None,
                     expose_prompts: None,
                     oauth: None,
+                    imported_from: None,
                     tool_search: crate::config::ToolSearchConfig::default(),
                 },
             ],
@@ -931,12 +933,14 @@ args = ["server.js"]
                 bearer_token_env: Some("C_TOKEN".to_string()),
                 command: None,
                 args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: true,
                 proxy_prompts: true,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
@@ -1190,12 +1194,14 @@ args = ["server.js"]
                 bearer_token_env: None,
                 command: None,
                 args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
@@ -1216,12 +1222,14 @@ args = ["server.js"]
                 bearer_token_env: None,
                 command: Some("node".to_string()),
                 args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }],
             ..LabConfig::default()
@@ -1243,12 +1251,14 @@ args = ["server.js"]
                 bearer_token_env: None,
                 command: None,
                 args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }],
             ..LabConfig::default()
@@ -1269,12 +1279,14 @@ args = ["server.js"]
                 bearer_token_env: None,
                 command: None,
                 args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
@@ -1294,12 +1306,14 @@ args = ["server.js"]
                 bearer_token_env: None,
                 command: None,
                 args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
@@ -1319,18 +1333,133 @@ args = ["server.js"]
                 bearer_token_env: Some("Bearer ghp_secret".to_string()),
                 command: None,
                 args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
         .expect_err("raw bearer token should be rejected");
 
         assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[test]
+    fn insert_upstream_rejects_name_over_128_chars() {
+        let long_name = "a".repeat(129);
+        let err = insert_upstream(
+            &mut LabConfig::default(),
+            UpstreamConfig {
+                enabled: true,
+                name: long_name,
+                url: Some("https://example.com/mcp".to_string()),
+                bearer_token_env: None,
+                command: None,
+                args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
+                proxy_resources: false,
+                proxy_prompts: false,
+                expose_tools: None,
+                expose_resources: None,
+                expose_prompts: None,
+                oauth: None,
+                imported_from: None,
+                tool_search: crate::config::ToolSearchConfig::default(),
+            },
+        )
+        .expect_err("name over 128 chars should be rejected");
+
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[test]
+    fn insert_upstream_rejects_invalid_chars_in_name() {
+        let err = insert_upstream(
+            &mut LabConfig::default(),
+            UpstreamConfig {
+                enabled: true,
+                name: "evil\x1bgateway".to_string(),
+                url: Some("https://example.com/mcp".to_string()),
+                bearer_token_env: None,
+                command: None,
+                args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
+                proxy_resources: false,
+                proxy_prompts: false,
+                expose_tools: None,
+                expose_resources: None,
+                expose_prompts: None,
+                oauth: None,
+                imported_from: None,
+                tool_search: crate::config::ToolSearchConfig::default(),
+            },
+        )
+        .expect_err("control char in name should be rejected");
+
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[test]
+    fn insert_upstream_rejects_bidi_override_in_name() {
+        // U+202E RIGHT-TO-LEFT OVERRIDE (bidi char, not caught by is_control())
+        let err = insert_upstream(
+            &mut LabConfig::default(),
+            UpstreamConfig {
+                enabled: true,
+                name: "safe\u{202e}gateway".to_string(),
+                url: Some("https://example.com/mcp".to_string()),
+                bearer_token_env: None,
+                command: None,
+                args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
+                proxy_resources: false,
+                proxy_prompts: false,
+                expose_tools: None,
+                expose_resources: None,
+                expose_prompts: None,
+                oauth: None,
+                imported_from: None,
+                tool_search: crate::config::ToolSearchConfig::default(),
+            },
+        )
+        .expect_err("bidi override in name should be rejected");
+
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[test]
+    fn insert_upstream_accepts_valid_names() {
+        // Positive test: ensure we didn't over-block valid names.
+        let valid_names = ["my-gateway", "plex.primary", "cursor_mcp", "abc123"];
+        for name in &valid_names {
+            let mut cfg = LabConfig::default();
+            insert_upstream(
+                &mut cfg,
+                UpstreamConfig {
+                    enabled: true,
+                    name: name.to_string(),
+                    url: Some("https://example.com/mcp".to_string()),
+                    bearer_token_env: None,
+                    command: None,
+                    args: Vec::new(),
+                    env: std::collections::BTreeMap::new(),
+                    proxy_resources: false,
+                    proxy_prompts: false,
+                    expose_tools: None,
+                    expose_resources: None,
+                    expose_prompts: None,
+                    oauth: None,
+                    imported_from: None,
+                    tool_search: crate::config::ToolSearchConfig::default(),
+                },
+            )
+            .unwrap_or_else(|e| panic!("valid name '{name}' should be accepted: {e}"));
+        }
     }
 
     #[test]

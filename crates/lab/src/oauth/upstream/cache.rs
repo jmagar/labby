@@ -231,6 +231,7 @@ mod tests {
             command: None,
             args: vec![],
             bearer_token_env: None,
+            env: std::collections::BTreeMap::new(),
             proxy_resources: false,
             proxy_prompts: false,
             expose_tools: None,
@@ -244,6 +245,7 @@ mod tests {
                 },
                 scopes: None,
             }),
+            imported_from: None,
             tool_search: crate::config::ToolSearchConfig::default(),
         }
     }

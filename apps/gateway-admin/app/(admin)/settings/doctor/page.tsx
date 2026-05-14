@@ -204,7 +204,7 @@ export default function SettingsPage() {
                       <div>
                         <p className="font-medium text-aurora-text-primary">Tool search mode</p>
                         <p className="mt-1 text-sm text-aurora-text-muted">
-                          Expose server-wide <code className="rounded bg-aurora-panel-strong px-1.5 py-0.5 text-aurora-text-primary">tool_search</code> and <code className="rounded bg-aurora-panel-strong px-1.5 py-0.5 text-aurora-text-primary">tool_invoke</code> instead of listing every upstream tool directly.
+                          Expose server-wide <code className="rounded bg-aurora-panel-strong px-1.5 py-0.5 text-aurora-text-primary">tool_search</code> and <code className="rounded bg-aurora-panel-strong px-1.5 py-0.5 text-aurora-text-primary">tool_execute</code> instead of listing every upstream tool directly.
                         </p>
                       </div>
                     </div>

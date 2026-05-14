@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::time::sleep;
 
-use crate::cli::helpers::run_action_command;
+use crate::cli::helpers::{run_action_command, run_confirmable_action_command};
 use crate::config::{LabConfig, ProtectedMcpRouteConfig, config_toml_path};
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
@@ -37,8 +37,38 @@ pub enum GatewayCommand {
     ToolSearch(GatewayToolSearchArgs),
     Reload,
     Mcp(GatewayMcpArgs),
+    /// Scan the machine for MCP server configs from known editors and tools (read-only)
+    Discover(GatewayDiscoverArgs),
+    /// Import discovered MCP servers into the gateway (disabled by default)
+    Import(GatewayImportArgs),
     /// Show resolved public URL configuration (app and MCP gateway)
     PublicUrls,
+}
+
+#[derive(Debug, Args)]
+pub struct GatewayDiscoverArgs {
+    /// Limit scan to specific client kinds (comma-separated: cursor,claude-code,vscode,...)
+    #[arg(long, value_delimiter = ',')]
+    pub clients: Vec<String>,
+    /// Also show servers already present in the gateway config
+    #[arg(long, default_value_t = false)]
+    pub include_existing: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct GatewayImportArgs {
+    /// Import every discovered server not already in the gateway config
+    #[arg(long, default_value_t = false)]
+    pub all: bool,
+    /// Specific server names to import (space-separated)
+    #[arg(long = "name")]
+    pub names: Vec<String>,
+    /// Limit discovery to specific client kinds (comma-separated)
+    #[arg(long, value_delimiter = ',')]
+    pub clients: Vec<String>,
+    /// Skip confirmation for the destructive config import.
+    #[arg(short = 'y', long, alias = "no-confirm")]
+    pub yes: bool,
 }
 
 #[derive(Debug, Args)]
@@ -447,6 +477,7 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
             }
         },
         command => {
+            let mut confirmed = true;
             let (action, params) = match command {
                 GatewayCommand::List => ("gateway.list".to_string(), json!({})),
                 GatewayCommand::Get(args) => {
@@ -562,14 +593,34 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                     "gateway.reload".to_string(),
                     json!({ "origin": cli_origin, "owner": cli_owner }),
                 ),
+                GatewayCommand::Discover(args) => (
+                    "gateway.discover".to_string(),
+                    json!({
+                        "clients": args.clients,
+                        "include_existing": args.include_existing,
+                    }),
+                ),
+                GatewayCommand::Import(args) => {
+                    confirmed = args.yes;
+                    (
+                        "gateway.import".to_string(),
+                        json!({
+                            "all": args.all,
+                            "names": args.names,
+                            "clients": args.clients,
+                        }),
+                    )
+                }
                 GatewayCommand::PublicUrls => ("gateway.public_urls.get".to_string(), json!({})),
                 GatewayCommand::Mcp(_) => unreachable!("handled above"),
             };
 
-            return run_action_command(
+            return run_confirmable_action_command(
                 "gateway",
+                crate::dispatch::gateway::ACTIONS,
                 action,
                 params,
+                confirmed,
                 format,
                 |action, params| async move {
                     crate::dispatch::gateway::dispatch_with_manager(&manager, &action, params).await
@@ -734,6 +785,7 @@ mod tests {
             .is_ok()
         );
         assert!(Cli::try_parse_from(["lab", "gateway", "remove", "fixture-http"]).is_ok());
+        assert!(Cli::try_parse_from(["lab", "gateway", "import", "--all", "--yes"]).is_ok());
         assert!(Cli::try_parse_from(["lab", "gateway", "quarantine", "list"]).is_ok());
         assert!(Cli::try_parse_from(["lab", "gateway", "quarantine", "restore", "plex"]).is_ok());
         assert!(Cli::try_parse_from(["lab", "gateway", "reload"]).is_ok());

@@ -12,6 +12,7 @@ mod client;
 mod dispatch;
 mod draft;
 mod params;
+mod plugin_hook;
 mod secret_mask;
 mod state;
 

@@ -91,9 +91,10 @@ struct GatewayToolIndexState {
     /// Handle for the most recent spawned rebuild, aborted when a new
     /// rebuild is scheduled so rapid config churn doesn't leak tasks.
     in_flight: Arc<StdMutex<Option<AbortHandle>>>,
-    /// Timestamp of the last completed live reprobe. Search-path refresh
-    /// short-circuits when younger than `TOOL_SEARCH_REPROBE_TTL`.
-    last_reprobe_at: Arc<StdMutex<Option<Instant>>>,
+    /// Timestamp of the last scheduled live reprobe attempt. Search-path
+    /// refresh short-circuits when younger than `TOOL_SEARCH_REPROBE_TTL`,
+    /// even if the previous attempt failed before rebuilding the index.
+    last_reprobe_attempt_at: Arc<StdMutex<Option<Instant>>>,
 }
 
 impl Default for GatewayToolIndexState {
@@ -103,9 +104,20 @@ impl Default for GatewayToolIndexState {
             warming: Arc::new(AtomicBool::new(false)),
             generation: Arc::new(AtomicU64::new(0)),
             in_flight: Arc::new(StdMutex::new(None)),
-            last_reprobe_at: Arc::new(StdMutex::new(None)),
+            last_reprobe_attempt_at: Arc::new(StdMutex::new(None)),
         }
     }
+}
+
+/// Outcome of a `batch_add` call.
+///
+/// `views` contains one [`GatewayView`] for each spec that was successfully
+/// inserted. `errors` contains `(name, error)` pairs for every spec that
+/// failed validation or insertion.
+#[derive(Debug, Default)]
+pub struct BatchAddOutcome {
+    pub views: Vec<GatewayView>,
+    pub errors: Vec<(String, ToolError)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -354,6 +366,11 @@ impl GatewayManager {
 
         let values = read_env_values(&env_path)?;
         Ok(service_config_view(meta, &values))
+    }
+
+    /// Return a snapshot of the current gateway config (read-only).
+    pub async fn current_config(&self) -> LabConfig {
+        self.config.read().await.clone()
     }
 
     pub async fn list(&self) -> Result<Vec<ServerView>, ToolError> {
@@ -756,16 +773,6 @@ impl GatewayManager {
         owner: Option<UpstreamRuntimeOwner>,
     ) -> Result<GatewayView, ToolError> {
         let started = Instant::now();
-        tracing::info!(
-            surface = "dispatch",
-            service = "gateway",
-            action = "gateway.add",
-            event = "install.start",
-            phase = "start",
-            gateway = %spec.name,
-            target = ?redacted_gateway_target(&spec),
-            "gateway reconcile"
-        );
         let _mutation_guard = self.config_mutation.lock().await;
         let mut cfg = self.config.read().await.clone();
 
@@ -789,6 +796,19 @@ impl GatewayManager {
         } else {
             insert_upstream(&mut cfg, spec.clone())?;
         }
+
+        // Log only after validation (inside insert_upstream) has passed so
+        // spec.name is confirmed well-formed before it enters any log sink.
+        tracing::info!(
+            surface = "dispatch",
+            service = "gateway",
+            action = "gateway.add",
+            event = "install.start",
+            phase = "start",
+            gateway = %spec.name,
+            target = ?redacted_gateway_target(&spec),
+            "gateway reconcile"
+        );
         self.persist_config(cfg).await?;
         let diff = self.reload_with_origin_unlocked(origin, owner).await?;
         tracing::info!(
@@ -806,6 +826,71 @@ impl GatewayManager {
             "gateway reconcile"
         );
         self.get(&spec.name).await
+    }
+
+    /// Add multiple upstream servers in a single config-persist + reload cycle.
+    ///
+    /// Each spec is validated and inserted individually. Specs that fail validation
+    /// are collected into `errors`; specs that succeed populate `views`. If every
+    /// spec fails the first error is returned as `Err`. Otherwise, a single
+    /// `persist_config` + `reload_with_origin_unlocked` is issued for all successes.
+    pub async fn batch_add(
+        &self,
+        specs: Vec<UpstreamConfig>,
+        origin: Option<&str>,
+        owner: Option<UpstreamRuntimeOwner>,
+    ) -> Result<BatchAddOutcome, ToolError> {
+        if specs.is_empty() {
+            return Ok(BatchAddOutcome::default());
+        }
+        let started = std::time::Instant::now();
+        let _mutation_guard = self.config_mutation.lock().await;
+        let mut cfg = self.config.read().await.clone();
+
+        let mut added_names = Vec::new();
+        let mut errors: Vec<(String, ToolError)> = Vec::new();
+        for mut spec in specs {
+            if let Some(ref env_name) = spec.bearer_token_env {
+                let trimmed = env_name.trim().to_string();
+                if let Err(e) = validate_bearer_token_env_name(&trimmed) {
+                    errors.push((spec.name, e));
+                    continue;
+                }
+                spec.bearer_token_env = Some(trimmed);
+            }
+            match insert_upstream(&mut cfg, spec.clone()) {
+                Ok(()) => added_names.push(spec.name),
+                Err(e) => errors.push((spec.name, e)),
+            }
+        }
+
+        if added_names.is_empty() && !errors.is_empty() {
+            // Every spec failed — return the first error to the caller.
+            return Err(errors.remove(0).1);
+        }
+
+        self.persist_config(cfg).await?;
+        let diff = self.reload_with_origin_unlocked(origin, owner).await?;
+
+        tracing::info!(
+            surface = "dispatch",
+            service = "gateway",
+            action = "gateway.import",
+            event = "batch_install.finish",
+            added = added_names.len(),
+            skipped = errors.len(),
+            tools_changed = diff.tools_changed,
+            elapsed_ms = started.elapsed().as_millis(),
+            "gateway batch reconcile"
+        );
+
+        let mut views = Vec::new();
+        for name in &added_names {
+            if let Ok(view) = self.get(name).await {
+                views.push(view);
+            }
+        }
+        Ok(BatchAddOutcome { views, errors })
     }
 
     pub async fn update(
@@ -1410,7 +1495,6 @@ impl GatewayManager {
                 message: "tool search is not enabled".to_string(),
             });
         }
-        self.refresh_tool_search_indexes_if_stale().await;
         let trimmed = query.trim();
         if trimmed.is_empty() {
             return Err(ToolError::Sdk {
@@ -1424,6 +1508,10 @@ impl GatewayManager {
                 message: "query exceeds max length 500".to_string(),
             });
         }
+
+        let has_cached_index = self.has_cached_tool_search_index();
+        self.refresh_tool_search_indexes_if_stale(!has_cached_index)
+            .await;
 
         let requested = top_k.max(1).min(50);
         let mut hits: Vec<SearchHit> = self
@@ -1465,7 +1553,7 @@ impl GatewayManager {
             .collect())
     }
 
-    pub async fn resolve_tool_invoke(
+    pub async fn resolve_tool_execute(
         &self,
         name: &str,
     ) -> Result<(String, crate::dispatch::upstream::types::UpstreamTool), ToolError> {
@@ -1499,6 +1587,12 @@ impl GatewayManager {
             });
         }
         Ok(matches.into_iter().next().expect("checked len"))
+    }
+
+    fn has_cached_tool_search_index(&self) -> bool {
+        self.tool_indexes
+            .iter()
+            .any(|entry| entry.value().index.load_full().is_some())
     }
 
     fn schedule_tool_search_rebuilds(&self, cfg: &LabConfig, pool: Option<Arc<UpstreamPool>>) {
@@ -1663,10 +1757,10 @@ impl GatewayManager {
 
     /// Refresh per-upstream tool-search indexes on the search hot path.
     ///
-    /// TTL-gated on `TOOL_SEARCH_REPROBE_TTL`: if the last successful reprobe
+    /// TTL-gated on `TOOL_SEARCH_REPROBE_TTL`: if the last attempted reprobe
     /// is younger than the TTL, skip the live probe and keep the cached
     /// index. Remaining stale upstreams are reprobed concurrently.
-    async fn refresh_tool_search_indexes_if_stale(&self) {
+    async fn refresh_tool_search_indexes_if_stale(&self, wait_for_refresh: bool) {
         let cfg = self.config.read().await.clone();
         if !cfg.tool_search.enabled {
             return;
@@ -1688,13 +1782,26 @@ impl GatewayManager {
         let max_tools = cfg.tool_search.max_tools;
         let mut pending = Vec::new();
         for upstream in cfg.upstream {
+            if !upstream.enabled {
+                tracing::debug!(
+                    surface = "mcp",
+                    service = "gateway",
+                    action = "tool_search.reprobe",
+                    event = "skipped",
+                    operation = "health",
+                    upstream = %upstream.name,
+                    reason = "disabled",
+                    "gateway tool index reprobe skipped"
+                );
+                continue;
+            }
             let state = self
                 .tool_indexes
                 .entry(upstream.name.clone())
                 .or_default()
                 .clone();
             let fresh = state
-                .last_reprobe_at
+                .last_reprobe_attempt_at
                 .lock()
                 .ok()
                 .and_then(|guard| *guard)
@@ -1712,6 +1819,10 @@ impl GatewayManager {
                 );
                 continue;
             }
+            if let Ok(mut guard) = state.last_reprobe_attempt_at.lock() {
+                *guard = Some(now);
+            }
+            state.warming.store(true, Ordering::Relaxed);
             tracing::info!(
                 surface = "mcp",
                 service = "gateway",
@@ -1724,79 +1835,83 @@ impl GatewayManager {
             pending.push((upstream, state));
         }
 
-        let pool = &pool;
-        let tasks = pending.into_iter().map(|(upstream, state)| async move {
-            state.warming.store(true, Ordering::Relaxed);
-            let reprobe_started = Instant::now();
-            tracing::debug!(
-                surface = "mcp",
-                service = "gateway",
-                action = "tool_search.reprobe",
-                event = "start",
-                operation = "health",
-                upstream = %upstream.name,
-                "gateway tool index reprobe start"
-            );
-            if let Err(err) = pool.reprobe_tools_for_upstream(&upstream).await {
-                tracing::warn!(
+        let tasks = pending.into_iter().map(|(upstream, state)| {
+            let pool = Arc::clone(&pool);
+            async move {
+                let reprobe_started = Instant::now();
+                tracing::debug!(
                     surface = "mcp",
                     service = "gateway",
                     action = "tool_search.reprobe",
-                    event = "error",
+                    event = "start",
                     operation = "health",
-                    elapsed_ms = reprobe_started.elapsed().as_millis(),
-                    kind = "upstream_reprobe_failed",
-                    error = %err,
                     upstream = %upstream.name,
-                    "gateway tool index reprobe failed"
+                    "gateway tool index reprobe start"
                 );
-                state.warming.store(false, Ordering::Relaxed);
-                return;
-            }
-            let healthy_tools = pool.healthy_tools_for_upstream(&upstream.name).await;
-            let upstream_clone = upstream.clone();
-            let built = tokio::task::spawn_blocking(move || {
-                ToolIndex::build_from_tools(&upstream_clone, healthy_tools, max_tools)
-            })
-            .await;
-            if let Ok(index) = built {
-                let should_publish = state.index.load_full().as_ref().is_none_or(|current| {
-                    current.metadata.catalog_hash != index.metadata.catalog_hash
-                });
-                if should_publish {
-                    state.index.store(Some(Arc::new(index)));
+                if let Err(err) = pool.reprobe_tools_for_upstream(&upstream).await {
+                    tracing::warn!(
+                        surface = "mcp",
+                        service = "gateway",
+                        action = "tool_search.reprobe",
+                        event = "error",
+                        operation = "health",
+                        elapsed_ms = reprobe_started.elapsed().as_millis(),
+                        kind = "upstream_reprobe_failed",
+                        error = %err,
+                        upstream = %upstream.name,
+                        "gateway tool index reprobe failed"
+                    );
+                    state.warming.store(false, Ordering::Relaxed);
+                    return;
                 }
-                tracing::info!(
-                    surface = "mcp",
-                    service = "gateway",
-                    action = "tool_search.reprobe",
-                    event = "finish",
-                    operation = "health",
-                    elapsed_ms = reprobe_started.elapsed().as_millis(),
-                    upstream = %upstream.name,
-                    published = should_publish,
-                    "gateway tool index reprobe finish"
-                );
-            } else {
-                tracing::warn!(
-                    surface = "mcp",
-                    service = "gateway",
-                    action = "tool_search.reprobe",
-                    event = "error",
-                    operation = "health",
-                    elapsed_ms = reprobe_started.elapsed().as_millis(),
-                    kind = "tool_index_build_failed",
-                    upstream = %upstream.name,
-                    "gateway tool index reprobe build failed"
-                );
+                let healthy_tools = pool.healthy_tools_for_upstream(&upstream.name).await;
+                let upstream_clone = upstream.clone();
+                let built = tokio::task::spawn_blocking(move || {
+                    ToolIndex::build_from_tools(&upstream_clone, healthy_tools, max_tools)
+                })
+                .await;
+                if let Ok(index) = built {
+                    let should_publish = state.index.load_full().as_ref().is_none_or(|current| {
+                        current.metadata.catalog_hash != index.metadata.catalog_hash
+                    });
+                    if should_publish {
+                        state.index.store(Some(Arc::new(index)));
+                    }
+                    tracing::info!(
+                        surface = "mcp",
+                        service = "gateway",
+                        action = "tool_search.reprobe",
+                        event = "finish",
+                        operation = "health",
+                        elapsed_ms = reprobe_started.elapsed().as_millis(),
+                        upstream = %upstream.name,
+                        published = should_publish,
+                        "gateway tool index reprobe finish"
+                    );
+                } else {
+                    tracing::warn!(
+                        surface = "mcp",
+                        service = "gateway",
+                        action = "tool_search.reprobe",
+                        event = "error",
+                        operation = "health",
+                        elapsed_ms = reprobe_started.elapsed().as_millis(),
+                        kind = "tool_index_build_failed",
+                        upstream = %upstream.name,
+                        "gateway tool index reprobe build failed"
+                    );
+                }
+                state.warming.store(false, Ordering::Relaxed);
             }
-            if let Ok(mut guard) = state.last_reprobe_at.lock() {
-                *guard = Some(Instant::now());
-            }
-            state.warming.store(false, Ordering::Relaxed);
         });
 
-        futures::future::join_all(tasks).await;
+        if wait_for_refresh {
+            futures::future::join_all(tasks).await;
+        } else {
+            for task in tasks {
+                tokio::spawn(task);
+            }
+        }
     }
 
     #[cfg(test)]
@@ -2073,7 +2188,7 @@ use super::runtime::{process_matches_patterns, upstream_cleanup_patterns};
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeSet, HashMap};
+    use std::collections::{BTreeMap, BTreeSet, HashMap};
     use std::sync::Arc;
 
     use crate::config::{
@@ -2101,14 +2216,142 @@ mod tests {
             bearer_token_env: None,
             command: Some("true".to_string()),
             args: Vec::new(),
+            env: BTreeMap::new(),
             proxy_resources: false,
             proxy_prompts: false,
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
             oauth: None,
+            imported_from: None,
             tool_search: ToolSearchConfig::default(),
         }
+    }
+
+    fn fixture_http_upstream(name: &str) -> UpstreamConfig {
+        UpstreamConfig {
+            enabled: true,
+            name: name.to_string(),
+            url: Some("http://127.0.0.1:9/mcp".to_string()),
+            bearer_token_env: None,
+            command: None,
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            proxy_resources: false,
+            proxy_prompts: false,
+            expose_tools: None,
+            expose_resources: None,
+            expose_prompts: None,
+            oauth: None,
+            imported_from: None,
+            tool_search: ToolSearchConfig::default(),
+        }
+    }
+
+    async fn tool_search_manager_with_pool(
+        upstream: UpstreamConfig,
+    ) -> (GatewayManager, Arc<UpstreamPool>) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        let runtime = GatewayRuntimeHandle::default();
+        let pool = Arc::new(UpstreamPool::new());
+        runtime.swap(Some(Arc::clone(&pool))).await;
+        let manager = GatewayManager::new(path, runtime);
+        manager
+            .seed_config(LabConfig {
+                tool_search: ToolSearchConfig {
+                    enabled: true,
+                    ..ToolSearchConfig::default()
+                },
+                upstream: vec![upstream],
+                ..LabConfig::default()
+            })
+            .await;
+        (manager, pool)
+    }
+
+    #[tokio::test]
+    async fn tool_search_failed_reprobe_attempt_is_ttl_gated() {
+        let upstream = fixture_http_upstream("downstream");
+        let (manager, _pool) = tool_search_manager_with_pool(upstream).await;
+
+        let _first_results = manager
+            .search_tools("missing tool", 5, false)
+            .await
+            .expect("failed reprobe still returns current search result set");
+        let state = manager
+            .tool_indexes
+            .get("downstream")
+            .expect("tool index state")
+            .clone();
+        let first_attempt = *state
+            .last_reprobe_attempt_at
+            .lock()
+            .expect("attempt timestamp lock");
+        assert!(first_attempt.is_some(), "failed reprobe records attempt");
+
+        let _second_results = manager
+            .search_tools("missing tool", 5, false)
+            .await
+            .expect("fresh failed reprobe is TTL-gated");
+        let second_attempt = *state
+            .last_reprobe_attempt_at
+            .lock()
+            .expect("attempt timestamp lock");
+
+        assert_eq!(
+            first_attempt, second_attempt,
+            "second search inside TTL must not schedule another reprobe"
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_search_returns_cached_results_while_stale_refresh_runs() {
+        let upstream = fixture_http_upstream("cached-upstream");
+        let (manager, _pool) = tool_search_manager_with_pool(upstream.clone()).await;
+        let schema = Arc::new(serde_json::Map::new());
+        let upstream_name: Arc<str> = Arc::from(upstream.name.as_str());
+        let tool = rmcp::model::Tool::new(
+            "cached_lookup",
+            "Cached marker search tool",
+            Arc::clone(&schema),
+        );
+        let index = ToolIndex::build_from_tools(
+            &upstream,
+            vec![crate::dispatch::upstream::types::UpstreamTool {
+                tool,
+                input_schema: None,
+                upstream_name,
+            }],
+            10,
+        );
+        let state = manager
+            .tool_indexes
+            .entry(upstream.name.clone())
+            .or_default()
+            .clone();
+        state.index.store(Some(Arc::new(index)));
+
+        let results = tokio::time::timeout(
+            Duration::from_millis(100),
+            manager.search_tools("cached marker", 5, false),
+        )
+        .await
+        .expect("cached search must not wait for live stale refresh")
+        .expect("cached search succeeds");
+
+        assert!(
+            results.iter().any(|result| result.name == "cached_lookup"),
+            "cached index result should be returned"
+        );
+        assert!(
+            state
+                .last_reprobe_attempt_at
+                .lock()
+                .expect("attempt timestamp lock")
+                .is_some(),
+            "stale refresh should still be scheduled in the background"
+        );
     }
 
     fn fixture_protected_route(name: &str) -> ProtectedMcpRouteConfig {
@@ -2181,12 +2424,14 @@ mod tests {
             bearer_token_env: None,
             command: Some("uvx".to_string()),
             args: vec!["github-chat-mcp".to_string()],
+            env: BTreeMap::new(),
             proxy_resources: false,
             proxy_prompts: false,
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
             oauth: None,
+            imported_from: None,
             tool_search: ToolSearchConfig::default(),
         };
 
@@ -2233,12 +2478,14 @@ mod tests {
                 bearer_token_env: None,
                 command: Some("uvx".to_string()),
                 args: vec![runtime_arg.to_string()],
+                env: BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: ToolSearchConfig::default(),
             }])
             .await;
@@ -2303,12 +2550,14 @@ mod tests {
                 bearer_token_env: Some("FIXTURE_HTTP_TOKEN".to_string()),
                 command: None,
                 args: Vec::new(),
+                env: BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: ToolSearchConfig::default(),
             }])
             .await;
@@ -2339,12 +2588,14 @@ mod tests {
                     "--access_token=abc123".to_string(),
                     "--api-key=super-secret".to_string(),
                 ],
+                env: BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: ToolSearchConfig::default(),
             }])
             .await;
@@ -2371,12 +2622,14 @@ mod tests {
             bearer_token_env: Some("FIXTURE_HTTP_TOKEN".to_string()),
             command: None,
             args: Vec::new(),
+            env: BTreeMap::new(),
             proxy_resources: false,
             proxy_prompts: false,
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
             oauth: None,
+            imported_from: None,
             tool_search: ToolSearchConfig::default(),
         };
 
@@ -2397,12 +2650,14 @@ mod tests {
             bearer_token_env: Some("FIXTURE_HTTP_TOKEN".to_string()),
             command: None,
             args: Vec::new(),
+            env: BTreeMap::new(),
             proxy_resources: false,
             proxy_prompts: false,
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
             oauth: None,
+            imported_from: None,
             tool_search: ToolSearchConfig::default(),
         };
 
@@ -2427,12 +2682,14 @@ mod tests {
                 "npx".to_string(),
                 "--access_token=abc123".to_string(),
             ],
+            env: BTreeMap::new(),
             proxy_resources: false,
             proxy_prompts: false,
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
             oauth: None,
+            imported_from: None,
             tool_search: ToolSearchConfig::default(),
         };
 
@@ -2725,12 +2982,14 @@ mod tests {
                     bearer_token_env: None,
                     command: None,
                     args: Vec::new(),
+                    env: BTreeMap::new(),
                     proxy_resources: false,
                     proxy_prompts: false,
                     expose_tools: None,
                     expose_resources: None,
                     expose_prompts: None,
                     oauth: None,
+                    imported_from: None,
                     tool_search: ToolSearchConfig::default(),
                 },
                 Some("ghp_secret".to_string()),
@@ -3213,12 +3472,14 @@ mod tests {
                     bearer_token_env: None,
                     command: None,
                     args: Vec::new(),
+                    env: BTreeMap::new(),
                     proxy_resources: false,
                     proxy_prompts: false,
                     expose_tools: None,
                     expose_resources: None,
                     expose_prompts: None,
                     oauth: None,
+                    imported_from: None,
                     tool_search: ToolSearchConfig::default(),
                 }],
                 ..LabConfig::default()
@@ -3245,6 +3506,7 @@ mod tests {
                     bearer_token_env: None,
                     command: None,
                     args: Vec::new(),
+                    env: BTreeMap::new(),
                     proxy_resources: false,
                     proxy_prompts: false,
                     expose_tools: None,
@@ -3255,6 +3517,7 @@ mod tests {
                         registration: UpstreamOauthRegistration::Dynamic,
                         scopes: None,
                     }),
+                    imported_from: None,
                     tool_search: ToolSearchConfig::default(),
                 }],
                 ..LabConfig::default()
@@ -3313,12 +3576,14 @@ mod tests {
                 bearer_token_env: None,
                 command: None,
                 args: Vec::new(),
+                env: BTreeMap::new(),
                 proxy_resources: true,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: ToolSearchConfig::default(),
             },
         )
@@ -3375,12 +3640,14 @@ mod tests {
                 bearer_token_env: None,
                 command: None,
                 args: Vec::new(),
+                env: BTreeMap::new(),
                 proxy_resources: true,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: ToolSearchConfig::default(),
             },
         )
@@ -3399,12 +3666,14 @@ mod tests {
             bearer_token_env: None,
             command: None,
             args: Vec::new(),
+            env: BTreeMap::new(),
             proxy_resources: true,
             proxy_prompts: false,
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
             oauth: None,
+            imported_from: None,
             tool_search: ToolSearchConfig::default(),
         };
         let upstream_name: Arc<str> = Arc::from("partial-upstream");

@@ -24,6 +24,9 @@ use tokio::sync::RwLock;
 
 use crate::config::NodeRole;
 use crate::dispatch::gateway::manager::{GatewayManager, GatewayToolSearchResult};
+use crate::mcp::catalog::{
+    LEGACY_TOOL_INVOKE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME,
+};
 use crate::mcp::elicitation::{ElicitResult, elicit_confirm};
 use crate::mcp::envelope::{build_error, build_error_extra, build_success};
 use crate::mcp::error::DispatchError;
@@ -897,23 +900,11 @@ impl ServerHandler for LabMcpServer {
         let mut subject_scoped_tool_count = 0usize;
         let mut gateway_tool_count = 0usize;
         let mut suppressed_builtin_tool_count = 0usize;
-        let manager_tool_search_enabled = if let Some(manager) = &self.gateway_manager {
-            manager.tool_search_enabled().await
-        } else {
-            false
-        };
+        let visibility = self.tool_search_visibility().await;
+        let manager_tool_search_enabled = visibility.exposes_synthetic_tools();
         let process_tool_search_enabled = crate::config::process_tool_search_enabled();
-        let hide_raw_tools = manager_tool_search_enabled
-            || (self.gateway_manager.is_none() && process_tool_search_enabled);
-        let visibility_mode = match (
-            manager_tool_search_enabled,
-            process_tool_search_enabled,
-            self.gateway_manager.is_some(),
-        ) {
-            (true, _, _) => "tool_search_root",
-            (false, true, false) => "tool_search_in_process_peer",
-            _ => "raw",
-        };
+        let hide_raw_tools = visibility.hides_raw_tools();
+        let visibility_mode = visibility.mode_label();
         for svc in self.registry.services() {
             if self.service_visible_on_mcp(svc.name).await {
                 if hide_raw_tools {
@@ -938,7 +929,7 @@ impl ServerHandler for LabMcpServer {
                 _ => unreachable!("tool_search schema must be an object"),
             };
             tools.push(Tool::new(
-                "tool_search",
+                TOOL_SEARCH_TOOL_NAME,
                 "Search Lab and proxied upstream tool catalogs",
                 tool_search_schema,
             ));
@@ -955,7 +946,7 @@ impl ServerHandler for LabMcpServer {
                 _ => unreachable!("tool_execute schema must be an object"),
             };
             tools.push(Tool::new(
-                "tool_execute",
+                TOOL_EXECUTE_TOOL_NAME,
                 "Invoke one Lab or upstream tool discovered through tool_search",
                 tool_execute_schema,
             ));
@@ -1058,7 +1049,7 @@ impl ServerHandler for LabMcpServer {
         let param_key_count = params.as_object().map_or(0, serde_json::Map::len);
 
         let svc = self.registry.services().iter().find(|s| s.name == service);
-        if service == "tool_search" {
+        if service == TOOL_SEARCH_TOOL_NAME {
             let started = Instant::now();
             let subject = self.request_subject_log_tag(&context);
             let query = args
@@ -1179,7 +1170,10 @@ impl ServerHandler for LabMcpServer {
                 }
             };
         }
-        if matches!(service.as_str(), "tool_execute" | "tool_invoke") {
+        if matches!(
+            service.as_str(),
+            TOOL_EXECUTE_TOOL_NAME | LEGACY_TOOL_INVOKE_TOOL_NAME
+        ) {
             let started = Instant::now();
             let tool_name = args
                 .get("name")
@@ -1193,7 +1187,7 @@ impl ServerHandler for LabMcpServer {
                 .unwrap_or_else(|| serde_json::json!({}));
             let arguments_hash = hash_arguments(&arguments);
             let subject = self.request_subject_log_tag(&context);
-            if !tool_invoke_scope_allowed(auth_context_from_extensions(&context.extensions)) {
+            if !tool_execute_scope_allowed(auth_context_from_extensions(&context.extensions)) {
                 tracing::warn!(
                     surface = "mcp",
                     service = %service,
@@ -1292,6 +1286,37 @@ impl ServerHandler for LabMcpServer {
                             entry.name
                         ),
                         &Value::Object(extra),
+                    );
+                    return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+                }
+
+                if !tool_execute_builtin_action_allowed(
+                    entry,
+                    &builtin_action,
+                    auth_context_from_extensions(&context.extensions),
+                ) {
+                    tracing::warn!(
+                        surface = "mcp",
+                        service = %service,
+                        action = "call_tool",
+                        subject,
+                        upstream = "lab",
+                        upstream_tool = %tool_name,
+                        builtin_action = %builtin_action,
+                        arguments_hash = %arguments_hash,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        kind = "forbidden",
+                        "gateway tool execute denied by built-in action scope"
+                    );
+                    let env = build_error_extra(
+                        &service,
+                        "call_tool",
+                        "forbidden",
+                        &format!(
+                            "action `{builtin_action}` for service `{}` requires `lab:admin` scope",
+                            entry.name
+                        ),
+                        &serde_json::json!({ "required_scopes": ["lab:admin"] }),
                     );
                     return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
                 }
@@ -1414,7 +1439,7 @@ impl ServerHandler for LabMcpServer {
                 .await;
                 return Ok(result);
             }
-            let resolved = manager.resolve_tool_invoke(&tool_name).await;
+            let resolved = manager.resolve_tool_execute(&tool_name).await;
             let (upstream_name, _) = match resolved {
                 Ok(value) => value,
                 Err(crate::dispatch::error::ToolError::AmbiguousTool { message, valid }) => {
@@ -1543,7 +1568,7 @@ impl ServerHandler for LabMcpServer {
                     }
                 }
             }
-            // resolve_tool_invoke succeeded but no upstream pool is wired
+            // resolve_tool_execute succeeded but no upstream pool is wired
             // yet (e.g. gateway manager present but runtime handle hasn't
             // swapped in a pool). Without this branch, execution falls
             // through to the catch-all "no dispatcher wired" error below,
@@ -1595,6 +1620,37 @@ impl ServerHandler for LabMcpServer {
                 "unknown_action",
                 &format!("action `{action}` is not exposed for service `{service}`"),
                 &Value::Object(extra),
+            );
+            return Ok(CallToolResult::error(vec![Content::text(
+                envelope.to_string(),
+            )]));
+        }
+
+        if self.tool_search_visibility().await.hides_raw_tools() {
+            let envelope = build_error(
+                &service,
+                &action,
+                "not_found",
+                &format!("tool `{service}` is hidden while tool_search mode is enabled"),
+            );
+            return Ok(CallToolResult::error(vec![Content::text(
+                envelope.to_string(),
+            )]));
+        }
+
+        if let Some(entry) = svc
+            && !tool_execute_builtin_action_allowed(
+                entry,
+                &action,
+                auth_context_from_extensions(&context.extensions),
+            )
+        {
+            let envelope = build_error_extra(
+                &service,
+                &action,
+                "forbidden",
+                &format!("action `{action}` for service `{service}` requires `lab:admin` scope"),
+                &serde_json::json!({ "required_scopes": ["lab:admin"] }),
             );
             return Ok(CallToolResult::error(vec![Content::text(
                 envelope.to_string(),
@@ -2189,9 +2245,9 @@ impl LabMcpServer {
             if !self.service_visible_on_mcp(service.name).await {
                 continue;
             }
+            let actions = self.searchable_builtin_actions(service).await;
 
-            let action_text = service
-                .actions
+            let action_text = actions
                 .iter()
                 .map(|action| format!("{} {}", action.name, action.description))
                 .collect::<Vec<_>>()
@@ -2205,16 +2261,29 @@ impl LabMcpServer {
 
             results.push(GatewayToolSearchResult {
                 name: service.name.to_string(),
-                description: builtin_tool_search_description(service),
+                description: builtin_tool_search_description(service, &actions),
                 upstream: "lab".to_string(),
                 score,
-                input_schema: include_schema.then(|| builtin_tool_search_schema(service)),
+                input_schema: include_schema.then(|| builtin_tool_search_schema(&actions)),
             });
         }
 
         results.sort_by(compare_tool_search_results);
         results.truncate(top_k.max(1).min(50));
         results
+    }
+
+    async fn searchable_builtin_actions<'a>(
+        &self,
+        service: &'a crate::registry::RegisteredService,
+    ) -> Vec<&'a lab_apis::core::action::ActionSpec> {
+        let mut actions = service.actions.iter().collect::<Vec<_>>();
+        if let Some(allowed_actions) = self.allowed_mcp_actions(service.name).await
+            && !allowed_actions.is_empty()
+        {
+            actions.retain(|action| allowed_actions.iter().any(|allowed| allowed == action.name));
+        }
+        actions
     }
 }
 
@@ -2260,32 +2329,34 @@ fn score_builtin_tool(query: &str, name: &str, haystack: &str) -> f32 {
     score
 }
 
-fn builtin_tool_search_description(service: &crate::registry::RegisteredService) -> String {
+fn builtin_tool_search_description(
+    service: &crate::registry::RegisteredService,
+    actions: &[&lab_apis::core::action::ActionSpec],
+) -> String {
     let mut description = service.description.to_string();
-    let actions = service
-        .actions
+    let visible_actions = actions
         .iter()
         .take(12)
         .map(|action| action.name)
         .collect::<Vec<_>>();
-    if !actions.is_empty() {
+    if !visible_actions.is_empty() {
         description.push_str(". Actions: ");
-        description.push_str(&actions.join(", "));
-        if service.actions.len() > actions.len() {
+        description.push_str(&visible_actions.join(", "));
+        if actions.len() > visible_actions.len() {
             description.push_str(", ...");
         }
     }
     description
 }
 
-fn builtin_tool_search_schema(service: &crate::registry::RegisteredService) -> Value {
+fn builtin_tool_search_schema(actions: &[&lab_apis::core::action::ActionSpec]) -> Value {
     serde_json::json!({
         "type": "object",
         "properties": {
             "action": {
                 "type": "string",
                 "description": "Lab service action to perform. Use \"help\" to list actions.",
-                "enum": service.actions.iter().map(|action| action.name).collect::<Vec<_>>(),
+                "enum": actions.iter().map(|action| action.name).collect::<Vec<_>>(),
             },
             "params": {
                 "type": "object",
@@ -2311,12 +2382,37 @@ fn auth_context_from_extensions(
     parts.extensions.get::<crate::api::oauth::AuthContext>()
 }
 
-fn tool_invoke_scope_allowed(auth: Option<&crate::api::oauth::AuthContext>) -> bool {
+fn tool_execute_scope_allowed(auth: Option<&crate::api::oauth::AuthContext>) -> bool {
     auth.is_none_or(|auth| {
         auth.scopes
             .iter()
             .any(|scope| matches!(scope.as_str(), "lab" | "lab:admin"))
     })
+}
+
+fn tool_execute_builtin_action_allowed(
+    entry: &crate::registry::RegisteredService,
+    action: &str,
+    auth: Option<&crate::api::oauth::AuthContext>,
+) -> bool {
+    if !builtin_action_requires_admin(entry, action) {
+        return true;
+    }
+    auth.is_none_or(|auth| auth.scopes.iter().any(|scope| scope == "lab:admin"))
+}
+
+fn builtin_action_requires_admin(entry: &crate::registry::RegisteredService, action: &str) -> bool {
+    if entry.name == "gateway" {
+        return !matches!(
+            action,
+            "help" | "schema" | "gateway.help" | "gateway.schema"
+        );
+    }
+    entry.name == "setup"
+        && entry
+            .actions
+            .iter()
+            .any(|spec| spec.name == action && spec.destructive)
 }
 
 fn hash_arguments(arguments: &Value) -> String {
@@ -2999,6 +3095,62 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn tool_search_filters_builtin_schema_to_allowed_mcp_actions() {
+        let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
+        let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+            std::path::PathBuf::from("config.toml"),
+            runtime,
+        ));
+        manager
+            .seed_config(crate::config::LabConfig {
+                virtual_servers: vec![crate::config::VirtualServerConfig {
+                    id: "plex".to_string(),
+                    service: "plex".to_string(),
+                    enabled: true,
+                    surfaces: crate::config::VirtualServerSurfacesConfig {
+                        cli: false,
+                        api: false,
+                        mcp: true,
+                        webui: false,
+                    },
+                    mcp_policy: Some(crate::config::VirtualServerMcpPolicyConfig {
+                        allowed_actions: vec!["server.info".to_string()],
+                    }),
+                }],
+                ..crate::config::LabConfig::default()
+            })
+            .await;
+
+        let server = super::LabMcpServer {
+            registry: std::sync::Arc::new(crate::registry::build_default_registry()),
+            gateway_manager: Some(manager),
+            node_role: None,
+            peers: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            logging_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+                logging_level_rank(rmcp::model::LoggingLevel::Info),
+            )),
+        };
+
+        let results = server
+            .search_builtin_tools("plex session info", 5, true)
+            .await;
+        let plex = results
+            .iter()
+            .find(|result| result.name == "plex")
+            .expect("plex should match allowed action text");
+        assert!(plex.description.contains("server.info"));
+        assert!(!plex.description.contains("session.list"));
+        let actions = plex
+            .input_schema
+            .as_ref()
+            .and_then(|schema| schema.pointer("/properties/action/enum"))
+            .and_then(Value::as_array)
+            .expect("action enum");
+        assert!(actions.iter().any(|action| action == "server.info"));
+        assert!(!actions.iter().any(|action| action == "session.list"));
+    }
+
     #[test]
     fn server_reads_subject_scoped_upstream_pool_from_request_extensions() {
         let mut parts = axum::http::Request::new(()).into_parts().0;
@@ -3025,5 +3177,91 @@ mod tests {
     #[test]
     fn upstream_subject_resolution_self_test_passes_for_plan_a() {
         super::verify_upstream_subject_resolution_support().expect("self-test");
+    }
+
+    #[test]
+    fn gateway_builtin_actions_require_admin_scope() {
+        let entry = RegisteredService {
+            name: "gateway",
+            description: "Gateway",
+            category: "bootstrap",
+            kind: crate::registry::RegisteredServiceKind::BootstrapOperator,
+            status: "available",
+            actions: crate::dispatch::gateway::ACTIONS,
+            dispatch: noop_dispatch,
+        };
+        let read_only = crate::api::oauth::AuthContext {
+            sub: "alice".to_string(),
+            actor_key: None,
+            scopes: vec!["lab".to_string()],
+            issuer: "https://lab.example.com".to_string(),
+            via_session: true,
+            csrf_token: None,
+            email: None,
+        };
+        let admin = crate::api::oauth::AuthContext {
+            scopes: vec!["lab:admin".to_string()],
+            ..read_only.clone()
+        };
+
+        assert!(super::tool_execute_builtin_action_allowed(
+            &entry,
+            "gateway.help",
+            Some(&read_only)
+        ));
+        assert!(!super::tool_execute_builtin_action_allowed(
+            &entry,
+            "gateway.import",
+            Some(&read_only)
+        ));
+        assert!(super::tool_execute_builtin_action_allowed(
+            &entry,
+            "gateway.import",
+            Some(&admin)
+        ));
+        assert!(super::tool_execute_builtin_action_allowed(
+            &entry,
+            "gateway.import",
+            None
+        ));
+    }
+
+    #[test]
+    fn setup_destructive_builtin_actions_require_admin_scope() {
+        let registry = crate::registry::build_default_registry();
+        let entry = registry
+            .services()
+            .iter()
+            .find(|service| service.name == "setup")
+            .expect("setup service");
+        let read_only = crate::api::oauth::AuthContext {
+            sub: "alice".to_string(),
+            actor_key: None,
+            scopes: vec!["lab".to_string()],
+            issuer: "https://lab.example.com".to_string(),
+            via_session: true,
+            csrf_token: None,
+            email: None,
+        };
+        let admin = crate::api::oauth::AuthContext {
+            scopes: vec!["lab:admin".to_string()],
+            ..read_only.clone()
+        };
+
+        assert!(super::tool_execute_builtin_action_allowed(
+            entry,
+            "state",
+            Some(&read_only)
+        ));
+        assert!(!super::tool_execute_builtin_action_allowed(
+            entry,
+            "repair",
+            Some(&read_only)
+        ));
+        assert!(super::tool_execute_builtin_action_allowed(
+            entry,
+            "repair",
+            Some(&admin)
+        ));
     }
 }

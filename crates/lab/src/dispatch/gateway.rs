@@ -2,6 +2,7 @@ mod catalog;
 mod client;
 pub(crate) mod config;
 mod config_mutation;
+pub mod discovery;
 mod dispatch;
 mod index;
 pub mod manager;

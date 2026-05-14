@@ -100,6 +100,32 @@ pub const ACTIONS: &[ActionSpec] = &[
         }],
     },
     ActionSpec {
+        name: "plugin_hook",
+        description: "Run binary-owned local setup checks for Claude plugin hooks",
+        destructive: true,
+        returns: "SetupReport",
+        params: &[ParamSpec {
+            name: "repair",
+            ty: "boolean",
+            required: false,
+            description: "Create missing local Lab setup files; defaults to true",
+        }],
+    },
+    ActionSpec {
+        name: "check",
+        description: "Check local Lab setup prerequisites without mutating the filesystem",
+        destructive: false,
+        returns: "SetupReport",
+        params: &[],
+    },
+    ActionSpec {
+        name: "repair",
+        description: "Repair missing local Lab setup prerequisites without contacting external services",
+        destructive: true,
+        returns: "SetupReport",
+        params: &[],
+    },
+    ActionSpec {
         name: "installed_plugins",
         description: "List installed Claude Code lab plugins",
         destructive: false,
