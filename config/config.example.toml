@@ -138,7 +138,7 @@
 
 [tool_search]
 # Gateway-wide mode. When enabled, proxied upstream tools are hidden from
-# MCP list_tools and exposed through synthetic tool_search/tool_invoke helpers.
+# MCP list_tools and exposed through synthetic tool_search/tool_execute helpers.
 # enabled = false                           # default: false
 # top_k_default = 10                        # valid range: 1..=50
 # max_tools = 5000                          # valid range: 1..=10000

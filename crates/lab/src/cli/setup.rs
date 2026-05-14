@@ -70,6 +70,16 @@ pub enum SetupCommand {
     },
     /// Join service configuration, draft, and Claude plugin state.
     ServicesStatus,
+    /// Run binary-owned local setup checks for Claude plugin hooks.
+    PluginHook {
+        /// Check only; do not create missing local setup files.
+        #[arg(long)]
+        no_repair: bool,
+    },
+    /// Check local setup prerequisites without mutating the filesystem.
+    Check,
+    /// Repair missing local setup prerequisites without contacting external services.
+    Repair,
     /// Install the Claude Code plugin for a configured service.
     InstallPlugin(PluginMutationArgs),
     /// Uninstall the Claude Code plugin for a service.
@@ -147,6 +157,20 @@ async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<Exit
             let value = crate::dispatch::setup::dispatch("services_status", json!({})).await?;
             print(&value, format)?;
         }
+        SetupCommand::PluginHook { no_repair } => {
+            let value =
+                crate::dispatch::setup::dispatch("plugin_hook", json!({ "repair": !no_repair }))
+                    .await?;
+            print(&value, format)?;
+        }
+        SetupCommand::Check => {
+            let value = crate::dispatch::setup::dispatch("check", json!({})).await?;
+            print(&value, format)?;
+        }
+        SetupCommand::Repair => {
+            let value = crate::dispatch::setup::dispatch("repair", json!({})).await?;
+            print(&value, format)?;
+        }
         SetupCommand::InstallPlugin(args) => {
             run_plugin_mutation("install_plugin", args, format).await?;
         }
@@ -181,6 +205,7 @@ async fn run_plugin_mutation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser as _;
 
     #[tokio::test]
     async fn no_setup_flag_exits_cleanly() {
@@ -201,5 +226,33 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(code, ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn parses_plugin_hook_no_repair_subcommand() {
+        let cli = crate::cli::Cli::try_parse_from(["labby", "setup", "plugin-hook", "--no-repair"])
+            .unwrap();
+        let crate::cli::Command::Setup(args) = cli.command else {
+            panic!("expected setup command");
+        };
+        let Some(SetupCommand::PluginHook { no_repair }) = args.command else {
+            panic!("expected plugin-hook subcommand");
+        };
+        assert!(no_repair);
+    }
+
+    #[test]
+    fn parses_setup_check_and_repair_subcommands() {
+        for command in ["check", "repair"] {
+            let cli = crate::cli::Cli::try_parse_from(["labby", "setup", command]).unwrap();
+            let crate::cli::Command::Setup(args) = cli.command else {
+                panic!("expected setup command");
+            };
+            match (command, args.command) {
+                ("check", Some(SetupCommand::Check)) => {}
+                ("repair", Some(SetupCommand::Repair)) => {}
+                _ => panic!("unexpected setup subcommand for {command}"),
+            }
+        }
     }
 }

@@ -35,6 +35,7 @@ pub(super) fn config_view(
         tool_search_enabled: tool_search.enabled,
         tool_search_top_k_default: tool_search.top_k_default,
         tool_search_max_tools: tool_search.max_tools,
+        imported_from: upstream.imported_from.clone(),
     }
 }
 

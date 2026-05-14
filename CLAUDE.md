@@ -400,3 +400,9 @@ just test-integration
 - Prefer concrete types over generics unless sharing demands it
 - Never add `clap`, `rmcp`, `ratatui`, `anyhow`, or `tabled` to `lab-apis` — they belong in `lab` only
 - **No `mod.rs` files.** Modern Rust module style only: a module `foo` is declared in `foo.rs` sibling to its `foo/` directory, never in `foo/mod.rs`
+
+## Plugin setup hooks
+
+Plugin setup is owned by the binary. `labby setup check` is read-only, `labby setup repair` is idempotent, and `labby setup plugin-hook --no-repair` is audit mode. If a lab plugin hook is added later, keep it as a thin adapter that maps `CLAUDE_PLUGIN_OPTION_*` values to environment variables, prepares appdata, ensures `labby` is on `PATH`, and then calls `labby setup plugin-hook "$@"`.
+
+Do not add Docker Compose, systemd, or service bootstrap logic to plugin hook scripts.

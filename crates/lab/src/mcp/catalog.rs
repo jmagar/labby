@@ -7,6 +7,35 @@ use super::server::LabMcpServer;
 use crate::dispatch::upstream::pool::UpstreamPool;
 use crate::mcp::prompts::list_all as list_builtin_prompts;
 
+pub(crate) const TOOL_SEARCH_TOOL_NAME: &str = "tool_search";
+pub(crate) const TOOL_EXECUTE_TOOL_NAME: &str = "tool_execute";
+pub(crate) const LEGACY_TOOL_INVOKE_TOOL_NAME: &str = "tool_invoke";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ToolSearchVisibility {
+    Raw,
+    RootSynthetic,
+    InProcessPeer,
+}
+
+impl ToolSearchVisibility {
+    pub(crate) fn hides_raw_tools(self) -> bool {
+        !matches!(self, Self::Raw)
+    }
+
+    pub(crate) fn exposes_synthetic_tools(self) -> bool {
+        matches!(self, Self::RootSynthetic)
+    }
+
+    pub(crate) fn mode_label(self) -> &'static str {
+        match self {
+            Self::Raw => "raw",
+            Self::RootSynthetic => "tool_search_root",
+            Self::InProcessPeer => "tool_search_in_process_peer",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CatalogSnapshot {
     pub(crate) tools: BTreeSet<String>,
@@ -55,6 +84,21 @@ impl LabMcpServer {
             Some(manager) => manager.allowed_mcp_actions_for_service(service).await,
             None => None,
         }
+    }
+
+    pub(crate) async fn tool_search_visibility(&self) -> ToolSearchVisibility {
+        let manager_tool_search_enabled = if let Some(manager) = &self.gateway_manager {
+            manager.tool_search_enabled().await
+        } else {
+            false
+        };
+        if manager_tool_search_enabled {
+            return ToolSearchVisibility::RootSynthetic;
+        }
+        if self.gateway_manager.is_none() && crate::config::process_tool_search_enabled() {
+            return ToolSearchVisibility::InProcessPeer;
+        }
+        ToolSearchVisibility::Raw
     }
 
     fn service_visible_by_env_or_gateway(&self, service: &str) -> bool {
@@ -140,24 +184,22 @@ impl LabMcpServer {
     }
 
     pub(crate) async fn snapshot_catalog(&self) -> CatalogSnapshot {
-        let tool_search_enabled = if let Some(manager) = &self.gateway_manager {
-            manager.tool_search_enabled().await
-        } else {
-            false
-        };
+        let visibility = self.tool_search_visibility().await;
         let mut tools = BTreeSet::new();
-        if tool_search_enabled {
-            tools.insert("tool_search".to_string());
-            tools.insert("tool_execute".to_string());
+        if visibility.exposes_synthetic_tools() {
+            tools.insert(TOOL_SEARCH_TOOL_NAME.to_string());
+            tools.insert(TOOL_EXECUTE_TOOL_NAME.to_string());
         } else {
             for svc in self.registry.services() {
-                if self.service_visible_on_mcp(svc.name).await {
+                if !visibility.hides_raw_tools() && self.service_visible_on_mcp(svc.name).await {
                     tools.insert(svc.name.to_string());
                 }
             }
         }
 
-        if !tool_search_enabled && let Some(pool) = self.current_upstream_pool().await {
+        if !visibility.hides_raw_tools()
+            && let Some(pool) = self.current_upstream_pool().await
+        {
             for tool in pool.healthy_tools().await {
                 let name = tool.tool.name.to_string();
                 if !tools.contains(&name) {

@@ -387,12 +387,14 @@ mod tests {
                 bearer_token_env: Some("FIXTURE_HTTP_TOKEN".to_string()),
                 command: None,
                 args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }])
             .await;

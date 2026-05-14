@@ -71,6 +71,9 @@ async fn dispatch_inner(action: &str, params: &Value) -> Result<Value, ToolError
         "draft.commit" => draft_commit_action(params).await,
         "settings.state" => settings_state_action(),
         "settings.update" => settings_update_action(params),
+        "plugin_hook" => plugin_hook_action(params),
+        "check" => setup_check_action(),
+        "repair" => setup_repair_action(),
         "installed_plugins" => installed_plugins_action(params).await,
         "services_status" => services_status_action().await,
         "install_plugin" => install_plugin_action(params).await,
@@ -82,6 +85,28 @@ async fn dispatch_inner(action: &str, params: &Value) -> Result<Value, ToolError
             hint: None,
         }),
     }
+}
+
+fn plugin_hook_action(params: &Value) -> Result<Value, ToolError> {
+    let repair = params
+        .get("repair")
+        .map(|value| parse_required_bool(value, "repair"))
+        .transpose()?
+        .unwrap_or(true);
+    let mode = if repair {
+        super::plugin_hook::Mode::Repair
+    } else {
+        super::plugin_hook::Mode::Check
+    };
+    to_json(super::plugin_hook::run(mode)?)
+}
+
+fn setup_check_action() -> Result<Value, ToolError> {
+    to_json(super::plugin_hook::run(super::plugin_hook::Mode::Check)?)
+}
+
+fn setup_repair_action() -> Result<Value, ToolError> {
+    to_json(super::plugin_hook::run(super::plugin_hook::Mode::Repair)?)
 }
 
 async fn installed_plugins_action(params: &Value) -> Result<Value, ToolError> {
@@ -565,6 +590,10 @@ fn log_outcome(
     elapsed_ms: u128,
     result: &Result<Value, ToolError>,
 ) {
+    if matches!(action, "plugin_hook" | "check" | "repair") {
+        return;
+    }
+
     let params_field = if log_params {
         params.clone()
     } else {

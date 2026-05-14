@@ -27,6 +27,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+// Gateway startup/reload writes this process-wide flag whenever root
+// `[tool_search]` changes. In-process peer MCP servers do not hold a
+// GatewayManager, but they must still hide raw built-in tools when the root
+// server is operating in synthetic `tool_search`/`tool_execute` mode.
 static PROCESS_TOOL_SEARCH_ENABLED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn set_process_tool_search_enabled(enabled: bool) {
@@ -445,6 +449,17 @@ impl ToolSearchConfig {
     }
 }
 
+/// Provenance record for an upstream imported from an external MCP config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportSource {
+    /// Which client config type this was discovered in (e.g. "cursor", "claude-code", "vscode").
+    pub client: String,
+    /// Absolute path to the config file the server was read from.
+    pub path: String,
+    /// ISO 8601 timestamp of when the import was recorded.
+    pub imported_at: String,
+}
+
 /// Configuration for a single upstream MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpstreamConfig {
@@ -466,6 +481,11 @@ pub struct UpstreamConfig {
     /// Arguments to pass to the stdio command.
     #[serde(default)]
     pub args: Vec<String>,
+    /// Environment variables to inject when spawning a stdio transport process.
+    /// Import discovery records env key counts, but does not copy raw values from
+    /// external config files into Lab config.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
     /// Whether to proxy resources from this upstream. Defaults to true.
     #[serde(default = "default_true")]
     pub proxy_resources: bool,
@@ -485,6 +505,10 @@ pub struct UpstreamConfig {
     /// `bearer_token_env` — setting both is a config error.
     #[serde(default)]
     pub oauth: Option<UpstreamOauthConfig>,
+    /// Import provenance — present when this upstream was discovered from an
+    /// external MCP config rather than added manually. Omitted for manual entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_from: Option<ImportSource>,
     /// Deprecated compatibility field. Tool search is gateway-wide via root
     /// `[tool_search]`; this field is only read to migrate older configs.
     #[serde(default, skip_serializing)]

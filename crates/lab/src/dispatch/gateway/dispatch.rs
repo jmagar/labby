@@ -9,14 +9,15 @@ use super::catalog::ACTIONS;
 use super::client::require_gateway_manager;
 use super::manager::GatewayManager;
 use super::params::{
-    GatewayAddParams, GatewayClientConfigParams, GatewayMcpCleanupParams, GatewayMcpToggleParams,
-    GatewayNameParams, GatewayOauthNameParams, GatewayReloadParams, GatewayStatusParams,
-    GatewayTestParams, GatewayUpdateParams, GatewayUpdatePatch, ProtectedRouteNameParams,
-    ProtectedRouteSpecParams, ProtectedRouteUpdateParams, ServiceConfigGetParams,
-    ServiceConfigSetParams, ToolInvokeParams, ToolSearchParams, ToolSearchSetParams,
-    VirtualServerMcpPolicyParams, VirtualServerNameParams, VirtualServerSurfaceParams,
+    GatewayAddParams, GatewayClientConfigParams, GatewayDiscoverParams, GatewayImportParams,
+    GatewayMcpCleanupParams, GatewayMcpToggleParams, GatewayNameParams, GatewayOauthNameParams,
+    GatewayReloadParams, GatewayStatusParams, GatewayTestParams, GatewayUpdateParams,
+    GatewayUpdatePatch, ProtectedRouteNameParams, ProtectedRouteSpecParams,
+    ProtectedRouteUpdateParams, ServiceConfigGetParams, ServiceConfigSetParams,
+    ToolSearchSetParams, VirtualServerMcpPolicyParams, VirtualServerNameParams,
+    VirtualServerSurfaceParams,
 };
-use super::types::ServiceActionView;
+use super::types::{DiscoveredServerView, ServiceActionView};
 
 fn parse_params<T: DeserializeOwned>(params_value: Value) -> Result<T, ToolError> {
     serde_json::from_value(params_value).map_err(|e| ToolError::InvalidParam {
@@ -36,11 +37,11 @@ pub async fn dispatch_with_manager(
             let action_name = require_str(&params_value, "action")?;
             action_schema(ACTIONS, action_name)
         }
-        "tool_search"
-        | "tool_execute"
-        | "tool_invoke"
-        | "gateway.tool_search.get"
-        | "gateway.tool_search.set" => handle_tool_actions(manager, action, params_value).await,
+        "gateway.tool_search.get" | "gateway.tool_search.set" => {
+            handle_tool_actions(manager, action, params_value).await
+        }
+        "gateway.discover" => handle_discover(manager, params_value).await,
+        "gateway.import" => handle_import(manager, params_value).await,
         "gateway.list"
         | "gateway.server.get"
         | "gateway.supported_services"
@@ -76,54 +77,133 @@ pub async fn dispatch_with_manager(
     }
 }
 
+async fn handle_discover(
+    manager: &GatewayManager,
+    params_value: Value,
+) -> Result<Value, ToolError> {
+    let params: GatewayDiscoverParams = parse_params(params_value)?;
+    let home = super::discovery::home_dir().ok_or_else(|| ToolError::Sdk {
+        sdk_kind: "internal_error".to_string(),
+        message: "cannot determine home directory".to_string(),
+    })?;
+
+    let mut discovered = super::discovery::discover_all(&home);
+    if !params.clients.is_empty() {
+        let filter: std::collections::HashSet<&str> =
+            params.clients.iter().map(String::as_str).collect();
+        discovered.retain(|s| filter.contains(s.source_client.as_str()));
+    }
+
+    let cfg = manager.current_config().await;
+    let existing: std::collections::HashSet<String> =
+        cfg.upstream.iter().map(|u| u.name.clone()).collect();
+
+    let views: Vec<DiscoveredServerView> = discovered
+        .into_iter()
+        .filter(|s| params.include_existing || !existing.contains(&s.name))
+        .map(|s| {
+            let transport = if s.spec.url.is_some() {
+                "http"
+            } else {
+                "stdio"
+            }
+            .to_string();
+            let command_preview = s.spec.command.as_ref().map(|c| {
+                c.split_whitespace()
+                    .next()
+                    .unwrap_or(c.as_str())
+                    .to_string()
+            });
+            DiscoveredServerView {
+                name: s.name,
+                source_client: s.source_client,
+                source_path: s.source_path,
+                transport,
+                command_preview,
+                url_preview: s.spec.url.as_deref().map(redact_url_preview),
+                env_key_count: s.env_key_count,
+                already_configured: existing.contains(&s.spec.name),
+            }
+        })
+        .collect();
+
+    to_json(views)
+}
+
+async fn handle_import(manager: &GatewayManager, params_value: Value) -> Result<Value, ToolError> {
+    let params: GatewayImportParams = parse_params(params_value)?;
+
+    if params.names.is_empty() && !params.all {
+        return Err(ToolError::InvalidParam {
+            message: "gateway.import requires either `all: true` or a non-empty `names` list"
+                .to_string(),
+            param: "names".to_string(),
+        });
+    }
+
+    let home = super::discovery::home_dir().ok_or_else(|| ToolError::Sdk {
+        sdk_kind: "internal_error".to_string(),
+        message: "cannot determine home directory".to_string(),
+    })?;
+
+    let mut discovered = super::discovery::discover_all(&home);
+    if !params.clients.is_empty() {
+        let filter: std::collections::HashSet<&str> =
+            params.clients.iter().map(String::as_str).collect();
+        discovered.retain(|s| filter.contains(s.source_client.as_str()));
+    }
+
+    let to_import: Vec<_> = if params.all {
+        discovered
+    } else {
+        let wanted: std::collections::HashSet<&str> =
+            params.names.iter().map(String::as_str).collect();
+        discovered
+            .into_iter()
+            .filter(|s| wanted.contains(s.name.as_str()))
+            .collect()
+    };
+
+    let cfg = manager.current_config().await;
+    let already: std::collections::HashSet<String> =
+        cfg.upstream.iter().map(|u| u.name.clone()).collect();
+
+    let mut imported = Vec::new();
+    for server in to_import {
+        if already.contains(&server.name) {
+            continue;
+        }
+        // spec already has enabled=false and imported_from set by discovery
+        match manager
+            .add(server.spec, None, true, Some("gateway.import"), None)
+            .await
+        {
+            Ok(view) => imported.push(view),
+            Err(ToolError::Conflict { .. }) => {} // already exists, skip silently
+            Err(e) => return Err(e),
+        }
+    }
+
+    to_json(imported)
+}
+
+fn redact_url_preview(raw: &str) -> String {
+    let Ok(mut parsed) = url::Url::parse(raw) else {
+        return "<redacted>".to_string();
+    };
+    let _ = parsed.set_username("");
+    let _ = parsed.set_password(None);
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    parsed.to_string()
+}
+
 async fn handle_tool_actions(
     manager: &GatewayManager,
     action: &str,
     params_value: Value,
 ) -> Result<Value, ToolError> {
     match action {
-        "tool_search" => {
-            let params: ToolSearchParams = parse_params(params_value)?;
-            let top_k = match params.top_k {
-                Some(top_k) => top_k,
-                None => manager.tool_search_config().await.top_k_default,
-            };
-            to_json(
-                manager
-                    .search_tools(&params.query, top_k, params.include_schema)
-                    .await?,
-            )
-        }
-        "tool_execute" | "tool_invoke" => {
-            let params: ToolInvokeParams = parse_params(params_value)?;
-            let (upstream_name, _) = manager.resolve_tool_invoke(&params.name).await?;
-            let pool = manager.current_pool().await.ok_or_else(|| ToolError::Sdk {
-                sdk_kind: "unknown_tool".to_string(),
-                message: format!("tool `{}` is not available", params.name),
-            })?;
-            let mut upstream_params = rmcp::model::CallToolRequestParams::new(params.name);
-            upstream_params.arguments = Some(match params.arguments {
-                Value::Object(map) => map,
-                _ => {
-                    return Err(ToolError::Sdk {
-                        sdk_kind: "invalid_param".to_string(),
-                        message: "arguments must be an object".to_string(),
-                    });
-                }
-            });
-            let result = pool
-                .call_tool(&upstream_name, upstream_params)
-                .await
-                .ok_or_else(|| ToolError::Sdk {
-                    sdk_kind: "upstream_error".to_string(),
-                    message: format!("upstream `{upstream_name}` is not connected"),
-                })?
-                .map_err(|error| ToolError::Sdk {
-                    sdk_kind: "upstream_error".to_string(),
-                    message: error,
-                })?;
-            to_json(result)
-        }
         "gateway.tool_search.get" => to_json(manager.tool_search_config().await),
         "gateway.tool_search.set" => {
             let params: ToolSearchSetParams = parse_params(params_value)?;
@@ -619,6 +699,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn gateway_dispatch_rejects_synthetic_tool_execution_actions() {
+        let manager = test_manager();
+
+        for action in ["tool_execute", "tool_invoke", "tool_search"] {
+            let err = dispatch_with_manager(&manager, action, json!({}))
+                .await
+                .expect_err("synthetic top-level MCP tools are not gateway actions");
+            assert_eq!(err.kind(), "unknown_action", "{action}");
+        }
+    }
+
+    #[tokio::test]
     async fn gateway_list_returns_array() {
         let manager = test_manager();
         manager
@@ -629,12 +721,14 @@ mod tests {
                 bearer_token_env: Some("FIXTURE_HTTP_TOKEN".to_string()),
                 command: None,
                 args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }])
             .await;
@@ -666,12 +760,14 @@ mod tests {
                     bearer_token_env: Some("FIXTURE_HTTP_TOKEN".to_string()),
                     command: None,
                     args: Vec::new(),
+                    env: std::collections::BTreeMap::new(),
                     proxy_resources: false,
                     proxy_prompts: false,
                     expose_tools: None,
                     expose_resources: None,
                     expose_prompts: None,
                     oauth: None,
+                    imported_from: None,
                     tool_search: crate::config::ToolSearchConfig::default(),
                 },
                 UpstreamConfig {
@@ -681,12 +777,14 @@ mod tests {
                     bearer_token_env: None,
                     command: Some("npx".to_string()),
                     args: vec!["-y".to_string(), "fixture-server".to_string()],
+                    env: std::collections::BTreeMap::new(),
                     proxy_resources: false,
                     proxy_prompts: false,
                     expose_tools: None,
                     expose_resources: None,
                     expose_prompts: None,
                     oauth: None,
+                    imported_from: None,
                     tool_search: crate::config::ToolSearchConfig::default(),
                 },
             ])
@@ -774,12 +872,14 @@ mod tests {
                 bearer_token_env: Some("FIXTURE_HTTP_TOKEN".to_string()),
                 command: None,
                 args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }])
             .await;
@@ -808,12 +908,14 @@ mod tests {
                 bearer_token_env: None,
                 command: Some("noxa".to_string()),
                 args: vec!["mcp".to_string()],
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: true,
                 proxy_prompts: false,
                 expose_tools: Some(vec!["scrape".to_string()]),
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }])
             .await;
@@ -1290,12 +1392,14 @@ mod tests {
                     bearer_token_env: None,
                     command: None,
                     args: Vec::new(),
+                    env: std::collections::BTreeMap::new(),
                     proxy_resources: false,
                     proxy_prompts: false,
                     expose_tools: None,
                     expose_resources: None,
                     expose_prompts: None,
                     oauth: None,
+                    imported_from: None,
                     tool_search: crate::config::ToolSearchConfig::default(),
                 },
                 UpstreamConfig {
@@ -1305,12 +1409,14 @@ mod tests {
                     bearer_token_env: None,
                     command: Some("echo".to_string()),
                     args: vec!["hello".to_string()],
+                    env: std::collections::BTreeMap::new(),
                     proxy_resources: false,
                     proxy_prompts: false,
                     expose_tools: None,
                     expose_resources: None,
                     expose_prompts: None,
                     oauth: None,
+                    imported_from: None,
                     tool_search: crate::config::ToolSearchConfig::default(),
                 },
             ])
@@ -1570,12 +1676,14 @@ mod tests {
                 bearer_token_env: Some("FIXTURE_HTTP_TOKEN".to_string()),
                 command: None,
                 args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }])
             .await;
@@ -1612,12 +1720,14 @@ mod tests {
                 bearer_token_env: None,
                 command: Some("uvx".to_string()),
                 args: vec![runtime_arg.to_string()],
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }])
             .await;
@@ -1682,12 +1792,14 @@ mod tests {
                 bearer_token_env: None,
                 command: Some("uvx".to_string()),
                 args: vec![runtime_arg.to_string()],
+                env: std::collections::BTreeMap::new(),
                 proxy_resources: false,
                 proxy_prompts: false,
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
                 oauth: None,
+                imported_from: None,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }])
             .await;
@@ -1730,5 +1842,14 @@ mod tests {
 
         drop(child.kill());
         panic!("github-chat stand-in process was not terminated by disable cleanup");
+    }
+
+    #[test]
+    fn discovery_url_preview_redacts_secret_url_parts() {
+        assert_eq!(
+            redact_url_preview("https://user:pass@example.com/mcp?token=secret#frag"),
+            "https://example.com/mcp"
+        );
+        assert_eq!(redact_url_preview("not a url token=secret"), "<redacted>");
     }
 }

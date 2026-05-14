@@ -79,12 +79,14 @@ mod tests {
             bearer_token_env: None,
             command: None,
             args: vec![],
+            env: std::collections::BTreeMap::new(),
             proxy_resources: false,
             proxy_prompts: false,
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
             oauth: None,
+            imported_from: None,
             tool_search: crate::config::ToolSearchConfig::default(),
         }
     }

@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
+use crate::config::ImportSource;
+
 /// Surface-neutral notification handle for catalog changes.
 ///
 /// The dispatch layer calls this after gateway reload/add/remove to inform
@@ -54,6 +56,31 @@ pub struct GatewayConfigView {
     pub tool_search_top_k_default: usize,
     #[serde(default = "default_tool_search_max_tools")]
     pub tool_search_max_tools: usize,
+    /// Set when this server was imported from an external config; absent for manual entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_from: Option<ImportSource>,
+}
+
+/// A server discovered from an external MCP config but not yet imported.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiscoveredServerView {
+    pub name: String,
+    /// Which client config type it was found in (e.g. "cursor", "vscode", "gemini").
+    pub source_client: String,
+    /// Absolute path to the config file.
+    pub source_path: String,
+    /// Transport kind: "http" or "stdio".
+    pub transport: String,
+    /// First token of the command (stdio only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command_preview: Option<String>,
+    /// URL (http only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url_preview: Option<String>,
+    /// Number of env keys present (values are not shown).
+    pub env_key_count: usize,
+    /// True if a server with this name is already in the gateway config.
+    pub already_configured: bool,
 }
 
 fn default_tool_search_top_k_default() -> usize {
