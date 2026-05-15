@@ -444,9 +444,12 @@ mod tests {
         let json = serde_json::json!({
             "servers": [
                 {
-                    "name": "io.example/hello",
-                    "description": "A hello world server",
-                    "version": "1.0.0"
+                    "server": {
+                        "name": "io.example/hello",
+                        "description": "A hello world server",
+                        "version": "1.0.0"
+                    },
+                    "meta": null
                 }
             ],
             "metadata": {

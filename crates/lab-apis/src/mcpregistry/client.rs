@@ -1,8 +1,8 @@
 //! `McpRegistryClient` — MCP Registry v0.1 API methods.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use crate::core::{ApiError, Auth, HttpClient, ServiceClient, ServiceStatus};
+use crate::core::{ApiError, Auth, HttpClient};
 
 use super::error::RegistryError;
 use super::types::{
@@ -24,14 +24,14 @@ pub struct McpRegistryClient {
 impl McpRegistryClient {
     /// Build a client against `base_url` with the given auth strategy.
     ///
-    /// The default should be `Auth::None` — no auth is required for the public
-    /// registry. The `auth` parameter is accepted for symmetry with other clients
-    /// and to support bearer-token-authenticated private registry mirrors.
+    /// Pass `Auth::None` for the official public registry. Pass `Auth::Bearer`
+    /// or `Auth::Token` when targeting a private registry mirror that requires
+    /// authentication.
     ///
     /// # Errors
     /// Returns [`RegistryError::Api`] if the TLS backend or redirect policy
     /// fails to initialise.
-    pub fn new(base_url: &str, _auth: Auth) -> Result<Self, RegistryError> {
+    pub fn new(base_url: &str, auth: Auth) -> Result<Self, RegistryError> {
         let inner = reqwest::Client::builder()
             .user_agent(concat!("lab-apis/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(5))
@@ -43,7 +43,7 @@ impl McpRegistryClient {
             .map_err(|e| ApiError::Internal(format!("reqwest::Client::build: {e}")))?;
 
         Ok(Self {
-            http: HttpClient::from_parts(base_url, Auth::None, inner),
+            http: HttpClient::from_parts(base_url, auth, inner),
         })
     }
 
@@ -87,6 +87,11 @@ impl McpRegistryClient {
                 message: "server name must not be empty".into(),
             });
         }
+        if version.trim().is_empty() {
+            return Err(RegistryError::InvalidInput {
+                message: "server version must not be empty".into(),
+            });
+        }
         let encoded_name = HttpClient::encode_path_segment(name);
         let encoded_version = HttpClient::encode_path_segment(version);
         let path = format!("/v0.1/servers/{encoded_name}/versions/{encoded_version}");
@@ -123,36 +128,10 @@ impl McpRegistryClient {
     ) -> Result<ValidationResult, RegistryError> {
         Ok(self.http.post_json("/v0.1/validate", server_json).await?)
     }
-}
 
-impl ServiceClient for McpRegistryClient {
-    fn name(&self) -> &'static str {
-        "mcpregistry"
-    }
-
-    fn service_type(&self) -> &'static str {
-        "ai"
-    }
-
-    async fn health(&self) -> Result<ServiceStatus, ApiError> {
-        let start = Instant::now();
-        match self.http.get_void("/v0.1/health").await {
-            Ok(()) => Ok(ServiceStatus {
-                reachable: true,
-                auth_ok: true,
-                version: None,
-                latency_ms: u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
-                message: None,
-            }),
-            Err(ApiError::Auth) => Ok(ServiceStatus {
-                reachable: true,
-                auth_ok: false,
-                version: None,
-                latency_ms: u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
-                message: Some("auth failed".into()),
-            }),
-            Err(e) => Ok(ServiceStatus::unreachable(e.to_string())),
-        }
+    /// Health probe called by the `ServiceClient` impl in `mcpregistry.rs`.
+    pub(super) async fn health_probe(&self) -> Result<(), RegistryError> {
+        Ok(self.http.get_void("/v0.1/health").await?)
     }
 }
 
@@ -174,47 +153,54 @@ mod tests {
         let _ = make_client();
     }
 
-    #[test]
-    fn get_server_rejects_blank_name() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let client = make_client();
-        let err = rt.block_on(client.get_server("", "1.0.0")).unwrap_err();
+    #[tokio::test]
+    async fn get_server_rejects_blank_name() {
+        let err = make_client().get_server("", "1.0.0").await.unwrap_err();
         assert!(
             matches!(err, RegistryError::InvalidInput { ref message } if message.contains("must not be empty")),
             "expected InvalidInput, got: {err:?}"
         );
     }
 
-    #[test]
-    fn get_server_rejects_whitespace_only_name() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let client = make_client();
-        let err = rt.block_on(client.get_server("   ", "latest")).unwrap_err();
+    #[tokio::test]
+    async fn get_server_rejects_whitespace_only_name() {
+        let err = make_client().get_server("   ", "latest").await.unwrap_err();
+        assert!(matches!(err, RegistryError::InvalidInput { .. }));
+    }
+
+    #[tokio::test]
+    async fn get_server_rejects_blank_version() {
+        let err = make_client()
+            .get_server("io.modelcontextprotocol/everything", "")
+            .await
+            .unwrap_err();
         assert!(
-            matches!(err, RegistryError::InvalidInput { .. }),
-            "expected InvalidInput for whitespace name, got: {err:?}"
+            matches!(err, RegistryError::InvalidInput { ref message } if message.contains("must not be empty")),
+            "expected InvalidInput for blank version, got: {err:?}"
         );
     }
 
-    #[test]
-    fn list_versions_rejects_blank_name() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let client = make_client();
-        let err = rt.block_on(client.list_versions("")).unwrap_err();
+    #[tokio::test]
+    async fn get_server_rejects_whitespace_only_version() {
+        let err = make_client()
+            .get_server("io.modelcontextprotocol/everything", "   ")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, RegistryError::InvalidInput { .. }));
+    }
+
+    #[tokio::test]
+    async fn list_versions_rejects_blank_name() {
+        let err = make_client().list_versions("").await.unwrap_err();
         assert!(
             matches!(err, RegistryError::InvalidInput { ref message } if message.contains("must not be empty")),
             "expected InvalidInput, got: {err:?}"
         );
     }
 
-    #[test]
-    fn list_versions_rejects_whitespace_only_name() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let client = make_client();
-        let err = rt.block_on(client.list_versions("\t")).unwrap_err();
-        assert!(
-            matches!(err, RegistryError::InvalidInput { .. }),
-            "expected InvalidInput for whitespace name, got: {err:?}"
-        );
+    #[tokio::test]
+    async fn list_versions_rejects_whitespace_only_name() {
+        let err = make_client().list_versions("\t").await.unwrap_err();
+        assert!(matches!(err, RegistryError::InvalidInput { .. }));
     }
 }

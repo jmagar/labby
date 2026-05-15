@@ -21,7 +21,41 @@ pub mod types;
 pub use client::McpRegistryClient;
 pub use error::RegistryError;
 
+use std::time::Instant;
+
 use crate::core::plugin::{Category, EnvVar, PluginMeta};
+use crate::core::{ApiError, ServiceClient, ServiceStatus};
+
+impl ServiceClient for McpRegistryClient {
+    fn name(&self) -> &'static str {
+        "mcpregistry"
+    }
+
+    fn service_type(&self) -> &'static str {
+        "ai"
+    }
+
+    async fn health(&self) -> Result<ServiceStatus, ApiError> {
+        let start = Instant::now();
+        match self.health_probe().await {
+            Ok(()) => Ok(ServiceStatus {
+                reachable: true,
+                auth_ok: true,
+                version: None,
+                latency_ms: u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+                message: None,
+            }),
+            Err(RegistryError::Api(ApiError::Auth)) => Ok(ServiceStatus {
+                reachable: true,
+                auth_ok: false,
+                version: None,
+                latency_ms: u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+                message: Some("auth failed".into()),
+            }),
+            Err(e) => Ok(ServiceStatus::unreachable(e.to_string())),
+        }
+    }
+}
 
 /// Compile-time metadata for the mcpregistry module.
 pub const META: PluginMeta = PluginMeta {
