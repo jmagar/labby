@@ -390,16 +390,24 @@ impl GatewayManager {
     }
 
     fn reconcile_upstream_oauth_managers(&self, cfg: &LabConfig) {
-        let Some(managers) = self.upstream_oauth_managers.as_ref() else {
-            return;
-        };
-
         let oauth_upstreams: BTreeMap<&str, &UpstreamConfig> = cfg
             .upstream
             .iter()
             .filter(|upstream| upstream.oauth.is_some())
             .map(|upstream| (upstream.name.as_str(), upstream))
             .collect();
+
+        // Unconditionally evict cache entries for OAuth upstreams that are no
+        // longer in config.  This must run even when upstream_oauth_managers is
+        // not initialised — the cache is independent of the manager map.
+        if let Some(cache) = &self.oauth_client_cache {
+            let known: std::collections::HashSet<&str> = oauth_upstreams.keys().copied().collect();
+            cache.evict_upstreams_not_in(&known);
+        }
+
+        let Some(managers) = self.upstream_oauth_managers.as_ref() else {
+            return;
+        };
 
         let removed: Vec<String> = managers
             .iter()

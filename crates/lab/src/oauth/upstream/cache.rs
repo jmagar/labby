@@ -161,6 +161,16 @@ impl OauthClientCache {
         // build_locks intentionally preserved — see comment in evict_subject.
     }
 
+    /// Evict all entries whose upstream name is not in `known`.
+    ///
+    /// Used at config reload to purge stale cache entries for upstreams that
+    /// have been removed from config, without requiring the full OAuth manager
+    /// infrastructure to be initialised.
+    pub(crate) fn evict_upstreams_not_in(&self, known: &std::collections::HashSet<&str>) {
+        self.clients
+            .retain(|(name, _), _| known.contains(name.as_str()));
+    }
+
     /// Number of cached clients. Intended for tests and observability.
     #[allow(dead_code)]
     #[must_use]

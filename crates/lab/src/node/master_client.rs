@@ -110,9 +110,16 @@ impl MasterClient {
                 );
             }
             attempt += 1;
-            // Exponential backoff: 2s, 4s, 8s, capped at 16s.
-            let delay =
-                std::time::Duration::from_secs(std::cmp::min(2u64.saturating_pow(attempt), 16));
+            // Exponential backoff: 2s, 4s, 8s, capped at 16s — but never
+            // sleep past the deadline, so the timeout fires on schedule.
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let delay = remaining.min(std::time::Duration::from_secs(std::cmp::min(
+                2u64.saturating_pow(attempt),
+                16,
+            )));
+            if delay.is_zero() {
+                continue;
+            }
             tokio::time::sleep(delay).await;
         }
     }
