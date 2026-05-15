@@ -1,0 +1,19 @@
+# =============================================================================
+# .cargo/config.toml — Cargo workspace configuration for lab
+#
+# Most build settings (linker, profile tuning, jobs) live in the developer's
+# ~/.cargo/config.toml. This file only adds workspace-local settings that the
+# global config cannot provide.
+#
+# See docs/RUST.md for expected global config and system tool requirements.
+# See https://github.com/jmagar/rmcp-template/blob/main/docs/RUST.md for the
+# canonical family reference.
+# =============================================================================
+
+[build]
+# sccache and incremental compilation are mutually exclusive — sccache cannot
+# cache Rust artifacts when incremental=true because incremental produces
+# non-deterministic intermediate files. The global ~/.cargo/config.toml sets
+# incremental=true for normal dev; this file overrides it for developers who
+# have sccache configured. See docs/RUST.md §Repo-specific overrides.
+incremental = false
