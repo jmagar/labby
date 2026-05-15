@@ -2,7 +2,10 @@
 """PostToolUse hook: remind to run sync-stack-llms after adding a package."""
 import json, sys, re
 
-data = json.load(sys.stdin)
+try:
+    data = json.load(sys.stdin)
+except json.JSONDecodeError:
+    sys.exit(0)
 cmd = data.get('tool_input', {}).get('command', '')
 # Match both plain invocations and rtk-prefixed ones (e.g. `rtk cargo add ...`)
 m = re.search(r'\b(?:rtk\s+)?(cargo|pnpm|npm|yarn)\s+add\s+(--[\w-]+\s+)*([@\w][\w@./-]*)', cmd)

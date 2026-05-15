@@ -14,8 +14,22 @@ is_settings = (
     (base == 'settings.local.json' and '.claude/' in path)
 )
 if is_settings:
-    validate_script = os.path.join(project_dir, '.claude/skills/agent-config/scripts/validate-settings.sh')
-    r = subprocess.run([validate_script, path], capture_output=True, text=True)
+    # Prefer CLAUDE_PLUGIN_ROOT (set by Claude Code when running a plugin hook) so this
+    # works regardless of CWD or whether CLAUDE_PROJECT_DIR is set.  Fall back to the
+    # project-relative path for local dev runs where the plugin is not installed.
+    plugin_root = os.environ.get('CLAUDE_PLUGIN_ROOT', '')
+    if plugin_root:
+        validate_script = os.path.join(plugin_root, 'skills/agent-config/scripts/validate-settings.sh')
+    else:
+        validate_script = os.path.join(project_dir, '.claude/skills/agent-config/scripts/validate-settings.sh')
+
+    if not os.path.exists(validate_script):
+        sys.exit(0)  # validation script not available in this context; skip silently
+
+    try:
+        r = subprocess.run([validate_script, path], capture_output=True, text=True)
+    except OSError:
+        sys.exit(0)
     if r.returncode != 0:
         print(f'⚠ Settings/config schema validation FAILED (exit {r.returncode}) — fix before relying on the file.')
         if r.stdout:

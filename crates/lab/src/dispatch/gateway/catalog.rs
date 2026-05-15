@@ -390,6 +390,27 @@ pub const ACTIONS: &[ActionSpec] = &[
         ],
     },
     ActionSpec {
+        name: "gateway.import_tombstones.list",
+        description: "List operator-deleted imported MCP servers that are suppressed from automatic re-import",
+        destructive: false,
+        returns: "ImportTombstoneView[]",
+        params: &[],
+    },
+    ActionSpec {
+        name: "gateway.import_tombstones.clear",
+        description: "Clear one import tombstone so a previously deleted imported server can be imported again",
+        destructive: true,
+        returns: "ImportTombstoneView[]",
+        params: &[NAME_PARAM],
+    },
+    ActionSpec {
+        name: "gateway.import_tombstones.restore",
+        description: "Atomically clear one import tombstone and restore the matching discovered server as disabled",
+        destructive: true,
+        returns: "GatewayView",
+        params: &[NAME_PARAM],
+    },
+    ActionSpec {
         name: "gateway.add",
         description: "Add a gateway and reconcile runtime state",
         destructive: true,
@@ -644,6 +665,8 @@ mod tests {
             "gateway.reload",
             "gateway.oauth.probe",
             "gateway.import",
+            "gateway.import_tombstones.clear",
+            "gateway.import_tombstones.restore",
         ] {
             let spec = ACTIONS
                 .iter()
@@ -666,6 +689,7 @@ mod tests {
             "gateway.discovered_prompts",
             "gateway.mcp.list",
             "gateway.discover",
+            "gateway.import_tombstones.list",
         ] {
             let spec = ACTIONS
                 .iter()

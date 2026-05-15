@@ -5,7 +5,7 @@ use anyhow::Context;
 use fd_lock::RwLock;
 use tempfile::NamedTempFile;
 
-use crate::config::{LabConfig, ProtectedMcpRouteConfig, UpstreamConfig};
+use crate::config::{LabConfig, ProtectedMcpRouteConfig, UpstreamConfig, UpstreamImportTombstone};
 use crate::dispatch::error::ToolError;
 
 use super::params::GatewayUpdatePatch;
@@ -35,13 +35,31 @@ pub fn load_gateway_config(path: &Path) -> Result<LabConfig, ToolError> {
     }
 }
 
+const KNOWN_LAB_CONFIG_KEYS: &[&str] = &[
+    "mcp",
+    "log",
+    "local_logs",
+    "api",
+    "web",
+    "workspace",
+    "mcpregistry",
+    "oauth",
+    "device",
+    "node",
+    "admin",
+    "services",
+    "auth",
+    "tool_search",
+    "upstream",
+    "upstream_import_tombstones",
+    "protected_mcp_routes",
+    "virtual_servers",
+    "quarantined_virtual_servers",
+    "deploy",
+    "public_urls",
+];
+
 /// Serialize `cfg` to TOML and atomically replace the file at `path`.
-///
-/// **Limitation:** This serializes the full `LabConfig` struct via `toml::to_string`,
-/// which means any unknown keys, TOML comments, or settings from newer schema
-/// versions that are not represented in `LabConfig` will be dropped on write.
-/// A future migration to `toml_edit` would preserve unknown keys and comments,
-/// but that is deferred as a P2 change.
 pub fn write_gateway_config(path: &Path, cfg: &LabConfig) -> Result<(), ToolError> {
     validate_config(cfg)?;
 
@@ -70,10 +88,7 @@ pub fn write_gateway_config(path: &Path, cfg: &LabConfig) -> Result<(), ToolErro
     })?;
 
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let raw = toml::to_string(cfg).map_err(|e| ToolError::Sdk {
-        sdk_kind: "internal_error".to_string(),
-        message: format!("failed to serialize gateway config: {e}"),
-    })?;
+    let raw = render_gateway_config(path, cfg)?;
 
     let mut tmp = NamedTempFile::new_in(parent).map_err(|e| ToolError::Sdk {
         sdk_kind: "internal_error".to_string(),
@@ -96,6 +111,35 @@ pub fn write_gateway_config(path: &Path, cfg: &LabConfig) -> Result<(), ToolErro
     Ok(())
 }
 
+fn render_gateway_config(path: &Path, cfg: &LabConfig) -> Result<String, ToolError> {
+    let serialized = toml::to_string(cfg).map_err(|e| ToolError::Sdk {
+        sdk_kind: "internal_error".to_string(),
+        message: format!("failed to serialize gateway config: {e}"),
+    })?;
+    let desired = serialized
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|e| ToolError::Sdk {
+            sdk_kind: "internal_error".to_string(),
+            message: format!("failed to parse serialized gateway config: {e}"),
+        })?;
+
+    let Ok(existing_raw) = std::fs::read_to_string(path) else {
+        return Ok(serialized);
+    };
+    let Ok(mut existing) = existing_raw.parse::<toml_edit::DocumentMut>() else {
+        return Ok(serialized);
+    };
+
+    for key in KNOWN_LAB_CONFIG_KEYS {
+        existing.as_table_mut().remove(key);
+    }
+    for (key, item) in desired.as_table().iter() {
+        existing[key] = item.clone();
+    }
+
+    Ok(existing.to_string())
+}
+
 pub fn insert_upstream(cfg: &mut LabConfig, upstream: UpstreamConfig) -> Result<(), ToolError> {
     validate_upstream(&upstream)?;
     if cfg
@@ -108,6 +152,8 @@ pub fn insert_upstream(cfg: &mut LabConfig, upstream: UpstreamConfig) -> Result<
             existing_id: upstream.name.clone(),
         });
     }
+    cfg.upstream_import_tombstones
+        .retain(|tombstone| !tombstone_matches_upstream(tombstone, &upstream));
     cfg.upstream.push(upstream);
     Ok(())
 }
@@ -207,6 +253,64 @@ pub fn remove_upstream(cfg: &mut LabConfig, name: &str) -> Result<UpstreamConfig
             message: format!("gateway `{name}` not found"),
         })?;
     Ok(cfg.upstream.remove(index))
+}
+
+pub fn tombstone_removed_import(cfg: &mut LabConfig, removed: &UpstreamConfig) {
+    let Some(imported_from) = removed.imported_from.clone() else {
+        return;
+    };
+    cfg.upstream_import_tombstones
+        .retain(|tombstone| !tombstone_matches_upstream(tombstone, removed));
+    cfg.upstream_import_tombstones
+        .push(UpstreamImportTombstone::now(&removed.name, imported_from));
+}
+
+fn tombstone_matches_upstream(
+    tombstone: &UpstreamImportTombstone,
+    upstream: &UpstreamConfig,
+) -> bool {
+    if tombstone.name == upstream.name {
+        let Some(source) = upstream.imported_from.as_ref() else {
+            return true;
+        };
+        return tombstone_source_matches_upstream(tombstone, source)
+            && tombstone
+                .imported_from
+                .server_name
+                .as_deref()
+                .is_none_or(|server_name| source.server_name.as_deref() == Some(server_name))
+            && tombstone_transport_matches_upstream(tombstone, upstream);
+    }
+
+    let Some(source) = upstream.imported_from.as_ref() else {
+        return false;
+    };
+    tombstone_source_matches_upstream(tombstone, source)
+        && tombstone.imported_from.server_name.is_some()
+        && tombstone.imported_from.server_name == source.server_name
+        && tombstone_transport_matches_upstream(tombstone, upstream)
+}
+
+fn tombstone_source_matches_upstream(
+    tombstone: &UpstreamImportTombstone,
+    source: &crate::config::ImportSource,
+) -> bool {
+    tombstone.imported_from.client == source.client && tombstone.imported_from.path == source.path
+}
+
+fn tombstone_transport_matches_upstream(
+    tombstone: &UpstreamImportTombstone,
+    upstream: &UpstreamConfig,
+) -> bool {
+    let Some(tombstone_fingerprint) = tombstone.imported_from.transport_fingerprint.as_deref()
+    else {
+        return true;
+    };
+    upstream
+        .imported_from
+        .as_ref()
+        .and_then(|source| source.transport_fingerprint.as_deref())
+        .is_none_or(|fingerprint| fingerprint == tombstone_fingerprint)
 }
 
 pub fn insert_protected_mcp_route(
@@ -895,6 +999,15 @@ mod tests {
         }
     }
 
+    fn sample_import_source() -> crate::config::ImportSource {
+        crate::config::ImportSource::new(
+            "codex",
+            "/home/alice/.codex/config.toml",
+            "2026-05-15T00:00:00Z",
+        )
+        .with_server_name("b")
+    }
+
     #[test]
     fn load_gateway_config_reads_existing_upstreams() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -919,6 +1032,87 @@ args = ["server.js"]
         assert_eq!(cfg.upstream[0].name, "a");
         assert_eq!(cfg.upstream[1].name, "b");
         assert_eq!(cfg.upstream[1].command.as_deref(), Some("node"));
+    }
+
+    #[test]
+    fn load_gateway_config_reads_import_tombstones() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+[[upstream_import_tombstones]]
+name = "renamed-in-lab"
+removed_at = "2026-05-15T00:00:00Z"
+
+[upstream_import_tombstones.imported_from]
+client = "codex"
+path = "/home/alice/.codex/config.toml"
+server_name = "original-config-name"
+imported_at = "2026-05-14T00:00:00Z"
+"#,
+        )
+        .expect("write config");
+
+        let cfg = load_gateway_config(&path).expect("load");
+        assert_eq!(cfg.upstream_import_tombstones.len(), 1);
+        let tombstone = &cfg.upstream_import_tombstones[0];
+        assert_eq!(tombstone.name, "renamed-in-lab");
+        assert_eq!(tombstone.imported_from.client, "codex");
+        assert_eq!(
+            tombstone.imported_from.server_name.as_deref(),
+            Some("original-config-name")
+        );
+    }
+
+    #[test]
+    fn write_gateway_config_preserves_unknown_top_level_config() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+# operator-owned setting from a newer schema
+[future_feature]
+enabled = true
+
+[[upstream]]
+name = "old"
+enabled = true
+url = "https://old.example.com/mcp"
+"#,
+        )
+        .expect("write config");
+
+        let mut cfg = LabConfig::default();
+        insert_upstream(
+            &mut cfg,
+            UpstreamConfig {
+                enabled: false,
+                name: "new".to_string(),
+                url: Some("https://new.example.com/mcp".to_string()),
+                bearer_token_env: None,
+                command: None,
+                args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
+                proxy_resources: true,
+                proxy_prompts: true,
+                expose_tools: None,
+                expose_resources: None,
+                expose_prompts: None,
+                oauth: None,
+                imported_from: None,
+                tool_search: crate::config::ToolSearchConfig::default(),
+            },
+        )
+        .expect("insert");
+
+        write_gateway_config(&path, &cfg).expect("write preserved config");
+        let rendered = std::fs::read_to_string(&path).expect("read rendered");
+        assert!(rendered.contains("[future_feature]"));
+        assert!(rendered.contains("enabled = true"));
+        assert!(rendered.contains("name = \"new\""));
+        assert!(!rendered.contains("name = \"old\""));
     }
 
     #[test]
@@ -1099,6 +1293,151 @@ args = ["server.js"]
         assert_eq!(removed.name, "b");
         assert_eq!(cfg.upstream.len(), 1);
         assert_eq!(cfg.upstream[0].name, "a");
+    }
+
+    #[test]
+    fn tombstone_removed_import_records_imported_gateway_deletion() {
+        let mut cfg = sample_config();
+        cfg.upstream[1].imported_from = Some(sample_import_source());
+
+        let removed = remove_upstream(&mut cfg, "b").expect("remove");
+        tombstone_removed_import(&mut cfg, &removed);
+
+        assert_eq!(cfg.upstream_import_tombstones.len(), 1);
+        let tombstone = &cfg.upstream_import_tombstones[0];
+        assert_eq!(tombstone.name, "b");
+        assert_eq!(tombstone.imported_from, sample_import_source());
+        assert!(!tombstone.removed_at.is_empty());
+    }
+
+    #[test]
+    fn tombstone_removed_import_ignores_manual_gateway_deletion() {
+        let mut cfg = sample_config();
+
+        let removed = remove_upstream(&mut cfg, "b").expect("remove");
+        tombstone_removed_import(&mut cfg, &removed);
+
+        assert!(cfg.upstream_import_tombstones.is_empty());
+    }
+
+    #[test]
+    fn insert_upstream_clears_matching_import_tombstone() {
+        let mut cfg = sample_config();
+        let source = sample_import_source();
+        cfg.upstream_import_tombstones
+            .push(UpstreamImportTombstone::now("c", source.clone()));
+
+        insert_upstream(
+            &mut cfg,
+            UpstreamConfig {
+                enabled: false,
+                name: "c".to_string(),
+                url: Some("https://example.com/mcp".to_string()),
+                bearer_token_env: None,
+                command: None,
+                args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
+                proxy_resources: true,
+                proxy_prompts: true,
+                expose_tools: None,
+                expose_resources: None,
+                expose_prompts: None,
+                oauth: None,
+                imported_from: Some(source),
+                tool_search: crate::config::ToolSearchConfig::default(),
+            },
+        )
+        .expect("insert");
+
+        assert!(
+            cfg.upstream_import_tombstones.is_empty(),
+            "explicit re-add should clear the auto-import tombstone"
+        );
+    }
+
+    #[test]
+    fn insert_upstream_clears_import_tombstone_by_source_identity_after_rename() {
+        let mut cfg = sample_config();
+        let source = crate::config::ImportSource::new(
+            "codex",
+            "/home/alice/.codex/config.toml",
+            "2026-05-15T00:00:00Z",
+        )
+        .with_server_name("c");
+        cfg.upstream_import_tombstones
+            .push(UpstreamImportTombstone::now(
+                "renamed-in-lab",
+                source.clone(),
+            ));
+
+        insert_upstream(
+            &mut cfg,
+            UpstreamConfig {
+                enabled: false,
+                name: "c".to_string(),
+                url: Some("https://example.com/mcp".to_string()),
+                bearer_token_env: None,
+                command: None,
+                args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
+                proxy_resources: true,
+                proxy_prompts: true,
+                expose_tools: None,
+                expose_resources: None,
+                expose_prompts: None,
+                oauth: None,
+                imported_from: Some(source),
+                tool_search: crate::config::ToolSearchConfig::default(),
+            },
+        )
+        .expect("insert");
+
+        assert!(
+            cfg.upstream_import_tombstones.is_empty(),
+            "explicit source-matched re-add should clear tombstone even when Lab name changed"
+        );
+    }
+
+    #[test]
+    fn insert_upstream_keeps_same_name_tombstone_from_different_source() {
+        let mut cfg = sample_config();
+        cfg.upstream_import_tombstones
+            .push(UpstreamImportTombstone::now("c", sample_import_source()));
+
+        insert_upstream(
+            &mut cfg,
+            UpstreamConfig {
+                enabled: false,
+                name: "c".to_string(),
+                url: Some("https://example.com/mcp".to_string()),
+                bearer_token_env: None,
+                command: None,
+                args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
+                proxy_resources: true,
+                proxy_prompts: true,
+                expose_tools: None,
+                expose_resources: None,
+                expose_prompts: None,
+                oauth: None,
+                imported_from: Some(
+                    crate::config::ImportSource::new(
+                        "claude-code",
+                        "/home/alice/.claude/settings.json",
+                        "2026-05-15T00:00:00Z",
+                    )
+                    .with_server_name("c"),
+                ),
+                tool_search: crate::config::ToolSearchConfig::default(),
+            },
+        )
+        .expect("insert");
+
+        assert_eq!(
+            cfg.upstream_import_tombstones.len(),
+            1,
+            "same-name imports from a different source should not clear tombstones"
+        );
     }
 
     #[test]

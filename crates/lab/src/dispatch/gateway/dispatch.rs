@@ -7,18 +7,18 @@ use crate::dispatch::helpers::{action_schema, help_payload, require_str, to_json
 use super::SHARED_GATEWAY_OAUTH_SUBJECT;
 use super::catalog::ACTIONS;
 use super::client::require_gateway_manager;
-use super::manager::GatewayManager;
+use super::manager::{GatewayManager, ImportTombstoneSelector};
 use super::params::{
     GatewayAddParams, GatewayClientConfigParams, GatewayDiscoverParams, GatewayImportParams,
-    GatewayMcpCleanupParams, GatewayMcpToggleParams, GatewayNameParams, GatewayOauthNameParams,
-    GatewayReloadParams, GatewayStatusParams, GatewayTestParams, GatewayUpdateParams,
-    GatewayUpdatePatch, ProtectedRouteNameParams, ProtectedRouteSpecParams,
-    ProtectedRouteUpdateParams, ServiceConfigGetParams, ServiceConfigSetParams,
-    ToolSearchSetParams, VirtualServerMcpPolicyParams, VirtualServerNameParams,
-    VirtualServerSurfaceParams,
+    GatewayImportTombstoneParams, GatewayMcpCleanupParams, GatewayMcpToggleParams,
+    GatewayNameParams, GatewayOauthNameParams, GatewayReloadParams, GatewayStatusParams,
+    GatewayTestParams, GatewayUpdateParams, GatewayUpdatePatch, ProtectedRouteNameParams,
+    ProtectedRouteSpecParams, ProtectedRouteUpdateParams, ServiceConfigGetParams,
+    ServiceConfigSetParams, ToolSearchSetParams, VirtualServerMcpPolicyParams,
+    VirtualServerNameParams, VirtualServerSurfaceParams,
 };
 use super::types::{
-    DiscoveredServerView, ImportErrorView, ImportResultView, ImportSkipReason, ImportSkipView,
+    DiscoveredServerView, ImportErrorView, ImportSkipReason, ImportSkipView,
     McpClientTransportType, ServiceActionView,
 };
 
@@ -45,6 +45,11 @@ pub async fn dispatch_with_manager(
         }
         "gateway.discover" => handle_discover(manager, params_value).await,
         "gateway.import" => handle_import(manager, params_value).await,
+        "gateway.import_tombstones.list"
+        | "gateway.import_tombstones.clear"
+        | "gateway.import_tombstones.restore" => {
+            handle_import_tombstone_actions(manager, action, params_value).await
+        }
         "gateway.list"
         | "gateway.server.get"
         | "gateway.supported_services"
@@ -128,13 +133,14 @@ async fn handle_discover(
     let existing: std::collections::HashSet<String> =
         cfg.upstream.iter().map(|u| u.name.clone()).collect();
 
-    let views = shape_discovered_views(discovered, &existing, &params);
+    let views = shape_discovered_views(discovered, &cfg, &existing, &params);
 
     to_json(views)
 }
 
 fn shape_discovered_views(
     discovered: Vec<super::discovery::DiscoveredServer>,
+    cfg: &crate::config::LabConfig,
     existing: &std::collections::HashSet<String>,
     params: &GatewayDiscoverParams,
 ) -> Vec<DiscoveredServerView> {
@@ -142,6 +148,7 @@ fn shape_discovered_views(
         .into_iter()
         .filter(|s| params.include_existing || !existing.contains(&s.name))
         .map(|s| {
+            let tombstoned = super::manager::discovered_is_tombstoned(cfg, &s);
             let transport = if s.spec.url.is_some() {
                 McpClientTransportType::Http
             } else {
@@ -162,6 +169,12 @@ fn shape_discovered_views(
                 url_preview: s.spec.url.as_deref().map(redact_url_preview),
                 env_key_count: s.env_key_count,
                 already_configured: existing.contains(&s.spec.name),
+                transport_fingerprint: s
+                    .spec
+                    .imported_from
+                    .as_ref()
+                    .and_then(|source| source.transport_fingerprint.clone()),
+                tombstoned,
             }
         })
         .collect()
@@ -226,25 +239,8 @@ async fn handle_import(manager: &GatewayManager, params_value: Value) -> Result<
     };
 
     let cfg = manager.current_config().await;
-    let already: std::collections::HashSet<String> =
-        cfg.upstream.iter().map(|u| u.name.clone()).collect();
-
-    let mut result = ImportResultView::default();
-
-    // Pre-filter already-configured names before calling batch_add so they
-    // are reported as skipped (not as errors) in the ImportResultView.
-    let mut specs_to_add = Vec::new();
-    for server in to_import {
-        if already.contains(&server.name) {
-            result.skipped.push(ImportSkipView {
-                name: server.name,
-                reason: ImportSkipReason::AlreadyConfigured,
-            });
-        } else {
-            // spec already has enabled=false and imported_from set by discovery
-            specs_to_add.push(server.spec);
-        }
-    }
+    let (mut result, specs_to_add) =
+        super::manager::partition_discovered_for_import(&cfg, to_import);
 
     if !specs_to_add.is_empty() {
         let outcome = manager
@@ -269,6 +265,47 @@ async fn handle_import(manager: &GatewayManager, params_value: Value) -> Result<
     }
 
     to_json(result)
+}
+
+async fn handle_import_tombstone_actions(
+    manager: &GatewayManager,
+    action: &str,
+    params_value: Value,
+) -> Result<Value, ToolError> {
+    match action {
+        "gateway.import_tombstones.list" => to_json(manager.list_import_tombstones().await),
+        "gateway.import_tombstones.clear" => {
+            let params: GatewayImportTombstoneParams = parse_params(params_value)?;
+            to_json(manager.clear_import_tombstone(params.into()).await?)
+        }
+        "gateway.import_tombstones.restore" => {
+            let params: GatewayImportTombstoneParams = parse_params(params_value)?;
+            let origin = params.origin.clone();
+            let owner = params.owner.clone();
+            to_json(
+                manager
+                    .restore_import_tombstone(
+                        params.into(),
+                        origin.as_deref(),
+                        owner.map(Into::into),
+                    )
+                    .await?,
+            )
+        }
+        unknown => unknown_action(unknown),
+    }
+}
+
+impl From<GatewayImportTombstoneParams> for ImportTombstoneSelector {
+    fn from(value: GatewayImportTombstoneParams) -> Self {
+        Self {
+            name: value.name,
+            source_client: value.source_client,
+            source_path: value.source_path,
+            server_name: value.server_name,
+            transport_fingerprint: value.transport_fingerprint,
+        }
+    }
 }
 
 fn redact_url_preview(raw: &str) -> String {
@@ -1998,10 +2035,11 @@ mod tests {
     #[test]
     fn shape_http_server_gets_http_transport_no_command_preview() {
         let discovered = vec![make_discovered_http("my-http-server")];
+        let cfg = crate::config::LabConfig::default();
         let existing: HashSet<String> = HashSet::new();
         let params = GatewayDiscoverParams::default();
 
-        let views = shape_discovered_views(discovered, &existing, &params);
+        let views = shape_discovered_views(discovered, &cfg, &existing, &params);
 
         assert_eq!(views.len(), 1);
         assert_eq!(views[0].transport, McpClientTransportType::Http);
@@ -2015,10 +2053,11 @@ mod tests {
             "my-stdio-server",
             "npx --yes some-mcp",
         )];
+        let cfg = crate::config::LabConfig::default();
         let existing: HashSet<String> = HashSet::new();
         let params = GatewayDiscoverParams::default();
 
-        let views = shape_discovered_views(discovered, &existing, &params);
+        let views = shape_discovered_views(discovered, &cfg, &existing, &params);
 
         assert_eq!(views.len(), 1);
         assert_eq!(views[0].transport, McpClientTransportType::Stdio);
@@ -2028,6 +2067,7 @@ mod tests {
     #[test]
     fn shape_already_configured_true_when_name_in_existing_set() {
         let discovered = vec![make_discovered_http("configured-server")];
+        let cfg = crate::config::LabConfig::default();
         let mut existing: HashSet<String> = HashSet::new();
         existing.insert("configured-server".to_string());
         let params = GatewayDiscoverParams {
@@ -2035,7 +2075,7 @@ mod tests {
             ..GatewayDiscoverParams::default()
         };
 
-        let views = shape_discovered_views(discovered, &existing, &params);
+        let views = shape_discovered_views(discovered, &cfg, &existing, &params);
 
         assert_eq!(views.len(), 1);
         assert!(views[0].already_configured);
@@ -2047,6 +2087,7 @@ mod tests {
             make_discovered_http("new-server"),
             make_discovered_http("existing-server"),
         ];
+        let cfg = crate::config::LabConfig::default();
         let mut existing: HashSet<String> = HashSet::new();
         existing.insert("existing-server".to_string());
         let params = GatewayDiscoverParams {
@@ -2054,7 +2095,7 @@ mod tests {
             ..GatewayDiscoverParams::default()
         };
 
-        let views = shape_discovered_views(discovered, &existing, &params);
+        let views = shape_discovered_views(discovered, &cfg, &existing, &params);
 
         assert_eq!(views.len(), 1);
         assert_eq!(views[0].name, "new-server");
@@ -2190,6 +2231,7 @@ mod discovery_shape_tests {
     fn http_server_gets_http_transport() {
         let views = shape_discovered_views(
             vec![make_http_server("srv", "https://example.com/mcp")],
+            &crate::config::LabConfig::default(),
             &HashSet::new(),
             &GatewayDiscoverParams::default(),
         );
@@ -2202,6 +2244,7 @@ mod discovery_shape_tests {
     fn stdio_server_gets_stdio_transport_and_command_preview() {
         let views = shape_discovered_views(
             vec![make_stdio_server("srv", "npx @some/mcp-server")],
+            &crate::config::LabConfig::default(),
             &HashSet::new(),
             &GatewayDiscoverParams::default(),
         );
@@ -2216,6 +2259,7 @@ mod discovery_shape_tests {
         existing.insert("known-server".to_string());
         let views = shape_discovered_views(
             vec![make_http_server("known-server", "https://h/m")],
+            &crate::config::LabConfig::default(),
             &existing,
             &GatewayDiscoverParams {
                 include_existing: true,
@@ -2232,6 +2276,7 @@ mod discovery_shape_tests {
         existing.insert("known-server".to_string());
         let views = shape_discovered_views(
             vec![make_http_server("known-server", "https://h/m")],
+            &crate::config::LabConfig::default(),
             &existing,
             &GatewayDiscoverParams::default(), // include_existing defaults to false
         );

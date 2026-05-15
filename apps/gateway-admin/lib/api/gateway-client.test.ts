@@ -96,6 +96,41 @@ test('gatewayApi.create sends confirm=true with destructive gateway adds', async
   )
 })
 
+test('gatewayApi discovery and import actions use gateway dispatch payloads', async () => {
+  await withGatewayFetch(
+    {
+      'gateway.discover': () => [
+        {
+          name: 'local-files',
+          source_client: 'claude-code',
+          source_path: '/home/user/.claude/settings.json',
+          transport: 'stdio',
+          command_preview: 'npx',
+          env_key_count: 1,
+          already_configured: false,
+        },
+      ],
+      'gateway.import': () => ({
+        imported: [{ config: { name: 'local-files', enabled: false } }],
+      }),
+    },
+    async (requests) => {
+      const discovered = await gatewayApi.discoverExternalConfigs()
+      const imported = await gatewayApi.importExternalConfigs(['local-files'])
+
+      assert.equal(discovered[0]?.name, 'local-files')
+      assert.equal(imported.imported[0]?.config.enabled, false)
+      assert.deepEqual(
+        requests.map((request) => ({ action: request.action, params: request.params })),
+        [
+          { action: 'gateway.discover', params: {} },
+          { action: 'gateway.import', params: { names: ['local-files'], confirm: true } },
+        ],
+      )
+    },
+  )
+})
+
 test('gatewayApi.create does not send allow_stdio for stdio gateway adds', async () => {
   await withGatewayFetch(
     {

@@ -49,11 +49,12 @@ export function matchesGatewayStatusFacet(
   if (selected.length === 0) return true
 
   const actual = new Set<GatewayStatusFacet>()
+  const enabled = gateway.enabled ?? true
   if (gateway.configured ?? true) actual.add('configured')
-  if (gateway.status.healthy && gateway.status.connected) actual.add('healthy')
-  if (!gateway.status.connected) actual.add('disconnected')
-  if (gateway.enabled ?? true) actual.add('enabled')
-  if (!(gateway.enabled ?? true)) actual.add('disabled')
+  if (enabled && gateway.status.healthy && gateway.status.connected) actual.add('healthy')
+  if (enabled && !gateway.status.connected) actual.add('disconnected')
+  if (enabled) actual.add('enabled')
+  if (!enabled) actual.add('disabled')
 
   return selected.some((value) => actual.has(value))
 }
@@ -89,8 +90,9 @@ export function aggregateToolsFromGateways(gateways: Gateway[]): ToolInventoryRo
 export function filterGateways(gateways: Gateway[], state: GatewayFilterState): Gateway[] {
   const normalizedSearch = state.search.trim().toLowerCase()
   return gateways.filter((gateway) => {
-    if (state.primaryLens === 'healthy' && !(gateway.status.healthy && gateway.status.connected)) return false
-    if (state.primaryLens === 'disconnected' && gateway.status.connected) return false
+    const enabled = gateway.enabled ?? true
+    if (state.primaryLens === 'healthy' && !(enabled && gateway.status.healthy && gateway.status.connected)) return false
+    if (state.primaryLens === 'disconnected' && !(enabled && !gateway.status.connected)) return false
     if (state.primaryLens === 'configured' && !(gateway.configured ?? true)) return false
 
     if (normalizedSearch) {

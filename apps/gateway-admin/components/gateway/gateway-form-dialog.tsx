@@ -773,13 +773,23 @@ export function GatewayFormDialog({
       if (!validateCustom()) return
       setSaveError(null)
       const normalizedProtectedPath = normalizeProtectedPublicPath(protectedPublicPath)
+      const reusedProtectedRoute = Boolean(
+        normalizedProtectedPath &&
+        protectedRoutes.some(
+          (route) =>
+            route.enabled &&
+            route.public_host === PROTECTED_MCP_PUBLIC_HOST &&
+            route.public_path === normalizedProtectedPath &&
+            route.name !== name.trim() &&
+            route.name !== existingProtectedRoute?.name,
+        ),
+      )
       await onSave(buildInput())
       if (normalizedProtectedPath) {
         await saveProtectedRoute(normalizedProtectedPath, controller.signal)
       } else {
         await removeExistingProtectedRouteIfCleared(normalizedProtectedPath, controller.signal)
       }
-      await removeExistingProtectedRouteIfCleared(normalizedProtectedPath, controller.signal)
       if (controller.signal.aborted) return
       toast.success(
         normalizedProtectedPath

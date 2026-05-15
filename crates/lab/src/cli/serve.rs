@@ -353,10 +353,30 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
     gateway_manager.seed_config(config.clone()).await;
     if !stdio_mode {
         install_gateway_manager(Arc::clone(&gateway_manager));
+        match gateway_manager.auto_import_discovered_configs().await {
+            Ok(result) => {
+                tracing::info!(
+                    subsystem = "gateway_client",
+                    phase = "auto_import.finish",
+                    imported = result.imported.len(),
+                    skipped = result.skipped.len(),
+                    errors = result.errors.len(),
+                    "external MCP configs auto-imported"
+                );
+            }
+            Err(error) => {
+                tracing::warn!(
+                    subsystem = "gateway_client",
+                    phase = "auto_import.failed",
+                    error = %error,
+                    "external MCP config auto-import failed"
+                );
+            }
+        }
         tracing::info!(
             subsystem = "gateway_client",
             phase = "manager.ready",
-            upstream_count = config.upstream.len(),
+            upstream_count = gateway_manager.current_config().await.upstream.len(),
             "gateway manager installed"
         );
     } else {

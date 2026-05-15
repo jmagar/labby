@@ -34,6 +34,7 @@ use lab_auth::sqlite::SqliteStore;
 use lab_auth::types::UpstreamOauthCredentialRow;
 use rmcp::transport::auth::{AuthorizationMetadata, OAuthClientConfig};
 use rmcp::transport::{AuthClient, AuthorizationManager};
+use serde::Deserialize;
 use tokio::sync::RwLock;
 use tracing::info;
 
@@ -666,10 +667,19 @@ impl UpstreamOauthManager {
             return Ok(meta);
         }
 
-        let mut metadata = manager
-            .discover_metadata()
-            .await
-            .map_err(|e| OauthError::Internal(format!("discover metadata: {e}")))?;
+        let mut metadata = match manager.discover_metadata().await {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                match discover_metadata_via_protected_resource(self.upstream_url()?.as_str())
+                    .await?
+                {
+                    Some(metadata) => metadata,
+                    None => {
+                        return Err(OauthError::Internal(format!("discover metadata: {error}")));
+                    }
+                }
+            }
+        };
 
         if self.upstream.name == "swag" {
             metadata.authorization_endpoint = metadata
@@ -887,6 +897,122 @@ enum DynamicClientRegistrationUse {
     BeginAuthorization,
     CompleteAuthorization,
     StoredCredentials,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProtectedResourceMetadata {
+    #[serde(default)]
+    authorization_server: Option<String>,
+    #[serde(default)]
+    authorization_servers: Option<Vec<String>>,
+}
+
+async fn discover_metadata_via_protected_resource(
+    upstream_url: &str,
+) -> Result<Option<AuthorizationMetadata>, OauthError> {
+    let upstream = url::Url::parse(upstream_url)
+        .map_err(|error| OauthError::Internal(format!("invalid upstream url: {error}")))?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|error| OauthError::Internal(format!("build oauth metadata client: {error}")))?;
+
+    for metadata_url in protected_resource_metadata_candidates(&upstream) {
+        let response = match client.get(metadata_url.clone()).send().await {
+            Ok(response) => response,
+            Err(_) => continue,
+        };
+        if !response.status().is_success() {
+            continue;
+        }
+        let Ok(resource_metadata) = response.json::<ProtectedResourceMetadata>().await else {
+            continue;
+        };
+
+        let mut authorization_servers = Vec::new();
+        if let Some(server) = resource_metadata.authorization_server {
+            authorization_servers.push(server);
+        }
+        if let Some(servers) = resource_metadata.authorization_servers {
+            authorization_servers.extend(servers);
+        }
+
+        for authorization_server in authorization_servers {
+            let Ok(server_url) =
+                resolve_authorization_server_url(&metadata_url, authorization_server.trim())
+            else {
+                continue;
+            };
+            for authorization_metadata_url in authorization_metadata_candidates(&server_url) {
+                let response = match client.get(authorization_metadata_url).send().await {
+                    Ok(response) => response,
+                    Err(_) => continue,
+                };
+                if !response.status().is_success() {
+                    continue;
+                }
+                if let Ok(metadata) = response.json::<AuthorizationMetadata>().await {
+                    return Ok(Some(metadata));
+                }
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+fn protected_resource_metadata_candidates(upstream: &url::Url) -> Vec<url::Url> {
+    let trimmed = upstream
+        .path()
+        .trim_start_matches('/')
+        .trim_end_matches('/');
+    let paths = if trimmed.is_empty() {
+        vec!["/.well-known/oauth-protected-resource".to_string()]
+    } else {
+        vec![
+            format!("/.well-known/oauth-protected-resource/{trimmed}"),
+            format!("/{trimmed}/.well-known/oauth-protected-resource"),
+            "/.well-known/oauth-protected-resource".to_string(),
+        ]
+    };
+
+    paths
+        .into_iter()
+        .filter_map(|path| {
+            let mut candidate = upstream.clone();
+            candidate.set_query(None);
+            candidate.set_fragment(None);
+            candidate.set_path(&path);
+            Some(candidate)
+        })
+        .collect()
+}
+
+fn authorization_metadata_candidates(server: &url::Url) -> Vec<url::Url> {
+    if server.path().contains("/.well-known/") {
+        return vec![server.clone()];
+    }
+
+    [
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/openid-configuration",
+    ]
+    .into_iter()
+    .filter_map(|path| {
+        let mut candidate = server.clone();
+        candidate.set_query(None);
+        candidate.set_fragment(None);
+        candidate.set_path(path);
+        Some(candidate)
+    })
+    .collect()
+}
+
+fn resolve_authorization_server_url(
+    metadata_url: &url::Url,
+    authorization_server: &str,
+) -> Result<url::Url, url::ParseError> {
+    url::Url::parse(authorization_server).or_else(|_| metadata_url.join(authorization_server))
 }
 
 /// Return the normalized origin (scheme + "://" + lowercased host + optional explicit port)

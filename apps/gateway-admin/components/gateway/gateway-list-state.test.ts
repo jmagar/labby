@@ -138,6 +138,19 @@ test('gateway status facets map configured healthy disconnected enabled and disa
   assert.equal(matchesGatewayStatusFacet(disconnectedGateway, ['disconnected']), true)
   assert.equal(matchesGatewayStatusFacet(disabledGateway, ['disabled']), true)
   assert.equal(matchesGatewayStatusFacet(disabledGateway, ['enabled']), false)
+  assert.equal(matchesGatewayStatusFacet(disabledGateway, ['disconnected']), false)
+})
+
+test('disconnected primary lens excludes disabled gateways', () => {
+  const result = filterGateways([configuredHealthyGateway, disconnectedGateway, disabledGateway], {
+    primaryLens: 'disconnected',
+    search: '',
+    status: [],
+    source: [],
+    transport: [],
+  })
+
+  assert.deepEqual(result.map((gateway) => gateway.id), ['gw_http'])
 })
 
 test('tool rows sort alphabetically by tool name', () => {

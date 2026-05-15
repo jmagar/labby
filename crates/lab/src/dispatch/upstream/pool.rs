@@ -59,6 +59,10 @@ pub struct UpstreamCachedSummary {
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
 /// Per-service timeout for in-process peer registration and capability probing.
 const IN_PROCESS_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
+/// Default cap for initial upstream discovery. Stdio upstreams can fan out into
+/// several child processes, so unbounded startup discovery can exhaust the
+/// container PID limit before any single upstream is unhealthy.
+const DEFAULT_UPSTREAM_DISCOVERY_CONCURRENCY: usize = 3;
 /// Per-request timeout for upstream tool/resource/prompt RPCs.
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const STDIO_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
@@ -67,6 +71,7 @@ const STDIO_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const DEFAULT_MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
 
 const IN_PROCESS_PEER_BUFFER_BYTES: usize = 256 * 1024;
+const AUTH_FAILURE_REPROBE_ATTEMPT_FLOOR: u32 = 5;
 
 pub fn in_process_upstream_name(service_name: &str) -> String {
     format!("__in_process__{service_name}")
@@ -80,6 +85,36 @@ fn max_response_bytes() -> usize {
         .unwrap_or(DEFAULT_MAX_RESPONSE_BYTES)
 }
 
+fn classify_upstream_error(error: &str) -> &'static str {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("auth required")
+        || lower.contains("unauthorized")
+        || lower.contains("forbidden")
+        || lower.contains("invalid_token")
+        || lower.contains("oauth")
+    {
+        "auth_failed"
+    } else if lower.contains("bearer")
+        || lower.contains("token")
+        || lower.contains("api key")
+        || lower.contains("api_key")
+    {
+        "auth_required"
+    } else if lower.contains("timed out") || lower.contains("timeout") {
+        "timeout"
+    } else if lower.contains("dns") || lower.contains("name or service not known") {
+        "dns_error"
+    } else if lower.contains("connection refused") {
+        "connection_refused"
+    } else {
+        "connection_error"
+    }
+}
+
+fn auth_error_should_backoff_aggressively(kind: &str) -> bool {
+    matches!(kind, "auth_failed" | "auth_required")
+}
+
 fn upstream_transport(config: &UpstreamConfig) -> &'static str {
     if config.url.as_deref().is_some_and(is_websocket_url) {
         "websocket"
@@ -88,6 +123,14 @@ fn upstream_transport(config: &UpstreamConfig) -> &'static str {
     } else {
         "stdio"
     }
+}
+
+fn upstream_discovery_concurrency() -> usize {
+    std::env::var("LAB_UPSTREAM_DISCOVERY_CONCURRENCY")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_UPSTREAM_DISCOVERY_CONCURRENCY)
 }
 
 fn is_websocket_url(url: &str) -> bool {
@@ -789,7 +832,7 @@ impl UpstreamPool {
         );
     }
 
-    /// Connect to all configured upstreams in parallel and discover their tools.
+    /// Connect to all configured upstreams and discover their tools.
     ///
     /// Each upstream gets a 15-second timeout. Failures are logged and the
     /// upstream is marked unhealthy, but do not prevent other upstreams from
@@ -826,7 +869,8 @@ impl UpstreamPool {
             .collect();
         *self.resource_upstreams.write().await = resource_names;
 
-        let mut futures = FuturesUnordered::new();
+        let mut discovery_jobs = Vec::new();
+        let mut probe_configs = Vec::new();
         let mut processed_names = std::collections::HashSet::new();
         let oauth_client_cache = self.oauth_client_cache.clone();
         let runtime_origin = self.runtime_origin.clone();
@@ -866,96 +910,106 @@ impl UpstreamPool {
             }
 
             let config = config.clone();
-            let probe_config = config.clone();
-            let oauth_client_cache = oauth_client_cache.clone();
-            let runtime_origin = runtime_origin.clone();
-            let runtime_owner = runtime_owner.clone();
             let subject = config
                 .oauth
                 .as_ref()
                 .and(oauth_subject)
                 .map(ToOwned::to_owned);
-            futures.push(async move {
-                let name = config.name.clone();
-                match tokio::time::timeout(
-                    DISCOVERY_TIMEOUT,
-                    connect_upstream(
-                        &config,
-                        subject.as_deref(),
-                        oauth_client_cache.as_ref(),
-                        runtime_origin.as_deref(),
-                        runtime_owner.as_ref(),
-                    ),
-                )
-                .await
-                {
-                    Ok(Ok((conn, tools))) => {
-                        let (
-                            resource_count,
-                            resource_last_error,
-                            resource_health,
-                            prompt_count,
-                            prompt_last_error,
-                            prompt_health,
-                        ) = discover_capability_counts(
-                            &name,
-                            &conn.peer,
-                            config.proxy_resources,
-                            config.proxy_prompts,
-                        )
-                        .await;
-                        tracing::info!(
-                            upstream = %name,
-                            transport = upstream_transport(&config),
-                            target = %upstream_target_redacted(&config),
-                            tool_count = tools.len(),
-                            resource_count,
-                            prompt_count,
-                            "upstream discovery succeeded"
-                        );
-                        Ok((
-                            name,
-                            config.expose_tools.clone(),
-                            conn,
-                            tools,
-                            resource_count,
-                            resource_last_error,
-                            resource_health,
-                            prompt_count,
-                            prompt_last_error,
-                            prompt_health,
-                        ))
-                    }
-                    Ok(Err(e)) => {
-                        let error = e.to_string();
-                        tracing::warn!(
-                            upstream = %name,
-                            transport = upstream_transport(&config),
-                            target = %upstream_target_redacted(&config),
-                            error = %error,
-                            "upstream discovery failed"
-                        );
-                        Err((name, error))
-                    }
-                    Err(_) => {
-                        let error = format!(
-                            "upstream discovery timed out after {}s",
-                            DISCOVERY_TIMEOUT.as_secs()
-                        );
-                        tracing::warn!(
-                            upstream = %name,
-                            transport = upstream_transport(&config),
-                            target = %upstream_target_redacted(&config),
-                            timeout_secs = DISCOVERY_TIMEOUT.as_secs(),
-                            "upstream discovery timed out"
-                        );
-                        Err((name, error))
+            probe_configs.push(config.clone());
+            discovery_jobs.push((config, subject));
+        }
+
+        let discovery_concurrency = upstream_discovery_concurrency();
+        let mut futures = futures::stream::iter(discovery_jobs)
+            .map(|(config, subject)| {
+                let oauth_client_cache = oauth_client_cache.clone();
+                let runtime_origin = runtime_origin.clone();
+                let runtime_owner = runtime_owner.clone();
+                async move {
+                    let name = config.name.clone();
+                    match tokio::time::timeout(
+                        DISCOVERY_TIMEOUT,
+                        connect_upstream(
+                            &config,
+                            subject.as_deref(),
+                            oauth_client_cache.as_ref(),
+                            runtime_origin.as_deref(),
+                            runtime_owner.as_ref(),
+                        ),
+                    )
+                    .await
+                    {
+                        Ok(Ok((conn, tools))) => {
+                            let (
+                                resource_count,
+                                resource_last_error,
+                                resource_health,
+                                prompt_count,
+                                prompt_last_error,
+                                prompt_health,
+                            ) = discover_capability_counts(
+                                &name,
+                                &conn.peer,
+                                config.proxy_resources,
+                                config.proxy_prompts,
+                            )
+                            .await;
+                            tracing::info!(
+                                upstream = %name,
+                                transport = upstream_transport(&config),
+                                target = %upstream_target_redacted(&config),
+                                tool_count = tools.len(),
+                                resource_count,
+                                prompt_count,
+                                "upstream discovery succeeded"
+                            );
+                            Ok((
+                                name,
+                                config.expose_tools.clone(),
+                                conn,
+                                tools,
+                                resource_count,
+                                resource_last_error,
+                                resource_health,
+                                prompt_count,
+                                prompt_last_error,
+                                prompt_health,
+                            ))
+                        }
+                        Ok(Err(e)) => {
+                            let error = e.to_string();
+                            let kind = classify_upstream_error(&error);
+                            tracing::warn!(
+                                upstream = %name,
+                                transport = upstream_transport(&config),
+                                target = %upstream_target_redacted(&config),
+                                kind,
+                                error = %error,
+                                "upstream discovery failed"
+                            );
+                            Err((name, error))
+                        }
+                        Err(_) => {
+                            let error = format!(
+                                "upstream discovery timed out after {}s waiting for {} MCP list_tools response from {}",
+                                DISCOVERY_TIMEOUT.as_secs(),
+                                upstream_transport(&config),
+                                upstream_target_redacted(&config)
+                            );
+                            tracing::warn!(
+                                upstream = %name,
+                                transport = upstream_transport(&config),
+                                target = %upstream_target_redacted(&config),
+                                kind = "timeout",
+                                timeout_secs = DISCOVERY_TIMEOUT.as_secs(),
+                                "upstream discovery timed out"
+                            );
+                            Err((name, error))
+                        }
                     }
                 }
-            });
-
-            self.ensure_probe_task(probe_config);
-        }
+            })
+            .buffer_unordered(discovery_concurrency);
 
         // Track all tool names across upstreams to detect duplicates.
         let mut global_tool_names: HashMap<String, String> = HashMap::new();
@@ -1057,6 +1111,10 @@ impl UpstreamPool {
                     self.catalog.write().await.insert(name, entry);
                 }
             }
+        }
+
+        for config in probe_configs {
+            self.ensure_probe_task(config);
         }
     }
 
@@ -1173,7 +1231,11 @@ impl UpstreamPool {
                         );
                     }
                     Err(error) => {
+                        let kind = classify_upstream_error(&error.to_string());
                         attempt = attempt.saturating_add(1);
+                        if auth_error_should_backoff_aggressively(kind) {
+                            attempt = attempt.max(AUTH_FAILURE_REPROBE_ATTEMPT_FLOOR);
+                        }
                         tracing::warn!(
                             surface = "dispatch",
                             service = "upstream.pool",
@@ -1184,7 +1246,7 @@ impl UpstreamPool {
                             transport = upstream_transport(&config),
                             attempt,
                             elapsed_ms = reprobe_started.elapsed().as_millis(),
-                            kind = "upstream_reprobe_failed",
+                            kind,
                             error = %error,
                             "upstream reprobe failed"
                         );

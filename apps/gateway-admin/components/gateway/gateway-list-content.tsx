@@ -5,18 +5,21 @@ import {
   Activity,
   ArrowLeft,
   Cable,
+  Download,
   LayoutList,
   Plus,
   Rows3,
+  Search,
   SlidersHorizontal,
   TriangleAlert,
   Wrench,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { AppHeader } from '@/components/app-header'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useGateways, useGatewayMutations } from '@/lib/hooks/use-gateways'
-import type { Gateway, CreateGatewayInput, UpdateGatewayInput } from '@/lib/types/gateway'
+import type { Gateway, CreateGatewayInput, UpdateGatewayInput, DiscoveredMcpServer } from '@/lib/types/gateway'
 import { cn, getErrorMessage } from '@/lib/utils'
 import {
   AURORA_DISPLAY_NUMBER,
@@ -102,6 +105,9 @@ export interface GatewayListViewProps {
   itemsCount: number
   filteredGateways: Gateway[]
   filteredToolRows: Parameters<typeof GatewayToolsTable>[0]['rows']
+  discoveredConfigs?: DiscoveredMcpServer[] | null
+  isDiscoveringConfigs?: boolean
+  isImportingConfigs?: boolean
   onPrimaryLensChange: (lens: GatewayPrimaryLens | 'tools') => void
   onBackToGateways: () => void
   onMobileSheetOpenChange: (open: boolean) => void
@@ -112,6 +118,9 @@ export interface GatewayListViewProps {
   onExposureChange: (value: ToolsExposureFilter) => void
   onClearFilters: () => void
   onCreate: () => void
+  onDiscoverConfigs?: () => void
+  onImportConfigs?: (names?: string[]) => void
+  onRestoreConfig?: (server: DiscoveredMcpServer) => void
   onEdit: (gateway: Gateway) => void
   onTest: (gateway: Gateway) => void
   onReload: (gateway: Gateway) => void
@@ -127,7 +136,7 @@ export interface GatewayListViewProps {
 
 export function GatewayListContent() {
   const { data: gateways, isLoading, error } = useGateways()
-  const { testGateway, reloadGateway, cleanupGateway, removeGateway, removeVirtualServer, createGateway, updateGateway, enableGateway, disableGateway } =
+  const { testGateway, reloadGateway, cleanupGateway, removeGateway, removeVirtualServer, createGateway, discoverExternalConfigs, importExternalConfigs, restoreImportTombstone, updateGateway, enableGateway, disableGateway } =
     useGatewayMutations()
 
   const [primaryView, setPrimaryView] = useState<GatewayPrimaryLens | 'tools'>(DEFAULT_GATEWAY_LENS)
@@ -144,6 +153,9 @@ export function GatewayListContent() {
   const [editingGateway, setEditingGateway] = useState<Gateway | null>(null)
   const [deleteGateway, setDeleteGateway] = useState<Gateway | null>(null)
   const [disableGatewayTarget, setDisableGatewayTarget] = useState<Gateway | null>(null)
+  const [discoveredConfigs, setDiscoveredConfigs] = useState<DiscoveredMcpServer[] | null>(null)
+  const [isDiscoveringConfigs, setIsDiscoveringConfigs] = useState(false)
+  const [isImportingConfigs, setIsImportingConfigs] = useState(false)
   const [testResult, setTestResult] = useState<{
     gateway: Gateway
     result: Awaited<ReturnType<typeof testGateway>>
@@ -160,9 +172,9 @@ export function GatewayListContent() {
 
   const summary = useMemo(() => {
     const configured = items.filter((gateway) => gateway.configured ?? true).length
-    const healthy = items.filter((gateway) => gateway.status.healthy && gateway.status.connected).length
-    const disconnected = items.filter((gateway) => !gateway.status.connected).length
-    const tools = aggregateToolsFromGateways(items).length
+    const healthy = items.filter((gateway) => (gateway.enabled ?? true) && gateway.status.healthy && gateway.status.connected).length
+    const disconnected = items.filter((gateway) => (gateway.enabled ?? true) && !gateway.status.connected).length
+    const tools = items.reduce((sum, gateway) => sum + gateway.status.discovered_tool_count, 0)
 
     return { configured, healthy, disconnected, tools }
   }, [items])
@@ -285,6 +297,49 @@ export function GatewayListContent() {
   const handleCreate = () => {
     setEditingGateway(null)
     setFormOpen(true)
+  }
+
+  const handleDiscoverConfigs = async () => {
+    setIsDiscoveringConfigs(true)
+    try {
+      const discovered = await discoverExternalConfigs()
+      setDiscoveredConfigs(discovered)
+      const importable = discovered.filter((server) => !server.already_configured && !server.tombstoned).length
+      toast.success(`${discovered.length} configs found, ${importable} available to import`)
+    } catch (requestError) {
+      toast.error(getErrorMessage(requestError, 'Failed to scan MCP configs'))
+    } finally {
+      setIsDiscoveringConfigs(false)
+    }
+  }
+
+  const handleImportConfigs = async (names?: string[]) => {
+    setIsImportingConfigs(true)
+    try {
+      const result = await importExternalConfigs(names)
+      const importedNames = result.imported.map((item) => item.config.name)
+      toast.success(`${importedNames.length} servers imported disabled`)
+      const refreshed = await discoverExternalConfigs()
+      setDiscoveredConfigs(refreshed)
+    } catch (requestError) {
+      toast.error(getErrorMessage(requestError, 'Failed to import MCP configs'))
+    } finally {
+      setIsImportingConfigs(false)
+    }
+  }
+
+  const handleRestoreConfig = async (server: DiscoveredMcpServer) => {
+    setIsImportingConfigs(true)
+    try {
+      const gateway = await restoreImportTombstone(server)
+      toast.success(`${gateway.name} restored disabled`)
+      const refreshed = await discoverExternalConfigs()
+      setDiscoveredConfigs(refreshed)
+    } catch (requestError) {
+      toast.error(getErrorMessage(requestError, 'Failed to restore MCP config import'))
+    } finally {
+      setIsImportingConfigs(false)
+    }
   }
 
   const handleEdit = (gateway: Gateway) => {
@@ -455,6 +510,9 @@ export function GatewayListContent() {
         itemsCount={items.length}
         filteredGateways={filteredGateways}
         filteredToolRows={filteredToolRows}
+        discoveredConfigs={discoveredConfigs}
+        isDiscoveringConfigs={isDiscoveringConfigs}
+        isImportingConfigs={isImportingConfigs}
         cleanupSummaryByGatewayId={cleanupSummaryByGatewayId}
         onPrimaryLensChange={handlePrimaryLens}
         onBackToGateways={handleBackToGateways}
@@ -466,6 +524,9 @@ export function GatewayListContent() {
         onExposureChange={handleExposureChange}
         onClearFilters={handleClearFilters}
         onCreate={handleCreate}
+        onDiscoverConfigs={handleDiscoverConfigs}
+        onImportConfigs={handleImportConfigs}
+        onRestoreConfig={handleRestoreConfig}
         onEdit={handleEdit}
         onTest={handleTest}
         onReload={handleReload}
@@ -514,6 +575,9 @@ export function GatewayListView({
   itemsCount,
   filteredGateways,
   filteredToolRows,
+  discoveredConfigs = null,
+  isDiscoveringConfigs = false,
+  isImportingConfigs = false,
   onPrimaryLensChange,
   onBackToGateways,
   onMobileSheetOpenChange,
@@ -525,6 +589,9 @@ export function GatewayListView({
   onClearFilters,
   cleanupSummaryByGatewayId,
   onCreate,
+  onDiscoverConfigs = () => undefined,
+  onImportConfigs = () => undefined,
+  onRestoreConfig = () => undefined,
   onEdit,
   onTest,
   onReload,
@@ -721,6 +788,16 @@ export function GatewayListView({
             />
 
             <div>
+              {!showToolsView ? (
+                <McpConfigImportPanel
+                  discoveredConfigs={discoveredConfigs}
+                  isDiscovering={isDiscoveringConfigs}
+                  isImporting={isImportingConfigs}
+                  onDiscover={onDiscoverConfigs}
+                  onImport={onImportConfigs}
+                  onRestore={onRestoreConfig}
+                />
+              ) : null}
               {isLoading ? (
                 <GatewayTableSkeleton />
               ) : errorMessage ? (
@@ -777,6 +854,123 @@ export function GatewayListView({
         </div>
       </div>
     </>
+  )
+}
+
+function McpConfigImportPanel({
+  discoveredConfigs,
+  isDiscovering,
+  isImporting,
+  onDiscover,
+  onImport,
+  onRestore,
+}: {
+  discoveredConfigs: DiscoveredMcpServer[] | null
+  isDiscovering: boolean
+  isImporting: boolean
+  onDiscover: () => void
+  onImport: (names?: string[]) => void
+  onRestore: (server: DiscoveredMcpServer) => void
+}) {
+  const importable = discoveredConfigs?.filter((server) => !server.already_configured && !server.tombstoned) ?? []
+  const configured = discoveredConfigs?.filter((server) => server.already_configured).length ?? 0
+  const tombstoned = discoveredConfigs?.filter((server) => server.tombstoned).length ?? 0
+  const disabled = isDiscovering || isImporting
+
+  return (
+    <section className={cn(AURORA_STRONG_PANEL, 'mb-4 p-4')}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-semibold text-aurora-text-primary">MCP config imports</h2>
+            {discoveredConfigs ? (
+              <>
+                <Badge variant="outline">{discoveredConfigs.length} found</Badge>
+                <Badge variant="outline" status={importable.length > 0 ? 'warn' : 'success'}>
+                  {importable.length} new
+                </Badge>
+                {configured > 0 ? <Badge variant="outline">{configured} configured</Badge> : null}
+                {tombstoned > 0 ? <Badge variant="outline" status="warn">{tombstoned} removed</Badge> : null}
+              </>
+            ) : null}
+          </div>
+          <p className="mt-1 text-sm text-aurora-text-muted">
+            Imported servers are added to the gateway disabled.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onDiscover}
+            disabled={disabled}
+            className={cn(gatewayActionTone(), 'hover:bg-aurora-hover-bg hover:text-aurora-text-primary')}
+          >
+            <Search className={cn('mr-2 size-4', isDiscovering && 'animate-pulse')} />
+            Scan configs
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => onImport()}
+            disabled={disabled || importable.length === 0}
+            className={cn(gatewayActionTone('accent'), 'border text-aurora-text-primary')}
+          >
+            <Download className={cn('mr-2 size-4', isImporting && 'animate-pulse')} />
+            Import all
+          </Button>
+        </div>
+      </div>
+
+      {discoveredConfigs && discoveredConfigs.length > 0 ? (
+        <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {discoveredConfigs.slice(0, 6).map((server) => (
+            <div
+              key={`${server.source_client}:${server.name}:${server.source_path}`}
+              className="min-w-0 rounded-aurora-1 border border-aurora-border-strong bg-aurora-panel/70 p-3"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-aurora-text-primary" title={server.name}>
+                    {server.name}
+                  </p>
+                  <p className="mt-1 truncate text-xs text-aurora-text-muted" title={server.source_path}>
+                    {server.source_client} / {server.transport === 'http' ? server.url_preview : server.command_preview}
+                  </p>
+                </div>
+                <Badge variant="outline" status={server.already_configured ? 'success' : 'warn'}>
+                  {server.already_configured ? 'configured' : server.tombstoned ? 'removed' : 'new'}
+                </Badge>
+              </div>
+              {server.tombstoned ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onRestore(server)}
+                  disabled={disabled}
+                  className={cn(gatewayActionTone(), 'mt-3 h-8 w-full hover:bg-aurora-hover-bg hover:text-aurora-text-primary')}
+                >
+                  <Download className="mr-2 size-3.5" />
+                  Restore
+                </Button>
+              ) : !server.already_configured ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onImport([server.name])}
+                  disabled={disabled}
+                  className={cn(gatewayActionTone(), 'mt-3 h-8 w-full hover:bg-aurora-hover-bg hover:text-aurora-text-primary')}
+                >
+                  <Download className="mr-2 size-3.5" />
+                  Import
+                </Button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : discoveredConfigs ? (
+        <p className="mt-3 text-sm text-aurora-text-muted">No external MCP configs found.</p>
+      ) : null}
+    </section>
   )
 }
 

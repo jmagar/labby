@@ -111,7 +111,7 @@ services:
       resources:
         limits:
           memory: 2G
-          pids: 200
+          pids: 1000
 
 volumes:
   labby-data:

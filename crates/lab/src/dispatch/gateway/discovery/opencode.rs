@@ -20,7 +20,7 @@ pub fn discover(home: &Path) -> Vec<DiscoveredServer> {
         for (name, entry) in mcp_obj {
             if let Some(spec) = entry_to_upstream(name, entry, "opencode", &path_str, &now) {
                 results.push(DiscoveredServer {
-                    name: name.clone(),
+                    name: spec.name.clone(),
                     spec,
                     source_client: "opencode".to_string(),
                     source_path: path_str.clone(),

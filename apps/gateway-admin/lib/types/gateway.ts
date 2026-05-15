@@ -114,6 +114,51 @@ export interface Gateway {
   updated_at: string
 }
 
+export type DiscoveredMcpServerTransport = 'http' | 'stdio'
+
+export interface DiscoveredMcpServer {
+  name: string
+  source_client: string
+  source_path: string
+  transport: DiscoveredMcpServerTransport
+  command_preview?: string
+  url_preview?: string
+  env_key_count: number
+  already_configured: boolean
+  transport_fingerprint?: string
+  tombstoned?: boolean
+}
+
+export interface GatewayImportTombstone {
+  name: string
+  source_client: string
+  source_path: string
+  server_name?: string
+  transport_fingerprint?: string
+  removed_at: string
+}
+
+export interface GatewayImportSkip {
+  name: string
+  reason: 'already_configured' | 'conflict' | 'tombstoned'
+}
+
+export interface GatewayImportError {
+  name: string
+  message: string
+}
+
+export interface GatewayImportResult {
+  imported: Array<{
+    config: {
+      name: string
+      enabled?: boolean
+    }
+  }>
+  skipped?: GatewayImportSkip[]
+  errors?: GatewayImportError[]
+}
+
 export interface CreateGatewayInput {
   name: string
   transport: TransportType
