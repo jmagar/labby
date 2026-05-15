@@ -158,37 +158,49 @@ impl NodeRuntime {
 
     /// Start all background tasks for a running node runtime.
     ///
-    /// Runs metadata upload, bootstrap log collection, and WebSocket flush
-    /// loop startup sequentially. All failures are logged as warnings — none
-    /// are fatal because the node can still operate without them.
-    pub async fn start_background_tasks(&self) {
-        if let Err(error) = self.upload_initial_metadata().await {
-            tracing::warn!(
-                surface = "node",
-                service = "runtime",
-                action = "metadata.upload_failed",
-                error = %error,
-                "initial metadata upload failed"
-            );
-        }
-        if let Err(error) = self.collect_and_queue_bootstrap_logs().await {
-            tracing::warn!(
-                surface = "node",
-                service = "runtime",
-                action = "bootstrap_logs.failed",
-                error = %error,
-                "bootstrap log collection failed"
-            );
-        }
-        if let Err(error) = self.spawn_ws_flush_loop().await {
-            tracing::warn!(
-                surface = "node",
-                service = "runtime",
-                action = "ws_flush.start_failed",
-                error = %error,
-                "ws flush loop spawn failed"
-            );
-        }
+    /// Spawns a detached task that runs metadata upload, bootstrap log
+    /// collection, and WebSocket flush loop startup sequentially. Returns
+    /// immediately so the caller is not blocked by network timeouts. All
+    /// failures inside the task are logged as warnings — none are fatal
+    /// because the node can still operate without them.
+    pub fn start_background_tasks(&self) {
+        let this = self.clone();
+        let node_id = self.resolved.local_host.clone();
+        tokio::spawn(async move {
+            if let Err(error) = this.upload_initial_metadata().await {
+                tracing::warn!(
+                    surface = "node",
+                    service = "runtime",
+                    action = "metadata.upload_failed",
+                    kind = "upload_failed",
+                    node_id = %node_id,
+                    error = %error,
+                    "initial metadata upload failed"
+                );
+            }
+            if let Err(error) = this.collect_and_queue_bootstrap_logs().await {
+                tracing::warn!(
+                    surface = "node",
+                    service = "runtime",
+                    action = "bootstrap_logs.failed",
+                    kind = "log_collection_failed",
+                    node_id = %node_id,
+                    error = %error,
+                    "bootstrap log collection failed"
+                );
+            }
+            if let Err(error) = this.spawn_ws_flush_loop().await {
+                tracing::warn!(
+                    surface = "node",
+                    service = "runtime",
+                    action = "ws_flush.start_failed",
+                    kind = "ws_start_failed",
+                    node_id = %node_id,
+                    error = %error,
+                    "ws flush loop spawn failed"
+                );
+            }
+        });
     }
 }
 

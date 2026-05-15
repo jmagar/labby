@@ -95,6 +95,15 @@ impl MasterClient {
                 }
             }
             if Instant::now() >= deadline {
+                tracing::warn!(
+                    surface = "node",
+                    service = "master_client",
+                    action = "node.connect_wait",
+                    kind = "timeout",
+                    node_id = %node_id,
+                    timeout_ms = timeout.as_millis(),
+                    "wait_for_node_connected timed out",
+                );
                 anyhow::bail!(
                     "timed out waiting for node `{node_id}` to reconnect to controller ({}s)",
                     timeout.as_secs()

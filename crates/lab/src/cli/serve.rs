@@ -653,10 +653,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         "startup plan resolved"
     );
 
-    let startup_runtime = node_runtime.clone();
-    tokio::spawn(async move {
-        startup_runtime.start_background_tasks().await;
-    });
+    node_runtime.start_background_tasks();
 
     run_http(
         &host,
@@ -1105,17 +1102,19 @@ async fn run_node_mode(
     }
 
     tracing::info!(
-        subsystem = "startup",
-        phase = "node_mode.start",
+        surface = "node",
+        service = "runtime",
+        action = "node_mode.start",
         node_id = %node_runtime.local_host(),
+        port,
         controller_host = %config.node.as_ref().and_then(|n| n.controller.as_deref()).unwrap_or("<none>"),
         "starting node runtime (non-controller mode)"
     );
 
     // Start background tasks: metadata upload, bootstrap log collection, WebSocket flush.
-    // These are awaited directly here (not fire-and-forget) because the health server
-    // loop below is what keeps the process alive, not an HTTP serve loop.
-    node_runtime.start_background_tasks().await;
+    // These are fire-and-forget — start_background_tasks spawns a detached task and returns
+    // immediately so the health server loop starts without being blocked by network timeouts.
+    node_runtime.start_background_tasks();
 
     // Run the loopback health server as the process keep-alive.
     crate::node::health::run_loopback_health_server(port).await

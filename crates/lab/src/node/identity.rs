@@ -136,12 +136,14 @@ pub fn resolve_runtime_role(
         NodeRole::NonMaster
     };
 
+    let started = std::time::Instant::now();
     tracing::info!(
         surface = "node", service = "identity", action = "role.resolved",
         local_host = %local_host,
         master_host = %master_host,
         role = ?role,
         is_master = matches!(role, NodeRole::Master),
+        elapsed_ms = started.elapsed().as_millis(),
         "runtime role resolved",
     );
     Ok(ResolvedNodeRuntime {
@@ -169,6 +171,7 @@ pub fn resolve_runtime_role_from_config(
 ) -> Result<ResolvedNodeRuntime> {
     // Resolution order: CLI override → config [node].role → hostname inference.
     let explicit_role = override_role.or_else(|| config.node.as_ref().and_then(|n| n.role));
+    let started = std::time::Instant::now();
 
     match explicit_role {
         Some(role_hint @ NodeRuntimeRole::Node) => {
@@ -184,6 +187,7 @@ pub fn resolve_runtime_role_from_config(
                 action = "role.resolved",
                 source = source,
                 role = ?role_hint,
+                elapsed_ms = started.elapsed().as_millis(),
                 "runtime role resolution source",
             );
             let controller = config.controller_host().ok_or_else(|| {
@@ -212,6 +216,7 @@ pub fn resolve_runtime_role_from_config(
                 action = "role.resolved",
                 source = source,
                 role = ?role_hint,
+                elapsed_ms = started.elapsed().as_millis(),
                 "runtime role resolution source",
             );
             let normalized =
@@ -226,6 +231,7 @@ pub fn resolve_runtime_role_from_config(
                 action = "role.resolved",
                 source = "hostname_inference",
                 role = ?Option::<NodeRuntimeRole>::None,
+                elapsed_ms = started.elapsed().as_millis(),
                 "runtime role resolution source",
             );
             resolve_runtime_role(local_host, config.controller_host())
