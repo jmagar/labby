@@ -18,7 +18,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use serde_json::json;
 
-use crate::cli::helpers::run_action_command;
+use crate::cli::helpers::run_confirmable_action_command;
 use crate::output::OutputFormat;
 
 /// `labby registry` arguments.
@@ -52,6 +52,9 @@ pub struct RegistryInstallArgs {
     /// Override the gateway entry name.  Defaults to the registry server name.
     #[arg(long)]
     pub gateway_name: Option<String>,
+    /// Skip the destructive-action confirmation prompt (required for non-interactive use).
+    #[arg(long, short = 'y')]
+    pub yes: bool,
 }
 
 /// Run `labby registry`.
@@ -77,10 +80,12 @@ async fn run_install(args: RegistryInstallArgs, format: OutputFormat) -> Result<
         "bearer_token_env": args.bearer_env,
     });
 
-    run_action_command(
+    run_confirmable_action_command(
         "marketplace",
+        crate::dispatch::marketplace::actions(),
         "mcp.install".to_string(),
         params,
+        args.yes,
         format,
         |action, params| async move {
             crate::dispatch::marketplace::dispatch(&action, params).await
@@ -147,6 +152,20 @@ mod tests {
                 "io.example/my-server",
                 "--gateway-name",
                 "my-service",
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from(["lab", "registry", "install", "io.example/my-server", "-y"])
+                .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "lab",
+                "registry",
+                "install",
+                "io.example/my-server",
+                "--yes"
             ])
             .is_ok()
         );
