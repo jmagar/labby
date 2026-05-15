@@ -15,6 +15,9 @@ import type {
   ProtectedMcpRoute,
   ProtectedMcpRouteInput,
   ProtectedMcpRouteTestResult,
+  DiscoveredMcpServer,
+  GatewayImportResult,
+  GatewayImportTombstone,
 } from '../types/gateway.ts'
 import {
   type BackendGatewayMcpRuntimeView,
@@ -297,7 +300,44 @@ function fieldPreview(config: ServiceConfig, suffix: string): string | undefined
   return config.fields.find((field) => field.name.endsWith(suffix))?.value_preview ?? undefined
 }
 
+function importTombstoneParams(server: DiscoveredMcpServer) {
+  return {
+    name: server.name,
+    source_client: server.source_client,
+    source_path: server.source_path,
+    transport_fingerprint: server.transport_fingerprint,
+  }
+}
+
 export const gatewayApi = {
+  async discoverExternalConfigs(signal?: AbortSignal): Promise<DiscoveredMcpServer[]> {
+    return gatewayAction<DiscoveredMcpServer[]>('gateway.discover', {}, signal)
+  },
+
+  async importExternalConfigs(names?: string[], signal?: AbortSignal): Promise<GatewayImportResult> {
+    const params = names && names.length > 0
+      ? { names }
+      : { all: true }
+    return gatewayAction<GatewayImportResult>('gateway.import', confirmGatewayParams(params), signal)
+  },
+
+  async clearImportTombstone(server: DiscoveredMcpServer, signal?: AbortSignal): Promise<GatewayImportTombstone[]> {
+    return gatewayAction<GatewayImportTombstone[]>(
+      'gateway.import_tombstones.clear',
+      confirmGatewayParams(importTombstoneParams(server)),
+      signal,
+    )
+  },
+
+  async restoreImportTombstone(server: DiscoveredMcpServer, signal?: AbortSignal): Promise<Gateway> {
+    const view = await gatewayAction<BackendGatewayView>(
+      'gateway.import_tombstones.restore',
+      confirmGatewayParams(importTombstoneParams(server)),
+      signal,
+    )
+    return normalizeGatewayView(view, true, undefined, signal)
+  },
+
   async list(signal?: AbortSignal): Promise<Gateway[]> {
     const [views, runtimeRows] = await Promise.all([
       gatewayAction<BackendServerView[]>('gateway.list', {}, signal),

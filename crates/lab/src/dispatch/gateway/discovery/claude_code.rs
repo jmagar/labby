@@ -51,7 +51,7 @@ fn harvest(
         if let Some(spec) = entry_to_upstream(name.as_str(), entry, source_client, source_path, now)
         {
             out.push(DiscoveredServer {
-                name,
+                name: spec.name.clone(),
                 spec,
                 source_client: source_client.to_string(),
                 source_path: source_path.to_string(),

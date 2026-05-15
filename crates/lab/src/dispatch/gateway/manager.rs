@@ -149,7 +149,7 @@ pub(crate) fn discovered_is_tombstoned(
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ImportTombstoneSelector {
+pub struct ImportTombstoneSelector {
     pub name: String,
     pub source_client: Option<String>,
     pub source_path: Option<String>,

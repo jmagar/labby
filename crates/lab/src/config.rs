@@ -122,6 +122,10 @@ pub struct LabConfig {
     /// Upstream MCP servers to proxy through the gateway.
     #[serde(default)]
     pub upstream: Vec<UpstreamConfig>,
+    /// Imported upstreams removed by an operator. Auto-import honors this list
+    /// so deleted external-config entries do not immediately return on restart.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub upstream_import_tombstones: Vec<UpstreamImportTombstone>,
     /// Public HTTP MCP routes protected by Lab OAuth and proxied by Lab.
     ///
     /// These are intentionally separate from `upstream`: upstreams import tools
@@ -450,12 +454,20 @@ impl ToolSearchConfig {
 }
 
 /// Provenance record for an upstream imported from an external MCP config.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportSource {
     /// Which client config type this was discovered in (e.g. "cursor", "claude-code", "vscode").
     pub client: String,
     /// Absolute path to the config file the server was read from.
     pub path: String,
+    /// Normalized server name as it appeared when discovered. This lets delete
+    /// tombstones survive an operator renaming the imported gateway in Lab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_name: Option<String>,
+    /// Stable hash of the discovered transport target. Used to avoid suppressing
+    /// a different server that later reuses the same client/path/name slot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_fingerprint: Option<String>,
     /// ISO 8601 timestamp of when the import was recorded.
     pub imported_at: String,
 }
@@ -469,12 +481,41 @@ impl ImportSource {
         Self {
             client: client.into(),
             path: path.into(),
+            server_name: None,
+            transport_fingerprint: None,
             imported_at: imported_at.into(),
         }
     }
 
-    pub fn now(client: impl Into<String>, path: impl Into<String>) -> Self {
-        Self::new(client, path, jiff::Timestamp::now().to_string())
+    pub fn with_server_name(mut self, server_name: impl Into<String>) -> Self {
+        self.server_name = Some(server_name.into());
+        self
+    }
+
+    pub fn with_transport_fingerprint(mut self, fingerprint: impl Into<String>) -> Self {
+        self.transport_fingerprint = Some(fingerprint.into());
+        self
+    }
+}
+
+/// Suppresses automatic re-import of an operator-deleted imported upstream.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpstreamImportTombstone {
+    /// Name of the removed upstream.
+    pub name: String,
+    /// Original import provenance for the removed upstream.
+    pub imported_from: ImportSource,
+    /// ISO 8601 timestamp of when the deletion was recorded.
+    pub removed_at: String,
+}
+
+impl UpstreamImportTombstone {
+    pub fn now(name: impl Into<String>, imported_from: ImportSource) -> Self {
+        Self {
+            name: name.into(),
+            imported_from,
+            removed_at: jiff::Timestamp::now().to_string(),
+        }
     }
 }
 
@@ -730,7 +771,7 @@ pub enum ConfigError {
 }
 
 /// Outbound OAuth configuration for an upstream MCP server.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpstreamOauthConfig {
     pub mode: UpstreamOauthMode,
@@ -740,14 +781,14 @@ pub struct UpstreamOauthConfig {
 }
 
 /// Outbound OAuth mode. Currently only `authorization_code_pkce` is supported.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UpstreamOauthMode {
     AuthorizationCodePkce,
 }
 
 /// Outbound OAuth client-registration strategy.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "strategy", rename_all = "snake_case")]
 pub enum UpstreamOauthRegistration {
     ClientMetadataDocument {

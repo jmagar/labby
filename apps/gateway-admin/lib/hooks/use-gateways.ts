@@ -33,6 +33,8 @@ import type {
   ProtectedMcpRoute,
   ProtectedMcpRouteInput,
   ProtectedMcpRouteTestResult,
+  DiscoveredMcpServer,
+  GatewayImportResult,
 } from '@/lib/types/gateway'
 import { useCallback } from 'react'
 
@@ -279,6 +281,79 @@ export function useGatewayMutations() {
       return newGateway
     }
     const gateway = await gatewayApi.create(input)
+    await refreshGatewayCache(gateway.id)
+    return gateway
+  }, [])
+
+  const discoverExternalConfigs = useCallback(async (): Promise<DiscoveredMcpServer[]> => {
+    if (USE_MOCK_DATA) {
+      await mockDelay()
+      return [
+        {
+          name: 'local-files',
+          source_client: 'claude-code',
+          source_path: '~/.claude/settings.json',
+          transport: 'stdio',
+          command_preview: 'npx',
+          env_key_count: 1,
+          already_configured: false,
+          tombstoned: false,
+        },
+      ]
+    }
+    return gatewayApi.discoverExternalConfigs()
+  }, [])
+
+  const importExternalConfigs = useCallback(async (names?: string[]): Promise<GatewayImportResult> => {
+    if (USE_MOCK_DATA) {
+      await mockDelay()
+      return {
+        imported: (names && names.length > 0 ? names : ['local-files']).map((name) => ({
+          config: { name, enabled: false },
+        })),
+      }
+    }
+    const result = await gatewayApi.importExternalConfigs(names)
+    await refreshGatewayCache()
+    return result
+  }, [])
+
+  const clearImportTombstone = useCallback(async (server: DiscoveredMcpServer): Promise<void> => {
+    if (USE_MOCK_DATA) {
+      await mockDelay()
+      return
+    }
+    await gatewayApi.clearImportTombstone(server)
+  }, [])
+
+  const restoreImportTombstone = useCallback(async (server: DiscoveredMcpServer): Promise<Gateway> => {
+    if (USE_MOCK_DATA) {
+      await mockDelay()
+      return {
+        id: server.name,
+        name: server.name,
+        transport: server.transport,
+        source: 'custom_gateway',
+        configured: true,
+        enabled: false,
+        config: {},
+        status: {
+          healthy: false,
+          connected: false,
+          discovered_tool_count: 0,
+          exposed_tool_count: 0,
+          discovered_resource_count: 0,
+          exposed_resource_count: 0,
+          discovered_prompt_count: 0,
+          exposed_prompt_count: 0,
+        },
+        discovery: { tools: [], resources: [], prompts: [] },
+        warnings: [],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+    }
+    const gateway = await gatewayApi.restoreImportTombstone(server)
     await refreshGatewayCache(gateway.id)
     return gateway
   }, [])
@@ -672,6 +747,10 @@ export function useGatewayMutations() {
 
   return {
     createGateway,
+    discoverExternalConfigs,
+    importExternalConfigs,
+    clearImportTombstone,
+    restoreImportTombstone,
     updateGateway,
     removeGateway,
     removeVirtualServer,

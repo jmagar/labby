@@ -41,7 +41,7 @@ pub fn discover(home: &Path) -> Vec<DiscoveredServer> {
             };
             if let Some(spec) = entry_to_upstream(name, &json_entry, "codex", &path_str, &now) {
                 results.push(DiscoveredServer {
-                    name: name.clone(),
+                    name: spec.name.clone(),
                     spec,
                     source_client: "codex".to_string(),
                     source_path: path_str.clone(),

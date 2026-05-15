@@ -43,7 +43,10 @@ export function protectedRouteForGateway(
   const matches = routes.filter((route) => {
     if (!route.enabled) return false
     if (route.public_host.toLowerCase() !== host) return false
-    return route.upstream === gatewayName || route.name === gatewayName
+    if (route.upstream) {
+      return route.upstream === gatewayName
+    }
+    return route.name === gatewayName
   })
 
   return matches.find((route) => route.upstream === gatewayName) ?? matches[0] ?? null

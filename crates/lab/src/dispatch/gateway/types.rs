@@ -81,6 +81,25 @@ pub struct DiscoveredServerView {
     pub env_key_count: usize,
     /// True if a server with this name is already in the gateway config.
     pub already_configured: bool,
+    /// Stable hash of the discovered transport target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_fingerprint: Option<String>,
+    /// True if this discovered server matches a prior operator deletion.
+    #[serde(default)]
+    pub tombstoned: bool,
+}
+
+/// One operator-deleted imported upstream that suppresses future auto-imports.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportTombstoneView {
+    pub name: String,
+    pub source_client: String,
+    pub source_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_fingerprint: Option<String>,
+    pub removed_at: String,
 }
 
 /// Why a server was skipped during `gateway.import`.
@@ -89,6 +108,7 @@ pub struct DiscoveredServerView {
 pub enum ImportSkipReason {
     AlreadyConfigured,
     Conflict,
+    Tombstoned,
 }
 
 /// One skipped entry from a `gateway.import` call.

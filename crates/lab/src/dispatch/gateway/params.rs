@@ -47,6 +47,23 @@ pub struct GatewayNameParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayImportTombstoneParams {
+    pub name: String,
+    #[serde(default)]
+    pub source_client: Option<String>,
+    #[serde(default)]
+    pub source_path: Option<String>,
+    #[serde(default)]
+    pub server_name: Option<String>,
+    #[serde(default)]
+    pub transport_fingerprint: Option<String>,
+    #[serde(default)]
+    pub origin: Option<String>,
+    #[serde(default)]
+    pub owner: Option<GatewayRuntimeOwnerParams>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GatewayClientConfigParams {
     pub name: String,
 }
