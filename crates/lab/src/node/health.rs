@@ -78,13 +78,24 @@ async fn handle_health_connection(stream: &mut tokio::net::TcpStream) {
         "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
-    drop(stream.write_all(response.as_bytes()).await);
-
-    tracing::debug!(
-        surface = "node",
-        service = "health",
-        action = "response.sent",
-        status = %status,
-        "health response sent"
-    );
+    match stream.write_all(response.as_bytes()).await {
+        Ok(()) => {
+            tracing::debug!(
+                surface = "node",
+                service = "health",
+                action = "response.sent",
+                status = %status,
+                "health response sent"
+            );
+        }
+        Err(error) => {
+            tracing::debug!(
+                surface = "node",
+                service = "health",
+                action = "response.error",
+                error = %error,
+                "health response write failed"
+            );
+        }
+    }
 }
