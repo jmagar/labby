@@ -1,463 +1,532 @@
 //! Request/response types for the MCP Registry v0.1 API.
 //!
-//! Serde rules:
-//! - No `deny_unknown_fields` — the registry adds fields freely.
-//! - Nullable arrays use `#[serde(default)]` to treat JSON null as empty.
-//! - Reserved-word fields use descriptive Rust names with `#[serde(rename = "type")]`.
-//! - Dotted/slashed JSON keys use `#[serde(rename = "...")]` directly.
+//! These types closely follow the official MCP Registry OpenAPI specification
+//! plus the Lab-specific extension metadata stored alongside registry records.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 // ---------------------------------------------------------------------------
-// Query params
+// Core registry types (mirrors the upstream API)
 // ---------------------------------------------------------------------------
 
-/// Parameters for `list_servers` (GET /v0.1/servers).
+/// A server record as returned by the registry API.
+///
+/// `server` holds the serialisable MCP server definition (stored verbatim in
+/// the local SQLite mirror). `meta` carries registry-managed extension data
+/// such as `is_latest`, publication timestamps, and Lab-specific annotations
+/// that are merged in at read time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerResponse {
+    /// The MCP server definition.
+    pub server: ServerJSON,
+    /// Registry-managed metadata attached to this response.
+    /// `None` when absent in both the upstream response and the local store.
+    pub meta: Option<ResponseMeta>,
+}
+
+/// Serialisable MCP server definition — stored verbatim in the local registry
+/// mirror and re-parsed on each read.
+///
+/// Fields align with the MCP Registry v0.1 `server` object schema.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerJSON {
+    /// JSON-LD / JSON Schema `$schema` URL.
+    #[serde(rename = "$schema", skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
+    /// Qualified server name, e.g. `io.modelcontextprotocol/everything`.
+    pub name: String,
+    /// Human-readable display title.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Human-readable description of the server's purpose.
+    pub description: String,
+    /// Semver version string for this entry.
+    pub version: String,
+    /// Package distributions available for this server.
+    #[serde(default)]
+    pub packages: Vec<Package>,
+    /// Remote transport endpoints.
+    #[serde(default)]
+    pub remotes: Vec<Remote>,
+    /// Source repository metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository: Option<Repository>,
+    /// Icon references (URL or data URI).
+    #[serde(default)]
+    pub icons: Vec<Icon>,
+    /// Canonical website URL, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub website_url: Option<String>,
+}
+
+impl ServerJSON {
+    /// Convenience: look up the first remote URL, if any.
+    #[must_use]
+    pub fn first_remote_url(&self) -> Option<&str> {
+        self.remotes.iter().find_map(|r| r.url.as_deref())
+    }
+}
+
+/// A package distribution for an MCP server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Package {
+    /// Registry type: `"npm"`, `"pypi"`, `"docker"`, `"mcpb"`, etc.
+    pub registry_type: String,
+    /// Package identifier within that registry (e.g. `@scope/name`).
+    pub identifier: String,
+    /// Optional pinned package version.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Transport configuration for this package.
+    pub transport: Transport,
+    /// Runtime hint: `"npx"`, `"uvx"`, `"docker"`, etc.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_hint: Option<String>,
+    /// Extra arguments prepended before the package identifier.
+    #[serde(default)]
+    pub runtime_arguments: Vec<Value>,
+    /// Extra arguments appended after the package identifier.
+    #[serde(default)]
+    pub package_arguments: Vec<Value>,
+    /// Environment variables accepted or required by this package.
+    #[serde(default)]
+    pub environment_variables: Vec<EnvironmentVariable>,
+    /// SHA-256 hash of the binary artifact (MCPB packages only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_sha256: Option<String>,
+    /// Override base URL for the package registry (used by self-hosted npm mirrors).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry_base_url: Option<String>,
+}
+
+/// Transport configuration attached to a package.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Transport {
+    /// Transport type: `"stdio"`, `"sse"`, `"http"`, etc.
+    pub transport_type: String,
+    /// URL for HTTP-based transports.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Static HTTP headers to send with every request.
+    #[serde(default)]
+    pub headers: Vec<Header>,
+    /// Dynamic variable definitions (template substitution).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variables: Option<Value>,
+}
+
+/// A static HTTP header.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Header {
+    /// Header name (e.g. `Authorization`).
+    pub name: String,
+    /// Header value or template (e.g. `Bearer ${API_KEY}`).
+    pub value: String,
+}
+
+/// An environment variable declaration for a package.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvironmentVariable {
+    /// Variable name (e.g. `GITHUB_TOKEN`).
+    pub name: String,
+    /// Human-readable description.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Whether this variable must be set.
+    pub is_required: bool,
+    /// Whether this variable should be treated as a secret.
+    pub is_secret: bool,
+    /// Default value to use when the caller does not provide one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<String>,
+    /// Enumerated choices for the variable value.
+    #[serde(default)]
+    pub choices: Vec<String>,
+    /// Placeholder text shown in UIs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+    /// Format hint (e.g. `"token"`, `"url"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+}
+
+/// A remote transport endpoint for an MCP server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Remote {
+    /// Transport type: `"sse"`, `"http"`, etc.
+    pub transport_type: String,
+    /// URL of the remote endpoint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Static HTTP headers to send with every request.
+    #[serde(default)]
+    pub headers: Vec<Header>,
+}
+
+/// Source repository metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Repository {
+    /// Repository URL (e.g. GitHub URL).
+    pub url: String,
+    /// Source host type (e.g. `"github"`, `"gitlab"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
+/// An icon reference.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Icon {
+    /// MIME type hint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    /// URL or data URI of the icon.
+    pub url: String,
+}
+
+// ---------------------------------------------------------------------------
+// Registry response envelope
+// ---------------------------------------------------------------------------
+
+/// Paginated list of MCP servers from the registry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerListResponse {
+    /// Servers in this page.
+    pub servers: Vec<ServerResponse>,
+    /// Pagination metadata.
+    pub metadata: PaginationMetadata,
+}
+
+/// Pagination metadata returned with list responses.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PaginationMetadata {
+    /// Opaque cursor for fetching the next page, if any.
+    pub next_cursor: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Response meta (registry-managed extensions)
+// ---------------------------------------------------------------------------
+
+/// Registry-managed metadata attached to a `ServerResponse`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResponseMeta {
+    /// Official registry extensions (is_latest, status, timestamps).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub official: Option<RegistryExtensions>,
+    /// Arbitrary extension metadata keyed by namespace.
+    ///
+    /// Lab stores its own curation data here under the `"lab"` key.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
+}
+
+impl ResponseMeta {
+    /// Return true when no fields carry any data (safe to serialize as `None`).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.official.is_none() && self.extensions.is_empty()
+    }
+
+    /// Insert or replace an extension value under a given namespace key.
+    pub fn insert_extension(&mut self, namespace: &str, value: Value) {
+        self.extensions.insert(namespace.to_owned(), value);
+    }
+}
+
+/// Official registry-managed extension fields.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryExtensions {
+    /// Whether this is the latest published version of the server.
+    pub is_latest: bool,
+    /// ISO-8601 timestamp when this version was first published.
+    pub published_at: String,
+    /// Lifecycle status: `"active"`, `"deprecated"`, `"deleted"`, etc.
+    pub status: String,
+    /// ISO-8601 timestamp when `status` last changed.
+    pub status_changed_at: String,
+    /// Human-readable message accompanying a non-active status.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_message: Option<String>,
+    /// ISO-8601 timestamp of the most recent upstream update.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Validate types
+// ---------------------------------------------------------------------------
+
+/// Result from the registry's `/v0.1/validate` endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidationResult {
+    /// Whether the provided server JSON is valid.
+    pub valid: bool,
+    /// Validation error messages, if any.
+    #[serde(default)]
+    pub errors: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Query parameters
+// ---------------------------------------------------------------------------
+
+/// Query parameters for the `GET /v0.1/servers` list endpoint.
 #[derive(Debug, Clone, Default)]
 pub struct ListServersParams {
-    /// Substring search on server name or description.
+    /// Optional free-text search query.
     pub search: Option<String>,
-    /// Pagination cursor from a previous response `metadata.next_cursor`.
-    pub cursor: Option<String>,
-    /// Page size (1–100; server default: 20).
+    /// Maximum number of results per page.
     pub limit: Option<u32>,
-    /// Filter by version string or `"latest"`.
+    /// Pagination cursor returned by a prior response.
+    pub cursor: Option<String>,
+    /// Filter to a specific version string.
     pub version: Option<String>,
-    /// RFC3339 timestamp filter — only servers updated after this time.
+    /// Filter to entries updated since this ISO-8601 timestamp.
     pub updated_since: Option<String>,
-    /// Filter by Lab featured flag.
+    /// Filter to Lab-featured entries.
     pub featured: Option<bool>,
-    /// Filter by Lab reviewed flag.
+    /// Filter to Lab-reviewed entries.
     pub reviewed: Option<bool>,
-    /// Filter by Lab recommended flag.
+    /// Filter to Lab-recommended entries.
     pub recommended: Option<bool>,
-    /// Filter by Lab hidden flag.
+    /// Filter to hidden entries.
     pub hidden: Option<bool>,
-    /// Filter by a single Lab curation tag.
+    /// Filter to a single Lab curation tag.
     pub tag: Option<String>,
 }
 
 impl ListServersParams {
-    /// Convert to wire query-parameter pairs.
-    pub fn to_query_pairs(&self) -> Vec<(String, String)> {
+    /// Encode as URL query pairs for `GET /v0.1/servers`, omitting `None` fields.
+    ///
+    /// Note: Lab-specific filter fields (featured, reviewed, etc.) are client-side
+    /// concepts applied against the local store — they are NOT forwarded upstream.
+    #[must_use]
+    pub fn to_upstream_query_pairs(&self) -> Vec<(String, String)> {
         let mut pairs = Vec::new();
-        if let Some(v) = &self.search {
-            pairs.push(("search".to_string(), v.clone()));
+        if let Some(q) = &self.search {
+            pairs.push(("search".to_owned(), q.clone()));
         }
-        if let Some(v) = &self.cursor {
-            pairs.push(("cursor".to_string(), v.clone()));
+        if let Some(n) = self.limit {
+            pairs.push(("limit".to_owned(), n.to_string()));
         }
-        if let Some(v) = self.limit {
-            pairs.push(("limit".to_string(), v.to_string()));
-        }
-        if let Some(v) = &self.version {
-            pairs.push(("version".to_string(), v.clone()));
-        }
-        if let Some(v) = &self.updated_since {
-            pairs.push(("updatedSince".to_string(), v.clone()));
-        }
-        if let Some(v) = self.featured {
-            pairs.push(("featured".to_string(), v.to_string()));
-        }
-        if let Some(v) = self.reviewed {
-            pairs.push(("reviewed".to_string(), v.to_string()));
-        }
-        if let Some(v) = self.recommended {
-            pairs.push(("recommended".to_string(), v.to_string()));
-        }
-        if let Some(v) = self.hidden {
-            pairs.push(("hidden".to_string(), v.to_string()));
-        }
-        if let Some(v) = &self.tag {
-            pairs.push(("tag".to_string(), v.clone()));
+        if let Some(c) = &self.cursor {
+            pairs.push(("cursor".to_owned(), c.clone()));
         }
         pairs
     }
 }
 
 // ---------------------------------------------------------------------------
-// Response types
+// Lab-specific metadata (stored alongside registry records)
 // ---------------------------------------------------------------------------
 
-/// Paginated list of MCP servers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerListResponse {
-    /// Page of server entries. JSON null is treated as an empty list.
-    #[serde(default)]
-    pub servers: Vec<ServerResponse>,
-    /// Pagination metadata.
-    pub metadata: Metadata,
-}
-
-/// Pagination metadata attached to list responses.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Metadata {
-    /// Number of items in the current page.
-    pub count: i64,
-    /// Cursor for retrieving the next page; absent when on the last page.
-    #[serde(rename = "nextCursor")]
-    pub next_cursor: Option<String>,
-}
-
-/// A single server entry from the registry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerResponse {
-    /// Server configuration and metadata.
-    pub server: ServerJSON,
-    /// Registry-managed metadata (may be absent in some response contexts).
-    #[serde(rename = "_meta")]
-    pub meta: Option<ResponseMeta>,
-}
-
-/// Registry-managed per-response metadata.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ResponseMeta {
-    /// Official registry extensions.
-    #[serde(
-        rename = "io.modelcontextprotocol.registry/official",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub official: Option<RegistryExtensions>,
-    /// Aggregator/subregistry-specific metadata, keyed by namespaced `_meta` entry.
-    #[serde(flatten, default)]
-    pub extensions: BTreeMap<String, serde_json::Value>,
-}
-
-impl ResponseMeta {
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.official.is_none() && self.extensions.is_empty()
-    }
-
-    pub fn insert_extension(&mut self, namespace: impl Into<String>, value: serde_json::Value) {
-        self.extensions.insert(namespace.into(), value);
-    }
-
-    #[must_use]
-    pub fn extension(&self, namespace: &str) -> Option<&serde_json::Value> {
-        self.extensions.get(namespace)
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// Lab-managed curation metadata attached to a registry record.
+///
+/// Stored in the local registry SQLite store under the `"lab"` extension
+/// namespace. Never accepted from the upstream registry API.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LabRegistryMetadata {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub curation: Option<LabRegistryCuration>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trust: Option<LabRegistryTrust>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub quality: Option<LabRegistryQuality>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub security: Option<LabRegistrySecurity>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ux: Option<LabRegistryUx>,
+    /// Lab audit trail (populated by the store, read-only for callers).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audit: Option<LabRegistryAudit>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub extra: BTreeMap<String, serde_json::Value>,
+    /// Curation tags and notes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub curation: Option<LabCuration>,
+    /// Trust signals (manual review state).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trust: Option<LabTrustMeta>,
+    /// Installation quality signals.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality: Option<LabQualityMeta>,
+    /// UX-level annotations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ux: Option<LabUxMeta>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LabRegistryCuration {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub featured: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hidden: Option<bool>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tags: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub notes: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LabRegistryTrust {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reviewed: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reviewed_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_verified: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub maintainer_known: Option<bool>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum LabRegistryTransportScore {
-    Good,
-    Mixed,
-    Poor,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LabRegistryQuality {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub install_tested: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_install_tested_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub transport_score: Option<LabRegistryTransportScore>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LabRegistrySecurity {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ssrf_reviewed: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub permissions_reviewed: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub secrets_reviewed: Option<bool>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum LabRegistrySetupDifficulty {
-    Easy,
-    Medium,
-    Hard,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LabRegistryUx {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub works_in_lab: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub recommended_for_homelab: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub setup_difficulty: Option<LabRegistrySetupDifficulty>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// Audit trail automatically populated by Lab.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LabRegistryAudit {
+    /// ISO-8601 timestamp of the last metadata write.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+    /// Agent or user identifier that last wrote the metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by: Option<String>,
 }
 
-/// Registry lifecycle extensions attached to a server version.
+/// Lab curator tags and notes for a server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegistryExtensions {
-    /// Whether this is the latest published version.
-    #[serde(rename = "isLatest")]
-    pub is_latest: bool,
-    /// Timestamp when the server was first published.
-    #[serde(rename = "publishedAt")]
-    pub published_at: String,
-    /// Lifecycle status: `"active"`, `"deprecated"`, or `"deleted"`.
-    pub status: String,
-    /// Timestamp of the most recent status change.
-    #[serde(rename = "statusChangedAt")]
-    pub status_changed_at: String,
-    /// Optional human-readable reason for the status change.
-    #[serde(rename = "statusMessage")]
-    pub status_message: Option<String>,
-    /// Timestamp of the most recent metadata update.
-    #[serde(rename = "updatedAt")]
-    pub updated_at: Option<String>,
-}
-
-/// Full server configuration from `server.json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerJSON {
-    /// JSON Schema URI for this server.json format.
-    #[serde(rename = "$schema", skip_serializing_if = "Option::is_none")]
-    pub schema: Option<String>,
-    /// Server name in reverse-DNS format (e.g. `io.github.user/weather`).
-    pub name: String,
-    /// Optional human-readable display name.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    /// Human-readable explanation of server functionality.
-    pub description: String,
-    /// Version string (ideally semver).
-    pub version: String,
-    /// Package configurations (local/stdio transports).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub packages: Vec<Package>,
-    /// Remote transport configurations.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub remotes: Vec<Transport>,
-    /// Source code repository metadata.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repository: Option<Repository>,
-    /// Display icons.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub icons: Vec<Icon>,
-    /// Homepage or project website URL.
-    #[serde(rename = "websiteUrl", skip_serializing_if = "Option::is_none")]
-    pub website_url: Option<String>,
-}
-
-/// Transport configuration (used by both `packages[].transport` and `remotes`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Transport {
-    /// Transport type: `"stdio"`, `"streamable-http"`, or `"sse"`.
-    #[serde(rename = "type")]
-    pub transport_type: String,
-    /// URL for HTTP-based transports.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    /// HTTP headers for HTTP-based transports.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub headers: Vec<serde_json::Value>,
-    /// URL template variables for remote transports.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub variables: Option<serde_json::Value>,
-}
-
-/// A single environment variable declaration from the registry.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct EnvironmentVariable {
-    /// Variable name (e.g. `GITHUB_TOKEN`).
-    pub name: String,
-    /// Human-readable description shown in install dialogs.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    /// Whether a value must be supplied before the server can run.
-    #[serde(rename = "isRequired", default)]
-    pub is_required: bool,
-    /// Whether the value should be treated as a secret (masked in UIs, written to `.env`).
-    #[serde(rename = "isSecret", default)]
-    pub is_secret: bool,
-    /// Default value used when the user provides none.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default: Option<String>,
-    /// Enumerated allowed values.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub choices: Vec<String>,
-    /// Placeholder text for the install dialog input field.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub placeholder: Option<String>,
-    /// Semantic format hint (e.g. `"token"`, `"url"`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub format: Option<String>,
-}
-
-/// Package distribution configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Package {
-    /// Registry type: `"npm"`, `"pypi"`, `"oci"`, `"nuget"`, `"mcpb"`.
-    #[serde(rename = "registryType")]
-    pub registry_type: String,
-    /// Package identifier or download URL.
-    pub identifier: String,
-    /// Specific version string.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
-    /// Transport configuration for this package.
-    pub transport: Transport,
-    /// Runtime hint (e.g. `"npx"`).
-    #[serde(rename = "runtimeHint", skip_serializing_if = "Option::is_none")]
-    pub runtime_hint: Option<String>,
-    /// Arguments passed to the runtime command.
-    #[serde(
-        rename = "runtimeArguments",
-        default,
-        skip_serializing_if = "Vec::is_empty"
-    )]
-    pub runtime_arguments: Vec<serde_json::Value>,
-    /// Arguments passed to the package binary.
-    #[serde(
-        rename = "packageArguments",
-        default,
-        skip_serializing_if = "Vec::is_empty"
-    )]
-    pub package_arguments: Vec<serde_json::Value>,
-    /// Environment variables for the package runtime.
-    #[serde(
-        rename = "environmentVariables",
-        default,
-        skip_serializing_if = "Vec::is_empty"
-    )]
-    pub environment_variables: Vec<EnvironmentVariable>,
-    /// SHA-256 hash of the package file for integrity verification.
-    #[serde(rename = "fileSha256", skip_serializing_if = "Option::is_none")]
-    pub file_sha256: Option<String>,
-    /// Base URL of the package registry.
-    #[serde(rename = "registryBaseUrl", skip_serializing_if = "Option::is_none")]
-    pub registry_base_url: Option<String>,
-}
-
-/// Source repository metadata.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Repository {
-    /// Hosting service identifier (e.g. `"github"`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    /// Repository URL.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    /// Stable repository identifier from the hosting service.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-    /// Relative path to the server within a monorepo.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subfolder: Option<String>,
-}
-
-/// Display icon metadata.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Icon {
-    /// Icon URL (HTTPS required).
-    pub src: String,
-    /// MIME type override.
-    #[serde(rename = "mimeType", skip_serializing_if = "Option::is_none")]
-    pub mime_type: Option<String>,
-    /// Size specifiers (e.g. `"48x48"`, `"any"`).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub sizes: Vec<String>,
-    /// Theme hint: `"light"` or `"dark"`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub theme: Option<String>,
-}
-
-// ---------------------------------------------------------------------------
-// Validation
-// ---------------------------------------------------------------------------
-
-/// Result of POST /v0.1/validate.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ValidationResult {
-    /// Whether the server JSON is valid.
-    pub valid: bool,
-    /// Validation issues found. JSON null is treated as empty.
+pub struct LabCuration {
+    /// Curation tags (sorted, deduplicated by the store).
     #[serde(default)]
-    pub issues: Vec<ValidationIssue>,
+    pub tags: Vec<String>,
+    /// Optional curator notes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    /// Whether Lab features this server in curated listings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub featured: Option<bool>,
+    /// Whether Lab has reviewed this server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reviewed: Option<bool>,
+    /// Whether Lab recommends this server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recommended: Option<bool>,
+    /// Whether this server is hidden from default listings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<bool>,
 }
 
-/// A single validation issue.
+/// Trust signals.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ValidationIssue {
-    /// Human-readable description of the issue.
-    pub message: String,
-    /// JSON path where the issue was found.
-    pub path: String,
-    /// Severity level (e.g. `"error"`, `"warning"`).
-    pub severity: String,
-    /// Issue type/code.
-    #[serde(rename = "type")]
-    pub issue_type: String,
-    /// Reference to documentation or specification.
-    pub reference: String,
+pub struct LabTrustMeta {
+    /// ISO-8601 timestamp when a human last reviewed this server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reviewed_at: Option<String>,
+}
+
+/// Installation quality signals.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabQualityMeta {
+    /// ISO-8601 timestamp of the last successful install test.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_install_tested_at: Option<String>,
+    /// Observed transport reliability score.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport_score: Option<LabRegistryTransportScore>,
+}
+
+/// UX-level annotations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabUxMeta {
+    /// Subjective setup difficulty rating.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub setup_difficulty: Option<LabRegistrySetupDifficulty>,
+}
+
+/// Transport reliability score.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LabRegistryTransportScore {
+    /// Transport works reliably.
+    Good,
+    /// Transport has known issues in some configurations.
+    Mixed,
+    /// Transport is unreliable or broken.
+    Poor,
+}
+
+/// Subjective setup difficulty.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LabRegistrySetupDifficulty {
+    /// Minimal configuration required.
+    Easy,
+    /// Some configuration steps required.
+    Medium,
+    /// Complex configuration or prerequisites required.
+    Hard,
 }
 
 // ---------------------------------------------------------------------------
-// Health
+// Tests
 // ---------------------------------------------------------------------------
 
-/// Response from GET /v0.1/health.
-#[derive(Debug, Deserialize)]
-pub struct HealthBody {
-    /// Health status string (e.g. `"ok"`).
-    pub status: String,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_list_response_deserializes_minimal() {
+        let json = serde_json::json!({
+            "servers": [
+                {
+                    "name": "io.example/hello",
+                    "description": "A hello world server",
+                    "version": "1.0.0"
+                }
+            ],
+            "metadata": {
+                "next_cursor": null
+            }
+        });
+
+        let resp: ServerListResponse = serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(resp.servers.len(), 1);
+        assert_eq!(resp.servers[0].server.name, "io.example/hello");
+        assert!(resp.metadata.next_cursor.is_none());
+        assert!(resp.servers[0].server.packages.is_empty());
+        assert!(resp.servers[0].server.remotes.is_empty());
+    }
+
+    #[test]
+    fn server_response_meta_default_is_empty() {
+        let meta = ResponseMeta::default();
+        assert!(meta.is_empty());
+    }
+
+    #[test]
+    fn server_response_meta_insert_extension() {
+        let mut meta = ResponseMeta::default();
+        meta.insert_extension("lab", serde_json::json!({"featured": true}));
+        assert!(!meta.is_empty());
+        assert!(meta.extensions.contains_key("lab"));
+    }
+
+    #[test]
+    fn list_servers_params_to_upstream_query_pairs_omits_lab_fields() {
+        let p = ListServersParams {
+            search: Some("test".into()),
+            limit: Some(25),
+            cursor: Some("cur1".into()),
+            featured: Some(true), // Lab-only — must NOT appear in upstream pairs
+            ..Default::default()
+        };
+        let pairs = p.to_upstream_query_pairs();
+        assert_eq!(pairs.len(), 3);
+        assert!(pairs.iter().any(|(k, v)| k == "search" && v == "test"));
+        assert!(pairs.iter().any(|(k, v)| k == "limit" && v == "25"));
+        assert!(pairs.iter().any(|(k, v)| k == "cursor" && v == "cur1"));
+        // Lab-only fields must be absent
+        assert!(!pairs.iter().any(|(k, _)| k == "featured"));
+    }
+
+    #[test]
+    fn lab_registry_metadata_audit_field_roundtrips() {
+        let meta = LabRegistryMetadata {
+            audit: Some(LabRegistryAudit {
+                updated_at: Some("2025-01-01T00:00:00Z".into()),
+                updated_by: Some("lab-agent".into()),
+            }),
+            ..Default::default()
+        };
+        let v = serde_json::to_value(&meta).unwrap();
+        let back: LabRegistryMetadata = serde_json::from_value(v).unwrap();
+        assert_eq!(
+            back.audit.as_ref().unwrap().updated_at.as_deref(),
+            Some("2025-01-01T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn package_deserializes_with_defaults() {
+        let json = serde_json::json!({
+            "registry_type": "npm",
+            "identifier": "@example/server",
+            "transport": {
+                "transport_type": "stdio",
+                "headers": []
+            },
+            "is_required": false,
+            "is_secret": false
+        });
+        let pkg: Package = serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(pkg.registry_type, "npm");
+        assert!(pkg.runtime_hint.is_none());
+        assert!(pkg.environment_variables.is_empty());
+        assert!(pkg.runtime_arguments.is_empty());
+    }
 }

@@ -120,22 +120,59 @@ impl ToolIndex {
 }
 
 fn score_tool(query: &str, tool: &IndexedTool) -> f32 {
-    let mut score = 0.0;
-    if tool.name_lower == query {
-        score += 100.0;
+    score_name_haystack(query, &tool.name_lower, &tool.haystack)
+}
+
+/// Score a tool given pre-lowercased name and haystack strings.
+///
+/// Exported so the builtin-tool search path in the MCP server can use the
+/// same algorithm without duplicating it.
+pub(crate) fn score_name_haystack(query: &str, name_lower: &str, haystack: &str) -> f32 {
+    // Exact name match always wins.
+    if name_lower == query {
+        return 200.0;
     }
-    if tool.name_lower.contains(query) {
+
+    let mut score = 0.0f32;
+
+    // Whole-query match against the name.
+    if name_lower.starts_with(query) {
+        score += 80.0;
+    } else if name_lower.contains(query) {
         score += 25.0;
     }
-    for token in query.split_whitespace() {
-        if tool.name_lower.contains(token) {
-            score += 10.0;
-        }
-        if tool.haystack.contains(token) {
-            score += 3.0;
+
+    // Token-level scoring: split both query and name on word-boundary characters
+    // so "weather" in "get_weather" scores as a segment match, not just substring.
+    let q_tokens: Vec<&str> = query
+        .split(|c: char| c.is_whitespace() || c == '_' || c == '-')
+        .filter(|t| t.len() >= 2)
+        .collect();
+    if !q_tokens.is_empty() {
+        let name_segments: Vec<&str> = name_lower
+            .split(|c: char| c == '_' || c == '-')
+            .filter(|s| !s.is_empty())
+            .collect();
+        for token in &q_tokens {
+            if name_segments.iter().any(|seg| *seg == *token) {
+                // Exact segment match: "weather" in ["get","weather"] → strongest token signal.
+                score += 20.0;
+            } else if name_segments.iter().any(|seg| seg.starts_with(token)) {
+                score += 10.0;
+            } else if name_lower.contains(token) {
+                score += 5.0;
+            }
+            if haystack.contains(token) {
+                score += 2.0;
+            }
         }
     }
-    score
+
+    // Length normalization: prefer concise, focused names for equal relevance.
+    // The divisor is capped at 1.0 so short names get no bonus, only long ones
+    // are gently penalized.
+    let len_factor = (name_lower.len() as f32 / 12.0).max(1.0).sqrt();
+    score / len_factor
 }
 
 fn catalog_hash(tools: &[IndexedTool]) -> u64 {

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -10,8 +10,8 @@ use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
 use crate::config::{
-    LabConfig, ProtectedMcpRouteConfig, ToolSearchConfig, UpstreamConfig, backup_env,
-    env_is_up_to_date, write_env,
+    LabConfig, ProtectedMcpRouteConfig, ToolSearchConfig, UpstreamConfig, UpstreamImportTombstone,
+    backup_env, env_is_up_to_date, write_env,
 };
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::error::ToolError;
@@ -28,8 +28,9 @@ use lab_apis::extract::types::ServiceCreds;
 use super::SHARED_GATEWAY_OAUTH_SUBJECT;
 use super::config::{
     default_gateway_bearer_env_name, insert_protected_mcp_route, insert_upstream,
-    load_gateway_config, remove_protected_mcp_route, remove_upstream, update_protected_mcp_route,
-    update_upstream, validate_bearer_token_env_name, validate_tool_search, write_gateway_config,
+    load_gateway_config, remove_protected_mcp_route, remove_upstream, tombstone_removed_import,
+    update_protected_mcp_route, update_upstream, validate_bearer_token_env_name,
+    validate_tool_search, write_gateway_config,
 };
 use super::config_mutation::{read_env_values, values_to_service_creds};
 use super::index::{SearchHit, ToolIndex};
@@ -41,7 +42,8 @@ use super::runtime::runtime_origin_tag;
 use super::service_catalog::service_meta;
 use super::types::{
     CatalogChangeNotifier, GatewayCatalogDiff, GatewayRuntimeView, GatewayToolExposureRowView,
-    GatewayView, McpClientConfigView, McpClientTransportType, ServiceConfigView,
+    GatewayView, ImportErrorView, ImportResultView, ImportSkipReason, ImportSkipView,
+    ImportTombstoneView, McpClientConfigView, McpClientTransportType, ServiceConfigView,
     VirtualServerMcpPolicyView,
 };
 use super::view_models::ServerView;
@@ -61,6 +63,165 @@ pub fn diff_catalogs(
         tools_changed: before.tools != after.tools,
         resources_changed: before.resources != after.resources,
         prompts_changed: before.prompts != after.prompts,
+    }
+}
+
+fn upstream_oauth_manager_matches(existing: &UpstreamConfig, desired: &UpstreamConfig) -> bool {
+    existing.name == desired.name && existing.url == desired.url && existing.oauth == desired.oauth
+}
+
+fn tombstone_matches_discovered(
+    tombstone: &UpstreamImportTombstone,
+    server: &super::discovery::DiscoveredServer,
+) -> bool {
+    tombstone_discovery_source_matches(tombstone, server)
+        && (tombstone.name == server.name
+            || tombstone
+                .imported_from
+                .server_name
+                .as_deref()
+                .is_some_and(|name| name == server.name))
+        && tombstone_transport_matches_discovered(tombstone, server)
+}
+
+fn tombstone_discovery_source_matches(
+    tombstone: &UpstreamImportTombstone,
+    server: &super::discovery::DiscoveredServer,
+) -> bool {
+    tombstone.imported_from.client == server.source_client
+        && tombstone.imported_from.path == server.source_path
+}
+
+fn tombstone_transport_matches_discovered(
+    tombstone: &UpstreamImportTombstone,
+    server: &super::discovery::DiscoveredServer,
+) -> bool {
+    let Some(tombstone_fingerprint) = tombstone.imported_from.transport_fingerprint.as_deref()
+    else {
+        return true;
+    };
+    server
+        .spec
+        .imported_from
+        .as_ref()
+        .and_then(|source| source.transport_fingerprint.as_deref())
+        .is_some_and(|fingerprint| fingerprint == tombstone_fingerprint)
+}
+
+pub(crate) fn partition_discovered_for_import(
+    cfg: &LabConfig,
+    discovered: Vec<super::discovery::DiscoveredServer>,
+) -> (ImportResultView, Vec<UpstreamConfig>) {
+    let already: HashSet<&str> = cfg.upstream.iter().map(|u| u.name.as_str()).collect();
+
+    let mut result = ImportResultView::default();
+    let mut specs_to_add = Vec::new();
+    for server in discovered {
+        if already.contains(server.name.as_str()) {
+            result.skipped.push(ImportSkipView {
+                name: server.name,
+                reason: ImportSkipReason::AlreadyConfigured,
+            });
+        } else if cfg
+            .upstream_import_tombstones
+            .iter()
+            .any(|tombstone| tombstone_matches_discovered(tombstone, &server))
+        {
+            result.skipped.push(ImportSkipView {
+                name: server.name,
+                reason: ImportSkipReason::Tombstoned,
+            });
+        } else {
+            specs_to_add.push(server.spec);
+        }
+    }
+
+    (result, specs_to_add)
+}
+
+pub(crate) fn discovered_is_tombstoned(
+    cfg: &LabConfig,
+    server: &super::discovery::DiscoveredServer,
+) -> bool {
+    cfg.upstream_import_tombstones
+        .iter()
+        .any(|tombstone| tombstone_matches_discovered(tombstone, server))
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ImportTombstoneSelector {
+    pub name: String,
+    pub source_client: Option<String>,
+    pub source_path: Option<String>,
+    pub server_name: Option<String>,
+    pub transport_fingerprint: Option<String>,
+}
+
+impl ImportTombstoneSelector {
+    fn matches_tombstone(&self, tombstone: &UpstreamImportTombstone) -> bool {
+        if tombstone.name != self.name
+            && tombstone.imported_from.server_name.as_deref() != Some(self.name.as_str())
+        {
+            return false;
+        }
+        if let Some(source_client) = self.source_client.as_deref()
+            && tombstone.imported_from.client != source_client
+        {
+            return false;
+        }
+        if let Some(source_path) = self.source_path.as_deref()
+            && tombstone.imported_from.path != source_path
+        {
+            return false;
+        }
+        if let Some(server_name) = self.server_name.as_deref()
+            && tombstone.imported_from.server_name.as_deref() != Some(server_name)
+        {
+            return false;
+        }
+        if let Some(fingerprint) = self.transport_fingerprint.as_deref()
+            && tombstone.imported_from.transport_fingerprint.as_deref() != Some(fingerprint)
+        {
+            return false;
+        }
+        true
+    }
+
+    fn matches_discovered(&self, server: &super::discovery::DiscoveredServer) -> bool {
+        if server.name != self.name {
+            return false;
+        }
+        if let Some(source_client) = self.source_client.as_deref()
+            && server.source_client != source_client
+        {
+            return false;
+        }
+        if let Some(source_path) = self.source_path.as_deref()
+            && server.source_path != source_path
+        {
+            return false;
+        }
+        if let Some(server_name) = self.server_name.as_deref()
+            && server
+                .spec
+                .imported_from
+                .as_ref()
+                .and_then(|source| source.server_name.as_deref())
+                != Some(server_name)
+        {
+            return false;
+        }
+        if let Some(fingerprint) = self.transport_fingerprint.as_deref()
+            && server
+                .spec
+                .imported_from
+                .as_ref()
+                .and_then(|source| source.transport_fingerprint.as_deref())
+                != Some(fingerprint)
+        {
+            return false;
+        }
+        true
     }
 }
 
@@ -226,6 +387,86 @@ impl GatewayManager {
     ) -> Self {
         self.upstream_oauth_managers = Some(managers);
         self
+    }
+
+    fn reconcile_upstream_oauth_managers(&self, cfg: &LabConfig) {
+        let Some(managers) = self.upstream_oauth_managers.as_ref() else {
+            return;
+        };
+
+        let oauth_upstreams: BTreeMap<&str, &UpstreamConfig> = cfg
+            .upstream
+            .iter()
+            .filter(|upstream| upstream.oauth.is_some())
+            .map(|upstream| (upstream.name.as_str(), upstream))
+            .collect();
+
+        let removed: Vec<String> = managers
+            .iter()
+            .filter_map(|entry| {
+                (!oauth_upstreams.contains_key(entry.key().as_str())).then(|| entry.key().clone())
+            })
+            .collect();
+        for name in removed {
+            managers.remove(&name);
+            self.evict_upstream_clients(&name);
+            tracing::info!(
+                upstream = %name,
+                "removed upstream oauth manager during gateway reload"
+            );
+        }
+
+        if oauth_upstreams.is_empty() {
+            return;
+        }
+
+        let (Some(sqlite), Some(key), Some(redirect_uri)) = (
+            self.oauth_sqlite.as_ref(),
+            self.oauth_key.as_ref(),
+            self.oauth_redirect_uri.as_ref(),
+        ) else {
+            for name in oauth_upstreams.keys() {
+                if !managers.contains_key(*name) {
+                    tracing::warn!(
+                        upstream = name,
+                        "new oauth upstream added via reload but oauth runtime resources are not configured"
+                    );
+                }
+            }
+            return;
+        };
+
+        for (name, upstream) in oauth_upstreams {
+            let should_replace = managers.get(name).is_none_or(|existing| {
+                !upstream_oauth_manager_matches(existing.upstream_config(), upstream)
+            });
+            if !should_replace {
+                continue;
+            }
+
+            if managers.remove(name).is_some() {
+                self.evict_upstream_clients(name);
+                tracing::info!(
+                    upstream = name,
+                    "replaced stale upstream oauth manager during gateway reload"
+                );
+            } else {
+                tracing::info!(
+                    upstream = name,
+                    "registered new upstream oauth manager during gateway reload"
+                );
+            }
+
+            managers.insert(
+                name.to_string(),
+                UpstreamOauthManager::new(
+                    sqlite.clone(),
+                    key.clone(),
+                    upstream.clone(),
+                    redirect_uri.as_ref().clone(),
+                ),
+            );
+        }
     }
 
     /// Attach a catalog-change notifier (e.g. the MCP peer notifier).
@@ -547,6 +788,166 @@ impl GatewayManager {
             items.push(runtime_view(pool.as_deref(), &upstream.name, prompt_owners.as_ref()).await);
         }
         Ok(items)
+    }
+
+    /// Import all externally configured MCP servers that are not already in the gateway config.
+    ///
+    /// Discovery-produced specs are intentionally persisted with `enabled = false`.
+    /// This makes newly found servers visible and editable in the gateway without
+    /// exposing them to downstream MCP clients until an operator enables them.
+    pub async fn auto_import_discovered_configs(&self) -> Result<ImportResultView, ToolError> {
+        let Some(home) = super::discovery::home_dir() else {
+            tracing::warn!(
+                surface = "dispatch",
+                service = "gateway",
+                action = "gateway.import",
+                event = "auto_import.skipped",
+                reason = "home_dir_unavailable",
+                "automatic MCP config import skipped"
+            );
+            return Ok(ImportResultView::default());
+        };
+
+        let discovered = tokio::task::spawn_blocking(move || super::discovery::discover_all(&home))
+            .await
+            .map_err(|e| ToolError::internal_message(format!("discovery task panicked: {e}")))?;
+
+        let cfg = self.current_config().await;
+        let (mut result, specs_to_add) = partition_discovered_for_import(&cfg, discovered);
+
+        if !specs_to_add.is_empty() {
+            let outcome = self
+                .batch_add(specs_to_add, Some("gateway.auto_import"), None)
+                .await?;
+            result.imported.extend(outcome.views);
+            for (name, err) in outcome.errors {
+                if matches!(err, ToolError::Conflict { .. }) {
+                    result.skipped.push(ImportSkipView {
+                        name,
+                        reason: ImportSkipReason::Conflict,
+                    });
+                } else {
+                    result.errors.push(ImportErrorView {
+                        name,
+                        message: err.to_string(),
+                    });
+                }
+            }
+        }
+
+        tracing::info!(
+            surface = "dispatch",
+            service = "gateway",
+            action = "gateway.import",
+            event = "auto_import.finish",
+            imported = result.imported.len(),
+            skipped = result.skipped.len(),
+            errors = result.errors.len(),
+            "automatic MCP config import finished"
+        );
+
+        Ok(result)
+    }
+
+    pub async fn list_import_tombstones(&self) -> Vec<ImportTombstoneView> {
+        let cfg = self.config.read().await;
+        cfg.upstream_import_tombstones
+            .iter()
+            .map(import_tombstone_view)
+            .collect()
+    }
+
+    pub async fn clear_import_tombstone(
+        &self,
+        selector: ImportTombstoneSelector,
+    ) -> Result<Vec<ImportTombstoneView>, ToolError> {
+        let _mutation_guard = self.config_mutation.lock().await;
+        let mut cfg = self.config.read().await.clone();
+        let before = cfg.upstream_import_tombstones.len();
+        cfg.upstream_import_tombstones
+            .retain(|tombstone| !selector.matches_tombstone(tombstone));
+        if cfg.upstream_import_tombstones.len() == before {
+            return Err(ToolError::Sdk {
+                sdk_kind: "not_found".to_string(),
+                message: format!("gateway import tombstone `{}` not found", selector.name),
+            });
+        }
+
+        let views: Vec<_> = cfg
+            .upstream_import_tombstones
+            .iter()
+            .map(import_tombstone_view)
+            .collect();
+        self.persist_config(cfg).await?;
+        Ok(views)
+    }
+
+    pub async fn restore_import_tombstone(
+        &self,
+        selector: ImportTombstoneSelector,
+        origin: Option<&str>,
+        owner: Option<UpstreamRuntimeOwner>,
+    ) -> Result<GatewayView, ToolError> {
+        let Some(home) = super::discovery::home_dir() else {
+            return Err(ToolError::internal_message(
+                "cannot determine home directory for MCP config restore",
+            ));
+        };
+        let discovered = tokio::task::spawn_blocking(move || super::discovery::discover_all(&home))
+            .await
+            .map_err(|e| ToolError::internal_message(format!("discovery task panicked: {e}")))?;
+
+        let _mutation_guard = self.config_mutation.lock().await;
+        let mut cfg = self.config.read().await.clone();
+        if !cfg
+            .upstream_import_tombstones
+            .iter()
+            .any(|tombstone| selector.matches_tombstone(tombstone))
+        {
+            return Err(ToolError::Sdk {
+                sdk_kind: "not_found".to_string(),
+                message: format!("gateway import tombstone `{}` not found", selector.name),
+            });
+        }
+
+        let Some(server) = discovered.into_iter().find(|server| {
+            selector.matches_discovered(server) && discovered_is_tombstoned(&cfg, server)
+        }) else {
+            return Err(ToolError::Sdk {
+                sdk_kind: "not_found".to_string(),
+                message: format!(
+                    "discovered MCP server `{}` no longer matches a tombstoned import",
+                    selector.name
+                ),
+            });
+        };
+
+        if cfg
+            .upstream
+            .iter()
+            .any(|upstream| upstream.name == server.spec.name)
+        {
+            cfg.upstream_import_tombstones
+                .retain(|tombstone| !selector.matches_tombstone(tombstone));
+            self.persist_config(cfg).await?;
+            return self.get(&server.spec.name).await;
+        }
+
+        let restored_name = server.spec.name.clone();
+        insert_upstream(&mut cfg, server.spec)?;
+        self.persist_config(cfg).await?;
+        let diff = self.reload_with_origin_unlocked(origin, owner).await?;
+        tracing::info!(
+            surface = "dispatch",
+            service = "gateway",
+            action = "gateway.import_tombstones.restore",
+            gateway = %restored_name,
+            tools_changed = diff.tools_changed,
+            resources_changed = diff.resources_changed,
+            prompts_changed = diff.prompts_changed,
+            "gateway import tombstone restored"
+        );
+        self.get(&restored_name).await
     }
 
     pub async fn service_for_virtual_server_id(&self, id: &str) -> Result<String, ToolError> {
@@ -1016,6 +1417,7 @@ impl GatewayManager {
         let mut cfg = self.config.read().await.clone();
         let tool_search = cfg.tool_search.clone();
         let removed = remove_upstream(&mut cfg, name)?;
+        tombstone_removed_import(&mut cfg, &removed);
         self.persist_config(cfg).await?;
         let diff = self.reload_with_origin_unlocked(origin, owner).await?;
         tracing::info!(
@@ -1284,38 +1686,30 @@ impl GatewayManager {
             quarantined_virtual_server_count = cfg.quarantined_virtual_servers.len(),
             "gateway reconcile"
         );
-        if let Some(cache) = &self.oauth_client_cache {
-            let existing = self.config.read().await.clone();
-            for upstream in existing
-                .upstream
-                .iter()
-                .filter(|upstream| upstream.oauth.is_some())
-            {
-                cache.evict_upstream(&upstream.name);
-            }
-        }
-        // Reconcile the upstream_oauth_managers map from the new config.
-        // Remove managers for OAuth upstreams no longer present; warn about
-        // new OAuth upstreams that require a restart to get a manager.
-        if let Some(managers) = &self.upstream_oauth_managers {
-            let new_oauth_names: std::collections::HashSet<&str> = cfg
-                .upstream
-                .iter()
-                .filter(|u| u.oauth.is_some())
-                .map(|u| u.name.as_str())
-                .collect();
-            managers.retain(|name, _| new_oauth_names.contains(name.as_str()));
-            for name in &new_oauth_names {
-                if !managers.contains_key(*name) {
-                    tracing::warn!(
-                        upstream = name,
-                        "new oauth upstream added via reload but no manager available; restart required"
-                    );
-                }
-            }
-        }
+        self.reconcile_upstream_oauth_managers(&cfg);
         let old_pool = self.runtime.current_pool().await;
         let before = snapshot_from_pool(old_pool.clone()).await;
+        let old_pool_present = old_pool.is_some();
+        if let Some(old_pool) = old_pool {
+            tracing::info!(
+                surface = "dispatch",
+                service = "gateway",
+                action = "gateway.reload",
+                event = "old_pool.drain.start",
+                phase = "pool.drain.start",
+                "gateway old upstream pool drain start"
+            );
+            self.runtime.swap(None).await;
+            old_pool.drain_for_swap("gateway.reload.before_build").await;
+            tracing::info!(
+                surface = "dispatch",
+                service = "gateway",
+                action = "gateway.reload",
+                event = "old_pool.drain.finish",
+                phase = "pool.drain.finish",
+                "gateway old upstream pool drain finish"
+            );
+        }
         tracing::info!(
             surface = "dispatch",
             service = "gateway",
@@ -1357,7 +1751,6 @@ impl GatewayManager {
             "gateway reconcile"
         );
         let after = snapshot_from_pool(fresh_pool.clone()).await;
-        let old_pool_present = old_pool.is_some();
         tracing::info!(
             surface = "dispatch",
             service = "gateway",
@@ -1368,25 +1761,6 @@ impl GatewayManager {
             "gateway reconcile"
         );
         self.runtime.swap(fresh_pool).await;
-        if let Some(old_pool) = old_pool {
-            tracing::info!(
-                surface = "dispatch",
-                service = "gateway",
-                action = "gateway.reload",
-                event = "old_pool.drain.start",
-                phase = "pool.drain.start",
-                "gateway old upstream pool drain start"
-            );
-            old_pool.drain_for_swap("gateway.reload.swap").await;
-            tracing::info!(
-                surface = "dispatch",
-                service = "gateway",
-                action = "gateway.reload",
-                event = "old_pool.drain.finish",
-                phase = "pool.drain.finish",
-                "gateway old upstream pool drain finish"
-            );
-        }
         *self.protected_route_index.write().await =
             ProtectedRouteIndex::from_routes(&cfg.protected_mcp_routes);
         *self.config.write().await = cfg;
@@ -1628,7 +2002,7 @@ impl GatewayManager {
             .upstream
             .iter()
             .map(|upstream| upstream.name.clone())
-            .collect::<std::collections::HashSet<_>>();
+            .collect::<HashSet<_>>();
         self.tool_indexes.retain(|name, state| {
             if !enabled.contains(name) {
                 if let Ok(mut guard) = state.in_flight.lock()
@@ -1722,6 +2096,18 @@ impl GatewayManager {
                 if state_for_task.generation.load(Ordering::Relaxed) == my_generation
                     && let Ok(index) = built
                 {
+                    if index.metadata.truncated {
+                        tracing::warn!(
+                            surface = "dispatch",
+                            service = "gateway",
+                            action = "tool_search.rebuild",
+                            upstream = %upstream_name,
+                            total_discovered = index.metadata.total_discovered,
+                            indexed_count = index.metadata.indexed_count,
+                            max_tools,
+                            "gateway tool index truncated — increase [tool_search] max_tools to index all tools"
+                        );
+                    }
                     state_for_task.index.store(Some(Arc::new(index)));
                     tracing::info!(
                         surface = "dispatch",
@@ -1874,6 +2260,18 @@ impl GatewayManager {
                     let should_publish = state.index.load_full().as_ref().is_none_or(|current| {
                         current.metadata.catalog_hash != index.metadata.catalog_hash
                     });
+                    if index.metadata.truncated {
+                        tracing::warn!(
+                            surface = "mcp",
+                            service = "gateway",
+                            action = "tool_search.reprobe",
+                            upstream = %upstream.name,
+                            total_discovered = index.metadata.total_discovered,
+                            indexed_count = index.metadata.indexed_count,
+                            max_tools,
+                            "gateway tool index truncated — increase [tool_search] max_tools to index all tools"
+                        );
+                    }
                     if should_publish {
                         state.index.store(Some(Arc::new(index)));
                     }
@@ -2082,6 +2480,17 @@ impl GatewayManager {
     }
 }
 
+fn import_tombstone_view(tombstone: &UpstreamImportTombstone) -> ImportTombstoneView {
+    ImportTombstoneView {
+        name: tombstone.name.clone(),
+        source_client: tombstone.imported_from.client.clone(),
+        source_path: tombstone.imported_from.path.clone(),
+        server_name: tombstone.imported_from.server_name.clone(),
+        transport_fingerprint: tombstone.imported_from.transport_fingerprint.clone(),
+        removed_at: tombstone.removed_at.clone(),
+    }
+}
+
 fn resolve_gateway_bearer_env_name(
     gateway_name: &str,
     explicit_env_name: Option<&str>,
@@ -2192,11 +2601,16 @@ mod tests {
     use std::sync::Arc;
 
     use crate::config::{
-        ProtectedMcpRouteConfig, UpstreamConfig, UpstreamOauthConfig, UpstreamOauthMode,
-        UpstreamOauthRegistration, VirtualServerConfig, VirtualServerSurfacesConfig,
+        ImportSource, ProtectedMcpRouteConfig, UpstreamConfig, UpstreamImportTombstone,
+        UpstreamOauthConfig, UpstreamOauthMode, UpstreamOauthRegistration, VirtualServerConfig,
+        VirtualServerSurfacesConfig,
     };
+    use crate::dispatch::gateway::discovery::DiscoveredServer;
     use crate::oauth::upstream::cache::OauthClientCache;
+    use crate::oauth::upstream::encryption::load_key;
     use crate::tui::events::ServiceHealth;
+    use base64::Engine as _;
+    use lab_auth::sqlite::SqliteStore;
     use rmcp::transport::{AuthClient, AuthorizationManager};
 
     use super::*;
@@ -2206,6 +2620,21 @@ mod tests {
             .await
             .expect("authorization manager");
         Arc::new(AuthClient::new(reqwest::Client::new(), manager))
+    }
+
+    async fn fixture_oauth_resources(
+        dir: &tempfile::TempDir,
+    ) -> (SqliteStore, EncryptionKey, String) {
+        let sqlite = SqliteStore::open(dir.path().join("auth.sqlite"))
+            .await
+            .expect("sqlite store");
+        let key_b64 = base64::engine::general_purpose::STANDARD.encode([7_u8; 32]);
+        let key = load_key(&key_b64).expect("encryption key");
+        (
+            sqlite,
+            key,
+            "https://lab.example.com/v1/upstream-oauth/callback".to_string(),
+        )
     }
 
     fn fixture_stdio_upstream(name: &str) -> UpstreamConfig {
@@ -2246,6 +2675,143 @@ mod tests {
             imported_from: None,
             tool_search: ToolSearchConfig::default(),
         }
+    }
+
+    fn fixture_import_source(server_name: &str) -> ImportSource {
+        ImportSource::new(
+            "codex",
+            "/home/alice/.codex/config.toml",
+            "2026-05-15T00:00:00Z",
+        )
+        .with_server_name(server_name)
+    }
+
+    fn fixture_discovered_http(name: &str) -> DiscoveredServer {
+        let mut spec = fixture_http_upstream(name);
+        spec.enabled = false;
+        spec.imported_from = Some(fixture_import_source(name));
+        DiscoveredServer {
+            name: name.to_string(),
+            spec,
+            source_client: "codex".to_string(),
+            source_path: "/home/alice/.codex/config.toml".to_string(),
+            env_key_count: 0,
+        }
+    }
+
+    #[test]
+    fn auto_import_partition_skips_name_tombstoned_discovered_server() {
+        let cfg = LabConfig {
+            upstream_import_tombstones: vec![UpstreamImportTombstone::now(
+                "removed-server",
+                fixture_import_source("removed-server"),
+            )],
+            ..LabConfig::default()
+        };
+
+        let (result, specs_to_add) =
+            partition_discovered_for_import(&cfg, vec![fixture_discovered_http("removed-server")]);
+
+        assert!(specs_to_add.is_empty());
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.skipped[0].name, "removed-server");
+        assert_eq!(result.skipped[0].reason, ImportSkipReason::Tombstoned);
+    }
+
+    #[test]
+    fn auto_import_partition_skips_source_tombstone_after_lab_rename() {
+        let cfg = LabConfig {
+            upstream_import_tombstones: vec![UpstreamImportTombstone::now(
+                "renamed-in-lab",
+                fixture_import_source("original-config-name"),
+            )],
+            ..LabConfig::default()
+        };
+
+        let (result, specs_to_add) = partition_discovered_for_import(
+            &cfg,
+            vec![fixture_discovered_http("original-config-name")],
+        );
+
+        assert!(specs_to_add.is_empty());
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.skipped[0].name, "original-config-name");
+        assert_eq!(result.skipped[0].reason, ImportSkipReason::Tombstoned);
+    }
+
+    #[test]
+    fn auto_import_partition_does_not_source_match_legacy_tombstone_without_server_name() {
+        let cfg = LabConfig {
+            upstream_import_tombstones: vec![UpstreamImportTombstone::now(
+                "old-removed-server",
+                ImportSource::new(
+                    "codex",
+                    "/home/alice/.codex/config.toml",
+                    "2026-05-15T00:00:00Z",
+                ),
+            )],
+            ..LabConfig::default()
+        };
+
+        let (result, specs_to_add) = partition_discovered_for_import(
+            &cfg,
+            vec![fixture_discovered_http("different-server-same-file")],
+        );
+
+        assert!(result.skipped.is_empty());
+        assert_eq!(specs_to_add.len(), 1);
+        assert_eq!(specs_to_add[0].name, "different-server-same-file");
+    }
+
+    #[test]
+    fn auto_import_partition_does_not_tombstone_same_name_from_different_source() {
+        let cfg = LabConfig {
+            upstream_import_tombstones: vec![UpstreamImportTombstone::now(
+                "shared-name",
+                fixture_import_source("shared-name"),
+            )],
+            ..LabConfig::default()
+        };
+        let mut discovered = fixture_discovered_http("shared-name");
+        discovered.source_client = "claude-code".to_string();
+        discovered.source_path = "/home/alice/.claude/settings.json".to_string();
+
+        let (result, specs_to_add) = partition_discovered_for_import(&cfg, vec![discovered]);
+
+        assert!(result.skipped.is_empty());
+        assert_eq!(specs_to_add.len(), 1);
+        assert_eq!(specs_to_add[0].name, "shared-name");
+    }
+
+    #[test]
+    fn auto_import_partition_does_not_tombstone_same_source_when_fingerprint_changes() {
+        let source =
+            fixture_import_source("fingerprinted").with_transport_fingerprint("old-fingerprint");
+        let cfg = LabConfig {
+            upstream_import_tombstones: vec![UpstreamImportTombstone::now("fingerprinted", source)],
+            ..LabConfig::default()
+        };
+        let mut discovered = fixture_discovered_http("fingerprinted");
+        discovered.spec.imported_from = Some(
+            fixture_import_source("fingerprinted").with_transport_fingerprint("new-fingerprint"),
+        );
+
+        let (result, specs_to_add) = partition_discovered_for_import(&cfg, vec![discovered]);
+
+        assert!(result.skipped.is_empty());
+        assert_eq!(specs_to_add.len(), 1);
+        assert_eq!(specs_to_add[0].name, "fingerprinted");
+    }
+
+    fn fixture_oauth_upstream(name: &str, url: &str) -> UpstreamConfig {
+        let mut upstream = fixture_http_upstream(name);
+        upstream.url = Some(url.to_string());
+        upstream.oauth = Some(UpstreamOauthConfig {
+            mode: UpstreamOauthMode::AuthorizationCodePkce,
+            registration: UpstreamOauthRegistration::Dynamic,
+            scopes: None,
+        });
+        upstream
     }
 
     async fn tool_search_manager_with_pool(
@@ -3530,6 +4096,90 @@ mod tests {
             .await
             .expect("reload");
         assert!(cache.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reload_registers_new_upstream_oauth_manager() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let managers = Arc::new(dashmap::DashMap::new());
+        let cache = OauthClientCache::new(Arc::clone(&managers));
+        let (sqlite, key, redirect_uri) = fixture_oauth_resources(&dir).await;
+        let manager = GatewayManager::new(
+            dir.path().join("config.toml"),
+            GatewayRuntimeHandle::default(),
+        )
+        .with_upstream_oauth_managers(Arc::clone(&managers))
+        .with_oauth_client_cache(cache)
+        .with_oauth_resources(sqlite, key, redirect_uri);
+
+        manager.reconcile_upstream_oauth_managers(&LabConfig {
+            upstream: vec![fixture_oauth_upstream(
+                "new-oauth",
+                "https://127.0.0.1:9/mcp",
+            )],
+            ..LabConfig::default()
+        });
+
+        assert!(managers.contains_key("new-oauth"));
+        assert_eq!(
+            managers
+                .get("new-oauth")
+                .expect("oauth manager")
+                .upstream_config()
+                .url
+                .as_deref(),
+            Some("https://127.0.0.1:9/mcp")
+        );
+    }
+
+    #[tokio::test]
+    async fn reload_replaces_changed_upstream_oauth_manager_and_evicts_cache() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (sqlite, key, redirect_uri) = fixture_oauth_resources(&dir).await;
+        let managers = Arc::new(dashmap::DashMap::new());
+        managers.insert(
+            "changed-oauth".to_string(),
+            UpstreamOauthManager::new(
+                sqlite.clone(),
+                key.clone(),
+                fixture_oauth_upstream("changed-oauth", "https://old.example.com/mcp"),
+                redirect_uri.clone(),
+            ),
+        );
+        let cache = OauthClientCache::new(Arc::clone(&managers));
+        cache.insert_for_tests(
+            "changed-oauth",
+            "alice",
+            "dynamic",
+            dummy_auth_client().await,
+        );
+        let manager = GatewayManager::new(
+            dir.path().join("config.toml"),
+            GatewayRuntimeHandle::default(),
+        )
+        .with_upstream_oauth_managers(Arc::clone(&managers))
+        .with_oauth_client_cache(cache.clone())
+        .with_oauth_resources(sqlite, key, redirect_uri);
+
+        assert_eq!(cache.len(), 1);
+        manager.reconcile_upstream_oauth_managers(&LabConfig {
+            upstream: vec![fixture_oauth_upstream(
+                "changed-oauth",
+                "https://new.example.com/mcp",
+            )],
+            ..LabConfig::default()
+        });
+
+        assert!(cache.is_empty());
+        assert_eq!(
+            managers
+                .get("changed-oauth")
+                .expect("oauth manager")
+                .upstream_config()
+                .url
+                .as_deref(),
+            Some("https://new.example.com/mcp")
+        );
     }
 
     #[tokio::test]

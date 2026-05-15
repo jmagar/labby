@@ -2236,7 +2236,7 @@ impl LabMcpServer {
         include_schema: bool,
     ) -> Vec<GatewayToolSearchResult> {
         let needle = query.trim().to_ascii_lowercase();
-        if needle.is_empty() {
+        if needle.is_empty() || needle.len() > 500 {
             return Vec::new();
         }
 
@@ -2254,7 +2254,11 @@ impl LabMcpServer {
                 .join("\n");
             let haystack = format!("{}\n{}\n{}", service.name, service.description, action_text)
                 .to_ascii_lowercase();
-            let score = score_builtin_tool(&needle, service.name, &haystack);
+            let score = crate::dispatch::gateway::score_name_haystack(
+                &needle,
+                &service.name.to_ascii_lowercase(),
+                &haystack,
+            );
             if score <= 0.0 {
                 continue;
             }
@@ -2307,26 +2311,6 @@ fn compare_tool_search_results(
         .unwrap_or(CmpOrdering::Equal)
         .then_with(|| a.name.cmp(&b.name))
         .then_with(|| a.upstream.cmp(&b.upstream))
-}
-
-fn score_builtin_tool(query: &str, name: &str, haystack: &str) -> f32 {
-    let name_lower = name.to_ascii_lowercase();
-    let mut score = 0.0;
-    if name_lower == query {
-        score += 100.0;
-    }
-    if name_lower.contains(query) {
-        score += 25.0;
-    }
-    for token in query.split_whitespace() {
-        if name_lower.contains(token) {
-            score += 10.0;
-        }
-        if haystack.contains(token) {
-            score += 3.0;
-        }
-    }
-    score
 }
 
 fn builtin_tool_search_description(

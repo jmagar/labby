@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::config::{ImportSource, UpstreamConfig};
 
@@ -22,6 +23,36 @@ pub struct DiscoveredServer {
     pub source_client: String,
     pub source_path: String,
     pub env_key_count: usize,
+}
+
+pub(crate) fn normalize_discovered_name(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len().min(128));
+    let mut previous_was_dash = false;
+
+    for ch in raw.trim().chars() {
+        let next = if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+            ch
+        } else {
+            '-'
+        };
+
+        if next == '-' && previous_was_dash {
+            continue;
+        }
+        out.push(next);
+        previous_was_dash = next == '-';
+
+        if out.len() >= 128 {
+            break;
+        }
+    }
+
+    let normalized = out.trim_matches(['-', '_', '.']).to_string();
+    if normalized.is_empty() {
+        "mcp-server".to_string()
+    } else {
+        normalized
+    }
 }
 
 /// Scan all known MCP config locations and return deduplicated discovered servers.
@@ -246,8 +277,10 @@ pub(crate) fn entry_to_upstream(
         vec![]
     };
 
+    let normalized_name = normalize_discovered_name(name);
+    let transport_fingerprint = transport_fingerprint(url.as_deref(), command.as_deref(), &args);
     Some(UpstreamConfig {
-        name: name.to_string(),
+        name: normalized_name.clone(),
         enabled: false,
         url,
         command,
@@ -260,9 +293,33 @@ pub(crate) fn entry_to_upstream(
         expose_resources: None,
         expose_prompts: None,
         oauth: None,
-        imported_from: Some(ImportSource::new(source_client, source_path, imported_at)),
+        imported_from: Some(
+            ImportSource::new(source_client, source_path, imported_at)
+                .with_server_name(normalized_name)
+                .with_transport_fingerprint(transport_fingerprint),
+        ),
         tool_search: Default::default(),
     })
+}
+
+fn transport_fingerprint(url: Option<&str>, command: Option<&str>, args: &[String]) -> String {
+    let mut hasher = Sha256::new();
+    match (url, command) {
+        (Some(url), _) => {
+            hasher.update(b"http\0");
+            hasher.update(url.trim().as_bytes());
+        }
+        (_, Some(command)) => {
+            hasher.update(b"stdio\0");
+            hasher.update(command.trim().as_bytes());
+            for arg in args {
+                hasher.update(b"\0");
+                hasher.update(arg.as_bytes());
+            }
+        }
+        _ => hasher.update(b"unknown"),
+    }
+    hex::encode(hasher.finalize())
 }
 
 pub(crate) fn env_key_count(entry: &Value) -> usize {
@@ -290,7 +347,7 @@ pub(crate) fn scan_paths(
         for (name, entry) in entries {
             if let Some(spec) = entry_to_upstream(&name, entry, source_client, &path_str, &now) {
                 results.push(DiscoveredServer {
-                    name: name.clone(),
+                    name: spec.name.clone(),
                     spec,
                     source_client: source_client.to_string(),
                     source_path: path_str.clone(),
@@ -378,6 +435,22 @@ mod tests {
             .expect("should produce spec");
         assert_eq!(spec.command.as_deref(), Some("node"));
         assert_eq!(spec.args, vec!["server.js"]);
+    }
+
+    #[test]
+    fn entry_to_upstream_normalizes_external_names_to_gateway_names() {
+        let entry = json!({"command": "npx", "args": ["-y", "shadcn-ui-mcp"]});
+        let spec = super::entry_to_upstream(
+            "shadcn/ui",
+            &entry,
+            "gemini",
+            "/home/alice/.gemini/mcp.json",
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("should produce spec");
+
+        assert_eq!(spec.name, "shadcn-ui");
+        spec.validate().expect("normalized import name is valid");
     }
 
     #[test]

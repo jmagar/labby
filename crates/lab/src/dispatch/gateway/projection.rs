@@ -80,6 +80,13 @@ fn redact_secret_like_segments(input: &str) -> String {
         .join(" ")
 }
 
+/// Maximum serialized schema size returned in tool search results.
+///
+/// Schemas over this limit are dropped entirely rather than truncated, since
+/// partial JSON schemas are invalid and could confuse callers.  Real-world
+/// tool schemas rarely exceed a few kilobytes; 16 KB is a generous ceiling.
+const MAX_SCHEMA_BYTES: usize = 16_384;
+
 pub(super) fn sanitize_schema(schema: Option<serde_json::Value>) -> Option<serde_json::Value> {
     fn recurse(value: &mut serde_json::Value) {
         match value {
@@ -100,9 +107,14 @@ pub(super) fn sanitize_schema(schema: Option<serde_json::Value>) -> Option<serde
         }
     }
 
-    schema.map(|mut value| {
+    schema.and_then(|raw| {
+        // Reject oversized schemas before sanitizing to avoid unnecessary work.
+        if raw.to_string().len() > MAX_SCHEMA_BYTES {
+            return None;
+        }
+        let mut value = raw;
         recurse(&mut value);
-        value
+        Some(value)
     })
 }
 
@@ -140,6 +152,32 @@ fn is_nonessential_capability_error(message: &str) -> bool {
 
 pub(super) fn operator_visible_upstream_error(message: Option<String>) -> Option<String> {
     message.filter(|message| !is_nonessential_capability_error(message))
+}
+
+pub(super) fn upstream_warning_code(message: &str) -> &'static str {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("auth required")
+        || lower.contains("unauthorized")
+        || lower.contains("forbidden")
+        || lower.contains("invalid_token")
+        || lower.contains("oauth")
+    {
+        "auth_failed"
+    } else if lower.contains("bearer")
+        || lower.contains("token")
+        || lower.contains("api key")
+        || lower.contains("api_key")
+    {
+        "auth_required"
+    } else if lower.contains("timed out") || lower.contains("timeout") {
+        "timeout"
+    } else if lower.contains("dns") || lower.contains("name or service not known") {
+        "dns_error"
+    } else if lower.contains("connection refused") {
+        "connection_refused"
+    } else {
+        "connection_error"
+    }
 }
 
 pub(super) async fn upstream_summary(
@@ -193,7 +231,7 @@ pub(super) async fn server_view_from_upstream(
             .as_ref()
             .map(|message| {
                 vec![super::view_models::ServerWarningView {
-                    code: "connection_error".to_string(),
+                    code: upstream_warning_code(message).to_string(),
                     message: message.clone(),
                 }]
             })
@@ -268,7 +306,7 @@ pub(super) fn server_view_from_virtual_server(
     }
     if let Some(message) = last_error {
         warnings.push(super::view_models::ServerWarningView {
-            code: "connection_error".to_string(),
+            code: upstream_warning_code(&message).to_string(),
             message,
         });
     }
