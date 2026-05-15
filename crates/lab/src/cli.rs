@@ -17,6 +17,8 @@ pub mod helpers;
 pub mod install;
 pub mod logs;
 pub mod marketplace;
+#[cfg(feature = "mcpregistry")]
+pub mod mcpregistry;
 pub mod nodes;
 pub mod oauth;
 pub mod params;
@@ -180,6 +182,9 @@ pub enum Command {
     Logs(logs::LogsArgs),
     /// Claude plugin marketplace manager.
     Marketplace(marketplace::MarketplaceArgs),
+    /// MCP Registry — look up and install servers from registry.modelcontextprotocol.io.
+    #[cfg(feature = "mcpregistry")]
+    Registry(mcpregistry::RegistryArgs),
     /// Component versioning and deployment.
     Stash(stash::StashArgs),
     /// Radarr movie collection manager.
@@ -315,6 +320,8 @@ pub async fn dispatch(cli: Cli, config: LabConfig) -> Result<ExitCode> {
         Command::Oauth(args) => oauth::run(args, &config).await,
         Command::Logs(args) => logs::run(args, format, &config).await,
         Command::Marketplace(args) => marketplace::run(args, format).await,
+        #[cfg(feature = "mcpregistry")]
+        Command::Registry(args) => mcpregistry::run(args, format).await,
         Command::Stash(args) => stash::run(args, format).await,
         #[cfg(feature = "radarr")]
         Command::Radarr(args) => radarr::run(args, format).await,
