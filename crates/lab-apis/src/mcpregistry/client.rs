@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn constructor_succeeds_with_default_url() {
-        let _ = make_client();
+        drop(make_client());
     }
 
     #[tokio::test]

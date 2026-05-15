@@ -31,7 +31,7 @@ The CLI collects the args and calls the `_many` variant on the client. The clien
 
 ## Output
 
-- Default: human-readable table via `output.rs` (uses `tabled` — wrapper types derived in `lab`, never on `lab-apis` types).
+- Default: human-readable tables via the local renderer in `output.rs`; keep table wrapper/rendering types in `lab`, never in `lab-apis`.
 - `--json`: serialize the underlying `lab-apis` type directly with `serde_json`. No wrapper.
 - Never `println!` for debug output. Use `tracing` — it respects `--verbose`.
 

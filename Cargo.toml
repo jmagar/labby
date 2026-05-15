@@ -65,7 +65,6 @@ tracing-subscriber = { version = "0.3", features = [
 # cli / output
 clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4"
-tabled = "0.20"
 owo-colors = "4"
 is-terminal = "0.4"
 indicatif = "0.18"

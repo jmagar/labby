@@ -24,6 +24,7 @@ pub struct ServerResponse {
     pub server: ServerJSON,
     /// Registry-managed metadata attached to this response.
     /// `None` when absent in both the upstream response and the local store.
+    #[serde(alias = "_meta")]
     pub meta: Option<ResponseMeta>,
 }
 
@@ -58,7 +59,7 @@ pub struct ServerJSON {
     #[serde(default)]
     pub icons: Vec<Icon>,
     /// Canonical website URL, if any.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "websiteUrl", skip_serializing_if = "Option::is_none")]
     pub website_url: Option<String>,
 }
 
@@ -74,6 +75,7 @@ impl ServerJSON {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Package {
     /// Registry type: `"npm"`, `"pypi"`, `"docker"`, `"mcpb"`, etc.
+    #[serde(alias = "registryType")]
     pub registry_type: String,
     /// Package identifier within that registry (e.g. `@scope/name`).
     pub identifier: String,
@@ -83,22 +85,22 @@ pub struct Package {
     /// Transport configuration for this package.
     pub transport: Transport,
     /// Runtime hint: `"npx"`, `"uvx"`, `"docker"`, etc.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "runtimeHint", skip_serializing_if = "Option::is_none")]
     pub runtime_hint: Option<String>,
     /// Extra arguments prepended before the package identifier.
-    #[serde(default)]
+    #[serde(alias = "runtimeArguments", default)]
     pub runtime_arguments: Vec<Value>,
     /// Extra arguments appended after the package identifier.
-    #[serde(default)]
+    #[serde(alias = "packageArguments", default)]
     pub package_arguments: Vec<Value>,
     /// Environment variables accepted or required by this package.
-    #[serde(default)]
+    #[serde(alias = "environmentVariables", default)]
     pub environment_variables: Vec<EnvironmentVariable>,
     /// SHA-256 hash of the binary artifact (MCPB packages only).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "fileSha256", skip_serializing_if = "Option::is_none")]
     pub file_sha256: Option<String>,
     /// Override base URL for the package registry (used by self-hosted npm mirrors).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "registryBaseUrl", skip_serializing_if = "Option::is_none")]
     pub registry_base_url: Option<String>,
 }
 
@@ -106,6 +108,7 @@ pub struct Package {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transport {
     /// Transport type: `"stdio"`, `"sse"`, `"http"`, etc.
+    #[serde(alias = "type")]
     pub transport_type: String,
     /// URL for HTTP-based transports.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -124,7 +127,29 @@ pub struct Header {
     /// Header name (e.g. `Authorization`).
     pub name: String,
     /// Header value or template (e.g. `Bearer ${API_KEY}`).
-    pub value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    /// Human-readable description for caller-supplied headers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Whether this header must be supplied by the caller.
+    #[serde(alias = "isRequired", skip_serializing_if = "Option::is_none")]
+    pub is_required: Option<bool>,
+    /// Whether this header should be treated as secret.
+    #[serde(alias = "isSecret", skip_serializing_if = "Option::is_none")]
+    pub is_secret: Option<bool>,
+    /// Placeholder text shown in UIs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+    /// Format hint (e.g. `"token"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    /// Enumerated choices for the header value.
+    #[serde(default)]
+    pub choices: Vec<String>,
+    /// Dynamic variable definitions (template substitution).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variables: Option<Value>,
 }
 
 /// An environment variable declaration for a package.
@@ -136,8 +161,10 @@ pub struct EnvironmentVariable {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// Whether this variable must be set.
+    #[serde(alias = "isRequired", default)]
     pub is_required: bool,
     /// Whether this variable should be treated as a secret.
+    #[serde(alias = "isSecret", default)]
     pub is_secret: bool,
     /// Default value to use when the caller does not provide one.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -157,6 +184,7 @@ pub struct EnvironmentVariable {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Remote {
     /// Transport type: `"sse"`, `"http"`, etc.
+    #[serde(alias = "type")]
     pub transport_type: String,
     /// URL of the remote endpoint.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -170,7 +198,8 @@ pub struct Remote {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Repository {
     /// Repository URL (e.g. GitHub URL).
-    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
     /// Source host type (e.g. `"github"`, `"gitlab"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
@@ -180,9 +209,10 @@ pub struct Repository {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Icon {
     /// MIME type hint.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "mimeType", skip_serializing_if = "Option::is_none")]
     pub mime_type: Option<String>,
     /// URL or data URI of the icon.
+    #[serde(alias = "src")]
     pub url: String,
 }
 
@@ -203,6 +233,7 @@ pub struct ServerListResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PaginationMetadata {
     /// Opaque cursor for fetching the next page, if any.
+    #[serde(alias = "nextCursor")]
     pub next_cursor: Option<String>,
 }
 
@@ -214,7 +245,11 @@ pub struct PaginationMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ResponseMeta {
     /// Official registry extensions (is_latest, status, timestamps).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "io.modelcontextprotocol.registry/official",
+        alias = "official",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub official: Option<RegistryExtensions>,
     /// Arbitrary extension metadata keyed by namespace.
     ///
@@ -240,18 +275,21 @@ impl ResponseMeta {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryExtensions {
     /// Whether this is the latest published version of the server.
+    #[serde(alias = "isLatest")]
     pub is_latest: bool,
     /// ISO-8601 timestamp when this version was first published.
+    #[serde(alias = "publishedAt")]
     pub published_at: String,
     /// Lifecycle status: `"active"`, `"deprecated"`, `"deleted"`, etc.
     pub status: String,
     /// ISO-8601 timestamp when `status` last changed.
+    #[serde(alias = "statusChangedAt")]
     pub status_changed_at: String,
     /// Human-readable message accompanying a non-active status.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "statusMessage", skip_serializing_if = "Option::is_none")]
     pub status_message: Option<String>,
     /// ISO-8601 timestamp of the most recent upstream update.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "updatedAt", skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
 }
 
@@ -531,5 +569,106 @@ mod tests {
         assert!(pkg.runtime_hint.is_none());
         assert!(pkg.environment_variables.is_empty());
         assert!(pkg.runtime_arguments.is_empty());
+    }
+
+    #[test]
+    fn server_json_accepts_upstream_registry_field_names() {
+        let json = serde_json::json!({
+            "servers": [{
+                "server": {
+                    "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+                    "name": "io.example/server",
+                    "title": "Example",
+                    "description": "Example MCP server",
+                    "version": "1.2.3",
+                    "websiteUrl": "https://example.com",
+                    "repository": {},
+                    "packages": [{
+                        "registryType": "npm",
+                        "identifier": "@example/server",
+                        "runtimeHint": "npx",
+                        "runtimeArguments": ["-y"],
+                        "packageArguments": ["--stdio"],
+                        "fileSha256": "abc123",
+                        "registryBaseUrl": "https://registry.npmjs.org",
+                        "transport": {
+                            "type": "stdio"
+                        },
+                        "environmentVariables": [{
+                            "name": "EXAMPLE_TOKEN",
+                            "description": "Example API token",
+                            "isSecret": true
+                        }]
+                    }],
+                    "remotes": [{
+                        "type": "streamable-http",
+                        "url": "https://example.com/mcp",
+                        "headers": [{
+                            "name": "Authorization",
+                            "description": "Bearer token",
+                            "isRequired": true,
+                            "isSecret": true
+                        }]
+                    }],
+                    "icons": [{
+                        "src": "https://example.com/icon.png",
+                        "mimeType": "image/png"
+                    }]
+                },
+                "_meta": {
+                    "io.modelcontextprotocol.registry/official": {
+                        "isLatest": true,
+                        "publishedAt": "2026-01-01T00:00:00Z",
+                        "status": "active",
+                        "statusChangedAt": "2026-01-01T00:00:00Z",
+                        "updatedAt": "2026-01-02T00:00:00Z"
+                    }
+                }
+            }],
+            "metadata": {
+                "nextCursor": "io.example/server:1.2.3",
+                "count": 1
+            }
+        });
+
+        let response: ServerListResponse =
+            serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(
+            response.metadata.next_cursor.as_deref(),
+            Some("io.example/server:1.2.3")
+        );
+        let first = &response.servers[0];
+        let official = first.meta.as_ref().and_then(|meta| meta.official.as_ref());
+        assert_eq!(official.map(|meta| meta.is_latest), Some(true));
+        assert_eq!(
+            official.and_then(|meta| meta.updated_at.as_deref()),
+            Some("2026-01-02T00:00:00Z")
+        );
+        let server = &first.server;
+        assert_eq!(server.website_url.as_deref(), Some("https://example.com"));
+        assert_eq!(server.packages[0].registry_type, "npm");
+        assert_eq!(server.packages[0].runtime_hint.as_deref(), Some("npx"));
+        assert_eq!(server.packages[0].transport.transport_type, "stdio");
+        assert_eq!(
+            server.packages[0].environment_variables[0].name,
+            "EXAMPLE_TOKEN"
+        );
+        assert!(!server.packages[0].environment_variables[0].is_required);
+        assert!(server.packages[0].environment_variables[0].is_secret);
+        assert_eq!(
+            server
+                .repository
+                .as_ref()
+                .and_then(|repo| repo.url.as_deref()),
+            None
+        );
+        assert_eq!(server.remotes[0].transport_type, "streamable-http");
+        assert_eq!(
+            server.remotes[0].headers[0].description.as_deref(),
+            Some("Bearer token")
+        );
+        assert_eq!(server.remotes[0].headers[0].value, None);
+        assert_eq!(server.icons[0].url, "https://example.com/icon.png");
+        assert_eq!(server.icons[0].mime_type.as_deref(), Some("image/png"));
     }
 }

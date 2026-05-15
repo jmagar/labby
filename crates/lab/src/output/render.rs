@@ -90,12 +90,6 @@ pub fn render<T: Serialize>(value: &T, format: OutputFormat) -> Result<String> {
     })
 }
 
-/// Print a pre-built `tabled::Table` to stdout.
-#[allow(dead_code)]
-pub fn print_table(table: &tabled::Table) {
-    println!("{table}");
-}
-
 fn render_human(value: &Value, theme: CliTheme) -> String {
     match value {
         Value::Object(map) => render_object(map, theme, 0),

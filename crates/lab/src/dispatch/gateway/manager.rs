@@ -401,7 +401,7 @@ impl GatewayManager {
         // longer in config.  This must run even when upstream_oauth_managers is
         // not initialised — the cache is independent of the manager map.
         if let Some(cache) = &self.oauth_client_cache {
-            let known: std::collections::HashSet<&str> = oauth_upstreams.keys().copied().collect();
+            let known: HashSet<&str> = oauth_upstreams.keys().copied().collect();
             cache.evict_upstreams_not_in(&known);
         }
 
