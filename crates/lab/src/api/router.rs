@@ -982,6 +982,7 @@ fn build_v1_router(state: &AppState, api_auth_configured: bool) -> Router<AppSta
 
     if is_master {
         v1 = v1.route("/{service}/actions", get(service_actions));
+        v1 = v1.nest("/catalog", services::catalog::routes(state.clone()));
 
         // upstream oauth must be nested before /gateway so its more-specific prefix wins;
         // only mount when the gateway manager is present (oauth requires it).

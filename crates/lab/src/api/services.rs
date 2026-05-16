@@ -14,6 +14,8 @@ pub mod helpers;
 pub mod auth_admin;
 
 pub mod acp;
+/// `GET /v1/catalog` — filtered service+action catalog for the ⌘K palette.
+pub mod catalog;
 pub mod doctor;
 pub mod extract;
 pub mod gateway;
