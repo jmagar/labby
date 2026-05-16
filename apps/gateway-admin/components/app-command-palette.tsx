@@ -49,9 +49,13 @@ import {
 } from '@/lib/app-command-palette'
 import type { CatalogAction, CatalogParam } from '@/lib/types/command-catalog'
 import { useCommandCatalog } from '@/lib/hooks/use-command-catalog'
-import { confirmGatewayParams, gatewayRequestInit } from '@/lib/api/gateway-request'
+import { confirmGatewayParams } from '@/lib/api/gateway-request'
 import { normalizeGatewayApiBase } from '@/lib/api/gateway-config'
-import { isAbortError } from '@/lib/api/service-action-client'
+import {
+  isAbortError,
+  performServiceAction,
+  type ServiceActionError,
+} from '@/lib/api/service-action-client'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -78,7 +82,7 @@ const OPEN_COMMAND_PALETTE_EVENT = 'labby:open-command-palette'
 
 type PaletteMode =
   | { kind: 'browse' }
-  | { kind: 'param_prompt'; service: string; action: CatalogAction; collected: Record<string, string> }
+  | { kind: 'param_prompt'; service: string; action: CatalogAction }
   | { kind: 'confirmation'; service: string; action: CatalogAction; params: Record<string, string> }
   | { kind: 'result'; service: string; action: string; data: unknown }
 
@@ -93,7 +97,7 @@ function paletteReducer(state: PaletteMode, action: PaletteAction): PaletteMode 
     case 'BROWSE':
       return { kind: 'browse' }
     case 'PARAM_PROMPT':
-      return { kind: 'param_prompt', service: action.service, action: action.action, collected: {} }
+      return { kind: 'param_prompt', service: action.service, action: action.action }
     case 'CONFIRMATION':
       return { kind: 'confirmation', service: action.service, action: action.action, params: action.params }
     case 'RESULT':
@@ -112,7 +116,13 @@ function isMacOS(): boolean {
 }
 
 function serviceActionUrl(service: string): string {
+  // normalizeGatewayApiBase strips trailing slash; service path is /v1/{service}
   return `${normalizeGatewayApiBase()}/${service}`
+}
+
+/** Simple error factory for palette dispatched actions (no typed error class needed). */
+function makePaletteError(message: string, status: number, code?: string): ServiceActionError {
+  return Object.assign(new Error(message), { status, code }) as ServiceActionError
 }
 
 // ── Public components ─────────────────────────────────────────────────────────
@@ -259,20 +269,20 @@ export function AppCommandPalette() {
 
     setIsDispatching(true)
     try {
+      // Use performServiceAction (not raw fetch) so that:
+      // 1. assertDevPreviewCanRunAction blocks write actions in /dev preview mode
+      // 2. devPreviewActionUrl rewrites the URL in preview mode correctly
+      // 3. CSRF token is injected via gatewayRequestInit inside performServiceAction
       const url = serviceActionUrl(service)
       const finalParams = action.destructive ? confirmGatewayParams(params) : params
-      const response = await fetch(url, gatewayRequestInit(action.action, finalParams, undefined, controller.signal))
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({})) as { message?: string; kind?: string }
-        toast.error(`${service} ${action.action} failed`, {
-          description: err.message ?? `HTTP ${response.status}`,
-        })
-        dispatch({ type: 'PARAM_PROMPT', service, action })
-        return
-      }
-
-      const data: unknown = await response.json()
+      const data: unknown = await performServiceAction<unknown, ServiceActionError>({
+        action: action.action,
+        params: finalParams,
+        signal: controller.signal,
+        serviceLabel: service,
+        url,
+        createError: makePaletteError,
+      })
       toast.success(`${service} ${action.action}`, {
         description: 'Action completed successfully.',
       })

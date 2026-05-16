@@ -89,5 +89,5 @@ export async function fetchCatalog(signal?: AbortSignal): Promise<CatalogRespons
     )
   }
 
-  return result.data as CatalogResponse
+  return result.data
 }
