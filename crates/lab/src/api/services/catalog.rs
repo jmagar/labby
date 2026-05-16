@@ -12,7 +12,13 @@
 use std::sync::OnceLock;
 use std::time::Instant;
 
-use axum::{Json, Router, extract::State, http::{HeaderMap, StatusCode, header}, response::IntoResponse, routing::get};
+use axum::{
+    Json, Router,
+    extract::State,
+    http::{HeaderMap, StatusCode, header},
+    response::IntoResponse,
+    routing::get,
+};
 use serde_json::json;
 
 use crate::api::state::AppState;
@@ -56,10 +62,7 @@ pub fn routes(_state: AppState) -> Router<AppState> {
 /// to compute and changes on every server restart or service-set change.
 /// Supports conditional `If-None-Match` requests; returns `304 Not Modified`
 /// when the ETag matches.
-async fn get_catalog(
-    State(state): State<AppState>,
-    req_headers: HeaderMap,
-) -> impl IntoResponse {
+async fn get_catalog(State(state): State<AppState>, req_headers: HeaderMap) -> impl IntoResponse {
     let start = Instant::now();
 
     tracing::info!(
@@ -205,12 +208,7 @@ mod tests {
         let state = test_state_with_catalog(vec![], HashSet::new());
 
         let response = catalog_router(state)
-            .oneshot(
-                Request::builder()
-                    .uri("/")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -230,12 +228,7 @@ mod tests {
         );
 
         let response = catalog_router(state)
-            .oneshot(
-                Request::builder()
-                    .uri("/")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -337,12 +330,7 @@ mod tests {
         let state = test_state_with_catalog(vec![], HashSet::new());
 
         let response = catalog_router(state)
-            .oneshot(
-                Request::builder()
-                    .uri("/")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -375,12 +363,7 @@ mod tests {
         );
 
         let response = catalog_router(state)
-            .oneshot(
-                Request::builder()
-                    .uri("/")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
             .await
             .unwrap();
 
@@ -408,12 +391,7 @@ mod tests {
 
         // First request: obtain the ETag.
         let first = catalog_router(state.clone())
-            .oneshot(
-                Request::builder()
-                    .uri("/")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
             .await
             .unwrap();
         assert_eq!(first.status(), StatusCode::OK);
