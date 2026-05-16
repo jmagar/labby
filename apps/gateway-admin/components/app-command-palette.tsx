@@ -236,10 +236,11 @@ export function AppCommandPalette() {
     }
   }, [open, openPalette, closePalette])
 
-  // Close on pathname change
+  // Close on pathname change. closePalette is stable (useCallback deps chain is stable).
+  // Omitting closePalette from deps is safe because its identity never changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (open) closePalette()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname])
 
   // Sync active item when state changes
