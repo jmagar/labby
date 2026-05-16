@@ -169,11 +169,22 @@ pub async fn run_update(
                 .get(&ArtifactRole::Controller)
                 .expect("controller artifact was built above"),
         );
+        const DEFAULT_PORT: u16 = 8765;
         let health_port = std::env::var("LAB_MCP_HTTP_PORT")
             .ok()
-            .and_then(|v| v.parse::<u16>().ok())
+            .map(|v| {
+                v.parse::<u16>().unwrap_or_else(|e| {
+                    tracing::warn!(
+                        key = "LAB_MCP_HTTP_PORT",
+                        error = %e,
+                        default = DEFAULT_PORT,
+                        "invalid port value, using default"
+                    );
+                    DEFAULT_PORT
+                })
+            })
             .or(config.mcp.port)
-            .unwrap_or(8765);
+            .unwrap_or(DEFAULT_PORT);
         results.push(
             run_local_controller(
                 local_target.identity,
