@@ -304,3 +304,57 @@ export function findAppCommandItemById(
   if (!itemId) return null
   return items.find((item) => item.id === itemId) ?? null
 }
+
+// ── Catalog browse helpers (pure — no React/SWR imports) ─────────────────────
+
+export type CatalogBrowseItem = {
+  kind: 'catalog-service' | 'catalog-action'
+  id: string
+  /** Display name: service name or dotted action name. */
+  title: string
+  description: string
+  /** Service name (both service and action items carry this). */
+  service: string
+  /** Action name for `catalog-action` items; empty for `catalog-service`. */
+  actionName: string
+  /** True when the action is destructive (only set for `catalog-action`). */
+  destructive: boolean
+}
+
+/**
+ * Transform a flat list of CatalogService entries into CatalogBrowseItems.
+ * Returns service-level items for the root browse page.
+ * Pure function — safe to call from node:test context.
+ */
+export function buildCatalogServiceItems(
+  services: ReadonlyArray<{ name: string; description: string }>,
+): CatalogBrowseItem[] {
+  return services.map((svc) => ({
+    kind: 'catalog-service' as const,
+    id: `catalog-svc:${svc.name}`,
+    title: svc.name,
+    description: svc.description,
+    service: svc.name,
+    actionName: '',
+    destructive: false,
+  }))
+}
+
+/**
+ * Transform a service's actions into CatalogBrowseItems for the action page.
+ * Pure function — safe to call from node:test context.
+ */
+export function buildCatalogActionItems(
+  service: string,
+  actions: ReadonlyArray<{ action: string; description: string; destructive: boolean }>,
+): CatalogBrowseItem[] {
+  return actions.map((a) => ({
+    kind: 'catalog-action' as const,
+    id: `catalog-act:${service}:${a.action}`,
+    title: a.action,
+    description: a.description,
+    service,
+    actionName: a.action,
+    destructive: a.destructive,
+  }))
+}
