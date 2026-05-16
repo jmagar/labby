@@ -41,8 +41,6 @@ async fn get_catalog(State(state): State<AppState>) -> Json<Value> {
         .filter(|svc| state.enabled_services.contains(&svc.name))
         .collect();
 
-    let body = json!({ "services": services });
-
     tracing::info!(
         surface = "api",
         service = "catalog",
@@ -52,7 +50,7 @@ async fn get_catalog(State(state): State<AppState>) -> Json<Value> {
         "dispatch ok"
     );
 
-    Json(body)
+    Json(json!({ "services": services }))
 }
 
 #[cfg(test)]
