@@ -315,6 +315,10 @@ export const gatewayApi = {
   },
 
   async importExternalConfigs(names?: string[], signal?: AbortSignal): Promise<GatewayImportResult> {
+    // Empty array is a no-op — caller must pass undefined/null to mean "import all"
+    if (names !== undefined && names !== null && names.length === 0) {
+      return { imported: [] }
+    }
     const params = names && names.length > 0
       ? { names }
       : { all: true }
