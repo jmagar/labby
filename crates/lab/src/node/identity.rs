@@ -125,6 +125,7 @@ pub fn resolve_runtime_role(
     local_host: &str,
     configured_master: Option<&str>,
 ) -> Result<ResolvedNodeRuntime> {
+    let started = std::time::Instant::now();
     let local_host =
         normalize_host_identifier(local_host).unwrap_or_else(|| "localhost".to_string());
     let master_host = configured_master
@@ -136,7 +137,6 @@ pub fn resolve_runtime_role(
         NodeRole::NonMaster
     };
 
-    let started = std::time::Instant::now();
     tracing::info!(
         surface = "node", service = "identity", action = "role.resolved",
         local_host = %local_host,
