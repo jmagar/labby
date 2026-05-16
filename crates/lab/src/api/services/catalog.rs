@@ -17,15 +17,30 @@ use serde_json::json;
 
 use crate::api::state::AppState;
 
-/// Startup nonce: seconds since UNIX epoch, set once at first request.
+/// Startup nonce: nanoseconds since UNIX epoch, set once at first request.
 static STARTUP_ID: OnceLock<String> = OnceLock::new();
 
 fn startup_id() -> &'static str {
     STARTUP_ID.get_or_init(|| {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs().to_string())
+            .map(|d| d.as_nanos().to_string())
             .unwrap_or_else(|_| "0".to_string())
+    })
+}
+
+/// Returns true if `if_none_match` contains an entry matching `etag`.
+///
+/// Handles:
+/// - Comma-separated ETag lists (e.g. `"abc", "def"`)
+/// - Weak validators (`W/"abc"`)
+/// - Quoted and unquoted forms
+fn etag_matches(if_none_match: &str, etag: &str) -> bool {
+    // Strip outer quotes from our ETag for comparison.
+    let bare_etag = etag.trim_matches('"');
+    if_none_match.split(',').any(|candidate| {
+        let stripped = candidate.trim().trim_start_matches("W/").trim_matches('"');
+        stripped == bare_etag
     })
 }
 
@@ -83,7 +98,7 @@ async fn get_catalog(
         .get(header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if client_etag == etag {
+    if !client_etag.is_empty() && etag_matches(client_etag, &etag) {
         return (StatusCode::NOT_MODIFIED, resp_headers).into_response();
     }
 
