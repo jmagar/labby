@@ -282,10 +282,14 @@ export function AppCommandPalette() {
     }
   }, [open, openPalette, closePalette])
 
-  // Close on pathname change. closePalette is stable (useCallback with stable deps).
+  // Close on pathname change. Use a ref so `open` is not a dep (avoids a
+  // re-run every time closePalette flips open→false, which would re-trigger
+  // this effect and create an infinite loop).
+  const openRef = useRef(open)
+  openRef.current = open
   useEffect(() => {
-    if (open) closePalette()
-  }, [pathname, open, closePalette])
+    if (openRef.current) closePalette()
+  }, [pathname, closePalette])
 
   // Sync active item when state changes
   useEffect(() => {
@@ -406,7 +410,13 @@ export function AppCommandPalette() {
 
     // Issue 7: client-side required-field validation before dispatch
     const requiredParams = mode.action.params.filter((p) => p.required)
-    const emptyRequired = requiredParams.filter((p) => !params[p.name]?.toString().trim())
+    const emptyRequired = requiredParams.filter((p) => {
+      const val = params[p.name]
+      if (val === undefined || val === null) return true
+      if (typeof val === 'string') return val.trim() === ''
+      if (Array.isArray(val)) return false  // empty array is a valid value
+      return false  // numbers, booleans, objects — presence is sufficient
+    })
     if (emptyRequired.length > 0) {
       toast.error(`Required: ${emptyRequired.map((p) => p.name).join(', ')}`)
       return
