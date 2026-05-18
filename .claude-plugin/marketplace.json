@@ -788,6 +788,11 @@
                 "repo": "jmagar/syslog-mcp"
             },
             "description": "Syslog MCP server - query, search, and tail system logs via Model Context Protocol"
+        },
+        {
+            "name": "agentmemory",
+            "source": "./plugins/agentmemory",
+            "description": "Persistent memory for AI coding agents \u2014 captures tool usage, compresses via LLM, injects context. 12 hooks, 51 MCP tools, 8 skills, real-time viewer at :3113."
         }
     ]
 }
