@@ -3,6 +3,7 @@
 use std::process::ExitCode;
 
 use anyhow::Result;
+use lab_apis::core::ServiceClient;
 use serde::Serialize;
 
 use crate::output::{OutputFormat, print};
@@ -20,15 +21,52 @@ pub struct HealthRow {
 
 /// Run the health subcommand.
 pub async fn run(format: OutputFormat) -> Result<ExitCode> {
+    let mut rows: Vec<HealthRow> = Vec::new();
+
     // extract has no network endpoint — always available.
-    let rows: Vec<HealthRow> = vec![HealthRow {
+    rows.push(HealthRow {
         service: "extract".into(),
         reachable: true,
         auth_ok: true,
         version: None,
         latency_ms: 0,
         message: Some("local scan service (always available)".into()),
-    }];
+    });
+
+    // Probe mcpregistry (uses configured or default public registry URL; no credentials required).
+    #[cfg(feature = "mcpregistry")]
+    {
+        use crate::dispatch::marketplace::mcp_client;
+        let row = match mcp_client::require_mcp_client() {
+            Ok(client) => match client.health().await {
+                Ok(status) => HealthRow {
+                    service: "mcpregistry".into(),
+                    reachable: status.reachable,
+                    auth_ok: status.auth_ok,
+                    version: status.version,
+                    latency_ms: status.latency_ms,
+                    message: status.message,
+                },
+                Err(_) => HealthRow {
+                    service: "mcpregistry".into(),
+                    reachable: false,
+                    auth_ok: false,
+                    version: None,
+                    latency_ms: 0,
+                    message: Some("health probe failed".into()),
+                },
+            },
+            Err(_) => HealthRow {
+                service: "mcpregistry".into(),
+                reachable: false,
+                auth_ok: false,
+                version: None,
+                latency_ms: 0,
+                message: Some("not configured".into()),
+            },
+        };
+        rows.push(row);
+    }
 
     let any_unhealthy = rows.iter().any(|r| !r.reachable || !r.auth_ok);
     print(&rows, format)?;
