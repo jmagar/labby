@@ -1147,7 +1147,7 @@ mod tests {
             .await
             .expect("supported services");
 
-        let services = value.as_array().expect("array");
+        let _services = value.as_array().expect("array");
     }
 
     #[tokio::test]

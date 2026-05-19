@@ -115,6 +115,7 @@ fn candidate_paths(home: &Path) -> Vec<PathBuf> {
     }
 
     // XDG / default config dirs
+    #[cfg(not(target_os = "windows"))]
     let xdg = std::env::var("XDG_CONFIG_HOME")
         .ok()
         .filter(|s| !s.is_empty())

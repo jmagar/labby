@@ -121,7 +121,7 @@ path = "src/lib.rs"
 [features]
 acp_registry = ["lab-apis/acp_registry"]
 node-runtime = []
-all = ["lab-apis/all", "lab-admin"]
+all = ["lab-apis/all", "lab-admin", "acp_registry", "deploy", "extract", "mcpregistry"]
 gateway = []
 marketplace = ["mcpregistry"]
 services-all = [

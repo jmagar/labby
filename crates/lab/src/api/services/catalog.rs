@@ -166,7 +166,6 @@ mod tests {
     }
 
     fn catalog_router(state: AppState) -> axum::Router {
-        use axum::Router;
         // Route is registered as "/" inside `routes()` and is nested under
         // "/v1/catalog" in the full router (router.rs:985). Here we mount it
         // directly at "/" to keep the test helper simple; requests use "/".

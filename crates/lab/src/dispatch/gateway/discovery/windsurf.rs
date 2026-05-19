@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use super::{DiscoveredServer, scan_paths, xdg_config_home};
+use super::{DiscoveredServer, scan_paths};
+#[cfg(not(target_os = "windows"))]
+use super::xdg_config_home;
 
 pub fn discover(home: &Path) -> Vec<DiscoveredServer> {
     let mut paths: Vec<PathBuf> = vec![

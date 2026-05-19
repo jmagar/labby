@@ -5,7 +5,6 @@ use super::{DiscoveredServer, scan_paths, xdg_config_home};
 /// Scans VS Code MCP configs. Also covers GitHub Copilot, which uses VS Code's
 /// mcp.json when running as a VS Code extension.
 pub fn discover(home: &Path) -> Vec<DiscoveredServer> {
-    let xdg = xdg_config_home(home);
     let mut paths: Vec<PathBuf> = Vec::new();
 
     #[cfg(target_os = "macos")]
@@ -26,6 +25,7 @@ pub fn discover(home: &Path) -> Vec<DiscoveredServer> {
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
+        let xdg = xdg_config_home(home);
         paths.push(xdg.join("Code/User/mcp.json"));
         paths.push(xdg.join("Code - Insiders/User/mcp.json"));
         paths.push(xdg.join("Antigravity/User/mcp.json"));

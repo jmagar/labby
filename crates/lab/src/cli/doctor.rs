@@ -363,7 +363,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn auth_checks_returns_findings() {
         let findings = crate::dispatch::doctor::run_auth_checks();
         assert!(!findings.is_empty());

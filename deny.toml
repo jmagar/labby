@@ -59,9 +59,6 @@ name = "rmcp"
 wrappers = ["labby", "agent-client-protocol"]
 reason = "Binary-only: lab-apis must stay pure. MCP server lives in `labby`."
 
-wrappers = ["labby"]
-reason = "Binary-only: lab-apis must stay pure. TUI lives in `labby`."
-
 [[bans.deny]]
 name = "anyhow"
 wrappers = ["labby", "agent-client-protocol", "agent-client-protocol-schema"]
