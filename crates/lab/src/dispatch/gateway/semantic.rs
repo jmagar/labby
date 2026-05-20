@@ -76,7 +76,12 @@ fn tool_point_id(upstream: &str, name: &str) -> u64 {
     const FNV_OFFSET: u64 = 14_695_981_039_346_656_037;
     const FNV_PRIME: u64 = 1_099_511_628_211;
     let mut hash = FNV_OFFSET;
-    for byte in upstream.as_bytes().iter().chain(b"/".iter()).chain(name.as_bytes()) {
+    for byte in upstream
+        .as_bytes()
+        .iter()
+        .chain(b"/".iter())
+        .chain(name.as_bytes())
+    {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(FNV_PRIME);
     }
@@ -226,9 +231,7 @@ pub async fn search_semantic(
 
     let candidates = HYBRID_CANDIDATES.max(limit * 3);
     let hits: Vec<SearchHit> = if sparse.is_empty() {
-        qdrant
-            .dense_search(TOOLS_COLLECTION, &dense, limit)
-            .await?
+        qdrant.dense_search(TOOLS_COLLECTION, &dense, limit).await?
     } else {
         qdrant
             .hybrid_search(TOOLS_COLLECTION, &dense, &sparse, limit, candidates)
@@ -241,7 +244,11 @@ pub async fn search_semantic(
         .filter_map(|(rank, hit)| {
             let name = hit.payload.get("name")?.as_str()?.to_string();
             let upstream = hit.payload.get("upstream")?.as_str()?.to_string();
-            Some(SemanticHit { name, upstream, rank })
+            Some(SemanticHit {
+                name,
+                upstream,
+                rank,
+            })
         })
         .collect())
 }
@@ -253,11 +260,7 @@ pub async fn search_semantic(
 /// `k = 60` is the standard RRF constant (Cormack et al., 2009).
 /// Each result receives `Σ 1 / (k + rank_i)` summed across both lists.
 /// Fused scores are comparable regardless of the original score scales.
-pub fn rrf_fuse(
-    lexical: &[LexicalHit],
-    semantic: &[SemanticHit],
-    top_k: usize,
-) -> Vec<LexicalHit> {
+pub fn rrf_fuse(lexical: &[LexicalHit], semantic: &[SemanticHit], top_k: usize) -> Vec<LexicalHit> {
     const K: f32 = 60.0;
 
     // Build a lookup from lexical hits: (name, upstream) → hit + rank.
@@ -342,7 +345,10 @@ mod tests {
         assert!(!sv.is_empty(), "should have non-stopword terms");
         // "a", "is" etc are 1-2 bytes → excluded.
         let sv2 = compute_sparse_vector("a is to");
-        assert!(sv2.is_empty(), "all-stopword or short input should be empty");
+        assert!(
+            sv2.is_empty(),
+            "all-stopword or short input should be empty"
+        );
     }
 
     #[test]
@@ -352,7 +358,10 @@ mod tests {
         assert!(!sv.is_empty());
         let w = sv.values[0];
         let expected = (1.0f32 + 3.0).ln();
-        assert!((w - expected).abs() < 0.01, "expected ln(4) ≈ {expected}, got {w}");
+        assert!(
+            (w - expected).abs() < 0.01,
+            "expected ln(4) ≈ {expected}, got {w}"
+        );
     }
 
     #[test]

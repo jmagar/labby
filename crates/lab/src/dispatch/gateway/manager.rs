@@ -1925,7 +1925,9 @@ impl GatewayManager {
         // Graceful degradation: if Qdrant/TEI are unavailable, log a WARN and return
         // lexical results unchanged.
         let hits = if tool_search_cfg.semantic_enabled() {
-            let qdrant_url = tool_search_cfg.resolved_qdrant_url().expect("checked above");
+            let qdrant_url = tool_search_cfg
+                .resolved_qdrant_url()
+                .expect("checked above");
             let tei_url = tool_search_cfg.resolved_tei_url().expect("checked above");
             match crate::dispatch::gateway::semantic::search_semantic(
                 &qdrant_url,
@@ -2158,13 +2160,29 @@ impl GatewayManager {
                         let tools_to_index: Vec<_> = index.tools.clone();
                         let upstream_for_sem = upstream_name.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = crate::dispatch::gateway::semantic::ensure_tools_collection(&qdrant_url).await {
+                            if let Err(e) =
+                                crate::dispatch::gateway::semantic::ensure_tools_collection(
+                                    &qdrant_url,
+                                )
+                                .await
+                            {
                                 tracing::warn!(service = "tool_search", action = "semantic.ensure_collection", error = %e, "semantic index: collection init failed");
                                 return;
                             }
-                            match crate::dispatch::gateway::semantic::index_tools(&qdrant_url, &tei_url, &upstream_for_sem, &tools_to_index).await {
-                                Ok(()) => tracing::info!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, count = tools_to_index.len(), "semantic tool index updated"),
-                                Err(e) => tracing::warn!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, error = %e, "semantic index failed — lexical search unaffected"),
+                            match crate::dispatch::gateway::semantic::index_tools(
+                                &qdrant_url,
+                                &tei_url,
+                                &upstream_for_sem,
+                                &tools_to_index,
+                            )
+                            .await
+                            {
+                                Ok(()) => {
+                                    tracing::info!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, count = tools_to_index.len(), "semantic tool index updated")
+                                }
+                                Err(e) => {
+                                    tracing::warn!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, error = %e, "semantic index failed — lexical search unaffected")
+                                }
                             }
                         });
                     }

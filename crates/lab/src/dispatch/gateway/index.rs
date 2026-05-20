@@ -306,7 +306,11 @@ mod tests {
         // logs description contains none of the query tokens → score is exactly 22.0.
         // extract description contains "docker" and "container" → 2×2.0 = 4.0 noise floor.
         let logs_tool = make_tool("logs", "live log streaming", 1.0);
-        let extract_tool = make_tool("extract", "scan docker containers for service credentials", 1.0);
+        let extract_tool = make_tool(
+            "extract",
+            "scan docker containers for service credentials",
+            1.0,
+        );
         let index = ToolIndex {
             tools: vec![logs_tool, extract_tool],
             metadata: ToolIndexMetadata::default(),
@@ -319,13 +323,21 @@ mod tests {
     #[test]
     fn floor_disabled_returns_all_positive_scores() {
         let logs_tool = make_tool("logs", "live log streaming", 1.0);
-        let extract_tool = make_tool("extract", "scan docker containers for service credentials", 1.0);
+        let extract_tool = make_tool(
+            "extract",
+            "scan docker containers for service credentials",
+            1.0,
+        );
         let index = ToolIndex {
             tools: vec![logs_tool, extract_tool],
             metadata: ToolIndexMetadata::default(),
         };
         let results = index.search("docker container inspect logs dookie", 10, 0.0);
-        assert_eq!(results.len(), 2, "both tools should appear when floor is disabled");
+        assert_eq!(
+            results.len(),
+            2,
+            "both tools should appear when floor is disabled"
+        );
     }
 
     #[test]
@@ -335,8 +347,14 @@ mod tests {
         let high = make_tool("get_weather", "current weather data", 2.0);
         let low_score = score_tool("weather", &low);
         let high_score = score_tool("weather", &high);
-        assert!(high_score > low_score, "higher priority must produce higher score");
-        assert!(approx_eq(high_score, low_score * 4.0), "priority is a linear multiplier");
+        assert!(
+            high_score > low_score,
+            "higher priority must produce higher score"
+        );
+        assert!(
+            approx_eq(high_score, low_score * 4.0),
+            "priority is a linear multiplier"
+        );
     }
 
     #[test]

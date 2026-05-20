@@ -2914,7 +2914,9 @@ mod tests {
             )),
         };
 
-        let results = server.search_builtin_tools("movie search", 5, true, 0.0).await;
+        let results = server
+            .search_builtin_tools("movie search", 5, true, 0.0)
+            .await;
 
         let radarr = results
             .iter()

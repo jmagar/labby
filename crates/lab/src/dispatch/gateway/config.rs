@@ -887,7 +887,6 @@ fn validate_gateway_url(url: &str) -> Result<(), ToolError> {
     Ok(())
 }
 
-
 fn lock_path(path: &Path) -> PathBuf {
     let file_name = path
         .file_name()
