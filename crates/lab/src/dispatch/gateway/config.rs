@@ -850,9 +850,11 @@ fn is_valid_env_var_name(value: &str) -> bool {
 }
 
 fn validate_gateway_url(url: &str) -> Result<(), ToolError> {
-    if !url.starts_with("https://") {
+    // Accept both http:// and https:// — OAuth and other auth layers provide
+    // security for servers that need it; homelab services routinely use http://.
+    if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err(ToolError::InvalidParam {
-            message: format!("gateway URL must use https:// scheme, got `{url}`"),
+            message: format!("gateway URL must use http:// or https:// scheme, got `{url}`"),
             param: "url".to_string(),
         });
     }
@@ -862,64 +864,29 @@ fn validate_gateway_url(url: &str) -> Result<(), ToolError> {
         param: "url".to_string(),
     })?;
 
+    // Reject the bind-all / unspecified address — it is a listen address,
+    // not a valid connection target.
     if let Some(host) = parsed.host_str() {
-        // Check literal IP addresses for private/loopback ranges.
-        // For hostnames we do NOT perform DNS resolution — blocking DNS is
-        // forbidden in async dispatch contexts.
         let bare = host.trim_start_matches('[').trim_end_matches(']');
         if let Ok(ip) = bare.parse::<std::net::IpAddr>() {
-            check_ip_not_private_tool(ip, url)?;
-        }
-    }
-
-    Ok(())
-}
-
-fn check_ip_not_private_tool(ip: std::net::IpAddr, url: &str) -> Result<(), ToolError> {
-    let blocked = match ip {
-        std::net::IpAddr::V4(v4) => {
-            let o = v4.octets();
-            v4.is_loopback()                              // 127.0.0.0/8
-                || o[0] == 10                             // 10.0.0.0/8
-                || (o[0] == 172 && o[1] >= 16 && o[1] <= 31) // 172.16.0.0/12
-                || (o[0] == 192 && o[1] == 168)          // 192.168.0.0/16
-                || (o[0] == 169 && o[1] == 254) // 169.254.0.0/16 link-local
-        }
-        std::net::IpAddr::V6(v6) => {
-            let s = v6.segments();
-            let is_ipv4_mapped =
-                s[0] == 0 && s[1] == 0 && s[2] == 0 && s[3] == 0 && s[4] == 0 && s[5] == 0xffff;
-            if is_ipv4_mapped {
-                // Check the embedded IPv4 address for private ranges.
-                let v4 = std::net::Ipv4Addr::new(
-                    (s[6] >> 8) as u8,
-                    s[6] as u8,
-                    (s[7] >> 8) as u8,
-                    s[7] as u8,
-                );
-                let o = v4.octets();
-                v4.is_loopback()
-                    || o[0] == 10
-                    || (o[0] == 172 && o[1] >= 16 && o[1] <= 31)
-                    || (o[0] == 192 && o[1] == 168)
-                    || (o[0] == 169 && o[1] == 254)
-            } else {
-                v6.is_loopback()                           // ::1/128
-                    || (s[0] & 0xfe00) == 0xfc00           // fc00::/7 ULA
-                    || (s[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
+            let is_unspecified = match ip {
+                std::net::IpAddr::V4(v4) => v4.octets() == [0, 0, 0, 0],
+                std::net::IpAddr::V6(v6) => v6 == std::net::Ipv6Addr::UNSPECIFIED,
+            };
+            if is_unspecified {
+                return Err(ToolError::InvalidParam {
+                    message: format!(
+                        "gateway URL must not use the bind-all/unspecified address: {url}"
+                    ),
+                    param: "url".to_string(),
+                });
             }
         }
-    };
-    if blocked {
-        return Err(ToolError::InvalidParam {
-            message: format!(
-                "gateway URL resolves to a private/loopback address — blocked to prevent SSRF: {url}"
-            ),
-            param: "url".to_string(),
-        });
     }
+
     Ok(())
 }
+
 
 fn lock_path(path: &Path) -> PathBuf {
     let file_name = path
@@ -956,6 +923,7 @@ mod tests {
                     expose_prompts: None,
                     oauth: None,
                     imported_from: None,
+                    priority: 1.0,
                     tool_search: crate::config::ToolSearchConfig::default(),
                 },
                 UpstreamConfig {
@@ -973,6 +941,7 @@ mod tests {
                     expose_prompts: None,
                     oauth: None,
                     imported_from: None,
+                    priority: 1.0,
                     tool_search: crate::config::ToolSearchConfig::default(),
                 },
             ],
@@ -1097,6 +1066,7 @@ url = "https://old.example.com/mcp"
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
@@ -1130,6 +1100,7 @@ url = "https://old.example.com/mcp"
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
@@ -1339,6 +1310,7 @@ url = "https://old.example.com/mcp"
                 expose_prompts: None,
                 oauth: None,
                 imported_from: Some(source),
+                priority: 1.0,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
@@ -1382,6 +1354,7 @@ url = "https://old.example.com/mcp"
                 expose_prompts: None,
                 oauth: None,
                 imported_from: Some(source),
+                priority: 1.0,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
@@ -1423,6 +1396,7 @@ url = "https://old.example.com/mcp"
                     )
                     .with_server_name("c"),
                 ),
+                priority: 1.0,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
@@ -1536,6 +1510,7 @@ url = "https://old.example.com/mcp"
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
@@ -1564,6 +1539,7 @@ url = "https://old.example.com/mcp"
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }],
             ..LabConfig::default()
@@ -1593,6 +1569,7 @@ url = "https://old.example.com/mcp"
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }],
             ..LabConfig::default()
@@ -1621,6 +1598,7 @@ url = "https://old.example.com/mcp"
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
@@ -1648,6 +1626,7 @@ url = "https://old.example.com/mcp"
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
@@ -1675,6 +1654,7 @@ url = "https://old.example.com/mcp"
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
@@ -1703,6 +1683,7 @@ url = "https://old.example.com/mcp"
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
@@ -1730,6 +1711,7 @@ url = "https://old.example.com/mcp"
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
@@ -1758,6 +1740,7 @@ url = "https://old.example.com/mcp"
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: crate::config::ToolSearchConfig::default(),
             },
         )
@@ -1789,6 +1772,7 @@ url = "https://old.example.com/mcp"
                     expose_prompts: None,
                     oauth: None,
                     imported_from: None,
+                    priority: 1.0,
                     tool_search: crate::config::ToolSearchConfig::default(),
                 },
             )
@@ -1809,23 +1793,29 @@ url = "https://old.example.com/mcp"
     }
 
     #[test]
-    fn validate_gateway_url_blocks_rfc1918() {
-        assert!(validate_gateway_url("https://192.168.1.1/mcp").is_err());
-        assert!(validate_gateway_url("https://10.0.0.1/mcp").is_err());
-        assert!(validate_gateway_url("https://172.16.0.1/mcp").is_err());
-        assert!(validate_gateway_url("https://172.31.255.255/mcp").is_err());
-        assert!(validate_gateway_url("https://169.254.0.1/mcp").is_err());
+    fn validate_gateway_url_allows_rfc1918() {
+        // Private-network addresses are valid targets in a homelab context.
+        assert!(validate_gateway_url("http://192.168.1.1/mcp").is_ok());
+        assert!(validate_gateway_url("https://10.0.0.1/mcp").is_ok());
+        assert!(validate_gateway_url("https://172.16.0.1/mcp").is_ok());
+        assert!(validate_gateway_url("https://172.31.255.255/mcp").is_ok());
+        assert!(validate_gateway_url("https://169.254.0.1/mcp").is_ok());
     }
 
     #[test]
-    fn validate_gateway_url_blocks_loopback() {
-        assert!(validate_gateway_url("https://127.0.0.1/mcp").is_err());
-        assert!(validate_gateway_url("https://[::1]/mcp").is_err());
+    fn validate_gateway_url_allows_loopback() {
+        // Loopback addresses are valid for local services (e.g. chrome-devtools).
+        assert!(validate_gateway_url("http://127.0.0.1:9222/mcp").is_ok());
+        assert!(validate_gateway_url("http://localhost:9222/mcp").is_ok());
+        assert!(validate_gateway_url("https://[::1]/mcp").is_ok());
     }
 
     #[test]
-    fn validate_gateway_url_requires_https() {
-        assert!(validate_gateway_url("http://example.com/mcp").is_err());
+    fn validate_gateway_url_accepts_http_and_https() {
+        // Both http:// and https:// are valid (OAuth and auth layers cover security).
+        assert!(validate_gateway_url("http://example.com/mcp").is_ok());
+        assert!(validate_gateway_url("https://example.com/mcp").is_ok());
+        // Non-http(s) schemes are still rejected.
         assert!(validate_gateway_url("ftp://example.com/mcp").is_err());
         assert!(validate_gateway_url("ws://example.com/mcp").is_err());
     }
@@ -1837,18 +1827,23 @@ url = "https://old.example.com/mcp"
     }
 
     #[test]
-    fn validate_gateway_url_blocks_ipv6_ula_and_link_local() {
-        // fc00::/7 ULA
-        assert!(validate_gateway_url("https://[fd00::1]/mcp").is_err());
-        // fe80::/10 link-local
-        assert!(validate_gateway_url("https://[fe80::1]/mcp").is_err());
+    fn validate_gateway_url_blocks_bind_all_address() {
+        // 0.0.0.0 is a listen address, not a valid connection target.
+        assert!(validate_gateway_url("http://0.0.0.0:8790").is_err());
+        assert!(validate_gateway_url("https://0.0.0.0:8790").is_err());
     }
 
     #[test]
-    fn validate_gateway_url_blocks_ipv4_mapped_private() {
-        // ::ffff:192.168.1.1 — IPv4-mapped IPv6 with private address
-        assert!(validate_gateway_url("https://[::ffff:192.168.1.1]/mcp").is_err());
-        // ::ffff:127.0.0.1 — IPv4-mapped loopback
-        assert!(validate_gateway_url("https://[::ffff:127.0.0.1]/mcp").is_err());
+    fn validate_gateway_url_allows_ipv6_ula_and_link_local() {
+        // ULA and link-local IPv6 are valid homelab addresses.
+        assert!(validate_gateway_url("https://[fd00::1]/mcp").is_ok());
+        assert!(validate_gateway_url("https://[fe80::1]/mcp").is_ok());
+    }
+
+    #[test]
+    fn validate_gateway_url_allows_ipv4_mapped_private() {
+        // IPv4-mapped private/loopback addresses are valid in homelab context.
+        assert!(validate_gateway_url("https://[::ffff:192.168.1.1]/mcp").is_ok());
+        assert!(validate_gateway_url("https://[::ffff:127.0.0.1]/mcp").is_ok());
     }
 }
