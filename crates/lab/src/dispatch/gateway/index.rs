@@ -98,6 +98,26 @@ impl ToolIndex {
         Self { tools, metadata }
     }
 
+    /// Construct a single-tool index for use in tests.
+    #[cfg(test)]
+    pub fn build_for_test(name: &str, upstream: &str, description: &str) -> Self {
+        let name_lower = name.to_ascii_lowercase();
+        let haystack = format!("{}\n{}", name_lower, description.to_ascii_lowercase());
+        let tool = IndexedTool {
+            name: name.to_string(),
+            description: description.to_string(),
+            upstream_name: upstream.to_string(),
+            input_schema: None,
+            priority: 1.0,
+            name_lower,
+            haystack,
+        };
+        Self {
+            tools: vec![tool],
+            metadata: ToolIndexMetadata::default(),
+        }
+    }
+
     /// Search this index for tools matching `query`.
     ///
     /// `score_floor_fraction`: drop results whose score is below this fraction

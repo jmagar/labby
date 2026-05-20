@@ -421,6 +421,10 @@ fn default_score_floor_fraction() -> f32 {
     0.25
 }
 
+fn default_tools_collection() -> String {
+    "lab-tools".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolSearchConfig {
     #[serde(default)]
@@ -434,6 +438,18 @@ pub struct ToolSearchConfig {
     /// Default 0.25 cuts the noise-floor pollution from incidental haystack matches.
     #[serde(default = "default_score_floor_fraction")]
     pub score_floor_fraction: f32,
+    /// Qdrant base URL for semantic tool search (e.g. `http://localhost:53333`).
+    /// Falls back to `QDRANT_URL` env var if absent. Semantic search is disabled
+    /// when neither this field nor the env var is set.
+    #[serde(default)]
+    pub qdrant_url: Option<String>,
+    /// TEI base URL for embedding queries and documents (e.g. `http://localhost:52000`).
+    /// Falls back to `TEI_URL` env var if absent.
+    #[serde(default)]
+    pub tei_url: Option<String>,
+    /// Qdrant collection name for tool vectors. Default: `lab-tools`.
+    #[serde(default = "default_tools_collection")]
+    pub tools_collection: String,
 }
 
 impl Default for ToolSearchConfig {
@@ -443,11 +459,35 @@ impl Default for ToolSearchConfig {
             top_k_default: default_tool_search_top_k(),
             max_tools: default_tool_search_max_tools(),
             score_floor_fraction: default_score_floor_fraction(),
+            qdrant_url: None,
+            tei_url: None,
+            tools_collection: default_tools_collection(),
         }
     }
 }
 
 impl ToolSearchConfig {
+    /// Resolve Qdrant URL: config field → `QDRANT_URL` env var → None.
+    pub fn resolved_qdrant_url(&self) -> Option<String> {
+        self.qdrant_url
+            .clone()
+            .filter(|s| !s.is_empty())
+            .or_else(|| std::env::var("QDRANT_URL").ok().filter(|s| !s.is_empty()))
+    }
+
+    /// Resolve TEI URL: config field → `TEI_URL` env var → None.
+    pub fn resolved_tei_url(&self) -> Option<String> {
+        self.tei_url
+            .clone()
+            .filter(|s| !s.is_empty())
+            .or_else(|| std::env::var("TEI_URL").ok().filter(|s| !s.is_empty()))
+    }
+
+    /// Returns `true` when both Qdrant and TEI URLs can be resolved.
+    pub fn semantic_enabled(&self) -> bool {
+        self.resolved_qdrant_url().is_some() && self.resolved_tei_url().is_some()
+    }
+
     pub fn validate(&self) -> Result<(), ConfigError> {
         if !(1..=50).contains(&self.top_k_default) {
             return Err(ConfigError::InvalidToolSearchTopKDefault {

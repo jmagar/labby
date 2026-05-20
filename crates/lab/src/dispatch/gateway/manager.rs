@@ -1895,7 +1895,9 @@ impl GatewayManager {
             .await;
 
         let requested = top_k.max(1).min(50);
-        let score_floor_fraction = self.config.read().await.tool_search.score_floor_fraction;
+        let tool_search_cfg = self.config.read().await.tool_search.clone();
+        let score_floor_fraction = tool_search_cfg.score_floor_fraction;
+
         let mut hits: Vec<SearchHit> = self
             .tool_indexes
             .iter()
@@ -1918,6 +1920,37 @@ impl GatewayManager {
                 message: "tool index is being built, retry shortly".to_string(),
             });
         }
+
+        // Semantic hybrid search via Qdrant + TEI — fused with lexical hits via RRF.
+        // Graceful degradation: if Qdrant/TEI are unavailable, log a WARN and return
+        // lexical results unchanged.
+        let hits = if tool_search_cfg.semantic_enabled() {
+            let qdrant_url = tool_search_cfg.resolved_qdrant_url().expect("checked above");
+            let tei_url = tool_search_cfg.resolved_tei_url().expect("checked above");
+            match crate::dispatch::gateway::semantic::search_semantic(
+                &qdrant_url,
+                &tei_url,
+                trimmed,
+                requested * 3,
+            )
+            .await
+            {
+                Ok(semantic_hits) => {
+                    crate::dispatch::gateway::semantic::rrf_fuse(&hits, &semantic_hits, requested)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        service = "tool_search",
+                        action = "semantic_search",
+                        error = %e,
+                        "semantic search unavailable, falling back to lexical results"
+                    );
+                    hits
+                }
+            }
+        } else {
+            hits
+        };
 
         Ok(hits
             .into_iter()
@@ -2072,6 +2105,7 @@ impl GatewayManager {
             let upstream_name = upstream.name.clone();
             let pool = pool.clone();
             let max_tools = cfg.tool_search.max_tools;
+            let semantic_cfg = cfg.tool_search.clone();
             state.warming.store(true, Ordering::Relaxed);
             let state_for_task = state.clone();
             tracing::info!(
@@ -2116,6 +2150,25 @@ impl GatewayManager {
                             "gateway tool index truncated — increase [tool_search] max_tools to index all tools"
                         );
                     }
+                    // Async-index into Qdrant if semantic search is configured.
+                    // Fire-and-forget: failures are logged but do not block the lexical index.
+                    if semantic_cfg.semantic_enabled() {
+                        let qdrant_url = semantic_cfg.resolved_qdrant_url().expect("checked");
+                        let tei_url = semantic_cfg.resolved_tei_url().expect("checked");
+                        let tools_to_index: Vec<_> = index.tools.clone();
+                        let upstream_for_sem = upstream_name.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = crate::dispatch::gateway::semantic::ensure_tools_collection(&qdrant_url).await {
+                                tracing::warn!(service = "tool_search", action = "semantic.ensure_collection", error = %e, "semantic index: collection init failed");
+                                return;
+                            }
+                            match crate::dispatch::gateway::semantic::index_tools(&qdrant_url, &tei_url, &upstream_for_sem, &tools_to_index).await {
+                                Ok(()) => tracing::info!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, count = tools_to_index.len(), "semantic tool index updated"),
+                                Err(e) => tracing::warn!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, error = %e, "semantic index failed — lexical search unaffected"),
+                            }
+                        });
+                    }
+
                     state_for_task.index.store(Some(Arc::new(index)));
                     tracing::info!(
                         surface = "dispatch",

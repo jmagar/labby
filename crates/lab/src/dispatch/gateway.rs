@@ -12,6 +12,7 @@ mod params;
 mod projection;
 pub(crate) mod protected_routes;
 mod runtime;
+mod semantic;
 mod service_catalog;
 mod shared;
 pub(crate) mod types;
