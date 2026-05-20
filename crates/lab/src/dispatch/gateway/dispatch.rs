@@ -854,6 +854,7 @@ mod tests {
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: ToolSearchConfig::default(),
             }])
             .await;
@@ -893,6 +894,7 @@ mod tests {
                     expose_prompts: None,
                     oauth: None,
                     imported_from: None,
+                    priority: 1.0,
                     tool_search: ToolSearchConfig::default(),
                 },
                 UpstreamConfig {
@@ -910,6 +912,7 @@ mod tests {
                     expose_prompts: None,
                     oauth: None,
                     imported_from: None,
+                    priority: 1.0,
                     tool_search: ToolSearchConfig::default(),
                 },
             ])
@@ -1005,6 +1008,7 @@ mod tests {
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: ToolSearchConfig::default(),
             }])
             .await;
@@ -1041,6 +1045,7 @@ mod tests {
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: ToolSearchConfig::default(),
             }])
             .await;
@@ -1533,6 +1538,7 @@ mod tests {
                     expose_prompts: None,
                     oauth: None,
                     imported_from: None,
+                    priority: 1.0,
                     tool_search: ToolSearchConfig::default(),
                 },
                 UpstreamConfig {
@@ -1550,6 +1556,7 @@ mod tests {
                     expose_prompts: None,
                     oauth: None,
                     imported_from: None,
+                    priority: 1.0,
                     tool_search: ToolSearchConfig::default(),
                 },
             ])
@@ -1818,6 +1825,7 @@ mod tests {
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: ToolSearchConfig::default(),
             }])
             .await;
@@ -1862,6 +1870,7 @@ mod tests {
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: ToolSearchConfig::default(),
             }])
             .await;
@@ -1938,6 +1947,7 @@ mod tests {
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: ToolSearchConfig::default(),
             }])
             .await;
@@ -2011,6 +2021,7 @@ mod tests {
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: ToolSearchConfig::default(),
             },
             source_client: "cursor".to_string(),
@@ -2037,6 +2048,7 @@ mod tests {
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: ToolSearchConfig::default(),
             },
             source_client: "claude-code".to_string(),
@@ -2216,6 +2228,7 @@ mod discovery_shape_tests {
             expose_prompts: None,
             oauth: None,
             imported_from: None,
+            priority: 1.0,
             tool_search: ToolSearchConfig::default(),
         }
     }

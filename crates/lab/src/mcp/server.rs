@@ -1092,8 +1092,9 @@ impl ServerHandler for LabMcpServer {
                 include_schema,
                 "gateway tool search start"
             );
+            let score_floor_fraction = manager.tool_search_config().await.score_floor_fraction;
             let builtin_results = self
-                .search_builtin_tools(&query, top_k, include_schema)
+                .search_builtin_tools(&query, top_k, include_schema, score_floor_fraction)
                 .await;
             return match manager.search_tools(&query, top_k, include_schema).await {
                 Ok(upstream_results) => {
@@ -2234,6 +2235,7 @@ impl LabMcpServer {
         query: &str,
         top_k: usize,
         include_schema: bool,
+        score_floor_fraction: f32,
     ) -> Vec<GatewayToolSearchResult> {
         let needle = query.trim().to_ascii_lowercase();
         if needle.is_empty() || needle.len() > 500 {
@@ -2273,6 +2275,15 @@ impl LabMcpServer {
         }
 
         results.sort_by(compare_tool_search_results);
+
+        // Apply score floor relative to this source's top result.
+        if score_floor_fraction > 0.0 {
+            if let Some(top) = results.first() {
+                let floor = top.score * score_floor_fraction;
+                results.retain(|r| r.score >= floor);
+            }
+        }
+
         results.truncate(top_k.max(1).min(50));
         results
     }
@@ -2903,7 +2914,7 @@ mod tests {
             )),
         };
 
-        let results = server.search_builtin_tools("movie search", 5, true).await;
+        let results = server.search_builtin_tools("movie search", 5, true, 0.0).await;
 
         let radarr = results
             .iter()
@@ -3119,7 +3130,7 @@ mod tests {
         };
 
         let results = server
-            .search_builtin_tools("plex session info", 5, true)
+            .search_builtin_tools("plex session info", 5, true, 0.0)
             .await;
         let plex = results
             .iter()

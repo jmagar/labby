@@ -395,6 +395,7 @@ mod tests {
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: crate::config::ToolSearchConfig::default(),
             }])
             .await;

@@ -186,6 +186,7 @@ impl Harness {
                 scopes: Some(vec!["read".into()]),
             }),
             imported_from: None,
+            priority: 1.0,
             tool_search: labby::config::ToolSearchConfig::default(),
         }
     }

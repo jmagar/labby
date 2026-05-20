@@ -1895,11 +1895,14 @@ impl GatewayManager {
             .await;
 
         let requested = top_k.max(1).min(50);
+        let tool_search_cfg = self.config.read().await.tool_search.clone();
+        let score_floor_fraction = tool_search_cfg.score_floor_fraction;
+
         let mut hits: Vec<SearchHit> = self
             .tool_indexes
             .iter()
             .filter_map(|entry| entry.value().index.load_full())
-            .flat_map(|index| index.search(trimmed, requested))
+            .flat_map(|index| index.search(trimmed, requested, score_floor_fraction))
             .collect();
 
         hits.sort_by(|a, b| {
@@ -1917,6 +1920,37 @@ impl GatewayManager {
                 message: "tool index is being built, retry shortly".to_string(),
             });
         }
+
+        // Semantic hybrid search via Qdrant + TEI — fused with lexical hits via RRF.
+        // Graceful degradation: if Qdrant/TEI are unavailable, log a WARN and return
+        // lexical results unchanged.
+        let hits = if tool_search_cfg.semantic_enabled() {
+            let qdrant_url = tool_search_cfg.resolved_qdrant_url().expect("checked above");
+            let tei_url = tool_search_cfg.resolved_tei_url().expect("checked above");
+            match crate::dispatch::gateway::semantic::search_semantic(
+                &qdrant_url,
+                &tei_url,
+                trimmed,
+                requested * 3,
+            )
+            .await
+            {
+                Ok(semantic_hits) => {
+                    crate::dispatch::gateway::semantic::rrf_fuse(&hits, &semantic_hits, requested)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        service = "tool_search",
+                        action = "semantic_search",
+                        error = %e,
+                        "semantic search unavailable, falling back to lexical results"
+                    );
+                    hits
+                }
+            }
+        } else {
+            hits
+        };
 
         Ok(hits
             .into_iter()
@@ -2071,6 +2105,7 @@ impl GatewayManager {
             let upstream_name = upstream.name.clone();
             let pool = pool.clone();
             let max_tools = cfg.tool_search.max_tools;
+            let semantic_cfg = cfg.tool_search.clone();
             state.warming.store(true, Ordering::Relaxed);
             let state_for_task = state.clone();
             tracing::info!(
@@ -2115,6 +2150,25 @@ impl GatewayManager {
                             "gateway tool index truncated — increase [tool_search] max_tools to index all tools"
                         );
                     }
+                    // Async-index into Qdrant if semantic search is configured.
+                    // Fire-and-forget: failures are logged but do not block the lexical index.
+                    if semantic_cfg.semantic_enabled() {
+                        let qdrant_url = semantic_cfg.resolved_qdrant_url().expect("checked");
+                        let tei_url = semantic_cfg.resolved_tei_url().expect("checked");
+                        let tools_to_index: Vec<_> = index.tools.clone();
+                        let upstream_for_sem = upstream_name.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = crate::dispatch::gateway::semantic::ensure_tools_collection(&qdrant_url).await {
+                                tracing::warn!(service = "tool_search", action = "semantic.ensure_collection", error = %e, "semantic index: collection init failed");
+                                return;
+                            }
+                            match crate::dispatch::gateway::semantic::index_tools(&qdrant_url, &tei_url, &upstream_for_sem, &tools_to_index).await {
+                                Ok(()) => tracing::info!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, count = tools_to_index.len(), "semantic tool index updated"),
+                                Err(e) => tracing::warn!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, error = %e, "semantic index failed — lexical search unaffected"),
+                            }
+                        });
+                    }
+
                     state_for_task.index.store(Some(Arc::new(index)));
                     tracing::info!(
                         surface = "dispatch",
@@ -2662,6 +2716,7 @@ mod tests {
             expose_prompts: None,
             oauth: None,
             imported_from: None,
+            priority: 1.0,
             tool_search: ToolSearchConfig::default(),
         }
     }
@@ -2682,6 +2737,7 @@ mod tests {
             expose_prompts: None,
             oauth: None,
             imported_from: None,
+            priority: 1.0,
             tool_search: ToolSearchConfig::default(),
         }
     }
@@ -3007,6 +3063,7 @@ mod tests {
             expose_prompts: None,
             oauth: None,
             imported_from: None,
+            priority: 1.0,
             tool_search: ToolSearchConfig::default(),
         };
 
@@ -3061,6 +3118,7 @@ mod tests {
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: ToolSearchConfig::default(),
             }])
             .await;
@@ -3133,6 +3191,7 @@ mod tests {
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: ToolSearchConfig::default(),
             }])
             .await;
@@ -3171,6 +3230,7 @@ mod tests {
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: ToolSearchConfig::default(),
             }])
             .await;
@@ -3205,6 +3265,7 @@ mod tests {
             expose_prompts: None,
             oauth: None,
             imported_from: None,
+            priority: 1.0,
             tool_search: ToolSearchConfig::default(),
         };
 
@@ -3233,6 +3294,7 @@ mod tests {
             expose_prompts: None,
             oauth: None,
             imported_from: None,
+            priority: 1.0,
             tool_search: ToolSearchConfig::default(),
         };
 
@@ -3265,6 +3327,7 @@ mod tests {
             expose_prompts: None,
             oauth: None,
             imported_from: None,
+            priority: 1.0,
             tool_search: ToolSearchConfig::default(),
         };
 
@@ -3570,6 +3633,7 @@ mod tests {
                     expose_prompts: None,
                     oauth: None,
                     imported_from: None,
+                    priority: 1.0,
                     tool_search: ToolSearchConfig::default(),
                 },
                 Some("ghp_secret".to_string()),
@@ -4062,6 +4126,7 @@ mod tests {
                     expose_prompts: None,
                     oauth: None,
                     imported_from: None,
+                    priority: 1.0,
                     tool_search: ToolSearchConfig::default(),
                 }],
                 ..LabConfig::default()
@@ -4100,6 +4165,7 @@ mod tests {
                         scopes: None,
                     }),
                     imported_from: None,
+                    priority: 1.0,
                     tool_search: ToolSearchConfig::default(),
                 }],
                 ..LabConfig::default()
@@ -4250,6 +4316,7 @@ mod tests {
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: ToolSearchConfig::default(),
             },
         )
@@ -4314,6 +4381,7 @@ mod tests {
                 expose_prompts: None,
                 oauth: None,
                 imported_from: None,
+                priority: 1.0,
                 tool_search: ToolSearchConfig::default(),
             },
         )
@@ -4340,6 +4408,7 @@ mod tests {
             expose_prompts: None,
             oauth: None,
             imported_from: None,
+            priority: 1.0,
             tool_search: ToolSearchConfig::default(),
         };
         let upstream_name: Arc<str> = Arc::from("partial-upstream");

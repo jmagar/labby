@@ -361,6 +361,7 @@ impl GatewayManager {
                             scopes: metadata.scopes_supported.clone(),
                         }),
                         imported_from: None,
+                        priority: 1.0,
                         tool_search: ToolSearchConfig::default(),
                     };
                     let manager = UpstreamOauthManager::new(

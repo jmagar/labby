@@ -417,6 +417,14 @@ fn default_tool_search_max_tools() -> usize {
     5000
 }
 
+fn default_score_floor_fraction() -> f32 {
+    0.25
+}
+
+fn default_tools_collection() -> String {
+    "lab-tools".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolSearchConfig {
     #[serde(default)]
@@ -425,6 +433,23 @@ pub struct ToolSearchConfig {
     pub top_k_default: usize,
     #[serde(default = "default_tool_search_max_tools")]
     pub max_tools: usize,
+    /// Drop results whose score is below this fraction of the top result's score.
+    /// 0.0 disables the floor (returns all positive-scoring results up to top_k).
+    /// Default 0.25 cuts the noise-floor pollution from incidental haystack matches.
+    #[serde(default = "default_score_floor_fraction")]
+    pub score_floor_fraction: f32,
+    /// Qdrant base URL for semantic tool search (e.g. `http://localhost:53333`).
+    /// Falls back to `QDRANT_URL` env var if absent. Semantic search is disabled
+    /// when neither this field nor the env var is set.
+    #[serde(default)]
+    pub qdrant_url: Option<String>,
+    /// TEI base URL for embedding queries and documents (e.g. `http://localhost:52000`).
+    /// Falls back to `TEI_URL` env var if absent.
+    #[serde(default)]
+    pub tei_url: Option<String>,
+    /// Qdrant collection name for tool vectors. Default: `lab-tools`.
+    #[serde(default = "default_tools_collection")]
+    pub tools_collection: String,
 }
 
 impl Default for ToolSearchConfig {
@@ -433,11 +458,36 @@ impl Default for ToolSearchConfig {
             enabled: false,
             top_k_default: default_tool_search_top_k(),
             max_tools: default_tool_search_max_tools(),
+            score_floor_fraction: default_score_floor_fraction(),
+            qdrant_url: None,
+            tei_url: None,
+            tools_collection: default_tools_collection(),
         }
     }
 }
 
 impl ToolSearchConfig {
+    /// Resolve Qdrant URL: config field → `QDRANT_URL` env var → None.
+    pub fn resolved_qdrant_url(&self) -> Option<String> {
+        self.qdrant_url
+            .clone()
+            .filter(|s| !s.is_empty())
+            .or_else(|| std::env::var("QDRANT_URL").ok().filter(|s| !s.is_empty()))
+    }
+
+    /// Resolve TEI URL: config field → `TEI_URL` env var → None.
+    pub fn resolved_tei_url(&self) -> Option<String> {
+        self.tei_url
+            .clone()
+            .filter(|s| !s.is_empty())
+            .or_else(|| std::env::var("TEI_URL").ok().filter(|s| !s.is_empty()))
+    }
+
+    /// Returns `true` when both Qdrant and TEI URLs can be resolved.
+    pub fn semantic_enabled(&self) -> bool {
+        self.resolved_qdrant_url().is_some() && self.resolved_tei_url().is_some()
+    }
+
     pub fn validate(&self) -> Result<(), ConfigError> {
         if !(1..=50).contains(&self.top_k_default) {
             return Err(ConfigError::InvalidToolSearchTopKDefault {
@@ -447,6 +497,11 @@ impl ToolSearchConfig {
         if !(1..=10_000).contains(&self.max_tools) {
             return Err(ConfigError::InvalidToolSearchMaxTools {
                 value: self.max_tools,
+            });
+        }
+        if !(0.0..=1.0).contains(&self.score_floor_fraction) {
+            return Err(ConfigError::InvalidToolSearchScoreFloor {
+                value: self.score_floor_fraction,
             });
         }
         Ok(())
@@ -521,6 +576,10 @@ impl UpstreamImportTombstone {
     }
 }
 
+fn default_upstream_priority() -> f32 {
+    1.0
+}
+
 /// Configuration for a single upstream MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpstreamConfig {
@@ -529,6 +588,11 @@ pub struct UpstreamConfig {
     /// Whether this upstream is enabled for discovery and proxying. Defaults to true.
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Search result priority multiplier for tools from this upstream (default 1.0).
+    /// Values above 1.0 boost this upstream's tools; below 1.0 suppress them.
+    /// Applied before the score-floor cut, so it affects which tools survive.
+    #[serde(default = "default_upstream_priority")]
+    pub priority: f32,
     /// URL of the upstream MCP server (must be `http://`, `https://`, `ws://`, or `wss://`).
     /// For stdio upstreams, omit `url` and use `command`/`args` fields instead.
     #[serde(default)]
@@ -764,6 +828,8 @@ pub enum ConfigError {
     InvalidToolSearchTopKDefault { value: usize },
     #[error("gateway tool_search.max_tools={value} is invalid — expected 1..=10000")]
     InvalidToolSearchMaxTools { value: usize },
+    #[error("gateway tool_search.score_floor_fraction={value} is invalid — expected 0.0..=1.0")]
+    InvalidToolSearchScoreFloor { value: f32 },
     #[error("protected MCP route '{name}' has invalid {field}: {value}")]
     InvalidProtectedRoute {
         name: String,
