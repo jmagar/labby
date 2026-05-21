@@ -69,6 +69,9 @@ pub struct GatewayPendingNameArgs {
     /// Skip the destructive-action confirmation prompt.
     #[arg(short = 'y', long, alias = "no-confirm")]
     pub yes: bool,
+    /// Print what would be done without executing.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Args)]
@@ -504,6 +507,7 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
         },
         command => {
             let mut confirmed = true;
+            let mut dry_run = false;
             let (action, params) = match command {
                 GatewayCommand::List => ("gateway.list".to_string(), json!({})),
                 GatewayCommand::Get(args) => {
@@ -643,6 +647,7 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                     }
                     GatewayPendingCommand::Approve(name_args) => {
                         confirmed = name_args.yes;
+                        dry_run = name_args.dry_run;
                         (
                             "gateway.import_pending.approve".to_string(),
                             json!({ "name": name_args.name }),
@@ -650,6 +655,7 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                     }
                     GatewayPendingCommand::Reject(name_args) => {
                         confirmed = name_args.yes;
+                        dry_run = name_args.dry_run;
                         (
                             "gateway.import_pending.reject".to_string(),
                             json!({ "name": name_args.name }),
@@ -659,6 +665,11 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                 GatewayCommand::PublicUrls => ("gateway.public_urls.get".to_string(), json!({})),
                 GatewayCommand::Mcp(_) => unreachable!("handled above"),
             };
+
+            if dry_run {
+                crate::cli::helpers::print_dry_run("gateway", &action, &params);
+                return Ok(ExitCode::SUCCESS);
+            }
 
             return run_confirmable_action_command(
                 "gateway",

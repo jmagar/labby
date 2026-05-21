@@ -77,7 +77,7 @@ pub enum SetupCommand {
         no_repair: bool,
     },
     /// Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.lab/.env as LAB_* vars.
-    PluginSync,
+    PluginSync(PluginSyncArgs),
     /// Read ~/.lab/.env and print current values keyed by userConfig field name.
     PluginExport,
     /// Validate connectivity to the lab MCP server.
@@ -94,6 +94,16 @@ pub enum SetupCommand {
     InstallPlugin(PluginMutationArgs),
     /// Uninstall the Claude Code plugin for a service.
     UninstallPlugin(PluginMutationArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct PluginSyncArgs {
+    /// Skip confirmation for this destructive action.
+    #[arg(short = 'y', long, alias = "no-confirm")]
+    pub yes: bool,
+    /// Print what would be dispatched without executing.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Args)]
@@ -173,8 +183,18 @@ async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<Exit
                     .await?;
             print(&value, format)?;
         }
-        SetupCommand::PluginSync => {
-            let value = crate::dispatch::setup::dispatch("plugin_sync", json!({})).await?;
+        SetupCommand::PluginSync(args) => {
+            let params = json!({ "confirm": true });
+            if args.dry_run {
+                crate::cli::helpers::print_dry_run("setup", "plugin_sync", &params);
+                return Ok(ExitCode::SUCCESS);
+            }
+            if !args.yes {
+                anyhow::bail!(
+                    "setup plugin_sync mutates ~/.lab/.env; pass -y/--yes to confirm or --dry-run to preview"
+                );
+            }
+            let value = crate::dispatch::setup::dispatch("plugin_sync", params).await?;
             print(&value, format)?;
         }
         SetupCommand::PluginExport => {
@@ -273,7 +293,7 @@ mod tests {
         let crate::cli::Command::Setup(args) = cli.command else {
             panic!("expected setup");
         };
-        assert!(matches!(args.command, Some(SetupCommand::PluginSync)));
+        assert!(matches!(args.command, Some(SetupCommand::PluginSync(_))));
 
         let cli = crate::cli::Cli::try_parse_from(["labby", "setup", "plugin-export"]).unwrap();
         let crate::cli::Command::Setup(args) = cli.command else {

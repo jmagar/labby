@@ -101,14 +101,16 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "plugin_hook",
-        description: "Run binary-owned local setup checks for Claude plugin hooks",
+        description: "Run binary-owned local setup checks for Claude plugin hooks; in repair mode also syncs CLAUDE_PLUGIN_OPTION_* and probes server connectivity",
         destructive: true,
-        returns: "SetupReport",
+        // Composite payload: { setup: SetupReport, sync: PluginSyncOutcome|null, connectivity: ConnectivityOutcome }.
+        // `sync` is null when called with repair=false (check mode is guaranteed non-mutating).
+        returns: "PluginHookReport",
         params: &[ParamSpec {
             name: "repair",
             ty: "boolean",
             required: false,
-            description: "Create missing local Lab setup files; defaults to true",
+            description: "Create missing local Lab setup files and sync plugin env; defaults to true",
         }],
     },
     ActionSpec {

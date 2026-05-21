@@ -523,6 +523,16 @@ pub fn rrf_fuse(lexical: &[LexicalHit], semantic: &[SemanticHit], top_k: usize) 
         .map(|s| ((s.name.as_str(), s.upstream.as_str()), s))
         .collect();
 
+    // Inherit upstream priority for semantic-only hits from any sibling lexical
+    // hit on the same upstream. Upstreams configured with priority=0 are
+    // suppressed and have NO lexical entries (the >0 filter at IndexedTool::search
+    // drops them), so a missing entry here means "either not suppressed, or
+    // semantic-indexed with no lexical view" — default to 1.0 (not suppressed).
+    let priority_by_upstream: HashMap<&str, f32> = lexical
+        .iter()
+        .map(|hit| (hit.tool.upstream_name.as_str(), hit.tool.priority))
+        .collect();
+
     let mut rrf_scores: HashMap<(&str, &str), f32> = HashMap::new();
     for (rank, hit) in lexical.iter().enumerate() {
         let key = (hit.tool.name.as_str(), hit.tool.upstream_name.as_str());
@@ -543,11 +553,23 @@ pub fn rrf_fuse(lexical: &[LexicalHit], semantic: &[SemanticHit], top_k: usize) 
             if let Some(hit) = lexical_map.get(&(name, upstream)) {
                 Some((score, (*hit).clone()))
             } else if let Some(sem) = semantic_map.get(&(name, upstream)) {
-                // Semantic-only hit: synthesize an IndexedTool from the payload
-                // so the result surfaces. `input_schema` is unavailable from the
-                // Qdrant payload; callers needing it look up the live catalog
-                // by (upstream, name).
-                let tool = IndexedTool::from_semantic_payload(name, upstream, &sem.description);
+                // Semantic-only hit: synthesize an IndexedTool from the payload.
+                // Inherit upstream priority from the lexical view — semantic-only
+                // hits on suppressed (priority=0) upstreams are dropped so the
+                // user-configured suppression survives fusion.
+                let priority = priority_by_upstream
+                    .get(upstream)
+                    .copied()
+                    .unwrap_or(1.0);
+                if priority == 0.0 {
+                    return None;
+                }
+                let tool = IndexedTool::from_semantic_payload_with_priority(
+                    name,
+                    upstream,
+                    &sem.description,
+                    priority,
+                );
                 Some((score, LexicalHit { tool, score }))
             } else {
                 None

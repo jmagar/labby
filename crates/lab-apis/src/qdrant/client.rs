@@ -10,12 +10,17 @@ use serde_json::json;
 
 /// Shared HTTP client. `reqwest::Client` owns a connection pool; constructing one
 /// per call exhausts sockets and bypasses pooling.
+///
+/// Builder failure (rustls/TLS init only) falls back to `reqwest::Client::new()`
+/// — losing the tuned pool/timeout settings but preserving forward progress.
+/// Library code MUST NOT panic at init.
 static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
-        .pool_idle_timeout(Duration::from_secs(90))
+        .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(30))
+        .pool_idle_timeout(Duration::from_secs(90))
         .build()
-        .expect("build shared reqwest client for Qdrant")
+        .unwrap_or_else(|_| reqwest::Client::new())
 });
 
 pub struct QdrantClient {

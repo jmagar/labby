@@ -2105,8 +2105,9 @@ impl GatewayManager {
 
         // Semantic hybrid search via Qdrant + TEI — fused with lexical hits via RRF.
         // Graceful degradation: if Qdrant/TEI are unavailable, log a WARN and return
-        // lexical results unchanged.
-        let hits = if tool_search_cfg.semantic_enabled() {
+        // lexical results unchanged. Every return path truncates to `requested` —
+        // the wider `lexical_window` is only a fusion-input convenience.
+        let mut hits = if tool_search_cfg.semantic_enabled() {
             let qdrant_url = tool_search_cfg
                 .resolved_qdrant_url()
                 .expect("checked above");
@@ -2135,6 +2136,7 @@ impl GatewayManager {
         } else {
             hits
         };
+        hits.truncate(requested);
 
         Ok(hits
             .into_iter()

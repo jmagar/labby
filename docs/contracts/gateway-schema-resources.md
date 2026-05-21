@@ -77,7 +77,7 @@ existing `gateway.discovered_*` actions.
 
 ## Document shapes
 
-### `lab://gateway/servers` and `GET /v1/gateway/servers`
+### `lab://gateway/servers` (MCP) / `gateway.servers` (HTTP action)
 
 ```jsonc
 {
@@ -105,7 +105,7 @@ Stability rules:
   renaming any of the listed fields is a breaking change.
 - Element order is not stable. Callers must key by `name`.
 
-### `lab://gateway/<name>/schema` and `GET /v1/gateway/{name}/schema`
+### `lab://gateway/<name>/schema` (MCP) / `gateway.schema` (HTTP action)
 
 ```jsonc
 {

@@ -101,19 +101,22 @@ async fn plugin_hook_action(params: &Value) -> Result<Value, ToolError> {
     } else {
         super::plugin_hook::Mode::Check
     };
-    // 1. Create ~/.lab/ and ~/.lab/.env if missing.
-    let report = super::plugin_hook::run(mode)?;
-    // 2. Sync CLAUDE_PLUGIN_OPTION_* → ~/.lab/.env.
-    let sync = super::plugin_hook::sync_plugin_env()?;
-    // 3. Validate connectivity.
+    let setup = super::plugin_hook::run(mode)?;
+    // sync_plugin_env mutates ~/.lab/.env — only run in Repair mode so
+    // check-mode invocations are guaranteed non-mutating.
+    let sync = if repair {
+        Some(super::plugin_hook::sync_plugin_env()?)
+    } else {
+        None
+    };
     let server_url = std::env::var("CLAUDE_PLUGIN_OPTION_SERVER_URL").ok();
     let connectivity =
         super::plugin_hook::validate_connectivity(server_url.as_deref()).await;
-    Ok(json!({
-        "setup": to_json(report)?,
-        "sync": to_json(sync)?,
-        "connectivity": to_json(connectivity)?,
-    }))
+    to_json(super::plugin_hook::PluginHookReport {
+        setup,
+        sync,
+        connectivity,
+    })
 }
 
 fn plugin_sync_action() -> Result<Value, ToolError> {

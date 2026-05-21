@@ -126,6 +126,18 @@ pub struct ConnectivityOutcome {
     pub message: String,
 }
 
+/// Composite result for the `plugin_hook` orchestration action.
+///
+/// `setup` is always present. `sync` is `None` in Check mode (non-mutating).
+/// `connectivity` is always probed since it is read-only.
+#[derive(Debug, Clone, Serialize)]
+pub struct PluginHookReport {
+    pub setup: SetupReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sync: Option<PluginSyncOutcome>,
+    pub connectivity: ConnectivityOutcome,
+}
+
 /// Run the full plugin-hook sequence: repair dirs → sync env vars → validate
 /// connectivity. Runs repair phase by default (called from SessionStart hook).
 pub fn run(mode: Mode) -> Result<SetupReport, ToolError> {

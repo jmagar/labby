@@ -30,13 +30,9 @@ volumes:
     driver: local
 
 networks:
-  # External so this stack can share a bridge with other compose stacks on the
-  # same host. Create the network once before `docker compose up`:
-  #
-  #     docker network create ${DOCKER_NETWORK:-lab}
-  #
-  # Override the name via the DOCKER_NETWORK env var to attach to an existing
-  # bridge instead.
+  # Compose creates and manages this network on first `up`. Override the name
+  # via the DOCKER_NETWORK env var to attach to an existing bridge shared with
+  # other compose stacks — Compose joins a pre-existing network of that name
+  # without re-creating it. The homelab `.env` sets `DOCKER_NETWORK=jakenet`.
   lab:
     name: ${DOCKER_NETWORK:-lab}
-    external: true
