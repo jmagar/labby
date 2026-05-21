@@ -24,6 +24,5 @@ just docs-check
 | `api-routes.md/json` | `labby docs generate` |
 | `openapi.json` | `labby docs generate` |
 | `feature-matrix.md/json` | `labby docs generate` |
-| `onboarding-audit.md/json` | `labby docs generate` |
 | `mcp-help.md/json` | `labby docs generate` |
 | `cli-help.md` | `labby docs generate` |

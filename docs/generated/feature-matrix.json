@@ -12,57 +12,11 @@
     },
     {
       "crate_name": "lab-apis",
-      "feature": "adguard",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/adguard",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
       "feature": "all",
       "dependencies": [
-        "radarr",
-        "sonarr",
-        "prowlarr",
-        "overseerr",
-        "plex",
-        "tautulli",
-        "sabnzbd",
-        "qbittorrent",
-        "tailscale",
-        "linkding",
-        "memos",
-        "beads",
-        "bytestash",
-        "paperless",
-        "arcane",
-        "unraid",
-        "unifi",
-        "gotify",
-        "jellyfin",
-        "adguard",
-        "glances",
-        "pihole",
-        "neo4j",
-        "uptime_kuma",
-        "immich",
-        "loggifly",
-        "navidrome",
-        "scrutiny",
-        "freshrss",
-        "openacp",
-        "openai",
-        "notebooklm",
-        "qdrant",
-        "tei",
-        "apprise",
         "deploy",
         "mcpregistry",
         "acp_registry",
-        "dozzle",
         "extract"
       ],
       "included_in_default": false,
@@ -70,46 +24,6 @@
       "classification": "aggregate_default",
       "mapped_crate_feature": "labby/all",
       "exception_reason": "aggregate/default feature"
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "apprise",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/apprise",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "arcane",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/arcane",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "beads",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/beads",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "bytestash",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/bytestash",
-      "exception_reason": null
     },
     {
       "crate_name": "lab-apis",
@@ -133,16 +47,6 @@
     },
     {
       "crate_name": "lab-apis",
-      "feature": "dozzle",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/dozzle",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
       "feature": "extract",
       "dependencies": [
         "dep:russh",
@@ -159,300 +63,12 @@
     },
     {
       "crate_name": "lab-apis",
-      "feature": "freshrss",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/freshrss",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "glances",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/glances",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "gotify",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/gotify",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "immich",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/immich",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "jellyfin",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/jellyfin",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "linkding",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/linkding",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "loggifly",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/loggifly",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
       "feature": "mcpregistry",
       "dependencies": [],
       "included_in_default": false,
       "included_in_all": true,
       "classification": "service_passthrough",
       "mapped_crate_feature": "labby/mcpregistry",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "memos",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/memos",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "navidrome",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/navidrome",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "neo4j",
-      "dependencies": [
-        "dep:neo4rs"
-      ],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/neo4j",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "notebooklm",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/notebooklm",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "openacp",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/openacp",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "openai",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/openai",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "overseerr",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/overseerr",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "paperless",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/paperless",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "pihole",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/pihole",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "plex",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/plex",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "prowlarr",
-      "dependencies": [
-        "servarr"
-      ],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/prowlarr",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "qbittorrent",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/qbittorrent",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "qdrant",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/qdrant",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "radarr",
-      "dependencies": [
-        "servarr"
-      ],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/radarr",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "sabnzbd",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/sabnzbd",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "scrutiny",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/scrutiny",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "servarr",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "helper_internal",
-      "mapped_crate_feature": null,
-      "exception_reason": "helper/internal feature"
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "sonarr",
-      "dependencies": [
-        "servarr"
-      ],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/sonarr",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "tailscale",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/tailscale",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "tautulli",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/tautulli",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "tei",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/tei",
       "exception_reason": null
     },
     {
@@ -464,38 +80,6 @@
       "classification": "helper_internal",
       "mapped_crate_feature": "labby/test-utils",
       "exception_reason": "helper/internal feature"
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "unifi",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/unifi",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "unraid",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/unraid",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "uptime_kuma",
-      "dependencies": [
-        "dep:rust_socketio"
-      ],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/uptime_kuma",
-      "exception_reason": null
     },
     {
       "crate_name": "labby",
@@ -511,96 +95,22 @@
     },
     {
       "crate_name": "labby",
-      "feature": "adguard",
-      "dependencies": [
-        "lab-apis/adguard"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/adguard",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
       "feature": "all",
       "dependencies": [
         "lab-apis/all",
-        "controller",
-        "services-all",
-        "lab-admin"
+        "lab-admin",
+        "acp_registry",
+        "deploy",
+        "extract",
+        "mcpregistry",
+        "gateway",
+        "marketplace"
       ],
       "included_in_default": true,
       "included_in_all": true,
       "classification": "aggregate_default",
       "mapped_crate_feature": "lab-apis/all",
       "exception_reason": "aggregate/default feature"
-    },
-    {
-      "crate_name": "labby",
-      "feature": "apprise",
-      "dependencies": [
-        "lab-apis/apprise"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/apprise",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "arcane",
-      "dependencies": [
-        "lab-apis/arcane"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/arcane",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "beads",
-      "dependencies": [
-        "lab-apis/beads"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/beads",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "bytestash",
-      "dependencies": [
-        "lab-apis/bytestash"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/bytestash",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "controller",
-      "dependencies": [
-        "gateway",
-        "marketplace",
-        "deploy",
-        "extract",
-        "fs",
-        "acp_registry",
-        "dep:clap_complete"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "helper_internal",
-      "mapped_crate_feature": null,
-      "exception_reason": "helper/internal feature"
     },
     {
       "crate_name": "labby",
@@ -629,18 +139,6 @@
     },
     {
       "crate_name": "labby",
-      "feature": "dozzle",
-      "dependencies": [
-        "lab-apis/dozzle"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/dozzle",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
       "feature": "extract",
       "dependencies": [
         "lab-apis/extract"
@@ -653,18 +151,6 @@
     },
     {
       "crate_name": "labby",
-      "feature": "freshrss",
-      "dependencies": [
-        "lab-apis/freshrss"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/freshrss",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
       "feature": "fs",
       "dependencies": [
         "dep:walkdir",
@@ -672,8 +158,8 @@
         "dep:unicode-normalization",
         "dep:rustix"
       ],
-      "included_in_default": true,
-      "included_in_all": true,
+      "included_in_default": false,
+      "included_in_all": false,
       "classification": "binary_only",
       "mapped_crate_feature": null,
       "exception_reason": "binary-only Lab feature"
@@ -690,54 +176,6 @@
     },
     {
       "crate_name": "labby",
-      "feature": "glances",
-      "dependencies": [
-        "lab-apis/glances"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/glances",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "gotify",
-      "dependencies": [
-        "lab-apis/gotify"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/gotify",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "immich",
-      "dependencies": [
-        "lab-apis/immich"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/immich",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "jellyfin",
-      "dependencies": [
-        "lab-apis/jellyfin"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/jellyfin",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
       "feature": "lab-admin",
       "dependencies": [],
       "included_in_default": true,
@@ -745,30 +183,6 @@
       "classification": "binary_only",
       "mapped_crate_feature": null,
       "exception_reason": "binary-only Lab feature"
-    },
-    {
-      "crate_name": "labby",
-      "feature": "linkding",
-      "dependencies": [
-        "lab-apis/linkding"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/linkding",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "loggifly",
-      "dependencies": [
-        "lab-apis/loggifly"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/loggifly",
-      "exception_reason": null
     },
     {
       "crate_name": "labby",
@@ -796,42 +210,6 @@
     },
     {
       "crate_name": "labby",
-      "feature": "memos",
-      "dependencies": [
-        "lab-apis/memos"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/memos",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "navidrome",
-      "dependencies": [
-        "lab-apis/navidrome"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/navidrome",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "neo4j",
-      "dependencies": [
-        "lab-apis/neo4j"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/neo4j",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
       "feature": "node-runtime",
       "dependencies": [],
       "included_in_default": false,
@@ -842,218 +220,13 @@
     },
     {
       "crate_name": "labby",
-      "feature": "notebooklm",
-      "dependencies": [
-        "lab-apis/notebooklm"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/notebooklm",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "openacp",
-      "dependencies": [
-        "lab-apis/openacp"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/openacp",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "openai",
-      "dependencies": [
-        "lab-apis/openai"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/openai",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "overseerr",
-      "dependencies": [
-        "lab-apis/overseerr"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/overseerr",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "paperless",
-      "dependencies": [
-        "lab-apis/paperless"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/paperless",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "pihole",
-      "dependencies": [
-        "lab-apis/pihole"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/pihole",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "plex",
-      "dependencies": [
-        "lab-apis/plex"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/plex",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "prowlarr",
-      "dependencies": [
-        "lab-apis/prowlarr"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/prowlarr",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "qbittorrent",
-      "dependencies": [
-        "lab-apis/qbittorrent"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/qbittorrent",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "qdrant",
-      "dependencies": [
-        "lab-apis/qdrant"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/qdrant",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "radarr",
-      "dependencies": [
-        "lab-apis/radarr"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/radarr",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "sabnzbd",
-      "dependencies": [
-        "lab-apis/sabnzbd"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/sabnzbd",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "scrutiny",
-      "dependencies": [
-        "lab-apis/scrutiny"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/scrutiny",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
       "feature": "services-all",
-      "dependencies": [
-        "radarr",
-        "sonarr",
-        "prowlarr",
-        "overseerr",
-        "plex",
-        "tautulli",
-        "sabnzbd",
-        "qbittorrent",
-        "tailscale",
-        "unraid",
-        "unifi",
-        "arcane",
-        "linkding",
-        "memos",
-        "beads",
-        "bytestash",
-        "paperless",
-        "gotify",
-        "jellyfin",
-        "adguard",
-        "glances",
-        "pihole",
-        "neo4j",
-        "uptime_kuma",
-        "immich",
-        "loggifly",
-        "navidrome",
-        "scrutiny",
-        "freshrss",
-        "openacp",
-        "apprise",
-        "openai",
-        "notebooklm",
-        "qdrant",
-        "tei",
-        "dozzle"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
+      "dependencies": [],
+      "included_in_default": false,
+      "included_in_all": false,
       "classification": "intentional_exception",
       "mapped_crate_feature": null,
       "exception_reason": "intentional crate-local exception"
-    },
-    {
-      "crate_name": "labby",
-      "feature": "sonarr",
-      "dependencies": [
-        "lab-apis/sonarr"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/sonarr",
-      "exception_reason": null
     },
     {
       "crate_name": "labby",
@@ -1069,42 +242,6 @@
     },
     {
       "crate_name": "labby",
-      "feature": "tailscale",
-      "dependencies": [
-        "lab-apis/tailscale"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/tailscale",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "tautulli",
-      "dependencies": [
-        "lab-apis/tautulli"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/tautulli",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "tei",
-      "dependencies": [
-        "lab-apis/tei"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/tei",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
       "feature": "test-utils",
       "dependencies": [],
       "included_in_default": false,
@@ -1112,42 +249,6 @@
       "classification": "intentional_exception",
       "mapped_crate_feature": "lab-apis/test-utils",
       "exception_reason": "intentional crate-local exception"
-    },
-    {
-      "crate_name": "labby",
-      "feature": "unifi",
-      "dependencies": [
-        "lab-apis/unifi"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/unifi",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "unraid",
-      "dependencies": [
-        "lab-apis/unraid"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/unraid",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "uptime_kuma",
-      "dependencies": [
-        "lab-apis/uptime_kuma"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/uptime_kuma",
-      "exception_reason": null
     }
   ],
   "mismatches": []

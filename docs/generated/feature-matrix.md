@@ -7,97 +7,23 @@ Feature invariant status: clean.
 | Crate | Feature | Class | In Default | In All | Maps To | Dependencies |
 | --- | --- | --- | --- | --- | --- | --- |
 | lab-apis | `acp_registry` | ServicePassthrough | false | true | labby/acp_registry |  |
-| lab-apis | `adguard` | ServicePassthrough | false | true | labby/adguard |  |
-| lab-apis | `all` | AggregateDefault | false | false | labby/all | `radarr`<br>`sonarr`<br>`prowlarr`<br>`overseerr`<br>`plex`<br>`tautulli`<br>`sabnzbd`<br>`qbittorrent`<br>`tailscale`<br>`linkding`<br>`memos`<br>`beads`<br>`bytestash`<br>`paperless`<br>`arcane`<br>`unraid`<br>`unifi`<br>`gotify`<br>`jellyfin`<br>`adguard`<br>`glances`<br>`pihole`<br>`neo4j`<br>`uptime_kuma`<br>`immich`<br>`loggifly`<br>`navidrome`<br>`scrutiny`<br>`freshrss`<br>`openacp`<br>`openai`<br>`notebooklm`<br>`qdrant`<br>`tei`<br>`apprise`<br>`deploy`<br>`mcpregistry`<br>`acp_registry`<br>`dozzle`<br>`extract` |
-| lab-apis | `apprise` | ServicePassthrough | false | true | labby/apprise |  |
-| lab-apis | `arcane` | ServicePassthrough | false | true | labby/arcane |  |
-| lab-apis | `beads` | ServicePassthrough | false | true | labby/beads |  |
-| lab-apis | `bytestash` | ServicePassthrough | false | true | labby/bytestash |  |
+| lab-apis | `all` | AggregateDefault | false | false | labby/all | `deploy`<br>`mcpregistry`<br>`acp_registry`<br>`extract` |
 | lab-apis | `default` | AggregateDefault | false | false | labby/default |  |
 | lab-apis | `deploy` | ServicePassthrough | false | true | labby/deploy |  |
-| lab-apis | `dozzle` | ServicePassthrough | false | true | labby/dozzle |  |
 | lab-apis | `extract` | ServicePassthrough | false | true | labby/extract | `dep:russh`<br>`dep:russh-sftp`<br>`dep:russh-config`<br>`dep:quick-xml`<br>`dep:rusqlite` |
-| lab-apis | `freshrss` | ServicePassthrough | false | true | labby/freshrss |  |
-| lab-apis | `glances` | ServicePassthrough | false | true | labby/glances |  |
-| lab-apis | `gotify` | ServicePassthrough | false | true | labby/gotify |  |
-| lab-apis | `immich` | ServicePassthrough | false | true | labby/immich |  |
-| lab-apis | `jellyfin` | ServicePassthrough | false | true | labby/jellyfin |  |
-| lab-apis | `linkding` | ServicePassthrough | false | true | labby/linkding |  |
-| lab-apis | `loggifly` | ServicePassthrough | false | true | labby/loggifly |  |
 | lab-apis | `mcpregistry` | ServicePassthrough | false | true | labby/mcpregistry |  |
-| lab-apis | `memos` | ServicePassthrough | false | true | labby/memos |  |
-| lab-apis | `navidrome` | ServicePassthrough | false | true | labby/navidrome |  |
-| lab-apis | `neo4j` | ServicePassthrough | false | true | labby/neo4j | `dep:neo4rs` |
-| lab-apis | `notebooklm` | ServicePassthrough | false | true | labby/notebooklm |  |
-| lab-apis | `openacp` | ServicePassthrough | false | true | labby/openacp |  |
-| lab-apis | `openai` | ServicePassthrough | false | true | labby/openai |  |
-| lab-apis | `overseerr` | ServicePassthrough | false | true | labby/overseerr |  |
-| lab-apis | `paperless` | ServicePassthrough | false | true | labby/paperless |  |
-| lab-apis | `pihole` | ServicePassthrough | false | true | labby/pihole |  |
-| lab-apis | `plex` | ServicePassthrough | false | true | labby/plex |  |
-| lab-apis | `prowlarr` | ServicePassthrough | false | true | labby/prowlarr | `servarr` |
-| lab-apis | `qbittorrent` | ServicePassthrough | false | true | labby/qbittorrent |  |
-| lab-apis | `qdrant` | ServicePassthrough | false | true | labby/qdrant |  |
-| lab-apis | `radarr` | ServicePassthrough | false | true | labby/radarr | `servarr` |
-| lab-apis | `sabnzbd` | ServicePassthrough | false | true | labby/sabnzbd |  |
-| lab-apis | `scrutiny` | ServicePassthrough | false | true | labby/scrutiny |  |
-| lab-apis | `servarr` | HelperInternal | false | true | - |  |
-| lab-apis | `sonarr` | ServicePassthrough | false | true | labby/sonarr | `servarr` |
-| lab-apis | `tailscale` | ServicePassthrough | false | true | labby/tailscale |  |
-| lab-apis | `tautulli` | ServicePassthrough | false | true | labby/tautulli |  |
-| lab-apis | `tei` | ServicePassthrough | false | true | labby/tei |  |
 | lab-apis | `test-utils` | HelperInternal | false | false | labby/test-utils |  |
-| lab-apis | `unifi` | ServicePassthrough | false | true | labby/unifi |  |
-| lab-apis | `unraid` | ServicePassthrough | false | true | labby/unraid |  |
-| lab-apis | `uptime_kuma` | ServicePassthrough | false | true | labby/uptime_kuma | `dep:rust_socketio` |
 | labby | `acp_registry` | ServicePassthrough | true | true | lab-apis/acp_registry | `lab-apis/acp_registry` |
-| labby | `adguard` | ServicePassthrough | true | true | lab-apis/adguard | `lab-apis/adguard` |
-| labby | `all` | AggregateDefault | true | true | lab-apis/all | `lab-apis/all`<br>`controller`<br>`services-all`<br>`lab-admin` |
-| labby | `apprise` | ServicePassthrough | true | true | lab-apis/apprise | `lab-apis/apprise` |
-| labby | `arcane` | ServicePassthrough | true | true | lab-apis/arcane | `lab-apis/arcane` |
-| labby | `beads` | ServicePassthrough | true | true | lab-apis/beads | `lab-apis/beads` |
-| labby | `bytestash` | ServicePassthrough | true | true | lab-apis/bytestash | `lab-apis/bytestash` |
-| labby | `controller` | HelperInternal | true | true | - | `gateway`<br>`marketplace`<br>`deploy`<br>`extract`<br>`fs`<br>`acp_registry`<br>`dep:clap_complete` |
+| labby | `all` | AggregateDefault | true | true | lab-apis/all | `lab-apis/all`<br>`lab-admin`<br>`acp_registry`<br>`deploy`<br>`extract`<br>`mcpregistry`<br>`gateway`<br>`marketplace` |
 | labby | `default` | AggregateDefault | false | false | lab-apis/default | `all` |
 | labby | `deploy` | ServicePassthrough | true | true | lab-apis/deploy | `lab-apis/deploy`<br>`dep:regex` |
-| labby | `dozzle` | ServicePassthrough | true | true | lab-apis/dozzle | `lab-apis/dozzle` |
 | labby | `extract` | ServicePassthrough | true | true | lab-apis/extract | `lab-apis/extract` |
-| labby | `freshrss` | ServicePassthrough | true | true | lab-apis/freshrss | `lab-apis/freshrss` |
-| labby | `fs` | BinaryOnly | true | true | - | `dep:walkdir`<br>`dep:globset`<br>`dep:unicode-normalization`<br>`dep:rustix` |
+| labby | `fs` | BinaryOnly | false | false | - | `dep:walkdir`<br>`dep:globset`<br>`dep:unicode-normalization`<br>`dep:rustix` |
 | labby | `gateway` | IntentionalException | true | true | - |  |
-| labby | `glances` | ServicePassthrough | true | true | lab-apis/glances | `lab-apis/glances` |
-| labby | `gotify` | ServicePassthrough | true | true | lab-apis/gotify | `lab-apis/gotify` |
-| labby | `immich` | ServicePassthrough | true | true | lab-apis/immich | `lab-apis/immich` |
-| labby | `jellyfin` | ServicePassthrough | true | true | lab-apis/jellyfin | `lab-apis/jellyfin` |
 | labby | `lab-admin` | BinaryOnly | true | true | - |  |
-| labby | `linkding` | ServicePassthrough | true | true | lab-apis/linkding | `lab-apis/linkding` |
-| labby | `loggifly` | ServicePassthrough | true | true | lab-apis/loggifly | `lab-apis/loggifly` |
 | labby | `marketplace` | IntentionalException | true | true | - | `mcpregistry` |
 | labby | `mcpregistry` | ServicePassthrough | true | true | lab-apis/mcpregistry | `lab-apis/mcpregistry` |
-| labby | `memos` | ServicePassthrough | true | true | lab-apis/memos | `lab-apis/memos` |
-| labby | `navidrome` | ServicePassthrough | true | true | lab-apis/navidrome | `lab-apis/navidrome` |
-| labby | `neo4j` | ServicePassthrough | true | true | lab-apis/neo4j | `lab-apis/neo4j` |
 | labby | `node-runtime` | IntentionalException | false | false | - |  |
-| labby | `notebooklm` | ServicePassthrough | true | true | lab-apis/notebooklm | `lab-apis/notebooklm` |
-| labby | `openacp` | ServicePassthrough | true | true | lab-apis/openacp | `lab-apis/openacp` |
-| labby | `openai` | ServicePassthrough | true | true | lab-apis/openai | `lab-apis/openai` |
-| labby | `overseerr` | ServicePassthrough | true | true | lab-apis/overseerr | `lab-apis/overseerr` |
-| labby | `paperless` | ServicePassthrough | true | true | lab-apis/paperless | `lab-apis/paperless` |
-| labby | `pihole` | ServicePassthrough | true | true | lab-apis/pihole | `lab-apis/pihole` |
-| labby | `plex` | ServicePassthrough | true | true | lab-apis/plex | `lab-apis/plex` |
-| labby | `prowlarr` | ServicePassthrough | true | true | lab-apis/prowlarr | `lab-apis/prowlarr` |
-| labby | `qbittorrent` | ServicePassthrough | true | true | lab-apis/qbittorrent | `lab-apis/qbittorrent` |
-| labby | `qdrant` | ServicePassthrough | true | true | lab-apis/qdrant | `lab-apis/qdrant` |
-| labby | `radarr` | ServicePassthrough | true | true | lab-apis/radarr | `lab-apis/radarr` |
-| labby | `sabnzbd` | ServicePassthrough | true | true | lab-apis/sabnzbd | `lab-apis/sabnzbd` |
-| labby | `scrutiny` | ServicePassthrough | true | true | lab-apis/scrutiny | `lab-apis/scrutiny` |
-| labby | `services-all` | IntentionalException | true | true | - | `radarr`<br>`sonarr`<br>`prowlarr`<br>`overseerr`<br>`plex`<br>`tautulli`<br>`sabnzbd`<br>`qbittorrent`<br>`tailscale`<br>`unraid`<br>`unifi`<br>`arcane`<br>`linkding`<br>`memos`<br>`beads`<br>`bytestash`<br>`paperless`<br>`gotify`<br>`jellyfin`<br>`adguard`<br>`glances`<br>`pihole`<br>`neo4j`<br>`uptime_kuma`<br>`immich`<br>`loggifly`<br>`navidrome`<br>`scrutiny`<br>`freshrss`<br>`openacp`<br>`apprise`<br>`openai`<br>`notebooklm`<br>`qdrant`<br>`tei`<br>`dozzle` |
-| labby | `sonarr` | ServicePassthrough | true | true | lab-apis/sonarr | `lab-apis/sonarr` |
+| labby | `services-all` | IntentionalException | false | false | - |  |
 | labby | `systemd` | HelperInternal | false | false | - | `dep:sd-notify` |
-| labby | `tailscale` | ServicePassthrough | true | true | lab-apis/tailscale | `lab-apis/tailscale` |
-| labby | `tautulli` | ServicePassthrough | true | true | lab-apis/tautulli | `lab-apis/tautulli` |
-| labby | `tei` | ServicePassthrough | true | true | lab-apis/tei | `lab-apis/tei` |
 | labby | `test-utils` | IntentionalException | false | false | lab-apis/test-utils |  |
-| labby | `unifi` | ServicePassthrough | true | true | lab-apis/unifi | `lab-apis/unifi` |
-| labby | `unraid` | ServicePassthrough | true | true | lab-apis/unraid | `lab-apis/unraid` |
-| labby | `uptime_kuma` | ServicePassthrough | true | true | lab-apis/uptime_kuma | `lab-apis/uptime_kuma` |

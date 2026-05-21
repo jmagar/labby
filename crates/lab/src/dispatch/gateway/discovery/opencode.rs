@@ -6,10 +6,18 @@ use super::{DiscoveredServer, entry_to_upstream, env_key_count, read_json};
 
 /// OpenCode uses the `mcp` key only (no root fallback, no `mcpServers`).
 pub fn discover(home: &Path) -> Vec<DiscoveredServer> {
+    let xdg = std::env::var("XDG_CONFIG_HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    discover_with_xdg(home, xdg.as_deref())
+}
+
+fn discover_with_xdg(home: &Path, xdg: Option<&Path>) -> Vec<DiscoveredServer> {
     let now = jiff::Timestamp::now().to_string();
     let mut results = Vec::new();
 
-    for path in candidate_paths(home) {
+    for path in candidate_paths(home, xdg) {
         let Some(value) = read_json(&path) else {
             continue;
         };
@@ -44,32 +52,19 @@ mod tests {
         std::fs::write(p, content).unwrap();
     }
 
-    /// Return the opencode config dir that `candidate_paths` will use for the
-    /// given `home`, replicating the same XDG / default logic so the tests are
-    /// not broken by an ambient `XDG_CONFIG_HOME` on the test runner.
-    fn opencode_config_dir(home: &Path) -> std::path::PathBuf {
-        let xdg = std::env::var("XDG_CONFIG_HOME")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(std::path::PathBuf::from);
-        xdg.map(|x| x.join("opencode"))
-            .unwrap_or_else(|| home.join(".config/opencode"))
-    }
-
+    /// Drive `discover_with_xdg` with an explicit XDG path under the test
+    /// home so the test is immune to the runner's ambient XDG_CONFIG_HOME
+    /// (CI runners may set it to an absolute path outside the TempDir).
     #[test]
     fn discovers_from_default_config_dir() {
         let dir = TempDir::new().unwrap();
-        let config_dir = opencode_config_dir(dir.path());
-        let rel = config_dir
-            .strip_prefix(dir.path())
-            .expect("config dir must be under home")
-            .join("opencode.json");
         write(
             dir.path(),
-            rel.to_str().unwrap(),
+            ".config/opencode/opencode.json",
             r#"{"mcp": {"my-server": {"command": "node", "args": ["server.js"]}}}"#,
         );
-        let results = super::discover(dir.path());
+        let xdg = dir.path().join(".config");
+        let results = super::discover_with_xdg(dir.path(), Some(&xdg));
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "my-server");
         assert_eq!(results[0].source_client, "opencode");
@@ -78,23 +73,19 @@ mod tests {
     #[test]
     fn mcp_key_only_no_mcp_servers_fallback() {
         let dir = TempDir::new().unwrap();
-        let config_dir = opencode_config_dir(dir.path());
-        let rel = config_dir
-            .strip_prefix(dir.path())
-            .expect("config dir must be under home")
-            .join("opencode.json");
         // opencode only uses "mcp" key, NOT "mcpServers"
         write(
             dir.path(),
-            rel.to_str().unwrap(),
+            ".config/opencode/opencode.json",
             r#"{"mcpServers": {"wrong-key": {"command": "node"}}}"#,
         );
-        let results = super::discover(dir.path());
+        let xdg = dir.path().join(".config");
+        let results = super::discover_with_xdg(dir.path(), Some(&xdg));
         assert!(results.is_empty(), "opencode must not use mcpServers key");
     }
 }
 
-fn candidate_paths(home: &Path) -> Vec<PathBuf> {
+fn candidate_paths(home: &Path, xdg: Option<&Path>) -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
     // Env override — reject empty strings; an empty OPENCODE_CONFIG would produce
@@ -114,13 +105,6 @@ fn candidate_paths(home: &Path) -> Vec<PathBuf> {
         paths.push(dir.join("opencode.json"));
     }
 
-    // XDG / default config dirs
-    #[cfg(not(target_os = "windows"))]
-    let xdg = std::env::var("XDG_CONFIG_HOME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from);
-
     #[cfg(target_os = "windows")]
     let default_config_dir = std::env::var("APPDATA")
         .map(PathBuf::from)
@@ -129,7 +113,6 @@ fn candidate_paths(home: &Path) -> Vec<PathBuf> {
 
     #[cfg(not(target_os = "windows"))]
     let default_config_dir = xdg
-        .clone()
         .map(|x| x.join("opencode"))
         .unwrap_or_else(|| home.join(".config/opencode"));
 

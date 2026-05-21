@@ -16,58 +16,19 @@ Commands:
   docs         Generate and verify code-owned documentation artifacts
   nodes        Query nodes from the configured controller
   health       Quick reachability check for configured services
-  plugins      Open the plugin manager TUI
-  audit        Audit service onboarding against the repo contract
   install      Install one or more services into `.mcp.json`
   uninstall    Uninstall services from `.mcp.json`
   init         First-time setup wizard
   setup        Open the web-based first-run wizard (or settings) — lab-bg3e.3
   help         Print the service + action catalog
-  scaffold     Generate a new service onboarding scaffold
-  completions  Generate shell completions
-  extract      Scan a local or SSH appdata path and extract service credentials
+  extract      Generate shell completions. Scan a local or SSH appdata path and extract service credentials
   gateway      Manage proxied upstream MCP gateways
   oauth        Run local OAuth callback relay helpers
   logs         Search fleet logs on the configured master
   marketplace  Claude plugin marketplace manager
+  registry     MCP Registry — look up and install servers from registry.modelcontextprotocol.io
   stash        Component versioning and deployment
-  radarr       Radarr movie collection manager
-  sonarr       Sonarr TV series manager
-  prowlarr     Prowlarr indexer manager
-  plex         Plex media server
-  tautulli     Tautulli Plex analytics
-  sabnzbd      `SABnzbd` download client
-  qbittorrent  qBittorrent download client
-  tailscale    Tailscale VPN network
-  linkding     Linkding bookmark manager
-  memos        Memos note-taking service
-  beads        Beads issue tracker
-  bytestash    Bytestash snippet manager
-  paperless    Paperless-ngx document manager
-  arcane       Arcane Docker management UI
-  unraid       Unraid server management
-  unifi        `UniFi` network management
-  overseerr    Overseerr media request manager
-  gotify       Gotify push notifications
-  openai       `OpenAI` API client
-  openacp      Upstream OpenACP daemon
-  notebooklm   Google NotebookLM client
-  qdrant       Qdrant vector database
-  tei          HF Text Embeddings Inference
-  apprise      Apprise notification dispatcher
-  deploy       Deploy the local lab release binary to SSH targets
-  dozzle       `lab dozzle` arguments
-  immich       `lab immich` arguments
-  jellyfin     Jellyfin media server
-  navidrome    `lab navidrome` arguments
-  scrutiny     `lab scrutiny` arguments
-  freshrss     `lab freshrss` arguments
-  loggifly     `lab loggifly` arguments
-  adguard      `lab adguard` arguments
-  glances      `lab glances` arguments
-  uptime-kuma  `lab uptime-kuma` arguments
-  pihole       `lab pihole` arguments
-  neo4j        `lab neo4j` arguments
+  deploy       Radarr movie collection manager. Sonarr TV series manager. Prowlarr indexer manager. Plex media server. Tautulli Plex analytics. `SABnzbd` download client. qBittorrent download client. Tailscale VPN network. Linkding bookmark manager. Memos note-taking service. Beads issue tracker. Bytestash snippet manager. Paperless-ngx document manager. Arcane Docker management UI. Unraid server management. `UniFi` network management. Overseerr media request manager. Gotify push notifications. `OpenAI` API client. Upstream OpenACP daemon. Google NotebookLM client. Qdrant vector database. HF Text Embeddings Inference. Apprise notification dispatcher. Deploy the local lab release binary to SSH targets
 
 Options:
       --json
@@ -619,76 +580,6 @@ Options:
           Print help
 ```
 
-## `labby plugins`
-
-```text
-Open the plugin manager TUI
-
-Usage: plugins [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby audit`
-
-```text
-Audit service onboarding against the repo contract
-
-Usage: audit [OPTIONS] <COMMAND>
-
-Commands:
-  onboarding  Audit onboarding for one or more services
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby audit onboarding`
-
-```text
-Audit onboarding for one or more services
-
-Usage: onboarding [OPTIONS] <SERVICES>...
-
-Arguments:
-  <SERVICES>...
-          Services to audit
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
 ## `labby install`
 
 ```text
@@ -768,10 +659,16 @@ Open the web-based first-run wizard (or settings) — lab-bg3e.3
 Usage: setup [OPTIONS] [COMMAND]
 
 Commands:
-  installed-plugins  List installed Claude Code lab plugins
-  services-status    Join service configuration, draft, and Claude plugin state
-  install-plugin     Install the Claude Code plugin for a configured service
-  uninstall-plugin   Uninstall the Claude Code plugin for a service
+  installed-plugins    List installed Claude Code lab plugins
+  services-status      Join service configuration, draft, and Claude plugin state
+  plugin-hook          Run binary-owned local setup checks for Claude plugin hooks
+  plugin-sync          Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.lab/.env as LAB_* vars
+  plugin-export        Read ~/.lab/.env and print current values keyed by userConfig field name
+  plugin-connectivity  Validate connectivity to the lab MCP server
+  check                Check local setup prerequisites without mutating the filesystem
+  repair               Repair missing local setup prerequisites without contacting external services
+  install-plugin       Install the Claude Code plugin for a configured service
+  uninstall-plugin     Uninstall the Claude Code plugin for a service
 
 Options:
       --json
@@ -832,6 +729,144 @@ Options:
 Join service configuration, draft, and Claude plugin state
 
 Usage: services-status [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup plugin-hook`
+
+```text
+Run binary-owned local setup checks for Claude plugin hooks
+
+Usage: plugin-hook [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --no-repair
+          Check only; do not create missing local setup files
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup plugin-sync`
+
+```text
+Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.lab/.env as LAB_* vars
+
+Usage: plugin-sync [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+  -y, --yes
+          Skip confirmation for this destructive action
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --dry-run
+          Print what would be dispatched without executing
+
+  -h, --help
+          Print help
+```
+
+## `labby setup plugin-export`
+
+```text
+Read ~/.lab/.env and print current values keyed by userConfig field name
+
+Usage: plugin-export [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup plugin-connectivity`
+
+```text
+Validate connectivity to the lab MCP server
+
+Usage: plugin-connectivity [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --server-url <SERVER_URL>
+          Server URL to probe; defaults to CLAUDE_PLUGIN_OPTION_SERVER_URL or http://localhost:8765
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup check`
+
+```text
+Check local setup prerequisites without mutating the filesystem
+
+Usage: check [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup repair`
+
+```text
+Repair missing local setup prerequisites without contacting external services
+
+Usage: repair [OPTIONS]
 
 Options:
       --json
@@ -933,101 +968,10 @@ Options:
           Print help
 ```
 
-## `labby scaffold`
-
-```text
-Generate a new service onboarding scaffold
-
-Usage: scaffold [OPTIONS] <COMMAND>
-
-Commands:
-  service  Scaffold one service
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby scaffold service`
-
-```text
-Scaffold one service
-
-Usage: service [OPTIONS] <SERVICE>
-
-Arguments:
-  <SERVICE>
-          Service name
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --kind <KIND>
-          Service kind
-
-          Possible values:
-          - http:     HTTP service with CLI, MCP, and API adapters
-          - non-http: Non-HTTP service that still participates in the onboarding contract
-
-          [default: http]
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --dry-run
-          Only show the planned file operations
-
-  -y, --yes
-          Confirm that scaffold writes are allowed
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
-## `labby completions`
-
-```text
-Generate shell completions
-
-Usage: completions [OPTIONS] <SHELL>
-
-Arguments:
-  <SHELL>
-          Target shell
-
-          [possible values: bash, elvish, fish, powershell, zsh]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
 ## `labby extract`
 
 ```text
-Scan a local or SSH appdata path and extract service credentials
+Generate shell completions. Scan a local or SSH appdata path and extract service credentials
 
 Usage: extract [OPTIONS] [URI]
 
@@ -1086,6 +1030,9 @@ Commands:
   tool-search
   reload
   mcp
+  discover         Scan the machine for MCP server configs from known editors and tools (read-only)
+  import           Import discovered MCP servers into the gateway (disabled by default)
+  pending          Manage pending discovered servers waiting for approval
   public-urls      Show resolved public URL configuration (app and MCP gateway)
 
 Options:
@@ -1975,6 +1922,175 @@ Options:
           Print help
 ```
 
+## `labby gateway discover`
+
+```text
+Scan the machine for MCP server configs from known editors and tools (read-only)
+
+Usage: discover [OPTIONS]
+
+Options:
+      --clients <CLIENTS>
+          Limit scan to specific client kinds (comma-separated: cursor,claude-code,vscode,...)
+
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --include-existing
+          Also show servers already present in the gateway config
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway import`
+
+```text
+Import discovered MCP servers into the gateway (disabled by default)
+
+Usage: import [OPTIONS]
+
+Options:
+      --all
+          Import every discovered server not already in the gateway config
+
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --name <NAMES>
+          Specific server names to import (space-separated)
+
+      --clients <CLIENTS>
+          Limit discovery to specific client kinds (comma-separated)
+
+  -y, --yes
+          Skip confirmation for the destructive config import
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway pending`
+
+```text
+Manage pending discovered servers waiting for approval
+
+Usage: pending [OPTIONS] <COMMAND>
+
+Commands:
+  list     List discovered servers waiting for approval
+  approve  Approve a pending server and add it to the gateway (disabled by default)
+  reject   Reject a pending server and tombstone it so it never re-appears
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway pending list`
+
+```text
+List discovered servers waiting for approval
+
+Usage: list [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway pending approve`
+
+```text
+Approve a pending server and add it to the gateway (disabled by default)
+
+Usage: approve [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+  -y, --yes
+          Skip the destructive-action confirmation prompt
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --dry-run
+          Print what would be done without executing
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway pending reject`
+
+```text
+Reject a pending server and tombstone it so it never re-appears
+
+Usage: reject [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+  -y, --yes
+          Skip the destructive-action confirmation prompt
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --dry-run
+          Print what would be done without executing
+
+  -h, --help
+          Print help
+```
+
 ## `labby gateway public-urls`
 
 ```text
@@ -2370,6 +2486,69 @@ Options:
           Print help
 ```
 
+## `labby registry`
+
+```text
+MCP Registry — look up and install servers from registry.modelcontextprotocol.io
+
+Usage: registry [OPTIONS] <COMMAND>
+
+Commands:
+  install  Fetch a server from the MCP registry and add it to the local gateway
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby registry install`
+
+```text
+Fetch a server from the MCP registry and add it to the local gateway
+
+Usage: install [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          Qualified registry server name (e.g. `io.modelcontextprotocol/everything`)
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --version <VERSION>
+          Pinned version to install (default: latest)
+
+      --bearer-env <ENV_VAR>
+          Environment variable name that holds the bearer token for this gateway entry.
+
+          Must be a valid env var name (e.g. `MY_SERVICE_TOKEN`), not the raw token value.  If omitted, no bearer auth is configured on the new gateway entry.
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --gateway-name <GATEWAY_NAME>
+          Override the gateway entry name.  Defaults to the registry server name
+
+  -y, --yes
+          Skip the destructive-action confirmation prompt (required for non-interactive use)
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
 ## `labby stash`
 
 ```text
@@ -2406,1847 +2585,10 @@ Options:
           Print help
 ```
 
-## `labby radarr`
-
-```text
-Radarr movie collection manager
-
-Usage: radarr [OPTIONS] [COMMAND]
-
-Commands:
-  help                        Return the Radarr action catalog
-  system-status               Return Radarr system status and version
-  system-health               Return Radarr health check results
-  system-disk-space           Return disk space information for all drives
-  system-logs                 Return list of available log files
-  system-updates              Return available Radarr updates
-  movie-list                  List all movies in the Radarr library
-  movie-get                   Get a single movie by its Radarr ID
-  movie-lookup                Search for movies to add (TMDB / IMDB lookup)
-  movie-add                   Add a movie to Radarr for monitoring and download
-  movie-delete                Delete a movie from Radarr
-  queue-list                  List all items currently in the download queue
-  queue-remove                Remove an item from the download queue
-  calendar-list               List upcoming movie releases
-  command-refresh             Refresh metadata for one movie or all movies
-  command-search              Trigger a file search for one or more movies
-  command-get                 Get the status of a previously issued command
-  history-list                List download history
-  blocklist-list              List blocked releases
-  release-search              Search indexers for available releases for a movie
-  indexer-list                List configured indexers
-  indexer-test                Test an indexer connection
-  quality-profile-list        List quality profiles
-  quality-definition-list     List quality definitions
-  root-folder-list            List root folders
-  tag-list                    List all tags
-  tag-detail-list             List tags with full details
-  download-client-list        List configured download clients
-  download-client-test        Test a download client connection
-  remote-path-mapping-list    List remote path mappings
-  config-host                 Get host configuration
-  config-naming               Get file naming configuration
-  config-ui                   Get UI configuration
-  notification-list           List configured notifications
-  notification-test           Test a notification connection
-  import-list-list            List configured import lists
-  import-list-exclusion-list  List import list exclusions
-  language-list               List available languages
-  metadata-list               List metadata providers
-  filesystem-list             Browse the server filesystem
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr help`
-
-```text
-Return the Radarr action catalog
-
-Usage: help [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr system-status`
-
-```text
-Return Radarr system status and version
-
-Usage: system-status [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr system-health`
-
-```text
-Return Radarr health check results
-
-Usage: system-health [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr system-disk-space`
-
-```text
-Return disk space information for all drives
-
-Usage: system-disk-space [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr system-logs`
-
-```text
-Return list of available log files
-
-Usage: system-logs [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr system-updates`
-
-```text
-Return available Radarr updates
-
-Usage: system-updates [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr movie-list`
-
-```text
-List all movies in the Radarr library
-
-Usage: movie-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr movie-get`
-
-```text
-Get a single movie by its Radarr ID
-
-Usage: movie-get [OPTIONS] <ID>
-
-Arguments:
-  <ID>
-          Radarr movie ID
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr movie-lookup`
-
-```text
-Search for movies to add (TMDB / IMDB lookup)
-
-Usage: movie-lookup [OPTIONS] <QUERY>
-
-Arguments:
-  <QUERY>
-          Search term, TMDB ID (tmdb:12345), or IMDB ID (imdb:tt1234567)
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr movie-add`
-
-```text
-Add a movie to Radarr for monitoring and download
-
-Usage: movie-add [OPTIONS] --tmdb-id <TMDB_ID> --title <TITLE> --quality-profile-id <QUALITY_PROFILE_ID> --root-folder-path <ROOT_FOLDER_PATH>
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --tmdb-id <TMDB_ID>
-          TMDB ID of the movie
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --title <TITLE>
-          Movie title
-
-      --quality-profile-id <QUALITY_PROFILE_ID>
-          Quality profile ID (use quality-profile-list to find IDs)
-
-      --root-folder-path <ROOT_FOLDER_PATH>
-          Root folder path (use root-folder-list to find paths)
-
-      --monitored
-          Monitor movie for download (default true)
-
-      --year <YEAR>
-          Release year (default 0; use movie-lookup to retrieve from TMDB)
-
-          [default: 0]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr movie-delete`
-
-```text
-Delete a movie from Radarr
-
-Usage: movie-delete [OPTIONS] <ID>
-
-Arguments:
-  <ID>
-          Radarr movie ID
-
-Options:
-      --delete-files
-          Also delete files from disk
-
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation prompt
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr queue-list`
-
-```text
-List all items currently in the download queue
-
-Usage: queue-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr queue-remove`
-
-```text
-Remove an item from the download queue
-
-Usage: queue-remove [OPTIONS] <ID>
-
-Arguments:
-  <ID>
-          Queue item ID
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --remove-from-client
-          Remove from download client too (default true)
-
-      --blocklist
-          Add release to blocklist
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation prompt
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr calendar-list`
-
-```text
-List upcoming movie releases
-
-Usage: calendar-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --start <START>
-          Start date ISO 8601 (default today)
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --end <END>
-          End date ISO 8601 (default 7 days from now)
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr command-refresh`
-
-```text
-Refresh metadata for one movie or all movies
-
-Usage: command-refresh [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --movie-id <MOVIE_ID>
-          Movie ID to refresh (omit to refresh all)
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr command-search`
-
-```text
-Trigger a file search for one or more movies
-
-Usage: command-search [OPTIONS] [MOVIE_IDS]...
-
-Arguments:
-  [MOVIE_IDS]...
-          Radarr movie IDs to search (space-separated)
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr command-get`
-
-```text
-Get the status of a previously issued command
-
-Usage: command-get [OPTIONS] <ID>
-
-Arguments:
-  <ID>
-          Command ID
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr history-list`
-
-```text
-List download history
-
-Usage: history-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --page <PAGE>
-          Page number (default 1)
-
-          [default: 1]
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --page-size <PAGE_SIZE>
-          Items per page (default 10)
-
-          [default: 10]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr blocklist-list`
-
-```text
-List blocked releases
-
-Usage: blocklist-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr release-search`
-
-```text
-Search indexers for available releases for a movie
-
-Usage: release-search [OPTIONS] <MOVIE_ID>
-
-Arguments:
-  <MOVIE_ID>
-          Radarr movie ID
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr indexer-list`
-
-```text
-List configured indexers
-
-Usage: indexer-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr indexer-test`
-
-```text
-Test an indexer connection
-
-Usage: indexer-test [OPTIONS] <ID>
-
-Arguments:
-  <ID>
-          Indexer ID
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr quality-profile-list`
-
-```text
-List quality profiles
-
-Usage: quality-profile-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr quality-definition-list`
-
-```text
-List quality definitions
-
-Usage: quality-definition-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr root-folder-list`
-
-```text
-List root folders
-
-Usage: root-folder-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr tag-list`
-
-```text
-List all tags
-
-Usage: tag-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr tag-detail-list`
-
-```text
-List tags with full details
-
-Usage: tag-detail-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr download-client-list`
-
-```text
-List configured download clients
-
-Usage: download-client-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr download-client-test`
-
-```text
-Test a download client connection
-
-Usage: download-client-test [OPTIONS] <ID>
-
-Arguments:
-  <ID>
-          Download client ID
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr remote-path-mapping-list`
-
-```text
-List remote path mappings
-
-Usage: remote-path-mapping-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr config-host`
-
-```text
-Get host configuration
-
-Usage: config-host [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr config-naming`
-
-```text
-Get file naming configuration
-
-Usage: config-naming [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr config-ui`
-
-```text
-Get UI configuration
-
-Usage: config-ui [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr notification-list`
-
-```text
-List configured notifications
-
-Usage: notification-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr notification-test`
-
-```text
-Test a notification connection
-
-Usage: notification-test [OPTIONS] <ID>
-
-Arguments:
-  <ID>
-          Notification ID
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr import-list-list`
-
-```text
-List configured import lists
-
-Usage: import-list-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr import-list-exclusion-list`
-
-```text
-List import list exclusions
-
-Usage: import-list-exclusion-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr language-list`
-
-```text
-List available languages
-
-Usage: language-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr metadata-list`
-
-```text
-List metadata providers
-
-Usage: metadata-list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby radarr filesystem-list`
-
-```text
-Browse the server filesystem
-
-Usage: filesystem-list [OPTIONS] <PATH>
-
-Arguments:
-  <PATH>
-          Directory path to browse
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby sonarr`
-
-```text
-Sonarr TV series manager
-
-Usage: sonarr [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help, series.list, episode.list)
-
-          [default: help]
-          [possible values: help, schema, series.list, series.get, series.lookup, series.add, series.delete, episode.list, episode.get, queue.list, queue.delete, history.list, wanted.list, calendar.list, health, system.status, tag.list, tag.create, tag.delete, rootfolder.list, qualityprofile.list, languageprofile.list, series.edit, episode.monitor, wanted.cutoff, release.search, release.grab, history.series, history.failed-retry, blocklist.list, blocklist.delete, episodefile.delete, system.restart, system.backup]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby prowlarr`
-
-```text
-Prowlarr indexer manager
-
-Usage: prowlarr [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help)
-
-          [default: help]
-          [possible values: help, schema, indexer.list, indexer.get, indexer.delete, indexer.test, indexer.testall, indexer.categories, history.list, application.list, application.get, application.delete, indexer.edit, indexer.add, indexer.stats, indexer.status, indexer.search, indexer.grab, history.indexer, application.add, system.restart, system.backup, tag.list, system.status, system.health]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby plex`
-
-```text
-Plex media server
-
-Usage: plex [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help)
-
-          [default: help]
-          [possible values: help, schema, server.info, server.capabilities, library.list, library.get, library.scan, library.refresh, media.search, media.get, session.list, session.terminate, playlist.list, playlist.get, playlist.create, playlist.delete, library.browse, library.empty-trash, metadata.delete, metadata.edit, metadata.refresh, session.history, hubs.continue-watching, butler.list, butler.run, item.scrobble, item.unscrobble, updater.status, health]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby tautulli`
-
-```text
-Tautulli Plex analytics
-
-Usage: tautulli [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help)
-
-          [default: help]
-          [possible values: help, schema, activity.list, activity.stream, history.list, users.list, users.get, users.watch_time, users.player_stats, libraries.list, libraries.get, libraries.media_info, stats.home, stats.plays_by_date, media.recently-added, media.metadata, media.children, media.export-metadata, user.item-stats, user.delete-history, plays.by-day, plays.by-hour, plays.by-stream-type, plays.by-month, server.pms-update, system.info, system.settings]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby sabnzbd`
-
-```text
-`SABnzbd` download client
-
-Usage: sabnzbd [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help)
-
-          [default: help]
-          [possible values: help, server.version, queue.list, queue.delete, history.list, history.delete, history.purge, server.stats, server.warnings, queue.pause, queue.resume, queue.speed.limit, queue.addurl, history.retry, history.retry-all, server.fullstatus, category.list, queue.set-complete-action, pp.pause, pp.resume, rss.fetch-now, config.get]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby qbittorrent`
-
-```text
-qBittorrent download client
-
-Usage: qbittorrent [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help)
-
-          [default: help]
-          [possible values: help, schema, transfer.info, transfer.download.limit, transfer.upload.limit, torrent.list, torrent.properties, torrent.trackers, torrent.pause, torrent.resume, torrent.delete, torrent.recheck, torrent.category.set, torrent.download.limit, torrent.upload.limit, category.list, app.version, app.preferences, log.list, torrent.add, transfer.toggle-speed-limits, torrent.files, torrent.set-file-prio, torrent.set-location, torrent.add-tags, torrent.remove-tags, torrent.reannounce, torrent.set-share-limits, category.create, category.edit, sync.maindata]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby tailscale`
-
-```text
-Tailscale VPN network
-
-Usage: tailscale [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help)
-
-          [default: help]
-          [possible values: help, schema, device.list, device.get, device.delete, device.authorize, key.list, key.get, key.delete, dns.nameservers, dns.search_paths, dns.split-get, dns.split-set, acl.get, acl.validate, acl.set, device.routes-get, device.routes-set, device.tag, device.expire, user.list, tailnet.settings-get, tailnet.settings-patch, key.create]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby linkding`
-
-```text
-Linkding bookmark manager
-
-Usage: linkding [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help)
-
-          [default: help]
-          [possible values: help, schema, bookmark.list, bookmark.archived.list, bookmark.get, bookmark.check, bookmark.create, bookmark.update, bookmark.archive, bookmark.unarchive, bookmark.delete, tag.list, tag.get, tag.create, user.profile, bundle.list, bundle.create, bundle.update, bundle.delete, bookmark.assets, bookmark.assets-upload]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby memos`
-
-```text
-Memos note-taking service
-
-Usage: memos [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help)
-
-          [default: help]
-          [possible values: help, schema, memos.list, memos.get, memos.create, memos.update, memos.delete, tags.list, workspace.profile, user.me, user.list, user.stats, webhook.list, webhook.create, attachment.upload, attachment.delete, memo.comment-list, memo.comment-create, memo.share-list, memo.share-create]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby beads`
-
-```text
-Beads issue tracker
-
-Usage: beads [OPTIONS] <ACTION> [KEY=VALUE]...
-
-Arguments:
-  <ACTION>
-          Action to run, e.g. `issue.ready`
-
-  [KEY=VALUE]...
-          Optional `key=value` params for the action
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby bytestash`
-
-```text
-Bytestash snippet manager
-
-Usage: bytestash [OPTIONS] <ACTION> [KEY=VALUE]...
-
-Arguments:
-  <ACTION>
-          Action to run, e.g. `help`, `snippets.list`, `categories.list`
-
-          [possible values: help, schema, auth.config, auth.register, auth.login, snippets.list, snippets.get, snippets.create, snippets.update, snippets.delete, snippets.public.list, snippets.public.get, snippets.share.create, snippets.share.get, categories.list, users.list, users.toggle-active, users.delete]
-
-  [KEY=VALUE]...
-          Optional `key=value` params for the action
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby paperless`
-
-```text
-Paperless-ngx document manager
-
-Usage: paperless [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help)
-
-          [default: help]
-          [possible values: help, schema, documents.list, documents.get, documents.metadata, documents.update, documents.delete, tags.list, tags.get, tags.create, tags.delete, correspondents.list, correspondents.get, correspondents.create, correspondents.delete, document_types.list, document_types.get, document_types.create, document_types.delete, statistics, tasks.list, document.upload, document.bulk-edit, document.download, tag.update, saved-view.list, saved-view.create, custom-field.list, custom-field.create, storage-path.list, storage-path.create]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby arcane`
-
-```text
-Arcane Docker management UI
-
-Usage: arcane [OPTIONS] [ACTION] [KEY=VALUE]...
-
-Arguments:
-  [ACTION]
-          Action to run, e.g. `help`, `system.health`, `container.list`
-
-          [default: help]
-          [possible values: help, schema, health, environment.list, environment.get, container.list, container.get, container.start, container.stop, container.restart, container.redeploy, project.list, project.create, project.up, project.down, project.redeploy, volume.list, volume.delete, volume.prune, image.list, image.pull, image.prune, image.update-summary]
-
-  [KEY=VALUE]...
-          Optional `key=value` params for the action
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby unraid`
-
-```text
-Unraid server management
-
-Usage: unraid [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help)
-
-          [default: help]
-          [possible values: help, system.info, system.metrics, system.array, system.online, docker.list, docker.start, docker.stop, docker.restart, disk.list, vm.list, vm.start, vm.stop, vm.pause, vm.resume, notification.list, notification.create, notification.archive, parity.history, parity.check-start, parity.check-pause, parity.check-cancel, share.list, plugin.list, network.list, ups.devices, ups.config, log.read, flash.status, flash.backup]
-
-Options:
-      --instance <INSTANCE>
-          Optional named instance label
-
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-  -y, --yes
-          Skip confirmation prompt for destructive actions (docker.start/stop/restart)
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby unifi`
-
-```text
-`UniFi` network management
-
-Usage: unifi [OPTIONS] <ACTION> [KEY=VALUE]...
-
-Arguments:
-  <ACTION>
-          Action to run, e.g. `help`, `sites.list`, `firewall.zones.list`
-
-          [possible values: help, system.info, sites.list, wans.list, vpn.site-to-site-tunnels.list, vpn.servers.list, radius.profiles.list, device-tags.list, dpi.categories.list, dpi.applications.list, countries.list, wan.get, devices.list, devices.get, devices.stats, pending-devices.list, devices.create, devices.port-action, devices.action, devices.delete, device.update, clients.list, clients.get, clients.action, client.history, client.block, client.unblock, networks.list, networks.get, networks.references, networks.create, networks.update, networks.delete, wifi.broadcasts.list, wifi.broadcasts.get, wifi.broadcasts.create, wifi.broadcasts.update, wifi.broadcasts.delete, wifi.update, hotspot.vouchers.list, hotspot.vouchers.create, hotspot.vouchers.delete, hotspot.vouchers.get, firewall.zones.list, firewall.zones.get, firewall.zones.create, firewall.zones.update, firewall.zones.delete, firewall.policies.list, firewall.policies.get, firewall.policies.create, firewall.policies.update, firewall.policies.patch, firewall.policies.ordering.get, firewall.policies.ordering.set, acl.rules.list, acl.rules.get, acl.rules.create, acl.rules.update, acl.rules.delete, acl.rules.ordering.get, acl.rules.ordering.set, switching.switch-stacks.list, switching.switch-stacks.get, switching.mc-lag-domains.list, switching.mc-lag-domains.get, switching.lags.list, switching.lags.get, port-profile.list, port-profile.create, port-profile.update, dns.policies.list, dns.policies.get, dns.policies.create, dns.policies.update, dns.policies.delete, traffic-matching-lists.list, traffic-matching-lists.get, traffic-matching-lists.create, traffic-matching-lists.update, traffic-matching-lists.delete]
-
-  [KEY=VALUE]...
-          Optional `key=value` params for the action
-
-Options:
-      --instance <INSTANCE>
-          Optional named instance label
-
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby overseerr`
-
-```text
-Overseerr media request manager
-
-Usage: overseerr [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help)
-
-          [default: help]
-          [possible values: help, schema, health, status, request.list, request.get, request.create, request.approve, request.decline, request.delete, movie.search, tv.search, movie.get, tv.get, user.list, user.get, issue.list, issue.get, issue.create, issue.comment, request.retry, request.count, issue.update, media.delete, media.update-status, user.requests, user.quota, user.edit, job.run, discover.trending]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby gotify`
-
-```text
-Gotify push notifications
-
-Usage: gotify [OPTIONS] <ACTION> [KEY=VALUE]...
-
-Arguments:
-  <ACTION>
-          Action to run, e.g. `help`, `message.send`, `app.list`
-
-          [possible values: help, schema, message.send, message.list, message.delete, message.purge, app.list, app.create, app.delete, client.list, client.create, client.delete, application.update, application.messages, application.messages-delete, client.update, plugin.list, plugin.enable, plugin.disable, plugin.config-get, plugin.config-set, user.list, user.create, user.delete, server.health, server.version]
-
-  [KEY=VALUE]...
-          Optional `key=value` params for the action
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby openai`
-
-```text
-`OpenAI` API client
-
-Usage: openai [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help)
-
-          [default: help]
-          [possible values: help, schema, model.list, chat.complete, embed.create, server.health]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby openacp`
-
-```text
-Upstream OpenACP daemon
-
-Usage: openacp [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run, for example `system.health`
-
-          [default: help]
-          [possible values: help, schema, system.health, system.version, system.restart, adapters.list, sessions.list, sessions.get, sessions.create, sessions.prompt, sessions.cancel, sessions.bypass.set, sessions.permission.resolve, sessions.archive, sessions.adopt, agents.list, config.get, config.editable, config.patch, topics.list, topics.delete, topics.cleanup, tunnel.status, tunnel.list, tunnel.create, tunnel.delete, tunnel.delete_all, notify.send]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Select a named OpenACP instance
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby notebooklm`
-
-```text
-Google NotebookLM client
-
-Usage: notebooklm [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help)
-
-          [default: help]
-          [possible values: help, schema, notebook.list, notebook.create, notebook.get, notebook.delete, source.list, source.add_url, server.health]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby qdrant`
-
-```text
-Qdrant vector database
-
-Usage: qdrant [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help)
-
-          [default: help]
-          [possible values: help, schema, server.health, collections.list, collections.get, collection.create, collection.delete, point.upsert, point.search, point.query, point.scroll, point.count, point.delete, snapshot.create, index.create]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
-## `labby tei`
-
-```text
-HF Text Embeddings Inference
-
-Usage: tei [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help)
-
-          [default: help]
-          [possible values: help, schema, server.health, server.info, embed.create, embed.rerank, embed.tokenize, embed.similarity, embed.sparse, embed.openai]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby apprise`
-
-```text
-Apprise notification dispatcher
-
-Usage: apprise [OPTIONS] [ACTION]
-
-Arguments:
-  [ACTION]
-          Action to run (e.g. help)
-
-          [default: help]
-          [possible values: help, schema, server.health, notify.send, notify.key.send, config.add, config.get, config.delete, config.urls, server.details]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --dry-run
-          Print what would be done without executing
-
-  -h, --help
-          Print help
-```
-
 ## `labby deploy`
 
 ```text
-Deploy the local lab release binary to SSH targets
+Radarr movie collection manager. Sonarr TV series manager. Prowlarr indexer manager. Plex media server. Tautulli Plex analytics. `SABnzbd` download client. qBittorrent download client. Tailscale VPN network. Linkding bookmark manager. Memos note-taking service. Beads issue tracker. Bytestash snippet manager. Paperless-ngx document manager. Arcane Docker management UI. Unraid server management. `UniFi` network management. Overseerr media request manager. Gotify push notifications. `OpenAI` API client. Upstream OpenACP daemon. Google NotebookLM client. Qdrant vector database. HF Text Embeddings Inference. Apprise notification dispatcher. Deploy the local lab release binary to SSH targets
 
 Usage: deploy [OPTIONS] <COMMAND>
 
@@ -4424,861 +2766,5 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
-```
-
-## `labby dozzle`
-
-```text
-`lab dozzle` arguments
-
-Usage: dozzle [OPTIONS] <ACTION> [KEY=VALUE]...
-
-Arguments:
-  <ACTION>
-          Action to run, e.g. `help` or `schema`
-
-  [KEY=VALUE]...
-          Optional `key=value` params for the action
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby immich`
-
-```text
-`lab immich` arguments
-
-Usage: immich [OPTIONS] <ACTION> [KEY=VALUE]...
-
-Arguments:
-  <ACTION>
-          Action to run, e.g. `help` or `schema`
-
-  [KEY=VALUE]...
-          Optional `key=value` params for the action
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin`
-
-```text
-Jellyfin media server
-
-Usage: jellyfin [OPTIONS] [COMMAND]
-
-Commands:
-  help       Return the Jellyfin action catalog
-  system     System operations
-  users      User operations
-  libraries  Library operations
-  items      Item operations
-  sessions   Session operations
-  plugins    Plugin operations
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin help`
-
-```text
-Return the Jellyfin action catalog
-
-Usage: help [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin system`
-
-```text
-System operations
-
-Usage: system [OPTIONS] <COMMAND>
-
-Commands:
-  ping         Ping the Jellyfin server
-  info         Fetch authenticated system information
-  public-info  Fetch public system information
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin system ping`
-
-```text
-Ping the Jellyfin server
-
-Usage: ping [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin system info`
-
-```text
-Fetch authenticated system information
-
-Usage: info [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin system public-info`
-
-```text
-Fetch public system information
-
-Usage: public-info [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin users`
-
-```text
-User operations
-
-Usage: users [OPTIONS] <COMMAND>
-
-Commands:
-  list  List users
-  me    Fetch the current authenticated user
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin users list`
-
-```text
-List users
-
-Usage: list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin users me`
-
-```text
-Fetch the current authenticated user
-
-Usage: me [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin libraries`
-
-```text
-Library operations
-
-Usage: libraries [OPTIONS] <COMMAND>
-
-Commands:
-  list  List virtual folders/libraries
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin libraries list`
-
-```text
-List virtual folders/libraries
-
-Usage: list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin items`
-
-```text
-Item operations
-
-Usage: items [OPTIONS] <COMMAND>
-
-Commands:
-  search  Search or list items
-  get     Fetch one item by ID
-  counts  Fetch item counts
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin items search`
-
-```text
-Search or list items
-
-Usage: search [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --user-id <USER_ID>
-          Optional Jellyfin user ID
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --search-term <SEARCH_TERM>
-          Optional item search term
-
-      --parent-id <PARENT_ID>
-          Optional parent item/library ID
-
-      --include-item-types <INCLUDE_ITEM_TYPES>
-          Include only these item types
-
-      --recursive <RECURSIVE>
-          Recurse into child folders
-
-          [possible values: true, false]
-
-      --start-index <START_INDEX>
-          Zero-based result offset
-
-      --limit <LIMIT>
-          Maximum result count
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin items get`
-
-```text
-Fetch one item by ID
-
-Usage: get [OPTIONS] <ITEM_ID>
-
-Arguments:
-  <ITEM_ID>
-          Jellyfin item ID
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin items counts`
-
-```text
-Fetch item counts
-
-Usage: counts [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin sessions`
-
-```text
-Session operations
-
-Usage: sessions [OPTIONS] <COMMAND>
-
-Commands:
-  list  List active sessions
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin sessions list`
-
-```text
-List active sessions
-
-Usage: list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin plugins`
-
-```text
-Plugin operations
-
-Usage: plugins [OPTIONS] <COMMAND>
-
-Commands:
-  list  List installed plugins
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby jellyfin plugins list`
-
-```text
-List installed plugins
-
-Usage: list [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --instance <INSTANCE>
-          Optional Jellyfin instance label
-
-  -h, --help
-          Print help
-```
-
-## `labby navidrome`
-
-```text
-`lab navidrome` arguments
-
-Usage: navidrome [OPTIONS] <ACTION> [KEY=VALUE]...
-
-Arguments:
-  <ACTION>
-          Action to run, e.g. `help` or `schema`
-
-  [KEY=VALUE]...
-          Optional `key=value` params for the action
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby scrutiny`
-
-```text
-`lab scrutiny` arguments
-
-Usage: scrutiny [OPTIONS] <ACTION> [KEY=VALUE]...
-
-Arguments:
-  <ACTION>
-          Action to run, e.g. `help` or `schema`
-
-  [KEY=VALUE]...
-          Optional `key=value` params for the action
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby freshrss`
-
-```text
-`lab freshrss` arguments
-
-Usage: freshrss [OPTIONS] <ACTION> [KEY=VALUE]...
-
-Arguments:
-  <ACTION>
-          Action to run, e.g. `help` or `schema`
-
-  [KEY=VALUE]...
-          Optional `key=value` params for the action
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby loggifly`
-
-```text
-`lab loggifly` arguments
-
-Usage: loggifly [OPTIONS] <ACTION> [KEY=VALUE]...
-
-Arguments:
-  <ACTION>
-          Action to run, e.g. `help` or `schema`
-
-  [KEY=VALUE]...
-          Optional `key=value` params for the action
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby adguard`
-
-```text
-`lab adguard` arguments
-
-Usage: adguard [OPTIONS] <ACTION> [KEY=VALUE]...
-
-Arguments:
-  <ACTION>
-          Action to run, e.g. `help` or `schema`
-
-  [KEY=VALUE]...
-          Optional `key=value` params for the action
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby glances`
-
-```text
-`lab glances` arguments
-
-Usage: glances [OPTIONS] <ACTION> [KEY=VALUE]...
-
-Arguments:
-  <ACTION>
-          Action to run, e.g. `help` or `schema`
-
-  [KEY=VALUE]...
-          Optional `key=value` params for the action
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby uptime-kuma`
-
-```text
-`lab uptime-kuma` arguments
-
-Usage: uptime-kuma [OPTIONS] <ACTION> [KEY=VALUE]...
-
-Arguments:
-  <ACTION>
-          Action to run, e.g. `help` or `schema`
-
-  [KEY=VALUE]...
-          Optional `key=value` params for the action
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby pihole`
-
-```text
-`lab pihole` arguments
-
-Usage: pihole [OPTIONS] <ACTION> [KEY=VALUE]...
-
-Arguments:
-  <ACTION>
-          Action to run, e.g. `help` or `schema`
-
-  [KEY=VALUE]...
-          Optional `key=value` params for the action
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby neo4j`
-
-```text
-`lab neo4j` arguments
-
-Usage: neo4j [OPTIONS] <ACTION> [KEY=VALUE]...
-
-Arguments:
-  <ACTION>
-          Action to run, e.g. `help` or `schema`
-
-  [KEY=VALUE]...
-          Optional `key=value` params for the action
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Skip confirmation for destructive actions
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
 ```
 
