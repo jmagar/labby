@@ -2021,7 +2021,10 @@ impl GatewayManager {
 
     pub async fn gateway_servers_doc(&self) -> Result<serde_json::Value, ToolError> {
         let Some(pool) = self.runtime.current_pool().await else {
-            return Ok(serde_json::json!({ "servers": [] }));
+            return Err(ToolError::Sdk {
+                sdk_kind: "not_found".to_string(),
+                message: "upstream pool not configured".to_string(),
+            });
         };
         Ok(pool.gateway_servers_doc().await)
     }

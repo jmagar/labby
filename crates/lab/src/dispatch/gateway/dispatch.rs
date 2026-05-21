@@ -851,12 +851,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gateway_servers_action_returns_empty_when_no_pool() {
+    async fn gateway_servers_action_returns_not_found_when_no_pool() {
         let manager = test_manager();
-        let result = dispatch_with_manager(&manager, "gateway.servers", json!({}))
+        let err = dispatch_with_manager(&manager, "gateway.servers", json!({}))
             .await
-            .expect("dispatch ok");
-        assert_eq!(result["servers"].as_array().map(|a| a.len()), Some(0));
+            .expect_err("no pool configured");
+        let body = serde_json::to_value(&err).expect("serialize");
+        assert_eq!(body["kind"], "not_found", "sdk_kind must be promoted to kind");
     }
 
     #[tokio::test]
