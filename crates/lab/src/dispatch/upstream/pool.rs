@@ -4927,7 +4927,6 @@ mod tests {
 
     #[tokio::test]
     async fn gateway_servers_doc_lists_one_healthy_upstream() {
-        use std::borrow::Cow;
         use std::sync::Arc;
 
         let pool = UpstreamPool::new();

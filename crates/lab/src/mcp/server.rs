@@ -643,7 +643,7 @@ impl ServerHandler for LabMcpServer {
                 service = "labby",
                 action = "read_resource",
                 subject,
-                resource_uri = uri.as_str(),
+                resource_uri = crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
                 route = "gateway",
                 "dispatch route selected"
             );
@@ -654,7 +654,7 @@ impl ServerHandler for LabMcpServer {
                     service = "labby",
                     action = "read_resource",
                     subject,
-                    resource_uri = uri.as_str(),
+                    resource_uri = crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
                     route = "gateway",
                     elapsed_ms,
                     kind = "unavailable",
@@ -692,13 +692,29 @@ impl ServerHandler for LabMcpServer {
             let elapsed_ms = start.elapsed().as_millis();
             return match json {
                 Some(value) => {
-                    let text = serde_json::to_string_pretty(&value).unwrap_or_default();
+                    let text = match serde_json::to_string_pretty(&value) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            tracing::error!(
+                                surface = "mcp",
+                                service = "labby",
+                                action = "read_resource",
+                                resource_uri = crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
+                                error = %e,
+                                "failed to serialize synthetic gateway resource"
+                            );
+                            return Err(ErrorData::internal_error(
+                                format!("failed to serialize resource: {e}"),
+                                None,
+                            ));
+                        }
+                    };
                     tracing::info!(
                         surface = "mcp",
                         service = "labby",
                         action = "read_resource",
                         subject,
-                        resource_uri = uri.as_str(),
+                        resource_uri = crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
                         route = "gateway",
                         elapsed_ms,
                         "synthetic resource ok"
@@ -721,7 +737,7 @@ impl ServerHandler for LabMcpServer {
                         service = "labby",
                         action = "read_resource",
                         subject,
-                        resource_uri = uri.as_str(),
+                        resource_uri = crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
                         route = "gateway",
                         elapsed_ms,
                         kind = "not_found",
