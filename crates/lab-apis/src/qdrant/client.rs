@@ -1,20 +1,31 @@
 //! Qdrant HTTP client — collection management, upsert, hybrid search.
 
+use std::sync::LazyLock;
+use std::time::Duration;
+
 use super::error::QdrantError;
 use super::types::{QueryResponse, SearchHit, SparseVector, UpsertPoint};
 use serde::Serialize;
 use serde_json::json;
 
+/// Shared HTTP client. `reqwest::Client` owns a connection pool; constructing one
+/// per call exhausts sockets and bypasses pooling.
+static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .pool_idle_timeout(Duration::from_secs(90))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .expect("build shared reqwest client for Qdrant")
+});
+
 pub struct QdrantClient {
     base_url: String,
-    http: reqwest::Client,
 }
 
 impl QdrantClient {
     pub fn new(base_url: &str) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
-            http: reqwest::Client::new(),
         }
     }
 
@@ -41,12 +52,11 @@ impl QdrantClient {
     ) -> Result<(), QdrantError> {
         // Check if collection already exists.
         let check_url = self.collection_url(collection);
-        let resp = self.http.get(&check_url).send().await?;
+        let resp = HTTP_CLIENT.get(&check_url).send().await?;
         if resp.status().is_success() {
             return Ok(());
         }
 
-        // Create it.
         let create_url = check_url;
         let body = json!({
             "vectors": {
@@ -63,7 +73,7 @@ impl QdrantClient {
             },
             "on_disk_payload": true
         });
-        let resp = self.http.put(&create_url).json(&body).send().await?;
+        let resp = HTTP_CLIENT.put(&create_url).json(&body).send().await?;
         // 409 = already exists (race-safe).
         if !resp.status().is_success() && resp.status().as_u16() != 409 {
             let status = resp.status().as_u16();
@@ -113,8 +123,7 @@ impl QdrantClient {
 
         // Qdrant upsert: PUT /collections/{name}/points?wait=true
         let url = format!("{}?wait=true", self.points_url(collection, ""));
-        let resp = self
-            .http
+        let resp = HTTP_CLIENT
             .put(&url)
             .json(&json!({ "points": bodies }))
             .send()
@@ -162,7 +171,7 @@ impl QdrantClient {
             "with_payload": true,
             "with_vector": false
         });
-        let resp = self.http.post(&url).json(&body).send().await?;
+        let resp = HTTP_CLIENT.post(&url).json(&body).send().await?;
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let body_text = resp.text().await.unwrap_or_default();
@@ -194,7 +203,7 @@ impl QdrantClient {
                 "quantization": { "rescore": true, "oversampling": 1.5 }
             }
         });
-        let resp = self.http.post(&url).json(&body).send().await?;
+        let resp = HTTP_CLIENT.post(&url).json(&body).send().await?;
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let body_text = resp.text().await.unwrap_or_default();
@@ -221,7 +230,34 @@ impl QdrantClient {
                 "must": [{ "key": field, "match": { "value": value } }]
             }
         });
-        let resp = self.http.post(&url).json(&body).send().await?;
+        let resp = HTTP_CLIENT.post(&url).json(&body).send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            let body_text = resp.text().await.unwrap_or_default();
+            return Err(QdrantError::Api {
+                status,
+                body: body_text,
+            });
+        }
+        Ok(())
+    }
+
+    /// Delete points matching an arbitrary Qdrant filter JSON.
+    ///
+    /// Generic primitive; callers build the filter shape. Used by the
+    /// tool-search indexer to compose an upsert-then-sweep pattern via
+    /// `must: field==value AND must_not: has_id in keep_ids`.
+    pub async fn delete_by_filter(
+        &self,
+        collection: &str,
+        filter: serde_json::Value,
+    ) -> Result<(), QdrantError> {
+        let url = format!("{}?wait=true", self.points_url(collection, "delete"));
+        let resp = HTTP_CLIENT
+            .post(&url)
+            .json(&json!({ "filter": filter }))
+            .send()
+            .await?;
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let body_text = resp.text().await.unwrap_or_default();

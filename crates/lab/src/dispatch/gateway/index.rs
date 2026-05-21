@@ -26,6 +26,28 @@ fn default_priority() -> f32 {
     1.0
 }
 
+impl IndexedTool {
+    /// Synthesize an `IndexedTool` from a Qdrant semantic-search payload.
+    ///
+    /// Used by `rrf_fuse` to surface semantic-only hits — tools that the
+    /// lexical scorer didn't find but the embedding model retrieved. `input_schema`
+    /// is unavailable from the payload (not indexed); callers needing it must
+    /// look the tool up by `(upstream, name)` in the live catalog.
+    pub(crate) fn from_semantic_payload(name: &str, upstream: &str, description: &str) -> Self {
+        let name_lower = name.to_ascii_lowercase();
+        let haystack = format!("{}\n{}", name_lower, description.to_ascii_lowercase());
+        Self {
+            name: name.to_string(),
+            description: description.to_string(),
+            upstream_name: upstream.to_string(),
+            input_schema: None,
+            priority: default_priority(),
+            name_lower,
+            haystack,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ToolIndexMetadata {
     pub truncated: bool,

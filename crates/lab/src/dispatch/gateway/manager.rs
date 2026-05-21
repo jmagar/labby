@@ -2060,13 +2060,31 @@ impl GatewayManager {
 
         let requested = top_k.max(1).min(50);
         let tool_search_cfg = self.config.read().await.tool_search.clone();
-        let score_floor_fraction = tool_search_cfg.score_floor_fraction;
+        let semantic_enabled = tool_search_cfg.semantic_enabled();
+        // When semantic search is enabled, skip the lexical score-floor: the
+        // floor would otherwise drop low-lexical-score tools BEFORE semantic
+        // could rescue them via RRF. The post-fusion top_k truncation handles
+        // the floor naturally. Lexical-only mode keeps the original behavior.
+        let effective_floor = if semantic_enabled {
+            0.0
+        } else {
+            tool_search_cfg.score_floor_fraction
+        };
+
+        // When semantic is enabled, widen the lexical candidate window so RRF
+        // fusion has a richer set to draw from. The final truncation to
+        // `requested` happens after fusion.
+        let lexical_window = if semantic_enabled {
+            requested * 3
+        } else {
+            requested
+        };
 
         let mut hits: Vec<SearchHit> = self
             .tool_indexes
             .iter()
             .filter_map(|entry| entry.value().index.load_full())
-            .flat_map(|index| index.search(trimmed, requested, score_floor_fraction))
+            .flat_map(|index| index.search(trimmed, lexical_window, effective_floor))
             .collect();
 
         hits.sort_by(|a, b| {
@@ -2076,7 +2094,7 @@ impl GatewayManager {
                 .then_with(|| a.tool.name.cmp(&b.tool.name))
                 .then_with(|| a.tool.upstream_name.cmp(&b.tool.upstream_name))
         });
-        hits.truncate(requested);
+        hits.truncate(lexical_window);
 
         if hits.is_empty() && self.tool_search_warming().await {
             return Err(ToolError::Sdk {

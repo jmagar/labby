@@ -8,6 +8,27 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.17.0] - 2026-05-21
+
+### Highlights
+
+- **Gateway pending-approval queue**: auto-import of upstream MCP servers is now disabled by default; discovered servers land in an approval queue instead of being added blindly.
+- **Semantic search improvements**: hybrid (dense + sparse) tool search wiring extended in `dispatch/gateway/semantic.rs` with new index plumbing.
+- **TEI + Qdrant client surface**: expanded TEI client capabilities; Qdrant client gains additional collection-management methods.
+- **Docs**: new `docs/contracts/` directory established with the first wire-shape contract (`gateway-schema-resources.md`).
+
+| Commit | Change |
+|--------|--------|
+| `bd1dcee9` | feat(gateway): disable auto-import by default; add pending approval queue |
+| *(this)* | feat: tei/qdrant client surface + gateway semantic search wiring |
+
+### Version bumps
+
+- Rust workspace: `0.16.0 → 0.17.0`
+- Gateway admin package: `0.16.0 → 0.17.0`
+
+---
+
 ## [0.16.0] - 2026-05-16
 
 ### Added
