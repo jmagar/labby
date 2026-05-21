@@ -12,8 +12,8 @@ use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, GetPromptRequestParams, GetPromptResult, LoggingLevel,
-    Prompt, ReadResourceResult, Resource, ResourceContents,
+    AnnotateAble, CallToolRequestParams, CallToolResult, GetPromptRequestParams, GetPromptResult,
+    LoggingLevel, Prompt, RawResource, ReadResourceResult, Resource, ResourceContents,
 };
 use rmcp::transport::streamable_http_client::{
     StreamableHttpClientTransportConfig, StreamableHttpClientWorker,
@@ -2152,6 +2152,11 @@ impl UpstreamPool {
         self.catalog.write().await.insert(name.to_string(), entry);
     }
 
+    /// Test-only: insert a fully-formed `UpstreamEntry` into the catalog.
+    pub async fn insert_entry_for_test(&self, name: &str, entry: UpstreamEntry) {
+        self.catalog.write().await.insert(name.to_string(), entry);
+    }
+
     /// Check if an upstream capability is due for a re-probe.
     #[allow(clippy::significant_drop_tightening)]
     pub async fn should_reprobe(&self, upstream_name: &str) -> bool {
@@ -2212,6 +2217,92 @@ impl UpstreamPool {
             .values()
             .map(|e| (e.name.to_string(), e.tool_health))
             .collect()
+    }
+
+    /// Render the synthetic `lab://gateway/servers` document.
+    ///
+    /// Lists every registered upstream (regardless of health) with the
+    /// tool count an agent would see in the corresponding schema document.
+    pub async fn gateway_servers_doc(&self) -> Value {
+        let catalog = self.catalog.read().await;
+        let mut servers: Vec<Value> = catalog
+            .iter()
+            .map(|(name, e)| {
+                let tool_count = e
+                    .tools
+                    .values()
+                    .filter(|t| e.exposure_policy.matches(&t.tool.name))
+                    .count();
+                serde_json::json!({
+                    "name": name,
+                    "tool_count": tool_count,
+                    "prompt_count": e.prompt_count,
+                    "resource_count": e.resource_count,
+                    "tool_health": health_str(e.tool_health),
+                    "tool_last_error": e.tool_last_error,
+                })
+            })
+            .collect();
+        servers.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+        serde_json::json!({ "servers": servers })
+    }
+
+    /// Render the synthetic `lab://gateway/<name>/schema` document.
+    ///
+    /// Returns `None` when the upstream is not registered. Tools hidden by
+    /// the upstream's `ToolExposurePolicy` are omitted. `input_schema` and
+    /// `meta` are passed through verbatim from the cached tool definition.
+    pub async fn gateway_server_schema(&self, name: &str) -> Option<Value> {
+        let catalog = self.catalog.read().await;
+        let entry = catalog.get(name)?;
+        let mut tools: Vec<Value> = entry
+            .tools
+            .values()
+            .filter(|t| entry.exposure_policy.matches(&t.tool.name))
+            .map(|t| {
+                serde_json::json!({
+                    "name": t.tool.name.as_ref(),
+                    "description": t.tool.description.as_ref().map(|s| s.as_ref()),
+                    "input_schema": t.input_schema,
+                    "meta": t.tool.meta,
+                })
+            })
+            .collect();
+        tools.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+        Some(serde_json::json!({
+            "name": name,
+            "tools": tools,
+            "health": health_str(entry.tool_health),
+            "last_error": entry.tool_last_error,
+        }))
+    }
+
+    /// Synthetic gateway resources to emit from `list_resources`.
+    ///
+    /// Returns one entry for `lab://gateway/servers` plus one
+    /// `lab://gateway/<name>/schema` entry per registered upstream.
+    pub async fn gateway_synthetic_resources(&self) -> Vec<Resource> {
+        let mut out = vec![
+            RawResource::new("lab://gateway/servers", "gateway/servers")
+                .with_description("Index of upstream MCP servers connected to the gateway")
+                .with_mime_type("application/json")
+                .no_annotation(),
+        ];
+        let catalog = self.catalog.read().await;
+        let mut names: Vec<&String> = catalog.keys().collect();
+        names.sort();
+        for name in names {
+            out.push(
+                RawResource::new(
+                    format!("lab://gateway/{name}/schema"),
+                    format!("gateway/{name}/schema"),
+                )
+                .with_description(format!("Tool schemas for upstream `{name}`"))
+                .with_mime_type("application/json")
+                .no_annotation(),
+            );
+        }
+        out
     }
 
     /// List resources from all resource-proxy-enabled upstreams.
@@ -3393,6 +3484,16 @@ async fn connect_in_process_service_peer(
         },
         tools,
     ))
+}
+
+fn health_str(health: UpstreamHealth) -> &'static str {
+    match health {
+        UpstreamHealth::Healthy => "healthy",
+        UpstreamHealth::Unhealthy {
+            consecutive_failures,
+        } if consecutive_failures >= types::CIRCUIT_BREAKER_THRESHOLD => "open",
+        UpstreamHealth::Unhealthy { .. } => "degraded",
+    }
 }
 
 fn healthy_in_process_entry(name: Arc<str>, tools: HashMap<String, UpstreamTool>) -> UpstreamEntry {
@@ -4822,5 +4923,108 @@ mod tests {
                 "missing upstream pool observability field `{expected}`"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn gateway_servers_doc_lists_one_healthy_upstream() {
+        use std::sync::Arc;
+
+        let pool = UpstreamPool::new();
+        let mut tools = HashMap::new();
+        tools.insert(
+            "search".to_string(),
+            UpstreamTool {
+                tool: rmcp::model::Tool::new(
+                    "search",
+                    "search the index",
+                    Arc::new(serde_json::Map::new()),
+                ),
+                input_schema: Some(serde_json::json!({"type": "object"})),
+                upstream_name: Arc::from("alpha"),
+            },
+        );
+        let entry = healthy_in_process_entry(Arc::from("alpha"), tools);
+        pool.catalog
+            .write()
+            .await
+            .insert("alpha".to_string(), entry);
+
+        let doc = pool.gateway_servers_doc().await;
+        let servers = doc
+            .get("servers")
+            .and_then(|v| v.as_array())
+            .expect("servers array");
+        assert_eq!(servers.len(), 1);
+        let s = &servers[0];
+        assert_eq!(s["name"], "alpha");
+        assert_eq!(s["tool_count"], 1);
+        assert_eq!(s["tool_health"], "healthy");
+        assert!(s["tool_last_error"].is_null());
+        assert_eq!(s["prompt_count"], 0);
+        assert_eq!(s["resource_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn gateway_server_schema_respects_exposure_policy() {
+        use std::sync::Arc;
+
+        let make_tool = |name: &'static str| UpstreamTool {
+            tool: rmcp::model::Tool::new(name, "desc", Arc::new(serde_json::Map::new())),
+            input_schema: Some(serde_json::json!({"type": "object"})),
+            upstream_name: Arc::from("alpha"),
+        };
+
+        let mut tools = HashMap::new();
+        tools.insert("github_create".into(), make_tool("github_create"));
+        tools.insert("delete_repo".into(), make_tool("delete_repo"));
+
+        let mut entry = healthy_in_process_entry(Arc::from("alpha"), tools);
+        entry.exposure_policy =
+            ToolExposurePolicy::from_patterns(vec!["github_*".into()]).expect("policy");
+
+        let pool = UpstreamPool::new();
+        pool.catalog
+            .write()
+            .await
+            .insert("alpha".to_string(), entry);
+
+        let doc = pool.gateway_server_schema("alpha").await.expect("doc");
+        let names: Vec<&str> = doc["tools"]
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .map(|t| t["name"].as_str().expect("name"))
+            .collect();
+        assert_eq!(names, vec!["github_create"]);
+        assert_eq!(doc["health"], "healthy");
+        assert!(doc["last_error"].is_null());
+        assert_eq!(doc["name"], "alpha");
+    }
+
+    #[tokio::test]
+    async fn gateway_server_schema_unknown_upstream_returns_none() {
+        let pool = UpstreamPool::new();
+        assert!(pool.gateway_server_schema("nope").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn gateway_synthetic_resources_lists_index_and_per_upstream() {
+        use std::sync::Arc;
+
+        let pool = UpstreamPool::new();
+        let entry = healthy_in_process_entry(Arc::from("alpha"), HashMap::new());
+        pool.catalog
+            .write()
+            .await
+            .insert("alpha".to_string(), entry);
+        let entry = healthy_in_process_entry(Arc::from("beta"), HashMap::new());
+        pool.catalog.write().await.insert("beta".to_string(), entry);
+
+        let resources = pool.gateway_synthetic_resources().await;
+        let uris: Vec<String> = resources.iter().map(|r| r.uri.clone()).collect();
+        assert!(uris.iter().any(|u| u == "lab://gateway/servers"));
+        assert!(uris.iter().any(|u| u == "lab://gateway/alpha/schema"));
+        assert!(uris.iter().any(|u| u == "lab://gateway/beta/schema"));
+        assert_eq!(uris.len(), 3);
     }
 }

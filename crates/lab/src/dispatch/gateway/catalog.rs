@@ -594,6 +594,27 @@ pub const ACTIONS: &[ActionSpec] = &[
         params: &[NAME_PARAM],
     },
     ActionSpec {
+        name: "gateway.servers",
+        description: "List upstream MCP servers connected to the gateway, with cached \
+                       tool/prompt/resource counts and tools-capability health.",
+        destructive: false,
+        returns: "GatewayServersDoc",
+        params: &[],
+    },
+    ActionSpec {
+        name: "gateway.schema",
+        description: "Return the cached tool schemas (input_schema + meta) for one upstream \
+                       MCP server, filtered by its exposure policy.",
+        destructive: false,
+        returns: "GatewayServerSchema",
+        params: &[ParamSpec {
+            name: "name",
+            ty: "string",
+            required: true,
+            description: "Upstream server name (as listed by gateway.servers).",
+        }],
+    },
+    ActionSpec {
         name: "gateway.oauth.probe",
         description: "Probe a URL for OAuth support via RFC 8414 AS metadata discovery. \
                        Rejects userinfo, query strings, and fragments. Registers a transient \

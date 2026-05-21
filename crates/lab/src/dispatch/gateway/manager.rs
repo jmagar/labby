@@ -2019,6 +2019,31 @@ impl GatewayManager {
         Ok(prompts)
     }
 
+    pub async fn gateway_servers_doc(&self) -> Result<serde_json::Value, ToolError> {
+        let Some(pool) = self.runtime.current_pool().await else {
+            return Err(ToolError::Sdk {
+                sdk_kind: "not_found".to_string(),
+                message: "upstream pool not configured".to_string(),
+            });
+        };
+        Ok(pool.gateway_servers_doc().await)
+    }
+
+    pub async fn gateway_server_schema(&self, name: &str) -> Result<serde_json::Value, ToolError> {
+        let Some(pool) = self.runtime.current_pool().await else {
+            return Err(ToolError::Sdk {
+                sdk_kind: "not_found".to_string(),
+                message: "upstream pool not configured".to_string(),
+            });
+        };
+        pool.gateway_server_schema(name)
+            .await
+            .ok_or_else(|| ToolError::Sdk {
+                sdk_kind: "not_found".to_string(),
+                message: format!("unknown upstream: {name}"),
+            })
+    }
+
     pub async fn tool_search_enabled(&self) -> bool {
         self.config.read().await.tool_search.enabled
     }
