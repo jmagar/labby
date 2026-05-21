@@ -857,7 +857,10 @@ mod tests {
             .await
             .expect_err("no pool configured");
         let body = serde_json::to_value(&err).expect("serialize");
-        assert_eq!(body["kind"], "not_found", "sdk_kind must be promoted to kind");
+        assert_eq!(
+            body["kind"], "not_found",
+            "sdk_kind must be promoted to kind"
+        );
     }
 
     #[tokio::test]
@@ -878,7 +881,10 @@ mod tests {
             .await
             .expect_err("no pool configured");
         let body = serde_json::to_value(&err).expect("serialize");
-        assert_eq!(body["kind"], "not_found", "sdk_kind must be promoted to kind");
+        assert_eq!(
+            body["kind"], "not_found",
+            "sdk_kind must be promoted to kind"
+        );
     }
 
     #[tokio::test]

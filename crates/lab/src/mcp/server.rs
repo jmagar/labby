@@ -643,7 +643,8 @@ impl ServerHandler for LabMcpServer {
                 service = "labby",
                 action = "read_resource",
                 subject,
-                resource_uri = crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
+                resource_uri =
+                    crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
                 route = "gateway",
                 "dispatch route selected"
             );
@@ -654,7 +655,8 @@ impl ServerHandler for LabMcpServer {
                     service = "labby",
                     action = "read_resource",
                     subject,
-                    resource_uri = crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
+                    resource_uri =
+                        crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
                     route = "gateway",
                     elapsed_ms,
                     kind = "unavailable",
@@ -714,7 +716,8 @@ impl ServerHandler for LabMcpServer {
                         service = "labby",
                         action = "read_resource",
                         subject,
-                        resource_uri = crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
+                        resource_uri =
+                            crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
                         route = "gateway",
                         elapsed_ms,
                         "synthetic resource ok"
@@ -728,7 +731,8 @@ impl ServerHandler for LabMcpServer {
                     )
                     .await;
                     Ok(ReadResourceResult::new(vec![
-                        ResourceContents::text(text, uri.clone()).with_mime_type("application/json"),
+                        ResourceContents::text(text, uri.clone())
+                            .with_mime_type("application/json"),
                     ]))
                 }
                 None => {
@@ -737,7 +741,8 @@ impl ServerHandler for LabMcpServer {
                         service = "labby",
                         action = "read_resource",
                         subject,
-                        resource_uri = crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
+                        resource_uri =
+                            crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
                         route = "gateway",
                         elapsed_ms,
                         kind = "not_found",

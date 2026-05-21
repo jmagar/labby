@@ -2282,10 +2282,12 @@ impl UpstreamPool {
     /// Returns one entry for `lab://gateway/servers` plus one
     /// `lab://gateway/<name>/schema` entry per registered upstream.
     pub async fn gateway_synthetic_resources(&self) -> Vec<Resource> {
-        let mut out = vec![RawResource::new("lab://gateway/servers", "gateway/servers")
-            .with_description("Index of upstream MCP servers connected to the gateway")
-            .with_mime_type("application/json")
-            .no_annotation()];
+        let mut out = vec![
+            RawResource::new("lab://gateway/servers", "gateway/servers")
+                .with_description("Index of upstream MCP servers connected to the gateway")
+                .with_mime_type("application/json")
+                .no_annotation(),
+        ];
         let catalog = self.catalog.read().await;
         let mut names: Vec<&String> = catalog.keys().collect();
         names.sort();
@@ -3487,11 +3489,9 @@ async fn connect_in_process_service_peer(
 fn health_str(health: UpstreamHealth) -> &'static str {
     match health {
         UpstreamHealth::Healthy => "healthy",
-        UpstreamHealth::Unhealthy { consecutive_failures }
-            if consecutive_failures >= types::CIRCUIT_BREAKER_THRESHOLD =>
-        {
-            "open"
-        }
+        UpstreamHealth::Unhealthy {
+            consecutive_failures,
+        } if consecutive_failures >= types::CIRCUIT_BREAKER_THRESHOLD => "open",
         UpstreamHealth::Unhealthy { .. } => "degraded",
     }
 }
@@ -4944,10 +4944,16 @@ mod tests {
             },
         );
         let entry = healthy_in_process_entry(Arc::from("alpha"), tools);
-        pool.catalog.write().await.insert("alpha".to_string(), entry);
+        pool.catalog
+            .write()
+            .await
+            .insert("alpha".to_string(), entry);
 
         let doc = pool.gateway_servers_doc().await;
-        let servers = doc.get("servers").and_then(|v| v.as_array()).expect("servers array");
+        let servers = doc
+            .get("servers")
+            .and_then(|v| v.as_array())
+            .expect("servers array");
         assert_eq!(servers.len(), 1);
         let s = &servers[0];
         assert_eq!(s["name"], "alpha");
@@ -4977,7 +4983,10 @@ mod tests {
             ToolExposurePolicy::from_patterns(vec!["github_*".into()]).expect("policy");
 
         let pool = UpstreamPool::new();
-        pool.catalog.write().await.insert("alpha".to_string(), entry);
+        pool.catalog
+            .write()
+            .await
+            .insert("alpha".to_string(), entry);
 
         let doc = pool.gateway_server_schema("alpha").await.expect("doc");
         let names: Vec<&str> = doc["tools"]
@@ -5004,7 +5013,10 @@ mod tests {
 
         let pool = UpstreamPool::new();
         let entry = healthy_in_process_entry(Arc::from("alpha"), HashMap::new());
-        pool.catalog.write().await.insert("alpha".to_string(), entry);
+        pool.catalog
+            .write()
+            .await
+            .insert("alpha".to_string(), entry);
         let entry = healthy_in_process_entry(Arc::from("beta"), HashMap::new());
         pool.catalog.write().await.insert("beta".to_string(), entry);
 
