@@ -236,7 +236,7 @@ cp .env.example .env
 | `UNIFI_MCP_ALLOW_DESTRUCTIVE` | no | `false` | Skip confirmation for all destructive actions |
 | `UNIFI_MCP_ALLOW_YOLO` | no | `false` | Skip all elicitation prompts including destructive confirmation |
 | `PUID` / `PGID` | no | `1000` / `1000` | UID/GID for Docker container process |
-| `DOCKER_NETWORK` | no | `lab` | Docker network name |
+| `DOCKER_NETWORK` | no | `lab` | External Docker network name (must already exist — create with `docker network create lab`) |
 
 ### UDM Pro vs traditional controller (`UNIFI_IS_UDM_PRO`)
 
