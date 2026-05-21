@@ -189,13 +189,21 @@ async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<Exit
                 crate::cli::helpers::print_dry_run("setup", "plugin_sync", &params);
                 return Ok(ExitCode::SUCCESS);
             }
-            if !args.yes {
-                anyhow::bail!(
-                    "setup plugin_sync mutates ~/.lab/.env; pass -y/--yes to confirm or --dry-run to preview"
-                );
-            }
-            let value = crate::dispatch::setup::dispatch("plugin_sync", params).await?;
-            print(&value, format)?;
+            // Route through the shared destructive-action helper so TTY users
+            // get the interactive confirm prompt and non-TTY callers get a
+            // structured refusal — matches the cli/CLAUDE.md contract.
+            return crate::cli::helpers::run_confirmable_action_command(
+                "setup",
+                crate::dispatch::setup::ACTIONS,
+                "plugin_sync".to_string(),
+                params,
+                args.yes,
+                format,
+                |action, params| async move {
+                    crate::dispatch::setup::dispatch(&action, params).await
+                },
+            )
+            .await;
         }
         SetupCommand::PluginExport => {
             let value = crate::dispatch::setup::dispatch("plugin_export", json!({})).await?;
