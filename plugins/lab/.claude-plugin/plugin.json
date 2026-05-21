@@ -17,6 +17,7 @@
     "marketplace"
   ],
   "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json",
   "skills": "./skills",
   "userConfig": {
     "server_url": {
@@ -51,18 +52,6 @@
       "title": "MCP gateway URL",
       "description": "Separate public base URL for the MCP gateway when it runs on a different hostname from the lab UI, e.g. https://mcp.example.com. Leave empty when the app and gateway share a hostname (the common case). Maps to LAB_MCP_GATEWAY_URL on the server.",
       "default": ""
-    },
-    "mcp_host": {
-      "type": "string",
-      "title": "MCP bind host",
-      "description": "Interface address labby serve binds the MCP HTTP server to. 0.0.0.0 makes it reachable from other hosts (normal homelab setup). 127.0.0.1 restricts to local-only (use this when fronted by a reverse proxy on the same host).",
-      "default": "0.0.0.0"
-    },
-    "mcp_port": {
-      "type": "number",
-      "title": "MCP HTTP port",
-      "description": "TCP port labby serve listens on for the MCP and API surface. Default 8765. Must match the port in server_url.",
-      "default": 8765
     },
     "admin_enabled": {
       "type": "boolean",

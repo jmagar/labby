@@ -112,6 +112,32 @@ pub const ACTIONS: &[ActionSpec] = &[
         }],
     },
     ActionSpec {
+        name: "plugin_sync",
+        description: "Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.lab/.env as LAB_* vars",
+        destructive: true,
+        returns: "PluginSyncOutcome",
+        params: &[],
+    },
+    ActionSpec {
+        name: "plugin_export",
+        description: "Read ~/.lab/.env and return current values keyed by userConfig field name",
+        destructive: false,
+        returns: "PluginExportOutcome",
+        params: &[],
+    },
+    ActionSpec {
+        name: "plugin_connectivity",
+        description: "Validate connectivity to the lab MCP server at {server_url}/health",
+        destructive: false,
+        returns: "ConnectivityOutcome",
+        params: &[ParamSpec {
+            name: "server_url",
+            ty: "string",
+            required: false,
+            description: "Override server URL; defaults to CLAUDE_PLUGIN_OPTION_SERVER_URL or http://localhost:8765",
+        }],
+    },
+    ActionSpec {
         name: "check",
         description: "Check local Lab setup prerequisites without mutating the filesystem",
         destructive: false,

@@ -71,7 +71,10 @@ async fn dispatch_inner(action: &str, params: &Value) -> Result<Value, ToolError
         "draft.commit" => draft_commit_action(params).await,
         "settings.state" => settings_state_action(),
         "settings.update" => settings_update_action(params),
-        "plugin_hook" => plugin_hook_action(params),
+        "plugin_hook" => plugin_hook_action(params).await,
+        "plugin_sync" => plugin_sync_action(),
+        "plugin_export" => plugin_export_action(),
+        "plugin_connectivity" => plugin_connectivity_action(params).await,
         "check" => setup_check_action(),
         "repair" => setup_repair_action(),
         "installed_plugins" => installed_plugins_action(params).await,
@@ -87,7 +90,7 @@ async fn dispatch_inner(action: &str, params: &Value) -> Result<Value, ToolError
     }
 }
 
-fn plugin_hook_action(params: &Value) -> Result<Value, ToolError> {
+async fn plugin_hook_action(params: &Value) -> Result<Value, ToolError> {
     let repair = params
         .get("repair")
         .map(|value| parse_required_bool(value, "repair"))
@@ -98,7 +101,37 @@ fn plugin_hook_action(params: &Value) -> Result<Value, ToolError> {
     } else {
         super::plugin_hook::Mode::Check
     };
-    to_json(super::plugin_hook::run(mode)?)
+    // 1. Create ~/.lab/ and ~/.lab/.env if missing.
+    let report = super::plugin_hook::run(mode)?;
+    // 2. Sync CLAUDE_PLUGIN_OPTION_* → ~/.lab/.env.
+    let sync = super::plugin_hook::sync_plugin_env()?;
+    // 3. Validate connectivity.
+    let server_url = std::env::var("CLAUDE_PLUGIN_OPTION_SERVER_URL").ok();
+    let connectivity =
+        super::plugin_hook::validate_connectivity(server_url.as_deref()).await;
+    Ok(json!({
+        "setup": to_json(report)?,
+        "sync": to_json(sync)?,
+        "connectivity": to_json(connectivity)?,
+    }))
+}
+
+fn plugin_sync_action() -> Result<Value, ToolError> {
+    to_json(super::plugin_hook::sync_plugin_env()?)
+}
+
+fn plugin_export_action() -> Result<Value, ToolError> {
+    to_json(super::plugin_hook::export_plugin_env()?)
+}
+
+async fn plugin_connectivity_action(params: &Value) -> Result<Value, ToolError> {
+    let server_url = params
+        .get("server_url")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let outcome =
+        super::plugin_hook::validate_connectivity(server_url.as_deref()).await;
+    to_json(outcome)
 }
 
 fn setup_check_action() -> Result<Value, ToolError> {
@@ -590,7 +623,10 @@ fn log_outcome(
     elapsed_ms: u128,
     result: &Result<Value, ToolError>,
 ) {
-    if matches!(action, "plugin_hook" | "check" | "repair") {
+    if matches!(
+        action,
+        "plugin_hook" | "plugin_sync" | "plugin_export" | "plugin_connectivity" | "check" | "repair"
+    ) {
         return;
     }
 
@@ -677,6 +713,9 @@ mod tests {
             "services_status",
             "install_plugin",
             "uninstall_plugin",
+            "plugin_sync",
+            "plugin_export",
+            "plugin_connectivity",
         ] {
             assert!(names.contains(required), "missing setup action {required}");
         }
