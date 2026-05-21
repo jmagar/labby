@@ -356,6 +356,15 @@ async fn refresh_token_grant(
         state.config.refresh_token_ttl,
         "LAB_AUTH_REFRESH_TOKEN_TTL_SECS",
     )?;
+    // Re-apply admin elevation in case this refresh token was originally
+    // issued before elevation was wired in, or before the user's email was
+    // on the allowlist.  elevate_scope_for_allowed_user is idempotent — if
+    // the scope already contains the admin token it is left unchanged.
+    let elevated_scope = crate::authorize::elevate_scope_for_allowed_user(
+        &stored.scope,
+        &state.config.default_scope,
+    );
+
     // Rotate with the stored subject and provider token (not yet refreshed).
     // If Google returns a new provider refresh token we update below.
     let rotated = state
@@ -367,7 +376,7 @@ async fn refresh_token_grant(
                 client_id: stored.client_id.clone(),
                 subject: stored.subject.clone(),
                 resource: stored_resource.clone(),
-                scope: stored.scope.clone(),
+                scope: elevated_scope.clone(),
                 provider_refresh_token: Some(provider_refresh_token.clone()),
                 created_at: stored.created_at,
                 expires_at: new_expires_at,
@@ -401,7 +410,7 @@ async fn refresh_token_grant(
                 client_id: stored.client_id.clone(),
                 subject: google.subject.clone(),
                 resource: stored_resource.clone(),
-                scope: stored.scope.clone(),
+                scope: elevated_scope.clone(),
                 provider_refresh_token: Some(new_provider_rt),
                 created_at: stored.created_at,
                 expires_at: new_expires_at,
@@ -415,7 +424,7 @@ async fn refresh_token_grant(
         refresh_token_id = %refresh_token_id,
         subject_id = %fingerprint(&google.subject),
         resource = %stored_resource,
-        scope = %stored.scope,
+        scope = %elevated_scope,
         "oauth refresh_token grant rotated refresh token and issued new access token"
     );
 
@@ -424,7 +433,7 @@ async fn refresh_token_grant(
         stored.client_id,
         google.subject,
         stored_resource,
-        stored.scope,
+        elevated_scope,
         Some(new_refresh_token),
     )
 }
@@ -1118,6 +1127,64 @@ mod tests {
                 .unwrap()
                 .is_none(),
             "old refresh token must be invalidated after rotation"
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_grant_elevates_stale_scope_to_admin() {
+        // Simulate a refresh token that was issued before elevation was wired in,
+        // storing only the base scope ("lab") without "lab:admin".  The refresh
+        // grant must re-apply elevate_scope_for_allowed_user so the new access
+        // token carries "lab:admin".
+        let state = test_auth_state_with_mock_google().await;
+        state
+            .store
+            .upsert_refresh_token(crate::types::RefreshTokenRow {
+                refresh_token: "stale-token".to_string(),
+                client_id: "client".to_string(),
+                subject: "google-subject-123".to_string(),
+                resource: String::new(),
+                scope: "lab".to_string(), // stale — no lab:admin
+                provider_refresh_token: Some("provider-refresh".to_string()),
+                created_at: crate::util::now_unix() - 60,
+                expires_at: crate::util::now_unix() + 3600,
+            })
+            .await
+            .unwrap();
+        let app = router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/token")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(
+                        "grant_type=refresh_token&refresh_token=stale-token&client_id=client",
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        // Decode the access token and verify the scope was elevated.
+        let access_token = json["access_token"].as_str().expect("access_token");
+        let claims = state
+            .signing_keys
+            .validate_access_token_with_issuer(
+                access_token,
+                "https://lab.example.com/mcp",
+                "https://lab.example.com",
+            )
+            .expect("access token must be valid");
+        let scopes: Vec<&str> = claims.scope.split_whitespace().collect();
+        assert!(
+            scopes.contains(&"lab:admin"),
+            "elevated access token must contain lab:admin, got: {:?}",
+            scopes
         );
     }
 

@@ -461,10 +461,21 @@ fn validate_response_type(response_type: &str) -> Result<(), AuthError> {
 /// carries the elevated scope regardless of what the OAuth client originally
 /// requested — most MCP clients use the default scope and have no way to
 /// negotiate `:admin` themselves.
-fn elevate_scope_for_allowed_user(scope: &str, default_scope: &str) -> String {
+pub(crate) fn elevate_scope_for_allowed_user(scope: &str, default_scope: &str) -> String {
     let base = default_scope.split(':').next().unwrap_or(default_scope);
     let admin_scope = format!("{base}:admin");
     let mut scopes: Vec<&str> = scope.split_whitespace().filter(|s| !s.is_empty()).collect();
+    // Only elevate when the scope belongs to the same brand as default_scope.
+    // A token from a different resource (e.g. "mcp:read mcp:write" for a
+    // syslog endpoint) must not receive "lab:admin" injected into it.
+    // An empty scope is allowed through so the rare zero-scope path still works.
+    let same_brand = scopes.is_empty()
+        || scopes
+            .iter()
+            .any(|s| *s == base || s.starts_with(&format!("{base}:")));
+    if !same_brand {
+        return scopes.join(" ");
+    }
     if scopes.iter().any(|s| *s == admin_scope.as_str()) {
         return scopes.join(" ");
     }
