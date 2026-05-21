@@ -107,6 +107,8 @@ services:
     # ── Hard outer boundary ──────────────────────────────────────────────────
     # Even if the spawn-guard logic in the binary fails, the container's pid
     # namespace + these limits prevent a fork-bomb from reaching the host.
+    networks:
+      - jakenet
     deploy:
       resources:
         limits:
@@ -116,3 +118,8 @@ services:
 volumes:
   labby-data:
     driver: local
+
+networks:
+  jakenet:
+    name: jakenet
+    external: true
