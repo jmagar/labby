@@ -56,11 +56,11 @@ ensure-host-dirs:
 
 # Start the dev container for the first time (or after docker-compose changes)
 dev-up: ensure-host-dirs
-    docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+    docker compose -f docker-compose.yml up -d
 
 # Release build → hot-swap binary into running dev container (no image rebuild)
 dev: build-release
-    docker compose -f docker-compose.yml -f docker-compose.dev.yml restart
+    docker compose -f docker-compose.yml restart
 
 # Debug build with Cranelift codegen (fastest compile) → hot-swap into running dev container.
 # Uses nightly toolchain — RUSTFLAGS explicitly includes mold since env var overrides config.toml.
@@ -71,7 +71,7 @@ dev-debug:
     RUSTC="$nightly_rustc" RUSTC_WRAPPER="" RUSTFLAGS="-C link-arg=-fuse-ld=mold -Z codegen-backend=cranelift" \
         cargo build -p labby --all-features
     install -D -m 755 target/debug/labby bin/labby
-    docker compose -f docker-compose.yml -f docker-compose.dev.yml restart
+    docker compose -f docker-compose.yml restart
 
 # Verify Docker ACP provider config, provider health, and a minimal Codex ACP prompt.
 acp-smoke *ARGS:

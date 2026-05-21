@@ -534,7 +534,7 @@ just release          # cargo release
 just mcp-token        # rotate LAB_MCP_HTTP_TOKEN in .env
 ```
 
-The dev container (`docker-compose.yml` + `docker-compose.dev.yml`) pre-installs the three ACP adapters (`claude-agent-acp`, `codex-acp`, `gemini`) into the image at fixed versions, with an npm `overrides` entry floating `@anthropic-ai/claude-agent-sdk` forward of the version `claude-agent-acp` pins. This eliminates per-spawn `npx` overhead and avoids credential/binary-version mismatches that otherwise SIGILL the bundled Claude Code binary. Bumping any adapter version requires rebuilding the image (`docker compose build labby-master`); changing only the labby binary uses `just dev` or `just dev-debug` and is immediate.
+The dev container (`docker-compose.yml`) pre-installs the three ACP adapters (`claude-agent-acp`, `codex-acp`, `gemini`) into the image at fixed versions, with an npm `overrides` entry floating `@anthropic-ai/claude-agent-sdk` forward of the version `claude-agent-acp` pins. This eliminates per-spawn `npx` overhead and avoids credential/binary-version mismatches that otherwise SIGILL the bundled Claude Code binary. Bumping any adapter version requires rebuilding the image (`docker compose build labby-master`); changing only the labby binary uses `just dev` or `just dev-debug` and is immediate.
 
 Driving the UI as automation while OAuth is enabled: pass the static bearer token as a header. The `/auth/session` endpoint recognizes the same token and returns a synthetic admin session, so the AuthBootstrap treats the caller as logged in:
 

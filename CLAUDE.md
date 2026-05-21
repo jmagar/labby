@@ -331,7 +331,7 @@ Default verification targets the all-features build. If you run a reduced featur
 
 ### Docker dev container
 
-`docker-compose.yml` + `docker-compose.dev.yml` run `labby:dev` with the host's `~/.lab/`, `~/.gemini/`, and the repo workspace bind-mounted in. The image at `config/Dockerfile.fast` pre-installs the three ACP adapters (`claude-agent-acp`, `codex-acp`, `gemini`) into `/opt/acp-adapters/node_modules` and symlinks them into `/usr/local/bin/`, so each chat session spawn calls a deterministic local binary instead of paying the `npx -y` round-trip. The provider config at `config/acp-providers.docker.json` therefore uses `command: "claude-agent-acp"` (etc.) directly.
+`docker-compose.yml` runs `labby:dev` with the host's `~/.lab/`, `~/.gemini/`, the repo workspace, the locally built `bin/labby`, and frontend assets bind-mounted in. The image at `config/Dockerfile.fast` pre-installs the three ACP adapters (`claude-agent-acp`, `codex-acp`, `gemini`) into `/opt/acp-adapters/node_modules` and symlinks them into `/usr/local/bin/`, so each chat session spawn calls a deterministic local binary instead of paying the `npx -y` round-trip. The provider config at `config/acp-providers.docker.json` therefore uses `command: "claude-agent-acp"` (etc.) directly.
 
 The Claude SDK is held forward of `claude-agent-acp`'s pinned version via an `overrides` entry in `/opt/acp-adapters/package.json` (currently `^0.2.131`). The bundled Claude Code binary version must match credential format expectations from the host's `claude` CLI, otherwise the underlying binary `SIGILL`s on session start. Bump both when upgrading.
 

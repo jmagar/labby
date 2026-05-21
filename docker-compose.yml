@@ -1,11 +1,11 @@
 name: lab
 
-# Local development stack. Builds Lab from this checkout and reuses the
-# production runtime definition from docker-compose.prod.yml.
+# Local development stack. Reuses the production runtime definition, but runs a
+# dev image with the locally built Lab binary and frontend assets bind-mounted.
 #
-# Normal dev flow still layers docker-compose.dev.yml on top:
-#
-#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# Normal Rust changes only need `just dev` or `just dev-debug` plus a container
+# restart; image rebuilds are only needed when config/Dockerfile.fast or the
+# pre-installed adapter/tooling set changes.
 
 services:
   labby-master:
@@ -17,6 +17,13 @@ services:
     build:
       context: .
       dockerfile: config/Dockerfile.fast
+    volumes:
+      # Hot-swap the locally built binary into the dev runtime.
+      - ./bin/labby:/usr/local/bin/labby
+    environment:
+      # Serve frontend assets from the bind-mounted workspace so `pnpm build`
+      # changes are reflected immediately without a binary rebuild.
+      LAB_WEB_ASSETS_DIR: "/workspace/lab/apps/gateway-admin/out"
 
 volumes:
   labby-data:
