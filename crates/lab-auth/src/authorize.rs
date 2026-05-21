@@ -345,9 +345,17 @@ pub async fn callback(
     );
     let auth_code = random_token(24)?;
     let auth_code_id = fingerprint(&auth_code);
+    // The user just passed `check_email_allowlist`, which IS the admin gate:
+    // operators are added to the allowlist explicitly to grant access. Elevate
+    // their scope to include `<default_scope>:admin` so MCP clients (which
+    // typically don't know to request elevated scopes) can call destructive
+    // gateway/setup actions without a separate flow. If they explicitly
+    // requested only the base scope, this is a no-op deny — they get admin.
+    let elevated_scope =
+        elevate_scope_for_allowed_user(&request.scope, &state.config.default_scope);
     let request_client_id = request.client_id.clone();
     let request_resource = request.resource.clone();
-    let request_scope = request.scope.clone();
+    let request_scope = elevated_scope.clone();
     state
         .store
         .insert_auth_code(AuthorizationCodeRow {
@@ -356,7 +364,7 @@ pub async fn callback(
             subject: google.subject,
             redirect_uri: request.redirect_uri.clone(),
             resource: request.resource,
-            scope: request.scope,
+            scope: elevated_scope,
             code_challenge: request.code_challenge,
             code_challenge_method: request.code_challenge_method,
             provider_refresh_token: google.refresh_token,
@@ -440,6 +448,23 @@ fn validate_response_type(response_type: &str) -> Result<(), AuthError> {
             "response_type must be `code`".to_string(),
         ))
     }
+}
+
+/// Add `<default_scope>:admin` to `scope` if not already present.
+///
+/// Called after `check_email_allowlist` succeeds. Being on the allowlist IS
+/// the admin gate (operators add users explicitly), so the issued token
+/// carries the elevated scope regardless of what the OAuth client originally
+/// requested — most MCP clients use the default scope and have no way to
+/// negotiate `:admin` themselves.
+fn elevate_scope_for_allowed_user(scope: &str, default_scope: &str) -> String {
+    let admin_scope = format!("{default_scope}:admin");
+    let mut scopes: Vec<&str> = scope.split_whitespace().filter(|s| !s.is_empty()).collect();
+    if scopes.iter().any(|s| *s == admin_scope.as_str()) {
+        return scopes.join(" ");
+    }
+    scopes.push(admin_scope.as_str());
+    scopes.join(" ")
 }
 
 fn validate_scope(state: &AuthState, resource: &str, scope: &str) -> Result<String, AuthError> {
@@ -1246,7 +1271,7 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn validate_scope_accepts_configured_default_and_rejects_others() {
+    async fn validate_scope_accepts_supported_scopes_and_rejects_others() {
         let state = test_auth_state().await;
         let canonical = crate::metadata::canonical_resource_url(&state);
         // Empty scope falls back to configured default ("lab").
@@ -1254,24 +1279,56 @@ pub mod tests {
             super::validate_scope(&state, &canonical, "").unwrap(),
             "lab"
         );
-        // Matching scope passes through.
+        // Base scope passes.
         assert_eq!(
             super::validate_scope(&state, &canonical, "lab").unwrap(),
             "lab"
         );
-        // Anything else is rejected — and the error mentions the configured
-        // default (proving the LAB_SCOPE constant is gone).
-        let err = super::validate_scope(&state, &canonical, "lab:admin").unwrap_err();
+        // `:admin` is in `scopes_supported` by default — MCP clients can request
+        // it explicitly. (Allowed-emails users also receive it implicitly via
+        // elevate_scope_for_allowed_user at callback time.)
+        assert_eq!(
+            super::validate_scope(&state, &canonical, "lab:admin").unwrap(),
+            "lab:admin"
+        );
+        // Anything not in scopes_supported is rejected.
+        let err = super::validate_scope(&state, &canonical, "lab:write").unwrap_err();
         assert!(err.to_string().contains("lab"), "got: {err}");
+    }
+
+    #[test]
+    fn elevate_scope_adds_admin_when_missing() {
+        assert_eq!(
+            super::elevate_scope_for_allowed_user("lab", "lab"),
+            "lab lab:admin"
+        );
+        // Already has admin → no duplication.
+        assert_eq!(
+            super::elevate_scope_for_allowed_user("lab lab:admin", "lab"),
+            "lab lab:admin"
+        );
+        // Empty scope → just admin (rare; OAuth default normally fills `lab`).
+        assert_eq!(
+            super::elevate_scope_for_allowed_user("", "lab"),
+            "lab:admin"
+        );
+        // Different brand prefix (syslog, axon, etc.) uses its own default.
+        assert_eq!(
+            super::elevate_scope_for_allowed_user("syslog", "syslog"),
+            "syslog syslog:admin"
+        );
     }
 
     #[tokio::test]
     async fn authorize_rejects_invalid_scope() {
         let app = router(test_auth_state_with_registered_client().await);
+        // `lab:write` is NOT in default scopes_supported; should be rejected.
+        // (`lab:admin` IS in scopes_supported as of 2026-05; use a different
+        // unsupported scope here.)
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri("/authorize?response_type=code&client_id=client&redirect_uri=http://127.0.0.1:7777/callback&state=abc&scope=lab:admin&code_challenge=pkce&code_challenge_method=S256")
+                    .uri("/authorize?response_type=code&client_id=client&redirect_uri=http://127.0.0.1:7777/callback&state=abc&scope=lab:write&code_challenge=pkce&code_challenge_method=S256")
                     .body(Body::empty())
                     .unwrap(),
             )
