@@ -450,7 +450,11 @@ fn validate_response_type(response_type: &str) -> Result<(), AuthError> {
     }
 }
 
-/// Add `<default_scope>:admin` to `scope` if not already present.
+/// Add `<base>:admin` to `scope` if not already present, where `base` is the
+/// resource prefix of `default_scope` (everything before the first `:`).
+///
+/// For example, `default_scope = "syslog:read"` produces the admin scope
+/// `"syslog:admin"`, not `"syslog:read:admin"`.
 ///
 /// Called after `check_email_allowlist` succeeds. Being on the allowlist IS
 /// the admin gate (operators add users explicitly), so the issued token
@@ -458,7 +462,8 @@ fn validate_response_type(response_type: &str) -> Result<(), AuthError> {
 /// requested — most MCP clients use the default scope and have no way to
 /// negotiate `:admin` themselves.
 fn elevate_scope_for_allowed_user(scope: &str, default_scope: &str) -> String {
-    let admin_scope = format!("{default_scope}:admin");
+    let base = default_scope.split(':').next().unwrap_or(default_scope);
+    let admin_scope = format!("{base}:admin");
     let mut scopes: Vec<&str> = scope.split_whitespace().filter(|s| !s.is_empty()).collect();
     if scopes.iter().any(|s| *s == admin_scope.as_str()) {
         return scopes.join(" ");
@@ -1316,6 +1321,17 @@ pub mod tests {
         assert_eq!(
             super::elevate_scope_for_allowed_user("syslog", "syslog"),
             "syslog syslog:admin"
+        );
+        // default_scope with verb suffix (e.g. syslog:read) → admin uses base prefix only,
+        // not syslog:read:admin.
+        assert_eq!(
+            super::elevate_scope_for_allowed_user("syslog:read", "syslog:read"),
+            "syslog:read syslog:admin"
+        );
+        // Already has correct admin even when default_scope carries a suffix.
+        assert_eq!(
+            super::elevate_scope_for_allowed_user("syslog:read syslog:admin", "syslog:read"),
+            "syslog:read syslog:admin"
         );
     }
 
