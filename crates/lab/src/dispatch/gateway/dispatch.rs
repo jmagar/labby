@@ -59,6 +59,11 @@ pub async fn dispatch_with_manager(
         | "gateway.import_tombstones.restore" => {
             handle_import_tombstone_actions(manager, action, params_value).await
         }
+        "gateway.servers" => to_json(manager.gateway_servers_doc().await?),
+        "gateway.schema" => {
+            let name = require_str(&params_value, "name")?;
+            to_json(manager.gateway_server_schema(&name).await?)
+        }
         "gateway.list"
         | "gateway.server.get"
         | "gateway.supported_services"
@@ -826,10 +831,60 @@ mod tests {
         }
     }
 
+    #[test]
+    fn gateway_actions_include_servers_and_schema() {
+        let names: Vec<&str> = ACTIONS.iter().map(|a| a.name).collect();
+        assert!(
+            names.contains(&"gateway.servers"),
+            "missing gateway.servers; have {names:?}"
+        );
+        assert!(
+            names.contains(&"gateway.schema"),
+            "missing gateway.schema; have {names:?}"
+        );
+    }
+
     fn test_manager() -> GatewayManager {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("config.toml");
         GatewayManager::new(path, GatewayRuntimeHandle::default())
+    }
+
+    #[tokio::test]
+    async fn gateway_servers_action_returns_not_found_when_no_pool() {
+        let manager = test_manager();
+        let err = dispatch_with_manager(&manager, "gateway.servers", json!({}))
+            .await
+            .expect_err("no pool configured");
+        let body = serde_json::to_value(&err).expect("serialize");
+        assert_eq!(
+            body["kind"], "not_found",
+            "sdk_kind must be promoted to kind"
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_schema_missing_name_returns_missing_param() {
+        let manager = test_manager();
+        let err = dispatch_with_manager(&manager, "gateway.schema", json!({}))
+            .await
+            .expect_err("missing name");
+        let body = serde_json::to_value(&err).expect("serialize");
+        assert_eq!(body["kind"], "missing_param");
+        assert_eq!(body["param"], "name");
+    }
+
+    #[tokio::test]
+    async fn gateway_schema_unknown_upstream_returns_not_found_envelope() {
+        let manager = test_manager();
+        let err = dispatch_with_manager(&manager, "gateway.schema", json!({"name": "nope"}))
+            .await
+            .expect_err("no pool configured");
+        let body = serde_json::to_value(&err).expect("serialize");
+        assert_eq!(
+            body["kind"], "not_found",
+            "sdk_kind must be promoted to kind"
+        );
     }
 
     #[tokio::test]

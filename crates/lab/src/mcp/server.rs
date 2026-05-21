@@ -591,6 +591,7 @@ impl ServerHandler for LabMcpServer {
         }
 
         if let Some(pool) = self.current_upstream_pool().await {
+            resources.extend(pool.gateway_synthetic_resources().await);
             resources.extend(pool.list_upstream_resources().await);
             if let Some(subject) = self.request_subject(&context) {
                 let configs = self.oauth_upstream_configs().await;
@@ -635,6 +636,136 @@ impl ServerHandler for LabMcpServer {
             resource_uri = crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
             "dispatch start"
         );
+
+        if uri.starts_with("lab://gateway/") {
+            tracing::info!(
+                surface = "mcp",
+                service = "labby",
+                action = "read_resource",
+                subject,
+                resource_uri =
+                    crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
+                route = "gateway",
+                "dispatch route selected"
+            );
+            let Some(pool) = self.current_upstream_pool().await else {
+                let elapsed_ms = start.elapsed().as_millis();
+                tracing::warn!(
+                    surface = "mcp",
+                    service = "labby",
+                    action = "read_resource",
+                    subject,
+                    resource_uri =
+                        crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
+                    route = "gateway",
+                    elapsed_ms,
+                    kind = "unavailable",
+                    "upstream pool not configured"
+                );
+                self.emit_dispatch_notification(
+                    &context,
+                    "lab",
+                    "read_resource",
+                    elapsed_ms,
+                    DispatchLogOutcome::Failure {
+                        level: LoggingLevel::Warning,
+                        kind: "unavailable",
+                    },
+                )
+                .await;
+                return Err(ErrorData::resource_not_found(
+                    "upstream pool not configured".to_string(),
+                    None,
+                ));
+            };
+
+            let json = if uri == "lab://gateway/servers" {
+                Some(pool.gateway_servers_doc().await)
+            } else if let Some(name) = uri
+                .strip_prefix("lab://gateway/")
+                .and_then(|rest| rest.strip_suffix("/schema"))
+                .filter(|name| !name.is_empty() && !name.contains('/'))
+            {
+                pool.gateway_server_schema(name).await
+            } else {
+                None
+            };
+
+            let elapsed_ms = start.elapsed().as_millis();
+            return match json {
+                Some(value) => {
+                    let text = match serde_json::to_string_pretty(&value) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            tracing::error!(
+                                surface = "mcp",
+                                service = "labby",
+                                action = "read_resource",
+                                resource_uri = crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
+                                error = %e,
+                                "failed to serialize synthetic gateway resource"
+                            );
+                            return Err(ErrorData::internal_error(
+                                format!("failed to serialize resource: {e}"),
+                                None,
+                            ));
+                        }
+                    };
+                    tracing::info!(
+                        surface = "mcp",
+                        service = "labby",
+                        action = "read_resource",
+                        subject,
+                        resource_uri =
+                            crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
+                        route = "gateway",
+                        elapsed_ms,
+                        "synthetic resource ok"
+                    );
+                    self.emit_dispatch_notification(
+                        &context,
+                        "lab",
+                        "read_resource",
+                        elapsed_ms,
+                        DispatchLogOutcome::Success,
+                    )
+                    .await;
+                    Ok(ReadResourceResult::new(vec![
+                        ResourceContents::text(text, uri.clone())
+                            .with_mime_type("application/json"),
+                    ]))
+                }
+                None => {
+                    tracing::warn!(
+                        surface = "mcp",
+                        service = "labby",
+                        action = "read_resource",
+                        subject,
+                        resource_uri =
+                            crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
+                        route = "gateway",
+                        elapsed_ms,
+                        kind = "not_found",
+                        "synthetic resource not found"
+                    );
+                    self.emit_dispatch_notification(
+                        &context,
+                        "lab",
+                        "read_resource",
+                        elapsed_ms,
+                        DispatchLogOutcome::Failure {
+                            level: LoggingLevel::Warning,
+                            kind: "not_found",
+                        },
+                    )
+                    .await;
+                    Err(ErrorData::resource_not_found(
+                        format!("unknown resource: {uri}"),
+                        None,
+                    ))
+                }
+            };
+        }
 
         if let Some(pool) = self.current_upstream_pool().await
             && uri.starts_with("lab://upstream/")
