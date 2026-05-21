@@ -85,7 +85,7 @@ mod tests {
     }
 }
 
-fn candidate_paths(home: &Path, xdg: Option<&Path>) -> Vec<PathBuf> {
+fn candidate_paths(home: &Path, #[cfg_attr(target_os = "windows", allow(unused_variables))] xdg: Option<&Path>) -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
     // Env override — reject empty strings; an empty OPENCODE_CONFIG would produce
