@@ -2421,6 +2421,40 @@ impl GatewayManager {
                         elapsed_ms = started.elapsed().as_millis(),
                         "gateway tool index rebuild skipped"
                     );
+                    // Qdrant cleanup is idempotent and does not depend on
+                    // generation freshness. Run it anyway so that disabled or
+                    // empty upstreams don't leave stale semantic entries that
+                    // poison future searches.
+                    if semantic_cfg.semantic_enabled() && tool_count == 0 {
+                        if let (Some(qdrant_url), Some(tei_url)) = (
+                            semantic_cfg.resolved_qdrant_url(),
+                            semantic_cfg.resolved_tei_url(),
+                        ) {
+                            let upstream_for_sem = upstream_name.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) =
+                                    crate::dispatch::gateway::semantic::ensure_tools_collection(
+                                        &qdrant_url,
+                                    )
+                                    .await
+                                {
+                                    tracing::warn!(service = "scout", action = "semantic.ensure_collection", error = %e, "stale-gen sweep: collection init failed");
+                                    return;
+                                }
+                                match crate::dispatch::gateway::semantic::index_tools(
+                                    &qdrant_url,
+                                    &tei_url,
+                                    &upstream_for_sem,
+                                    &[],
+                                )
+                                .await
+                                {
+                                    Ok(()) => tracing::info!(service = "scout", action = "semantic.sweep", upstream = %upstream_for_sem, "stale Qdrant entries purged for empty upstream"),
+                                    Err(e) => tracing::warn!(service = "scout", action = "semantic.sweep", upstream = %upstream_for_sem, error = %e, "stale-gen Qdrant sweep failed"),
+                                }
+                            });
+                        }
+                    }
                 }
                 state_for_task.warming.store(false, Ordering::Relaxed);
             });
@@ -2475,13 +2509,20 @@ impl GatewayManager {
                 .entry(upstream.name.clone())
                 .or_default()
                 .clone();
+            let has_tools = state
+                .index
+                .load_full()
+                .as_ref()
+                .is_some_and(|idx| !idx.tools.is_empty());
             let fresh = state
                 .last_reprobe_attempt_at
                 .lock()
                 .ok()
                 .and_then(|guard| *guard)
                 .is_some_and(|t| now.duration_since(t) < TOOL_SEARCH_REPROBE_TTL);
-            if fresh {
+            // Only skip when the index already has tools — always retry when empty so
+            // a post-restart/reload cold index does not stay cold indefinitely.
+            if fresh && has_tools {
                 tracing::debug!(
                     surface = "mcp",
                     service = "gateway",
@@ -3130,7 +3171,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tool_search_failed_reprobe_attempt_is_ttl_gated() {
+    async fn tool_search_empty_index_always_retries_regardless_of_ttl() {
+        // Empty indexes bypass the TTL so a post-restart cold index does not
+        // stay cold indefinitely.
         let upstream = fixture_http_upstream("downstream");
         let (manager, _pool) = tool_search_manager_with_pool(upstream).await;
 
@@ -3152,15 +3195,17 @@ mod tests {
         let _second_results = manager
             .search_tools("missing tool", 5, false)
             .await
-            .expect("fresh failed reprobe is TTL-gated");
+            .expect("empty index retries on every call");
         let second_attempt = *state
             .last_reprobe_attempt_at
             .lock()
             .expect("attempt timestamp lock");
 
-        assert_eq!(
-            first_attempt, second_attempt,
-            "second search inside TTL must not schedule another reprobe"
+        // With an empty index the TTL is bypassed — the second attempt stamp
+        // is updated (≥ first) rather than staying equal.
+        assert!(
+            second_attempt >= first_attempt,
+            "empty-index reprobe must update the attempt timestamp on each search"
         );
     }
 
