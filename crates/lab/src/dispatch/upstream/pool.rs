@@ -645,6 +645,10 @@ impl Drop for UpstreamConnection {
 
 impl UpstreamConnection {
     async fn shutdown(mut self, upstream_name: &str, reason: &'static str) {
+        // Clone runtime BEFORE taking pgid so subsequent log lines surface
+        // the actual pgid (otherwise `runtime.pgid` reads as None after
+        // `.take()` clears it).
+        let runtime = self.runtime.clone();
         // INVARIANT: take pgid BEFORE any `.await` so the consuming Drop
         // sees `None` and no-ops. This prevents double-kill on the graceful
         // path. `runtime_pgid` carries the value through the function so the
@@ -652,7 +656,6 @@ impl UpstreamConnection {
         // process group.
         #[cfg(unix)]
         let runtime_pgid = self.runtime.pgid.take();
-        let runtime = self.runtime.clone();
         let started = Instant::now();
         let result = self
             ._client_service
@@ -2043,10 +2046,19 @@ impl UpstreamPool {
     /// Returns `None` if the upstream is not connected or the tool is not found.
     /// Enforces a response size cap (`LAB_UPSTREAM_MAX_RESPONSE_BYTES`, default 10 MB).
     ///
-    /// NOTE: The size check is post-hoc — rmcp materializes the full response before
-    /// we can inspect it. This guards against forwarding oversized payloads to callers
-    /// but cannot prevent the memory allocation itself. A streaming limit would require
-    /// rmcp transport-level support.
+    /// Cap layering by transport:
+    /// - **HTTP non-OAuth**: cap is enforced at the rmcp transport layer by
+    ///   `BodyCappedHttpClient` (see `dispatch/upstream/http_client.rs`) —
+    ///   bytes are checked during streaming, *before* allocation.
+    /// - **stdio**: cap is post-hoc here (rmcp's stdio transport buffers the
+    ///   full JSON response before we see it). The check at the end of this
+    ///   function guards against forwarding oversized payloads but cannot
+    ///   prevent the underlying allocation.
+    /// - **HTTP OAuth**: also post-hoc for now — threading the cap through
+    ///   `OauthClientCache` is tracked as a follow-up.
+    ///
+    /// The post-hoc check below is therefore defense-in-depth for HTTP
+    /// non-OAuth and the primary line of defense for stdio / OAuth.
     pub async fn call_tool(
         &self,
         upstream_name: &str,

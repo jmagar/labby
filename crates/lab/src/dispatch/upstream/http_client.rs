@@ -176,7 +176,11 @@ pub enum CappedStreamError {
 impl std::fmt::Display for CappedStreamError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Reqwest(e) => write!(f, "{e}"),
+            // Keep the "upstream stream error:" prefix so log lines surface
+            // that the failure came from inside the body-cap wrapper and
+            // not bare reqwest. `source()` still chains to the inner error
+            // for `{:#}` formatters.
+            Self::Reqwest(e) => write!(f, "upstream stream error: {e}"),
             Self::TooLarge {
                 event_bytes,
                 max_bytes,
@@ -524,6 +528,54 @@ mod tests {
         assert!(chunk_contains_event_boundary(b"abc\n\ndef", false));
         assert!(!chunk_contains_event_boundary(b"abc\ndef", false));
         assert!(!chunk_contains_event_boundary(b"", false));
+    }
+
+    /// SSE happy path through the full pipeline: server returns an
+    /// `text/event-stream` response with multiple small events under the
+    /// per-event cap. `post_message` must return `Sse(stream, _)` and the
+    /// stream must yield at least one event without erroring.
+    ///
+    /// This guards against regressions in the per_event_capped_byte_stream
+    /// state machine (scan + chunk_contains_event_boundary) when refactored.
+    #[tokio::test]
+    async fn sse_happy_path_yields_events_under_cap() {
+        use futures::StreamExt;
+        use rmcp::transport::streamable_http_client::StreamableHttpPostResponse as Resp;
+
+        let server = MockServer::start().await;
+        // 3 small SSE events well under the cap.
+        let body = "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":1}\n\n\
+                    data: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":2}\n\n\
+                    data: {\"jsonrpc\":\"2.0\",\"id\":3,\"result\":3}\n\n";
+        Mock::given(method("POST"))
+            .and(path("/mcp"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(body.as_bytes().to_vec(), "text/event-stream"),
+            )
+            .mount(&server)
+            .await;
+
+        let client = build(10 * 1024 * 1024);
+        let uri: Arc<str> = format!("{}/mcp", server.uri()).into();
+        let result = client
+            .post_message(uri, jsonrpc_request(), None, None, HashMap::new())
+            .await
+            .expect("sse post_message must succeed");
+
+        let mut stream = match result {
+            Resp::Sse(s, _) => s,
+            other => panic!("expected Sse variant, got: {other:?}"),
+        };
+        let mut event_count = 0usize;
+        while let Some(item) = stream.next().await {
+            let _sse = item.expect("each SSE event must parse cleanly under cap");
+            event_count += 1;
+            if event_count >= 3 {
+                break;
+            }
+        }
+        assert!(event_count >= 1, "must yield at least one SSE event");
     }
 
     #[test]
