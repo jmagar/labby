@@ -894,7 +894,13 @@ mod tests {
     async fn gateway_dispatch_rejects_synthetic_tool_execution_actions() {
         let manager = test_manager();
 
-        for action in ["tool_execute", "tool_invoke", "tool_search", "scout", "invoke"] {
+        for action in [
+            "tool_execute",
+            "tool_invoke",
+            "tool_search",
+            "scout",
+            "invoke",
+        ] {
             let err = dispatch_with_manager(&manager, action, json!({}))
                 .await
                 .expect_err("synthetic top-level MCP tools are not gateway actions");
