@@ -203,3 +203,84 @@ fn jitter_ms() -> u64 {
     let mixed = now.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(pid);
     mixed % BACKOFF_BASE_MS
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::Auth;
+    use wiremock::matchers::{body_json, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    const TEI_API_KEY: &str = "tei-test-key";
+
+    fn authed_client(base_url: &str) -> TeiClient {
+        TeiClient::with_auth(
+            base_url,
+            Auth::Bearer {
+                token: TEI_API_KEY.to_string(),
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn test_embed_documents_returns_vectors() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/embed"))
+            .and(header("authorization", "Bearer tei-test-key"))
+            .and(body_json(
+                serde_json::json!({ "inputs": ["alpha", "bravo"] }),
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!([[0.1, 0.2], [0.3, 0.4]])),
+            )
+            .mount(&server)
+            .await;
+
+        let vectors = authed_client(&server.uri())
+            .embed_documents(&["alpha", "bravo"])
+            .await
+            .expect("documents should embed");
+
+        assert_eq!(vectors, vec![vec![0.1, 0.2], vec![0.3, 0.4]]);
+    }
+
+    #[tokio::test]
+    async fn test_embed_mixed_one_round_trip() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/embed"))
+            .and(header("authorization", "Bearer tei-test-key"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!([[0.1, 0.2], [0.3, 0.4]])),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let vectors = authed_client(&server.uri())
+            .embed_mixed(&[
+                EmbedInput::query("find alpha"),
+                EmbedInput::document("alpha"),
+            ])
+            .await
+            .expect("mixed inputs should embed in one request");
+
+        assert_eq!(vectors, vec![vec![0.1, 0.2], vec![0.3, 0.4]]);
+        let requests = server.received_requests().await.expect("recorded requests");
+        assert_eq!(requests.len(), 1);
+        let body: serde_json::Value =
+            serde_json::from_slice(&requests[0].body).expect("request body json");
+        let inputs = body["inputs"].as_array().expect("inputs array");
+        assert_eq!(inputs.len(), 2);
+        assert!(
+            inputs[0]
+                .as_str()
+                .expect("query string")
+                .starts_with(QUERY_INSTRUCTION)
+        );
+        assert_eq!(inputs[1], "alpha");
+    }
+}
