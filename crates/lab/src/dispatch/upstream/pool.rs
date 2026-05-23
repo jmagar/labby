@@ -3243,6 +3243,21 @@ async fn connect_http_upstream(
             .await
             .map_err(|e| anyhow::anyhow!("oauth_required: {e}"))?;
 
+        // TODO(follow-up to lab-4z8sx.2): the OAuth path does NOT get the
+        // BodyCappedHttpClient cap because `OauthClientCache` returns a
+        // concrete `AuthClient<reqwest::Client>` and AuthClient is
+        // `#[non_exhaustive]` (no way to swap its inner http_client type).
+        // Threading `BodyCappedHttpClient` through the cache requires
+        // changing the cache to build `AuthClient<BodyCappedHttpClient>` end
+        // to end. The non-OAuth path (below) is capped — OAuth-protected
+        // upstreams are typically more trustworthy, so accept this gap for
+        // the initial fix.
+        tracing::warn!(
+            surface = "dispatch",
+            service = "upstream.pool",
+            upstream = %config.name,
+            "oauth http upstream: response body cap not yet applied (follow-up)"
+        );
         let worker = StreamableHttpClientWorker::new((*auth_client).clone(), transport_config);
         let service: rmcp::service::RunningService<RoleClient, ()> = ().serve(worker).await?;
         let peer = service.peer().clone();
@@ -3275,7 +3290,13 @@ async fn connect_http_upstream(
     let client = reqwest::Client::builder()
         .timeout(DEFAULT_REQUEST_TIMEOUT)
         .build()?;
-    let worker = StreamableHttpClientWorker::new(client, transport_config);
+    // Wrap reqwest::Client in BodyCappedHttpClient so a hostile upstream
+    // cannot OOM the gateway via an oversized response. Cap is enforced
+    // during streaming (Content-Length + bytes_stream count). For SSE, the
+    // cap is per-event so legitimate long-lived subscriptions are not
+    // disconnected.
+    let capped = super::http_client::BodyCappedHttpClient::new(client, max_response_bytes());
+    let worker = StreamableHttpClientWorker::new(capped, transport_config);
     let service: rmcp::service::RunningService<RoleClient, ()> = ().serve(worker).await?;
     let peer = service.peer().clone();
     let tools = peer.list_all_tools().await?;
