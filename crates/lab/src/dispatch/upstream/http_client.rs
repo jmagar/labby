@@ -134,14 +134,20 @@ async fn read_body_capped(
     max_bytes: usize,
 ) -> Result<Vec<u8>, StreamableHttpError<reqwest::Error>> {
     let max_u64 = max_bytes as u64;
-    if let Some(cl) = response.content_length()
+    // Pre-check Content-Length when present (fast reject for hostile upstreams
+    // that declare oversized bodies up front).
+    let declared = response.content_length();
+    if let Some(cl) = declared
         && cl > max_u64
     {
         return Err(StreamableHttpError::UnexpectedServerResponse(Cow::Owned(
             format!("response_too_large: declared {cl} bytes, max {max_bytes}"),
         )));
     }
-    let mut buf: Vec<u8> = Vec::new();
+    // Preallocate when Content-Length is honest and under cap. Saves
+    // ~log2(N) reallocs on the hot path for every legitimate response.
+    let initial_cap = declared.map(|cl| cl.min(max_u64) as usize).unwrap_or(0);
+    let mut buf: Vec<u8> = Vec::with_capacity(initial_cap);
     let mut stream = response.bytes_stream();
     let mut count: u64 = 0;
     while let Some(chunk) = stream.next().await {
@@ -195,27 +201,33 @@ impl std::error::Error for CappedStreamError {
 /// produces a stream error. The accumulator resets at the SSE event
 /// delimiter (`\n\n`), so cumulative bytes across many events are
 /// unconstrained — legitimate long-lived subscriptions keep working.
+///
+/// The scan tracks `(running_bytes, prev_ended_with_lf)` so the `\n\n`
+/// delimiter is detected even when it straddles a chunk boundary
+/// (chunk N ends `\n`, chunk N+1 starts `\n`).
 fn per_event_capped_byte_stream(
     inner: impl futures::Stream<Item = reqwest::Result<bytes::Bytes>> + Send + 'static,
     max_bytes: usize,
 ) -> BoxStream<'static, Result<bytes::Bytes, CappedStreamError>> {
     use bytes::Bytes;
-    let stream = inner.scan(0u64, move |count, chunk_res| {
-        let max_u64 = max_bytes as u64;
+    let max_u64 = max_bytes as u64;
+    // State: (running event-byte count, did the previous chunk end with '\n')
+    let stream = inner.scan((0u64, false), move |state, chunk_res| {
         let res = match chunk_res {
             Ok(chunk) => {
-                *count = count.saturating_add(chunk.len() as u64);
-                if *count > max_u64 {
-                    let event_bytes = *count;
-                    *count = 0;
+                state.0 = state.0.saturating_add(chunk.len() as u64);
+                if state.0 > max_u64 {
+                    let event_bytes = state.0;
+                    *state = (0, false);
                     Err(CappedStreamError::TooLarge {
                         event_bytes,
                         max_bytes,
                     })
                 } else {
-                    if memmem(&chunk, b"\n\n") {
-                        *count = 0;
+                    if chunk_contains_event_boundary(&chunk, state.1) {
+                        state.0 = 0;
                     }
+                    state.1 = chunk.last().is_some_and(|b| *b == b'\n');
                     Ok::<Bytes, _>(chunk)
                 }
             }
@@ -226,13 +238,14 @@ fn per_event_capped_byte_stream(
     stream.boxed()
 }
 
-/// Tiny memmem helper — `bytes::Bytes` derefs to `&[u8]` so a windowed
-/// scan is sufficient for the SSE delimiter ("\n\n", 2 bytes).
-fn memmem(haystack: &[u8], needle: &[u8]) -> bool {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return false;
+/// Detect the SSE event boundary `"\n\n"` in `chunk`, including the case
+/// where the previous chunk ended with `\n` and this chunk starts with
+/// `\n`. Returns true when a boundary is observed.
+fn chunk_contains_event_boundary(chunk: &[u8], prev_ended_with_lf: bool) -> bool {
+    if prev_ended_with_lf && chunk.first() == Some(&b'\n') {
+        return true;
     }
-    haystack.windows(needle.len()).any(|w| w == needle)
+    chunk.windows(2).any(|w| w == b"\n\n")
 }
 
 impl StreamableHttpClient for BodyCappedHttpClient {
@@ -506,9 +519,21 @@ mod tests {
     }
 
     #[test]
-    fn memmem_finds_delimiter() {
-        assert!(memmem(b"abc\n\ndef", b"\n\n"));
-        assert!(!memmem(b"abc\ndef", b"\n\n"));
-        assert!(!memmem(b"", b"\n\n"));
+    fn chunk_contains_event_boundary_intra_chunk() {
+        // "\n\n" entirely within one chunk
+        assert!(chunk_contains_event_boundary(b"abc\n\ndef", false));
+        assert!(!chunk_contains_event_boundary(b"abc\ndef", false));
+        assert!(!chunk_contains_event_boundary(b"", false));
+    }
+
+    #[test]
+    fn chunk_contains_event_boundary_cross_chunk() {
+        // Previous chunk ended with '\n' and this chunk starts with '\n'.
+        // Without the prev-state flag the windowed scan would miss this.
+        assert!(chunk_contains_event_boundary(b"\nrest", true));
+        // Prev '\n' but next chunk doesn't start with '\n': no boundary.
+        assert!(!chunk_contains_event_boundary(b"rest", true));
+        // No prev '\n', chunk starts with '\n' but no in-chunk "\n\n": OK.
+        assert!(!chunk_contains_event_boundary(b"\nrest", false));
     }
 }
