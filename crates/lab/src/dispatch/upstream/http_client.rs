@@ -202,13 +202,14 @@ impl std::error::Error for CappedStreamError {
 }
 
 /// Wrap an SSE byte stream so any SINGLE event exceeding `max_bytes`
-/// produces a stream error. The accumulator resets at the SSE event
-/// delimiter (`\n\n`), so cumulative bytes across many events are
-/// unconstrained — legitimate long-lived subscriptions keep working.
+/// produces a stream error. Bytes are counted per-event: the counter
+/// resets to 0 immediately after each `"\n\n"` delimiter, and bytes
+/// after the delimiter (within the same chunk) count toward the next
+/// event. Cumulative bytes across many events are unconstrained —
+/// legitimate long-lived subscriptions keep working.
 ///
-/// The scan tracks `(running_bytes, prev_ended_with_lf)` so the `\n\n`
-/// delimiter is detected even when it straddles a chunk boundary
-/// (chunk N ends `\n`, chunk N+1 starts `\n`).
+/// Cross-chunk delimiters (chunk N ends `\n`, chunk N+1 starts `\n`)
+/// are detected via the `prev_ended_with_lf` state.
 fn per_event_capped_byte_stream(
     inner: impl futures::Stream<Item = reqwest::Result<bytes::Bytes>> + Send + 'static,
     max_bytes: usize,
@@ -218,23 +219,19 @@ fn per_event_capped_byte_stream(
     // State: (running event-byte count, did the previous chunk end with '\n')
     let stream = inner.scan((0u64, false), move |state, chunk_res| {
         let res = match chunk_res {
-            Ok(chunk) => {
-                state.0 = state.0.saturating_add(chunk.len() as u64);
-                if state.0 > max_u64 {
-                    let event_bytes = state.0;
+            Ok(chunk) => match account_event_bytes(&chunk, state.0, state.1, max_u64) {
+                Ok((new_count, new_prev_lf)) => {
+                    *state = (new_count, new_prev_lf);
+                    Ok::<Bytes, _>(chunk)
+                }
+                Err(event_bytes) => {
                     *state = (0, false);
                     Err(CappedStreamError::TooLarge {
                         event_bytes,
                         max_bytes,
                     })
-                } else {
-                    if chunk_contains_event_boundary(&chunk, state.1) {
-                        state.0 = 0;
-                    }
-                    state.1 = chunk.last().is_some_and(|b| *b == b'\n');
-                    Ok::<Bytes, _>(chunk)
                 }
-            }
+            },
             Err(e) => Err(CappedStreamError::Reqwest(e)),
         };
         futures::future::ready(Some(res))
@@ -242,9 +239,80 @@ fn per_event_capped_byte_stream(
     stream.boxed()
 }
 
-/// Detect the SSE event boundary `"\n\n"` in `chunk`, including the case
-/// where the previous chunk ended with `\n` and this chunk starts with
-/// `\n`. Returns true when a boundary is observed.
+/// Account the bytes of `chunk` against the per-event counter, resetting
+/// the counter at each `"\n\n"` delimiter (which may span this chunk and
+/// the previous one).
+///
+/// On success, returns `(new_count, prev_chunk_ended_with_lf)`. On cap
+/// breach, returns `Err(event_byte_count_that_exceeded)` — caller maps to
+/// `CappedStreamError::TooLarge`.
+///
+/// Counts bytes after the final `\n\n` in this chunk toward the next event
+/// (rather than discarding them as the naive "add full chunk, then reset"
+/// would). Detects boundaries that span chunks (prev ends '\n', this
+/// starts '\n').
+fn account_event_bytes(
+    chunk: &[u8],
+    mut count: u64,
+    prev_ended_with_lf: bool,
+    max_bytes: u64,
+) -> Result<(u64, bool), u64> {
+    // Handle the cross-chunk boundary case first: if the previous chunk ended
+    // with '\n' and this chunk begins with '\n', the byte at index 0 closes
+    // the previous event. Count that one byte toward the previous event (no
+    // cap re-check needed — we already approved the previous chunk), then
+    // reset and scan the rest.
+    let (mut idx, count_after_cross_boundary) =
+        if prev_ended_with_lf && chunk.first() == Some(&b'\n') {
+            (1usize, 0u64) // event closed at byte 0; skip past it, reset counter
+        } else {
+            (0usize, count)
+        };
+    count = count_after_cross_boundary;
+
+    // Scan for intra-chunk "\n\n" delimiters. Between delimiters, accumulate
+    // per-event bytes; check the cap whenever the counter advances.
+    while idx < chunk.len() {
+        match memchr2(&chunk[idx..], b'\n') {
+            None => {
+                let advance = (chunk.len() - idx) as u64;
+                count = count.saturating_add(advance);
+                if count > max_bytes {
+                    return Err(count);
+                }
+                idx = chunk.len();
+            }
+            Some(pos) => {
+                // Advance up to and including the '\n' at relative `pos`.
+                let advance = (pos + 1) as u64;
+                count = count.saturating_add(advance);
+                if count > max_bytes {
+                    return Err(count);
+                }
+                idx += pos + 1;
+                // Look at the next byte (in this chunk) to detect "\n\n".
+                if chunk.get(idx) == Some(&b'\n') {
+                    count = 0; // event closed at this byte
+                    idx += 1; // skip the second '\n'
+                }
+            }
+        }
+    }
+
+    let prev_ended_with_lf = chunk.last() == Some(&b'\n');
+    Ok((count, prev_ended_with_lf))
+}
+
+/// Find the first occurrence of `needle` in `haystack`. Inlined to avoid
+/// a `memchr` crate dep — the haystack is per-chunk so this is bounded.
+fn memchr2(haystack: &[u8], needle: u8) -> Option<usize> {
+    haystack.iter().position(|b| *b == needle)
+}
+
+/// Legacy helper kept for the chunk_contains_event_boundary tests in
+/// docs and review evidence. The new `account_event_bytes` function
+/// supersedes it for the streaming path.
+#[cfg(test)]
 fn chunk_contains_event_boundary(chunk: &[u8], prev_ended_with_lf: bool) -> bool {
     if prev_ended_with_lf && chunk.first() == Some(&b'\n') {
         return true;
@@ -528,6 +596,64 @@ mod tests {
         assert!(chunk_contains_event_boundary(b"abc\n\ndef", false));
         assert!(!chunk_contains_event_boundary(b"abc\ndef", false));
         assert!(!chunk_contains_event_boundary(b"", false));
+    }
+
+    #[test]
+    fn account_event_bytes_single_event_under_cap() {
+        // 6-byte event in one chunk, no delimiter inside.
+        let (c, lf) = account_event_bytes(b"abcdef", 0, false, 100).unwrap();
+        assert_eq!(c, 6);
+        assert!(!lf);
+    }
+
+    #[test]
+    fn account_event_bytes_intra_chunk_boundary_resets() {
+        // First event "abc\n\n" (5 bytes accounted), then "def" starts next event.
+        let (c, lf) = account_event_bytes(b"abc\n\ndef", 0, false, 100).unwrap();
+        // After the "\n\n" the counter resets, then 3 bytes of next event.
+        assert_eq!(c, 3, "counter must track bytes AFTER the \\n\\n");
+        assert!(!lf);
+    }
+
+    #[test]
+    fn account_event_bytes_cross_chunk_boundary_resets() {
+        // Previous chunk ended with '\n' and we already saw 4 bytes of an
+        // event; this chunk starts with '\n', closing the event. Then
+        // "next_event" accumulates from scratch.
+        let (c, lf) = account_event_bytes(b"\nnext", 4, true, 100).unwrap();
+        // After the cross-chunk "\n\n" the counter resets, then 4 bytes
+        // of "next" accumulate.
+        assert_eq!(c, 4);
+        assert!(!lf);
+    }
+
+    #[test]
+    fn account_event_bytes_caps_oversized_event() {
+        // Cap = 5 bytes. Chunk = "abcdefg" with no delimiter — should error.
+        let err = account_event_bytes(b"abcdefg", 0, false, 5).unwrap_err();
+        assert!(err > 5, "error must include exceeded byte count: got {err}");
+    }
+
+    #[test]
+    fn account_event_bytes_no_false_positive_on_multi_event_chunk() {
+        // Three small events in one chunk; cap larger than any single
+        // event but smaller than total. Naive "add chunk.len() then reset"
+        // would falsely flag. account_event_bytes resets per-event so the
+        // chunk passes cleanly.
+        let chunk = b"event1\n\nevent2\n\nevent3";
+        // Cap = 10 bytes — each event is 6, total chunk is 22.
+        let (c, lf) = account_event_bytes(chunk, 0, false, 10).unwrap();
+        // After the trailing "event3" (no closing "\n\n"), counter = 6.
+        assert_eq!(c, 6);
+        assert!(!lf);
+    }
+
+    #[test]
+    fn account_event_bytes_tracks_trailing_lf() {
+        // Chunk ends with '\n' — next chunk must be told to look for cross
+        // boundary.
+        let (_c, lf) = account_event_bytes(b"abc\n", 0, false, 100).unwrap();
+        assert!(lf, "must report trailing '\\n' for cross-chunk detection");
     }
 
     /// SSE happy path through the full pipeline: server returns an
