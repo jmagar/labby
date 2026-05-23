@@ -2595,6 +2595,11 @@ fn tool_search_include_schema_allowed(
         })
 }
 
+#[cfg(test)]
+fn tool_search_schema_visible(auth: Option<&crate::api::oauth::AuthContext>) -> bool {
+    tool_search_include_schema_allowed(auth, true)
+}
+
 fn tool_execute_builtin_action_allowed(
     entry: &crate::registry::RegisteredService,
     action: &str,
