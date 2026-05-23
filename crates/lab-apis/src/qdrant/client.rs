@@ -303,3 +303,152 @@ impl QdrantClient {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::Auth;
+    use wiremock::matchers::{header, method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    const COLLECTION: &str = "lab-tools";
+    const QDRANT_API_KEY: &str = "qdrant-test-key";
+
+    fn authed_client(base_url: &str) -> QdrantClient {
+        QdrantClient::with_auth(
+            base_url,
+            Auth::ApiKey {
+                header: "api-key".to_string(),
+                key: QDRANT_API_KEY.to_string(),
+            },
+        )
+    }
+
+    fn point() -> UpsertPoint {
+        UpsertPoint {
+            id: 42,
+            dense: vec![0.1, 0.2],
+            sparse: SparseVector {
+                indices: vec![7],
+                values: vec![1.0],
+            },
+            payload: json!({ "name": "demo" }),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hybrid_search_returns_parsed_hits() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/collections/lab-tools/points/query"))
+            .and(header("api-key", QDRANT_API_KEY))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "result": {
+                    "points": [{
+                        "id": 42,
+                        "score": 0.91,
+                        "payload": { "name": "demo", "upstream": "fixture" }
+                    }]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let hits = authed_client(&server.uri())
+            .hybrid_search(
+                COLLECTION,
+                &[0.1, 0.2],
+                &SparseVector {
+                    indices: vec![7],
+                    values: vec![1.0],
+                },
+                5,
+                10,
+            )
+            .await
+            .expect("hybrid search should parse");
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].score, 0.91);
+        assert_eq!(hits[0].payload["name"], "demo");
+    }
+
+    #[tokio::test]
+    async fn test_hybrid_search_propagates_api_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/collections/lab-tools/points/query"))
+            .and(header("api-key", QDRANT_API_KEY))
+            .respond_with(ResponseTemplate::new(500).set_body_string("boom"))
+            .mount(&server)
+            .await;
+
+        let err = authed_client(&server.uri())
+            .hybrid_search(
+                COLLECTION,
+                &[0.1],
+                &SparseVector {
+                    indices: vec![1],
+                    values: vec![1.0],
+                },
+                5,
+                10,
+            )
+            .await
+            .expect_err("500 should propagate");
+
+        match err {
+            QdrantError::Api { status, body } => {
+                assert_eq!(status, 500);
+                assert_eq!(body, "boom");
+            }
+            other => panic!("expected QdrantError::Api, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_upsert_points_sends_wait_true() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path("/collections/lab-tools/points"))
+            .and(query_param("wait", "true"))
+            .and(header("api-key", QDRANT_API_KEY))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "result": {} })))
+            .mount(&server)
+            .await;
+
+        authed_client(&server.uri())
+            .upsert_points(COLLECTION, &[point()])
+            .await
+            .expect("upsert should succeed");
+    }
+
+    #[tokio::test]
+    async fn test_upsert_points_empty_is_noop() {
+        let server = MockServer::start().await;
+        authed_client(&server.uri())
+            .upsert_points(COLLECTION, &[])
+            .await
+            .expect("empty upsert should be a no-op");
+
+        let requests = server.received_requests().await.expect("recorded requests");
+        assert!(requests.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_delete_by_filter_sends_wait_true() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/collections/lab-tools/points/delete"))
+            .and(query_param("wait", "true"))
+            .and(header("api-key", QDRANT_API_KEY))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "result": {} })))
+            .mount(&server)
+            .await;
+
+        authed_client(&server.uri())
+            .delete_by_filter(COLLECTION, json!({ "must": [] }))
+            .await
+            .expect("delete should succeed");
+    }
+}
