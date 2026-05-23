@@ -69,6 +69,7 @@ storage/
 Thumbs.db
 
 # ── Caches (ALL tool caches go here) ─────────────────────────────────────────
+.cache
 .cache/
 __pycache__/
 *.pyc

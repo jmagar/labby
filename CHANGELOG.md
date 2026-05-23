@@ -8,6 +8,30 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.17.1] - 2026-05-23
+
+### Highlights
+
+- **Scout authorization hardening**: `scout` now requires read-capable scopes, suppresses schemas for read-only callers, and keeps `invoke` behind execution scopes.
+- **Gateway priority enforcement**: priority-zero upstreams are filtered from semantic RRF results, direct invoke resolution, and semantic index rebuilds.
+- **Semantic pipeline reliability**: Qdrant/TEI clients now support auth headers, semantic URL resolution no longer relies on panic-prone `expect()` gates, and wiremock coverage exercises the semantic client request path.
+- **Worktree hygiene**: `.cache` symlinks are ignored alongside cache directories.
+
+| Commit | Change |
+|--------|--------|
+| `3a01a1f4` | test(lab-mqd6f.3): cover semantic pipeline clients |
+| `47b47703` | fix(lab-9ycyb): add semantic client auth |
+| `fa4b4d0f` | fix(lab-mqd6f.5): remove search semantic expects |
+| `8f5722d6` | fix(lab-mqd6f.1): scope scout gateway search |
+| `9e17b029` | fix(lab-mqd6f.2): enforce priority-zero gateway suppression |
+
+### Version bumps
+
+- Rust workspace: `0.17.0 → 0.17.1`
+- Gateway admin package: `0.17.0 → 0.17.1`
+
+---
+
 ## [0.17.0] - 2026-05-21
 
 ### Highlights
