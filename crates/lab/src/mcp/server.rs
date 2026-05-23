@@ -2597,6 +2597,14 @@ fn tool_search_include_schema_allowed(
         })
 }
 
+/// Whether the caller is allowed to see full input schemas in scout (tool_search) responses.
+/// Thin wrapper over `tool_search_include_schema_allowed` for callers that don't carry the
+/// `requested` flag (it is always implicitly `true` at the test boundary).
+#[cfg(test)]
+fn tool_search_schema_visible(auth: Option<&crate::api::oauth::AuthContext>) -> bool {
+    tool_search_include_schema_allowed(auth, true)
+}
+
 fn tool_execute_builtin_action_allowed(
     entry: &crate::registry::RegisteredService,
     action: &str,

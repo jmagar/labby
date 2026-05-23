@@ -145,18 +145,28 @@ fn wildcard_matches(pattern: &str, candidate: &str) -> bool {
         return true;
     }
 
-    let mut cursor = 0usize;
+    // Use match_indices to advance the cursor only on char-boundary-aligned
+    // byte offsets. `&str::match_indices` yields `(byte_offset, _)` pairs
+    // where `byte_offset` is always a valid UTF-8 boundary, and each `part`
+    // is itself a `&str` so `part.len()` is its UTF-8 byte length. This
+    // keeps `cursor` on a valid boundary at all times — no slicing panic
+    // possible for any valid UTF-8 candidate (including upstream tool
+    // names containing multi-byte characters).
+    let mut cursor: usize = 0;
     for (index, part) in non_empty_parts.iter().enumerate() {
         if index == 0 && anchored_start {
-            if !candidate[cursor..].starts_with(part) {
+            if !candidate.starts_with(part) {
                 return false;
             }
-            cursor += part.len();
+            cursor = part.len();
             continue;
         }
 
-        match candidate[cursor..].find(part) {
-            Some(found) => cursor += found + part.len(),
+        match candidate
+            .match_indices(*part)
+            .find(|(idx, _)| *idx >= cursor)
+        {
+            Some((idx, _)) => cursor = idx + part.len(),
             None => return false,
         }
     }
@@ -279,6 +289,53 @@ mod tests {
         assert!(wildcard_matches("*_repo", "delete_repo"));
         assert!(wildcard_matches("search*repos", "search_public_repos"));
         assert!(!wildcard_matches("github_*", "gitlab_create_issue"));
+    }
+
+    #[test]
+    fn wildcard_matches_does_not_panic_on_multibyte_char_boundary() {
+        // Regression: pattern `f*o` against candidate `f∂o` previously
+        // panicked at `candidate[cursor..].find(part)` because cursor=1
+        // sits inside the 2-byte `∂` codepoint. The match_indices-based
+        // implementation never byte-slices at hand-computed offsets.
+        assert!(wildcard_matches("f*o", "f∂o"));
+        assert!(!wildcard_matches("f*o", "f∂x"));
+    }
+
+    #[test]
+    fn wildcard_matches_unicode_anchors() {
+        assert!(wildcard_matches("*∂*", "prefix∂suffix"));
+        assert!(wildcard_matches("∂*", "∂abc"));
+        assert!(wildcard_matches("*∂", "abc∂"));
+        assert!(wildcard_matches("a*b*c", "a∂b∂c"));
+    }
+
+    #[test]
+    fn wildcard_matches_edge_cases() {
+        assert!(wildcard_matches("*", ""));
+        assert!(!wildcard_matches("a", ""));
+        assert!(wildcard_matches("**", "anything"));
+        // BIDI override (U+202E) is just another codepoint to the matcher.
+        // Security normalization (rejecting BIDI/control chars at catalog
+        // ingress) is out of scope for this fix — tracked separately.
+        assert!(wildcard_matches("*\u{202E}*", "abc\u{202E}def"));
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn wildcard_matches_never_panics(pattern in ".{0,32}", candidate in ".{0,128}") {
+            // The only requirement is no panic. Return value is unconstrained —
+            // any valid UTF-8 input must produce a bool without panicking.
+            let _ = wildcard_matches(&pattern, &candidate);
+        }
+
+        #[test]
+        fn wildcard_matches_star_injection_never_panics(
+            parts in proptest::collection::vec(".{0,8}", 0..6),
+            candidate in ".{0,64}",
+        ) {
+            let pattern = parts.join("*");
+            let _ = wildcard_matches(&pattern, &candidate);
+        }
     }
 }
 
