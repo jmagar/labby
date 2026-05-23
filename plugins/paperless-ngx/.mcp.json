@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "paperless": {
-      "command": "lab",
-      "args": ["mcp", "--services", "paperless"]
-    }
-  }
-}

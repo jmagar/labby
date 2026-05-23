@@ -42,7 +42,6 @@ Unknown instance labels return a structured error listing valid labels.
 | `sabnzbd` | `SABNZBD_URL`, `SABNZBD_API_KEY` | — |
 | `linkding` | `LINKDING_URL`, `LINKDING_TOKEN` | — |
 | `bytestash` | `BYTESTASH_URL`, `BYTESTASH_TOKEN` | — |
-| `paperless` | `PAPERLESS_URL`, `PAPERLESS_TOKEN` | — |
 | `unraid` | `UNRAID_URL`, `UNRAID_API_KEY` | multi-instance labels |
 | `unifi` | `UNIFI_URL`, `UNIFI_USERNAME`, `UNIFI_PASSWORD` | — |
 | `gotify` | `GOTIFY_URL`, `GOTIFY_TOKEN` | — |

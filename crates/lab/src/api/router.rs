@@ -1231,7 +1231,6 @@ async fn dev_nodeinfo(State(state): State<AppState>) -> axum::response::Response
         "ARCANE_",
         "LINKDING_",
         "MEMOS_",
-        "PAPERLESS_",
         "BYTESTASH_",
         "GOTIFY_",
         "APPRISE_",

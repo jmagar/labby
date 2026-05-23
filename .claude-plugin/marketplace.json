@@ -232,11 +232,6 @@
             "description": "Skill for operating OpenAI via the lab MCP server / CLI."
         },
         {
-            "name": "paperless-ngx",
-            "source": "./plugins/paperless-ngx",
-            "description": "Document management skills for Paperless-ngx."
-        },
-        {
             "name": "qmd",
             "source": "./plugins/qmd",
             "description": "Local-first semantic markdown search via qmd. Combines BM25 keyword search, vector similarity search, and LLM re-ranking\u2014all running on-device with no cloud calls or API keys required."

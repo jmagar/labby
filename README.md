@@ -438,7 +438,6 @@ complete coverage index is [docs/coverage/README.md](./docs/coverage/README.md):
 | OpenACP | [docs/coverage/openacp.md](./docs/coverage/openacp.md) |
 | OpenAI | [docs/coverage/openai.md](./docs/coverage/openai.md) |
 | Overseerr | [docs/coverage/overseerr.md](./docs/coverage/overseerr.md) |
-| Paperless | [docs/coverage/paperless.md](./docs/coverage/paperless.md) |
 | Pi-hole | [docs/coverage/pihole.md](./docs/coverage/pihole.md) |
 | Plex | [docs/coverage/plex.md](./docs/coverage/plex.md) |
 | Prowlarr | [docs/coverage/prowlarr.md](./docs/coverage/prowlarr.md) |
@@ -496,7 +495,7 @@ Feature-gated upstream integrations:
 
 `radarr`, `sonarr`, `prowlarr`, `overseerr`, `plex`, `tautulli`, `sabnzbd`,
 `qbittorrent`, `tailscale`, `unraid`, `unifi`, `arcane`, `linkding`, `memos`,
-`bytestash`, `paperless`, `gotify`, `apprise`, `openai`, `qdrant`, `tei`,
+`bytestash`, `gotify`, `apprise`, `openai`, `qdrant`, `tei`,
 `deploy`, `mcpregistry`, `acp_registry`, `fs`, `lab-admin`.
 
 Always-on product/capability services include `extract`, `gateway`, `doctor`, `logs`,

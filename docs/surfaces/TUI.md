@@ -260,7 +260,7 @@ Services are enumerated from `PluginMeta` constants at compile time via `metadat
 | Servarr | radarr, sonarr, prowlarr |
 | Download | sabnzbd, qbittorrent |
 | Notes | memos |
-| Documents | paperless, linkding, bytestash |
+| Documents | linkding, bytestash |
 | Network | tailscale, unifi, unraid |
 | Notifications | apprise, gotify |
 | Ai | openai, notebooklm, qdrant, tei |

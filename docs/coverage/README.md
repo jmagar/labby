@@ -31,7 +31,6 @@ Use these with [../SERVICES.md](../SERVICES.md) and the generated catalogs in
 | OpenACP | [openacp.md](./openacp.md) |
 | OpenAI | [openai.md](./openai.md) |
 | Overseerr | [overseerr.md](./overseerr.md) |
-| Paperless | [paperless.md](./paperless.md) |
 | Pi-hole | [pihole.md](./pihole.md) |
 | Plex | [plex.md](./plex.md) |
 | Prowlarr | [prowlarr.md](./prowlarr.md) |

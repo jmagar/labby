@@ -30,8 +30,6 @@ Audit findings are reported here, but audit failures do not fail docs freshness 
 - `memos` `tui.metadata.rs`: missing token `spawn_health!("memos", client)`
 - `openacp` `tui.metadata.rs`: missing token `spawn_health!("openacp", client)`
 - `overseerr` `tui.metadata.rs`: missing token `spawn_health!("overseerr", client)`
-- `paperless` `registry.rs`: missing token `register_service!(reg, "paperless"`
-- `paperless` `tui.metadata.rs`: missing token `spawn_health!("paperless", client)`
 - `plex` `registry.rs`: missing token `register_service!(reg, "plex"`
 - `plex` `tui.metadata.rs`: missing token `spawn_health!("plex", client)`
 - `prowlarr` `registry.rs`: missing token `register_service!(reg, "prowlarr"`
@@ -89,7 +87,6 @@ Audit findings are reported here, but audit failures do not fail docs freshness 
 | `openacp` | 29 | 1 | 0 |
 | `openai` | 29 | 0 | 1 |
 | `overseerr` | 29 | 1 | 0 |
-| `paperless` | 28 | 2 | 0 |
 | `pihole` | 30 | 0 | 0 |
 | `plex` | 28 | 2 | 0 |
 | `prowlarr` | 29 | 1 | 0 |

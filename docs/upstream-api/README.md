@@ -30,7 +30,6 @@ modules.
 | OpenACP | [openacp.md](./openacp.md) | upstream daemon contract | OpenACP |
 | OpenAI | [openai.openapi.yaml](./openai.openapi.yaml) | OpenAPI 3.x | openai/openai-openapi manual_spec |
 | Overseerr | [overseerr.openapi.yaml](./overseerr.openapi.yaml) | OpenAPI 3.0.2 | sct/overseerr |
-| Paperless-ngx | [paperless.md](./paperless.md) | instance-served schema note | `$PAPERLESS_URL/api/schema/` |
 | Pi-hole | [pihole.md](./pihole.md) | v6 REST notes | Pi-hole API |
 | Plex | [plex.openapi.yaml](./plex.openapi.yaml) | OpenAPI 3.x | LukeHagar/plex-api-spec |
 | Prowlarr | [prowlarr.openapi.json](./prowlarr.openapi.json) | OpenAPI 3.0 | Prowlarr develop branch |
@@ -69,6 +68,6 @@ curl -fsSL https://raw.githubusercontent.com/qdrant/qdrant/master/docs/redoc/mas
 curl -fsSL https://raw.githubusercontent.com/huggingface/text-embeddings-inference/main/docs/openapi.json > docs/upstream-api/tei.openapi.json
 ```
 
-Instance-served or private-contract docs such as Paperless, ByteStash,
+Instance-served or private-contract docs such as ByteStash,
 NotebookLM, OpenACP, and Uptime Kuma require manual review against the running
   instance or upstream repository.

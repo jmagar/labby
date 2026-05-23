@@ -89,8 +89,6 @@ check_service "linkding"   "${LINKDING_URL:-}/api/bookmarks/?limit=1" \
 check_service "memos"      "${MEMOS_URL:-}/api/v1/memo?limit=1" \
     "${MEMOS_API_TOKEN:+Authorization: Bearer $MEMOS_API_TOKEN}"
 check_service "bytestash"  "${BYTESTASH_URL:-}" ""
-check_service "paperless"  "${PAPERLESS_URL:-}/api/" \
-    "${PAPERLESS_API_TOKEN:+Authorization: Token $PAPERLESS_API_TOKEN}"
 check_service "radicale"   "${RADICALE_URL:-}" ""
 
 # Output JSON array

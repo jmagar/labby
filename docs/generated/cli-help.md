@@ -28,7 +28,7 @@ Commands:
   marketplace  Claude plugin marketplace manager
   registry     MCP Registry — look up and install servers from registry.modelcontextprotocol.io
   stash        Component versioning and deployment
-  deploy       Radarr movie collection manager. Sonarr TV series manager. Prowlarr indexer manager. Plex media server. Tautulli Plex analytics. `SABnzbd` download client. qBittorrent download client. Tailscale VPN network. Linkding bookmark manager. Memos note-taking service. Beads issue tracker. Bytestash snippet manager. Paperless-ngx document manager. Arcane Docker management UI. Unraid server management. `UniFi` network management. Overseerr media request manager. Gotify push notifications. `OpenAI` API client. Upstream OpenACP daemon. Google NotebookLM client. Qdrant vector database. HF Text Embeddings Inference. Apprise notification dispatcher. Deploy the local lab release binary to SSH targets
+  deploy       Radarr movie collection manager. Sonarr TV series manager. Prowlarr indexer manager. Plex media server. Tautulli Plex analytics. `SABnzbd` download client. qBittorrent download client. Tailscale VPN network. Linkding bookmark manager. Memos note-taking service. Beads issue tracker. Bytestash snippet manager. Arcane Docker management UI. Unraid server management. `UniFi` network management. Overseerr media request manager. Gotify push notifications. `OpenAI` API client. Upstream OpenACP daemon. Google NotebookLM client. Qdrant vector database. HF Text Embeddings Inference. Apprise notification dispatcher. Deploy the local lab release binary to SSH targets
 
 Options:
       --json
@@ -2588,7 +2588,7 @@ Options:
 ## `labby deploy`
 
 ```text
-Radarr movie collection manager. Sonarr TV series manager. Prowlarr indexer manager. Plex media server. Tautulli Plex analytics. `SABnzbd` download client. qBittorrent download client. Tailscale VPN network. Linkding bookmark manager. Memos note-taking service. Beads issue tracker. Bytestash snippet manager. Paperless-ngx document manager. Arcane Docker management UI. Unraid server management. `UniFi` network management. Overseerr media request manager. Gotify push notifications. `OpenAI` API client. Upstream OpenACP daemon. Google NotebookLM client. Qdrant vector database. HF Text Embeddings Inference. Apprise notification dispatcher. Deploy the local lab release binary to SSH targets
+Radarr movie collection manager. Sonarr TV series manager. Prowlarr indexer manager. Plex media server. Tautulli Plex analytics. `SABnzbd` download client. qBittorrent download client. Tailscale VPN network. Linkding bookmark manager. Memos note-taking service. Beads issue tracker. Bytestash snippet manager. Arcane Docker management UI. Unraid server management. `UniFi` network management. Overseerr media request manager. Gotify push notifications. `OpenAI` API client. Upstream OpenACP daemon. Google NotebookLM client. Qdrant vector database. HF Text Embeddings Inference. Apprise notification dispatcher. Deploy the local lab release binary to SSH targets
 
 Usage: deploy [OPTIONS] <COMMAND>
 
@@ -2767,4 +2767,3 @@ Options:
   -h, --help
           Print help (see a summary with '-h')
 ```
-

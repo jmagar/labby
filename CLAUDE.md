@@ -49,7 +49,6 @@ lab/
 │   │       ├── linkding/
 │   │       ├── memos/
 │   │       ├── bytestash/
-│   │       ├── paperless/
 │   │       ├── arcane/                # Docker management UI
 │   │       ├── unraid/                # Unraid GraphQL API
 │   │       ├── unifi/                 # UniFi Network Application local API

@@ -60,7 +60,7 @@ pub enum Category {
     Download,
     /// Note-taking and bookmarks (`Memos`, `Linkding`, `ByteStash`).
     Notes,
-    /// Document management (Paperless).
+    /// Document management.
     Documents,
     /// Network and infrastructure (Tailscale, `UniFi`, Unraid, Arcane).
     Network,

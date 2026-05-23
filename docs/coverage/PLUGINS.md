@@ -338,15 +338,6 @@ All plugins in `plugins/` with their registered components. Each plugin lives at
 
 ---
 
-## paperless-ngx
-
-| Type | Detail |
-|------|--------|
-| skill | `skills/paperless-ngx/SKILL.md` |
-| .mcp.json | `paperless` → `labby mcp --services paperless` |
-
----
-
 ## pihole
 
 | Type | Detail |

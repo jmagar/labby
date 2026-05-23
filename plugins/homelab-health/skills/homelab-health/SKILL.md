@@ -46,7 +46,6 @@ Utilities       gotify           ✓ reachable   https://gotify.example.com
                 linkding         ✓ reachable   https://links.example.com
                 memos            ⚠ unreachable https://memos.example.com
                 bytestash        ○ not configured
-                paperless        ✓ reachable   https://paperless.example.com
                 radicale         ✓ reachable   https://cal.example.com
 
 Summary: 12 reachable  ·  1 unreachable  ·  5 not configured

@@ -20,7 +20,7 @@ pub enum Auth {
         /// Secret value.
         key: String,
     },
-    /// `Authorization: Token <token>` (Linkding, Paperless, ...).
+    /// `Authorization: Token <token>` (Linkding, ...).
     Token {
         /// Token value.
         token: String,

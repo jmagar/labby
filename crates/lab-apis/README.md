@@ -98,7 +98,7 @@ See `docs/ERRORS.md` in the monorepo for the canonical error vocabulary.
 |--------|----------|
 | **Fully Implemented** | Radarr, UniFi, ByteStash |
 | **Partially Implemented** | OpenAI (Chat, Embeddings), Overseerr (search, request management) |
-| **Client Stub** | Sonarr, Prowlarr, Plex, Tautulli, SABnzbd, qBittorrent, Tailscale, Linkding, Memos, Paperless, Arcane, Gotify, Qdrant, TEI, Apprise |
+| **Client Stub** | Sonarr, Prowlarr, Plex, Tautulli, SABnzbd, qBittorrent, Tailscale, Linkding, Memos, Arcane, Gotify, Qdrant, TEI, Apprise |
 | **Extract** | Synthetic capability module for service credential scanning |
 
 "Stub" means the client struct exists and compiles, but methods are minimal or unimplemented. Contributions welcome.
@@ -161,7 +161,7 @@ Non-HTTP modules may not use these env keys at all. Their config still must be s
 ```rust
 radarr, sonarr, prowlarr     // pulls in shared "servarr" types automatically
 overseerr, plex, tautulli, sabnzbd, qbittorrent, tailscale
-linkding, memos, bytestash, paperless, arcane, unraid, unifi
+linkding, memos, bytestash, arcane, unraid, unifi
 gotify, openai, qdrant, tei, apprise
 ```
 

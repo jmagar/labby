@@ -12,7 +12,6 @@ Current service status as of the `feat/unifi-dispatch-api-bearer-rmcp` branch.
 | `sabnzbd` | download | Usenet download client | `queue-list`, `queue-pause`, `queue-resume`, `queue-purge`, `history-list` |
 | `linkding` | notes | Bookmark manager with tagging | `bookmark-list`, `bookmark-add`, `bookmark-delete`, `tag-list` |
 | `bytestash` | notes | Code snippet manager | `snippet-list`, `snippet-get`, `snippet-add`, `snippet-delete` |
-| `paperless` | documents | Document management with OCR | `document-search`, `document-list`, `document-get`, `correspondent-list`, `tag-list` |
 | `unraid` | network | Server management via GraphQL | `system-status`, `array-status`, `docker-list`, `disk-list` |
 | `unifi` | network | UniFi Network Application | `client-list`, `device-list`, `site-list`, `network-list` (69 total actions) |
 | `gotify` | notifications | Push notification server | `message-list`, `message-send`, `app-list` |

@@ -186,8 +186,6 @@ launch_probe memos     "${MEMOS_URL:-}/api/v1/workspace/profile" \
     -H "Authorization: Bearer ${MEMOS_TOKEN:-}"
 launch_probe bytestash "${BYTESTASH_URL:-}/api/auth/config" \
     -H "Authorization: Bearer ${BYTESTASH_TOKEN:-}"
-launch_probe paperless "${PAPERLESS_URL:-}/api/" \
-    -H "Authorization: Token ${PAPERLESS_API_KEY:-}"
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 launch_probe arcane    "${ARCANE_URL:-}/api/health" \

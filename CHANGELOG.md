@@ -16,9 +16,12 @@ All notable changes to this project will be documented in this file.
 - **Gateway priority enforcement**: priority-zero upstreams are filtered from semantic RRF results, direct invoke resolution, and semantic index rebuilds.
 - **Semantic pipeline reliability**: Qdrant/TEI clients now support auth headers, semantic URL resolution no longer relies on panic-prone `expect()` gates, and wiremock coverage exercises the semantic client request path.
 - **Worktree hygiene**: `.cache` symlinks are ignored alongside cache directories.
+- **Stale service cleanup**: removed remaining Paperless plugin, docs, UI, env, and health-check references after the active service implementation was removed.
 
 | Commit | Change |
 |--------|--------|
+| `b7f4bab7` | docs: capture scout cleanup quick-push session |
+| `466586d0` | fix: harden scout access and remove paperless remnants |
 | `3a01a1f4` | test(lab-mqd6f.3): cover semantic pipeline clients |
 | `47b47703` | fix(lab-9ycyb): add semantic client auth |
 | `fa4b4d0f` | fix(lab-mqd6f.5): remove search semantic expects |

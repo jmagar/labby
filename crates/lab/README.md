@@ -110,7 +110,7 @@ All surfaces delegate business logic to `lab-apis` clients. Logic lives in SDK, 
 **MCP-passthrough (tier 2, work in progress):**
 - Media: sonarr, prowlarr, plex, tautulli, sabnzbd, qbittorrent, overseerr
 - Network: tailscale, unraid, arcane
-- Notes: linkding, memos, paperless
+- Notes: linkding, memos
 - Notifications: gotify, apprise
 - AI: openai, qdrant, tei
 

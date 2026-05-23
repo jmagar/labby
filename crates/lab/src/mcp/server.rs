@@ -2573,6 +2573,10 @@ fn tool_execute_scope_allowed(auth: Option<&crate::api::oauth::AuthContext>) -> 
     })
 }
 
+/// Returns `true` when the caller is allowed to invoke the scout (tool_search) tool.
+///
+/// Scout requires at least `lab:read`; invoke requires the stronger `lab` or `lab:admin`.
+/// `None` auth means stdio transport — trusted by design (no per-request AuthContext).
 fn tool_search_scope_allowed(auth: Option<&crate::api::oauth::AuthContext>) -> bool {
     auth.is_none_or(|auth| {
         auth.scopes
@@ -3539,5 +3543,94 @@ mod tests {
             "repair",
             Some(&admin)
         ));
+    }
+
+    fn make_auth(scopes: &[&str]) -> crate::api::oauth::AuthContext {
+        crate::api::oauth::AuthContext {
+            sub: "test-user".to_string(),
+            actor_key: None,
+            scopes: scopes.iter().map(|s| s.to_string()).collect(),
+            issuer: "https://lab.example.com".to_string(),
+            via_session: false,
+            csrf_token: None,
+            email: None,
+        }
+    }
+
+    #[test]
+    fn tool_search_scope_allowed_permits_all_expected_scopes() {
+        // None = stdio transport → trusted (always permitted)
+        assert!(super::tool_search_scope_allowed(None));
+
+        // lab:read is the minimum acceptable scope for scout
+        let read_only = make_auth(&["lab:read"]);
+        assert!(super::tool_search_scope_allowed(Some(&read_only)));
+
+        // bare lab must also pass scout
+        let lab = make_auth(&["lab"]);
+        assert!(super::tool_search_scope_allowed(Some(&lab)));
+
+        // lab:admin must pass scout (identified as a gap in the original review)
+        let admin = make_auth(&["lab:admin"]);
+        assert!(super::tool_search_scope_allowed(Some(&admin)));
+
+        // empty scopes → denied
+        let no_scopes = make_auth(&[]);
+        assert!(!super::tool_search_scope_allowed(Some(&no_scopes)));
+
+        // unrelated scope → denied
+        let unrelated = make_auth(&["mcp:read"]);
+        assert!(!super::tool_search_scope_allowed(Some(&unrelated)));
+    }
+
+    #[test]
+    fn scout_allows_lab_read_but_invoke_requires_lab() {
+        // Intentional asymmetry: scout is a read-only discovery operation and therefore
+        // accepts lab:read in addition to the stronger lab / lab:admin.
+        // tool_execute (invoke) must NOT accept lab:read — it executes upstream tools
+        // which may have side effects.
+        let read_only = make_auth(&["lab:read"]);
+
+        // scout: lab:read is permitted
+        assert!(
+            super::tool_search_scope_allowed(Some(&read_only)),
+            "scout should accept lab:read"
+        );
+
+        // invoke: lab:read must NOT be sufficient
+        assert!(
+            !super::tool_execute_scope_allowed(Some(&read_only)),
+            "invoke must reject lab:read — requires lab or lab:admin"
+        );
+    }
+
+    #[test]
+    fn scout_include_schema_suppressed_for_read_only_callers() {
+        // A caller with only lab:read must not receive full input schemas, because schemas
+        // for admin-only built-in tools would reveal internal parameter shapes.
+        let read_only = make_auth(&["lab:read"]);
+        assert!(
+            !super::tool_search_schema_visible(Some(&read_only)),
+            "lab:read-only caller must have schema suppressed"
+        );
+
+        // lab and lab:admin may see schemas
+        let lab = make_auth(&["lab"]);
+        assert!(
+            super::tool_search_schema_visible(Some(&lab)),
+            "lab scope must see schemas"
+        );
+
+        let admin = make_auth(&["lab:admin"]);
+        assert!(
+            super::tool_search_schema_visible(Some(&admin)),
+            "lab:admin scope must see schemas"
+        );
+
+        // stdio (None) always sees schemas
+        assert!(
+            super::tool_search_schema_visible(None),
+            "stdio (None auth) must see schemas"
+        );
     }
 }

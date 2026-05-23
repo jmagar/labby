@@ -1,6 +1,6 @@
 ---
 name: using-lab-cli
-description: This skill should be used when the user wants to run labby CLI commands, operate any homelab service through the labby binary (Radarr, Sonarr, UniFi, Unraid, Linkding, Paperless, Gotify, SABnzbd, Qdrant, Prowlarr, Bytestash, Apprise, TEI), manage the labby MCP server (labby serve, labby install, labby uninstall), configure credentials in ~/.lab/.env, scan for credentials with labby extract, check service health with labby doctor, scaffold a new service with labby scaffold, or perform any action dispatch against a homelab service using the action + params pattern.
+description: This skill should be used when the user wants to run labby CLI commands, operate any homelab service through the labby binary (Radarr, Sonarr, UniFi, Unraid, Linkding, Gotify, SABnzbd, Qdrant, Prowlarr, Bytestash, Apprise, TEI), manage the labby MCP server (labby serve, labby install, labby uninstall), configure credentials in ~/.lab/.env, scan for credentials with labby extract, check service health with labby doctor, scaffold a new service with labby scaffold, or perform any action dispatch against a homelab service using the action + params pattern.
 ---
 
 # Using the `lab` CLI
@@ -37,7 +37,7 @@ labby --json <command>   # Machine-readable output for any command
 
 For current service status, see [references/service-catalog.md](references/service-catalog.md).
 
-**Active services** (fully implemented): `extract`, `radarr`, `prowlarr`, `sabnzbd`, `linkding`, `bytestash`, `paperless`, `unraid`, `unifi`, `gotify`, `qdrant`, `tei`, `apprise`
+**Active services** (fully implemented): `extract`, `radarr`, `prowlarr`, `sabnzbd`, `linkding`, `bytestash`, `unraid`, `unifi`, `gotify`, `qdrant`, `tei`, `apprise`
 
 **Stub services** (not yet implemented): `sonarr`, `plex`, `tautulli`, `qbittorrent`, `tailscale`, `memos`, `arcane`, `overseerr`, `openai`
 
@@ -64,7 +64,6 @@ lab unifi client-list
 lab unraid system-status
 
 lab linkding bookmark-list --tag homelab
-lab paperless document-search --query invoice
 ```
 
 ### Destructive operations require `--yes`

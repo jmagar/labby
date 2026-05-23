@@ -31,7 +31,6 @@ export const SERVICE_SLUGS = [
   'openacp',
   'openai',
   'overseerr',
-  'paperless',
   'pihole',
   'plex',
   'prowlarr',

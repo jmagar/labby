@@ -114,7 +114,6 @@ pub enum Command {
     /// Memos note-taking service.
     /// Beads issue tracker.
     /// Bytestash snippet manager.
-    /// Paperless-ngx document manager.
     /// Arcane Docker management UI.
     /// Unraid server management.
     /// `UniFi` network management.
