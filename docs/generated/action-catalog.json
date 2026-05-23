@@ -1107,6 +1107,105 @@
     "builtin": false
   },
   {
+    "service": "fs",
+    "action": "fs.list",
+    "description": "List immediate entries of a directory inside the configured workspace root",
+    "destructive": false,
+    "params": [
+      {
+        "name": "path",
+        "ty": "string",
+        "required": false,
+        "description": "Workspace-relative path to list; empty or omitted means the workspace root"
+      }
+    ],
+    "returns": "{entries: [{name, path, kind, size, modified, accessible}], truncated: bool}",
+    "surface_availability": {
+      "cli": false,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "fs",
+    "action": "fs.preview",
+    "description": "Stream a capped byte window from a workspace file (HTTP-only, admin-session gated)",
+    "destructive": false,
+    "params": [
+      {
+        "name": "path",
+        "ty": "string",
+        "required": true,
+        "description": "Workspace-relative path of the file to preview"
+      },
+      {
+        "name": "max_bytes",
+        "ty": "integer",
+        "required": false,
+        "description": "Upper bound on bytes returned; server cap of 2 MiB always wins"
+      }
+    ],
+    "returns": "binary (streamed); mime from safe-MIME whitelist or application/octet-stream",
+    "surface_availability": {
+      "cli": false,
+      "mcp": false,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": true,
+    "auth_posture": "HTTP-only admin/browser session path; intentionally unavailable on MCP",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "fs",
+    "action": "help",
+    "description": "Show service actions",
+    "destructive": false,
+    "params": [],
+    "returns": "HelpPayload",
+    "surface_availability": {
+      "cli": false,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": true
+  },
+  {
+    "service": "fs",
+    "action": "schema",
+    "description": "Show the schema for a specific action",
+    "destructive": false,
+    "params": [
+      {
+        "name": "action",
+        "ty": "string",
+        "required": true,
+        "description": "Action name to describe"
+      }
+    ],
+    "returns": "ActionSpec",
+    "surface_availability": {
+      "cli": false,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": true
+  },
+  {
     "service": "gateway",
     "action": "gateway.add",
     "description": "Add a gateway and reconcile runtime state",
