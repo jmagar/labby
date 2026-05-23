@@ -596,19 +596,46 @@ impl std::fmt::Debug for UpstreamConnection {
     }
 }
 
-/// Sync Drop: SIGTERM+SIGKILL the process group if any. Last-resort
-/// abandonment cleanup for stdio upstreams whose connect future was dropped
-/// without going through `shutdown()` — discovery timeouts, cancelled
-/// `buffer_unordered` futures, pool drops, `insert()` overwrites, etc.
-/// The async `shutdown()` graceful path zeroes `self.runtime.pgid` before
-/// its first `.await` so this Drop no-ops on the graceful path.
-#[cfg(unix)]
+/// Sync Drop: SIGTERM+SIGKILL the process group if any, then abort any
+/// in-process server task. Last-resort abandonment cleanup for stdio
+/// upstreams whose connect future was dropped without going through
+/// `shutdown()` — discovery timeouts, cancelled `buffer_unordered` futures,
+/// pool drops, `insert()` overwrites, etc.
+///
+/// The async `shutdown()` graceful path zeroes `self.runtime.pgid` and
+/// takes `_server_task` before its first `.await` so this Drop no-ops on
+/// the graceful path.
+///
+/// Process-group kill is `#[cfg(unix)]`-gated (no Windows equivalent in the
+/// same shape), but `_server_task.abort()` runs on all platforms — without
+/// it a dropped in-process upstream would leak the spawned tokio task.
 impl Drop for UpstreamConnection {
     fn drop(&mut self) {
+        #[cfg(unix)]
         if let Some(pgid) = self.runtime.pgid.take() {
             // No sleep — Drop must not block. Kernel handles TERM/KILL race.
-            let _ = terminate_process_group_sigterm(pgid);
-            let _ = terminate_process_group_sigkill(pgid);
+            if let Err(error) = terminate_process_group_sigterm(pgid) {
+                tracing::warn!(
+                    target: "upstream.connection",
+                    pgid,
+                    ?error,
+                    "process group SIGTERM failed on drop"
+                );
+            }
+            if let Err(error) = terminate_process_group_sigkill(pgid) {
+                tracing::warn!(
+                    target: "upstream.connection",
+                    pgid,
+                    ?error,
+                    "process group SIGKILL failed on drop"
+                );
+            } else {
+                tracing::debug!(
+                    target: "upstream.connection",
+                    pgid,
+                    "process group reaped on connection drop"
+                );
+            }
         }
         if let Some(handle) = self._server_task.take() {
             handle.abort();
@@ -3235,6 +3262,30 @@ fn stable_jitter_seed(name: &str, attempt: u32) -> u64 {
     hash ^ u64::from(attempt)
 }
 
+/// Log the "OAuth upstream not yet capped" warning at most once per
+/// upstream name per process. The OAuth path runs on every reprobe/
+/// reconnect, so an unconditional WARN floods logs at REPROBE_INTERVAL
+/// (30s) × N upstreams cadence. This dedup keeps the gap visible without
+/// drowning out real warnings.
+fn log_oauth_uncapped_once(upstream_name: &str) {
+    use std::sync::Mutex;
+    use std::sync::OnceLock;
+    static LOGGED: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    let set = LOGGED.get_or_init(|| Mutex::new(std::collections::HashSet::new()));
+    let mut guard = match set.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if guard.insert(upstream_name.to_string()) {
+        tracing::warn!(
+            surface = "dispatch",
+            service = "upstream.pool",
+            upstream = %upstream_name,
+            "oauth http upstream: response body cap not yet applied (follow-up to lab-4z8sx.2)"
+        );
+    }
+}
+
 /// Connect to an HTTP upstream MCP server.
 async fn connect_http_upstream(
     url: &str,
@@ -3276,15 +3327,8 @@ async fn connect_http_upstream(
         // `#[non_exhaustive]` (no way to swap its inner http_client type).
         // Threading `BodyCappedHttpClient` through the cache requires
         // changing the cache to build `AuthClient<BodyCappedHttpClient>` end
-        // to end. The non-OAuth path (below) is capped — OAuth-protected
-        // upstreams are typically more trustworthy, so accept this gap for
-        // the initial fix.
-        tracing::warn!(
-            surface = "dispatch",
-            service = "upstream.pool",
-            upstream = %config.name,
-            "oauth http upstream: response body cap not yet applied (follow-up)"
-        );
+        // to end. The non-OAuth path (below) is capped.
+        log_oauth_uncapped_once(&config.name);
         let worker = StreamableHttpClientWorker::new((*auth_client).clone(), transport_config);
         let service: rmcp::service::RunningService<RoleClient, ()> = ().serve(worker).await?;
         let peer = service.peer().clone();

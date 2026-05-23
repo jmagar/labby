@@ -48,11 +48,32 @@ impl ProcessGroupGuard {
 #[cfg(unix)]
 impl Drop for ProcessGroupGuard {
     fn drop(&mut self) {
-        if let Some(pgid) = self.pgid.take() {
-            // Sync syscalls (nix::sys::signal::killpg). Safe in Drop —
-            // no allocation, no async, no panicking.
-            let _ = crate::process::unix::terminate_process_group_sigterm(pgid);
-            let _ = crate::process::unix::terminate_process_group_sigkill(pgid);
+        let Some(pgid) = self.pgid.take() else {
+            return;
+        };
+        // Sync syscalls (nix::sys::signal::killpg). Safe in Drop —
+        // no allocation, no async, no panicking.
+        if let Err(error) = crate::process::unix::terminate_process_group_sigterm(pgid) {
+            tracing::warn!(
+                target: "upstream.process_guard",
+                pgid,
+                ?error,
+                "process group SIGTERM failed (still attempting SIGKILL)"
+            );
+        }
+        if let Err(error) = crate::process::unix::terminate_process_group_sigkill(pgid) {
+            tracing::warn!(
+                target: "upstream.process_guard",
+                pgid,
+                ?error,
+                "process group SIGKILL failed (pgid may still be alive)"
+            );
+        } else {
+            tracing::debug!(
+                target: "upstream.process_guard",
+                pgid,
+                "process group reaped on guard drop"
+            );
         }
     }
 }
