@@ -26,7 +26,7 @@ use crate::config::NodeRole;
 use crate::dispatch::gateway::manager::{GatewayManager, GatewayToolSearchResult};
 use crate::mcp::catalog::{
     LEGACY_TOOL_EXECUTE_TOOL_NAME, LEGACY_TOOL_INVOKE_TOOL_NAME, LEGACY_TOOL_SEARCH_TOOL_NAME,
-        TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME,
+    TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME,
 };
 use crate::mcp::elicitation::{ElicitResult, elicit_confirm};
 use crate::mcp::envelope::{build_error, build_error_extra, build_success};
@@ -1359,9 +1359,7 @@ impl ServerHandler for LabMcpServer {
         }
         if matches!(
             service.as_str(),
-            TOOL_EXECUTE_TOOL_NAME
-                | LEGACY_TOOL_EXECUTE_TOOL_NAME
-                | LEGACY_TOOL_INVOKE_TOOL_NAME
+            TOOL_EXECUTE_TOOL_NAME | LEGACY_TOOL_EXECUTE_TOOL_NAME | LEGACY_TOOL_INVOKE_TOOL_NAME
         ) {
             let started = Instant::now();
             let tool_name = args
@@ -2597,6 +2595,14 @@ fn tool_search_include_schema_allowed(
         })
 }
 
+/// Whether the caller is allowed to see full input schemas in scout (tool_search) responses.
+/// Thin wrapper over `tool_search_include_schema_allowed` for callers that don't carry the
+/// `requested` flag (it is always implicitly `true` at the test boundary).
+#[cfg(test)]
+fn tool_search_schema_visible(auth: Option<&crate::api::oauth::AuthContext>) -> bool {
+    tool_search_include_schema_allowed(auth, true)
+}
+
 fn tool_execute_builtin_action_allowed(
     entry: &crate::registry::RegisteredService,
     action: &str,
@@ -3498,7 +3504,10 @@ mod tests {
             Some(&read_only),
             true
         ));
-        assert!(super::tool_search_include_schema_allowed(Some(&admin), true));
+        assert!(super::tool_search_include_schema_allowed(
+            Some(&admin),
+            true
+        ));
         assert!(super::tool_search_include_schema_allowed(None, true));
         assert!(!super::tool_search_include_schema_allowed(
             Some(&admin),

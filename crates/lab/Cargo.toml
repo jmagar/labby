@@ -85,6 +85,11 @@ num_cpus = "1"
 regex = { version = "1", optional = true }
 
 rmcp.workspace = true
+# Transport-layer body-cap wrapper (dispatch/upstream/http_client.rs) uses
+# bytes::Bytes and sse-stream::SseStream directly. `http` types come in via
+# reqwest::header (already a direct dep).
+bytes = "1"
+sse-stream = "0.2"
 jsonwebtoken.workspace = true
 rusqlite.workspace = true
 r2d2 = "0.8"

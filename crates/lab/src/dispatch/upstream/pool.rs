@@ -596,9 +596,66 @@ impl std::fmt::Debug for UpstreamConnection {
     }
 }
 
+/// Sync Drop: SIGTERM+SIGKILL the process group if any, then abort any
+/// in-process server task. Last-resort abandonment cleanup for stdio
+/// upstreams whose connect future was dropped without going through
+/// `shutdown()` — discovery timeouts, cancelled `buffer_unordered` futures,
+/// pool drops, `insert()` overwrites, etc.
+///
+/// The async `shutdown()` graceful path zeroes `self.runtime.pgid` and
+/// takes `_server_task` before its first `.await` so this Drop no-ops on
+/// the graceful path.
+///
+/// Process-group kill is `#[cfg(unix)]`-gated (no Windows equivalent in the
+/// same shape), but `_server_task.abort()` runs on all platforms — without
+/// it a dropped in-process upstream would leak the spawned tokio task.
+impl Drop for UpstreamConnection {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(pgid) = self.runtime.pgid.take() {
+            // No sleep — Drop must not block. Kernel handles TERM/KILL race.
+            if let Err(error) = terminate_process_group_sigterm(pgid) {
+                tracing::warn!(
+                    target: "upstream.connection",
+                    pgid,
+                    ?error,
+                    "process group SIGTERM failed on drop"
+                );
+            }
+            if let Err(error) = terminate_process_group_sigkill(pgid) {
+                tracing::warn!(
+                    target: "upstream.connection",
+                    pgid,
+                    ?error,
+                    "process group SIGKILL failed on drop"
+                );
+            } else {
+                tracing::debug!(
+                    target: "upstream.connection",
+                    pgid,
+                    "process group reaped on connection drop"
+                );
+            }
+        }
+        if let Some(handle) = self._server_task.take() {
+            handle.abort();
+        }
+    }
+}
+
 impl UpstreamConnection {
     async fn shutdown(mut self, upstream_name: &str, reason: &'static str) {
+        // Clone runtime BEFORE taking pgid so subsequent log lines surface
+        // the actual pgid (otherwise `runtime.pgid` reads as None after
+        // `.take()` clears it).
         let runtime = self.runtime.clone();
+        // INVARIANT: take pgid BEFORE any `.await` so the consuming Drop
+        // sees `None` and no-ops. This prevents double-kill on the graceful
+        // path. `runtime_pgid` carries the value through the function so the
+        // graceful TERM→sleep→KILL sequence below can still target the
+        // process group.
+        #[cfg(unix)]
+        let runtime_pgid = self.runtime.pgid.take();
         let started = Instant::now();
         let result = self
             ._client_service
@@ -609,7 +666,7 @@ impl UpstreamConnection {
         }
 
         #[cfg(unix)]
-        if let (Some(pid), Some(pgid)) = (runtime.pid, runtime.pgid)
+        if let (Some(pid), Some(pgid)) = (runtime.pid, runtime_pgid)
             && pid_is_alive(pid)
         {
             let _ = terminate_process_group_sigterm(pgid);
@@ -1989,10 +2046,19 @@ impl UpstreamPool {
     /// Returns `None` if the upstream is not connected or the tool is not found.
     /// Enforces a response size cap (`LAB_UPSTREAM_MAX_RESPONSE_BYTES`, default 10 MB).
     ///
-    /// NOTE: The size check is post-hoc — rmcp materializes the full response before
-    /// we can inspect it. This guards against forwarding oversized payloads to callers
-    /// but cannot prevent the memory allocation itself. A streaming limit would require
-    /// rmcp transport-level support.
+    /// Cap layering by transport:
+    /// - **HTTP non-OAuth**: cap is enforced at the rmcp transport layer by
+    ///   `BodyCappedHttpClient` (see `dispatch/upstream/http_client.rs`) —
+    ///   bytes are checked during streaming, *before* allocation.
+    /// - **stdio**: cap is post-hoc here (rmcp's stdio transport buffers the
+    ///   full JSON response before we see it). The check at the end of this
+    ///   function guards against forwarding oversized payloads but cannot
+    ///   prevent the underlying allocation.
+    /// - **HTTP OAuth**: also post-hoc for now — threading the cap through
+    ///   `OauthClientCache` is tracked as a follow-up.
+    ///
+    /// The post-hoc check below is therefore defense-in-depth for HTTP
+    /// non-OAuth and the primary line of defense for stdio / OAuth.
     pub async fn call_tool(
         &self,
         upstream_name: &str,
@@ -3208,6 +3274,30 @@ fn stable_jitter_seed(name: &str, attempt: u32) -> u64 {
     hash ^ u64::from(attempt)
 }
 
+/// Log the "OAuth upstream not yet capped" warning at most once per
+/// upstream name per process. The OAuth path runs on every reprobe/
+/// reconnect, so an unconditional WARN floods logs at REPROBE_INTERVAL
+/// (30s) × N upstreams cadence. This dedup keeps the gap visible without
+/// drowning out real warnings.
+fn log_oauth_uncapped_once(upstream_name: &str) {
+    use std::sync::Mutex;
+    use std::sync::OnceLock;
+    static LOGGED: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    let set = LOGGED.get_or_init(|| Mutex::new(std::collections::HashSet::new()));
+    let mut guard = match set.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if guard.insert(upstream_name.to_string()) {
+        tracing::warn!(
+            surface = "dispatch",
+            service = "upstream.pool",
+            upstream = %upstream_name,
+            "oauth http upstream: response body cap not yet applied (follow-up to lab-4z8sx.2)"
+        );
+    }
+}
+
 /// Connect to an HTTP upstream MCP server.
 async fn connect_http_upstream(
     url: &str,
@@ -3243,6 +3333,14 @@ async fn connect_http_upstream(
             .await
             .map_err(|e| anyhow::anyhow!("oauth_required: {e}"))?;
 
+        // TODO(follow-up to lab-4z8sx.2): the OAuth path does NOT get the
+        // BodyCappedHttpClient cap because `OauthClientCache` returns a
+        // concrete `AuthClient<reqwest::Client>` and AuthClient is
+        // `#[non_exhaustive]` (no way to swap its inner http_client type).
+        // Threading `BodyCappedHttpClient` through the cache requires
+        // changing the cache to build `AuthClient<BodyCappedHttpClient>` end
+        // to end. The non-OAuth path (below) is capped.
+        log_oauth_uncapped_once(&config.name);
         let worker = StreamableHttpClientWorker::new((*auth_client).clone(), transport_config);
         let service: rmcp::service::RunningService<RoleClient, ()> = ().serve(worker).await?;
         let peer = service.peer().clone();
@@ -3275,7 +3373,13 @@ async fn connect_http_upstream(
     let client = reqwest::Client::builder()
         .timeout(DEFAULT_REQUEST_TIMEOUT)
         .build()?;
-    let worker = StreamableHttpClientWorker::new(client, transport_config);
+    // Wrap reqwest::Client in BodyCappedHttpClient so a hostile upstream
+    // cannot OOM the gateway via an oversized response. Cap is enforced
+    // during streaming (Content-Length + bytes_stream count). For SSE, the
+    // cap is per-event so legitimate long-lived subscriptions are not
+    // disconnected.
+    let capped = super::http_client::BodyCappedHttpClient::new(client, max_response_bytes());
+    let worker = StreamableHttpClientWorker::new(capped, transport_config);
     let service: rmcp::service::RunningService<RoleClient, ()> = ().serve(worker).await?;
     let peer = service.peer().clone();
     let tools = peer.list_all_tools().await?;
@@ -3342,6 +3446,17 @@ async fn connect_stdio_upstream(
         action = "upstream.connect.start", command = %command, pid = ?pid,
         "upstream connect start",
     );
+
+    // INVARIANT: arm the process-group guard immediately after spawn. If any
+    // subsequent `?` propagates (serve fails, list_all_tools fails, the outer
+    // future is dropped on timeout), `Drop` on this guard SIGTERM+SIGKILLs
+    // the process group via `killpg`, reaping grandchildren (npx → node,
+    // sh -c → python) that rmcp's per-PID TokioChildProcess Drop would
+    // otherwise miss. With `ProcessGroup::leader()` the child is its own
+    // group leader, so pgid == pid.
+    #[cfg(unix)]
+    let pg_guard = pid.map(super::process_guard::ProcessGroupGuard::arm);
+
     let service: rmcp::service::RunningService<RoleClient, ()> = ().serve(process).await?;
     let peer = service.peer().clone();
 
@@ -3354,13 +3469,22 @@ async fn connect_stdio_upstream(
         "upstream connect finish",
     );
 
+    // INVARIANT: disarm the guard right before successful construction. The
+    // pgid is transferred to UpstreamConnection.runtime.pgid; its own Drop
+    // now owns cleanup. `shutdown()` will zero runtime.pgid before any
+    // `.await` so its Drop no-ops on the graceful path.
+    #[cfg(unix)]
+    let pgid_for_runtime = pg_guard.and_then(super::process_guard::ProcessGroupGuard::disarm);
+    #[cfg(not(unix))]
+    let pgid_for_runtime: Option<u32> = pid;
+
     let conn = UpstreamConnection {
         _client_service: service,
         _server_task: None,
         peer,
         runtime: UpstreamRuntimeMetadata {
             pid,
-            pgid: pid,
+            pgid: pgid_for_runtime,
             started_at: Some(std::time::SystemTime::now()),
             origin: runtime_origin_label(runtime_origin, runtime_owner),
             owner: runtime_owner.cloned(),

@@ -614,10 +614,9 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                             "max_tools": args.max_tools,
                         }),
                     ),
-                    GatewayToolSearchCommand::Disable => (
-                        "gateway.scout.set".to_string(),
-                        json!({ "enabled": false }),
-                    ),
+                    GatewayToolSearchCommand::Disable => {
+                        ("gateway.scout.set".to_string(), json!({ "enabled": false }))
+                    }
                 },
                 GatewayCommand::Reload => (
                     "gateway.reload".to_string(),

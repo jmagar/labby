@@ -44,6 +44,9 @@ pub fn cli_help() -> String {
     );
     let mut command = crate::cli::Cli::command();
     write_cli_command(&mut out, &mut command, "labby");
+    while out.ends_with("\n\n") {
+        out.pop();
+    }
     out
 }
 
