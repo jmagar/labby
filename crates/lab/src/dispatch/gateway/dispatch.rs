@@ -78,9 +78,8 @@ pub async fn dispatch_with_manager(
         | "gateway.client_config.get"
         | "gateway.discovered_tools"
         | "gateway.discovered_resources"
-        | "gateway.discovered_prompts" => {
-            handle_gateway_actions(manager, action, params_value).await
-        }
+        | "gateway.discovered_prompts"
+        | "gateway.public_urls.get" => handle_gateway_actions(manager, action, params_value).await,
         action if action.starts_with("gateway.protected_route.") => {
             handle_protected_route_actions(manager, action, params_value).await
         }
@@ -591,6 +590,15 @@ async fn handle_gateway_actions(
             let params: GatewayNameParams = parse_params(params_value)?;
             to_json(manager.discovered_prompts(&params.name).await?)
         }
+        "gateway.public_urls.get" => {
+            let urls = manager.public_urls().await;
+            let effective_mcp_gateway = urls.effective_mcp_gateway().map(str::to_owned);
+            to_json(serde_json::json!({
+                "app": urls.app,
+                "mcp_gateway": urls.mcp_gateway,
+                "effective_mcp_gateway": effective_mcp_gateway,
+            }))
+        }
         unknown => unknown_action(unknown),
     }
 }
@@ -704,15 +712,6 @@ async fn handle_mcp_actions(
                     .cleanup_upstream_processes(&params.name, params.aggressive, params.dry_run)
                     .await?,
             )
-        }
-        "gateway.public_urls.get" => {
-            let urls = manager.public_urls().await;
-            let effective_mcp_gateway = urls.effective_mcp_gateway().map(str::to_owned);
-            to_json(serde_json::json!({
-                "app": urls.app,
-                "mcp_gateway": urls.mcp_gateway,
-                "effective_mcp_gateway": effective_mcp_gateway,
-            }))
         }
         unknown => unknown_action(unknown),
     }
@@ -851,6 +850,16 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("config.toml");
         GatewayManager::new(path, GatewayRuntimeHandle::default())
+    }
+
+    #[tokio::test]
+    async fn gateway_public_urls_get_dispatches_from_catalog_action() {
+        let manager = test_manager();
+        let value = dispatch_with_manager(&manager, "gateway.public_urls.get", json!({}))
+            .await
+            .expect("public urls dispatches");
+
+        assert!(value.get("effective_mcp_gateway").is_some());
     }
 
     #[tokio::test]
