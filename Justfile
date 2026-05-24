@@ -24,9 +24,13 @@ test-integration:
     cargo nextest run --workspace --all-features -- --ignored
 
 # Lint
-lint:
+lint: skill-drift
     cargo clippy --workspace --all-features -- -D warnings
     cargo fmt --all -- --check
+
+# Check hand-authored skills for known stale or unsafe patterns
+skill-drift:
+    scripts/check-dozzle-skill
 
 # License and vulnerability audit
 deny:

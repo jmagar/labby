@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+target="plugins/dozzle"
+
+failures=0
+
+check_absent() {
+  local description="$1"
+  local pattern="$2"
+
+  if rg -n -S -- "$pattern" "$target"; then
+    printf 'dozzle skill check failed: %s\n  pattern: %s\n' "$description" "$pattern" >&2
+    failures=$((failures + 1))
+  fi
+}
+
+check_absent "stale Lab MCP dispatch guidance" 'mcp__lab__dozzle.*Dispatch'
+check_absent "stale lab dozzle CLI command guidance" 'lab dozzle --help|lab dozzle <action> --help'
+check_absent "stale labby dozzle CLI command guidance" 'labby --json dozzle'
+check_absent "stale Lab homelab-control-plane description" 'homelab control plane|Lab.s Dozzle integration'
+check_absent "stale MCP/CLI reference files" 'references/(mcp|cli)\.md'
+check_absent "unsafe cookie header in curl argv" 'curl.*-H[[:space:]]*["'\'']Cookie:'
+
+if [[ -e "$target/.mcp.json" ]]; then
+  printf 'dozzle skill check failed: stale Lab MCP wrapper still exists\n  file: %s\n' "$target/.mcp.json" >&2
+  failures=$((failures + 1))
+fi
+
+if (( failures > 0 )); then
+  exit 1
+fi
+
+printf 'dozzle skill check passed\n'
