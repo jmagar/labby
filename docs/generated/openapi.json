@@ -1366,6 +1366,9 @@
           "env_path": {
             "type": "string"
           },
+          "force": {
+            "type": "string"
+          },
           "services": {
             "type": "array",
             "items": {
@@ -1383,6 +1386,18 @@
           "uri"
         ],
         "properties": {
+          "env_path": {
+            "type": "string"
+          },
+          "force": {
+            "type": "string"
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "uri": {
             "type": "string"
           }

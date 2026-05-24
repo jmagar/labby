@@ -83,6 +83,12 @@
               "ty": "string",
               "required": false,
               "description": "Override target env file path"
+            },
+            {
+              "name": "force",
+              "ty": "bool",
+              "required": false,
+              "description": "Overwrite conflicting env keys instead of skipping them"
             }
           ],
           "returns": "WritePlan"
@@ -97,6 +103,24 @@
               "ty": "string",
               "required": true,
               "description": "Local path or 'host:/abs/path' for SSH — same format as scan"
+            },
+            {
+              "name": "services",
+              "ty": "string[]",
+              "required": false,
+              "description": "Optional filter; defaults to everything found"
+            },
+            {
+              "name": "env_path",
+              "ty": "string",
+              "required": false,
+              "description": "Override target env file path"
+            },
+            {
+              "name": "force",
+              "ty": "bool",
+              "required": false,
+              "description": "Show overwrite changes instead of skipped conflicts"
             }
           ],
           "returns": "WritePlan"

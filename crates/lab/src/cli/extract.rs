@@ -14,7 +14,7 @@ use anyhow::{Context, Result};
 use clap::Args;
 use owo_colors::{OwoColorize, XtermColors};
 
-use crate::config::{backup_env, env_is_up_to_date, write_env};
+use crate::config::{env_merge, write_service_creds};
 use crate::output::{ColorPolicy, OutputFormat, RenderEnv, print};
 use lab_apis::extract::{ExtractClient, ExtractReport, ScanTarget, Uri};
 
@@ -81,8 +81,12 @@ impl ExtractCmd {
     fn apply_report(&self, report: &ExtractReport, color_policy: ColorPolicy) -> Result<()> {
         let target = self.resolve_env_path()?;
 
+        let merge_request = merge_request_from_creds(&report.creds, self.force);
+        let preview = env_merge::preview(&target, &merge_request)
+            .with_context(|| format!("preview {}", target.display()))?;
+
         // Rule 8: idempotence check — skip backup and write if nothing would change.
-        if env_is_up_to_date(&target, &report.creds) {
+        if preview.written == 0 && preview.skipped.is_empty() {
             eprintln!("{}", "Already up to date — nothing to write.".dimmed());
             return Ok(());
         }
@@ -104,9 +108,10 @@ impl ExtractCmd {
             return Ok(());
         }
 
-        // Rule 1: backup before any write.
-        let backup = backup_env(&target).with_context(|| format!("backup {}", target.display()))?;
-        if backup.exists() {
+        // Canonical merge owns backup, atomic write, permissions, and retention.
+        let outcome = write_service_creds(&target, &report.creds, self.force)
+            .with_context(|| format!("write {}", target.display()))?;
+        if let Some(backup) = &outcome.backup_path {
             eprintln!(
                 "  {} {}",
                 "backup →".dimmed(),
@@ -114,11 +119,7 @@ impl ExtractCmd {
             );
         }
 
-        // Rules 2–7: atomic merge write.
-        let warnings = write_env(&target, &report.creds, self.force)
-            .with_context(|| format!("write {}", target.display()))?;
-
-        for w in &warnings {
+        for w in &outcome.skipped {
             eprintln!("  {} {}", "⚠".color(XtermColors::FlushOrange), w);
         }
         eprintln!(
@@ -131,38 +132,39 @@ impl ExtractCmd {
 
     fn diff_report(&self, report: &ExtractReport) -> Result<()> {
         let target = self.resolve_env_path()?;
+        let preview = env_merge::preview(
+            &target,
+            &merge_request_from_creds(&report.creds, self.force),
+        )
+        .with_context(|| format!("preview {}", target.display()))?;
 
-        let existing_raw = if target.exists() {
-            std::fs::read_to_string(&target)
-                .with_context(|| format!("read {}", target.display()))?
-        } else {
-            String::new()
-        };
-        let existing: std::collections::HashMap<String, String> = existing_raw
-            .lines()
-            .filter(|l| !l.trim().is_empty() && !l.trim().starts_with('#'))
-            .filter_map(|l| {
-                l.split_once('=')
-                    .map(|(k, v)| (k.trim().to_owned(), v.trim().to_owned()))
-            })
-            .collect();
-
-        let mut any = false;
-        for cred in &report.creds {
-            let svc_upper = cred.service.to_uppercase();
-            if let Some(url) = &cred.url {
-                let key = format!("{svc_upper}_URL");
-                print_diff_line(&key, url, &existing);
-                any = true;
-            }
-            if let Some(secret) = &cred.secret {
-                print_diff_line(&cred.env_field, secret, &existing);
-                any = true;
-            }
-        }
-
-        if !any {
+        if preview.changes.is_empty() {
             eprintln!("{}", "No credentials found — nothing to diff.".dimmed());
+        }
+        for change in preview.changes {
+            match change.status {
+                env_merge::PreviewStatus::Add => eprintln!(
+                    "  {} {}",
+                    "+".color(XtermColors::BrightGreen).bold(),
+                    change.key
+                ),
+                env_merge::PreviewStatus::Update => eprintln!(
+                    "  {} {}",
+                    "~".color(XtermColors::FlushOrange).bold(),
+                    change.key
+                ),
+                env_merge::PreviewStatus::Unchanged => {
+                    eprintln!("  {} {}", "=".dimmed(), change.key)
+                }
+                env_merge::PreviewStatus::Conflict => eprintln!(
+                    "  {} {}",
+                    "!".color(XtermColors::FlushOrange).bold(),
+                    change.key
+                ),
+            };
+        }
+        for warning in preview.skipped {
+            eprintln!("  {} {}", "⚠".color(XtermColors::FlushOrange), warning);
         }
         Ok(())
     }
@@ -194,22 +196,30 @@ impl ExtractCmd {
     }
 }
 
-fn print_diff_line(key: &str, value: &str, existing: &std::collections::HashMap<String, String>) {
-    match existing.get(key) {
-        None => eprintln!(
-            "  {} {}={}",
-            "+".color(XtermColors::BrightGreen).bold(),
-            key.color(XtermColors::BrightGreen),
-            value
-        ),
-        Some(ev) if ev == value => {
-            // Same value already present — silent in diff output.
+fn merge_request_from_creds(
+    creds: &[lab_apis::extract::ServiceCreds],
+    force: bool,
+) -> env_merge::MergeRequest {
+    let mut entries = Vec::new();
+    for cred in creds {
+        let svc_upper = cred.service.to_uppercase();
+        if let Some(url) = &cred.url {
+            entries.push(env_merge::EnvEntry::new(
+                format!("{svc_upper}_URL"),
+                url.clone(),
+            ));
         }
-        Some(ev) => eprintln!(
-            "  {} {} (was {ev:?})",
-            "~".color(XtermColors::FlushOrange).bold(),
-            format!("{key}={value}").color(XtermColors::FlushOrange)
-        ),
+        if let Some(secret) = &cred.secret {
+            entries.push(env_merge::EnvEntry::new(
+                cred.env_field.clone(),
+                secret.clone(),
+            ));
+        }
+    }
+    env_merge::MergeRequest {
+        entries,
+        force,
+        expected_mtime: None,
     }
 }
 

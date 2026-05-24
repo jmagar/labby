@@ -28,8 +28,7 @@ UNRAID_NODE2_URL=http://tower2.local
 UNRAID_NODE2_API_KEY=...
 ```
 
-CLI: `lab unraid system-status --instance node2`
-MCP: `{ "action": "system.status", "params": { "instance": "node2" } }`
+MCP/API dispatch: `{ "action": "system.status", "params": { "instance": "node2" } }`
 
 Unknown instance labels return a structured error listing valid labels.
 
@@ -56,9 +55,9 @@ LAB_LOG=labby=info,lab_apis=warn    # tracing filter directive (default)
 LAB_LOG_FORMAT=json               # emit newline-delimited JSON (for prod/CI)
 ```
 
-## extract.apply Behavior
+## `extract --apply` Behavior
 
-`labby extract apply --yes` writes credentials to `~/.lab/.env`:
+`labby extract /path/to/appdata --apply -y` writes credentials to `~/.lab/.env`:
 
 - Backs up the file before writing
 - Deduplicates by key, preserves order and comments

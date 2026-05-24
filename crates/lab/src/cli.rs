@@ -4,6 +4,7 @@
 //! `lab-apis` client (or a lab-local subsystem), and formats output.
 //! See `crates/lab/src/cli/CLAUDE.md` for the rulebook.
 
+pub mod completions;
 pub mod docs;
 pub mod doctor;
 pub mod extract;
@@ -11,7 +12,6 @@ pub mod gateway;
 pub mod health;
 pub mod help;
 pub mod helpers;
-pub mod install;
 pub mod logs;
 pub mod marketplace;
 #[cfg(feature = "mcpregistry")]
@@ -76,17 +76,12 @@ pub enum Command {
     Nodes(nodes::NodesArgs),
     /// Quick reachability check for configured services.
     Health,
-    /// Install one or more services into `.mcp.json`.
-    Install(install::InstallArgs),
-    /// Uninstall services from `.mcp.json`.
-    Uninstall(install::UninstallArgs),
-    /// First-time setup wizard.
-    Init,
     /// Open the web-based first-run wizard (or settings) — lab-bg3e.3.
     Setup(setup::SetupArgs),
     /// Print the service + action catalog.
     Help(help::HelpArgs),
     /// Generate shell completions.
+    Completions(completions::CompletionsArgs),
     /// Scan a local or SSH appdata path and extract service credentials.
     Extract(extract::ExtractCmd),
     /// Manage proxied upstream MCP gateways.
@@ -102,29 +97,6 @@ pub enum Command {
     Registry(mcpregistry::RegistryArgs),
     /// Component versioning and deployment.
     Stash(stash::StashArgs),
-    /// Radarr movie collection manager.
-    /// Sonarr TV series manager.
-    /// Prowlarr indexer manager.
-    /// Plex media server.
-    /// Tautulli Plex analytics.
-    /// `SABnzbd` download client.
-    /// qBittorrent download client.
-    /// Tailscale VPN network.
-    /// Linkding bookmark manager.
-    /// Memos note-taking service.
-    /// Beads issue tracker.
-    /// Bytestash snippet manager.
-    /// Arcane Docker management UI.
-    /// Unraid server management.
-    /// `UniFi` network management.
-    /// Overseerr media request manager.
-    /// Gotify push notifications.
-    /// `OpenAI` API client.
-    /// Upstream OpenACP daemon.
-    /// Google NotebookLM client.
-    /// Qdrant vector database.
-    /// HF Text Embeddings Inference.
-    /// Apprise notification dispatcher.
     /// Deploy the local lab release binary to SSH targets.
     #[cfg(feature = "deploy")]
     Deploy(deploy::DeployArgs),
@@ -142,11 +114,9 @@ pub async fn dispatch(cli: Cli, config: LabConfig) -> Result<ExitCode> {
         Command::Docs(args) => docs::run(args),
         Command::Nodes(args) => nodes::run(args, format, &config).await,
         Command::Health => health::run(format).await,
-        Command::Install(args) => install::run_install(&args).map(|()| ExitCode::SUCCESS),
-        Command::Uninstall(args) => install::run_uninstall(&args).map(|()| ExitCode::SUCCESS),
-        Command::Init => install::run_init().map(|()| ExitCode::SUCCESS),
         Command::Setup(args) => setup::run(args, format).await,
         Command::Help(args) => help::run(args, format),
+        Command::Completions(args) => completions::run(&args),
         Command::Extract(cmd) => cmd.run(color).await.map(|()| ExitCode::SUCCESS),
         Command::Gateway(args) => gateway::run(args, format, &config).await,
         Command::Oauth(args) => oauth::run(args, &config).await,
@@ -212,6 +182,34 @@ mod tests {
                 check: Some(doctor::DoctorCheck::Services)
             })
         ));
+    }
+
+    #[test]
+    fn cli_rejects_legacy_install_uninstall_init_stubs() {
+        for command in ["install", "uninstall", "init"] {
+            let err =
+                Cli::try_parse_from(["labby", command]).expect_err("legacy stub must be gone");
+            assert!(
+                err.to_string().contains("unrecognized subcommand"),
+                "{command}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn replacement_setup_commands_parse() {
+        let cli = Cli::try_parse_from(["labby", "setup"]).expect("setup parses");
+        assert!(matches!(cli.command, Command::Setup(_)));
+
+        let cli = Cli::try_parse_from(["labby", "setup", "install-plugin", "gateway", "-y"])
+            .expect("setup install-plugin parses");
+        assert!(matches!(cli.command, Command::Setup(_)));
+    }
+
+    #[test]
+    fn cli_parses_completions_subcommand() {
+        let cli = Cli::parse_from(["labby", "completions", "bash"]);
+        assert!(matches!(cli.command, Command::Completions(_)));
     }
 }
 

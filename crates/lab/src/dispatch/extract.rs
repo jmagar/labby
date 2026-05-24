@@ -3,10 +3,14 @@
 //! This is the always-on service; no feature flag needed.
 //! All real work is delegated to `lab_apis::extract::ExtractClient`.
 
+use std::path::PathBuf;
+
 use lab_apis::core::action::{ActionSpec, ParamSpec};
-use lab_apis::extract::{ExtractClient, RedactedExtractReport, ScanTarget, Uri};
+use lab_apis::extract::{ExtractClient, RedactedExtractReport, ScanTarget, ServiceCreds, Uri};
+use serde::Serialize;
 use serde_json::Value;
 
+use crate::config::{env_merge, write_service_creds};
 use crate::dispatch::error::ToolError;
 use crate::dispatch::helpers::{action_schema, help_payload, require_str, to_json};
 
@@ -88,6 +92,12 @@ pub const ACTIONS: &[ActionSpec] = &[
                 required: false,
                 description: "Override target env file path",
             },
+            ParamSpec {
+                name: "force",
+                ty: "bool",
+                required: false,
+                description: "Overwrite conflicting env keys instead of skipping them",
+            },
         ],
         returns: "WritePlan",
     },
@@ -95,12 +105,32 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "diff",
         description: "Show what 'apply' would change vs the current env file (no writes)",
         destructive: false,
-        params: &[ParamSpec {
-            name: "uri",
-            ty: "string",
-            required: true,
-            description: "Local path or 'host:/abs/path' for SSH — same format as scan",
-        }],
+        params: &[
+            ParamSpec {
+                name: "uri",
+                ty: "string",
+                required: true,
+                description: "Local path or 'host:/abs/path' for SSH — same format as scan",
+            },
+            ParamSpec {
+                name: "services",
+                ty: "string[]",
+                required: false,
+                description: "Optional filter; defaults to everything found",
+            },
+            ParamSpec {
+                name: "env_path",
+                ty: "string",
+                required: false,
+                description: "Override target env file path",
+            },
+            ParamSpec {
+                name: "force",
+                ty: "bool",
+                required: false,
+                description: "Show overwrite changes instead of skipped conflicts",
+            },
+        ],
         returns: "WritePlan",
     },
 ];
@@ -146,15 +176,42 @@ pub async fn dispatch(action: &str, params: Value) -> Result<Value, ToolError> {
         "apply" => {
             // Destructive — the registry has already invoked elicitation
             // before we get here, otherwise dispatch would have short-circuited.
-            Err(ToolError::Sdk {
-                sdk_kind: "internal_error".into(),
-                message: "apply not yet implemented".into(),
+            let uri = parse_uri(&params)?;
+            let force = parse_bool_param(&params, "force")?.unwrap_or(false);
+            let env_path = parse_env_path(&params)?;
+            let report = scan_targeted(uri).await?;
+            let creds = filter_creds(report.creds, parse_services_filter(&params)?)?;
+            let merge_request = merge_request_from_creds(&creds, force);
+            let preview = env_merge::preview(&env_path, &merge_request).map_err(map_merge_err)?;
+            let outcome = write_service_creds(&env_path, &creds, force).map_err(map_merge_err)?;
+            to_json(WritePlan {
+                env_path,
+                credentials: creds.len(),
+                preview,
+                applied: true,
+                written: outcome.written,
+                skipped: outcome.skipped,
+                backup_path: outcome.backup_path,
             })
         }
-        "diff" => Err(ToolError::Sdk {
-            sdk_kind: "internal_error".into(),
-            message: "diff not yet implemented".into(),
-        }),
+        "diff" => {
+            let uri = parse_uri(&params)?;
+            let force = parse_bool_param(&params, "force")?.unwrap_or(false);
+            let env_path = parse_env_path(&params)?;
+            let report = scan_targeted(uri).await?;
+            let creds = filter_creds(report.creds, parse_services_filter(&params)?)?;
+            let merge_request = merge_request_from_creds(&creds, force);
+            let preview = env_merge::preview(&env_path, &merge_request).map_err(map_merge_err)?;
+            to_json(WritePlan {
+                env_path,
+                credentials: creds.len(),
+                written: preview.written,
+                skipped: preview.skipped.clone(),
+                preview,
+                applied: false,
+                backup_path: None,
+            })
+        }
         unknown => Err(ToolError::UnknownAction {
             message: format!("unknown action 'extract.{unknown}'"),
             valid: ACTIONS.iter().map(|a| a.name.to_string()).collect(),
@@ -163,13 +220,32 @@ pub async fn dispatch(action: &str, params: Value) -> Result<Value, ToolError> {
     }
 }
 
+#[derive(Debug, Serialize)]
+struct WritePlan {
+    env_path: PathBuf,
+    credentials: usize,
+    preview: env_merge::MergePreview,
+    applied: bool,
+    written: usize,
+    skipped: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    backup_path: Option<PathBuf>,
+}
+
 fn parse_redact_secrets(params: &Value) -> Result<bool, ToolError> {
-    match params.get("redact_secrets") {
-        None => Ok(false),
-        Some(value) => value.as_bool().ok_or_else(|| ToolError::InvalidParam {
-            message: "parameter `redact_secrets` must be a bool".into(),
-            param: "redact_secrets".into(),
-        }),
+    Ok(parse_bool_param(params, "redact_secrets")?.unwrap_or(false))
+}
+
+fn parse_bool_param(params: &Value, param: &'static str) -> Result<Option<bool>, ToolError> {
+    match params.get(param) {
+        None => Ok(None),
+        Some(value) => value
+            .as_bool()
+            .map(Some)
+            .ok_or_else(|| ToolError::InvalidParam {
+                message: format!("parameter `{param}` must be a bool"),
+                param: param.into(),
+            }),
     }
 }
 
@@ -218,6 +294,122 @@ fn parse_hosts_filter(params: &Value) -> Result<Option<Vec<String>>, ToolError> 
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(if hosts.is_empty() { None } else { Some(hosts) })
+}
+
+fn parse_services_filter(params: &Value) -> Result<Option<Vec<String>>, ToolError> {
+    let Some(value) = params.get("services") else {
+        return Ok(None);
+    };
+    let arr = value.as_array().ok_or_else(|| ToolError::InvalidParam {
+        message: "parameter `services` must be an array of strings".into(),
+        param: "services".into(),
+    })?;
+    let services = arr
+        .iter()
+        .map(|v| {
+            v.as_str()
+                .map(|s| s.to_ascii_lowercase())
+                .ok_or_else(|| ToolError::InvalidParam {
+                    message: "each element of `services` must be a string".into(),
+                    param: "services".into(),
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(if services.is_empty() {
+        None
+    } else {
+        Some(services)
+    })
+}
+
+fn parse_env_path(params: &Value) -> Result<PathBuf, ToolError> {
+    match params.get("env_path") {
+        None => default_env_path(),
+        Some(Value::String(path)) if env_path_override_allowed() => Ok(PathBuf::from(path)),
+        Some(Value::String(_)) => Err(ToolError::InvalidParam {
+            message:
+                "parameter `env_path` is only accepted when LAB_ALLOW_EXTRACT_ENV_PATH_OVERRIDE=1"
+                    .into(),
+            param: "env_path".into(),
+        }),
+        Some(_) => Err(ToolError::InvalidParam {
+            message: "parameter `env_path` must be a string".into(),
+            param: "env_path".into(),
+        }),
+    }
+}
+
+fn default_env_path() -> Result<PathBuf, ToolError> {
+    let home = std::env::var("HOME").map_err(|_| ToolError::Sdk {
+        sdk_kind: "internal_error".into(),
+        message: "$HOME not set".into(),
+    })?;
+    Ok(PathBuf::from(home).join(".lab/.env"))
+}
+
+fn env_path_override_allowed() -> bool {
+    std::env::var("LAB_ALLOW_EXTRACT_ENV_PATH_OVERRIDE").is_ok_and(|value| value == "1")
+}
+
+async fn scan_targeted(uri: Uri) -> Result<lab_apis::extract::ExtractReport, ToolError> {
+    ExtractClient::new()
+        .scan(ScanTarget::Targeted(uri))
+        .await
+        .map_err(|e| ToolError::Sdk {
+            sdk_kind: "internal_error".into(),
+            message: e.to_string(),
+        })
+}
+
+fn filter_creds(
+    creds: Vec<ServiceCreds>,
+    services: Option<Vec<String>>,
+) -> Result<Vec<ServiceCreds>, ToolError> {
+    let Some(services) = services else {
+        return Ok(creds);
+    };
+    let filtered: Vec<ServiceCreds> = creds
+        .into_iter()
+        .filter(|cred| services.iter().any(|service| service == &cred.service))
+        .collect();
+    if filtered.is_empty() {
+        return Err(ToolError::InvalidParam {
+            message: "parameter `services` matched no discovered credentials".into(),
+            param: "services".into(),
+        });
+    }
+    Ok(filtered)
+}
+
+fn merge_request_from_creds(creds: &[ServiceCreds], force: bool) -> env_merge::MergeRequest {
+    let mut entries = Vec::new();
+    for cred in creds {
+        let svc_upper = cred.service.to_uppercase();
+        if let Some(url) = &cred.url {
+            entries.push(env_merge::EnvEntry::new(
+                format!("{svc_upper}_URL"),
+                url.clone(),
+            ));
+        }
+        if let Some(secret) = &cred.secret {
+            entries.push(env_merge::EnvEntry::new(
+                cred.env_field.clone(),
+                secret.clone(),
+            ));
+        }
+    }
+    env_merge::MergeRequest {
+        entries,
+        force,
+        expected_mtime: None,
+    }
+}
+
+fn map_merge_err(err: env_merge::MergeError) -> ToolError {
+    ToolError::Sdk {
+        sdk_kind: err.kind().into(),
+        message: err.to_string(),
+    }
 }
 
 fn parse_scan_target(params: &Value) -> Result<ScanTarget, ToolError> {
@@ -278,12 +470,51 @@ mod tests {
     }
 
     #[test]
+    fn env_path_override_is_rejected_by_default() {
+        let error = parse_env_path(&json!({"env_path": "/tmp/custom.env"}))
+            .expect_err("api env_path override should be gated");
+        assert!(matches!(
+            error,
+            ToolError::InvalidParam { param, .. } if param == "env_path"
+        ));
+    }
+
+    #[test]
+    fn services_filter_is_case_insensitive_and_rejects_misses() {
+        let creds = vec![ServiceCreds {
+            service: "radarr".to_owned(),
+            url: Some("http://localhost:7878".to_owned()),
+            secret: Some("secret-key".to_owned()),
+            env_field: "RADARR_API_KEY".to_owned(),
+            source_host: None,
+            probe_host: None,
+            runtime: None,
+            url_verified: false,
+        }];
+
+        let filtered = filter_creds(
+            creds.clone(),
+            parse_services_filter(&json!({"services": ["RADARR"]})).expect("services"),
+        )
+        .expect("filter");
+        assert_eq!(filtered.len(), 1);
+
+        assert!(
+            filter_creds(
+                creds,
+                parse_services_filter(&json!({"services": ["sonarr"]})).expect("services"),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn redacted_scan_serialization_omits_secret_values() {
         let report = lab_apis::extract::ExtractReport {
             target: ScanTarget::Fleet,
             uri: None,
             found: vec!["radarr".to_owned()],
-            creds: vec![lab_apis::extract::ServiceCreds {
+            creds: vec![ServiceCreds {
                 service: "radarr".to_owned(),
                 url: Some("http://100.64.0.12:7878".to_owned()),
                 secret: Some("secret-key".to_owned()),
