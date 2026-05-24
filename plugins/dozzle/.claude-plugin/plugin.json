@@ -15,5 +15,15 @@
     "logs",
     "containers",
     "homelab"
-  ]
+  ],
+  "mcpServers": "./.mcp.json",
+  "userConfig": {
+    "dozzle_mcp_url": {
+      "type": "string",
+      "title": "Dozzle MCP URL",
+      "description": "Dozzle's native Streamable HTTP MCP endpoint. Enable Dozzle with DOZZLE_ENABLE_MCP=true or --enable-mcp, then point this at the reachable /api/mcp URL. Include any configured base path before /api/mcp.",
+      "required": true,
+      "default": "http://localhost:8080/api/mcp"
+    }
+  }
 }

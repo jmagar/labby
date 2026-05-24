@@ -1,6 +1,6 @@
 ---
 name: dozzle
-description: Direct Dozzle API workflow for the real-time Docker container log viewer. Use when the user wants to inspect Dozzle health, version, containers, logs, authentication failures, session-cookie refresh, auth setup, or Dozzle MCP. Uses `DOZZLE_URL` and optional `DOZZLE_SESSION_COOKIE`; do not route through Lab MCP or `lab dozzle`.
+description: Direct Dozzle API and native Dozzle MCP workflow for the real-time Docker container log viewer. Use when the user wants to inspect Dozzle health, version, containers, logs, authentication failures, session-cookie refresh, auth setup, or Dozzle MCP. Uses `DOZZLE_URL` and optional `DOZZLE_SESSION_COOKIE`; Dozzle MCP uses the native Streamable HTTP `/api/mcp` endpoint, not the stale Lab command wrapper.
 ---
 
 # Dozzle
@@ -9,8 +9,10 @@ Real-time Docker container log viewer.
 
 ## How to call it
 
-Use Dozzle's HTTP API directly. Do not use Lab MCP, `mcp__lab__dozzle`,
-`lab dozzle`, or `labby dozzle`; those paths are stale for this service.
+Use Dozzle's HTTP API directly for ad-hoc checks, or the native Dozzle MCP
+server when the MCP endpoint is enabled. Do not use `mcp__lab__dozzle`,
+`lab dozzle`, `labby dozzle`, or a Lab command-wrapper MCP entry; those paths
+are stale wrappers for this service.
 
 ### Configuration
 
@@ -19,6 +21,7 @@ Read connection values from the environment when available:
 ```bash
 DOZZLE_URL                 # base URL, for example http://host:8080
 DOZZLE_SESSION_COOKIE      # optional raw Cookie header value
+DOZZLE_ENABLE_MCP=true     # required on the Dozzle container for /api/mcp
 ```
 
 If the shell environment is not already populated, `~/.lab/.env` may contain
