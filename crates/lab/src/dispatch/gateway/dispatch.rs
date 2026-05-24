@@ -853,6 +853,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn gateway_public_urls_get_dispatches_from_catalog_action() {
+        let manager = test_manager();
+        let value = dispatch_with_manager(&manager, "gateway.public_urls.get", json!({}))
+            .await
+            .expect("public urls dispatches");
+
+        assert!(value.get("effective_mcp_gateway").is_some());
+    }
+
+    #[tokio::test]
     async fn gateway_servers_action_returns_not_found_when_no_pool() {
         let manager = test_manager();
         let err = dispatch_with_manager(&manager, "gateway.servers", json!({}))
