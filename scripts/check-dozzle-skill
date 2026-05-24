@@ -25,8 +25,19 @@ check_absent "stale Lab homelab-control-plane description" 'homelab control plan
 check_absent "stale MCP/CLI reference files" 'references/(mcp|cli)\.md'
 check_absent "unsafe cookie header in curl argv" 'curl.*-H[[:space:]]*["'\'']Cookie:'
 
-if [[ -e "$target/.mcp.json" ]]; then
-  printf 'dozzle skill check failed: stale Lab MCP wrapper still exists\n  file: %s\n' "$target/.mcp.json" >&2
+mcp_file="$target/.mcp.json"
+if [[ ! -e "$mcp_file" ]]; then
+  printf 'dozzle skill check failed: native Dozzle MCP config is missing\n  file: %s\n' "$mcp_file" >&2
+  failures=$((failures + 1))
+elif jq -e '
+  .mcpServers.dozzle.type == "http"
+  and .mcpServers.dozzle.url == "${userConfig.dozzle_mcp_url}"
+  and (.mcpServers.dozzle.command | not)
+  and (.mcpServers.dozzle.args | not)
+' "$mcp_file" >/dev/null; then
+  :
+else
+  printf 'dozzle skill check failed: MCP config must point at Dozzle native HTTP /api/mcp, not Lab command wrapping\n  file: %s\n' "$mcp_file" >&2
   failures=$((failures + 1))
 fi
 

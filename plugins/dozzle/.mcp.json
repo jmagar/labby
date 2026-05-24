@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "dozzle": {
+      "type": "http",
+      "url": "${userConfig.dozzle_mcp_url}"
+    }
+  }
+}

@@ -71,6 +71,25 @@ The endpoint is:
 If Dozzle is mounted under a base path, include that base path before
 `/api/mcp`.
 
+This Lab plugin installs a client entry for Dozzle's native Streamable HTTP MCP
+server:
+
+```json
+{
+  "mcpServers": {
+    "dozzle": {
+      "type": "http",
+      "url": "${userConfig.dozzle_mcp_url}"
+    }
+  }
+}
+```
+
+Set `dozzle_mcp_url` to the reachable endpoint, for example
+`http://localhost:8080/api/mcp` or `https://dozzle.example.com/api/mcp`. Do not
+point this at a Lab command-wrapper MCP entry; that is not Dozzle's native MCP
+server.
+
 Dozzle documents its MCP tools as read-only. Do not conflate Dozzle MCP access
 with the separate shell/actions/download web capabilities.
 
