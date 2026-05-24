@@ -8,6 +8,27 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.17.3] - 2026-05-24
+
+### Highlights
+
+- **Gateway invoke disambiguation**: `invoke` now accepts fully-qualified `upstream::tool` names or a separate `upstream` selector when multiple upstream MCP servers expose the same tool name.
+- **Agent retry guidance**: ambiguous gateway tool errors now include a structured retry hint alongside valid qualified tool names.
+- **MCP boundary coverage**: focused tests cover the agent-visible ambiguity envelope and resolver behavior.
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | fix: disambiguate gateway invoke upstream tools |
+| `3bc9faac` | docs: capture gateway oauth quick-push session |
+| `4e0570c5` | fix: route gateway oauth tool access |
+
+### Version bumps
+
+- Rust workspace: `0.17.2 → 0.17.3`
+- Gateway admin package: `0.17.2 → 0.17.3`
+
+---
+
 ## [0.17.2] - 2026-05-24
 
 ### Highlights

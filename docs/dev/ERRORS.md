@@ -55,7 +55,7 @@ Dispatch layers may add the following kinds on top of SDK errors:
 - `invalid_param`
 - `unknown_instance`
 - `conflict` — resource already exists with the given identifier; HTTP 409
-- `ambiguous_tool` — unqualified tool name resolved to multiple upstream gateway candidates; envelope carries `valid: Vec<String>` of fully-qualified `{upstream}::{tool}` names the caller must choose from. HTTP 409.
+- `ambiguous_tool` — unqualified tool name resolved to multiple upstream gateway candidates; envelope carries `valid: Vec<String>` of fully-qualified `{upstream}::{tool}` names the caller must choose from, plus a `hint` explaining that callers may either pass `name = "{upstream}::{tool}"` or set `upstream` separately. HTTP 409.
 - `queue_saturated` — bounded runtime queue is full; caller should retry after the current work drains. HTTP 429.
 
 ### Fleet-WS install hardening kinds (lab-zxx5.18)

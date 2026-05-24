@@ -2242,9 +2242,10 @@ impl GatewayManager {
             .collect())
     }
 
-    pub async fn resolve_tool_execute(
+    pub async fn resolve_tool_execute_with_upstream(
         &self,
         name: &str,
+        upstream: Option<&str>,
     ) -> Result<(String, crate::dispatch::upstream::types::UpstreamTool), ToolError> {
         if !self.config.read().await.tool_search.enabled {
             return Err(ToolError::Sdk {
@@ -2258,6 +2259,7 @@ impl GatewayManager {
             message: format!("tool `{name}` is not available"),
         })?;
 
+        let selector = ToolExecuteSelector::parse(name, upstream)?;
         let priority_by_upstream: HashMap<String, f32> = self
             .config
             .read()
@@ -2266,18 +2268,35 @@ impl GatewayManager {
             .iter()
             .map(|upstream| (upstream.name.clone(), upstream.priority.max(0.0)))
             .collect();
-        let matches: Vec<_> = pool
-            .find_tool_candidates(name)
-            .await
-            .into_iter()
-            .filter(|(upstream, _)| {
-                priority_by_upstream.get(upstream).copied().unwrap_or(1.0) > 0.0
-            })
-            .collect();
+        let matches: Vec<_> = if let Some(upstream_name) = selector.upstream.as_deref() {
+            if priority_by_upstream
+                .get(upstream_name)
+                .copied()
+                .unwrap_or(1.0)
+                <= 0.0
+            {
+                Vec::new()
+            } else {
+                pool.healthy_tools_for_upstream(upstream_name)
+                    .await
+                    .into_iter()
+                    .filter(|tool| tool.tool.name.as_ref() == selector.tool_name)
+                    .map(|tool| (upstream_name.to_string(), tool))
+                    .collect()
+            }
+        } else {
+            pool.find_tool_candidates(&selector.tool_name)
+                .await
+                .into_iter()
+                .filter(|(upstream, _)| {
+                    priority_by_upstream.get(upstream).copied().unwrap_or(1.0) > 0.0
+                })
+                .collect()
+        };
         if matches.is_empty() {
             return Err(ToolError::Sdk {
                 sdk_kind: "unknown_tool".to_string(),
-                message: format!("unknown tool `{name}`"),
+                message: format!("unknown tool `{}`", selector.display_name()),
             });
         }
         if matches.len() > 1 {
@@ -2286,7 +2305,10 @@ impl GatewayManager {
                 .map(|(upstream, tool)| format!("{upstream}::{}", tool.tool.name))
                 .collect::<Vec<_>>();
             return Err(ToolError::AmbiguousTool {
-                message: format!("tool `{name}` matched multiple upstream tools"),
+                message: format!(
+                    "tool `{}` matched multiple upstream tools",
+                    selector.tool_name
+                ),
                 valid,
             });
         }
@@ -2973,6 +2995,70 @@ fn find_virtual_server_for_service<'a>(
         .find(|server| server.service == service || server.id == service)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ToolExecuteSelector {
+    upstream: Option<String>,
+    tool_name: String,
+}
+
+impl ToolExecuteSelector {
+    fn parse(name: &str, upstream: Option<&str>) -> Result<Self, ToolError> {
+        let explicit_upstream = upstream.map(str::trim).filter(|value| !value.is_empty());
+        let trimmed_name = name.trim();
+        if trimmed_name.is_empty() {
+            return Err(ToolError::Sdk {
+                sdk_kind: "invalid_param".to_string(),
+                message: "tool name must not be empty".to_string(),
+            });
+        }
+
+        if let Some(upstream_name) = explicit_upstream {
+            let tool_name = trimmed_name
+                .strip_prefix(upstream_name)
+                .and_then(|rest| rest.strip_prefix("::"))
+                .unwrap_or(trimmed_name)
+                .trim();
+            if tool_name.is_empty() {
+                return Err(ToolError::Sdk {
+                    sdk_kind: "invalid_param".to_string(),
+                    message: "tool name must not be empty".to_string(),
+                });
+            }
+            return Ok(Self {
+                upstream: Some(upstream_name.to_string()),
+                tool_name: tool_name.to_string(),
+            });
+        }
+
+        if let Some((upstream_name, tool_name)) = trimmed_name.split_once("::") {
+            let upstream_name = upstream_name.trim();
+            let tool_name = tool_name.trim();
+            if upstream_name.is_empty() || tool_name.is_empty() {
+                return Err(ToolError::Sdk {
+                    sdk_kind: "invalid_param".to_string(),
+                    message: "qualified tool names must use `upstream::tool`".to_string(),
+                });
+            }
+            return Ok(Self {
+                upstream: Some(upstream_name.to_string()),
+                tool_name: tool_name.to_string(),
+            });
+        }
+
+        Ok(Self {
+            upstream: None,
+            tool_name: trimmed_name.to_string(),
+        })
+    }
+
+    fn display_name(&self) -> String {
+        match &self.upstream {
+            Some(upstream) => format!("{upstream}::{}", self.tool_name),
+            None => self.tool_name.clone(),
+        }
+    }
+}
+
 fn quarantine_unregistered_virtual_servers(
     mut cfg: LabConfig,
     registry: &ToolRegistry,
@@ -3254,6 +3340,12 @@ mod tests {
     async fn tool_search_manager_with_pool(
         upstream: UpstreamConfig,
     ) -> (GatewayManager, Arc<UpstreamPool>) {
+        tool_search_manager_with_upstreams(vec![upstream]).await
+    }
+
+    async fn tool_search_manager_with_upstreams(
+        upstream: Vec<UpstreamConfig>,
+    ) -> (GatewayManager, Arc<UpstreamPool>) {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("config.toml");
         let runtime = GatewayRuntimeHandle::default();
@@ -3266,7 +3358,7 @@ mod tests {
                     enabled: true,
                     ..ToolSearchConfig::default()
                 },
-                upstream: vec![upstream],
+                upstream,
                 ..LabConfig::default()
             })
             .await;
@@ -3360,7 +3452,7 @@ mod tests {
         .await;
 
         let err = manager
-            .resolve_tool_execute("secret-tool")
+            .resolve_tool_execute_with_upstream("secret-tool", None)
             .await
             .expect_err("priority=0 upstream tools must not be invokable by known name");
 
@@ -3368,6 +3460,72 @@ mod tests {
             ToolError::Sdk { sdk_kind, .. } => assert_eq!(sdk_kind, "unknown_tool"),
             other => panic!("expected unknown_tool sdk error, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn resolve_tool_execute_accepts_qualified_upstream_tool_names() {
+        let (manager, pool) = tool_search_manager_with_upstreams(vec![
+            fixture_http_upstream("agent-os_windows-mcp"),
+            fixture_http_upstream("steamy-windows-mcp"),
+        ])
+        .await;
+        pool.insert_entry_for_tests(
+            "agent-os_windows-mcp",
+            healthy_entry_with_tool("agent-os_windows-mcp", "PowerShell"),
+        )
+        .await;
+        pool.insert_entry_for_tests(
+            "steamy-windows-mcp",
+            healthy_entry_with_tool("steamy-windows-mcp", "PowerShell"),
+        )
+        .await;
+
+        let ambiguous = manager
+            .resolve_tool_execute_with_upstream("PowerShell", None)
+            .await
+            .expect_err("bare duplicate tool name should stay ambiguous");
+        match ambiguous {
+            ToolError::AmbiguousTool { valid, .. } => {
+                assert!(valid.contains(&"agent-os_windows-mcp::PowerShell".to_string()));
+                assert!(valid.contains(&"steamy-windows-mcp::PowerShell".to_string()));
+            }
+            other => panic!("expected ambiguous_tool, got {other:?}"),
+        }
+
+        let (upstream, tool) = manager
+            .resolve_tool_execute_with_upstream("steamy-windows-mcp::PowerShell", None)
+            .await
+            .expect("qualified selector should route to one upstream");
+
+        assert_eq!(upstream, "steamy-windows-mcp");
+        assert_eq!(tool.tool.name.as_ref(), "PowerShell");
+    }
+
+    #[tokio::test]
+    async fn resolve_tool_execute_accepts_explicit_upstream_param() {
+        let (manager, pool) = tool_search_manager_with_upstreams(vec![
+            fixture_http_upstream("agent-os_windows-mcp"),
+            fixture_http_upstream("steamy-windows-mcp"),
+        ])
+        .await;
+        pool.insert_entry_for_tests(
+            "agent-os_windows-mcp",
+            healthy_entry_with_tool("agent-os_windows-mcp", "PowerShell"),
+        )
+        .await;
+        pool.insert_entry_for_tests(
+            "steamy-windows-mcp",
+            healthy_entry_with_tool("steamy-windows-mcp", "PowerShell"),
+        )
+        .await;
+
+        let (upstream, tool) = manager
+            .resolve_tool_execute_with_upstream("PowerShell", Some("agent-os_windows-mcp"))
+            .await
+            .expect("explicit upstream should disambiguate duplicate tool names");
+
+        assert_eq!(upstream, "agent-os_windows-mcp");
+        assert_eq!(tool.tool.name.as_ref(), "PowerShell");
     }
 
     #[tokio::test]
