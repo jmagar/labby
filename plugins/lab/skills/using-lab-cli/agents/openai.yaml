@@ -1,0 +1,4 @@
+interface:
+  display_name: "Using Lab CLI"
+  short_description: "Operate current Labby CLI workflows"
+  default_prompt: "Use $using-lab-cli to inspect the current Labby command surface and run the appropriate operator workflow."

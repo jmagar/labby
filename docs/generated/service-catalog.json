@@ -126,27 +126,6 @@
     "metadata_source": "registry + PluginMeta"
   },
   {
-    "name": "fs",
-    "display_name": "fs",
-    "description": "Workspace filesystem browser (read-only, deny-listed)",
-    "category": "bootstrap",
-    "status": "available",
-    "feature": "fs",
-    "exposure": "feature_gated",
-    "surfaces": {
-      "cli": false,
-      "mcp": true,
-      "api": true,
-      "web_ui": true
-    },
-    "default_port": null,
-    "docs_url": null,
-    "coverage_doc": null,
-    "upstream_doc": null,
-    "supports_multi_instance": false,
-    "metadata_source": "registry synthetic metadata"
-  },
-  {
     "name": "gateway",
     "display_name": "gateway",
     "description": "Manage proxied upstream MCP gateways",

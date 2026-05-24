@@ -94,7 +94,7 @@ test('buildGatewayCreatePayload generates an auth env var when a bearer token is
   })
 })
 
-test('buildGatewayCreatePayload does not add stdio acknowledgement flags', () => {
+test('buildGatewayCreatePayload adds stdio acknowledgement flag', () => {
   const payload = buildGatewayCreatePayload({
     name: 'fixture-stdio',
     transport: 'stdio',
@@ -104,7 +104,7 @@ test('buildGatewayCreatePayload does not add stdio acknowledgement flags', () =>
     },
   })
 
-  assert.equal(payload.allow_stdio, undefined)
+  assert.equal(payload.allow_stdio, true)
   assert.deepEqual(payload.spec, {
     name: 'fixture-stdio',
     url: null,
@@ -138,7 +138,7 @@ test('buildGatewayUpdatePayload clears auth when bearer_token_env is blanked', (
   })
 })
 
-test('buildGatewayUpdatePayload does not add stdio acknowledgement flags', () => {
+test('buildGatewayUpdatePayload adds stdio acknowledgement flag', () => {
   const payload = buildGatewayUpdatePayload('fixture-stdio', {
     transport: 'stdio',
     config: {
@@ -149,6 +149,7 @@ test('buildGatewayUpdatePayload does not add stdio acknowledgement flags', () =>
 
   assert.deepEqual(payload, {
     name: 'fixture-stdio',
+    allow_stdio: true,
     patch: {
       url: null,
       command: 'example-mcp-server',

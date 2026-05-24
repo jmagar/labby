@@ -45,10 +45,6 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `extract` | `list_hosts` | false | false |  | `string[]` | cli, mcp, api |
 | `extract` | `scan` | false | false | `uri: string`<br>`hosts: string[]`<br>`redact_secrets: bool` | `DiscoveredService[]` | cli, mcp, api |
 | `extract` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api |
-| `fs` | `fs.list` | false | false | `path: string` | `{entries: [{name, path, kind, size, modified, accessible}], truncated: bool}` | mcp, api, web |
-| `fs` | `fs.preview` | false | false | `path*: string`<br>`max_bytes: integer` | `binary (streamed); mime from safe-MIME whitelist or application/octet-stream` | api, web |
-| `fs` | `help` | true | false |  | `HelpPayload` | mcp, api, web |
-| `fs` | `schema` | true | false | `action*: string` | `ActionSpec` | mcp, api, web |
 | `gateway` | `gateway.add` | false | true | `spec*: json`<br>`bearer_token_value: string`<br>`allow_stdio: boolean` | `GatewayView` | cli, mcp, api, web |
 | `gateway` | `gateway.client_config.get` | false | false | `name*: string` | `McpClientConfigView` | cli, mcp, api, web |
 | `gateway` | `gateway.discover` | false | false | `clients: string[]`<br>`include_existing: boolean` | `DiscoveredServerView[]` | cli, mcp, api, web |
@@ -81,15 +77,17 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `gateway` | `gateway.public_urls.get` | false | false |  | `{app: string?, mcp_gateway: string?, effective_mcp_gateway: string?}` | cli, mcp, api, web |
 | `gateway` | `gateway.reload` | false | true |  | `GatewayCatalogDiff` | cli, mcp, api, web |
 | `gateway` | `gateway.remove` | false | true | `name*: string` | `GatewayView` | cli, mcp, api, web |
+| `gateway` | `gateway.schema` | false | false | `name*: string` | `GatewayServerSchema` | cli, mcp, api, web |
+| `gateway` | `gateway.scout.get` | false | false |  | `ScoutConfig` | cli, mcp, api, web |
+| `gateway` | `gateway.scout.set` | false | true | `enabled*: boolean`<br>`top_k_default: integer`<br>`max_tools: integer` | `ScoutConfig` | cli, mcp, api, web |
 | `gateway` | `gateway.server.get` | false | false | `id*: string` | `ServerView` | cli, mcp, api, web |
+| `gateway` | `gateway.servers` | false | false |  | `GatewayServersDoc` | cli, mcp, api, web |
 | `gateway` | `gateway.service_actions` | false | false | `service*: string` | `ServiceActionView[]` | cli, mcp, api, web |
 | `gateway` | `gateway.service_config.get` | false | false | `service*: string` | `ServiceConfigView` | cli, mcp, api, web |
 | `gateway` | `gateway.service_config.set` | false | true | `service*: string`<br>`values*: json` | `ServiceConfigView` | cli, mcp, api, web |
 | `gateway` | `gateway.status` | false | false | `name: string` | `GatewayRuntimeView[]` | cli, mcp, api, web |
 | `gateway` | `gateway.supported_services` | false | false |  | `SupportedServiceView[]` | cli, mcp, api, web |
 | `gateway` | `gateway.test` | false | false | `name: string`<br>`spec: json`<br>`allow_stdio: boolean` | `GatewayTestResult` | cli, mcp, api, web |
-| `gateway` | `gateway.tool_search.get` | false | false |  | `ToolSearchConfig` | cli, mcp, api, web |
-| `gateway` | `gateway.tool_search.set` | false | true | `enabled*: boolean`<br>`top_k_default: integer`<br>`max_tools: integer` | `ToolSearchConfig` | cli, mcp, api, web |
 | `gateway` | `gateway.update` | false | true | `name*: string`<br>`patch*: json`<br>`bearer_token_value: string`<br>`allow_stdio: boolean` | `GatewayView` | cli, mcp, api, web |
 | `gateway` | `gateway.virtual_server.disable` | false | true | `id*: string` | `ServerView` | cli, mcp, api, web |
 | `gateway` | `gateway.virtual_server.enable` | false | true | `id*: string` | `ServerView` | cli, mcp, api, web |

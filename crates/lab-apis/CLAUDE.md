@@ -5,7 +5,6 @@ HTTP client library for feature-gated homelab services, plus always-on bootstrap
 
 Sub-docs for key sub-modules:
 - [`src/core/CLAUDE.md`](src/core/CLAUDE.md) — HttpClient, Auth, traits, error taxonomy
-- [`src/servarr/CLAUDE.md`](src/servarr/CLAUDE.md) — shared *arr primitives
 - [`src/extract/CLAUDE.md`](src/extract/CLAUDE.md) — synthetic bootstrap service rules
 
 ## Feature Flags

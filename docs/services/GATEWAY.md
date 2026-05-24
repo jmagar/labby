@@ -91,8 +91,10 @@ When enabled, Lab hides raw proxied upstream tools from MCP `list_tools()` and e
 
 | Tool | Purpose |
 |------|---------|
-| `tool_search` | Search healthy discovered upstream tools across the gateway. |
-| `tool_execute` | Invoke one tool returned by `tool_search`. |
+| `scout` | Search healthy discovered upstream tools across the gateway. |
+| `invoke` | Invoke one tool returned by `scout`. |
+
+Compatibility aliases `tool_search`, `tool_execute`, and `tool_invoke` remain accepted for older clients.
 
 This keeps the MCP catalog small while still allowing clients to reach every exposed upstream tool. Per-upstream `expose_tools` filters still apply before tools enter the searchable catalog.
 
@@ -117,11 +119,11 @@ labby gateway tool-search disable
 HTTP/MCP gateway management actions:
 
 ```json
-{ "action": "gateway.tool_search.get", "params": {} }
+{ "action": "gateway.scout.get", "params": {} }
 ```
 
 ```json
-{ "action": "gateway.tool_search.set", "params": { "enabled": true, "top_k_default": 10, "max_tools": 5000 } }
+{ "action": "gateway.scout.set", "params": { "enabled": true, "top_k_default": 10, "max_tools": 5000 } }
 ```
 
 Search call shape on the MCP surface:
@@ -143,7 +145,7 @@ Rules:
 - `query` must be non-empty and no longer than 500 characters
 - `include_schema` defaults to `false`; schemas are sanitized before return when requested
 - old `[[upstream]].tool_search` blocks are accepted only as migration input and are dropped on the next gateway config write
-- `gateway.update` rejects `patch.tool_search`; use `gateway.tool_search.set` instead
+- `gateway.update` rejects `patch.tool_search`; use `gateway.scout.set` instead
 
 Tool-search observability:
 

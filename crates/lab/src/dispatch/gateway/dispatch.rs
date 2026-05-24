@@ -78,9 +78,8 @@ pub async fn dispatch_with_manager(
         | "gateway.client_config.get"
         | "gateway.discovered_tools"
         | "gateway.discovered_resources"
-        | "gateway.discovered_prompts" => {
-            handle_gateway_actions(manager, action, params_value).await
-        }
+        | "gateway.discovered_prompts"
+        | "gateway.public_urls.get" => handle_gateway_actions(manager, action, params_value).await,
         action if action.starts_with("gateway.protected_route.") => {
             handle_protected_route_actions(manager, action, params_value).await
         }
@@ -579,6 +578,15 @@ async fn handle_gateway_actions(
             let params: GatewayClientConfigParams = parse_params(params_value)?;
             to_json(manager.client_config(&params.name).await?)
         }
+        "gateway.public_urls.get" => {
+            let urls = manager.public_urls().await;
+            let effective_mcp_gateway = urls.effective_mcp_gateway().map(str::to_owned);
+            to_json(serde_json::json!({
+                "app": urls.app,
+                "mcp_gateway": urls.mcp_gateway,
+                "effective_mcp_gateway": effective_mcp_gateway,
+            }))
+        }
         "gateway.discovered_tools" => {
             let params: GatewayNameParams = parse_params(params_value)?;
             to_json(manager.discovered_tools(&params.name).await?)
@@ -704,15 +712,6 @@ async fn handle_mcp_actions(
                     .cleanup_upstream_processes(&params.name, params.aggressive, params.dry_run)
                     .await?,
             )
-        }
-        "gateway.public_urls.get" => {
-            let urls = manager.public_urls().await;
-            let effective_mcp_gateway = urls.effective_mcp_gateway().map(str::to_owned);
-            to_json(serde_json::json!({
-                "app": urls.app,
-                "mcp_gateway": urls.mcp_gateway,
-                "effective_mcp_gateway": effective_mcp_gateway,
-            }))
         }
         unknown => unknown_action(unknown),
     }
@@ -894,7 +893,13 @@ mod tests {
     async fn gateway_dispatch_rejects_synthetic_tool_execution_actions() {
         let manager = test_manager();
 
-        for action in ["tool_execute", "tool_invoke", "tool_search", "scout", "invoke"] {
+        for action in [
+            "tool_execute",
+            "tool_invoke",
+            "tool_search",
+            "scout",
+            "invoke",
+        ] {
             let err = dispatch_with_manager(&manager, action, json!({}))
                 .await
                 .expect_err("synthetic top-level MCP tools are not gateway actions");
@@ -1633,14 +1638,22 @@ mod tests {
             dispatch_with_manager(&manager, "gateway.test", json!({"name": "fixture-http"}))
                 .await
                 .expect("named test");
-        let named_stdio = dispatch_with_manager(
+        let named_stdio_error = dispatch_with_manager(
             &manager,
             "gateway.test",
             json!({"name": "configured-stdio"}),
         )
         .await
-        .expect("configured stdio test should not require allow_stdio");
-        let proposed_without_ack = dispatch_with_manager(
+        .expect_err("configured stdio test requires allow_stdio");
+        assert_eq!(named_stdio_error.kind(), "invalid_param");
+        let named_stdio = dispatch_with_manager(
+            &manager,
+            "gateway.test",
+            json!({"name": "configured-stdio", "allow_stdio": true}),
+        )
+        .await
+        .expect("configured stdio test with allow_stdio");
+        let proposed_without_ack_error = dispatch_with_manager(
             &manager,
             "gateway.test",
             json!({"spec": {
@@ -1650,7 +1663,8 @@ mod tests {
             }}),
         )
         .await
-        .expect("stdio spec test should not require allow_stdio");
+        .expect_err("stdio spec test requires allow_stdio");
+        assert_eq!(proposed_without_ack_error.kind(), "invalid_param");
 
         let proposed = dispatch_with_manager(
             &manager,
@@ -1666,7 +1680,6 @@ mod tests {
 
         assert_eq!(named["name"], "fixture-http");
         assert_eq!(named_stdio["name"], "configured-stdio");
-        assert_eq!(proposed_without_ack["name"], "fixture-stdio");
         assert_eq!(proposed["name"], "fixture-stdio");
     }
 
@@ -1715,10 +1728,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gateway_add_allows_enabled_stdio_without_extra_ack() {
+    async fn gateway_add_requires_stdio_ack() {
         let manager = test_manager();
 
-        let added = dispatch_with_manager(
+        let err = dispatch_with_manager(
             &manager,
             "gateway.add",
             json!({"spec": {
@@ -1728,18 +1741,31 @@ mod tests {
             }}),
         )
         .await
-        .expect("stdio add should be allowed");
+        .expect_err("stdio add requires allow_stdio");
+        assert_eq!(err.kind(), "invalid_param");
+
+        let added = dispatch_with_manager(
+            &manager,
+            "gateway.add",
+            json!({"allow_stdio": true, "spec": {
+                "name": "fixture-stdio",
+                "command": "echo",
+                "args": ["hello"]
+            }}),
+        )
+        .await
+        .expect("stdio add with allow_stdio");
 
         assert_eq!(added["config"]["name"], "fixture-stdio");
     }
 
     #[tokio::test]
-    async fn gateway_update_allows_enabled_stdio_without_extra_ack() {
+    async fn gateway_update_requires_stdio_ack_for_enabled_stdio() {
         let manager = test_manager();
         dispatch_with_manager(
             &manager,
             "gateway.add",
-            json!({"spec": {
+            json!({"allow_stdio": true, "spec": {
                 "name": "fixture-stdio",
                 "command": "echo",
                 "args": ["hello"]
@@ -1748,13 +1774,22 @@ mod tests {
         .await
         .expect("add stdio");
 
-        let updated = dispatch_with_manager(
+        let err = dispatch_with_manager(
             &manager,
             "gateway.update",
             json!({"name": "fixture-stdio", "patch": {"proxy_resources": true}}),
         )
         .await
-        .expect("stdio update should be allowed");
+        .expect_err("stdio update requires allow_stdio");
+        assert_eq!(err.kind(), "invalid_param");
+
+        let updated = dispatch_with_manager(
+            &manager,
+            "gateway.update",
+            json!({"name": "fixture-stdio", "allow_stdio": true, "patch": {"proxy_resources": true}}),
+        )
+        .await
+        .expect("stdio update with allow_stdio");
 
         assert_eq!(updated["config"]["proxy_resources"], true);
     }
@@ -1910,6 +1945,19 @@ mod tests {
             help.to_string().contains("gateway.reload"),
             "reload should remain the explicit env-refresh action"
         );
+    }
+
+    #[tokio::test]
+    async fn public_urls_action_dispatches_to_manager() {
+        let manager = test_manager();
+
+        let value = dispatch_with_manager(&manager, "gateway.public_urls.get", json!({}))
+            .await
+            .expect("public urls");
+
+        assert!(value.get("app").is_some());
+        assert!(value.get("mcp_gateway").is_some());
+        assert!(value.get("effective_mcp_gateway").is_some());
     }
 
     #[cfg(target_os = "linux")]

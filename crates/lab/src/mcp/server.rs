@@ -4,6 +4,7 @@
 //! can share the same handler logic.
 
 use sha2::{Digest, Sha256};
+use std::borrow::Cow;
 use std::cmp::Ordering as CmpOrdering;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -23,10 +24,11 @@ use serde_json::Value;
 use tokio::sync::RwLock;
 
 use crate::config::NodeRole;
+use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
 use crate::dispatch::gateway::manager::{GatewayManager, GatewayToolSearchResult};
 use crate::mcp::catalog::{
     LEGACY_TOOL_EXECUTE_TOOL_NAME, LEGACY_TOOL_INVOKE_TOOL_NAME, LEGACY_TOOL_SEARCH_TOOL_NAME,
-        TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME,
+    TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME,
 };
 use crate::mcp::elicitation::{ElicitResult, elicit_confirm};
 use crate::mcp::envelope::{build_error, build_error_extra, build_success};
@@ -272,11 +274,14 @@ impl ServerHandler for LabMcpServer {
             let builtin_name_refs: Vec<&str> = builtin_names.iter().map(String::as_str).collect();
             let upstream_prompts = pool.list_upstream_prompts(&builtin_name_refs).await;
             prompts.extend(upstream_prompts);
-            if let Some(subject) = self.request_subject(&context) {
+            let auth = auth_context_from_extensions(&context.extensions);
+            if let Some(oauth_subject) =
+                oauth_upstream_subject_for_request(auth, self.request_subject(&context))
+            {
                 let scoped_prompts = pool
                     .subject_scoped_prompts(
                         &self.oauth_upstream_configs().await,
-                        subject,
+                        oauth_subject.as_ref(),
                         &builtin_name_refs,
                     )
                     .await;
@@ -449,12 +454,14 @@ impl ServerHandler for LabMcpServer {
             return outcome;
         }
 
-        if let Some(subject) = self.request_subject(&context)
+        let auth = auth_context_from_extensions(&context.extensions);
+        if let Some(oauth_subject) =
+            oauth_upstream_subject_for_request(auth, self.request_subject(&context))
             && let Some(pool) = self.current_upstream_pool().await
         {
             let configs = self.oauth_upstream_configs().await;
             if let Some(upstream_name) = pool
-                .subject_scoped_prompt_owner(&configs, subject, &request.name)
+                .subject_scoped_prompt_owner(&configs, oauth_subject.as_ref(), &request.name)
                 .await
                 && let Some(config) = configs
                     .into_iter()
@@ -468,10 +475,11 @@ impl ServerHandler for LabMcpServer {
                     prompt = %prompt_name,
                     upstream = %config.name,
                     route = "subject_scoped",
+                    oauth_subject = %oauth_subject,
                     "dispatch route selected"
                 );
                 let outcome = match pool
-                    .subject_scoped_get_prompt(&config, subject, request)
+                    .subject_scoped_get_prompt(&config, oauth_subject.as_ref(), request)
                     .await
                 {
                     Ok(result) => {
@@ -481,6 +489,7 @@ impl ServerHandler for LabMcpServer {
                             service = "labby",
                             action = "get_prompt",
                             subject,
+                            oauth_subject = %oauth_subject,
                             prompt = %prompt_name,
                             upstream = %config.name,
                             elapsed_ms,
@@ -594,9 +603,15 @@ impl ServerHandler for LabMcpServer {
         if let Some(pool) = self.current_upstream_pool().await {
             resources.extend(pool.gateway_synthetic_resources().await);
             resources.extend(pool.list_upstream_resources().await);
-            if let Some(subject) = self.request_subject(&context) {
+            let auth = auth_context_from_extensions(&context.extensions);
+            if let Some(oauth_subject) =
+                oauth_upstream_subject_for_request(auth, self.request_subject(&context))
+            {
                 let configs = self.oauth_upstream_configs().await;
-                resources.extend(pool.subject_scoped_resources(&configs, subject).await);
+                resources.extend(
+                    pool.subject_scoped_resources(&configs, oauth_subject.as_ref())
+                        .await,
+                );
             }
         }
 
@@ -875,7 +890,9 @@ impl ServerHandler for LabMcpServer {
             return outcome;
         }
 
-        if let Some(subject) = self.request_subject(&context)
+        let auth = auth_context_from_extensions(&context.extensions);
+        if let Some(oauth_subject) =
+            oauth_upstream_subject_for_request(auth, self.request_subject(&context))
             && let Some(pool) = self.current_upstream_pool().await
             && let Some(upstream_name) = uri
                 .strip_prefix("lab://upstream/")
@@ -889,10 +906,11 @@ impl ServerHandler for LabMcpServer {
                 resource_uri = crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
                 upstream = %config.name,
                 route = "subject_scoped",
+                oauth_subject = %oauth_subject,
                 "dispatch route selected"
             );
             let outcome = match pool
-                .subject_scoped_read_resource(&config, subject, uri)
+                .subject_scoped_read_resource(&config, oauth_subject.as_ref(), uri)
                 .await
             {
                 Ok(result) => {
@@ -902,6 +920,7 @@ impl ServerHandler for LabMcpServer {
                         service = "labby",
                         action = "read_resource",
                         subject,
+                        oauth_subject = %oauth_subject,
                         upstream = %config.name,
                         resource_uri = crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
                         elapsed_ms,
@@ -1142,9 +1161,15 @@ impl ServerHandler for LabMcpServer {
                 tools.push(ut.tool);
                 upstream_tool_count += 1;
             }
-            if let Some(subject) = self.request_subject(&context) {
+            let auth = auth_context_from_extensions(&context.extensions);
+            if let Some(oauth_subject) =
+                oauth_upstream_subject_for_request(auth, self.request_subject(&context))
+            {
                 for (_upstream_name, upstream_tools) in pool
-                    .subject_scoped_tools(&self.oauth_upstream_configs().await, subject)
+                    .subject_scoped_tools(
+                        &self.oauth_upstream_configs().await,
+                        oauth_subject.as_ref(),
+                    )
                     .await
                 {
                     for ut in upstream_tools {
@@ -1359,9 +1384,7 @@ impl ServerHandler for LabMcpServer {
         }
         if matches!(
             service.as_str(),
-            TOOL_EXECUTE_TOOL_NAME
-                | LEGACY_TOOL_EXECUTE_TOOL_NAME
-                | LEGACY_TOOL_INVOKE_TOOL_NAME
+            TOOL_EXECUTE_TOOL_NAME | LEGACY_TOOL_EXECUTE_TOOL_NAME | LEGACY_TOOL_INVOKE_TOOL_NAME
         ) {
             let started = Instant::now();
             let tool_name = args
@@ -2136,12 +2159,17 @@ impl ServerHandler for LabMcpServer {
             }
         }
 
-        if let Some(subject) = self.request_subject(&context)
+        let auth = auth_context_from_extensions(&context.extensions);
+        if let Some(oauth_subject) =
+            oauth_upstream_subject_for_request(auth, self.request_subject(&context))
             && let Some(pool) = self.current_upstream_pool().await
         {
             let configs = self.oauth_upstream_configs().await;
             let mut owner = None;
-            for (upstream_name, tools) in pool.subject_scoped_tools(&configs, subject).await {
+            for (upstream_name, tools) in pool
+                .subject_scoped_tools(&configs, oauth_subject.as_ref())
+                .await
+            {
                 if tools.iter().any(|tool| tool.name.as_ref() == service) {
                     owner = Some(upstream_name);
                     break;
@@ -2160,12 +2188,13 @@ impl ServerHandler for LabMcpServer {
                     tool = %service,
                     upstream = %upstream_name,
                     route = "subject_scoped",
+                    oauth_subject = %oauth_subject,
                     "dispatch route selected"
                 );
                 let mut upstream_params = CallToolRequestParams::new(service.clone());
                 upstream_params.arguments = raw_arguments;
                 match pool
-                    .subject_scoped_call_tool(&config, subject, upstream_params)
+                    .subject_scoped_call_tool(&config, oauth_subject.as_ref(), upstream_params)
                     .await
                 {
                     Ok(result) => {
@@ -2183,6 +2212,7 @@ impl ServerHandler for LabMcpServer {
                                 operation = upstream_operation,
                                 subject_scoped = true,
                                 subject,
+                                oauth_subject = %oauth_subject,
                                 elapsed_ms,
                                 kind,
                                 "upstream dispatch error"
@@ -2206,6 +2236,7 @@ impl ServerHandler for LabMcpServer {
                                 operation = upstream_operation,
                                 subject_scoped = true,
                                 subject,
+                                oauth_subject = %oauth_subject,
                                 elapsed_ms,
                                 "upstream dispatch ok"
                             );
@@ -2563,6 +2594,19 @@ fn auth_context_from_extensions(
 ) -> Option<&crate::api::oauth::AuthContext> {
     let parts = extensions.get::<Parts>()?;
     parts.extensions.get::<crate::api::oauth::AuthContext>()
+}
+
+fn oauth_upstream_subject_for_request<'a>(
+    auth: Option<&crate::api::oauth::AuthContext>,
+    request_subject: Option<&'a str>,
+) -> Option<Cow<'a, str>> {
+    match auth {
+        None => Some(Cow::Borrowed(SHARED_GATEWAY_OAUTH_SUBJECT)),
+        Some(ctx) if ctx.scopes.iter().any(|scope| scope == "lab:admin") => {
+            Some(Cow::Borrowed(SHARED_GATEWAY_OAUTH_SUBJECT))
+        }
+        Some(_) => request_subject.map(Cow::Borrowed),
+    }
 }
 
 fn tool_execute_scope_allowed(auth: Option<&crate::api::oauth::AuthContext>) -> bool {
@@ -3498,7 +3542,10 @@ mod tests {
             Some(&read_only),
             true
         ));
-        assert!(super::tool_search_include_schema_allowed(Some(&admin), true));
+        assert!(super::tool_search_include_schema_allowed(
+            Some(&admin),
+            true
+        ));
         assert!(super::tool_search_include_schema_allowed(None, true));
         assert!(!super::tool_search_include_schema_allowed(
             Some(&admin),
@@ -3558,6 +3605,45 @@ mod tests {
     }
 
     #[test]
+    fn oauth_upstream_subject_uses_shared_gateway_for_admin_and_trusted_callers() {
+        assert_eq!(
+            super::oauth_upstream_subject_for_request(None, None).as_deref(),
+            Some(crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT)
+        );
+        assert_eq!(
+            super::oauth_upstream_subject_for_request(None, Some("stdio-subject")).as_deref(),
+            Some(crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT)
+        );
+
+        let admin = make_auth(&["lab:admin"]);
+        assert_eq!(
+            super::oauth_upstream_subject_for_request(Some(&admin), Some("google-subject"))
+                .as_deref(),
+            Some(crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT)
+        );
+    }
+
+    #[test]
+    fn oauth_upstream_subject_preserves_non_admin_request_subjects() {
+        let lab = make_auth(&["lab"]);
+        assert_eq!(
+            super::oauth_upstream_subject_for_request(Some(&lab), Some("user-subject")).as_deref(),
+            Some("user-subject")
+        );
+
+        let read_only = make_auth(&["lab:read"]);
+        assert_eq!(
+            super::oauth_upstream_subject_for_request(Some(&read_only), Some("reader-subject"))
+                .as_deref(),
+            Some("reader-subject")
+        );
+        assert!(
+            super::oauth_upstream_subject_for_request(Some(&read_only), None).is_none(),
+            "non-admin HTTP callers must not fall back to shared gateway credentials without a subject"
+        );
+    }
+
+    #[test]
     fn tool_search_scope_allowed_permits_all_expected_scopes() {
         // None = stdio transport → trusted (always permitted)
         assert!(super::tool_search_scope_allowed(None));
@@ -3610,26 +3696,26 @@ mod tests {
         // for admin-only built-in tools would reveal internal parameter shapes.
         let read_only = make_auth(&["lab:read"]);
         assert!(
-            !super::tool_search_schema_visible(Some(&read_only)),
+            !super::tool_search_include_schema_allowed(Some(&read_only), true),
             "lab:read-only caller must have schema suppressed"
         );
 
         // lab and lab:admin may see schemas
         let lab = make_auth(&["lab"]);
         assert!(
-            super::tool_search_schema_visible(Some(&lab)),
+            super::tool_search_include_schema_allowed(Some(&lab), true),
             "lab scope must see schemas"
         );
 
         let admin = make_auth(&["lab:admin"]);
         assert!(
-            super::tool_search_schema_visible(Some(&admin)),
+            super::tool_search_include_schema_allowed(Some(&admin), true),
             "lab:admin scope must see schemas"
         );
 
         // stdio (None) always sees schemas
         assert!(
-            super::tool_search_schema_visible(None),
+            super::tool_search_include_schema_allowed(None, true),
             "stdio (None auth) must see schemas"
         );
     }

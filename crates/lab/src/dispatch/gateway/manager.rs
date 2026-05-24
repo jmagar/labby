@@ -241,6 +241,34 @@ impl VirtualServerMigration {
 const TOOL_SEARCH_REPROBE_TTL: Duration = Duration::from_secs(30);
 const WARNING_UNKNOWN_SERVICE: &str = "unknown_service";
 
+fn ensure_stdio_admin_ack(
+    upstream: &UpstreamConfig,
+    allow_stdio: bool,
+    action: &str,
+) -> Result<(), ToolError> {
+    if upstream.command.is_some() && !allow_stdio {
+        return Err(ToolError::InvalidParam {
+            message: format!(
+                "{action} for stdio gateway `{}` requires allow_stdio=true because it may execute a local command",
+                upstream.name
+            ),
+            param: "allow_stdio".to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn ensure_enabled_stdio_admin_ack(
+    upstream: &UpstreamConfig,
+    allow_stdio: bool,
+    action: &str,
+) -> Result<(), ToolError> {
+    if upstream.enabled {
+        ensure_stdio_admin_ack(upstream, allow_stdio, action)?;
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 struct GatewayToolIndexState {
     index: Arc<ArcSwapOption<ToolIndex>>,
@@ -1130,7 +1158,7 @@ impl GatewayManager {
     pub async fn test(
         &self,
         spec_or_name: Result<&UpstreamConfig, &str>,
-        _allow_stdio: bool,
+        allow_stdio: bool,
     ) -> Result<GatewayRuntimeView, ToolError> {
         let upstream = match spec_or_name {
             Ok(spec) => spec.clone(),
@@ -1146,6 +1174,7 @@ impl GatewayManager {
                     })?
             }
         };
+        ensure_stdio_admin_ack(&upstream, allow_stdio, "gateway.test")?;
 
         let pool = match &self.oauth_client_cache {
             Some(cache) => UpstreamPool::new().with_oauth_client_cache(cache.clone()),
@@ -1341,7 +1370,7 @@ impl GatewayManager {
         &self,
         mut spec: UpstreamConfig,
         bearer_token_value: Option<String>,
-        _allow_stdio: bool,
+        allow_stdio: bool,
         origin: Option<&str>,
         owner: Option<UpstreamRuntimeOwner>,
     ) -> Result<GatewayView, ToolError> {
@@ -1356,6 +1385,7 @@ impl GatewayManager {
             validate_bearer_token_env_name(&trimmed)?;
             spec.bearer_token_env = Some(trimmed);
         }
+        ensure_stdio_admin_ack(&spec, allow_stdio, "gateway.add")?;
 
         if let Some(token_value) = bearer_token_value.as_deref().map(str::trim)
             && !token_value.is_empty()
@@ -1471,7 +1501,7 @@ impl GatewayManager {
         name: &str,
         patch: GatewayUpdatePatch,
         bearer_token_value: Option<String>,
-        _allow_stdio: bool,
+        allow_stdio: bool,
         origin: Option<&str>,
         owner: Option<UpstreamRuntimeOwner>,
     ) -> Result<GatewayView, ToolError> {
@@ -1529,6 +1559,15 @@ impl GatewayManager {
             };
             patch.bearer_token_env = Some(Some(env_name.clone()));
             update_upstream(&mut cfg, name, patch)?;
+            let updated = cfg
+                .upstream
+                .iter()
+                .find(|u| u.name == updated_name)
+                .ok_or_else(|| ToolError::Sdk {
+                    sdk_kind: "not_found".to_string(),
+                    message: format!("gateway `{updated_name}` not found after update"),
+                })?;
+            ensure_enabled_stdio_admin_ack(updated, allow_stdio, "gateway.update")?;
             cfg.upstream
                 .iter()
                 .any(|u| u.name == updated_name)
@@ -1541,14 +1580,15 @@ impl GatewayManager {
                 .await?;
         } else {
             update_upstream(&mut cfg, name, patch)?;
-            cfg.upstream
+            let updated = cfg
+                .upstream
                 .iter()
-                .any(|u| u.name == updated_name)
-                .then_some(())
+                .find(|u| u.name == updated_name)
                 .ok_or_else(|| ToolError::Sdk {
                     sdk_kind: "not_found".to_string(),
                     message: format!("gateway `{updated_name}` not found after update"),
                 })?;
+            ensure_enabled_stdio_admin_ack(updated, allow_stdio, "gateway.update")?;
         }
         self.persist_config(cfg).await?;
         let diff = self.reload_with_origin_unlocked(origin, owner).await?;

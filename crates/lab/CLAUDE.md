@@ -1,14 +1,13 @@
 # lab — Binary Crate
 
-The `lab` binary crate. Depends on `lab-apis` (pure SDK). Provides four surfaces:
-CLI (`clap`), MCP server (`rmcp`), HTTP API (`axum`), TUI (`ratatui`).
+The `lab` binary crate (binary name: `labby`). Depends on `lab-apis` (pure SDK). Provides three surfaces:
+CLI (`clap`), MCP server (`rmcp`), HTTP API (`axum`).
 
 Sub-docs for each surface:
 - [`src/CLAUDE.md`](src/CLAUDE.md) — layer contract and ownership rules
 - [`src/mcp/CLAUDE.md`](src/mcp/CLAUDE.md) — dispatch, envelopes, elicitation
 - [`src/cli/CLAUDE.md`](src/cli/CLAUDE.md) — thin-shim pattern, destructive flags
 - [`src/api/CLAUDE.md`](src/api/CLAUDE.md) — router, middleware, status mapping
-- [`src/tui/CLAUDE.md`](src/tui/CLAUDE.md) — plugin manager UX, .mcp.json patching
 
 ## Feature Flags
 
@@ -63,5 +62,4 @@ These are facts about the current state, not the spec:
 
 - **`surface` field** in HTTP handler log events: missing (gap vs `OBSERVABILITY.md`).
 - **`/ready` probe**: always returns 200; readiness is not actually checked.
-- **TUI**: verify current feature coverage in `src/tui/metadata.rs` and `src/tui/services.rs` before adding or claiming a service.
 - **Human table rendering** in `output.rs`: `print()` falls back to `serde_json::to_string_pretty` for both `Human` and `Json` formats.

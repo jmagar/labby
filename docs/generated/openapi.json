@@ -388,72 +388,6 @@
         ]
       }
     },
-    "/v1/fs": {
-      "post": {
-        "tags": [
-          "fs"
-        ],
-        "summary": "Dispatch action to fs",
-        "description": "Execute an action on the fs service. Use `action: \"help\"` to list available actions.",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ActionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful action response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request (unknown action, confirmation required)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorUnknownAction"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorSdk"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation error (missing or invalid param)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorMissingParam"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer_auth": []
-          }
-        ]
-      }
-    },
     "/v1/gateway": {
       "post": {
         "tags": [
@@ -1416,14 +1350,6 @@
           }
         }
       },
-      "FsFsListParams": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string"
-          }
-        }
-      },
       "GatewayGatewayAddParams": {
         "type": "object",
         "required": [
@@ -1766,6 +1692,34 @@
           }
         }
       },
+      "GatewayGatewaySchemaParams": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "GatewayGatewayScoutSetParams": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "max_tools": {
+            "type": "integer"
+          },
+          "top_k_default": {
+            "type": "integer"
+          }
+        }
+      },
       "GatewayGatewayServerGetParams": {
         "type": "object",
         "required": [
@@ -1833,23 +1787,6 @@
           },
           "spec": {
             "type": "string"
-          }
-        }
-      },
-      "GatewayGatewayTool_searchSetParams": {
-        "type": "object",
-        "required": [
-          "enabled"
-        ],
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          },
-          "max_tools": {
-            "type": "integer"
-          },
-          "top_k_default": {
-            "type": "integer"
           }
         }
       },

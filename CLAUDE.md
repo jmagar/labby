@@ -2,7 +2,7 @@
 
 ## What is this?
 
-`lab` is a pluggable homelab CLI + MCP server SDK in Rust. One binary, feature-gated upstream integrations plus always-on operator tools like `gateway`, `logs`, `device`, `marketplace`, `acp`, `extract`, and `stash`; MCP dispatch still uses a single tool per runtime service with an `action` + `params` shape instead of hundreds of per-method tools.
+`lab` is a pluggable homelab CLI + MCP server SDK in Rust. One binary exposing three surfaces (CLI, MCP, HTTP API), feature-gated upstream integrations plus always-on operator tools like `gateway`, `logs`, `device`, `marketplace`, `acp`, `extract`, and `stash`; MCP dispatch still uses a single tool per runtime service with an `action` + `params` shape instead of hundreds of per-method tools.
 
 Start with `docs/README.md` for the docs index. The topic docs in `docs/` are the source of truth; if this file disagrees with them, this file is stale.
 
@@ -16,13 +16,11 @@ Shared dispatch ownership and adapter direction are governed by `docs/dev/DISPAT
 
 **Nested guides.** Subdirectories carry their own `CLAUDE.md` with rules that don't belong at the root. Read the nearest one when working in:
 - `crates/lab-apis/src/core/` — trait contracts, error taxonomy, HttpClient invariants
-- `crates/lab-apis/src/servarr/` — shared *arr primitives
 - `crates/lab-apis/src/extract/` — synthetic-service rules, `.env` merge algorithm
 - `crates/lab/src/dispatch/` — shared dispatch layer, required service layout, canonical templates
 - `crates/lab/src/dispatch/upstream/` — upstream MCP proxy pool, circuit breaker, layer contract
 - `crates/lab/src/mcp/` — dispatch, envelopes, elicitation, catalog
 - `crates/lab/src/cli/` — thin-shim pattern, destructive flags, batch commands
-- `crates/lab/src/tui/` — plugin manager UX, `.mcp.json` patching
 - `crates/lab/src/api/` — axum HTTP surface, status code mapping, middleware stack
 
 ## Repository Structure
@@ -181,7 +179,6 @@ See `docs/surfaces/MCP.md` for the MCP surface and `docs/CONVENTIONS.md` for the
 10. Create API route group in `crates/lab/src/api/services/foo.rs` calling the dispatch layer
 11. Register in `crates/lab/src/registry.rs` (via `register_service!` inside `build_default_registry()`), `crates/lab/src/cli.rs`, and `crates/lab/src/api/router.rs`
 12. Add `foo = ["lab-apis/foo"]` passthrough to `crates/lab/Cargo.toml`
-13. Confirm TUI coverage: service listing comes from the shared registry, but health/config helpers in `crates/lab/src/tui/metadata.rs` and `crates/lab/src/tui/services.rs` may need service-specific entries.
 
 A service is not fully online until one successful path and one failing path are traceable end to end without leaking secrets.
 
@@ -298,7 +295,6 @@ All formatting lives in `crates/lab/src/output.rs`. `lab-apis` types are pure da
 | wiremock | HTTP mocking (tests) | lab-apis |
 | clap | CLI parsing (derive) | lab |
 | rmcp | MCP server | lab |
-| ratatui + crossterm | TUI | lab |
 | tabled | table rendering | lab |
 | dotenvy | .env loading | lab |
 | toml | config parsing | lab |

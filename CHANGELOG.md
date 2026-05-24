@@ -8,6 +8,26 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.17.2] - 2026-05-24
+
+### Highlights
+
+- **Gateway OAuth tool routing**: admin and trusted MCP callers now route upstream OAuth tools, prompts, and resource discovery through the shared gateway credential subject while preserving non-admin subject isolation.
+- **Gateway CLI/docs polish**: gateway catalog/help output and the Lab CLI skill references were refreshed around upstream proxy and schema discovery behavior.
+- **Gateway admin OAuth coverage**: gateway admin adapter tests now cover OAuth config patch behavior.
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | fix: route gateway oauth tool access |
+| `82a85762` | merge scout security fixes |
+
+### Version bumps
+
+- Rust workspace: `0.17.1 → 0.17.2`
+- Gateway admin package: `0.17.1 → 0.17.2`
+
+---
+
 ## [0.17.1] - 2026-05-23
 
 ### Highlights

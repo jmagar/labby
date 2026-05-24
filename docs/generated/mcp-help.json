@@ -139,28 +139,28 @@
           "returns": "ServerView[]"
         },
         {
-          "name": "gateway.tool_search.get",
-          "description": "Read the gateway-wide tool-search settings",
+          "name": "gateway.scout.get",
+          "description": "Read the gateway-wide scout (tool discovery) settings",
           "destructive": false,
           "params": [],
-          "returns": "ToolSearchConfig"
+          "returns": "ScoutConfig"
         },
         {
-          "name": "gateway.tool_search.set",
-          "description": "Enable or disable gateway-wide tool-search mode for all exposed upstream tools",
+          "name": "gateway.scout.set",
+          "description": "Enable or disable gateway-wide scout/invoke mode for all exposed upstream tools",
           "destructive": true,
           "params": [
             {
               "name": "enabled",
               "ty": "boolean",
               "required": true,
-              "description": "Whether tool_search/tool_execute mode is enabled for the gateway"
+              "description": "Whether scout/invoke mode is enabled for the gateway"
             },
             {
               "name": "top_k_default",
               "ty": "integer",
               "required": false,
-              "description": "Default result count for tool_search when top_k is omitted"
+              "description": "Default result count for scout when top_k is omitted"
             },
             {
               "name": "max_tools",
@@ -169,7 +169,7 @@
               "description": "Maximum number of tools to index per rebuild"
             }
           ],
-          "returns": "ToolSearchConfig"
+          "returns": "ScoutConfig"
         },
         {
           "name": "gateway.server.get",
@@ -495,7 +495,7 @@
               "name": "allow_stdio",
               "ty": "boolean",
               "required": false,
-              "description": "Deprecated compatibility flag; ignored by current Lab versions"
+              "description": "Required when testing a stdio gateway because probing can execute a local command"
             }
           ],
           "returns": "GatewayTestResult"
@@ -685,7 +685,7 @@
               "name": "allow_stdio",
               "ty": "boolean",
               "required": false,
-              "description": "Deprecated compatibility flag; ignored by current Lab versions"
+              "description": "Required when spec.command is set because adding an enabled stdio gateway can execute a local command during reconcile"
             }
           ],
           "returns": "GatewayView"
@@ -717,7 +717,7 @@
               "name": "allow_stdio",
               "ty": "boolean",
               "required": false,
-              "description": "Deprecated compatibility flag; ignored by current Lab versions"
+              "description": "Required when the resulting enabled gateway uses stdio because reconcile can execute a local command"
             }
           ],
           "returns": "GatewayView"
@@ -798,6 +798,27 @@
             }
           ],
           "returns": "string[]"
+        },
+        {
+          "name": "gateway.servers",
+          "description": "List upstream MCP servers connected to the gateway, with cached tool/prompt/resource counts and tools-capability health.",
+          "destructive": false,
+          "params": [],
+          "returns": "GatewayServersDoc"
+        },
+        {
+          "name": "gateway.schema",
+          "description": "Return the cached tool schemas (input_schema + meta) for one upstream MCP server, filtered by its exposure policy.",
+          "destructive": false,
+          "params": [
+            {
+              "name": "name",
+              "ty": "string",
+              "required": true,
+              "description": "Upstream server name (as listed by gateway.servers)."
+            }
+          ],
+          "returns": "GatewayServerSchema"
         },
         {
           "name": "gateway.oauth.probe",
@@ -3131,29 +3152,6 @@
             }
           ],
           "returns": "AuditReport"
-        }
-      ]
-    },
-    {
-      "name": "fs",
-      "description": "Workspace filesystem browser (read-only, deny-listed)",
-      "category": "bootstrap",
-      "status": "available",
-      "requires_http_subject": false,
-      "actions": [
-        {
-          "name": "fs.list",
-          "description": "List immediate entries of a directory inside the configured workspace root",
-          "destructive": false,
-          "params": [
-            {
-              "name": "path",
-              "ty": "string",
-              "required": false,
-              "description": "Workspace-relative path to list; empty or omitted means the workspace root"
-            }
-          ],
-          "returns": "{entries: [{name, path, kind, size, modified, accessible}], truncated: bool}"
         }
       ]
     }

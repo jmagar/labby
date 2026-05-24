@@ -168,6 +168,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cli_rejects_legacy_install_uninstall_init_stubs() {
+        for command in ["install", "uninstall", "init"] {
+            let err =
+                Cli::try_parse_from(["labby", command]).expect_err("legacy stub must be gone");
+            assert!(
+                err.to_string().contains("unrecognized subcommand"),
+                "{command}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn replacement_setup_commands_parse() {
+        let cli = Cli::try_parse_from(["labby", "setup"]).expect("setup parses");
+        assert!(matches!(cli.command, Command::Setup(_)));
+
+        let cli = Cli::try_parse_from(["labby", "setup", "install-plugin", "gateway", "-y"])
+            .expect("setup install-plugin parses");
+        assert!(matches!(cli.command, Command::Setup(_)));
+    }
+
+    #[test]
     fn cli_parses_global_color_flag() {
         let cli = Cli::parse_from(["lab", "--color", "plain", "doctor"]);
         assert_eq!(cli.color, ColorPolicy::Plain);
