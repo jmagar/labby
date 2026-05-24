@@ -16,19 +16,17 @@ Commands:
   docs         Generate and verify code-owned documentation artifacts
   nodes        Query nodes from the configured controller
   health       Quick reachability check for configured services
-  install      Install one or more services into `.mcp.json`
-  uninstall    Uninstall services from `.mcp.json`
-  init         First-time setup wizard
   setup        Open the web-based first-run wizard (or settings) — lab-bg3e.3
   help         Print the service + action catalog
-  extract      Generate shell completions. Scan a local or SSH appdata path and extract service credentials
+  completions  Generate shell completions
+  extract      Scan a local or SSH appdata path and extract service credentials
   gateway      Manage proxied upstream MCP gateways
   oauth        Run local OAuth callback relay helpers
   logs         Search fleet logs on the configured master
   marketplace  Claude plugin marketplace manager
   registry     MCP Registry — look up and install servers from registry.modelcontextprotocol.io
   stash        Component versioning and deployment
-  deploy       Radarr movie collection manager. Sonarr TV series manager. Prowlarr indexer manager. Plex media server. Tautulli Plex analytics. `SABnzbd` download client. qBittorrent download client. Tailscale VPN network. Linkding bookmark manager. Memos note-taking service. Beads issue tracker. Bytestash snippet manager. Arcane Docker management UI. Unraid server management. `UniFi` network management. Overseerr media request manager. Gotify push notifications. `OpenAI` API client. Upstream OpenACP daemon. Google NotebookLM client. Qdrant vector database. HF Text Embeddings Inference. Apprise notification dispatcher. Deploy the local lab release binary to SSH targets
+  deploy       Deploy the local lab release binary to SSH targets
 
 Options:
       --json
@@ -580,77 +578,6 @@ Options:
           Print help
 ```
 
-## `labby install`
-
-```text
-Install one or more services into `.mcp.json`
-
-Usage: install [OPTIONS] <SERVICES>...
-
-Arguments:
-  <SERVICES>...
-          Services to install
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby uninstall`
-
-```text
-Uninstall services from `.mcp.json`
-
-Usage: uninstall [OPTIONS] <SERVICES>...
-
-Arguments:
-  <SERVICES>...
-          Services to uninstall
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby init`
-
-```text
-First-time setup wizard
-
-Usage: init [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
 ## `labby setup`
 
 ```text
@@ -968,10 +895,37 @@ Options:
           Print help
 ```
 
+## `labby completions`
+
+```text
+Generate shell completions
+
+Usage: completions [OPTIONS] <SHELL>
+
+Arguments:
+  <SHELL>
+          Target shell
+
+          [possible values: bash, elvish, fish, powershell, zsh]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
 ## `labby extract`
 
 ```text
-Generate shell completions. Scan a local or SSH appdata path and extract service credentials
+Scan a local or SSH appdata path and extract service credentials
 
 Usage: extract [OPTIONS] [URI]
 
@@ -2588,7 +2542,7 @@ Options:
 ## `labby deploy`
 
 ```text
-Radarr movie collection manager. Sonarr TV series manager. Prowlarr indexer manager. Plex media server. Tautulli Plex analytics. `SABnzbd` download client. qBittorrent download client. Tailscale VPN network. Linkding bookmark manager. Memos note-taking service. Beads issue tracker. Bytestash snippet manager. Arcane Docker management UI. Unraid server management. `UniFi` network management. Overseerr media request manager. Gotify push notifications. `OpenAI` API client. Upstream OpenACP daemon. Google NotebookLM client. Qdrant vector database. HF Text Embeddings Inference. Apprise notification dispatcher. Deploy the local lab release binary to SSH targets
+Deploy the local lab release binary to SSH targets
 
 Usage: deploy [OPTIONS] <COMMAND>
 

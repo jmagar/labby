@@ -148,7 +148,7 @@ The docs are split by topic so contributors do not have to recover architecture,
 - [SCAFFOLD_AND_AUDIT.md](./dev/SCAFFOLD_AND_AUDIT.md)
   `labby scaffold service` and `labby audit onboarding` contract.
 - [CLI.md](./surfaces/CLI.md)
-  Command structure, output rules, confirmation rules, install/uninstall, operator commands, and `labby oauth relay-local`.
+  Command structure, output rules, confirmation rules, setup/install surfaces, operator commands, and `labby oauth relay-local`.
 - [design/CLI_DESIGN_SYSTEM.md](./design/CLI_DESIGN_SYSTEM.md)
   Human-readable CLI output language, semantic tokens, status hierarchy, and pipe-safe color policy.
 - [design/CLI_OUTPUT_THEME_API.md](./design/CLI_OUTPUT_THEME_API.md)

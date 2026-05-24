@@ -47,7 +47,7 @@ tracing-subscriber.workspace = true
 tracing-appender = "0.2"
 
 clap.workspace = true
-clap_complete = { workspace = true, optional = true }
+clap_complete.workspace = true
 owo-colors.workspace = true
 is-terminal.workspace = true
 indicatif.workspace = true

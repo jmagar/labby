@@ -81,6 +81,30 @@ pub struct MergeOutcome {
     pub pruned: PruneStats,
 }
 
+/// Dry-run classification for a merge request.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct MergePreview {
+    pub changes: Vec<PreviewChange>,
+    pub skipped: Vec<String>,
+    pub written: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PreviewChange {
+    pub key: String,
+    pub status: PreviewStatus,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewStatus {
+    Add,
+    Update,
+    Unchanged,
+    Conflict,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 #[allow(dead_code)]
 pub struct PruneStats {
@@ -251,15 +275,12 @@ pub fn merge(path: &Path, req: MergeRequest) -> Result<MergeOutcome, MergeError>
             Some(existing_val) if existing_val == &entry.value => {
                 // Idempotent — no change.
             }
-            Some(existing_val) => {
+            Some(_) => {
                 if req.force {
                     overrides.insert(entry.key.clone(), entry.value.clone());
                     written_count += 1;
                 } else {
-                    skipped.push(format!(
-                        "CONFLICT: {} already set to {:?}; skipping (set force=true to overwrite)",
-                        entry.key, existing_val
-                    ));
+                    skipped.push(conflict_warning(&entry.key));
                 }
             }
         }
@@ -320,6 +341,81 @@ pub fn merge(path: &Path, req: MergeRequest) -> Result<MergeOutcome, MergeError>
         backup_path,
         pruned,
     })
+}
+
+/// Classify a merge without writing, backing up, or pruning files.
+pub fn preview(path: &Path, req: &MergeRequest) -> Result<MergePreview, MergeError> {
+    let existing_raw = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
+        Err(e) => {
+            return Err(MergeError::WriteFailed {
+                path: path.to_path_buf(),
+                reason: WriteFailReason::from_io(&e),
+            });
+        }
+    };
+
+    let mut existing_map: HashMap<String, String> = HashMap::new();
+    for line in existing_raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trimmed.split_once('=') {
+            existing_map.insert(k.trim().to_owned(), strip_quotes(v.trim()).to_owned());
+        }
+    }
+
+    let mut request_entries: Vec<EnvEntry> = Vec::new();
+    for entry in &req.entries {
+        if let Some(slot) = request_entries
+            .iter_mut()
+            .find(|existing| existing.key == entry.key)
+        {
+            slot.value = entry.value.clone();
+        } else {
+            request_entries.push(entry.clone());
+        }
+    }
+
+    let mut preview = MergePreview::default();
+    for entry in request_entries {
+        match existing_map.get(&entry.key) {
+            None => {
+                preview.written += 1;
+                preview.changes.push(PreviewChange {
+                    key: entry.key,
+                    status: PreviewStatus::Add,
+                });
+            }
+            Some(existing_val) if existing_val == &entry.value => {
+                preview.changes.push(PreviewChange {
+                    key: entry.key,
+                    status: PreviewStatus::Unchanged,
+                });
+            }
+            Some(_) if req.force => {
+                preview.written += 1;
+                preview.changes.push(PreviewChange {
+                    key: entry.key,
+                    status: PreviewStatus::Update,
+                });
+            }
+            Some(_) => {
+                preview.skipped.push(conflict_warning(&entry.key));
+                preview.changes.push(PreviewChange {
+                    key: entry.key,
+                    status: PreviewStatus::Conflict,
+                });
+            }
+        }
+    }
+    Ok(preview)
+}
+
+fn conflict_warning(key: &str) -> String {
+    format!("CONFLICT: {key} already set; skipping (set force=true to overwrite)")
 }
 
 fn write_atomically(path: &Path, lines: &[String], parent: &Path) -> Result<(), MergeError> {
@@ -568,7 +664,31 @@ mod tests {
         .unwrap();
         assert_eq!(outcome.written, 0);
         assert_eq!(outcome.skipped.len(), 1);
+        assert!(!outcome.skipped[0].contains("bar"));
         assert!(fs::read_to_string(&path).unwrap().contains("FOO=bar"));
+    }
+
+    #[test]
+    fn preview_classifies_without_writing_or_leaking_existing_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_initial(dir.path(), ".env", "FOO=secret\nBAR=same\n");
+        let outcome = preview(
+            &path,
+            &MergeRequest {
+                entries: vec![
+                    EnvEntry::new("FOO", "new-secret"),
+                    EnvEntry::new("BAR", "same"),
+                    EnvEntry::new("BAZ", "new"),
+                ],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(outcome.written, 1);
+        assert_eq!(outcome.skipped.len(), 1);
+        assert!(!outcome.skipped[0].contains("secret"));
+        assert!(fs::read_to_string(&path).unwrap().contains("FOO=secret"));
     }
 
     #[test]

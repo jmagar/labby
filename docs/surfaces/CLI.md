@@ -13,7 +13,6 @@ The CLI is the human-facing surface for `lab`. It must remain thin, predictable,
 
 The CLI includes:
 
-- one subcommand per service
 - `mcp`
 - `nodes`
 - `logs`
@@ -23,13 +22,8 @@ The CLI includes:
 - `stash`
 - `plugins`
 - `setup`
-- `install`
-- `uninstall`
-- `init`
 - `health`
 - `doctor`
-- `audit`
-- `scaffold`
 - `extract`
 - `oauth`
 - `help`
@@ -38,8 +32,7 @@ The CLI includes:
 Representative command tree:
 
 ```text
-lab
-├── <service> ...
+labby
 ├── mcp
 ├── nodes
 ├── logs
@@ -49,34 +42,28 @@ lab
 ├── stash
 ├── plugins
 ├── setup
-├── install
-├── uninstall
-├── init
 ├── health
 ├── doctor
-├── audit
-├── scaffold
 ├── extract
 ├── oauth
 ├── help
 └── completions
 ```
 
-## Per-Service Commands
+## Service Actions
 
-Each service subcommand must expose operations in a way that mirrors the service model cleanly.
+Service actions are exposed through the shared catalog and the MCP/API dispatch
+surfaces. Do not add per-service CLI command trees unless the service needs a
+genuine human-operator workflow that cannot be represented by the shared action
+model.
 
 Examples:
 
-- `lab radarr movie-lookup --params '{"query":"The Matrix"}'`
-- `lab sonarr series.list`
-- `lab plex library.list`
-- `lab unraid system.array`
-- `labby openai models`
-- `lab qdrant collections.list`
+- `labby help`
 - `labby marketplace mcp.meta.set --params '{"name":"io.github.user/server","metadata":{"curation":{"featured":true},"trust":{"reviewed":true}}}'`
+- MCP/API: `extract({ "action": "scan", "params": { "uri": "/mnt/appdata" } })`
 
-The CLI must not invent a second semantic model that drifts from MCP or the SDK.
+The CLI must not invent a second semantic model that drifts from MCP, HTTP, or the SDK.
 
 ## Output Formats
 
@@ -147,7 +134,7 @@ The CLI reads the same destructive flag from `ActionSpec` that MCP uses for elic
 The CLI must support explicit instance selection where relevant:
 
 ```bash
-lab unraid array status --instance shart
+labby help --all
 ```
 
 If there is a clear default instance, that can be used implicitly. Otherwise the command must fail loudly and ask for an instance.
@@ -230,19 +217,21 @@ Rules:
 
 ## Install and Uninstall
 
-`labby install` and `labby uninstall` handle:
+Top-level `labby install`, `labby uninstall`, and `labby init` are not part of
+the supported CLI surface. Use the owning surfaces instead:
 
-- env validation and prompting
-- `.mcp.json` patching
-- service enablement changes
+- `labby setup` for first-run and local environment repair flows
+- `labby setup install-plugin <name>` for Lab plugin installation
+- `labby marketplace ...` for marketplace-managed plugin operations
+- `labby registry ...` for MCP Registry installs when the `mcpregistry` feature is enabled
 
-These commands are operationally sensitive and must use atomic file writes and backup behavior.
+These flows are operationally sensitive and must use atomic file writes and backup behavior.
 
 Expected `.mcp.json` behavior:
 
 1. locate the file
 2. parse or initialize it
-3. compute the updated `--services` list
+3. compute the updated server/plugin list
 4. support dry-run diffing
 5. back up before mutation
 6. write atomically

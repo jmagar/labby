@@ -39,8 +39,8 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `doctor` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api |
 | `doctor` | `service.probe` | false | false | `service*: string`<br>`instance: string` | `Finding` | cli, mcp, api |
 | `doctor` | `system.checks` | false | false |  | `DoctorReport` | cli, mcp, api |
-| `extract` | `apply` | false | true | `uri*: string`<br>`services: string[]`<br>`env_path: string` | `WritePlan` | cli, mcp, api |
-| `extract` | `diff` | false | false | `uri*: string` | `WritePlan` | cli, mcp, api |
+| `extract` | `apply` | false | true | `uri*: string`<br>`services: string[]`<br>`env_path: string`<br>`force: bool` | `WritePlan` | cli, mcp, api |
+| `extract` | `diff` | false | false | `uri*: string`<br>`services: string[]`<br>`env_path: string`<br>`force: bool` | `WritePlan` | cli, mcp, api |
 | `extract` | `help` | false | false |  | `Catalog` | cli, mcp, api |
 | `extract` | `list_hosts` | false | false |  | `string[]` | cli, mcp, api |
 | `extract` | `scan` | false | false | `uri: string`<br>`hosts: string[]`<br>`redact_secrets: bool` | `DiscoveredService[]` | cli, mcp, api |
