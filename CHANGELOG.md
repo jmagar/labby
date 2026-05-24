@@ -8,6 +8,25 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.17.4] - 2026-05-24
+
+### Highlights
+
+- **Stdio MCP gateway parity**: normal `labby mcp` startup now wires the same gateway manager, upstream discovery, upstream OAuth runtime, and auto-import path used by HTTP MCP.
+- **Recursive stdio guard**: `LAB_SPAWN_DEPTH` still suppresses upstream spawning for recursive Lab child processes without weakening the normal stdio tool/resource surface.
+- **Startup coverage**: focused tests pin the recursion-guard behavior and tolerate malformed spawn-depth environment values.
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | fix: align stdio mcp gateway startup with http |
+
+### Version bumps
+
+- Rust workspace: `0.17.3 → 0.17.4`
+- Gateway admin package: `0.17.3 → 0.17.4`
+
+---
+
 ## [0.17.3] - 2026-05-24
 
 ### Highlights

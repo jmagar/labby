@@ -253,6 +253,8 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
     );
 
     let stdio_mode = should_run_stdio(transport, args.command.as_ref());
+    let spawn_depth = resolve_lab_spawn_depth(std::env::var("LAB_SPAWN_DEPTH").ok());
+    let suppress_upstream_runtime = stdio_recursion_guard_active(stdio_mode, spawn_depth);
     let gateway_runtime = GatewayRuntimeHandle::default();
     let bearer_token = http_token();
     let auth_config =
@@ -267,11 +269,13 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         bearer_token_configured = bearer_token.is_some(),
         "http auth configuration resolved"
     );
-    let upstream_oauth_runtime = if stdio_mode {
+    let upstream_oauth_runtime = if suppress_upstream_runtime {
         tracing::info!(
             subsystem = "gateway_client",
             phase = "oauth.runtime.disabled",
-            "upstream oauth runtime skipped for stdio transport"
+            transport = ?transport,
+            spawn_depth,
+            "upstream oauth runtime skipped because stdio recursion guard is active"
         );
         None
     } else {
@@ -299,9 +303,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         pool_builder = pool_builder.with_oauth_client_cache(rt.cache.clone());
     }
     let pool = Arc::new(pool_builder);
-    // In MCP-only (stdio) mode skip upstream discovery entirely — no child processes
-    // should be spawned, making the axon↔lab recursion cycle physically impossible.
-    if !stdio_mode {
+    if !suppress_upstream_runtime {
         if upstream_oauth_runtime.is_some() {
             pool.discover_all_for_subject_with_in_process_peers(
                 &config.upstream,
@@ -325,7 +327,8 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         tracing::info!(
             subsystem = "gateway_client",
             phase = "discovery.skipped",
-            "upstream discovery skipped for MCP-only stdio mode — no upstream processes spawned"
+            spawn_depth,
+            "upstream discovery skipped because stdio recursion guard is active"
         );
     }
     let notifier = PeerNotifier::default();
@@ -347,12 +350,12 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
     gateway_manager.set_notifier(CatalogChangeNotifier::new(notify_tx));
     let gateway_manager = Arc::new(gateway_manager);
     // Seed config for both transports so MCP catalog visibility and tool-search
-    // settings match the persisted config. MCP-only stdio still skips installing
-    // the process-global gateway manager and upstream discovery, which are the
-    // paths that can create recursive upstream connections.
+    // settings match the persisted config. Normal stdio follows the same gateway
+    // runtime path as HTTP; only recursive stdio children suppress upstream
+    // spawning.
     gateway_manager.seed_config(config.clone()).await;
-    if !stdio_mode {
-        install_gateway_manager(Arc::clone(&gateway_manager));
+    install_gateway_manager(Arc::clone(&gateway_manager));
+    if !suppress_upstream_runtime {
         match config.gateway_import_mode {
             crate::config::GatewayImportMode::Off => {
                 tracing::info!(
@@ -409,14 +412,18 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         tracing::info!(
             subsystem = "gateway_client",
             phase = "manager.ready",
+            transport = ?transport,
             upstream_count = gateway_manager.current_config().await.upstream.len(),
             "gateway manager installed"
         );
     } else {
         tracing::info!(
             subsystem = "gateway_client",
-            phase = "manager.skipped",
-            "gateway manager install skipped for MCP-only stdio mode"
+            phase = "manager.ready",
+            transport = ?transport,
+            spawn_depth,
+            upstream_count = gateway_manager.current_config().await.upstream.len(),
+            "gateway manager installed with upstream spawning suppressed"
         );
     }
     let logs_system = bootstrap_running_log_system(
@@ -455,6 +462,8 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
             Arc::clone(&gateway_manager),
             node_role,
             notifier,
+            spawn_depth,
+            suppress_upstream_runtime,
         )
         .await;
     }
@@ -1158,12 +1167,10 @@ async fn run_stdio(
     gateway_manager: Arc<GatewayManager>,
     node_role: crate::config::NodeRole,
     notifier: PeerNotifier,
+    spawn_depth: Option<u32>,
+    suppress_upstream_runtime: bool,
 ) -> Result<ExitCode> {
-    let spawn_depth = resolve_lab_spawn_depth(std::env::var("LAB_SPAWN_DEPTH").ok());
-    // MCP-only mode never spawns upstream processes, so a positive
-    // LAB_SPAWN_DEPTH is logged as lifecycle evidence instead of changing
-    // behavior in this process.
-    if spawn_depth.unwrap_or_default() > 0 {
+    if suppress_upstream_runtime {
         tracing::warn!(
             surface = "mcp",
             service = "stdio",
@@ -1243,6 +1250,10 @@ fn resolve_lab_spawn_depth(env: Option<String>) -> Option<u32> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .and_then(|value| value.parse::<u32>().ok())
+}
+
+fn stdio_recursion_guard_active(stdio_mode: bool, spawn_depth: Option<u32>) -> bool {
+    stdio_mode && spawn_depth.unwrap_or_default() > 0
 }
 
 /// Build the MCP streamable HTTP service from app state.
@@ -1556,7 +1567,7 @@ mod tests {
         McpArgs, PeerNotifier, ServeCommand, Transport, allowed_hosts, bind_addr,
         build_http_router, filter_registry, is_loopback_host, resolve_lab_spawn_depth,
         resolve_port, resolve_session_ttl_secs, resolve_stateful_mode, resolve_transport,
-        resolve_web_ui_auth_disabled, should_run_stdio,
+        resolve_web_ui_auth_disabled, should_run_stdio, stdio_recursion_guard_active,
     };
     use crate::api::AppState;
     use crate::cli::Cli;
@@ -1683,12 +1694,20 @@ mod tests {
     }
 
     #[test]
-    fn lab_spawn_depth_resolution_is_logging_only_and_tolerates_bad_env() {
+    fn lab_spawn_depth_resolution_tolerates_bad_env() {
         assert_eq!(resolve_lab_spawn_depth(Some("2".into())), Some(2));
         assert_eq!(resolve_lab_spawn_depth(Some(" 3 ".into())), Some(3));
         assert_eq!(resolve_lab_spawn_depth(Some("".into())), None);
         assert_eq!(resolve_lab_spawn_depth(Some("not-a-number".into())), None);
         assert_eq!(resolve_lab_spawn_depth(None), None);
+    }
+
+    #[test]
+    fn stdio_recursion_guard_only_suppresses_child_spawns() {
+        assert!(!stdio_recursion_guard_active(false, Some(2)));
+        assert!(!stdio_recursion_guard_active(true, None));
+        assert!(!stdio_recursion_guard_active(true, Some(0)));
+        assert!(stdio_recursion_guard_active(true, Some(1)));
     }
 
     #[test]
