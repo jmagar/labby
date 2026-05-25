@@ -81,6 +81,7 @@ export type ChatSessionDataContextValue = {
   hiddenRunCount: number
   includeHiddenRuns: boolean
   dominantModelId: string | null
+  lastDispatchError: { provider: string; message: string; at: number } | null
   selectedRunId: string | null
   selectedRun: ACPRun | null
   providerHealth: ProviderHealth | null
@@ -197,6 +198,14 @@ export function ChatSessionProvider({
   const [optimisticMessages, setOptimisticMessages] = React.useState<ACPMessage[]>([])
   const [pageContext, setPageContext] = React.useState<PageContext>(null)
   const [includeHiddenRuns, setIncludeHiddenRuns] = React.useState(false)
+  // Transient dispatch error surface that does NOT mutate `providerHealth`.
+  // Earlier code path stomped synthetic `{ ready: false, ... }` into
+  // `providerHealth` whenever a session or prompt call failed, which made the
+  // provider look permanently down even when only one dispatch had failed.
+  // Auto-clears when the user switches providers (see effect below).
+  const [lastDispatchError, setLastDispatchError] = React.useState<
+    { provider: string; message: string; at: number } | null
+  >(null)
 
   // SSE state
   const [events, setEvents] = React.useState<BridgeEvent[]>([])
@@ -371,13 +380,11 @@ export function ChatSessionProvider({
             payload as ErrorPayload | null,
             'Failed to create ACP session.',
           )
-          setProviderHealth((current) => ({
-            provider: current?.provider ?? 'codex-acp',
-            ready: false,
-            command: current?.command ?? '',
-            args: current?.args ?? [],
+          setLastDispatchError({
+            provider: providerHealth?.provider ?? selectedProviderId ?? 'codex-acp',
             message,
-          }))
+            at: Date.now(),
+          })
           throw new Error(message)
         }
         // Narrow: if payload has an `id` field it is a SessionCreatePayload; otherwise ErrorPayload
@@ -462,13 +469,11 @@ export function ChatSessionProvider({
         })
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to send prompt to ACP session.'
-        setProviderHealth((current) => ({
-          provider: current?.provider ?? selectedProviderId ?? 'codex-acp',
-          ready: false,
-          command: current?.command ?? '',
-          args: current?.args ?? [],
+        setLastDispatchError({
+          provider: providerHealth?.provider ?? selectedProviderId ?? 'codex-acp',
           message,
-        }))
+          at: Date.now(),
+        })
         throw error
       }
     },
@@ -476,6 +481,7 @@ export function ChatSessionProvider({
       createSession,
       fetchAcp,
       isMobileViewport,
+      providerHealth?.provider,
       refreshSessions,
       selectedProviderId,
       selectedAgent.id,
@@ -520,6 +526,16 @@ export function ChatSessionProvider({
       setProviderHealth(selected)
     }
   }, [providers, selectedProviderId])
+
+  // Clear lastDispatchError when the user moves to a different provider — the
+  // error is scoped to whichever provider failed; following them around is
+  // misleading.
+  React.useEffect(() => {
+    if (!lastDispatchError) return
+    if (lastDispatchError.provider !== selectedProviderId) {
+      setLastDispatchError(null)
+    }
+  }, [selectedProviderId, lastDispatchError])
 
   // Auto-bootstrap first session — after sessions have been loaded so we don't race with refreshSessions.
   // Gated on `autoBootstrap`: the provider mounts on every admin page, but we only want to mint a
@@ -712,6 +728,7 @@ export function ChatSessionProvider({
       hiddenRunCount,
       includeHiddenRuns,
       dominantModelId,
+      lastDispatchError,
       selectedRunId,
       selectedRun,
       providerHealth,
@@ -724,7 +741,7 @@ export function ChatSessionProvider({
       sessionsLoaded,
       pageContext,
     }),
-    [runs, visibleRuns, hiddenRunCount, includeHiddenRuns, dominantModelId, selectedRunId, selectedRun, providerHealth, providers, selectedProviderId, selectedAgent, selectedModel, agents, projects, sessionsLoaded, pageContext],
+    [runs, visibleRuns, hiddenRunCount, includeHiddenRuns, dominantModelId, lastDispatchError, selectedRunId, selectedRun, providerHealth, providers, selectedProviderId, selectedAgent, selectedModel, agents, projects, sessionsLoaded, pageContext],
   )
 
   const actionsValue = React.useMemo<ChatSessionActionsContextValue>(
