@@ -17,7 +17,7 @@ mod semantic;
 mod service_catalog;
 mod shared;
 pub(crate) mod types;
-mod view_models;
+pub(crate) mod view_models;
 mod virtual_servers;
 
 pub use catalog::ACTIONS;

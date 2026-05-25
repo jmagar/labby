@@ -168,7 +168,13 @@ async fn main() -> ExitCode {
         cli::Command::Serve(args) => args.log_level.as_ref().map(|level| format!("labby={level},warn")),
         cli::Command::Mcp(args) => args.log_level.as_ref().map(|level| format!("labby={level},warn")),
         _ if std::env::var_os("LAB_LOG").is_none() => {
-            Some("labby=warn,lab_apis=warn,rmcp=warn".to_string())
+            // Silence upstream connect/discovery warnings — failures are surfaced
+            // inline in command output (e.g. `gateway list`); raw events just leak
+            // above the human-readable result. Set LAB_LOG=labby=warn to see them.
+            Some(
+                "labby=warn,labby::dispatch::upstream=error,lab_apis=warn,rmcp=warn"
+                    .to_string(),
+            )
         }
         _ => None,
     };

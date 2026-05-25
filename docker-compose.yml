@@ -24,6 +24,8 @@ services:
       # Serve frontend assets from the bind-mounted workspace so `pnpm build`
       # changes are reflected immediately without a binary rebuild.
       LAB_WEB_ASSETS_DIR: "/workspace/lab/apps/gateway-admin/out"
+      # Parallel upstream MCP server discovery. Default is 3; bump for fast warmup.
+      LAB_UPSTREAM_DISCOVERY_CONCURRENCY: "16"
 
 volumes:
   labby-data:

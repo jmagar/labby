@@ -117,6 +117,9 @@ services:
       # CLICOLOR_FORCE forces console::colors_enabled() which the custom log formatter uses.
       LAB_LOG_COLOR: "force"
       CLICOLOR_FORCE: "1"
+      # Parallel upstream MCP server discovery. Default is 3; bump so startup
+      # warms ~20 upstreams in roughly one 15s window instead of seven.
+      LAB_UPSTREAM_DISCOVERY_CONCURRENCY: "16"
 
     # ── Hard outer boundary ──────────────────────────────────────────────────
     # Even if the spawn-guard logic in the binary fails, the container's pid
