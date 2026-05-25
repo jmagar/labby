@@ -56,11 +56,12 @@ Dispatch layers may add the following kinds on top of SDK errors:
 - `unknown_instance`
 - `conflict` — resource already exists with the given identifier; HTTP 409
 - `ambiguous_tool` — unqualified tool name resolved to multiple upstream gateway candidates; envelope carries `valid: Vec<String>` of fully-qualified `{upstream}::{tool}` names the caller must choose from, plus a `hint` explaining that callers may either pass `name = "{upstream}::{tool}"` or set `upstream` separately. HTTP 409.
-- `invalid_code_mode_id` — Code Mode tool id parsing failed. Valid ids are `lab::<service>.<action>` and `upstream::<upstream-name>::<tool-name>`. HTTP 422.
-- `code_mode_disabled` — Code Mode execution was requested while `[code_mode].enabled` is false. Discovery and schema lookup can remain enabled without allowing execution. HTTP 403.
+- `invalid_code_mode_id` — Code Mode tool id parsing failed. Valid ids are `upstream::<upstream-name>::<tool-name>` only; Lab actions use `tool_execute`/`invoke`. HTTP 422.
+- `code_mode_disabled` — Code Mode execution was requested while `[code_mode].enabled` is false. Catalog search can remain enabled without allowing execution. HTTP 403.
 - `code_execution_failed` — Code Mode child-process JavaScript evaluation failed before completing the runner protocol. HTTP 422.
 - `tool_call_limit_exceeded` — a Code Mode snippet attempted more host-brokered tool calls than `max_tool_calls` allows. HTTP 429.
-- `schema_unavailable` — Code Mode schema lookup found a tool, but its upstream schema was missing or exceeded the safe return size after sanitization. HTTP 422.
+- `code_mode_fuel_exhausted` — the Wasmtime Code Mode runner consumed its configured fuel budget before completion. HTTP 408.
+- `code_mode_timeout` — the Code Mode wall-clock backstop interrupted execution before completion. HTTP 408.
 - `queue_saturated` — bounded runtime queue is full; caller should retry after the current work drains. HTTP 429.
 
 ### Fleet-WS install hardening kinds (lab-zxx5.18)

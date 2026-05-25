@@ -2075,8 +2075,7 @@ Search, inspect, and execute Code Mode snippets through dispatch
 Usage: code [OPTIONS] <COMMAND>
 
 Commands:
-  search  Search Code Mode tool IDs by natural-language query
-  schema  Show the schema and generated bindings for one Code Mode tool ID
+  search  Filter the inlined Code Mode tool catalog with JavaScript
   exec    Execute a sandboxed JavaScript snippet that calls callTool(id, params)
 
 Options:
@@ -2096,43 +2095,14 @@ Options:
 ## `labby gateway code search`
 
 ```text
-Search Code Mode tool IDs by natural-language query
+Filter the inlined Code Mode tool catalog with JavaScript
 
-Usage: search [OPTIONS] <QUERY>
-
-Arguments:
-  <QUERY>
-
+Usage: search [OPTIONS]
 
 Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --top-k <TOP_K>
-          [default: 10]
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby gateway code schema`
-
-```text
-Show the schema and generated bindings for one Code Mode tool ID
-
-Usage: schema [OPTIONS] <ID>
-
-Arguments:
-  <ID>
+      --code <CODE>
 
 
-Options:
       --json
           Emit JSON instead of human-readable tables
 
@@ -2141,6 +2111,9 @@ Options:
 
           [default: auto]
           [possible values: auto, plain, color]
+
+      --file <FILE>
+
 
   -h, --help
           Print help

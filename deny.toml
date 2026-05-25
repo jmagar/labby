@@ -25,6 +25,7 @@ ignore = [
 allow = [
     "MIT",
     "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
@@ -64,12 +65,18 @@ reason = "Binary-only: lab-apis must stay pure. MCP server lives in `labby`."
 
 [[bans.deny]]
 name = "anyhow"
-wrappers = ["labby", "agent-client-protocol", "agent-client-protocol-schema"]
+wrappers = [
+    "labby",
+    "agent-client-protocol",
+    "agent-client-protocol-schema",
+    "javy",
+    "wasmprinter",
+    "wasmtime-environ",
+]
 reason = "lab-apis uses `thiserror`. anyhow is for the binary only."
 
 [[bans.deny]]
 name = "tabled"
-wrappers = ["labby"]
 reason = "Binary-only: table formatting happens in `lab/src/output.rs`, not lab-apis."
 
 [sources]

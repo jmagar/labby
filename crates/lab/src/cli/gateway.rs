@@ -12,9 +12,7 @@ use crate::cli::helpers::{run_action_command, run_confirmable_action_command};
 use crate::config::{LabConfig, ProtectedMcpRouteConfig, config_toml_path};
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
-use crate::dispatch::gateway::code_mode::{
-    CodeModeBroker, CodeModeCaller, CodeModeSurface, CodeModeToolId, CodeModeToolRef,
-};
+use crate::dispatch::gateway::code_mode::{CodeModeBroker, CodeModeCaller, CodeModeSurface};
 use crate::dispatch::gateway::install_gateway_manager;
 use crate::dispatch::gateway::manager::{GatewayManager, GatewayRuntimeHandle};
 use crate::dispatch::upstream::pool::UpstreamPool;
@@ -60,14 +58,13 @@ pub struct GatewayCodeArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum GatewayCodeCommand {
-    /// Search Code Mode tool IDs by natural-language query
+    /// Filter the inlined Code Mode tool catalog with JavaScript
     Search {
-        query: String,
-        #[arg(long, default_value_t = 10)]
-        top_k: usize,
+        #[arg(long, conflicts_with = "file")]
+        code: Option<String>,
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
     },
-    /// Show the schema and generated bindings for one Code Mode tool ID
-    Schema { id: String },
     /// Execute a sandboxed JavaScript snippet that calls callTool(id, params)
     Exec {
         #[arg(long, conflicts_with = "file")]
@@ -417,13 +414,7 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                     command: GatewayMcpAuthCommand::Status(_) | GatewayMcpAuthCommand::Clear(_),
                 }),
         })
-    ) || matches!(&args.command, GatewayCommand::ProtectedRoute(_)))
-        && !matches!(
-            &args.command,
-            GatewayCommand::Code(GatewayCodeArgs {
-                command: GatewayCodeCommand::Schema { id },
-            }) if code_mode_schema_is_builtin(id)
-        );
+    ) || matches!(&args.command, GatewayCommand::ProtectedRoute(_)));
     let manager = build_manager(config, discover_upstreams).await;
     let cli_origin = format!("cli:{}", std::process::id());
     let cli_owner = json!({
@@ -729,16 +720,6 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
     }
 }
 
-fn code_mode_schema_is_builtin(id: &str) -> bool {
-    matches!(
-        CodeModeToolId::parse(id),
-        Ok(CodeModeToolId {
-            reference: CodeModeToolRef::LabAction { .. },
-            ..
-        })
-    )
-}
-
 async fn run_gateway_code(
     manager: Arc<GatewayManager>,
     args: GatewayCodeArgs,
@@ -752,29 +733,13 @@ async fn run_gateway_code(
     let surface = CodeModeSurface::Cli;
 
     match args.command {
-        GatewayCodeCommand::Search { query, top_k } => {
-            let candidates = broker.search(&query, top_k, caller, surface).await?;
-            crate::output::print(&candidates, format)?;
-        }
-        GatewayCodeCommand::Schema { id } => {
-            let schema = broker.schema(&id, caller, surface).await?;
-            crate::output::print(&schema, format)?;
+        GatewayCodeCommand::Search { code, file } => {
+            let code = read_code_mode_source(code, file, CODE_MODE_CLI_MAX_SOURCE_BYTES)?;
+            let response = broker.search(&code, caller, surface).await?;
+            crate::output::print(&response, format)?;
         }
         GatewayCodeCommand::Exec { code, file } => {
-            let code = match (code, file) {
-                (Some(code), None) => code,
-                (None, Some(path)) => {
-                    let metadata = std::fs::metadata(&path)?;
-                    if metadata.len() > CODE_MODE_CLI_MAX_SOURCE_BYTES {
-                        anyhow::bail!("Code Mode source file exceeds 20480 bytes");
-                    }
-                    std::fs::read_to_string(path)?
-                }
-                _ => anyhow::bail!("provide exactly one of --code or --file"),
-            };
-            if code.len() as u64 > CODE_MODE_CLI_MAX_SOURCE_BYTES {
-                anyhow::bail!("Code Mode source exceeds 20480 bytes");
-            }
+            let code = read_code_mode_source(code, file, CODE_MODE_CLI_MAX_SOURCE_BYTES)?;
             let config = manager.code_mode_config().await;
             let max_tool_calls = config.max_tool_calls;
             let response = broker
@@ -785,6 +750,28 @@ async fn run_gateway_code(
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+fn read_code_mode_source(
+    code: Option<String>,
+    file: Option<std::path::PathBuf>,
+    max_source_bytes: u64,
+) -> Result<String> {
+    let code = match (code, file) {
+        (Some(code), None) => code,
+        (None, Some(path)) => {
+            let metadata = std::fs::metadata(&path)?;
+            if metadata.len() > max_source_bytes {
+                anyhow::bail!("Code Mode source file exceeds {max_source_bytes} bytes");
+            }
+            std::fs::read_to_string(path)?
+        }
+        _ => anyhow::bail!("provide exactly one of --code or --file"),
+    };
+    if code.len() as u64 > max_source_bytes {
+        anyhow::bail!("Code Mode source exceeds {max_source_bytes} bytes");
+    }
+    Ok(code)
 }
 
 async fn run_gateway_oauth_start(
@@ -909,10 +896,7 @@ fn open_in_browser(url: &str) -> Result<()> {
 /// Format inspired by `claude mcp list` (status icon + one-line per server)
 /// and `codex mcp list` (column alignment). JSON mode preserves the full
 /// `ServerView` shape for downstream consumers.
-async fn run_gateway_list(
-    manager: Arc<GatewayManager>,
-    format: OutputFormat,
-) -> Result<ExitCode> {
+async fn run_gateway_list(manager: Arc<GatewayManager>, format: OutputFormat) -> Result<ExitCode> {
     let servers = match manager.list().await {
         Ok(s) => s,
         Err(err) => {
@@ -982,10 +966,8 @@ fn render_gateway_list_human(
     servers.sort_by_key(|s| {
         if !s.enabled {
             2u8
-        } else if s.connected {
-            0u8
         } else {
-            1u8
+            u8::from(!s.connected)
         }
     });
     let servers = servers.as_slice();
@@ -1027,7 +1009,7 @@ fn render_gateway_list_human(
         let transport = theme.tertiary(&transport_padded);
 
         let status_detail = if !s.enabled {
-            theme.muted("disabled".to_string())
+            theme.muted("disabled")
         } else if s.connected {
             let mut parts = Vec::new();
             if s.exposed_tool_count > 0 {
@@ -1198,14 +1180,14 @@ mod tests {
             ])
             .is_ok()
         );
-        assert!(Cli::try_parse_from(["lab", "gateway", "code", "search", "movie.search"]).is_ok());
         assert!(
             Cli::try_parse_from([
                 "lab",
                 "gateway",
                 "code",
-                "schema",
-                "lab::radarr.movie.search",
+                "search",
+                "--code",
+                "async () => tools.slice(0, 3)",
             ])
             .is_ok()
         );
@@ -1214,9 +1196,30 @@ mod tests {
                 "lab",
                 "gateway",
                 "code",
+                "search",
+                "--code",
+                "async () => tools.filter(t => /github/i.test(t.id)).slice(0, 3)",
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "lab",
+                "gateway",
+                "code",
+                "schema",
+                "upstream::github::search_issues"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "lab",
+                "gateway",
+                "code",
                 "exec",
                 "--code",
-                "await callTool(\"lab::gateway.gateway.servers\", {})",
+                "await callTool(\"upstream::github::search_issues\", {query:\"repo\"})",
             ])
             .is_ok()
         );

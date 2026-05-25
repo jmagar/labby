@@ -1,9 +1,9 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Stdio};
 
 use serde_json::{Value, json};
 
-fn read_protocol_line(reader: &mut BufReader<impl std::io::Read>) -> Value {
+fn read_protocol_line(reader: &mut BufReader<impl Read>) -> Value {
     let mut line = String::new();
     reader.read_line(&mut line).expect("read runner output");
     assert!(!line.is_empty(), "runner closed stdout");
@@ -22,6 +22,7 @@ fn code_mode_runner_evaluates_js_in_a_minimal_host_environment() {
 
     let mut stdin = child.stdin.take().expect("runner stdin");
     let stdout = child.stdout.take().expect("runner stdout");
+    let mut stderr = child.stderr.take().expect("runner stderr");
     let mut stdout = BufReader::new(stdout);
     let code = r#"
         if (typeof process !== "undefined" || typeof require !== "undefined" ||
@@ -29,6 +30,7 @@ fn code_mode_runner_evaluates_js_in_a_minimal_host_environment() {
             typeof Bun !== "undefined") {
           throw new Error("ambient host API exposed");
         }
+        console.log("runner console check");
         const first = await callTool("lab::gateway.first", {"x": 1});
         if (first.ok) {
           await callTool("lab::gateway.second", {"from": first.value});
@@ -91,6 +93,11 @@ fn code_mode_runner_evaluates_js_in_a_minimal_host_environment() {
     assert_eq!(read_protocol_line(&mut stdout), json!({"type": "done"}));
     let status = child.wait().expect("wait for runner");
     assert!(status.success(), "runner exited with {status}");
+    let mut stderr_text = String::new();
+    stderr
+        .read_to_string(&mut stderr_text)
+        .expect("read runner stderr");
+    assert!(stderr_text.contains("runner console check"));
 }
 
 #[test]

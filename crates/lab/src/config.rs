@@ -496,10 +496,18 @@ fn default_code_mode_max_tool_calls() -> usize {
     8
 }
 
+fn default_code_mode_max_response_bytes() -> usize {
+    24 * 1024
+}
+
+fn default_code_mode_max_response_tokens() -> usize {
+    6_000
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeModeConfig {
-    /// Enable the constrained Code Mode executor. Discovery and schema lookup
-    /// can be enabled through `[tool_search]` without enabling execution.
+    /// Enable the constrained Code Mode executor. Catalog search can be enabled
+    /// through `[tool_search]` without enabling execution.
     #[serde(default)]
     pub enabled: bool,
     /// Maximum wall-clock time for one Code Mode execution.
@@ -508,6 +516,12 @@ pub struct CodeModeConfig {
     /// Maximum host-brokered tool calls allowed in one Code Mode execution.
     #[serde(default = "default_code_mode_max_tool_calls")]
     pub max_tool_calls: usize,
+    /// Maximum serialized response envelope size returned by code_execute.
+    #[serde(default = "default_code_mode_max_response_bytes")]
+    pub max_response_bytes: usize,
+    /// Approximate maximum response tokens returned by code_execute.
+    #[serde(default = "default_code_mode_max_response_tokens")]
+    pub max_response_tokens: usize,
 }
 
 impl Default for CodeModeConfig {
@@ -516,6 +530,8 @@ impl Default for CodeModeConfig {
             enabled: false,
             timeout_ms: default_code_mode_timeout_ms(),
             max_tool_calls: default_code_mode_max_tool_calls(),
+            max_response_bytes: default_code_mode_max_response_bytes(),
+            max_response_tokens: default_code_mode_max_response_tokens(),
         }
     }
 }
@@ -530,6 +546,16 @@ impl CodeModeConfig {
         if !(1..=50).contains(&self.max_tool_calls) {
             return Err(ConfigError::InvalidCodeModeMaxToolCalls {
                 value: self.max_tool_calls,
+            });
+        }
+        if !(1024..=1024 * 1024).contains(&self.max_response_bytes) {
+            return Err(ConfigError::InvalidCodeModeMaxResponseBytes {
+                value: self.max_response_bytes,
+            });
+        }
+        if !(256..=256_000).contains(&self.max_response_tokens) {
+            return Err(ConfigError::InvalidCodeModeMaxResponseTokens {
+                value: self.max_response_tokens,
             });
         }
         Ok(())
@@ -986,6 +1012,10 @@ pub enum ConfigError {
     InvalidCodeModeTimeout { value: u64 },
     #[error("gateway code_mode.max_tool_calls={value} is invalid — expected 1..=50")]
     InvalidCodeModeMaxToolCalls { value: usize },
+    #[error("gateway code_mode.max_response_bytes={value} is invalid — expected 1024..=1048576")]
+    InvalidCodeModeMaxResponseBytes { value: usize },
+    #[error("gateway code_mode.max_response_tokens={value} is invalid — expected 256..=256000")]
+    InvalidCodeModeMaxResponseTokens { value: usize },
     #[error("protected MCP route '{name}' has invalid {field}: {value}")]
     InvalidProtectedRoute {
         name: String,
@@ -2842,6 +2872,8 @@ url = "https://acme.example.com/mcp"
         assert!(!default_cfg.code_mode.enabled);
         assert_eq!(default_cfg.code_mode.timeout_ms, 5000);
         assert_eq!(default_cfg.code_mode.max_tool_calls, 8);
+        assert_eq!(default_cfg.code_mode.max_response_bytes, 24 * 1024);
+        assert_eq!(default_cfg.code_mode.max_response_tokens, 6000);
 
         let cfg = toml::from_str::<LabConfig>(
             r#"
@@ -2849,6 +2881,8 @@ url = "https://acme.example.com/mcp"
 enabled = true
 timeout_ms = 2500
 max_tool_calls = 3
+max_response_bytes = 12000
+max_response_tokens = 3000
 "#,
         )
         .expect("root code_mode parses");
@@ -2856,6 +2890,8 @@ max_tool_calls = 3
         assert!(cfg.code_mode.enabled);
         assert_eq!(cfg.code_mode.timeout_ms, 2500);
         assert_eq!(cfg.code_mode.max_tool_calls, 3);
+        assert_eq!(cfg.code_mode.max_response_bytes, 12000);
+        assert_eq!(cfg.code_mode.max_response_tokens, 3000);
     }
 
     #[test]
@@ -2884,6 +2920,34 @@ max_tool_calls = 0
         assert!(matches!(
             cfg.validate(),
             Err(ConfigError::InvalidCodeModeMaxToolCalls { value: 0 })
+        ));
+
+        let cfg = toml::from_str::<LabConfig>(
+            r#"
+[code_mode]
+timeout_ms = 5000
+max_tool_calls = 8
+max_response_bytes = 100
+"#,
+        )
+        .expect("code_mode parses");
+        assert!(matches!(
+            cfg.validate(),
+            Err(ConfigError::InvalidCodeModeMaxResponseBytes { value: 100 })
+        ));
+
+        let cfg = toml::from_str::<LabConfig>(
+            r#"
+[code_mode]
+timeout_ms = 5000
+max_tool_calls = 8
+max_response_tokens = 100
+"#,
+        )
+        .expect("code_mode parses");
+        assert!(matches!(
+            cfg.validate(),
+            Err(ConfigError::InvalidCodeModeMaxResponseTokens { value: 100 })
         ));
     }
 

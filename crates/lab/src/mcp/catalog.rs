@@ -10,7 +10,6 @@ use crate::mcp::prompts::list_all as list_builtin_prompts;
 pub(crate) const TOOL_SEARCH_TOOL_NAME: &str = "scout";
 pub(crate) const TOOL_EXECUTE_TOOL_NAME: &str = "invoke";
 pub(crate) const CODE_SEARCH_TOOL_NAME: &str = "code_search";
-pub(crate) const CODE_SCHEMA_TOOL_NAME: &str = "code_schema";
 pub(crate) const CODE_EXECUTE_TOOL_NAME: &str = "code_execute";
 pub(crate) const LEGACY_TOOL_INVOKE_TOOL_NAME: &str = "tool_invoke";
 pub(crate) const LEGACY_TOOL_SEARCH_TOOL_NAME: &str = "tool_search";
@@ -201,7 +200,6 @@ impl LabMcpServer {
         if visibility.exposes_synthetic_tools() {
             tools.insert(TOOL_SEARCH_TOOL_NAME.to_string());
             tools.insert(CODE_SEARCH_TOOL_NAME.to_string());
-            tools.insert(CODE_SCHEMA_TOOL_NAME.to_string());
             tools.insert(CODE_EXECUTE_TOOL_NAME.to_string());
             tools.insert(TOOL_EXECUTE_TOOL_NAME.to_string());
         } else {

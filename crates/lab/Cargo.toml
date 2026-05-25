@@ -43,6 +43,13 @@ anyhow.workspace = true
 thiserror.workspace = true
 jiff.workspace = true
 boa_engine = "0.21.1"
+javy = { version = "7.0.0", optional = true }
+wasmtime = { version = "44.0.1", optional = true, default-features = false, features = [
+  "cranelift",
+  "pooling-allocator",
+  "runtime",
+  "wat",
+] }
 
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -128,7 +135,8 @@ path = "src/lib.rs"
 [features]
 acp_registry = ["lab-apis/acp_registry"]
 node-runtime = []
-all = ["lab-apis/all", "lab-admin", "acp_registry", "deploy", "extract", "mcpregistry", "gateway", "marketplace"]
+all = ["lab-apis/all", "lab-admin", "acp_registry", "deploy", "extract", "mcpregistry", "gateway", "marketplace", "code_mode_wasm"]
+code_mode_wasm = ["dep:javy", "dep:wasmtime"]
 gateway = []
 marketplace = ["mcpregistry"]
 services-all = [

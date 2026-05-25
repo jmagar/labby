@@ -33,8 +33,8 @@ For normal services, `dispatch/<service>/dispatch.rs` owns action routing, catal
   `dispatch/gateway/dispatch.rs` enforces the non-dispatch boundary. Do
   not add `dispatch/gateway-scout/` unless a second surface consumer is
   confirmed.
-- `code_search`, `code_schema`, and `code_execute` are registered
-  directly in `mcp/server.rs` as gateway Code Mode meta-tools. MCP owns
+- `code_search` and `code_execute` are registered directly in
+  `mcp/server.rs` as gateway Code Mode meta-tools. MCP owns
   tool registration, scope extraction, MCP request parsing, and
   `CallToolResult` envelope conversion. Code Mode business logic lives
   in `dispatch/gateway/code_mode.rs` so the native CLI can call the same
