@@ -2945,11 +2945,21 @@ impl LabMcpServer {
 }
 
 fn tool_error_envelope(service: &str, action: &str, err: &DispatchToolError) -> Value {
-    match err {
-        DispatchToolError::Sdk { sdk_kind, message } => {
-            build_error(service, action, sdk_kind, message)
-        }
-        other => build_error(service, action, other.kind(), &other.to_string()),
+    let Ok(Value::Object(mut serialized)) = serde_json::to_value(err) else {
+        return build_error(service, action, err.kind(), &err.to_string());
+    };
+    let kind = serialized
+        .remove("kind")
+        .and_then(|value| value.as_str().map(ToOwned::to_owned))
+        .unwrap_or_else(|| err.kind().to_string());
+    let message = serialized
+        .remove("message")
+        .and_then(|value| value.as_str().map(ToOwned::to_owned))
+        .unwrap_or_else(|| err.to_string());
+    if serialized.is_empty() {
+        build_error(service, action, &kind, &message)
+    } else {
+        build_error_extra(service, action, &kind, &message, &Value::Object(serialized))
     }
 }
 
@@ -3448,6 +3458,25 @@ mod tests {
 
         assert_eq!(kind, "missing_param");
         assert!(!counts_as_failure);
+    }
+
+    #[test]
+    fn tool_error_envelope_preserves_structured_extras() {
+        let err = ToolError::MissingParam {
+            message: "query is required".to_string(),
+            param: "query".to_string(),
+        };
+
+        let envelope = super::tool_error_envelope("code_search", "call_tool", &err);
+
+        assert_eq!(
+            envelope.pointer("/error/kind"),
+            Some(&Value::from("missing_param"))
+        );
+        assert_eq!(
+            envelope.pointer("/error/param"),
+            Some(&Value::from("query"))
+        );
     }
 
     #[test]

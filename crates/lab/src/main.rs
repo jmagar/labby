@@ -165,8 +165,14 @@ async fn main() -> ExitCode {
     // by default — upstream connect/discovery events would otherwise flood
     // ordinary commands like `gateway list`. LAB_LOG still wins when set.
     let log_filter_override: Option<String> = match &cli.command {
-        cli::Command::Serve(args) => args.log_level.as_ref().map(|level| format!("labby={level},warn")),
-        cli::Command::Mcp(args) => args.log_level.as_ref().map(|level| format!("labby={level},warn")),
+        cli::Command::Serve(args) => args
+            .log_level
+            .as_ref()
+            .map(|level| format!("labby={level},warn")),
+        cli::Command::Mcp(args) => args
+            .log_level
+            .as_ref()
+            .map(|level| format!("labby={level},warn")),
         _ if std::env::var_os("LAB_LOG").is_none() => {
             Some("labby=warn,lab_apis=warn,rmcp=warn".to_string())
         }

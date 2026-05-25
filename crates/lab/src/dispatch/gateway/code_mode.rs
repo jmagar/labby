@@ -303,7 +303,7 @@ impl<'a> CodeModeBroker<'a> {
         let parsed = CodeModeToolId::parse(id)?;
         match parsed.reference {
             CodeModeToolRef::LabAction { service, action } => {
-                self.schema_for_lab_action(&parsed.raw, &service, &action, surface)
+                self.schema_for_lab_action(&parsed.raw, &service, &action, caller, surface)
                     .await
             }
             CodeModeToolRef::UpstreamTool { upstream, tool } => {
@@ -400,6 +400,7 @@ impl<'a> CodeModeBroker<'a> {
         id: &str,
         service_name: &str,
         action_name: &str,
+        caller: CodeModeCaller,
         surface: CodeModeSurface,
     ) -> Result<CodeModeSchemaResponse, ToolError> {
         let Some(entry) = self
@@ -431,6 +432,15 @@ impl<'a> CodeModeBroker<'a> {
                 sdk_kind: "not_found".to_string(),
                 message: format!("Lab action `{service_name}.{action_name}` was not found"),
             })?;
+        if !caller.can_execute_action(entry, action_name) {
+            return Err(ToolError::Sdk {
+                sdk_kind: "forbidden".to_string(),
+                message: format!(
+                    "action `{action_name}` for service `{}` requires `lab:admin` scope",
+                    entry.name
+                ),
+            });
+        }
         let input_schema = action_input_schema(action);
         crate::dispatch::helpers::action_schema(entry.actions, action_name).map(|schema| {
             CodeModeSchemaResponse::lab_action_with_input_schema(
@@ -1025,6 +1035,10 @@ async fn write_runner_input(
     stdin.write_all(&line).await.map_err(|err| ToolError::Sdk {
         sdk_kind: "internal_error".to_string(),
         message: format!("failed to write Code Mode runner input: {err}"),
+    })?;
+    stdin.flush().await.map_err(|err| ToolError::Sdk {
+        sdk_kind: "internal_error".to_string(),
+        message: format!("failed to flush Code Mode runner input: {err}"),
     })
 }
 
@@ -1634,6 +1648,29 @@ mod tests {
             .expect_err("mcp destructive action should require top-level code_execute confirm");
 
         assert_eq!(err.kind(), "confirmation_required");
+    }
+
+    #[tokio::test]
+    async fn code_mode_schema_requires_admin_for_admin_only_actions() {
+        let registry = destructive_test_registry();
+        let broker = super::CodeModeBroker::new(&registry, None);
+
+        let err = broker
+            .schema(
+                "lab::gateway.danger",
+                super::CodeModeCaller::Scoped {
+                    scopes: vec!["lab".to_string()],
+                    subject: Some("subject-1".to_string()),
+                },
+                super::CodeModeSurface::Mcp {
+                    expose_builtin_services: true,
+                    allow_destructive_actions: true,
+                },
+            )
+            .await
+            .expect_err("schema for admin-only action must require admin scope");
+
+        assert_eq!(err.kind(), "forbidden");
     }
 
     #[tokio::test]

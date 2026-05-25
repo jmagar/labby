@@ -539,14 +539,11 @@ impl CodeModeConfig {
 impl ToolSearchConfig {
     /// Resolve Qdrant URL: config field → `QDRANT_URL` env var → None.
     pub fn resolved_qdrant_url(&self) -> Option<String> {
-        resolve_container_service_url(
-            self.qdrant_url
-                .clone()
-                .filter(|s| !s.is_empty())
-                .or_else(|| std::env::var("QDRANT_URL").ok().filter(|s| !s.is_empty())),
-            "axon-qdrant",
-            6333,
-        )
+        self.qdrant_url
+            .clone()
+            .filter(|s| !s.is_empty())
+            .or_else(|| std::env::var("QDRANT_URL").ok().filter(|s| !s.is_empty()))
+            .map(|raw| normalize_container_loopback_url(&raw, "axon-qdrant", 6333))
     }
 
     /// Resolve Qdrant API key: config field → `QDRANT_API_KEY` env var → None.
@@ -564,14 +561,11 @@ impl ToolSearchConfig {
 
     /// Resolve TEI URL: config field → `TEI_URL` env var → None.
     pub fn resolved_tei_url(&self) -> Option<String> {
-        resolve_container_service_url(
-            self.tei_url
-                .clone()
-                .filter(|s| !s.is_empty())
-                .or_else(|| std::env::var("TEI_URL").ok().filter(|s| !s.is_empty())),
-            "axon-tei",
-            80,
-        )
+        self.tei_url
+            .clone()
+            .filter(|s| !s.is_empty())
+            .or_else(|| std::env::var("TEI_URL").ok().filter(|s| !s.is_empty()))
+            .map(|raw| normalize_container_loopback_url(&raw, "axon-tei", 80))
     }
 
     /// Resolve TEI API key: config field → `TEI_API_KEY` env var → None.
@@ -601,14 +595,6 @@ impl ToolSearchConfig {
         }
         Ok(())
     }
-}
-
-fn resolve_container_service_url(
-    configured: Option<String>,
-    docker_host: &str,
-    docker_port: u16,
-) -> Option<String> {
-    configured.map(|raw| normalize_container_loopback_url(&raw, docker_host, docker_port))
 }
 
 fn normalize_container_loopback_url(raw: &str, docker_host: &str, docker_port: u16) -> String {

@@ -11,6 +11,8 @@ pub mod config;
 pub mod dispatch;
 #[allow(unreachable_pub)]
 pub mod docs;
+#[cfg(test)]
+#[allow(dead_code)]
 pub mod log_fmt;
 #[allow(unreachable_pub)]
 pub mod mcp;

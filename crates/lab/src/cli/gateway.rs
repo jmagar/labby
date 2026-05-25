@@ -769,6 +769,9 @@ async fn run_gateway_code(
                 }
                 _ => anyhow::bail!("provide exactly one of --code or --file"),
             };
+            if code.len() as u64 > CODE_MODE_CLI_MAX_SOURCE_BYTES {
+                anyhow::bail!("Code Mode source exceeds 20480 bytes");
+            }
             let config = manager.code_mode_config().await;
             let max_tool_calls = config.max_tool_calls;
             let response = broker
