@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import type { ACPAgent, ACPModelOption } from './types'
 import {
   createLocalAttachmentDraft,
@@ -19,6 +20,8 @@ import {
   revokeLocalAttachmentPreview,
   validateLocalFiles,
 } from '@/lib/chat/local-attachments'
+import { groupModels } from '@/lib/chat/model-grouping'
+import { nextNavIndex, useListKeyboard } from '@/lib/chat/use-list-keyboard'
 import type { AttachmentRef, LocalAttachmentDraft, PromptAttachmentRef } from '@/lib/fs/types'
 import { isInlineImageMime, previewWorkspaceFile } from '@/lib/fs/client'
 import { WorkspacePicker } from './workspace-picker'
@@ -89,10 +92,15 @@ export function ChatInput({
   const modelPickerRef = React.useRef<HTMLDivElement>(null)
   const modelTriggerRef = React.useRef<HTMLButtonElement>(null)
   const modelOptionRefs = React.useRef<Array<HTMLButtonElement | null>>([])
-  const [activeAgentIndex, setActiveAgentIndex] = React.useState(0)
-  const [activeModelIndex, setActiveModelIndex] = React.useState(0)
+  const agentNav = useListKeyboard({ count: agents.length })
+  const modelNav = useListKeyboard({ count: modelOptions.length })
+  const activeAgentIndex = agentNav.activeIndex
+  const setActiveAgentIndex = agentNav.setActiveIndex
+  const activeModelIndex = modelNav.activeIndex
+  const setActiveModelIndex = modelNav.setActiveIndex
   const pickerId = React.useId()
   const modelPickerId = React.useId()
+  const groupedModels = React.useMemo(() => groupModels(modelOptions), [modelOptions])
 
   const value = draftText ?? uncontrolledValue
   const setValue = React.useCallback(
@@ -300,26 +308,17 @@ export function ChatInput({
 
     if (agents.length === 0) return
 
-    const moveTo = (nextIndex: number) => {
-      setActiveAgentIndex(nextIndex)
-      optionRefs.current[nextIndex]?.focus()
-    }
-
-    if (event.key === 'ArrowDown') {
-      event.preventDefault()
-      moveTo((activeAgentIndex + 1) % agents.length)
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault()
-      moveTo((activeAgentIndex - 1 + agents.length) % agents.length)
-    } else if (event.key === 'Home') {
-      event.preventDefault()
-      moveTo(0)
-    } else if (event.key === 'End') {
-      event.preventDefault()
-      moveTo(agents.length - 1)
-    } else if ((event.key === 'Enter' || event.key === ' ') && agents[activeAgentIndex]) {
+    if ((event.key === 'Enter' || event.key === ' ') && agents[activeAgentIndex]) {
       event.preventDefault()
       selectAgent(agents[activeAgentIndex].id)
+      return
+    }
+
+    const next = nextNavIndex(activeAgentIndex, event.key, agents.length)
+    if (next !== null) {
+      event.preventDefault()
+      setActiveAgentIndex(next)
+      optionRefs.current[next]?.focus()
     }
   }
 
@@ -363,26 +362,21 @@ export function ChatInput({
 
     if (modelOptions.length === 0) return
 
-    const moveTo = (nextIndex: number) => {
-      setActiveModelIndex(nextIndex)
-      modelOptionRefs.current[nextIndex]?.focus()
-    }
+    // In grouped mode each row owns a ToggleGroup with its own keyboard nav —
+    // bow out so we don't double-handle arrow keys.
+    if (groupedModels.kind === 'grouped') return
 
-    if (event.key === 'ArrowDown') {
-      event.preventDefault()
-      moveTo((activeModelIndex + 1) % modelOptions.length)
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault()
-      moveTo((activeModelIndex - 1 + modelOptions.length) % modelOptions.length)
-    } else if (event.key === 'Home') {
-      event.preventDefault()
-      moveTo(0)
-    } else if (event.key === 'End') {
-      event.preventDefault()
-      moveTo(modelOptions.length - 1)
-    } else if ((event.key === 'Enter' || event.key === ' ') && modelOptions[activeModelIndex]) {
+    if ((event.key === 'Enter' || event.key === ' ') && modelOptions[activeModelIndex]) {
       event.preventDefault()
       selectModel(modelOptions[activeModelIndex].id)
+      return
+    }
+
+    const next = nextNavIndex(activeModelIndex, event.key, modelOptions.length)
+    if (next !== null) {
+      event.preventDefault()
+      setActiveModelIndex(next)
+      modelOptionRefs.current[next]?.focus()
     }
   }
 
@@ -516,9 +510,13 @@ export function ChatInput({
                 {modelPickerOpen && (
                   <div
                     id={modelPickerId}
-                    role="listbox"
+                    role={groupedModels.kind === 'flat' ? 'listbox' : 'group'}
                     aria-label="Model picker"
-                    aria-activedescendant={modelOptions[activeModelIndex] ? `${modelPickerId}-${modelOptions[activeModelIndex].id}` : undefined}
+                    aria-activedescendant={
+                      groupedModels.kind === 'flat' && modelOptions[activeModelIndex]
+                        ? `${modelPickerId}-${modelOptions[activeModelIndex].id}`
+                        : undefined
+                    }
                     onKeyDown={handleModelListKeyDown}
                     className={cn(
                       'absolute bottom-full right-0 z-50 mb-1.5 min-w-[180px] overflow-hidden',
@@ -527,38 +525,91 @@ export function ChatInput({
                     )}
                   >
                     <TooltipProvider delayDuration={400}>
-                      {modelOptions.map((model, index) => {
-                        const optionButton = (
-                          <button
-                            key={model.id}
-                            id={`${modelPickerId}-${model.id}`}
-                            ref={(node) => {
-                              modelOptionRefs.current[index] = node
-                            }}
-                            type="button"
-                            role="option"
-                            aria-selected={selectedModel?.id === model.id}
-                            tabIndex={index === activeModelIndex ? 0 : -1}
-                            onFocus={() => setActiveModelIndex(index)}
-                            onClick={() => selectModel(model.id)}
-                            className={cn(
-                              'flex w-full items-center px-3 py-1.5 text-left text-[13px] font-medium text-aurora-text-primary transition-colors hover:bg-aurora-hover-bg',
-                              selectedModel?.id === model.id && 'bg-aurora-panel-medium',
-                            )}
-                          >
-                            <span className="truncate">{model.name}</span>
-                          </button>
-                        )
-                        if (!model.description) return optionButton
-                        return (
-                          <Tooltip key={model.id}>
-                            <TooltipTrigger asChild>{optionButton}</TooltipTrigger>
-                            <TooltipContent side="right" className="max-w-[260px] text-xs">
-                              {model.description}
-                            </TooltipContent>
-                          </Tooltip>
-                        )
-                      })}
+                      {groupedModels.kind === 'flat' ? (
+                        modelOptions.map((model, index) => {
+                          const optionButton = (
+                            <button
+                              key={model.id}
+                              id={`${modelPickerId}-${model.id}`}
+                              ref={(node) => {
+                                modelOptionRefs.current[index] = node
+                              }}
+                              type="button"
+                              role="option"
+                              aria-selected={selectedModel?.id === model.id}
+                              tabIndex={index === activeModelIndex ? 0 : -1}
+                              onFocus={() => setActiveModelIndex(index)}
+                              onClick={() => selectModel(model.id)}
+                              className={cn(
+                                'flex w-full items-center px-3 py-1.5 text-left text-[13px] font-medium text-aurora-text-primary transition-colors hover:bg-aurora-hover-bg',
+                                selectedModel?.id === model.id && 'bg-aurora-panel-medium',
+                              )}
+                            >
+                              <span className="truncate">{model.name}</span>
+                            </button>
+                          )
+                          if (!model.description) return optionButton
+                          return (
+                            <Tooltip key={model.id}>
+                              <TooltipTrigger asChild>{optionButton}</TooltipTrigger>
+                              <TooltipContent side="right" className="max-w-[260px] text-xs">
+                                {model.description}
+                              </TooltipContent>
+                            </Tooltip>
+                          )
+                        })
+                      ) : (
+                        groupedModels.groups.map((group) => {
+                          const selectedVariant = group.variants.find(
+                            (v) => v.option.id === selectedModel?.id,
+                          )
+                          return (
+                            <div
+                              key={group.base}
+                              className="flex items-center justify-between gap-2 px-3 py-1.5"
+                            >
+                              <span className="truncate text-[13px] font-medium text-aurora-text-primary">
+                                {group.base}
+                              </span>
+                              <ToggleGroup
+                                type="single"
+                                value={selectedVariant?.effort ?? ''}
+                                onValueChange={(effort) => {
+                                  if (!effort) return
+                                  const variant = group.variants.find((v) => v.effort === effort)
+                                  if (variant) selectModel(variant.option.id)
+                                }}
+                                className="h-7 shrink-0"
+                              >
+                                {group.variants.map((variant) => {
+                                  const item = (
+                                    <ToggleGroupItem
+                                      key={variant.effort}
+                                      value={variant.effort}
+                                      aria-label={`${group.base} ${variant.effort}`}
+                                      className="h-7 px-2 text-[11px]"
+                                    >
+                                      {variant.effort}
+                                    </ToggleGroupItem>
+                                  )
+                                  if (!variant.option.description) return item
+                                  return (
+                                    <Tooltip key={variant.effort}>
+                                      <TooltipTrigger asChild>{item}</TooltipTrigger>
+                                      <TooltipContent
+                                        side="top"
+                                        className="max-w-[260px] text-xs"
+                                      >
+                                        {variant.option.description}
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  )
+                                })}
+                              </ToggleGroup>
+                            </div>
+                          )
+                        })
+                      )}
                     </TooltipProvider>
                   </div>
                 )}
