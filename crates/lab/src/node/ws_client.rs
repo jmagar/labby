@@ -822,6 +822,14 @@ struct InstallDecodeError {
 fn decode_component_files(
     files: Option<&Vec<Value>>,
 ) -> Result<Vec<(String, Vec<u8>)>, InstallDecodeError> {
+    decode_component_files_with_limits(files, MAX_COMPONENT_FILE_SIZE, MAX_COMPONENT_AGGREGATE_SIZE)
+}
+
+fn decode_component_files_with_limits(
+    files: Option<&Vec<Value>>,
+    max_file_size: usize,
+    max_aggregate_size: usize,
+) -> Result<Vec<(String, Vec<u8>)>, InstallDecodeError> {
     use base64::Engine as _;
     let Some(files) = files else {
         return Ok(Vec::new());
@@ -870,24 +878,21 @@ fn decode_component_files(
                 });
             }
         };
-        if decoded.len() > MAX_COMPONENT_FILE_SIZE {
+        if decoded.len() > max_file_size {
             return Err(InstallDecodeError {
                 kind: "content_too_large",
                 message: format!(
                     "component `{path}` is {} bytes; per-file limit is {} bytes",
                     decoded.len(),
-                    MAX_COMPONENT_FILE_SIZE
+                    max_file_size
                 ),
             });
         }
         aggregate = aggregate.saturating_add(decoded.len());
-        if aggregate > MAX_COMPONENT_AGGREGATE_SIZE {
+        if aggregate > max_aggregate_size {
             return Err(InstallDecodeError {
                 kind: "content_too_large",
-                message: format!(
-                    "aggregate component payload exceeds {} bytes",
-                    MAX_COMPONENT_AGGREGATE_SIZE
-                ),
+                message: format!("aggregate component payload exceeds {max_aggregate_size} bytes"),
             });
         }
         out.push((path, decoded));
@@ -1873,10 +1878,9 @@ mod tests {
 
     #[test]
     fn decode_component_files_rejects_per_file_oversize() {
-        // 6 MB of 'a' > 5 MB per-file cap.
-        let big = "a".repeat(6 * 1024 * 1024);
+        let big = "a".repeat(17);
         let files = vec![json!({ "path": "big.bin", "content": big, "encoding": "utf8" })];
-        let err = decode_component_files(Some(&files))
+        let err = decode_component_files_with_limits(Some(&files), 16, 64)
             .err()
             .expect("must reject");
         assert_eq!(err.kind, "content_too_large");
@@ -1884,13 +1888,13 @@ mod tests {
 
     #[test]
     fn decode_component_files_rejects_aggregate_oversize() {
-        // 7 × 5 MB = 35 MB > 32 MB aggregate cap. Individual files fit under
-        // the per-file cap so the aggregate check is exercised.
-        let chunk = "a".repeat(5 * 1024 * 1024 - 1024);
+        // 7 x 10 bytes = 70 bytes > 64 byte aggregate cap. Individual files fit
+        // under the per-file cap so the aggregate check is exercised.
+        let chunk = "a".repeat(10);
         let files: Vec<Value> = (0..7)
             .map(|i| json!({ "path": format!("f{i}.bin"), "content": chunk, "encoding": "utf8" }))
             .collect();
-        let err = decode_component_files(Some(&files))
+        let err = decode_component_files_with_limits(Some(&files), 16, 64)
             .err()
             .expect("must reject");
         assert_eq!(err.kind, "content_too_large");

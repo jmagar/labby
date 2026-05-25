@@ -513,6 +513,22 @@
   },
   {
     "method": "POST",
+    "path": "/v1/fs",
+    "surface": "api",
+    "handler_group": "services",
+    "feature": "fs",
+    "runtime_condition": "mounted only when fs is enabled and /v1 auth is configured if LAB_WEB_UI_AUTH_DISABLED=true",
+    "auth_required": true,
+    "bearer_only": false,
+    "session_cookie_allowed": true,
+    "csrf_required": true,
+    "host_validation": false,
+    "master_only": true,
+    "cache_posture": "not cacheable",
+    "notes": "service action dispatch"
+  },
+  {
+    "method": "POST",
     "path": "/v1/gateway",
     "surface": "api",
     "handler_group": "gateway",

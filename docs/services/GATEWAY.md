@@ -139,7 +139,13 @@ Invoke call shape on the MCP surface:
 { "name": "search_issues", "arguments": { "query": "repo:jmagar/lab tool_search" } }
 ```
 
-Code Mode is schema-first discovery plus opt-in sandboxed execution.
+Code Mode is schema-first discovery plus opt-in sandboxed execution. The
+business logic lives in gateway dispatch and is exposed through two adapters:
+the MCP meta-tools (`code_search`, `code_schema`, `code_execute`) and the native
+CLI (`labby gateway code search|schema|exec`). Both adapters use the same stable
+ids, schema response types, sandbox runner, visibility checks, and brokered
+execution path.
+
 `code_search` returns stable ids for Lab actions and upstream tools:
 
 ```json
@@ -159,6 +165,14 @@ Example candidate ids:
 
 ```json
 { "id": "lab::gateway.gateway.schema" }
+```
+
+Native CLI equivalents:
+
+```bash
+labby gateway code search "gateway servers" --json
+labby gateway code schema "lab::gateway.gateway.servers" --json
+labby gateway code exec --code 'await callTool("lab::gateway.gateway.servers", {})' --json
 ```
 
 Lab ids use `lab::<service>.<action>` and return an `ActionSpec`-derived
@@ -200,7 +214,9 @@ Rules:
 - `include_schema` defaults to `false`; schemas are sanitized before return when requested
 - `code_search` is read-only discovery and accepts `lab:read`, `lab`, or `lab:admin`
 - `code_schema` exposes full schemas and requires `lab` or `lab:admin`
-- `code_execute` requires `lab` or `lab:admin`, is disabled unless `[code_mode].enabled = true`, and brokers calls through the same gateway visibility and destructive-action checks as `invoke`
+- `code_execute` requires `lab` or `lab:admin`, is disabled unless `[code_mode].enabled = true`, and brokers calls through the same gateway visibility checks as `invoke`
+- destructive Lab actions in MCP Code Mode require both top-level `code_execute.confirm = true` and per-call `params.confirm = true`; Code Mode does not prompt per action via MCP elicitation
+- gateway action provenance fields (`origin` and `owner`) are reserved in Code Mode and are overwritten by the broker
 - `code_execute` enforces `timeout_ms` by killing the child process and enforces `max_tool_calls` in the parent before brokering each call
 - invalid Code Mode ids return `invalid_code_mode_id`
 - unavailable or overlarge upstream schemas return `schema_unavailable`
