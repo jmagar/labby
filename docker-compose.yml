@@ -33,6 +33,11 @@ networks:
   # Compose creates and manages this network on first `up`. Override the name
   # via the DOCKER_NETWORK env var to attach to an existing bridge shared with
   # other compose stacks — Compose joins a pre-existing network of that name
-  # without re-creating it. The homelab `.env` sets `DOCKER_NETWORK=jakenet`.
+  # without re-creating it. Host-local `.env` files can set DOCKER_NETWORK to
+  # the shared bridge used on that machine.
   lab:
     name: ${DOCKER_NETWORK:-lab}
+    external: ${DOCKER_NETWORK_EXTERNAL:-false}
+  axon:
+    external: true
+    name: ${AXON_DOCKER_NETWORK:-jakenet}

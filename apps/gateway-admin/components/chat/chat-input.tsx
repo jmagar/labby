@@ -526,28 +526,40 @@ export function ChatInput({
                       'shadow-[var(--aurora-shadow-strong),var(--aurora-highlight-strong)]',
                     )}
                   >
-                    {modelOptions.map((model, index) => (
-                      <button
-                        key={model.id}
-                        id={`${modelPickerId}-${model.id}`}
-                        ref={(node) => {
-                          modelOptionRefs.current[index] = node
-                        }}
-                        type="button"
-                        role="option"
-                        aria-selected={selectedModel?.id === model.id}
-                        tabIndex={index === activeModelIndex ? 0 : -1}
-                        onFocus={() => setActiveModelIndex(index)}
-                        onClick={() => selectModel(model.id)}
-                        className={cn(
-                          'flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-aurora-hover-bg',
-                          selectedModel?.id === model.id && 'bg-aurora-panel-medium',
-                        )}
-                      >
-                        <span className="text-[13px] font-medium text-aurora-text-primary">{model.name}</span>
-                        {model.description && <span className="text-[11px] text-aurora-text-muted">{model.description}</span>}
-                      </button>
-                    ))}
+                    <TooltipProvider delayDuration={400}>
+                      {modelOptions.map((model, index) => {
+                        const optionButton = (
+                          <button
+                            key={model.id}
+                            id={`${modelPickerId}-${model.id}`}
+                            ref={(node) => {
+                              modelOptionRefs.current[index] = node
+                            }}
+                            type="button"
+                            role="option"
+                            aria-selected={selectedModel?.id === model.id}
+                            tabIndex={index === activeModelIndex ? 0 : -1}
+                            onFocus={() => setActiveModelIndex(index)}
+                            onClick={() => selectModel(model.id)}
+                            className={cn(
+                              'flex w-full items-center px-3 py-1.5 text-left text-[13px] font-medium text-aurora-text-primary transition-colors hover:bg-aurora-hover-bg',
+                              selectedModel?.id === model.id && 'bg-aurora-panel-medium',
+                            )}
+                          >
+                            <span className="truncate">{model.name}</span>
+                          </button>
+                        )
+                        if (!model.description) return optionButton
+                        return (
+                          <Tooltip key={model.id}>
+                            <TooltipTrigger asChild>{optionButton}</TooltipTrigger>
+                            <TooltipContent side="right" className="max-w-[260px] text-xs">
+                              {model.description}
+                            </TooltipContent>
+                          </Tooltip>
+                        )
+                      })}
+                    </TooltipProvider>
                   </div>
                 )}
               </div>

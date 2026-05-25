@@ -161,12 +161,17 @@ async fn main() -> ExitCode {
 
     // 2. Init tracing. If a serve-path `--log-level <level>` was given, pass it
     //    directly to avoid mutating the environment (crate forbids unsafe_code).
+    // For one-shot CLI commands (not Serve/Mcp) we silence labby's INFO chatter
+    // by default — upstream connect/discovery events would otherwise flood
+    // ordinary commands like `gateway list`. LAB_LOG still wins when set.
     let log_filter_override: Option<String> = match &cli.command {
-        cli::Command::Serve(args) => args.log_level.as_ref(),
-        cli::Command::Mcp(args) => args.log_level.as_ref(),
+        cli::Command::Serve(args) => args.log_level.as_ref().map(|level| format!("labby={level},warn")),
+        cli::Command::Mcp(args) => args.log_level.as_ref().map(|level| format!("labby={level},warn")),
+        _ if std::env::var_os("LAB_LOG").is_none() => {
+            Some("labby=warn,lab_apis=warn,rmcp=warn".to_string())
+        }
         _ => None,
-    }
-    .map(|level| format!("labby={level},warn"));
+    };
 
     // LAB_LOG_COLOR overrides the CLI default when running without a TTY (e.g.
     // inside Docker). The CLI --color flag wins when the user sets it explicitly,

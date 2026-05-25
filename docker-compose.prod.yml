@@ -50,6 +50,14 @@ services:
       # claude-agent-sdk may rewrite the file on token refresh; that goes
       # straight back to the host source-of-truth.
       - ${HOME}/.claude/.credentials.json:/home/lab/.lab/acp/claude-home/.credentials.json
+      # Codex credentials — same lockstep pattern as Claude. The host `codex`
+      # CLI and the container's codex-acp share one ChatGPT OAuth identity, and
+      # whichever side refreshes first rotates the refresh_token; without these
+      # file-level mounts the other side's copy goes stale and codex-acp
+      # returns "refresh_token_reused" on every session. Mounted rw so codex's
+      # own rotation flows straight back to the host source-of-truth.
+      - ${HOME}/.codex/auth.json:/home/lab/.lab/acp/codex-home/auth.json
+      - ${HOME}/.codex/.credentials.json:/home/lab/.lab/acp/codex-home/.credentials.json
       # Marketplace catalog state. The marketplace API reads Claude's known
       # marketplaces, cached marketplace checkouts, and installed plugin index
       # from ~/.claude/plugins; without this mount the web UI only sees the
@@ -115,6 +123,7 @@ services:
     # namespace + these limits prevent a fork-bomb from reaching the host.
     networks:
       - lab
+      - axon
     deploy:
       resources:
         limits:
@@ -129,6 +138,14 @@ networks:
   # Compose creates and manages this network on first `up`. Override the name
   # via the DOCKER_NETWORK env var to attach to an existing bridge shared with
   # other compose stacks — Compose joins a pre-existing network of that name
-  # without re-creating it. The homelab `.env` sets `DOCKER_NETWORK=jakenet`.
+  # without re-creating it. Host-local `.env` files can set DOCKER_NETWORK to
+  # the shared bridge used on that machine.
   lab:
     name: ${DOCKER_NETWORK:-lab}
+    external: ${DOCKER_NETWORK_EXTERNAL:-false}
+  # Qdrant and TEI for semantic gateway/code_search live in the Axon stack.
+  # Lab keeps host-loopback URLs usable for host CLIs, but rewrites them to
+  # these Docker DNS names when running in a container.
+  axon:
+    external: true
+    name: ${AXON_DOCKER_NETWORK:-jakenet}

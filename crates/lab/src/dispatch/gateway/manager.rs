@@ -2186,13 +2186,6 @@ impl GatewayManager {
         });
         hits.truncate(lexical_window);
 
-        if hits.is_empty() && self.tool_search_warming().await {
-            return Err(ToolError::Sdk {
-                sdk_kind: "index_warming".to_string(),
-                message: "tool index is being built, retry shortly".to_string(),
-            });
-        }
-
         // Semantic hybrid search via Qdrant + TEI — fused with lexical hits via RRF.
         // Graceful degradation: if Qdrant/TEI are unavailable, log a WARN and return
         // lexical results unchanged. Every return path truncates to `requested` —
@@ -2229,6 +2222,13 @@ impl GatewayManager {
                 hits
             };
         hits.truncate(requested);
+
+        if hits.is_empty() && self.tool_search_warming().await {
+            return Err(ToolError::Sdk {
+                sdk_kind: "index_warming".to_string(),
+                message: "tool index is being built, retry shortly".to_string(),
+            });
+        }
 
         Ok(hits
             .into_iter()
@@ -2662,6 +2662,18 @@ impl GatewayManager {
 
         let now = Instant::now();
         let max_tools = cfg.tool_search.max_tools;
+        let semantic_urls = match (
+            cfg.tool_search.resolved_qdrant_url(),
+            cfg.tool_search.resolved_tei_url(),
+        ) {
+            (Some(qdrant_url), Some(tei_url)) => Some((
+                qdrant_url,
+                tei_url,
+                cfg.tool_search.resolved_qdrant_api_key(),
+                cfg.tool_search.resolved_tei_api_key(),
+            )),
+            _ => None,
+        };
         let mut pending = Vec::new();
         for upstream in cfg.upstream {
             if !upstream.enabled {
@@ -2726,6 +2738,7 @@ impl GatewayManager {
 
         let tasks = pending.into_iter().map(|(upstream, state)| {
             let pool = Arc::clone(&pool);
+            let semantic_urls = semantic_urls.clone();
             async move {
                 let reprobe_started = Instant::now();
                 tracing::debug!(
@@ -2774,6 +2787,47 @@ impl GatewayManager {
                             max_tools,
                             "gateway tool index truncated — increase [tool_search] max_tools to index all tools"
                         );
+                    }
+                    if should_publish
+                        && let Some((qdrant_url, tei_url, qdrant_api_key, tei_api_key)) =
+                            semantic_urls.clone()
+                    {
+                        let tools_to_index: Vec<_> = index
+                            .tools
+                            .iter()
+                            .filter(|tool| tool.priority > 0.0)
+                            .cloned()
+                            .collect();
+                        let upstream_for_sem = upstream.name.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) =
+                                crate::dispatch::gateway::semantic::ensure_tools_collection(
+                                    &qdrant_url,
+                                    qdrant_api_key.as_deref(),
+                                )
+                                .await
+                            {
+                                tracing::warn!(service = "tool_search", action = "semantic.ensure_collection", error = %e, "semantic index: collection init failed");
+                                return;
+                            }
+                            match crate::dispatch::gateway::semantic::index_tools(
+                                &qdrant_url,
+                                &tei_url,
+                                qdrant_api_key.as_deref(),
+                                tei_api_key.as_deref(),
+                                &upstream_for_sem,
+                                &tools_to_index,
+                            )
+                            .await
+                            {
+                                Ok(()) => {
+                                    tracing::info!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, count = tools_to_index.len(), "semantic tool index updated")
+                                }
+                                Err(e) => {
+                                    tracing::warn!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, error = %e, "semantic index failed — lexical search unaffected")
+                                }
+                            }
+                        });
                     }
                     if should_publish {
                         state.index.store(Some(Arc::new(index)));

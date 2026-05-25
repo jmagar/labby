@@ -1,8 +1,9 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::process::ExitCode;
 
-use boa_engine::builtins::promise::PromiseState;
+use boa_engine::builtins::promise::{PromiseState, ResolvingFunctions};
 use boa_engine::object::builtins::JsPromise;
 use boa_engine::{
     Context, JsArgs, JsError, JsNativeError, JsResult, JsValue, NativeFunction, Source, js_string,
@@ -188,6 +189,7 @@ struct CodeModeRunnerState {
     reader: BufReader<io::Stdin>,
     writer: BufWriter<io::Stdout>,
     next_seq: u64,
+    pending_calls: HashMap<u64, ResolvingFunctions>,
 }
 
 const CODE_MODE_LOOP_ITERATION_LIMIT: u64 = 1_000_000;
@@ -256,6 +258,7 @@ pub fn run_code_mode_runner_stdio() -> ExitCode {
             reader: BufReader::new(io::stdin()),
             writer: BufWriter::new(io::stdout()),
             next_seq: 0,
+            pending_calls: HashMap::new(),
         });
     });
 
@@ -289,15 +292,20 @@ fn run_code_mode_runner() -> Result<(), String> {
     let value = context
         .eval(Source::from_bytes(wrapped.as_bytes()))
         .map_err(js_error_message)?;
-    context.run_jobs().map_err(js_error_message)?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| "Code Mode script did not return a promise".to_string())?;
+    let promise = JsPromise::from_object(object.clone()).map_err(js_error_message)?;
 
-    if let Some(object) = value.as_object() {
-        let promise = JsPromise::from_object(object.clone()).map_err(js_error_message)?;
+    loop {
+        context.run_jobs().map_err(js_error_message)?;
+
         match promise.state() {
-            PromiseState::Fulfilled(_) => {}
+            PromiseState::Fulfilled(_) => break,
             PromiseState::Rejected(reason) => return Err(js_value_message(&reason, &mut context)),
             PromiseState::Pending => {
-                return Err("Code Mode script returned a pending promise".to_string());
+                let input = runner_read_input()?;
+                settle_code_mode_tool_promise(input, &mut context)?;
             }
         }
     }
@@ -335,6 +343,7 @@ fn code_mode_call_tool_native(
         return Err(js_type_error("callTool params must be a JSON object"));
     }
 
+    let (promise, resolvers) = JsPromise::new_pending(context);
     let seq = RUNNER_STATE
         .with(|state| {
             let mut state = state.borrow_mut();
@@ -343,26 +352,57 @@ fn code_mode_call_tool_native(
                 .ok_or_else(|| "runner state is not initialized".to_string())?;
             let seq = state.next_seq;
             state.next_seq += 1;
+            state.pending_calls.insert(seq, resolvers);
             Ok::<_, String>(seq)
         })
         .map_err(js_type_error)?;
 
     runner_emit(CodeModeRunnerOutput::ToolCall { seq, id, params }).map_err(js_type_error)?;
+    Ok(promise.into())
+}
 
-    match runner_read_input().map_err(js_type_error)? {
-        CodeModeRunnerInput::ToolResult {
-            seq: response_seq,
-            result,
-        } if response_seq == seq => JsValue::from_json(&result, context),
-        CodeModeRunnerInput::ToolError {
-            seq: response_seq,
-            kind,
-            message,
-        } if response_seq == seq => Err(js_type_error(format!("{kind}: {message}"))),
-        _ => Err(js_type_error(
-            "runner received an out-of-order tool response",
-        )),
+fn settle_code_mode_tool_promise(
+    input: CodeModeRunnerInput,
+    context: &mut Context,
+) -> Result<(), String> {
+    let (seq, result) = match input {
+        CodeModeRunnerInput::ToolResult { seq, result } => (seq, Ok(result)),
+        CodeModeRunnerInput::ToolError { seq, kind, message } => {
+            (seq, Err(format!("{kind}: {message}")))
+        }
+        CodeModeRunnerInput::Start { .. } => {
+            return Err("runner received unexpected start message".to_string());
+        }
+    };
+
+    let resolvers = RUNNER_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let state = state
+            .as_mut()
+            .ok_or_else(|| "runner state is not initialized".to_string())?;
+        state
+            .pending_calls
+            .remove(&seq)
+            .ok_or_else(|| "runner received a response for an unknown tool call".to_string())
+    })?;
+
+    match result {
+        Ok(result) => {
+            let value = JsValue::from_json(&result, context).map_err(js_error_message)?;
+            resolvers
+                .resolve
+                .call(&JsValue::undefined(), &[value], context)
+                .map_err(js_error_message)?;
+        }
+        Err(message) => {
+            let reason = JsValue::from(js_string!(message.as_str()));
+            resolvers
+                .reject
+                .call(&JsValue::undefined(), &[reason], context)
+                .map_err(js_error_message)?;
+        }
     }
+    Ok(())
 }
 
 fn runner_emit(output: CodeModeRunnerOutput) -> Result<(), String> {
