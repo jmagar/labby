@@ -44,6 +44,7 @@ import {
   errorMessageFromPayload,
   sameProviderList,
 } from './acp-normalizers'
+import { filterVisibleRuns } from './session-filters'
 import type { ACPAgent, ACPRun, ACPProject, ACPMessage, ACPModelOption } from '@/components/chat/types'
 import type { BridgeSessionSummary, ProviderHealth, BridgeEvent } from '@/lib/acp/types'
 import type { SessionEventConnectionState } from './use-session-events'
@@ -75,6 +76,9 @@ export type PageContext = {
 
 export type ChatSessionDataContextValue = {
   runs: ACPRun[]
+  visibleRuns: ACPRun[]
+  hiddenRunCount: number
+  includeHiddenRuns: boolean
   selectedRunId: string | null
   selectedRun: ACPRun | null
   providerHealth: ProviderHealth | null
@@ -100,6 +104,8 @@ export type ChatSessionActionsContextValue = {
   selectAgent: (providerId: string) => void
   selectModel: (providerId: string, modelId: string) => void
   setPageContext: (ctx: PageContext) => void
+  setIncludeHiddenRuns: (include: boolean | ((prev: boolean) => boolean)) => void
+  bulkCloseHiddenSessions: () => Promise<{ closedCount: number; failedCount: number }>
 }
 
 export type ChatSessionConnectionContextValue = {
@@ -188,6 +194,7 @@ export function ChatSessionProvider({
   const [selectedModelByProvider, setSelectedModelByProvider] = React.useState<Record<string, string>>({})
   const [optimisticMessages, setOptimisticMessages] = React.useState<ACPMessage[]>([])
   const [pageContext, setPageContext] = React.useState<PageContext>(null)
+  const [includeHiddenRuns, setIncludeHiddenRuns] = React.useState(false)
 
   // SSE state
   const [events, setEvents] = React.useState<BridgeEvent[]>([])
@@ -645,9 +652,43 @@ export function ChatSessionProvider({
 
   // ---- Context values ----
 
+  const visibleRuns = React.useMemo(
+    () => filterVisibleRuns(runs, { includeHidden: includeHiddenRuns }),
+    [runs, includeHiddenRuns],
+  )
+  const hiddenRunCount = runs.length - visibleRuns.length
+
+  const bulkCloseHiddenSessions = React.useCallback(async () => {
+    // The API auto-injects `confirm: true` for destructive actions and
+    // `principal` from the auth context, so the client only sends the selector.
+    const response = await fetchAcp('', {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'session.bulk_close',
+        params: {
+          selector: { states: ['failed', 'closed', 'cancelled'], max_count: 500 },
+        },
+      }),
+    })
+    if (!response.ok) {
+      const errorPayload = await readJsonSafe<ErrorPayload>(response)
+      throw new Error(errorMessageFromPayload(errorPayload, 'Failed to clean up sessions'))
+    }
+    const payload = (await readJsonSafe(response)) as
+      | { closed?: string[]; failed?: Array<{ id: string }> }
+      | null
+    const closedCount = payload?.closed?.length ?? 0
+    const failedCount = payload?.failed?.length ?? 0
+    await refreshSessions()
+    return { closedCount, failedCount }
+  }, [fetchAcp, refreshSessions])
+
   const dataValue = React.useMemo<ChatSessionDataContextValue>(
     () => ({
       runs,
+      visibleRuns,
+      hiddenRunCount,
+      includeHiddenRuns,
       selectedRunId,
       selectedRun,
       providerHealth,
@@ -660,7 +701,7 @@ export function ChatSessionProvider({
       sessionsLoaded,
       pageContext,
     }),
-    [runs, selectedRunId, selectedRun, providerHealth, providers, selectedProviderId, selectedAgent, selectedModel, agents, projects, sessionsLoaded, pageContext],
+    [runs, visibleRuns, hiddenRunCount, includeHiddenRuns, selectedRunId, selectedRun, providerHealth, providers, selectedProviderId, selectedAgent, selectedModel, agents, projects, sessionsLoaded, pageContext],
   )
 
   const actionsValue = React.useMemo<ChatSessionActionsContextValue>(
@@ -673,8 +714,10 @@ export function ChatSessionProvider({
       selectAgent,
       selectModel,
       setPageContext: setPageContextStable,
+      setIncludeHiddenRuns,
+      bulkCloseHiddenSessions,
     }),
-    [createSession, selectRun, sendPrompt, refreshSessions, refreshProvider, selectAgent, selectModel, setPageContextStable],
+    [createSession, selectRun, sendPrompt, refreshSessions, refreshProvider, selectAgent, selectModel, setPageContextStable, bulkCloseHiddenSessions],
   )
 
   const connectionValue = React.useMemo<ChatSessionConnectionContextValue>(

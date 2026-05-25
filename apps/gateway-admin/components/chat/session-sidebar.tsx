@@ -11,6 +11,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { formatTimeAgo } from './mock-data'
+import { ConfirmDialog, type ConfirmState } from '@/components/marketplace/confirm-dialog'
 import type { ACPProject, ACPRun, ACPRunStatus } from './types'
 
 interface SessionSidebarProps {
@@ -21,6 +22,14 @@ interface SessionSidebarProps {
   selectedProjectId: string | null
   onSelectRun: (runId: string, projectId: string) => void
   onNewRun: (projectId: string) => void
+  /** Number of failed/closed/cancelled runs hidden from `runs`. */
+  hiddenRunCount?: number
+  /** Whether the toggle currently includes hidden runs in `runs`. */
+  includeHiddenRuns?: boolean
+  /** Called when the user clicks the show/hide toggle chip. */
+  onToggleIncludeHidden?: () => void
+  /** Called when the user confirms the bulk cleanup. Should resolve to closed/failed counts. */
+  onBulkCloseHidden?: () => Promise<{ closedCount: number; failedCount: number }>
 }
 
 function RunIcon({ status, agentId }: { status: ACPRunStatus; agentId: string }) {
@@ -188,10 +197,29 @@ export function SessionSidebar({
   selectedProjectId,
   onSelectRun,
   onNewRun,
+  hiddenRunCount = 0,
+  includeHiddenRuns = false,
+  onToggleIncludeHidden,
+  onBulkCloseHidden,
 }: SessionSidebarProps) {
   const activeProjectId = selectedProjectId
   const [search, setSearch] = React.useState('')
   const deferredSearch = React.useDeferredValue(search)
+  const [confirm, setConfirm] = React.useState<ConfirmState | null>(null)
+
+  const handleCleanup = React.useCallback(() => {
+    if (!onBulkCloseHidden || hiddenRunCount === 0) return
+    setConfirm({
+      title: `Delete ${hiddenRunCount} session${hiddenRunCount === 1 ? '' : 's'}?`,
+      description:
+        'Sessions in state failed, closed, or cancelled will be permanently removed. This action cannot be undone.',
+      confirmLabel: `Delete ${hiddenRunCount}`,
+      destructive: true,
+      onConfirm: async () => {
+        await onBulkCloseHidden()
+      },
+    })
+  }, [hiddenRunCount, onBulkCloseHidden])
 
   const visibleProjects = React.useMemo(() => {
     const normalizedSearch = deferredSearch.trim().toLowerCase()
@@ -241,6 +269,30 @@ export function SessionSidebar({
         </div>
       </div>
 
+      {/* Hidden-session controls */}
+      {hiddenRunCount > 0 && (
+        <div className="flex items-center justify-between gap-2 px-3 pb-2 text-[11px] text-aurora-text-muted">
+          <button
+            type="button"
+            onClick={onToggleIncludeHidden}
+            className="hover:text-aurora-text-primary transition-colors"
+          >
+            {includeHiddenRuns
+              ? `Hide ${hiddenRunCount} inactive`
+              : `Show ${hiddenRunCount} inactive`}
+          </button>
+          {onBulkCloseHidden && (
+            <button
+              type="button"
+              onClick={handleCleanup}
+              className="hover:text-aurora-error transition-colors"
+            >
+              Clean up
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Project list */}
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-1 px-2 pb-4">
@@ -257,6 +309,13 @@ export function SessionSidebar({
           ))}
         </div>
       </ScrollArea>
+
+      <ConfirmDialog
+        state={confirm}
+        onOpenChange={(open) => {
+          if (!open) setConfirm(null)
+        }}
+      />
     </div>
   )
 }

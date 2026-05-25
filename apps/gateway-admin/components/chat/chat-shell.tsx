@@ -48,9 +48,27 @@ export function ChatShell() {
   const [maxTokens, setMaxTokens] = React.useState(8192)
   const [draftText, setDraftText] = React.useState('')
   const [attachmentsResetToken, setAttachmentsResetToken] = React.useState(0)
-  const { runs, selectedRun, selectedRunId, providerHealth, selectedAgent, selectedModel, agents, projects } =
-    useChatSessionData()
-  const { selectRun, createSession, sendPrompt, selectAgent, selectModel } = useChatSessionActions()
+  const {
+    visibleRuns,
+    hiddenRunCount,
+    includeHiddenRuns,
+    selectedRun,
+    selectedRunId,
+    providerHealth,
+    selectedAgent,
+    selectedModel,
+    agents,
+    projects,
+  } = useChatSessionData()
+  const {
+    selectRun,
+    createSession,
+    sendPrompt,
+    selectAgent,
+    selectModel,
+    setIncludeHiddenRuns,
+    bulkCloseHiddenSessions,
+  } = useChatSessionActions()
   const { messages } = useChatSessionStream()
   const { connectionState } = useChatSessionConnection()
   const providerReady = Boolean(providerHealth?.ready)
@@ -228,11 +246,15 @@ export function ChatShell() {
               <SessionSidebar
                 className="shadow-[var(--aurora-shadow-strong),var(--aurora-highlight-strong)] md:shadow-none"
                 projects={projects}
-                runs={runs}
+                runs={visibleRuns}
                 selectedRunId={selectedRunId}
                 selectedProjectId="workspace"
                 onSelectRun={selectRun}
                 onNewRun={() => void createRun()}
+                hiddenRunCount={hiddenRunCount}
+                includeHiddenRuns={includeHiddenRuns}
+                onToggleIncludeHidden={() => setIncludeHiddenRuns((v) => !v)}
+                onBulkCloseHidden={bulkCloseHiddenSessions}
               />
             </div>
           </>

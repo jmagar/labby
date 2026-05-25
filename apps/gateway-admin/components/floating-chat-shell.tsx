@@ -44,9 +44,26 @@ export function FloatingChatShell({
   config,
 }: FloatingChatShellProps) {
   // ---- Context consumers ----
-  const { runs, selectedRun, selectedRunId, providerHealth, selectedAgent, agents, projects, pageContext } =
-    useChatSessionData()
-  const { createSession, selectRun, sendPrompt: sendPromptAction, selectAgent } = useChatSessionActions()
+  const {
+    visibleRuns,
+    hiddenRunCount,
+    includeHiddenRuns,
+    selectedRun,
+    selectedRunId,
+    providerHealth,
+    selectedAgent,
+    agents,
+    projects,
+    pageContext,
+  } = useChatSessionData()
+  const {
+    createSession,
+    selectRun,
+    sendPrompt: sendPromptAction,
+    selectAgent,
+    setIncludeHiddenRuns,
+    bulkCloseHiddenSessions,
+  } = useChatSessionActions()
   const { connectionState } = useChatSessionConnection()
   const { messages } = useChatSessionStream()
 
@@ -188,11 +205,15 @@ export function FloatingChatShell({
           <SessionSidebar
             className="hidden w-[180px] shrink-0 md:flex"
             projects={projects}
-            runs={runs}
+            runs={visibleRuns}
             selectedRunId={selectedRunId}
             selectedProjectId="workspace"
             onSelectRun={(runId) => selectRun(runId)}
             onNewRun={() => void createRun()}
+            hiddenRunCount={hiddenRunCount}
+            includeHiddenRuns={includeHiddenRuns}
+            onToggleIncludeHidden={() => setIncludeHiddenRuns((v) => !v)}
+            onBulkCloseHidden={bulkCloseHiddenSessions}
           />
         )}
 
