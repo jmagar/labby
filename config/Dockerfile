@@ -1,5 +1,5 @@
 # ─── Stage 1: Build ───────────────────────────────────────────────────────────
-# Requires Rust 1.90+ (Cargo.toml: rust-version = "1.90", edition = "2024")
+# Requires Rust 1.92+ (Cargo.toml: rust-version = "1.92", edition = "2024")
 FROM rust:1-slim AS builder
 
 WORKDIR /build
@@ -14,11 +14,13 @@ ENV CARGO_PROFILE_RELEASE_LTO=false \
 #   pkg-config     — lets -sys crates find system headers
 #   build-essential — C compiler for rusqlite's bundled SQLite + other -sys crates
 #   libssl-dev     — headers/pkg-config metadata for crates pulling openssl-sys
+#   libclang-dev   — libclang for rquickjs-sys bindgen during Code Mode builds
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       pkg-config \
       build-essential \
       libssl-dev \
+      libclang-dev \
  && rm -rf /var/lib/apt/lists/*
 
 # ── Dependency-caching layer ──────────────────────────────────────────────────
