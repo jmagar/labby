@@ -116,7 +116,7 @@ pub async fn dispatch_with_registry(
     action: &str,
     params: Value,
 ) -> Result<Value, ToolError> {
-    let max_params_bytes = if action == "session.prompt" {
+    let max_params_bytes = if action == "session.prompt" || action == "session.start_and_prompt" {
         MAX_ACP_PROMPT_PARAMS_BYTES
     } else {
         MAX_ACP_PARAMS_BYTES
@@ -242,6 +242,82 @@ pub async fn dispatch_with_registry(
             };
             let summary = registry.create_session(input, principal).await?;
             to_json(summary)
+        }
+
+        "session.start_and_prompt" => {
+            let principal = require_str(&params, "principal")?;
+            let provider = opt_str(&params, "provider").map(|s| s.to_string());
+            let title = opt_str(&params, "title").map(|s| s.to_string());
+            let cwd = opt_str(&params, "cwd").unwrap_or("").to_string();
+            let model_id = opt_str(&params, "model")
+                .or_else(|| opt_str(&params, "model_id"))
+                .map(str::to_string);
+            let raw_text = params.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
+            if raw_text.is_empty() {
+                return Err(ToolError::MissingParam {
+                    message: "prompt is required".to_string(),
+                    param: "prompt".to_string(),
+                });
+            }
+            ensure_prompt_size(raw_text)?;
+
+            let page_ctx = params
+                .get("page_context")
+                .and_then(|v| v.as_object())
+                .map(|obj| PageContextInput {
+                    route: obj.get("route").and_then(|v| v.as_str()).unwrap_or(""),
+                    entity_type: obj.get("entityType").and_then(|v| v.as_str()),
+                    entity_id: obj.get("entityId").and_then(|v| v.as_str()),
+                });
+            let attachments: Vec<LocalPromptAttachment> = params
+                .get("attachments")
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|error| ToolError::InvalidParam {
+                    message: format!("invalid attachments payload: {error}"),
+                    param: "attachments".into(),
+                })?
+                .unwrap_or_default();
+            validate_local_attachments(&attachments)?;
+
+            let input = StartSessionInput {
+                provider: provider.clone(),
+                title,
+                cwd,
+                principal: Some(principal.to_string()),
+                model_id,
+            };
+            // Synthesize the effective prompt with page-context prefix, just
+            // like `session.prompt` does.
+            let placeholder_session_id = ""; // session does not exist yet; helper tolerates empty.
+            let effective_text = build_prompt_with_context(placeholder_session_id, raw_text, page_ctx.as_ref());
+            ensure_prompt_size(&effective_text)?;
+
+            let result = registry
+                .start_and_prompt(
+                    input,
+                    &effective_text,
+                    attachments,
+                    principal,
+                    PromptSessionOptions {
+                        provider,
+                        continuity_mode: opt_str(&params, "continuity_mode").map(ToOwned::to_owned),
+                    },
+                )
+                .await?;
+            // Issue the SSE ticket so the client can subscribe to the stream
+            // without a second action call.
+            let ticket = issue_subscribe_ticket(&result.session_id, principal)?;
+            let mut value = to_json(json!(result))?;
+            if let Some(map) = value.as_object_mut() {
+                map.insert("stream_ticket".to_string(), Value::String(ticket));
+                map.insert(
+                    "ticket_expires_in_secs".to_string(),
+                    Value::Number(TICKET_TTL_SECS.into()),
+                );
+            }
+            Ok(value)
         }
 
         "session.prompt" => {
@@ -614,6 +690,69 @@ mod tests {
         let (session_id, principal) = validate_subscribe_ticket(&ticket).unwrap();
         assert_eq!(session_id, "sess-456");
         assert_eq!(principal, "");
+    }
+
+    #[tokio::test]
+    async fn session_start_and_prompt_requires_principal() {
+        let registry = AcpSessionRegistry::new_for_tests(Duration::from_millis(100));
+        let err = dispatch_with_registry(
+            &registry,
+            "session.start_and_prompt",
+            json!({
+                "prompt": "hello",
+            }),
+        )
+        .await
+        .expect_err("principal must be required");
+        assert_eq!(err.kind(), "missing_param");
+    }
+
+    #[tokio::test]
+    async fn session_start_and_prompt_requires_prompt_text() {
+        let registry = AcpSessionRegistry::new_for_tests(Duration::from_millis(100));
+        let err = dispatch_with_registry(
+            &registry,
+            "session.start_and_prompt",
+            json!({
+                "principal": "alice",
+            }),
+        )
+        .await
+        .expect_err("prompt must be required");
+        assert_eq!(err.kind(), "missing_param");
+    }
+
+    #[tokio::test]
+    async fn session_start_and_prompt_rejects_oversized_prompt() {
+        let registry = AcpSessionRegistry::new_for_tests(Duration::from_millis(100));
+        let huge = "x".repeat(MAX_ACP_PROMPT_BYTES + 1);
+        let err = dispatch_with_registry(
+            &registry,
+            "session.start_and_prompt",
+            json!({
+                "principal": "alice",
+                "prompt": huge,
+            }),
+        )
+        .await
+        .expect_err("oversized prompt must be rejected");
+        assert_eq!(err.kind(), "content_too_large");
+    }
+
+    #[tokio::test]
+    async fn session_start_and_prompt_appears_in_schema() {
+        let v = dispatch("schema", json!({"action": "session.start_and_prompt"}))
+            .await
+            .unwrap();
+        assert!(v.is_object());
+        // Schema entry must surface the canonical params so clients can wire UIs.
+        let params = v["params"].as_array().expect("params array");
+        let names: Vec<&str> = params
+            .iter()
+            .filter_map(|p| p["name"].as_str())
+            .collect();
+        assert!(names.contains(&"prompt"), "schema missing prompt: {names:?}");
+        assert!(names.contains(&"principal"), "schema missing principal: {names:?}");
     }
 
     #[tokio::test]

@@ -113,6 +113,56 @@ pub const ACTIONS: &[ActionSpec] = &[
         ],
     },
     ActionSpec {
+        name: "session.start_and_prompt",
+        description: "Atomically create an ACP session and queue its first prompt. Returns session metadata + SSE stream ticket. Closes the orphan-session window of separate create+prompt calls.",
+        destructive: false,
+        returns: "Value",
+        params: &[
+            ParamSpec {
+                name: "provider",
+                ty: "string",
+                required: false,
+                description: "Provider id (defaults to gateway default)",
+            },
+            ParamSpec {
+                name: "model",
+                ty: "string",
+                required: false,
+                description: "Model id; provider's default if omitted",
+            },
+            ParamSpec {
+                name: "title",
+                ty: "string",
+                required: false,
+                description: "Human-readable session title",
+            },
+            ParamSpec {
+                name: "cwd",
+                ty: "string",
+                required: false,
+                description: "Working directory for the session",
+            },
+            ParamSpec {
+                name: "prompt",
+                ty: "string",
+                required: true,
+                description: "First user prompt text",
+            },
+            ParamSpec {
+                name: "page_context",
+                ty: "object",
+                required: false,
+                description: "Optional page context: {route, entityType?, entityId?}",
+            },
+            ParamSpec {
+                name: "principal",
+                ty: "string",
+                required: true,
+                description: "Caller principal for ownership of the new session",
+            },
+        ],
+    },
+    ActionSpec {
         name: "session.prompt",
         description: "Send a prompt to a session. Optional provider switches the active runtime inside the same Lab session before dispatch.",
         destructive: false,

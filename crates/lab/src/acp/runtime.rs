@@ -1271,8 +1271,8 @@ fn redact_provider_stderr_line(line: &str) -> (String, bool) {
 /// Composes with [`redact_stdio_value`] which already handles `key=value`
 /// secret patterns at the token level.
 pub fn sanitize_provider_error(message: &str) -> String {
-    static PATTERNS: std::sync::OnceLock<Vec<(regex::Regex, &'static str)>> =
-        std::sync::OnceLock::new();
+    use std::sync::OnceLock;
+    static PATTERNS: OnceLock<Vec<(regex::Regex, &'static str)>> = OnceLock::new();
     let patterns = PATTERNS.get_or_init(|| {
         vec![
             // IPv4 with optional :port. Conservative — does not match IPv6.

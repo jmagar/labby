@@ -143,6 +143,21 @@ pub struct BulkCloseFailure {
     pub message: String,
 }
 
+/// Outcome of `start_and_prompt` — the orchestrator that collapses
+/// `session.start` + `session.prompt` into a single atomic call. The session
+/// is closed before returning if the prompt step fails, so callers never
+/// see an orphan row from this code path.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StartAndPromptResult {
+    pub session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    pub provider: String,
+    pub title: String,
+}
+
 #[derive(Clone)]
 pub struct AcpSessionRegistry {
     sessions: Arc<RwLock<HashMap<String, Arc<Session>>>>,
@@ -1119,6 +1134,63 @@ impl AcpSessionRegistry {
         );
 
         Ok(BulkCloseResult { closed, failed })
+    }
+
+    /// Atomically create a session and queue its first prompt. On any prompt-
+    /// step failure, the session is closed before the error returns — so a
+    /// failed `start_and_prompt` leaves no orphan row in the sidebar.
+    pub async fn start_and_prompt(
+        &self,
+        input: StartSessionInput,
+        prompt_text: &str,
+        prompt_attachments: Vec<crate::dispatch::acp::params::LocalPromptAttachment>,
+        principal: &str,
+        prompt_options: PromptSessionOptions,
+    ) -> Result<StartAndPromptResult, ToolError> {
+        let session = self.create_session(input, principal).await?;
+
+        let prompt_result = self
+            .prompt_session_with_attachments(
+                &session.id,
+                prompt_text,
+                prompt_attachments,
+                principal,
+                session.model_id.as_deref(),
+                prompt_options,
+            )
+            .await;
+
+        if let Err(prompt_err) = prompt_result {
+            // Atomicity: drop the just-created session before bubbling the
+            // failure so callers see exactly one of {success, no-op}.
+            tracing::warn!(
+                surface = "acp",
+                service = "registry",
+                action = "session.start_and_prompt",
+                session_id = %session.id,
+                kind = %prompt_err.kind(),
+                "start_and_prompt prompt step failed — closing session",
+            );
+            if let Err(close_err) = self.close_session(&session.id, principal).await {
+                tracing::error!(
+                    surface = "acp",
+                    service = "registry",
+                    action = "session.start_and_prompt",
+                    session_id = %session.id,
+                    kind = %close_err.kind(),
+                    "failed to close session after prompt failure",
+                );
+            }
+            return Err(prompt_err);
+        }
+
+        Ok(StartAndPromptResult {
+            session_id: session.id.clone(),
+            provider_session_id: session.provider_session_id.clone(),
+            model_id: session.model_id.clone(),
+            provider: session.provider.clone(),
+            title: session.title.clone(),
+        })
     }
 
     /// Gracefully terminate all sessions. Sets shutting_down flag, cancels every
