@@ -14,6 +14,7 @@ categories = ["command-line-utilities", "development-tools"]
 [[bin]]
 name = "labby"
 path = "src/main.rs"
+test = false
 
 [dependencies]
 lab-apis = { path = "../lab-apis", default-features = false }

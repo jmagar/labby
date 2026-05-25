@@ -17,3 +17,11 @@
 # incremental=true for normal dev; this file overrides it for developers who
 # have sccache configured. See docs/RUST.md §Repo-specific overrides.
 incremental = false
+
+[profile.dev]
+# The all-features labby test harness is large enough that LLVM can exhaust
+# memory on this host when the global Cargo config forces debug info on.
+debug = 0
+
+[profile.test]
+debug = 0

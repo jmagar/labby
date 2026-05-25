@@ -12,6 +12,9 @@ use crate::cli::helpers::{run_action_command, run_confirmable_action_command};
 use crate::config::{LabConfig, ProtectedMcpRouteConfig, config_toml_path};
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
+use crate::dispatch::gateway::code_mode::{
+    CodeModeBroker, CodeModeCaller, CodeModeSurface, CodeModeToolId, CodeModeToolRef,
+};
 use crate::dispatch::gateway::install_gateway_manager;
 use crate::dispatch::gateway::manager::{GatewayManager, GatewayRuntimeHandle};
 use crate::dispatch::upstream::pool::UpstreamPool;
@@ -45,6 +48,33 @@ pub enum GatewayCommand {
     Pending(GatewayPendingArgs),
     /// Show resolved public URL configuration (app and MCP gateway)
     PublicUrls,
+    /// Search, inspect, and execute Code Mode snippets through dispatch
+    Code(GatewayCodeArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct GatewayCodeArgs {
+    #[command(subcommand)]
+    pub command: GatewayCodeCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum GatewayCodeCommand {
+    /// Search Code Mode tool IDs by natural-language query
+    Search {
+        query: String,
+        #[arg(long, default_value_t = 10)]
+        top_k: usize,
+    },
+    /// Show the schema and generated bindings for one Code Mode tool ID
+    Schema { id: String },
+    /// Execute a sandboxed JavaScript snippet that calls callTool(id, params)
+    Exec {
+        #[arg(long, conflicts_with = "file")]
+        code: Option<String>,
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -387,7 +417,13 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                     command: GatewayMcpAuthCommand::Status(_) | GatewayMcpAuthCommand::Clear(_),
                 }),
         })
-    ) || matches!(&args.command, GatewayCommand::ProtectedRoute(_)));
+    ) || matches!(&args.command, GatewayCommand::ProtectedRoute(_)))
+        && !matches!(
+            &args.command,
+            GatewayCommand::Code(GatewayCodeArgs {
+                command: GatewayCodeCommand::Schema { id },
+            }) if code_mode_schema_is_builtin(id)
+        );
     let manager = build_manager(config, discover_upstreams).await;
     let cli_origin = format!("cli:{}", std::process::id());
     let cli_owner = json!({
@@ -506,6 +542,9 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
             }
         },
         command => {
+            if let GatewayCommand::Code(args) = command {
+                return run_gateway_code(manager, args, format).await;
+            }
             let mut confirmed = true;
             let mut dry_run = false;
             let (action, params) = match command {
@@ -663,6 +702,7 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                 },
                 GatewayCommand::PublicUrls => ("gateway.public_urls.get".to_string(), json!({})),
                 GatewayCommand::Mcp(_) => unreachable!("handled above"),
+                GatewayCommand::Code(_) => unreachable!("handled above"),
             };
 
             if dry_run {
@@ -684,6 +724,61 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
             .await;
         }
     }
+}
+
+fn code_mode_schema_is_builtin(id: &str) -> bool {
+    matches!(
+        CodeModeToolId::parse(id),
+        Ok(CodeModeToolId {
+            reference: CodeModeToolRef::LabAction { .. },
+            ..
+        })
+    )
+}
+
+async fn run_gateway_code(
+    manager: Arc<GatewayManager>,
+    args: GatewayCodeArgs,
+    format: OutputFormat,
+) -> Result<ExitCode> {
+    const CODE_MODE_CLI_MAX_SOURCE_BYTES: u64 = 20 * 1024;
+
+    let registry = manager.builtin_service_registry();
+    let broker = CodeModeBroker::new(&registry, Some(manager.as_ref()));
+    let caller = CodeModeCaller::TrustedLocal;
+    let surface = CodeModeSurface::Cli;
+
+    match args.command {
+        GatewayCodeCommand::Search { query, top_k } => {
+            let candidates = broker.search(&query, top_k, caller, surface).await?;
+            crate::output::print(&candidates, format)?;
+        }
+        GatewayCodeCommand::Schema { id } => {
+            let schema = broker.schema(&id, caller, surface).await?;
+            crate::output::print(&schema, format)?;
+        }
+        GatewayCodeCommand::Exec { code, file } => {
+            let code = match (code, file) {
+                (Some(code), None) => code,
+                (None, Some(path)) => {
+                    let metadata = std::fs::metadata(&path)?;
+                    if metadata.len() > CODE_MODE_CLI_MAX_SOURCE_BYTES {
+                        anyhow::bail!("Code Mode source file exceeds 20480 bytes");
+                    }
+                    std::fs::read_to_string(path)?
+                }
+                _ => anyhow::bail!("provide exactly one of --code or --file"),
+            };
+            let config = manager.code_mode_config().await;
+            let max_tool_calls = config.max_tool_calls;
+            let response = broker
+                .execute(&code, max_tool_calls, caller, surface, config)
+                .await?;
+            crate::output::print(&response, format)?;
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
 }
 
 async fn run_gateway_oauth_start(
@@ -901,6 +996,32 @@ mod tests {
                 "--aggressive",
             ])
             .is_ok()
+        );
+        assert!(Cli::try_parse_from(["lab", "gateway", "code", "search", "movie.search"]).is_ok());
+        assert!(
+            Cli::try_parse_from([
+                "lab",
+                "gateway",
+                "code",
+                "schema",
+                "lab::radarr.movie.search",
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "lab",
+                "gateway",
+                "code",
+                "exec",
+                "--code",
+                "await callTool(\"lab::gateway.gateway.servers\", {})",
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from(["lab", "gateway", "code", "exec", "--file", "snippet.js",])
+                .is_ok()
         );
     }
 }

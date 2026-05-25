@@ -45,6 +45,10 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `extract` | `list_hosts` | false | false |  | `string[]` | cli, mcp, api |
 | `extract` | `scan` | false | false | `uri: string`<br>`hosts: string[]`<br>`redact_secrets: bool` | `DiscoveredService[]` | cli, mcp, api |
 | `extract` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api |
+| `fs` | `fs.list` | false | false | `path: string` | `{entries: [{name, path, kind, size, modified, accessible}], truncated: bool}` | mcp, api, web |
+| `fs` | `fs.preview` | false | false | `path*: string`<br>`max_bytes: integer` | `binary (streamed); mime from safe-MIME whitelist or application/octet-stream` | api, web |
+| `fs` | `help` | true | false |  | `HelpPayload` | mcp, api, web |
+| `fs` | `schema` | true | false | `action*: string` | `ActionSpec` | mcp, api, web |
 | `gateway` | `gateway.add` | false | true | `spec*: json`<br>`bearer_token_value: string`<br>`allow_stdio: boolean` | `GatewayView` | cli, mcp, api, web |
 | `gateway` | `gateway.client_config.get` | false | false | `name*: string` | `McpClientConfigView` | cli, mcp, api, web |
 | `gateway` | `gateway.discover` | false | false | `clients: string[]`<br>`include_existing: boolean` | `DiscoveredServerView[]` | cli, mcp, api, web |

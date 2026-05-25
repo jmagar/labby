@@ -11,6 +11,7 @@ pub mod config;
 pub mod dispatch;
 #[allow(unreachable_pub)]
 pub mod docs;
+pub mod log_fmt;
 #[allow(unreachable_pub)]
 pub mod mcp;
 pub mod net;

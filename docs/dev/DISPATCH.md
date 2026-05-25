@@ -73,6 +73,11 @@ It does not own:
 - axum response types
 - table rendering
 
+Synthetic gateway workflows such as Code Mode still follow this ownership rule:
+the schema-first IDs, search/schema composition, sandbox parent broker, and
+tool-call dispatch live in `dispatch/gateway/`; MCP and CLI only adapt their
+surface-specific inputs and outputs.
+
 ### Surface Adapters
 
 The three product surfaces are adapters over `dispatch`.

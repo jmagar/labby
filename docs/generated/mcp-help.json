@@ -3178,6 +3178,29 @@
           "returns": "AuditReport"
         }
       ]
+    },
+    {
+      "name": "fs",
+      "description": "Workspace filesystem browser (read-only, deny-listed)",
+      "category": "bootstrap",
+      "status": "available",
+      "requires_http_subject": false,
+      "actions": [
+        {
+          "name": "fs.list",
+          "description": "List immediate entries of a directory inside the configured workspace root",
+          "destructive": false,
+          "params": [
+            {
+              "name": "path",
+              "ty": "string",
+              "required": false,
+              "description": "Workspace-relative path to list; empty or omitted means the workspace root"
+            }
+          ],
+          "returns": "{entries: [{name, path, kind, size, modified, accessible}], truncated: bool}"
+        }
+      ]
     }
   ]
 }

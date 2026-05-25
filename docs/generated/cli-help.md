@@ -988,6 +988,7 @@ Commands:
   import           Import discovered MCP servers into the gateway (disabled by default)
   pending          Manage pending discovered servers waiting for approval
   public-urls      Show resolved public URL configuration (app and MCP gateway)
+  code             Search, inspect, and execute Code Mode snippets through dispatch
 
 Options:
       --json
@@ -2061,6 +2062,112 @@ Options:
 
           [default: auto]
           [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway code`
+
+```text
+Search, inspect, and execute Code Mode snippets through dispatch
+
+Usage: code [OPTIONS] <COMMAND>
+
+Commands:
+  search  Search Code Mode tool IDs by natural-language query
+  schema  Show the schema and generated bindings for one Code Mode tool ID
+  exec    Execute a sandboxed JavaScript snippet that calls callTool(id, params)
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway code search`
+
+```text
+Search Code Mode tool IDs by natural-language query
+
+Usage: search [OPTIONS] <QUERY>
+
+Arguments:
+  <QUERY>
+
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --top-k <TOP_K>
+          [default: 10]
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway code schema`
+
+```text
+Show the schema and generated bindings for one Code Mode tool ID
+
+Usage: schema [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway code exec`
+
+```text
+Execute a sandboxed JavaScript snippet that calls callTool(id, params)
+
+Usage: exec [OPTIONS]
+
+Options:
+      --code <CODE>
+
+
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --file <FILE>
+
 
   -h, --help
           Print help
