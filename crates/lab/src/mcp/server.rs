@@ -6,12 +6,14 @@
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::cmp::Ordering as CmpOrdering;
+use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use axum::http::{self, request::Parts};
+use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
 use rmcp::model::{
     AnnotateAble, CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult,
     CompletionInfo, Content, GetPromptRequestParams, GetPromptResult, ListPromptsResult,
@@ -1392,17 +1394,22 @@ impl ServerHandler for LabMcpServer {
                 .await;
             return match manager.search_tools(&query, top_k, true).await {
                 Ok(upstream_results) => {
-                    candidates.extend(upstream_results.into_iter().map(|result| {
-                        CodeModeSearchCandidate::upstream_tool(
-                            &result.upstream,
-                            &result.name,
-                            &result.description,
-                            result.score,
-                            result.input_schema,
-                        )
-                    }));
-                    candidates.sort_by(compare_code_mode_search_candidates);
-                    candidates.truncate(top_k);
+                    candidates = merge_code_mode_search_candidates(
+                        candidates,
+                        upstream_results
+                            .into_iter()
+                            .map(|result| {
+                                CodeModeSearchCandidate::upstream_tool(
+                                    &result.upstream,
+                                    &result.name,
+                                    &result.description,
+                                    result.score,
+                                    result.input_schema,
+                                )
+                            })
+                            .collect(),
+                        top_k,
+                    );
                     tracing::info!(
                         surface = "mcp",
                         service = "code_search",
@@ -3137,57 +3144,115 @@ impl LabMcpServer {
 
         let mut lines = BufReader::new(stdout).lines();
         let mut calls = Vec::new();
+        let mut pending_tool_calls = FuturesUnordered::new();
+        let mut started_tool_calls = 0usize;
         let deadline = tokio::time::Instant::now() + timeout;
 
         loop {
-            let line = match tokio::time::timeout_at(deadline, lines.next_line()).await {
-                Ok(line) => line,
-                Err(_) => {
-                    terminate_code_mode_runner(&mut child).await;
-                    return Err(DispatchToolError::Sdk {
-                        sdk_kind: "timeout".to_string(),
-                        message: "Code Mode execution timed out".to_string(),
-                    });
-                }
-            };
-            let Some(line) = line.map_err(|err| DispatchToolError::Sdk {
-                sdk_kind: "internal_error".to_string(),
-                message: format!("failed to read Code Mode runner output: {err}"),
-            })?
-            else {
-                let status = child.wait().await.map_err(|err| DispatchToolError::Sdk {
-                    sdk_kind: "internal_error".to_string(),
-                    message: format!("failed to wait for Code Mode runner: {err}"),
-                })?;
-                return Err(DispatchToolError::Sdk {
-                    sdk_kind: "code_execution_failed".to_string(),
-                    message: format!(
-                        "Code Mode runner exited before completion with status {status}"
-                    ),
-                });
-            };
-            match serde_json::from_str::<CodeModeRunnerOutput>(&line).map_err(|err| {
-                DispatchToolError::Sdk {
-                    sdk_kind: "internal_error".to_string(),
-                    message: format!("Code Mode runner emitted invalid protocol JSON: {err}"),
-                }
-            })? {
-                CodeModeRunnerOutput::ToolCall { seq, id, params } => {
-                    if calls.len() >= max_tool_calls {
-                        terminate_code_mode_runner(&mut child).await;
+            tokio::select! {
+                line = tokio::time::timeout_at(deadline, lines.next_line()) => {
+                    let line = match line {
+                        Ok(line) => line,
+                        Err(_) => {
+                            terminate_code_mode_runner(&mut child).await;
+                            return Err(DispatchToolError::Sdk {
+                                sdk_kind: "timeout".to_string(),
+                                message: "Code Mode execution timed out".to_string(),
+                            });
+                        }
+                    };
+                    let Some(line) = line.map_err(|err| DispatchToolError::Sdk {
+                        sdk_kind: "internal_error".to_string(),
+                        message: format!("failed to read Code Mode runner output: {err}"),
+                    })?
+                    else {
+                        let status = child.wait().await.map_err(|err| DispatchToolError::Sdk {
+                            sdk_kind: "internal_error".to_string(),
+                            message: format!("failed to wait for Code Mode runner: {err}"),
+                        })?;
                         return Err(DispatchToolError::Sdk {
-                            sdk_kind: "tool_call_limit_exceeded".to_string(),
+                            sdk_kind: "code_execution_failed".to_string(),
                             message: format!(
-                                "Code Mode execution exceeded max_tool_calls={max_tool_calls}"
+                                "Code Mode runner exited before completion with status {status}"
                             ),
                         });
+                    };
+                    match serde_json::from_str::<CodeModeRunnerOutput>(&line).map_err(|err| {
+                        DispatchToolError::Sdk {
+                            sdk_kind: "internal_error".to_string(),
+                            message: format!("Code Mode runner emitted invalid protocol JSON: {err}"),
+                        }
+                    })? {
+                        CodeModeRunnerOutput::ToolCall { seq, id, params } => {
+                            if started_tool_calls >= max_tool_calls {
+                                terminate_code_mode_runner(&mut child).await;
+                                return Err(DispatchToolError::Sdk {
+                                    sdk_kind: "tool_call_limit_exceeded".to_string(),
+                                    message: format!(
+                                        "Code Mode execution exceeded max_tool_calls={max_tool_calls}"
+                                    ),
+                                });
+                            }
+                            started_tool_calls += 1;
+                            let call_id = id.clone();
+                            pending_tool_calls.push(
+                                async move {
+                                    let result = self
+                                        .code_mode_call_tool_id_before_deadline(
+                                            &id, params, deadline, auth, subject,
+                                        )
+                                        .await;
+                                    (seq, call_id, result)
+                                }
+                                .boxed(),
+                            );
+                        }
+                        CodeModeRunnerOutput::Done => {
+                            if !pending_tool_calls.is_empty() {
+                                terminate_code_mode_runner(&mut child).await;
+                                return Err(DispatchToolError::Sdk {
+                                    sdk_kind: "code_execution_failed".to_string(),
+                                    message: "Code Mode runner completed with pending tool calls".to_string(),
+                                });
+                            }
+                            if calls.is_empty() {
+                                terminate_code_mode_runner(&mut child).await;
+                                return Err(DispatchToolError::Sdk {
+                                    sdk_kind: "invalid_param".to_string(),
+                                    message:
+                                        "Code Mode snippet must call callTool(id, params) at least once"
+                                            .to_string(),
+                                });
+                            }
+                            let status = child.wait().await.map_err(|err| DispatchToolError::Sdk {
+                                sdk_kind: "internal_error".to_string(),
+                                message: format!("failed to wait for Code Mode runner: {err}"),
+                            })?;
+                            if !status.success() {
+                                return Err(DispatchToolError::Sdk {
+                                    sdk_kind: "code_execution_failed".to_string(),
+                                    message: format!("Code Mode runner exited with status {status}"),
+                                });
+                            }
+                            calls.sort_by_key(|(seq, _)| *seq);
+                            return Ok(CodeModeExecutionResponse {
+                                calls: calls.into_iter().map(|(_, call)| call).collect(),
+                            });
+                        }
+                        CodeModeRunnerOutput::Error { kind, message } => {
+                            drop(child.wait().await);
+                            return Err(DispatchToolError::Sdk {
+                                sdk_kind: kind,
+                                message,
+                            });
+                        }
                     }
-                    let result = match self
-                        .code_mode_call_tool_id_before_deadline(
-                            &id, params, deadline, auth, subject,
-                        )
-                        .await
-                    {
+                }
+                completed = pending_tool_calls.next(), if !pending_tool_calls.is_empty() => {
+                    let Some((seq, id, result)) = completed else {
+                        continue;
+                    };
+                    let result = match result {
                         Ok(result) => result,
                         Err(err) => {
                             drop(
@@ -3211,44 +3276,15 @@ impl LabMcpServer {
                             return Err(err);
                         }
                     };
-                    calls.push(CodeModeExecutedCall {
-                        id,
+                    calls.push((seq, CodeModeExecutedCall {
+                        id: id.clone(),
                         result: result.clone(),
-                    });
+                    }));
                     write_runner_input(
                         &mut stdin,
                         &CodeModeRunnerInput::ToolResult { seq, result },
                     )
                     .await?;
-                }
-                CodeModeRunnerOutput::Done => {
-                    if calls.is_empty() {
-                        terminate_code_mode_runner(&mut child).await;
-                        return Err(DispatchToolError::Sdk {
-                            sdk_kind: "invalid_param".to_string(),
-                            message:
-                                "Code Mode snippet must call callTool(id, params) at least once"
-                                    .to_string(),
-                        });
-                    }
-                    let status = child.wait().await.map_err(|err| DispatchToolError::Sdk {
-                        sdk_kind: "internal_error".to_string(),
-                        message: format!("failed to wait for Code Mode runner: {err}"),
-                    })?;
-                    if !status.success() {
-                        return Err(DispatchToolError::Sdk {
-                            sdk_kind: "code_execution_failed".to_string(),
-                            message: format!("Code Mode runner exited with status {status}"),
-                        });
-                    }
-                    return Ok(CodeModeExecutionResponse { calls });
-                }
-                CodeModeRunnerOutput::Error { kind, message } => {
-                    drop(child.wait().await);
-                    return Err(DispatchToolError::Sdk {
-                        sdk_kind: kind,
-                        message,
-                    });
                 }
             }
         }
@@ -3453,6 +3489,82 @@ fn compare_code_mode_search_candidates(
         .then_with(|| a.id.cmp(&b.id))
 }
 
+const SEARCH_RRF_K: f32 = 60.0;
+const BUILTIN_SEARCH_WEIGHT: f32 = 1.0;
+const GATEWAY_SEARCH_WEIGHT: f32 = 2.0;
+
+fn rank_fusion_score(rank: usize, weight: f32) -> f32 {
+    #[allow(clippy::cast_precision_loss)]
+    let rank = rank as f32;
+    weight / (SEARCH_RRF_K + rank)
+}
+
+fn merge_code_mode_search_candidates(
+    left: Vec<CodeModeSearchCandidate>,
+    right: Vec<CodeModeSearchCandidate>,
+    top_k: usize,
+) -> Vec<CodeModeSearchCandidate> {
+    #[derive(Debug)]
+    struct FusedCandidate {
+        candidate: CodeModeSearchCandidate,
+        score: f32,
+        best_source_weight: f32,
+    }
+
+    let mut fused: HashMap<String, FusedCandidate> = HashMap::new();
+    for (rank, mut candidate) in left.into_iter().enumerate() {
+        let score = rank_fusion_score(rank, BUILTIN_SEARCH_WEIGHT);
+        candidate.score = score;
+        fused.insert(
+            candidate.id.clone(),
+            FusedCandidate {
+                candidate,
+                score,
+                best_source_weight: BUILTIN_SEARCH_WEIGHT,
+            },
+        );
+    }
+    for (rank, mut candidate) in right.into_iter().enumerate() {
+        let score = rank_fusion_score(rank, GATEWAY_SEARCH_WEIGHT);
+        candidate.score = score;
+        fused
+            .entry(candidate.id.clone())
+            .and_modify(|existing| {
+                existing.score += score;
+                existing.best_source_weight =
+                    existing.best_source_weight.max(GATEWAY_SEARCH_WEIGHT);
+                existing.candidate.score = existing.score;
+                existing.candidate.schema_available |= candidate.schema_available;
+            })
+            .or_insert(FusedCandidate {
+                candidate,
+                score,
+                best_source_weight: GATEWAY_SEARCH_WEIGHT,
+            });
+    }
+
+    let mut results = fused.into_values().collect::<Vec<_>>();
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(CmpOrdering::Equal)
+            .then_with(|| {
+                b.best_source_weight
+                    .partial_cmp(&a.best_source_weight)
+                    .unwrap_or(CmpOrdering::Equal)
+            })
+            .then_with(|| a.candidate.id.cmp(&b.candidate.id))
+    });
+    results.truncate(top_k.max(1).min(50));
+    results
+        .into_iter()
+        .map(|mut fused| {
+            fused.candidate.score = fused.score;
+            fused.candidate
+        })
+        .collect()
+}
+
 async fn write_runner_input(
     stdin: &mut ChildStdin,
     input: &CodeModeRunnerInput,
@@ -3493,14 +3605,72 @@ fn tool_error_envelope(service: &str, action: &str, err: &DispatchToolError) -> 
 }
 
 fn merge_tool_search_results(
-    mut left: Vec<GatewayToolSearchResult>,
+    left: Vec<GatewayToolSearchResult>,
     right: Vec<GatewayToolSearchResult>,
     top_k: usize,
 ) -> Vec<GatewayToolSearchResult> {
-    left.extend(right);
-    left.sort_by(compare_tool_search_results);
-    left.truncate(top_k.max(1).min(50));
-    left
+    #[derive(Debug)]
+    struct FusedResult {
+        result: GatewayToolSearchResult,
+        score: f32,
+        best_source_weight: f32,
+    }
+
+    let mut fused: HashMap<(String, String), FusedResult> = HashMap::new();
+    for (rank, mut result) in left.into_iter().enumerate() {
+        let score = rank_fusion_score(rank, BUILTIN_SEARCH_WEIGHT);
+        result.score = score;
+        fused.insert(
+            (result.upstream.clone(), result.name.clone()),
+            FusedResult {
+                result,
+                score,
+                best_source_weight: BUILTIN_SEARCH_WEIGHT,
+            },
+        );
+    }
+    for (rank, mut result) in right.into_iter().enumerate() {
+        let score = rank_fusion_score(rank, GATEWAY_SEARCH_WEIGHT);
+        result.score = score;
+        fused
+            .entry((result.upstream.clone(), result.name.clone()))
+            .and_modify(|existing| {
+                existing.score += score;
+                existing.best_source_weight =
+                    existing.best_source_weight.max(GATEWAY_SEARCH_WEIGHT);
+                existing.result.score = existing.score;
+                if existing.result.input_schema.is_none() {
+                    existing.result.input_schema = result.input_schema.take();
+                }
+            })
+            .or_insert(FusedResult {
+                result,
+                score,
+                best_source_weight: GATEWAY_SEARCH_WEIGHT,
+            });
+    }
+
+    let mut results = fused.into_values().collect::<Vec<_>>();
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(CmpOrdering::Equal)
+            .then_with(|| {
+                b.best_source_weight
+                    .partial_cmp(&a.best_source_weight)
+                    .unwrap_or(CmpOrdering::Equal)
+            })
+            .then_with(|| a.result.name.cmp(&b.result.name))
+            .then_with(|| a.result.upstream.cmp(&b.result.upstream))
+    });
+    results.truncate(top_k.max(1).min(50));
+    results
+        .into_iter()
+        .map(|mut fused| {
+            fused.result.score = fused.score;
+            fused.result
+        })
+        .collect()
 }
 
 fn compare_tool_search_results(
@@ -3858,8 +4028,13 @@ pub fn extract_error_info(e: &anyhow::Error) -> (&'static str, String, Option<Va
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_error_info, logging_level_rank, normalize_upstream_result};
+    use super::{
+        extract_error_info, logging_level_rank, merge_code_mode_search_candidates,
+        merge_tool_search_results, normalize_upstream_result,
+    };
     use crate::dispatch::error::ToolError;
+    use crate::dispatch::gateway::code_mode::CodeModeSearchCandidate;
+    use crate::dispatch::gateway::manager::GatewayToolSearchResult;
     use crate::mcp::envelope::build_error;
     use crate::mcp::error::{DispatchError, canonical_kind};
     use crate::registry::{RegisteredService, ToolRegistry};
@@ -4204,6 +4379,66 @@ mod tests {
         );
         assert!(results.iter().all(|result| result.upstream == "lab"));
         assert!(results.iter().all(|result| result.schema_available));
+    }
+
+    #[test]
+    fn code_search_merges_gateway_results_by_rank_not_raw_score() {
+        let results = merge_code_mode_search_candidates(
+            vec![CodeModeSearchCandidate::lab_action(
+                "extract",
+                "list_hosts",
+                "List configured hosts",
+                22.0,
+            )],
+            vec![CodeModeSearchCandidate::upstream_tool(
+                "dozzle",
+                "list_containers",
+                "List Docker containers",
+                0.033,
+                Some(serde_json::json!({"type": "object"})),
+            )],
+            2,
+        );
+
+        assert_eq!(
+            results.first().map(|result| result.id.as_str()),
+            Some("upstream::dozzle::list_containers"),
+            "gateway search ranks are already fused; raw lexical scores must not bury semantic hits"
+        );
+        assert!(
+            results
+                .first()
+                .is_some_and(|result| result.score > 0.03 && result.score < 0.04)
+        );
+    }
+
+    #[test]
+    fn tool_search_merges_gateway_results_by_rank_not_raw_score() {
+        let results = merge_tool_search_results(
+            vec![GatewayToolSearchResult {
+                name: "extract".to_string(),
+                description: "Host extraction".to_string(),
+                upstream: "lab".to_string(),
+                score: 22.0,
+                input_schema: None,
+            }],
+            vec![GatewayToolSearchResult {
+                name: "list_containers".to_string(),
+                description: "List Docker containers".to_string(),
+                upstream: "dozzle".to_string(),
+                score: 0.033,
+                input_schema: Some(serde_json::json!({"type": "object"})),
+            }],
+            2,
+        );
+
+        let first = results.first().expect("merged result");
+        assert_eq!(first.upstream, "dozzle");
+        assert_eq!(first.name, "list_containers");
+        assert!(
+            first.score > 0.03 && first.score < 0.04,
+            "score should be normalized to cross-source rank fusion"
+        );
     }
 
     #[tokio::test]

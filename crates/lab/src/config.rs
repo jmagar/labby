@@ -539,10 +539,14 @@ impl CodeModeConfig {
 impl ToolSearchConfig {
     /// Resolve Qdrant URL: config field → `QDRANT_URL` env var → None.
     pub fn resolved_qdrant_url(&self) -> Option<String> {
-        self.qdrant_url
-            .clone()
-            .filter(|s| !s.is_empty())
-            .or_else(|| std::env::var("QDRANT_URL").ok().filter(|s| !s.is_empty()))
+        resolve_container_service_url(
+            self.qdrant_url
+                .clone()
+                .filter(|s| !s.is_empty())
+                .or_else(|| std::env::var("QDRANT_URL").ok().filter(|s| !s.is_empty())),
+            "axon-qdrant",
+            6333,
+        )
     }
 
     /// Resolve Qdrant API key: config field → `QDRANT_API_KEY` env var → None.
@@ -560,10 +564,14 @@ impl ToolSearchConfig {
 
     /// Resolve TEI URL: config field → `TEI_URL` env var → None.
     pub fn resolved_tei_url(&self) -> Option<String> {
-        self.tei_url
-            .clone()
-            .filter(|s| !s.is_empty())
-            .or_else(|| std::env::var("TEI_URL").ok().filter(|s| !s.is_empty()))
+        resolve_container_service_url(
+            self.tei_url
+                .clone()
+                .filter(|s| !s.is_empty())
+                .or_else(|| std::env::var("TEI_URL").ok().filter(|s| !s.is_empty())),
+            "axon-tei",
+            80,
+        )
     }
 
     /// Resolve TEI API key: config field → `TEI_API_KEY` env var → None.
@@ -593,6 +601,63 @@ impl ToolSearchConfig {
         }
         Ok(())
     }
+}
+
+fn resolve_container_service_url(
+    configured: Option<String>,
+    docker_host: &str,
+    docker_port: u16,
+) -> Option<String> {
+    configured.map(|raw| normalize_container_loopback_url(&raw, docker_host, docker_port))
+}
+
+fn normalize_container_loopback_url(raw: &str, docker_host: &str, docker_port: u16) -> String {
+    normalize_container_loopback_url_for_runtime(
+        raw,
+        docker_host,
+        docker_port,
+        running_in_container(),
+    )
+}
+
+fn normalize_container_loopback_url_for_runtime(
+    raw: &str,
+    docker_host: &str,
+    docker_port: u16,
+    in_container: bool,
+) -> String {
+    if !in_container {
+        return raw.to_string();
+    }
+
+    let Ok(mut parsed) = url::Url::parse(raw.trim()) else {
+        return raw.to_string();
+    };
+
+    let Some(host) = parsed.host_str() else {
+        return raw.to_string();
+    };
+
+    if !matches!(host, "localhost" | "127.0.0.1" | "::1") {
+        return raw.to_string();
+    }
+
+    if parsed.set_host(Some(docker_host)).is_err() || parsed.set_port(Some(docker_port)).is_err() {
+        return raw.to_string();
+    }
+    parsed.to_string().trim_end_matches('/').to_string()
+}
+
+fn running_in_container() -> bool {
+    Path::new("/.dockerenv").exists()
+        || Path::new("/run/.containerenv").exists()
+        || std::fs::read_to_string("/proc/1/cgroup")
+            .map(|cgroup| {
+                cgroup.contains("docker")
+                    || cgroup.contains("kubepods")
+                    || cgroup.contains("containerd")
+            })
+            .unwrap_or(false)
 }
 
 /// Provenance record for an upstream imported from an external MCP config.
@@ -2735,6 +2800,54 @@ url = "https://acme.example.com/mcp"
         assert_eq!(cfg.tool_search.top_k_default, 20);
         assert_eq!(cfg.tool_search.max_tools, 8000);
         cfg.validate().expect("root tool_search validates");
+    }
+
+    #[test]
+    fn tool_search_loopback_urls_normalize_to_docker_dns_in_container() {
+        assert_eq!(
+            normalize_container_loopback_url_for_runtime(
+                "http://127.0.0.1:53333",
+                "axon-qdrant",
+                6333,
+                true
+            ),
+            "http://axon-qdrant:6333"
+        );
+        assert_eq!(
+            normalize_container_loopback_url_for_runtime(
+                "http://localhost:52000/health",
+                "axon-tei",
+                80,
+                true
+            ),
+            "http://axon-tei/health"
+        );
+    }
+
+    #[test]
+    fn tool_search_loopback_urls_stay_host_local_outside_container() {
+        assert_eq!(
+            normalize_container_loopback_url_for_runtime(
+                "http://127.0.0.1:53333",
+                "axon-qdrant",
+                6333,
+                false
+            ),
+            "http://127.0.0.1:53333"
+        );
+    }
+
+    #[test]
+    fn tool_search_non_loopback_urls_do_not_normalize_in_container() {
+        assert_eq!(
+            normalize_container_loopback_url_for_runtime(
+                "http://qdrant.internal:6333",
+                "axon-qdrant",
+                6333,
+                true
+            ),
+            "http://qdrant.internal:6333"
+        );
     }
 
     #[test]

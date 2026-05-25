@@ -92,3 +92,99 @@ fn code_mode_runner_evaluates_js_in_a_minimal_host_environment() {
     let status = child.wait().expect("wait for runner");
     assert!(status.success(), "runner exited with {status}");
 }
+
+#[test]
+fn code_mode_runner_fans_out_promise_all_tool_calls() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+    let code = r#"
+        const [first, second] = await Promise.all([
+          callTool("lab::gateway.first", {"x": 1}),
+          callTool("lab::gateway.second", {"x": 2})
+        ]);
+        await callTool("lab::gateway.after", {"sum": first.value + second.value});
+    "#;
+
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "start",
+            "code": code
+        })
+    )
+    .expect("write start");
+
+    assert_eq!(
+        read_protocol_line(&mut stdout),
+        json!({
+            "type": "tool_call",
+            "seq": 0,
+            "id": "lab::gateway.first",
+            "params": {"x": 1}
+        })
+    );
+    assert_eq!(
+        read_protocol_line(&mut stdout),
+        json!({
+            "type": "tool_call",
+            "seq": 1,
+            "id": "lab::gateway.second",
+            "params": {"x": 2}
+        })
+    );
+
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "tool_result",
+            "seq": 1,
+            "result": {"value": 20}
+        })
+    )
+    .expect("write second result");
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "tool_result",
+            "seq": 0,
+            "result": {"value": 10}
+        })
+    )
+    .expect("write first result");
+
+    assert_eq!(
+        read_protocol_line(&mut stdout),
+        json!({
+            "type": "tool_call",
+            "seq": 2,
+            "id": "lab::gateway.after",
+            "params": {"sum": 30}
+        })
+    );
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "tool_result",
+            "seq": 2,
+            "result": {"ok": true}
+        })
+    )
+    .expect("write after result");
+
+    assert_eq!(read_protocol_line(&mut stdout), json!({"type": "done"}));
+    let status = child.wait().expect("wait for runner");
+    assert!(status.success(), "runner exited with {status}");
+}
