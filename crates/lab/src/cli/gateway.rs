@@ -12,9 +12,7 @@ use crate::cli::helpers::{run_action_command, run_confirmable_action_command};
 use crate::config::{LabConfig, ProtectedMcpRouteConfig, config_toml_path};
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
-use crate::dispatch::gateway::code_mode::{
-    CodeModeBroker, CodeModeCaller, CodeModeSurface, CodeModeToolId, CodeModeToolRef,
-};
+use crate::dispatch::gateway::code_mode::{CodeModeBroker, CodeModeCaller, CodeModeSurface};
 use crate::dispatch::gateway::install_gateway_manager;
 use crate::dispatch::gateway::manager::{GatewayManager, GatewayRuntimeHandle};
 use crate::dispatch::upstream::pool::UpstreamPool;
@@ -417,13 +415,7 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                     command: GatewayMcpAuthCommand::Status(_) | GatewayMcpAuthCommand::Clear(_),
                 }),
         })
-    ) || matches!(&args.command, GatewayCommand::ProtectedRoute(_)))
-        && !matches!(
-            &args.command,
-            GatewayCommand::Code(GatewayCodeArgs {
-                command: GatewayCodeCommand::Schema { id },
-            }) if code_mode_schema_is_builtin(id)
-        );
+    ) || matches!(&args.command, GatewayCommand::ProtectedRoute(_)));
     let manager = build_manager(config, discover_upstreams).await;
     let cli_origin = format!("cli:{}", std::process::id());
     let cli_owner = json!({
@@ -729,16 +721,6 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
     }
 }
 
-fn code_mode_schema_is_builtin(id: &str) -> bool {
-    matches!(
-        CodeModeToolId::parse(id),
-        Ok(CodeModeToolId {
-            reference: CodeModeToolRef::LabAction { .. },
-            ..
-        })
-    )
-}
-
 async fn run_gateway_code(
     manager: Arc<GatewayManager>,
     args: GatewayCodeArgs,
@@ -909,10 +891,7 @@ fn open_in_browser(url: &str) -> Result<()> {
 /// Format inspired by `claude mcp list` (status icon + one-line per server)
 /// and `codex mcp list` (column alignment). JSON mode preserves the full
 /// `ServerView` shape for downstream consumers.
-async fn run_gateway_list(
-    manager: Arc<GatewayManager>,
-    format: OutputFormat,
-) -> Result<ExitCode> {
+async fn run_gateway_list(manager: Arc<GatewayManager>, format: OutputFormat) -> Result<ExitCode> {
     let servers = match manager.list().await {
         Ok(s) => s,
         Err(err) => {
@@ -982,10 +961,8 @@ fn render_gateway_list_human(
     servers.sort_by_key(|s| {
         if !s.enabled {
             2u8
-        } else if s.connected {
-            0u8
         } else {
-            1u8
+            u8::from(!s.connected)
         }
     });
     let servers = servers.as_slice();
@@ -1027,7 +1004,7 @@ fn render_gateway_list_human(
         let transport = theme.tertiary(&transport_padded);
 
         let status_detail = if !s.enabled {
-            theme.muted("disabled".to_string())
+            theme.muted("disabled")
         } else if s.connected {
             let mut parts = Vec::new();
             if s.exposed_tool_count > 0 {
@@ -1205,7 +1182,7 @@ mod tests {
                 "gateway",
                 "code",
                 "schema",
-                "lab::radarr.movie.search",
+                "upstream::github::search_issues",
             ])
             .is_ok()
         );
@@ -1216,7 +1193,7 @@ mod tests {
                 "code",
                 "exec",
                 "--code",
-                "await callTool(\"lab::gateway.gateway.servers\", {})",
+                "await callTool(\"upstream::github::search_issues\", {query:\"repo\"})",
             ])
             .is_ok()
         );

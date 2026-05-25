@@ -177,10 +177,7 @@ async fn main() -> ExitCode {
             // Silence upstream connect/discovery warnings — failures are surfaced
             // inline in command output (e.g. `gateway list`); raw events just leak
             // above the human-readable result. Set LAB_LOG=labby=warn to see them.
-            Some(
-                "labby=warn,labby::dispatch::upstream=error,lab_apis=warn,rmcp=warn"
-                    .to_string(),
-            )
+            Some("labby=warn,labby::dispatch::upstream=error,lab_apis=warn,rmcp=warn".to_string())
         }
         _ => None,
     };

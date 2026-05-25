@@ -1129,7 +1129,7 @@ impl ServerHandler for LabMcpServer {
             };
             tools.push(Tool::new(
                 CODE_SEARCH_TOOL_NAME,
-                "Schema-first Code Mode discovery for Lab and proxied upstream tools. \
+                "Schema-first Code Mode discovery for proxied upstream MCP tools. \
                 Returns stable tool ids, short descriptions, scores, and whether an \
                 exact schema is available. Use code_schema with the returned id before \
                 generating tool-call code.",
@@ -1141,7 +1141,7 @@ impl ServerHandler for LabMcpServer {
                 "properties": {
                     "id": {
                         "type": "string",
-                        "description": "Stable id returned by code_search, e.g. lab::gateway.gateway.schema or upstream::github::search_issues"
+                        "description": "Stable id returned by code_search, e.g. upstream::github::search_issues"
                     }
                 },
                 "required": ["id"]
@@ -1152,8 +1152,8 @@ impl ServerHandler for LabMcpServer {
             tools.push(Tool::new(
                 CODE_SCHEMA_TOOL_NAME,
                 "Return the exact input contract for one Code Mode tool id. \
-                Lab ids return the ActionSpec-derived action contract; upstream ids \
-                return the upstream JSON Schema exposed by the gateway.",
+                Returns the upstream JSON Schema exposed by the gateway for a given \
+                upstream:: tool id.",
                 code_schema_schema,
             ));
             gateway_tool_count += 1;
@@ -1172,7 +1172,7 @@ impl ServerHandler for LabMcpServer {
                     },
                     "confirm": {
                         "type": "boolean",
-                        "description": "Required at the top level, in addition to per-call params.confirm, before Code Mode may execute destructive Lab actions."
+                        "description": "Reserved for compatibility; Code Mode executes proxied upstream MCP tools only."
                     }
                 },
                 "required": ["code"]
@@ -2751,7 +2751,6 @@ fn redact_subject_for_logging(subject: &str) -> String {
 impl LabMcpServer {
     fn code_mode_surface(&self, allow_destructive_actions: bool) -> CodeModeSurface {
         CodeModeSurface::Mcp {
-            expose_builtin_services: !matches!(self.node_role, Some(NodeRole::NonMaster)),
             allow_destructive_actions,
         }
     }
@@ -3322,7 +3321,6 @@ pub fn extract_error_info(e: &anyhow::Error) -> (&'static str, String, Option<Va
 mod tests {
     use super::{extract_error_info, logging_level_rank, normalize_upstream_result};
     use crate::dispatch::error::ToolError;
-    use crate::dispatch::gateway::code_mode::{CodeModeBroker, CodeModeCaller, CodeModeSurface};
     use crate::mcp::envelope::build_error;
     use crate::mcp::error::{DispatchError, canonical_kind};
     use crate::registry::{RegisteredService, ToolRegistry};
@@ -3333,7 +3331,6 @@ mod tests {
     use std::collections::{BTreeMap, HashMap};
     use std::future::Future;
     use std::pin::Pin;
-    use std::time::Duration;
 
     #[tokio::test]
     async fn extract_error_info_preserves_unknown_action_from_real_dispatch_downcast() {
@@ -3657,106 +3654,6 @@ mod tests {
                 .is_some_and(|actions| actions.iter().any(|action| action == "movie.search")),
             "schema should expose Lab action choices"
         );
-    }
-
-    #[tokio::test]
-    async fn code_search_expands_builtin_matches_to_action_candidates() {
-        let registry = completion_test_registry();
-        let broker = CodeModeBroker::new(&registry, None);
-
-        let results = broker
-            .search(
-                "movie.search",
-                10,
-                CodeModeCaller::TrustedLocal,
-                CodeModeSurface::Cli,
-            )
-            .await
-            .unwrap();
-
-        assert!(
-            results
-                .iter()
-                .any(|result| result.id == "lab::radarr.movie.search")
-        );
-        assert_eq!(
-            results.first().map(|result| result.id.as_str()),
-            Some("lab::radarr.movie.search")
-        );
-        assert!(results.iter().all(|result| result.upstream == "lab"));
-        assert!(results.iter().all(|result| result.schema_available));
-    }
-
-    #[tokio::test]
-    async fn code_mode_brokers_lab_action_by_stable_id() {
-        let registry = completion_test_registry();
-        let broker = CodeModeBroker::new(&registry, None);
-
-        let result = broker
-            .call_tool_id(
-                "lab::radarr.movie.search",
-                serde_json::json!({"query": "Alien"}),
-                CodeModeCaller::TrustedLocal,
-                CodeModeSurface::Cli,
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(result, Value::Null);
-    }
-
-    const SLOW_ACTIONS: &[ActionSpec] = &[ActionSpec {
-        name: "wait",
-        description: "Wait long enough to test Code Mode timeout propagation",
-        destructive: false,
-        params: &[],
-        returns: "object",
-    }];
-
-    fn slow_dispatch(
-        _action: String,
-        _params: Value,
-    ) -> Pin<Box<dyn Future<Output = Result<Value, ToolError>> + Send>> {
-        Box::pin(async {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            Ok(serde_json::json!({"ok": true}))
-        })
-    }
-
-    #[tokio::test]
-    async fn code_mode_timeout_covers_brokered_lab_calls() {
-        let mut registry = ToolRegistry::new();
-        registry.register(RegisteredService {
-            name: "slow",
-            description: "Slow test service",
-            category: "bootstrap",
-            kind: crate::registry::RegisteredServiceKind::BootstrapOperator,
-            status: "available",
-            actions: SLOW_ACTIONS,
-            dispatch: slow_dispatch,
-        });
-        let broker = CodeModeBroker::new(&registry, None);
-
-        let started = std::time::Instant::now();
-        let err = broker
-            .call_tool_id_before_deadline(
-                "lab::slow.wait",
-                serde_json::json!({}),
-                tokio::time::Instant::now() + Duration::from_millis(50),
-                CodeModeCaller::TrustedLocal,
-                CodeModeSurface::Cli,
-            )
-            .await
-            .expect_err("brokered tool call should be bounded by Code Mode timeout");
-
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "timeout should not wait for the slow dispatch to finish"
-        );
-        match err {
-            ToolError::Sdk { sdk_kind, .. } => assert_eq!(sdk_kind, "timeout"),
-            other => panic!("expected timeout sdk error, got {other:?}"),
-        }
     }
 
     #[tokio::test]

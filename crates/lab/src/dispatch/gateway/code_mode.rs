@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::cmp::Ordering as CmpOrdering;
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::process::ExitCode;
@@ -12,7 +11,6 @@ use boa_engine::{
     Context, JsArgs, JsError, JsNativeError, JsResult, JsValue, NativeFunction, Source, js_string,
 };
 use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
-use lab_apis::core::action::{ActionSpec, ParamSpec};
 use rmcp::model::CallToolRequestParams;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -22,7 +20,11 @@ use tokio::process::{Child, ChildStdin, Command};
 
 use crate::dispatch::error::ToolError;
 use crate::dispatch::gateway::manager::GatewayManager;
-use crate::registry::{RegisteredService, ToolRegistry};
+use crate::registry::ToolRegistry;
+
+const LAB_ACTION_UNKNOWN_TOOL_HINT: &str = "Code Mode handles upstream MCP tools only. For Lab actions, use the `tool_execute` MCP tool: \
+     name=<service> (e.g. \"radarr\"), arguments={action: \"<dotted.action>\", params: {...}}. \
+     Example: tool_execute(name=\"radarr\", arguments={action:\"movie.search\", params:{query:\"Matrix\"}}).";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeModeToolId {
@@ -32,7 +34,6 @@ pub struct CodeModeToolId {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodeModeToolRef {
-    LabAction { service: String, action: String },
     UpstreamTool { upstream: String, tool: String },
 }
 
@@ -43,22 +44,8 @@ impl CodeModeToolId {
             return Err(invalid_code_mode_id("Code Mode tool id must not be empty"));
         }
 
-        if let Some(rest) = raw.strip_prefix("lab::") {
-            let (service, action) = rest.split_once('.').ok_or_else(|| {
-                invalid_code_mode_id("lab Code Mode ids must use lab::<service>.<action>")
-            })?;
-            if service.trim().is_empty() || action.trim().is_empty() {
-                return Err(invalid_code_mode_id(
-                    "lab Code Mode ids must include service and action",
-                ));
-            }
-            return Ok(Self {
-                raw: raw.to_string(),
-                reference: CodeModeToolRef::LabAction {
-                    service: service.trim().to_string(),
-                    action: action.trim().to_string(),
-                },
-            });
+        if raw.starts_with("lab::") {
+            return Err(lab_action_unknown_tool());
         }
 
         if let Some(rest) = raw.strip_prefix("upstream::") {
@@ -80,14 +67,9 @@ impl CodeModeToolId {
         }
 
         Err(invalid_code_mode_id(
-            "Code Mode ids must start with lab:: or upstream::",
+            "Code Mode ids must start with upstream::",
         ))
     }
-}
-
-#[must_use]
-pub fn lab_action_id(service: &str, action: &str) -> String {
-    format!("lab::{service}.{action}")
 }
 
 #[must_use]
@@ -111,18 +93,6 @@ pub struct CodeModeSearchCandidate {
 }
 
 impl CodeModeSearchCandidate {
-    #[must_use]
-    pub fn lab_action(service: &str, action: &str, description: &str, score: f32) -> Self {
-        Self {
-            id: lab_action_id(service, action),
-            name: action.to_string(),
-            upstream: "lab".to_string(),
-            description: description.to_string(),
-            score,
-            schema_available: true,
-        }
-    }
-
     #[must_use]
     pub fn upstream_tool(
         upstream: &str,
@@ -181,10 +151,7 @@ pub enum CodeModeCaller {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeModeSurface {
-    Mcp {
-        expose_builtin_services: bool,
-        allow_destructive_actions: bool,
-    },
+    Mcp { allow_destructive_actions: bool },
     Cli,
 }
 
@@ -208,39 +175,16 @@ impl CodeModeCaller {
                 .any(|scope| matches!(scope.as_str(), "lab" | "lab:admin")),
         }
     }
-
-    #[must_use]
-    pub fn can_execute_action(&self, entry: &RegisteredService, action: &str) -> bool {
-        if !builtin_action_requires_admin(entry, action) {
-            return self.can_execute();
-        }
-        match self {
-            Self::TrustedLocal => true,
-            Self::Scoped { scopes, .. } => scopes.iter().any(|scope| scope == "lab:admin"),
-        }
-    }
-
-    #[must_use]
-    pub fn subject(&self) -> Option<&str> {
-        match self {
-            Self::TrustedLocal => None,
-            Self::Scoped { subject, .. } => subject.as_deref(),
-        }
-    }
 }
 
 pub struct CodeModeBroker<'a> {
-    registry: &'a ToolRegistry,
     gateway_manager: Option<&'a GatewayManager>,
 }
 
 impl<'a> CodeModeBroker<'a> {
     #[must_use]
-    pub fn new(registry: &'a ToolRegistry, gateway_manager: Option<&'a GatewayManager>) -> Self {
-        Self {
-            registry,
-            gateway_manager,
-        }
+    pub fn new(_registry: &'a ToolRegistry, gateway_manager: Option<&'a GatewayManager>) -> Self {
+        Self { gateway_manager }
     }
 
     pub async fn search(
@@ -248,7 +192,7 @@ impl<'a> CodeModeBroker<'a> {
         query: &str,
         top_k: usize,
         caller: CodeModeCaller,
-        surface: CodeModeSurface,
+        _surface: CodeModeSurface,
     ) -> Result<Vec<CodeModeSearchCandidate>, ToolError> {
         if !caller.can_read() {
             return Err(ToolError::Sdk {
@@ -257,42 +201,34 @@ impl<'a> CodeModeBroker<'a> {
             });
         }
 
-        let score_floor_fraction = match self.gateway_manager {
-            Some(manager) => manager.tool_search_config().await.score_floor_fraction,
-            None => 0.0,
+        let Some(manager) = self.gateway_manager else {
+            return Ok(Vec::new());
         };
-        let mut candidates = self
-            .search_builtin_candidates(query, top_k, score_floor_fraction, surface)
-            .await;
 
-        if let Some(manager) = self.gateway_manager {
-            match manager.search_tools(query, top_k, true).await {
-                Ok(upstream_results) => {
-                    candidates.extend(upstream_results.into_iter().map(|result| {
-                        CodeModeSearchCandidate::upstream_tool(
-                            &result.upstream,
-                            &result.name,
-                            &result.description,
-                            result.score,
-                            result.input_schema,
-                        )
-                    }));
-                }
-                Err(err) if err.kind() == "index_warming" && !candidates.is_empty() => {}
-                Err(err) => return Err(err),
-            }
+        let top_k = top_k.max(1).min(50);
+        match manager.search_tools(query, top_k, true).await {
+            Ok(upstream_results) => Ok(upstream_results
+                .into_iter()
+                .map(|result| {
+                    CodeModeSearchCandidate::upstream_tool(
+                        &result.upstream,
+                        &result.name,
+                        &result.description,
+                        result.score,
+                        result.input_schema,
+                    )
+                })
+                .collect()),
+            Err(err) if err.kind() == "index_warming" => Ok(Vec::new()),
+            Err(err) => Err(err),
         }
-
-        candidates.sort_by(compare_code_mode_search_candidates);
-        candidates.truncate(top_k.max(1).min(50));
-        Ok(candidates)
     }
 
     pub async fn schema(
         &self,
         id: &str,
         caller: CodeModeCaller,
-        surface: CodeModeSurface,
+        _surface: CodeModeSurface,
     ) -> Result<CodeModeSchemaResponse, ToolError> {
         if !caller.can_execute() {
             return Err(ToolError::Sdk {
@@ -301,13 +237,15 @@ impl<'a> CodeModeBroker<'a> {
             });
         }
         let parsed = CodeModeToolId::parse(id)?;
+        let Some(manager) = self.gateway_manager else {
+            return Err(ToolError::Sdk {
+                sdk_kind: "unknown_tool".to_string(),
+                message: "no gateway manager configured".to_string(),
+            });
+        };
         match parsed.reference {
-            CodeModeToolRef::LabAction { service, action } => {
-                self.schema_for_lab_action(&parsed.raw, &service, &action, caller, surface)
-                    .await
-            }
             CodeModeToolRef::UpstreamTool { upstream, tool } => {
-                self.schema_for_upstream_tool(&parsed.raw, &upstream, &tool)
+                self.schema_for_upstream_tool(manager, &parsed.raw, &upstream, &tool)
                     .await
             }
         }
@@ -345,125 +283,13 @@ impl<'a> CodeModeBroker<'a> {
         .await
     }
 
-    async fn search_builtin_candidates(
-        &self,
-        query: &str,
-        top_k: usize,
-        score_floor_fraction: f32,
-        surface: CodeModeSurface,
-    ) -> Vec<CodeModeSearchCandidate> {
-        let needle = query.trim().to_ascii_lowercase();
-        if needle.is_empty() || needle.len() > 500 {
-            return Vec::new();
-        }
-
-        let mut candidates = Vec::new();
-        for service in self.registry.services() {
-            if !self.service_visible(service.name, surface).await {
-                continue;
-            }
-            for action in self.searchable_builtin_actions(service, surface).await {
-                let haystack = format!(
-                    "{}\n{}\n{}\n{}",
-                    service.name, service.description, action.name, action.description
-                )
-                .to_ascii_lowercase();
-                let score = crate::dispatch::gateway::score_name_haystack(
-                    &needle,
-                    &action.name.to_ascii_lowercase(),
-                    &haystack,
-                );
-                if score > 0.0 {
-                    candidates.push(CodeModeSearchCandidate::lab_action(
-                        service.name,
-                        action.name,
-                        action.description,
-                        score,
-                    ));
-                }
-            }
-        }
-
-        candidates.sort_by(compare_code_mode_search_candidates);
-        if score_floor_fraction > 0.0
-            && let Some(top) = candidates.first()
-        {
-            let floor = top.score * score_floor_fraction;
-            candidates.retain(|candidate| candidate.score >= floor);
-        }
-        candidates.truncate(top_k.max(1).min(50));
-        candidates
-    }
-
-    async fn schema_for_lab_action(
-        &self,
-        id: &str,
-        service_name: &str,
-        action_name: &str,
-        caller: CodeModeCaller,
-        surface: CodeModeSurface,
-    ) -> Result<CodeModeSchemaResponse, ToolError> {
-        let Some(entry) = self
-            .registry
-            .services()
-            .iter()
-            .find(|entry| entry.name == service_name)
-        else {
-            return Err(ToolError::Sdk {
-                sdk_kind: "not_found".to_string(),
-                message: format!("Lab service `{service_name}` was not found"),
-            });
-        };
-        if !self.service_visible(entry.name, surface).await
-            || !self.action_allowed(entry.name, action_name, surface).await
-        {
-            return Err(ToolError::Sdk {
-                sdk_kind: "not_found".to_string(),
-                message: format!(
-                    "Lab action `{service_name}.{action_name}` is not exposed on this surface"
-                ),
-            });
-        }
-        let action = entry
-            .actions
-            .iter()
-            .find(|action| action.name == action_name)
-            .ok_or_else(|| ToolError::Sdk {
-                sdk_kind: "not_found".to_string(),
-                message: format!("Lab action `{service_name}.{action_name}` was not found"),
-            })?;
-        if !caller.can_execute_action(entry, action_name) {
-            return Err(ToolError::Sdk {
-                sdk_kind: "forbidden".to_string(),
-                message: format!(
-                    "action `{action_name}` for service `{}` requires `lab:admin` scope",
-                    entry.name
-                ),
-            });
-        }
-        let input_schema = action_input_schema(action);
-        crate::dispatch::helpers::action_schema(entry.actions, action_name).map(|schema| {
-            CodeModeSchemaResponse::lab_action_with_input_schema(
-                id,
-                action_name,
-                schema,
-                input_schema,
-            )
-        })
-    }
-
     async fn schema_for_upstream_tool(
         &self,
+        manager: &GatewayManager,
         id: &str,
         upstream: &str,
         tool: &str,
     ) -> Result<CodeModeSchemaResponse, ToolError> {
-        let Some(manager) = self.gateway_manager else {
-            return Err(ToolError::Sdk {
-                sdk_kind: "upstream_error".to_string(),
-                message: "gateway manager is unavailable".to_string(),
-            });
-        };
         let candidate = manager
             .resolve_code_mode_upstream_tool(upstream, tool)
             .await?;
@@ -698,101 +524,31 @@ impl<'a> CodeModeBroker<'a> {
         &self,
         id: &str,
         params: Value,
-        caller: CodeModeCaller,
-        surface: CodeModeSurface,
+        _caller: CodeModeCaller,
+        _surface: CodeModeSurface,
     ) -> Result<Value, ToolError> {
         let parsed = CodeModeToolId::parse(id)?;
+        let Some(manager) = self.gateway_manager else {
+            return Err(ToolError::Sdk {
+                sdk_kind: "unknown_tool".to_string(),
+                message: "no gateway manager configured".to_string(),
+            });
+        };
         match parsed.reference {
-            CodeModeToolRef::LabAction { service, action } => {
-                self.call_lab_action(&service, &action, params, caller, surface)
+            CodeModeToolRef::UpstreamTool { upstream, tool } => {
+                self.call_upstream_tool(manager, &upstream, &tool, params)
                     .await
             }
-            CodeModeToolRef::UpstreamTool { upstream, tool } => {
-                self.call_upstream_tool(&upstream, &tool, params).await
-            }
         }
-    }
-
-    async fn call_lab_action(
-        &self,
-        service_name: &str,
-        action_name: &str,
-        params: Value,
-        caller: CodeModeCaller,
-        surface: CodeModeSurface,
-    ) -> Result<Value, ToolError> {
-        let Some(entry) = self
-            .registry
-            .services()
-            .iter()
-            .find(|entry| entry.name == service_name)
-        else {
-            return Err(ToolError::Sdk {
-                sdk_kind: "not_found".to_string(),
-                message: format!("Lab service `{service_name}` was not found"),
-            });
-        };
-        if !self.service_visible(entry.name, surface).await
-            || !self.action_allowed(entry.name, action_name, surface).await
-        {
-            return Err(ToolError::Sdk {
-                sdk_kind: "not_found".to_string(),
-                message: format!(
-                    "Lab action `{service_name}.{action_name}` is not exposed on this surface"
-                ),
-            });
-        }
-        if !caller.can_execute_action(entry, action_name) {
-            return Err(ToolError::Sdk {
-                sdk_kind: "forbidden".to_string(),
-                message: format!(
-                    "action `{action_name}` for service `{}` requires `lab:admin` scope",
-                    entry.name
-                ),
-            });
-        }
-        let is_destructive = entry
-            .actions
-            .iter()
-            .any(|action| action.name == action_name && action.destructive);
-        let confirmed = params.get("confirm").and_then(Value::as_bool) == Some(true);
-        if is_destructive && !confirmed {
-            return Err(ToolError::Sdk {
-                sdk_kind: "confirmation_required".to_string(),
-                message: format!(
-                    "action `{action_name}` is destructive - pass {{\"confirm\":true}} in params"
-                ),
-            });
-        }
-        if is_destructive && !surface.allows_destructive_actions() {
-            return Err(ToolError::Sdk {
-                sdk_kind: "confirmation_required".to_string(),
-                message: format!(
-                    "action `{action_name}` is destructive - pass {{\"confirm\":true}} to code_execute and to the tool params"
-                ),
-            });
-        }
-        let params = strip_code_mode_control_params(params);
-        let params = if entry.name == "gateway" {
-            inject_gateway_origin_param(params, caller.subject(), surface)
-        } else {
-            params
-        };
-        (entry.dispatch)(action_name.to_string(), params).await
     }
 
     async fn call_upstream_tool(
         &self,
+        manager: &GatewayManager,
         upstream: &str,
         tool: &str,
         params: Value,
     ) -> Result<Value, ToolError> {
-        let Some(manager) = self.gateway_manager else {
-            return Err(ToolError::Sdk {
-                sdk_kind: "upstream_error".to_string(),
-                message: "gateway manager is unavailable".to_string(),
-            });
-        };
         manager
             .resolve_code_mode_upstream_tool(upstream, tool)
             .await?;
@@ -850,75 +606,6 @@ impl<'a> CodeModeBroker<'a> {
             }
         }
     }
-
-    async fn searchable_builtin_actions<'b>(
-        &self,
-        service: &'b RegisteredService,
-        surface: CodeModeSurface,
-    ) -> Vec<&'b ActionSpec> {
-        let mut actions = service.actions.iter().collect::<Vec<_>>();
-        if let Some(allowed_actions) = self.allowed_actions(service.name, surface).await
-            && !allowed_actions.is_empty()
-        {
-            actions.retain(|action| allowed_actions.iter().any(|allowed| allowed == action.name));
-        }
-        actions
-    }
-
-    async fn service_visible(&self, service: &str, surface: CodeModeSurface) -> bool {
-        match (surface, self.gateway_manager) {
-            (
-                CodeModeSurface::Mcp {
-                    expose_builtin_services: false,
-                    ..
-                },
-                _,
-            ) => false,
-            (CodeModeSurface::Mcp { .. }, Some(manager)) => {
-                manager.surface_enabled_for_service(service, "mcp").await
-            }
-            (CodeModeSurface::Cli, Some(manager)) => {
-                manager.surface_enabled_for_service(service, "cli").await
-            }
-            _ => true,
-        }
-    }
-
-    async fn action_allowed(&self, service: &str, action: &str, surface: CodeModeSurface) -> bool {
-        match (surface, self.gateway_manager) {
-            (CodeModeSurface::Mcp { .. }, Some(manager)) => {
-                manager
-                    .mcp_action_allowed_for_service(service, action)
-                    .await
-            }
-            _ => true,
-        }
-    }
-
-    async fn allowed_actions(
-        &self,
-        service: &str,
-        surface: CodeModeSurface,
-    ) -> Option<Vec<String>> {
-        match (surface, self.gateway_manager) {
-            (CodeModeSurface::Mcp { .. }, Some(manager)) => {
-                manager.allowed_mcp_actions_for_service(service).await
-            }
-            _ => None,
-        }
-    }
-}
-
-impl CodeModeSurface {
-    fn allows_destructive_actions(self) -> bool {
-        match self {
-            Self::Cli => true,
-            Self::Mcp {
-                allow_destructive_actions,
-                ..
-            } => allow_destructive_actions,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -962,33 +649,6 @@ thread_local! {
 }
 
 impl CodeModeSchemaResponse {
-    #[cfg(test)]
-    #[must_use]
-    pub fn lab_action(id: &str, action: &str, schema: Value) -> Self {
-        Self::lab_action_with_input_schema(id, action, schema.clone(), schema)
-    }
-
-    #[must_use]
-    pub fn lab_action_with_input_schema(
-        id: &str,
-        action: &str,
-        schema: Value,
-        input_schema: Value,
-    ) -> Self {
-        Self {
-            id: id.to_string(),
-            kind: "lab_action",
-            name: action.to_string(),
-            upstream: "lab".to_string(),
-            schema,
-            schema_format: "lab_action_spec",
-            bindings: CodeModeBindings {
-                typescript: typescript_binding(id, "ToolArgs", &input_schema),
-            },
-            input_schema,
-        }
-    }
-
     #[must_use]
     pub fn upstream_tool(id: &str, upstream: &str, tool: &str, schema: Value) -> Self {
         Self {
@@ -1013,14 +673,13 @@ pub fn invalid_code_mode_id(message: impl Into<String>) -> ToolError {
     }
 }
 
-fn compare_code_mode_search_candidates(
-    a: &CodeModeSearchCandidate,
-    b: &CodeModeSearchCandidate,
-) -> CmpOrdering {
-    b.score
-        .partial_cmp(&a.score)
-        .unwrap_or(CmpOrdering::Equal)
-        .then_with(|| a.id.cmp(&b.id))
+fn lab_action_unknown_tool() -> ToolError {
+    ToolError::Sdk {
+        sdk_kind: "unknown_tool".to_string(),
+        message: format!(
+            "lab:: IDs are not supported by Code Mode. {LAB_ACTION_UNKNOWN_TOOL_HINT}"
+        ),
+    }
 }
 
 async fn write_runner_input(
@@ -1045,54 +704,6 @@ async fn write_runner_input(
 async fn terminate_code_mode_runner(child: &mut Child) {
     drop(child.kill().await);
     drop(child.wait().await);
-}
-
-fn strip_code_mode_control_params(mut params: Value) -> Value {
-    if let Value::Object(map) = &mut params {
-        map.remove("confirm");
-    }
-    params
-}
-
-fn inject_gateway_origin_param(
-    params: Value,
-    subject: Option<&str>,
-    surface: CodeModeSurface,
-) -> Value {
-    let surface_label = match surface {
-        CodeModeSurface::Mcp { .. } => "mcp",
-        CodeModeSurface::Cli => "cli",
-    };
-    let raw = subject
-        .map(|value| format!("{surface_label}:{value}"))
-        .unwrap_or_else(|| format!("{surface_label}:anonymous"));
-    let Some(mut object) = params.as_object().cloned() else {
-        return params;
-    };
-    object.insert(
-        "owner".to_string(),
-        json!({
-            "surface": surface_label,
-            "subject": subject,
-            "raw": raw,
-        }),
-    );
-    object.insert("origin".to_string(), Value::String(raw));
-    Value::Object(object)
-}
-
-fn builtin_action_requires_admin(entry: &RegisteredService, action: &str) -> bool {
-    if entry.name == "gateway" {
-        return !matches!(
-            action,
-            "help" | "schema" | "gateway.help" | "gateway.schema"
-        );
-    }
-    entry.name == "setup"
-        && entry
-            .actions
-            .iter()
-            .any(|spec| spec.name == action && spec.destructive)
 }
 
 fn code_mode_canonical_error_kind(s: &str) -> &'static str {
@@ -1358,80 +969,6 @@ fn js_value_message(value: &JsValue, context: &mut Context) -> String {
 }
 
 #[must_use]
-pub fn action_input_schema(action: &ActionSpec) -> Value {
-    let mut properties = Map::new();
-    let mut required = Vec::new();
-
-    for param in action.params {
-        let mut schema = param_json_schema(param);
-        if let Value::Object(map) = &mut schema
-            && !param.description.is_empty()
-        {
-            map.insert(
-                "description".to_string(),
-                Value::String(param.description.to_string()),
-            );
-        }
-        properties.insert(param.name.to_string(), schema);
-        if param.required {
-            required.push(Value::String(param.name.to_string()));
-        }
-    }
-
-    let mut schema = Map::from_iter([
-        ("type".to_string(), Value::String("object".to_string())),
-        ("properties".to_string(), Value::Object(properties)),
-        ("additionalProperties".to_string(), Value::Bool(false)),
-    ]);
-    if !required.is_empty() {
-        schema.insert("required".to_string(), Value::Array(required));
-    }
-    Value::Object(schema)
-}
-
-fn param_json_schema(param: &ParamSpec) -> Value {
-    let ty = param.ty.trim();
-    if let Some(item) = ty.strip_suffix("[]") {
-        return json!({
-            "type": "array",
-            "items": type_label_json_schema(item)
-        });
-    }
-    if ty.contains('|')
-        && ty.split('|').all(|part| {
-            !matches!(
-                part.trim(),
-                "string" | "number" | "integer" | "boolean" | "object" | "array" | "null"
-            )
-        })
-    {
-        return json!({
-            "type": "string",
-            "enum": ty.split('|').map(str::trim).collect::<Vec<_>>()
-        });
-    }
-    if ty.contains('|') {
-        return json!({
-            "anyOf": ty.split('|').map(|part| type_label_json_schema(part.trim())).collect::<Vec<_>>()
-        });
-    }
-    type_label_json_schema(ty)
-}
-
-fn type_label_json_schema(ty: &str) -> Value {
-    match ty {
-        "string" => json!({ "type": "string" }),
-        "integer" | "int" | "i64" | "u64" | "usize" => json!({ "type": "integer" }),
-        "number" | "float" | "f64" => json!({ "type": "number" }),
-        "boolean" | "bool" => json!({ "type": "boolean" }),
-        "object" | "json" | "value" => json!({ "type": "object" }),
-        "array" | "list" => json!({ "type": "array" }),
-        "null" => json!({ "type": "null" }),
-        _ => json!({ "description": format!("Lab type hint: {ty}") }),
-    }
-}
-
-#[must_use]
 pub fn typescript_binding(id: &str, type_name: &str, schema: &Value) -> String {
     let args_type = typescript_type(schema, 0);
     format!(
@@ -1527,31 +1064,26 @@ fn typescript_property_name(name: &str) -> String {
 mod tests {
     use boa_engine::{Context, Source};
     use serde_json::json;
-    use std::future::Future;
-    use std::pin::Pin;
 
     use super::{
         CodeModeSchemaResponse, CodeModeSearchCandidate, CodeModeToolId, CodeModeToolRef,
-        action_input_schema, code_mode_upstream_error_info, configure_code_mode_runtime_limits,
+        code_mode_upstream_error_info, configure_code_mode_runtime_limits,
         sanitize_code_mode_schema,
     };
-    use crate::dispatch::error::ToolError;
-    use crate::registry::{RegisteredService, RegisteredServiceKind, ToolRegistry};
-    use lab_apis::core::action::{ActionSpec, ParamSpec};
 
     #[test]
-    fn parses_lab_action_id() {
-        let parsed = CodeModeToolId::parse("lab::gateway.gateway.schema").unwrap();
-        assert_eq!(
-            parsed,
-            CodeModeToolId {
-                raw: "lab::gateway.gateway.schema".to_string(),
-                reference: CodeModeToolRef::LabAction {
-                    service: "gateway".to_string(),
-                    action: "gateway.schema".to_string(),
-                },
+    fn parse_rejects_lab_id() {
+        let err =
+            CodeModeToolId::parse("lab::radarr.movie.search").expect_err("lab:: ids are rejected");
+        match err {
+            super::ToolError::Sdk { sdk_kind, message } => {
+                assert_eq!(sdk_kind, "unknown_tool");
+                assert!(message.contains("lab::"));
+                assert!(message.contains("tool_execute"));
+                assert!(message.contains("\"radarr\""));
             }
-        );
+            other => panic!("expected unknown_tool, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1600,121 +1132,77 @@ mod tests {
         assert!(!counts_as_failure);
     }
 
-    const DESTRUCTIVE_ACTIONS: &[ActionSpec] = &[ActionSpec {
-        name: "danger",
-        description: "Dangerous test action",
-        destructive: true,
-        params: &[],
-        returns: "object",
-    }];
-
-    fn echo_dispatch(
-        _action: String,
-        params: serde_json::Value,
-    ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, ToolError>> + Send>> {
-        Box::pin(async move { Ok(params) })
-    }
-
-    fn destructive_test_registry() -> ToolRegistry {
-        let mut registry = ToolRegistry::new();
-        registry.register(RegisteredService {
-            name: "gateway",
-            description: "Gateway",
-            category: "bootstrap",
-            kind: RegisteredServiceKind::BootstrapOperator,
-            status: "available",
-            actions: DESTRUCTIVE_ACTIONS,
-            dispatch: echo_dispatch,
-        });
-        registry
-    }
-
     #[tokio::test]
-    async fn mcp_code_mode_requires_top_level_confirmation_for_destructive_actions() {
-        let registry = destructive_test_registry();
-        let broker = super::CodeModeBroker::new(&registry, None);
-
-        let err = broker
-            .call_tool_id(
-                "lab::gateway.danger",
-                json!({"confirm": true}),
-                super::CodeModeCaller::TrustedLocal,
-                super::CodeModeSurface::Mcp {
-                    expose_builtin_services: true,
-                    allow_destructive_actions: false,
-                },
-            )
-            .await
-            .expect_err("mcp destructive action should require top-level code_execute confirm");
-
-        assert_eq!(err.kind(), "confirmation_required");
-    }
-
-    #[tokio::test]
-    async fn code_mode_schema_requires_admin_for_admin_only_actions() {
-        let registry = destructive_test_registry();
+    async fn schema_rejects_lab_id() {
+        let registry = super::ToolRegistry::new();
         let broker = super::CodeModeBroker::new(&registry, None);
 
         let err = broker
             .schema(
-                "lab::gateway.danger",
-                super::CodeModeCaller::Scoped {
-                    scopes: vec!["lab".to_string()],
-                    subject: Some("subject-1".to_string()),
-                },
-                super::CodeModeSurface::Mcp {
-                    expose_builtin_services: true,
-                    allow_destructive_actions: true,
-                },
+                "lab::radarr.movie.search",
+                super::CodeModeCaller::TrustedLocal,
+                super::CodeModeSurface::Cli,
             )
             .await
-            .expect_err("schema for admin-only action must require admin scope");
+            .expect_err("schema should reject lab:: id");
 
-        assert_eq!(err.kind(), "forbidden");
+        match err {
+            super::ToolError::Sdk { sdk_kind, message } => {
+                assert_eq!(sdk_kind, "unknown_tool");
+                assert!(message.contains("tool_execute"));
+                assert!(message.contains("\"radarr\""));
+            }
+            other => panic!("expected unknown_tool, got {other:?}"),
+        }
     }
 
     #[tokio::test]
-    async fn code_mode_overwrites_gateway_provenance_fields() {
-        let registry = destructive_test_registry();
+    async fn code_search_returns_only_upstream_candidates() {
+        let registry = super::ToolRegistry::new();
         let broker = super::CodeModeBroker::new(&registry, None);
 
-        let result = broker
-            .call_tool_id(
-                "lab::gateway.danger",
-                json!({
-                    "confirm": true,
-                    "origin": "spoofed",
-                    "owner": {"raw": "spoofed"}
-                }),
-                super::CodeModeCaller::Scoped {
-                    scopes: vec!["lab:admin".to_string()],
-                    subject: Some("subject-1".to_string()),
-                },
-                super::CodeModeSurface::Mcp {
-                    expose_builtin_services: true,
-                    allow_destructive_actions: true,
-                },
+        let results = broker
+            .search(
+                "movie.search",
+                10,
+                super::CodeModeCaller::TrustedLocal,
+                super::CodeModeSurface::Cli,
             )
             .await
-            .unwrap();
+            .expect("search ok");
 
-        assert_eq!(result.pointer("/origin"), Some(&json!("mcp:subject-1")));
-        assert_eq!(result.pointer("/owner/raw"), Some(&json!("mcp:subject-1")));
-        assert_eq!(result.pointer("/owner/surface"), Some(&json!("mcp")));
+        for candidate in &results {
+            assert!(
+                !candidate.id.starts_with("lab::"),
+                "found lab:: candidate after drop: {}",
+                candidate.id
+            );
+        }
     }
 
-    #[test]
-    fn builds_search_candidate_for_lab_action() {
-        let candidate = CodeModeSearchCandidate::lab_action(
-            "gateway",
-            "gateway.schema",
-            "Return gateway schema",
-            10.0,
-        );
-        assert_eq!(candidate.id, "lab::gateway.gateway.schema");
-        assert_eq!(candidate.upstream, "lab");
-        assert_eq!(candidate.name, "gateway.schema");
-        assert!(candidate.schema_available);
+    #[tokio::test]
+    async fn code_execute_call_tool_lab_id_returns_unknown_tool() {
+        let registry = super::ToolRegistry::new();
+        let broker = super::CodeModeBroker::new(&registry, None);
+
+        let err = broker
+            .call_tool_id(
+                "lab::radarr.movie.search",
+                json!({"query": "Matrix"}),
+                super::CodeModeCaller::TrustedLocal,
+                super::CodeModeSurface::Cli,
+            )
+            .await
+            .expect_err("lab:: callTool id should return unknown_tool");
+
+        match err {
+            super::ToolError::Sdk { sdk_kind, message } => {
+                assert_eq!(sdk_kind, "unknown_tool");
+                assert!(message.contains("tool_execute"));
+                assert!(message.contains("\"radarr\""));
+            }
+            other => panic!("expected unknown_tool, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1730,17 +1218,6 @@ mod tests {
         assert_eq!(candidate.upstream, "github");
         assert_eq!(candidate.name, "search_issues");
         assert!(candidate.schema_available);
-    }
-
-    #[test]
-    fn builds_lab_schema_response() {
-        let response = CodeModeSchemaResponse::lab_action(
-            "lab::gateway.gateway.schema",
-            "gateway.schema",
-            json!({"action": "gateway.schema"}),
-        );
-        assert_eq!(response.kind, "lab_action");
-        assert_eq!(response.schema_format, "lab_action_spec");
     }
 
     #[test]
@@ -1776,57 +1253,6 @@ mod tests {
         assert!(!description.contains("<system>"));
         assert!(!description.contains("sk-secret"));
         assert!(description.contains("<redacted>"));
-    }
-
-    #[test]
-    fn builds_action_input_schema_and_typescript_binding() {
-        const PARAMS: &[ParamSpec] = &[
-            ParamSpec {
-                name: "query",
-                ty: "string",
-                required: true,
-                description: "Search query",
-            },
-            ParamSpec {
-                name: "limit",
-                ty: "integer",
-                required: false,
-                description: "Maximum result count",
-            },
-        ];
-        let action = ActionSpec {
-            name: "issue.search",
-            description: "Search issues",
-            destructive: false,
-            params: PARAMS,
-            returns: "Issue[]",
-        };
-
-        let schema = action_input_schema(&action);
-        assert_eq!(
-            schema.pointer("/properties/query/type"),
-            Some(&json!("string"))
-        );
-        assert_eq!(
-            schema.pointer("/properties/limit/type"),
-            Some(&json!("integer"))
-        );
-        assert_eq!(schema.pointer("/required/0"), Some(&json!("query")));
-
-        let response = CodeModeSchemaResponse::lab_action_with_input_schema(
-            "lab::github.issue.search",
-            "issue.search",
-            json!({"action": "issue.search"}),
-            schema,
-        );
-        assert!(response.bindings.typescript.contains("query: string;"));
-        assert!(response.bindings.typescript.contains("limit?: number;"));
-        assert!(
-            response
-                .bindings
-                .typescript
-                .contains("caller.callTool(\"lab::github.issue.search\", args)")
-        );
     }
 
     #[test]
