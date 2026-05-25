@@ -1065,31 +1065,47 @@ impl AcpSessionRegistry {
             let sem = semaphore.clone();
             let registry = self.clone();
             let principal_owned = principal.to_string();
-            handles.push(tokio::spawn(async move {
-                let _permit = sem.acquire().await.expect("bulk_close semaphore closed");
-                let outcome = registry.close_session(&id, &principal_owned).await;
-                (id, outcome)
-            }));
+            let id_for_task = id.clone();
+            handles.push((
+                id,
+                tokio::spawn(async move {
+                    let _permit = sem.acquire().await.expect("bulk_close semaphore closed");
+                    registry.close_session(&id_for_task, &principal_owned).await
+                }),
+            ));
         }
 
         let mut closed = Vec::new();
         let mut failed = Vec::new();
-        for handle in handles {
-            if let Ok((id, outcome)) = handle.await {
-                match outcome {
-                    Ok(()) => closed.push(id),
-                    Err(error) => {
-                        // Silently skip sessions reaped or otherwise inaccessible between
-                        // the snapshot and close attempt — preserves not_found masking.
-                        if error.kind() == "not_found" {
-                            continue;
-                        }
-                        failed.push(BulkCloseFailure {
-                            id,
-                            kind: error.kind().to_string(),
-                            message: error.user_message().to_string(),
-                        });
+        for (id, handle) in handles {
+            match handle.await {
+                Ok(Ok(())) => closed.push(id),
+                Ok(Err(error)) => {
+                    // Silently skip sessions reaped or otherwise inaccessible between
+                    // the snapshot and close attempt — preserves not_found masking.
+                    if error.kind() == "not_found" {
+                        continue;
                     }
+                    failed.push(BulkCloseFailure {
+                        id,
+                        kind: error.kind().to_string(),
+                        message: error.user_message().to_string(),
+                    });
+                }
+                Err(join_error) => {
+                    tracing::error!(
+                        surface = "acp",
+                        service = "registry",
+                        action = "session.bulk_close",
+                        session_id = %id,
+                        error = %join_error,
+                        "bulk_close worker task failed",
+                    );
+                    failed.push(BulkCloseFailure {
+                        id,
+                        kind: "internal_error".to_string(),
+                        message: "bulk_close worker failed".to_string(),
+                    });
                 }
             }
         }

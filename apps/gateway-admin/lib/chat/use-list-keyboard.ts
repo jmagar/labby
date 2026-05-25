@@ -33,6 +33,16 @@ export interface ListKeyboardHandle {
 }
 
 /**
+ * Pure predicate for the shrink-reset path. Returns true when the active index
+ * has fallen out of range because the list shrank but is still non-empty.
+ * An empty list does not trigger a reset — that case is handled separately so
+ * the hook does not thrash state when transient empty states arrive.
+ */
+export function shouldResetActiveIndex(activeIndex: number, count: number): boolean {
+  return count > 0 && activeIndex >= count
+}
+
+/**
  * Shared state shape for keyboard-navigable lists. Tracks an active index and
  * resets to 0 when `count` shrinks past the current index (e.g., the list
  * collapses on a provider switch). Pair with `nextNavIndex` to react to keys.
@@ -47,7 +57,7 @@ export function useListKeyboard({
   const [activeIndex, setActiveIndex] = React.useState(initialIndex)
 
   React.useEffect(() => {
-    if (count > 0 && activeIndex >= count) setActiveIndex(0)
+    if (shouldResetActiveIndex(activeIndex, count)) setActiveIndex(0)
   }, [count, activeIndex])
 
   return { activeIndex, setActiveIndex }

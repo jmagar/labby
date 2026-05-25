@@ -263,6 +263,16 @@ export function ChatInput({
     const selectedIndex = Math.max(modelOptions.findIndex((model) => model.id === selectedModel?.id), 0)
     setActiveModelIndex(selectedIndex)
     const frame = window.requestAnimationFrame(() => {
+      if (groupedModels.kind === 'grouped') {
+        // Flat-mode refs don't exist in grouped mode; pull focus onto the
+        // currently-selected toggle (or the first toggle as a fallback) so
+        // keyboard navigation immediately enters the picker.
+        const pickerEl = document.getElementById(modelPickerId)
+        const selectedToggle = pickerEl?.querySelector<HTMLButtonElement>('[data-state="on"]')
+        const firstToggle = pickerEl?.querySelector<HTMLButtonElement>('button')
+        ;(selectedToggle ?? firstToggle)?.focus()
+        return
+      }
       modelOptionRefs.current[selectedIndex]?.focus()
     })
 
@@ -278,7 +288,7 @@ export function ChatInput({
       window.cancelAnimationFrame(frame)
       document.removeEventListener('mousedown', handlePointerDown)
     }
-  }, [modelPickerOpen, modelOptions, selectedModel?.id])
+  }, [modelPickerOpen, modelOptions, selectedModel?.id, groupedModels.kind, modelPickerId])
 
   const selectAgent = (agentId: string) => {
     onSelectAgent(agentId)

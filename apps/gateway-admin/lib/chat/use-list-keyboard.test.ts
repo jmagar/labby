@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { nextNavIndex } from './use-list-keyboard'
+import { nextNavIndex, shouldResetActiveIndex } from './use-list-keyboard'
 
 test('ArrowDown wraps at end', () => {
   assert.equal(nextNavIndex(0, 'ArrowDown', 3), 1)
@@ -27,4 +27,22 @@ test('returns null for unrelated keys', () => {
   assert.equal(nextNavIndex(0, 'a', 5), null)
   assert.equal(nextNavIndex(0, 'Enter', 5), null)
   assert.equal(nextNavIndex(0, 'Tab', 5), null)
+})
+
+test('shouldResetActiveIndex flags shrink-past-active', () => {
+  // List shrinks below the active index — hook must reset.
+  assert.equal(shouldResetActiveIndex(3, 2), true)
+  assert.equal(shouldResetActiveIndex(1, 1), true)
+})
+
+test('shouldResetActiveIndex leaves valid index alone', () => {
+  assert.equal(shouldResetActiveIndex(0, 5), false)
+  assert.equal(shouldResetActiveIndex(4, 5), false)
+})
+
+test('shouldResetActiveIndex does not reset on empty list', () => {
+  // Empty list is a transient state; preserve the index so the hook does not
+  // thrash when the list briefly empties between provider switches.
+  assert.equal(shouldResetActiveIndex(0, 0), false)
+  assert.equal(shouldResetActiveIndex(3, 0), false)
 })

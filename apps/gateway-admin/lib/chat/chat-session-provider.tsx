@@ -680,10 +680,24 @@ export function ChatSessionProvider({
       throw new Error(errorMessageFromPayload(errorPayload, 'Failed to clean up sessions'))
     }
     const payload = (await readJsonSafe(response)) as
-      | { closed?: string[]; failed?: Array<{ id: string }> }
+      | { closed?: unknown; failed?: unknown }
       | null
-    const closedCount = payload?.closed?.length ?? 0
-    const failedCount = payload?.failed?.length ?? 0
+    if (
+      !payload ||
+      !Array.isArray(payload.closed) ||
+      !Array.isArray(payload.failed) ||
+      payload.closed.some((id) => typeof id !== 'string') ||
+      payload.failed.some(
+        (item) =>
+          typeof item !== 'object' ||
+          item == null ||
+          typeof (item as { id?: unknown }).id !== 'string',
+      )
+    ) {
+      throw new Error('Invalid cleanup response payload')
+    }
+    const closedCount = payload.closed.length
+    const failedCount = payload.failed.length
     await refreshSessions()
     return { closedCount, failedCount }
   }, [fetchAcp, refreshSessions])
