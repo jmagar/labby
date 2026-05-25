@@ -53,6 +53,7 @@ export function ChatShell() {
     hiddenRunCount,
     includeHiddenRuns,
     dominantModelId,
+    lastDispatchError,
     selectedRun,
     selectedRunId,
     providerHealth,
@@ -73,7 +74,12 @@ export function ChatShell() {
   const { messages } = useChatSessionStream()
   const { connectionState } = useChatSessionConnection()
   const providerReady = Boolean(providerHealth?.ready)
-  const providerUnavailableMessage = providerReady ? null : providerHealth?.message?.trim() || null
+  // Union the actual provider-down message with the transient dispatch-error
+  // surface so the user sees a banner for ANY actionable failure — but the
+  // input itself only disables when the provider is genuinely down.
+  const providerUnavailableMessage = providerReady
+    ? lastDispatchError?.message ?? null
+    : providerHealth?.message?.trim() || lastDispatchError?.message || null
 
   const createRun = React.useCallback(async () => {
     try {

@@ -49,6 +49,7 @@ export function FloatingChatShell({
     hiddenRunCount,
     includeHiddenRuns,
     dominantModelId,
+    lastDispatchError,
     selectedRun,
     selectedRunId,
     providerHealth,
@@ -73,7 +74,11 @@ export function FloatingChatShell({
   const [lastActionError, setLastActionError] = React.useState<string | null>(null)
 
   const providerReady = Boolean(providerHealth?.ready)
-  const visibleError = lastActionError ?? (!providerReady ? providerHealth?.message : null)
+  // Surface order: explicit action error → transient dispatch error → provider-down banner.
+  const visibleError =
+    lastActionError ??
+    lastDispatchError?.message ??
+    (!providerReady ? providerHealth?.message : null)
 
   // ---- sendPrompt (reads pageContext from provider + config) ----
   const sendPrompt = React.useCallback(
