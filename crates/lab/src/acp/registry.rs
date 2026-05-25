@@ -23,6 +23,7 @@ use lab_apis::acp::types::{
     AcpEvent, AcpModelOption, AcpProviderHealth, AcpSessionState, AcpSessionSummary,
 };
 
+use crate::dispatch::acp::params::BulkCloseSelector;
 use crate::dispatch::acp::persistence::SqliteAcpPersistence;
 use crate::dispatch::error::ToolError;
 
@@ -126,6 +127,21 @@ impl Session {
 // ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
+
+/// Partial-success envelope for `bulk_close_sessions`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BulkCloseResult {
+    pub closed: Vec<String>,
+    pub failed: Vec<BulkCloseFailure>,
+}
+
+/// Per-session failure inside a `BulkCloseResult.failed[]` array.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BulkCloseFailure {
+    pub id: String,
+    pub kind: String,
+    pub message: String,
+}
 
 #[derive(Clone)]
 pub struct AcpSessionRegistry {
@@ -987,6 +1003,108 @@ impl AcpSessionRegistry {
         Ok(())
     }
 
+    /// Close every session the caller owns that matches the typed selector.
+    /// Returns a per-id partial-success envelope. Sessions belonging to other
+    /// principals are silently omitted (matches the not_found masking pattern
+    /// of `close_session`).
+    pub async fn bulk_close_sessions(
+        &self,
+        selector: BulkCloseSelector,
+        principal: &str,
+    ) -> Result<BulkCloseResult, ToolError> {
+        if principal.trim().is_empty() {
+            return Err(ToolError::Sdk {
+                sdk_kind: "auth_failed".to_string(),
+                message: "authenticated principal required for bulk_close".to_string(),
+            });
+        }
+        let now = jiff::Timestamp::now();
+        let max_age_secs: Option<i64> = selector.max_age_days.map(|d| i64::from(d) * 86_400);
+
+        let candidates: Vec<String> = {
+            let sessions = self.sessions.read().await;
+            let mut ids = Vec::new();
+            for session in sessions.values() {
+                if session.principal != principal {
+                    continue;
+                }
+                let summary = session.summary.read().await;
+                if !selector.states.is_empty() && !selector.states.contains(&summary.state) {
+                    continue;
+                }
+                if let Some(window) = max_age_secs {
+                    let updated_secs = summary
+                        .updated_at
+                        .parse::<jiff::Timestamp>()
+                        .ok()
+                        .map(|ts| now.as_second() - ts.as_second())
+                        .unwrap_or(0);
+                    if updated_secs < window {
+                        continue;
+                    }
+                }
+                ids.push(session.id.clone());
+            }
+            ids
+        };
+
+        if (candidates.len() as u32) > selector.max_count {
+            return Err(ToolError::InvalidParam {
+                message: format!(
+                    "selector matches {} sessions; max_count is {}",
+                    candidates.len(),
+                    selector.max_count
+                ),
+                param: "selector".to_string(),
+            });
+        }
+
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(5));
+        let mut handles = Vec::with_capacity(candidates.len());
+        for id in candidates {
+            let sem = semaphore.clone();
+            let registry = self.clone();
+            let principal_owned = principal.to_string();
+            handles.push(tokio::spawn(async move {
+                let _permit = sem.acquire().await.expect("bulk_close semaphore closed");
+                let outcome = registry.close_session(&id, &principal_owned).await;
+                (id, outcome)
+            }));
+        }
+
+        let mut closed = Vec::new();
+        let mut failed = Vec::new();
+        for handle in handles {
+            if let Ok((id, outcome)) = handle.await {
+                match outcome {
+                    Ok(()) => closed.push(id),
+                    Err(error) => {
+                        // Silently skip sessions reaped or otherwise inaccessible between
+                        // the snapshot and close attempt — preserves not_found masking.
+                        if error.kind() == "not_found" {
+                            continue;
+                        }
+                        failed.push(BulkCloseFailure {
+                            id,
+                            kind: error.kind().to_string(),
+                            message: error.user_message().to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
+        tracing::info!(
+            surface = "acp", service = "registry", action = "session.bulk_close",
+            principal = %principal,
+            closed_count = closed.len(),
+            failed_count = failed.len(),
+            "ACP bulk_close completed",
+        );
+
+        Ok(BulkCloseResult { closed, failed })
+    }
+
     /// Gracefully terminate all sessions. Sets shutting_down flag, cancels every
     /// runtime, waits ≤10 s, then force-clears the map.
     #[allow(dead_code)]
@@ -1637,6 +1755,27 @@ impl AcpSessionRegistry {
             }
         });
         summary
+    }
+
+    /// Force the cached summary state of a session for tests. Both the
+    /// fast-path state lock and the summary lock are updated so any consumer
+    /// that reads either sees the new value.
+    #[cfg(test)]
+    pub async fn force_summary_state_for_tests(
+        &self,
+        session_id: &str,
+        state: AcpSessionState,
+    ) {
+        if let Ok(session) = self.get_session_arc(session_id).await {
+            *session.state.write().await = state.clone();
+            session.summary.write().await.state = state;
+        }
+    }
+
+    /// Check whether a session id is still registered (for assertions).
+    #[cfg(test)]
+    pub async fn session_exists_for_tests(&self, session_id: &str) -> bool {
+        self.sessions.read().await.contains_key(session_id)
     }
 
     /// Inject a pre-built session whose runtime command queue is already full.

@@ -1,7 +1,7 @@
 //! Action catalog for the `acp` (Agent Client Protocol) service.
 //!
 //! Single authoritative source for MCP, CLI, and API adapters.
-//! `session.cancel` and `session.close` are marked destructive.
+//! `session.cancel`, `session.close`, and `session.bulk_close` are marked destructive.
 
 use lab_apis::core::action::{ActionSpec, ParamSpec};
 
@@ -257,6 +257,27 @@ pub const ACTIONS: &[ActionSpec] = &[
                 ty: "string",
                 required: false,
                 description: "Caller principal for ownership verification",
+            },
+        ],
+    },
+    ActionSpec {
+        name: "session.bulk_close",
+        description: "Bulk close sessions matching a typed selector. Self-service only — \
+                      only the caller's own sessions are touched. [destructive]",
+        destructive: true,
+        returns: r#"{ "closed": string[], "failed": [{ "id": string, "kind": string, "message": string }] }"#,
+        params: &[
+            ParamSpec {
+                name: "selector",
+                ty: "object",
+                required: true,
+                description: "BulkCloseSelector { states?: AcpSessionState[], max_age_days?: number, max_count?: number (default 500) }",
+            },
+            ParamSpec {
+                name: "principal",
+                ty: "string",
+                required: true,
+                description: "Caller principal; only the caller's sessions are touched",
             },
         ],
     },

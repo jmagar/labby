@@ -15,7 +15,8 @@ use super::catalog::ACTIONS;
 use super::client::require_registry;
 use super::page_context::{PageContextInput, build_prompt_with_context};
 use super::params::{
-    LocalPromptAttachment, opt_str, opt_u64, require_str, validate_local_attachments,
+    BulkCloseSelector, LocalPromptAttachment, opt_str, opt_u64, require_str,
+    validate_local_attachments,
 };
 
 /// SSE ticket lifetime in seconds.
@@ -342,6 +343,27 @@ pub async fn dispatch_with_registry(
             to_json(json!({ "ok": true, "session_id": session_id }))
         }
 
+        "session.bulk_close" => {
+            require_confirm(&params, "session.bulk_close")?;
+            let selector_value = params
+                .get("selector")
+                .cloned()
+                .ok_or_else(|| ToolError::MissingParam {
+                    message: "selector is required".to_string(),
+                    param: "selector".to_string(),
+                })?;
+            let selector: BulkCloseSelector = serde_json::from_value(selector_value).map_err(
+                |error| ToolError::InvalidParam {
+                    message: format!("invalid selector: {error}"),
+                    param: "selector".to_string(),
+                },
+            )?;
+            selector.validate_non_empty()?;
+            let principal = require_str(&params, "principal")?;
+            let result = registry.bulk_close_sessions(selector, principal).await?;
+            to_json(json!(result))
+        }
+
         "session.subscribe_ticket" => {
             let session_id = require_str(&params, "session_id")?;
             let principal = opt_str(&params, "principal").unwrap_or("");
@@ -470,6 +492,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::acp::registry::AcpSessionRegistry;
+    use lab_apis::acp::types::AcpSessionState;
     use serde_json::json;
 
     #[tokio::test]
@@ -591,5 +614,76 @@ mod tests {
         let (session_id, principal) = validate_subscribe_ticket(&ticket).unwrap();
         assert_eq!(session_id, "sess-456");
         assert_eq!(principal, "");
+    }
+
+    #[tokio::test]
+    async fn session_bulk_close_rejects_empty_selector() {
+        let registry = AcpSessionRegistry::new_for_tests(Duration::from_millis(100));
+        let err = dispatch_with_registry(
+            &registry,
+            "session.bulk_close",
+            json!({
+                "selector": {},
+                "principal": "alice",
+                "confirm": true,
+            }),
+        )
+        .await
+        .expect_err("empty selector must be rejected");
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[tokio::test]
+    async fn session_bulk_close_requires_confirm() {
+        // Gate-drift guard: the dispatcher arm itself must enforce require_confirm
+        // so a surface bypassing destructive-elicitation cannot fall through.
+        let registry = AcpSessionRegistry::new_for_tests(Duration::from_millis(100));
+        let err = dispatch_with_registry(
+            &registry,
+            "session.bulk_close",
+            json!({
+                "selector": { "states": ["failed"], "max_count": 100 },
+                "principal": "alice",
+                // INTENTIONALLY no "confirm": true
+            }),
+        )
+        .await
+        .expect_err("missing confirm must be rejected");
+        assert_eq!(err.kind(), "confirmation_required");
+    }
+
+    #[tokio::test]
+    async fn session_bulk_close_only_touches_caller_principal() {
+        let registry = AcpSessionRegistry::new_for_tests(Duration::from_millis(100));
+        registry.inject_fake_session("sess-alice", "alice").await;
+        registry.inject_fake_session("sess-bob", "bob").await;
+        // Flip both into Failed so a Failed-only selector would match either.
+        registry
+            .force_summary_state_for_tests("sess-alice", AcpSessionState::Failed)
+            .await;
+        registry
+            .force_summary_state_for_tests("sess-bob", AcpSessionState::Failed)
+            .await;
+
+        let value = dispatch_with_registry(
+            &registry,
+            "session.bulk_close",
+            json!({
+                "selector": { "states": ["failed"], "max_count": 100 },
+                "principal": "alice",
+                "confirm": true,
+            }),
+        )
+        .await
+        .expect("bulk_close should succeed");
+
+        let closed = value["closed"].as_array().expect("closed array");
+        assert_eq!(closed.len(), 1, "should close exactly one session");
+        assert_eq!(closed[0], "sess-alice");
+        // Bob's session must still be registered.
+        assert!(
+            registry.session_exists_for_tests("sess-bob").await,
+            "other-principal session must remain untouched",
+        );
     }
 }

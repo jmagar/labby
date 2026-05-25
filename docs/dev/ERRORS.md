@@ -472,6 +472,26 @@ At minimum, verify:
 3. HTTP emits the expected structured JSON error with the matching semantic kind
 4. messages do not leak secrets
 
+## Batch-result envelope
+
+Actions that operate on multiple items in one call (e.g. `acp.session.bulk_close`) return a partial-success envelope with two arrays. Inner `failed[]` items reuse the same `{ kind, message }` shape as top-level `ToolError::Sdk` so per-item taxonomy stays consistent with the rest of the system.
+
+```json
+{
+  "closed": ["session-uuid-1", "session-uuid-2"],
+  "failed": [
+    { "id": "session-uuid-3", "kind": "internal_error", "message": "..." }
+  ]
+}
+```
+
+Rules:
+
+- `closed[]` contains the ids that completed the action.
+- `failed[]` contains ids that the action attempted but errored on; per-item `kind` must be one of the canonical kinds listed above.
+- Items the caller is not authorized to act on are silently omitted from BOTH arrays (preserves the `not_found` masking pattern — do not leak existence by reporting forbidden items).
+- Authorization or validation errors that prevent the action from running at all return a top-level `ToolError` (not a 200 with empty arrays).
+
 ## Related Docs
 
 - [CONVENTIONS.md](../CONVENTIONS.md)
