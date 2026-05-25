@@ -52,6 +52,7 @@ export function ChatShell() {
     visibleRuns,
     hiddenRunCount,
     includeHiddenRuns,
+    dominantModelId,
     selectedRun,
     selectedRunId,
     providerHealth,
@@ -255,6 +256,7 @@ export function ChatShell() {
                 includeHiddenRuns={includeHiddenRuns}
                 onToggleIncludeHidden={() => setIncludeHiddenRuns((v) => !v)}
                 onBulkCloseHidden={bulkCloseHiddenSessions}
+                dominantModelId={dominantModelId}
               />
             </div>
           </>

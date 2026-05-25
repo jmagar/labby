@@ -30,6 +30,8 @@ interface SessionSidebarProps {
   onToggleIncludeHidden?: () => void
   /** Called when the user confirms the bulk cleanup. Should resolve to closed/failed counts. */
   onBulkCloseHidden?: () => Promise<{ closedCount: number; failedCount: number }>
+  /** modelId shared by more than half of the visible runs — used to suppress redundant badges. */
+  dominantModelId?: string | null
 }
 
 function RunIcon({ status, agentId }: { status: ACPRunStatus; agentId: string }) {
@@ -57,15 +59,25 @@ function RunRow({
   run,
   isSelected,
   onSelect,
+  dominantModelId,
 }: {
   run: ACPRun
   isSelected: boolean
   onSelect: () => void
+  dominantModelId: string | null
 }) {
+  // Hide the per-row model badge when this run matches the dominant model
+  // across the visible list — the badge is redundant noise in that case.
+  const hideBadge =
+    dominantModelId !== null && run.modelId !== null && run.modelId === dominantModelId
+  // The screen-reader label always carries the model name, even when the
+  // visual badge is suppressed.
+  const ariaLabel = run.modelName ? `${run.title} · ${run.modelName}` : run.title
   return (
     <button
       type="button"
       onClick={onSelect}
+      aria-label={ariaLabel}
       className={cn(
         'group/run relative flex w-full items-center gap-2 overflow-hidden rounded-aurora-1 px-2 py-1.5 text-left transition-colors',
         isSelected
@@ -82,8 +94,11 @@ function RunRow({
       <RunIcon status={run.status} agentId={run.agentId} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[13px] leading-[1.2]">{run.title}</span>
-        {run.modelName && (
-          <span className="block truncate text-[11px] leading-[1.2] text-aurora-text-muted/70">
+        {run.modelName && !hideBadge && (
+          <span
+            aria-hidden="true"
+            className="block truncate text-[11px] leading-[1.2] text-aurora-text-muted/70"
+          >
             {run.modelName}
           </span>
         )}
@@ -102,6 +117,7 @@ function ProjectGroup({
   isActiveProject,
   onSelectRun,
   onNewRun,
+  dominantModelId,
 }: {
   project: ACPProject
   runs: ACPRun[]
@@ -109,6 +125,7 @@ function ProjectGroup({
   isActiveProject: boolean
   onSelectRun: (runId: string, projectId: string) => void
   onNewRun: (projectId: string) => void
+  dominantModelId: string | null
 }) {
   // Seed `open` from `project.collapsed` once per `project.id`; after mount the
   // local row toggle wins so parent prop churn does not clobber user intent.
@@ -180,6 +197,7 @@ function ProjectGroup({
                 run={run}
                 isSelected={selectedRunId === run.id}
                 onSelect={() => onSelectRun(run.id, project.id)}
+                dominantModelId={dominantModelId}
               />
             ))
           )}
@@ -201,6 +219,7 @@ export function SessionSidebar({
   includeHiddenRuns = false,
   onToggleIncludeHidden,
   onBulkCloseHidden,
+  dominantModelId = null,
 }: SessionSidebarProps) {
   const activeProjectId = selectedProjectId
   const [search, setSearch] = React.useState('')
@@ -305,6 +324,7 @@ export function SessionSidebar({
               isActiveProject={activeProjectId === project.id}
               onSelectRun={onSelectRun}
               onNewRun={onNewRun}
+              dominantModelId={dominantModelId}
             />
           ))}
         </div>

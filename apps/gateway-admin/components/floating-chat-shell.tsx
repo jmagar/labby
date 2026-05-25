@@ -48,6 +48,7 @@ export function FloatingChatShell({
     visibleRuns,
     hiddenRunCount,
     includeHiddenRuns,
+    dominantModelId,
     selectedRun,
     selectedRunId,
     providerHealth,
@@ -214,6 +215,7 @@ export function FloatingChatShell({
             includeHiddenRuns={includeHiddenRuns}
             onToggleIncludeHidden={() => setIncludeHiddenRuns((v) => !v)}
             onBulkCloseHidden={bulkCloseHiddenSessions}
+            dominantModelId={dominantModelId}
           />
         )}
 

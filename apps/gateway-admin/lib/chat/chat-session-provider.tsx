@@ -45,6 +45,7 @@ import {
   sameProviderList,
 } from './acp-normalizers'
 import { filterVisibleRuns } from './session-filters'
+import { dominantModelId as computeDominantModelId } from './dominant-model'
 import type { ACPAgent, ACPRun, ACPProject, ACPMessage, ACPModelOption } from '@/components/chat/types'
 import type { BridgeSessionSummary, ProviderHealth, BridgeEvent } from '@/lib/acp/types'
 import type { SessionEventConnectionState } from './use-session-events'
@@ -79,6 +80,7 @@ export type ChatSessionDataContextValue = {
   visibleRuns: ACPRun[]
   hiddenRunCount: number
   includeHiddenRuns: boolean
+  dominantModelId: string | null
   selectedRunId: string | null
   selectedRun: ACPRun | null
   providerHealth: ProviderHealth | null
@@ -657,6 +659,7 @@ export function ChatSessionProvider({
     [runs, includeHiddenRuns],
   )
   const hiddenRunCount = runs.length - visibleRuns.length
+  const dominantModelId = React.useMemo(() => computeDominantModelId(visibleRuns), [visibleRuns])
 
   const bulkCloseHiddenSessions = React.useCallback(async () => {
     // The API auto-injects `confirm: true` for destructive actions and
@@ -708,6 +711,7 @@ export function ChatSessionProvider({
       visibleRuns,
       hiddenRunCount,
       includeHiddenRuns,
+      dominantModelId,
       selectedRunId,
       selectedRun,
       providerHealth,
@@ -720,7 +724,7 @@ export function ChatSessionProvider({
       sessionsLoaded,
       pageContext,
     }),
-    [runs, visibleRuns, hiddenRunCount, includeHiddenRuns, selectedRunId, selectedRun, providerHealth, providers, selectedProviderId, selectedAgent, selectedModel, agents, projects, sessionsLoaded, pageContext],
+    [runs, visibleRuns, hiddenRunCount, includeHiddenRuns, dominantModelId, selectedRunId, selectedRun, providerHealth, providers, selectedProviderId, selectedAgent, selectedModel, agents, projects, sessionsLoaded, pageContext],
   )
 
   const actionsValue = React.useMemo<ChatSessionActionsContextValue>(
