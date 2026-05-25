@@ -1,18 +1,26 @@
 # ─── Stage 1: Build ───────────────────────────────────────────────────────────
-# Requires Rust 1.90+ (Cargo.toml: rust-version = "1.90", edition = "2024")
+# Requires Rust 1.92+ (Cargo.toml: rust-version = "1.92", edition = "2024")
 FROM rust:1-slim AS builder
 
 WORKDIR /build
+
+# GitHub's container builder has less memory than the release-smoke runners.
+# Keep the container release binary optimized but avoid ThinLTO/codegen-units=1
+# peak memory during the final link.
+ENV CARGO_PROFILE_RELEASE_LTO=false \
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
 
 # System build deps:
 #   pkg-config     — lets -sys crates find system headers
 #   build-essential — C compiler for rusqlite's bundled SQLite + other -sys crates
 #   libssl-dev     — headers/pkg-config metadata for crates pulling openssl-sys
+#   libclang-dev   — libclang for rquickjs-sys bindgen during Code Mode builds
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       pkg-config \
       build-essential \
       libssl-dev \
+      libclang-dev \
  && rm -rf /var/lib/apt/lists/*
 
 # ── Dependency-caching layer ──────────────────────────────────────────────────

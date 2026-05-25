@@ -29,9 +29,9 @@ use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
 use crate::dispatch::gateway::code_mode::{CodeModeBroker, CodeModeCaller, CodeModeSurface};
 use crate::dispatch::gateway::manager::{GatewayManager, GatewayToolSearchResult};
 use crate::mcp::catalog::{
-    CODE_EXECUTE_TOOL_NAME, CODE_SCHEMA_TOOL_NAME, CODE_SEARCH_TOOL_NAME,
-    LEGACY_TOOL_EXECUTE_TOOL_NAME, LEGACY_TOOL_INVOKE_TOOL_NAME, LEGACY_TOOL_SEARCH_TOOL_NAME,
-    TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME,
+    CODE_EXECUTE_TOOL_NAME, CODE_SEARCH_TOOL_NAME, LEGACY_TOOL_EXECUTE_TOOL_NAME,
+    LEGACY_TOOL_INVOKE_TOOL_NAME, LEGACY_TOOL_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME,
+    TOOL_SEARCH_TOOL_NAME,
 };
 use crate::mcp::elicitation::{ElicitResult, elicit_confirm};
 use crate::mcp::envelope::{build_error, build_error_extra, build_success};
@@ -41,6 +41,8 @@ use crate::mcp::logging::{DispatchLogOutcome, logging_level_rank};
 use crate::registry::ToolRegistry;
 
 const CODE_MODE_MAX_CODE_BYTES: usize = 20_000;
+const CODE_EXECUTE_DESCRIPTION: &str =
+    include_str!("../dispatch/gateway/code_execute_description.md");
 
 #[cfg(test)]
 use crate::mcp::peers::PeerNotifier;
@@ -1119,42 +1121,27 @@ impl ServerHandler for LabMcpServer {
             let code_search_schema = match serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "query": { "type": "string", "maxLength": 500 },
-                    "top_k": { "type": "integer", "minimum": 1, "maximum": 50 }
+                    "code": {
+                        "type": "string",
+                        "maxLength": 4000,
+                        "description": "JavaScript async arrow function that filters the inlined `tools` catalog and returns JSON-serializable results."
+                    }
                 },
-                "required": ["query"]
+                "required": ["code"]
             }) {
                 Value::Object(map) => Arc::new(map),
                 _ => unreachable!("code_search schema must be an object"),
             };
             tools.push(Tool::new(
                 CODE_SEARCH_TOOL_NAME,
-                "Schema-first Code Mode discovery for Lab and proxied upstream tools. \
-                Returns stable tool ids, short descriptions, scores, and whether an \
-                exact schema is available. Use code_schema with the returned id before \
-                generating tool-call code.",
+                "Filter the inlined upstream MCP tool catalog with JavaScript. \
+                The sandbox has `const tools = [...]`, where each entry has id, upstream, \
+                name, description, and schema. Prefer matching on description; upstream \
+                names can be terse. Examples: \
+                `async () => tools.filter(t => /container.*log/i.test(t.description)).map(t => ({id:t.id, schema:t.schema}))`; \
+                `async () => tools.find(t => t.id === \"upstream::github::search_issues\")`; \
+                `async () => tools.filter(t => t.upstream === \"github\").slice(0, 20)`.",
                 code_search_schema,
-            ));
-            gateway_tool_count += 1;
-            let code_schema_schema = match serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "Stable id returned by code_search, e.g. lab::gateway.gateway.schema or upstream::github::search_issues"
-                    }
-                },
-                "required": ["id"]
-            }) {
-                Value::Object(map) => Arc::new(map),
-                _ => unreachable!("code_schema schema must be an object"),
-            };
-            tools.push(Tool::new(
-                CODE_SCHEMA_TOOL_NAME,
-                "Return the exact input contract for one Code Mode tool id. \
-                Lab ids return the ActionSpec-derived action contract; upstream ids \
-                return the upstream JSON Schema exposed by the gateway.",
-                code_schema_schema,
             ));
             gateway_tool_count += 1;
             let code_execute_schema = match serde_json::json!({
@@ -1172,7 +1159,7 @@ impl ServerHandler for LabMcpServer {
                     },
                     "confirm": {
                         "type": "boolean",
-                        "description": "Required at the top level, in addition to per-call params.confirm, before Code Mode may execute destructive Lab actions."
+                        "description": "Reserved for compatibility; Code Mode executes proxied upstream MCP tools only."
                     }
                 },
                 "required": ["code"]
@@ -1180,11 +1167,17 @@ impl ServerHandler for LabMcpServer {
                 Value::Object(map) => Arc::new(map),
                 _ => unreachable!("code_execute schema must be an object"),
             };
+            debug_assert!(CODE_EXECUTE_DESCRIPTION.len() < 8192);
+            tracing::info!(
+                surface = "mcp",
+                service = "code_execute",
+                action = "tool.describe",
+                description_bytes = CODE_EXECUTE_DESCRIPTION.len(),
+                "registered Code Mode execute description"
+            );
             tools.push(Tool::new(
                 CODE_EXECUTE_TOOL_NAME,
-                "Execute a sandboxed Code Mode snippet through the Lab gateway broker. \
-                Disabled by default; enable [code_mode].enabled to allow child-process execution. \
-                Snippets may call callTool(id, params) with ids returned by code_search.",
+                CODE_EXECUTE_DESCRIPTION,
                 code_execute_schema,
             ));
             gateway_tool_count += 1;
@@ -1345,16 +1338,12 @@ impl ServerHandler for LabMcpServer {
                 );
                 return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
             }
-            let query = args
-                .get("query")
+            let code = args
+                .get("code")
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-            let query_hash = hash_arguments(&Value::String(query.clone()));
-            let requested_top_k = args
-                .get("top_k")
-                .and_then(Value::as_u64)
-                .map(|value| value as usize);
+            let code_hash = hash_arguments(&Value::String(code.clone()));
             let Some(manager) = &self.gateway_manager else {
                 let envelope = build_error(
                     &service,
@@ -1366,20 +1355,13 @@ impl ServerHandler for LabMcpServer {
                     envelope.to_string(),
                 )]));
             };
-            let top_k = match requested_top_k {
-                Some(value) => value,
-                None => manager.tool_search_config().await.top_k_default,
-            }
-            .max(1)
-            .min(50);
             tracing::info!(
                 surface = "mcp",
                 service = "code_search",
                 action = "call_tool",
                 subject,
-                query_hash = %query_hash,
-                query_len = query.len(),
-                top_k,
+                code_hash = %code_hash,
+                code_len = code.len(),
                 "gateway code search start"
             );
             let broker = CodeModeBroker::new(&self.registry, Some(manager));
@@ -1390,24 +1372,22 @@ impl ServerHandler for LabMcpServer {
                 }
             });
             return match broker
-                .search(&query, top_k, caller, self.code_mode_surface(false))
+                .search(&code, caller, self.code_mode_surface(false))
                 .await
             {
-                Ok(candidates) => {
+                Ok(response) => {
                     tracing::info!(
                         surface = "mcp",
                         service = "code_search",
                         action = "call_tool",
                         subject,
-                        query_hash = %query_hash,
-                        query_len = query.len(),
-                        top_k,
-                        result_count = candidates.len(),
+                        code_hash = %code_hash,
+                        code_len = code.len(),
                         elapsed_ms = started.elapsed().as_millis(),
                         "gateway code search ok"
                     );
                     Ok(CallToolResult::success(vec![Content::text(
-                        serde_json::to_string(&candidates).unwrap_or_else(|_| "[]".to_string()),
+                        serde_json::to_string(&response).unwrap_or_else(|_| "null".to_string()),
                     )]))
                 }
                 Err(err) => {
@@ -1416,93 +1396,13 @@ impl ServerHandler for LabMcpServer {
                         service = "code_search",
                         action = "call_tool",
                         subject,
-                        query_hash = %query_hash,
-                        query_len = query.len(),
-                        top_k,
+                        code_hash = %code_hash,
+                        code_len = code.len(),
                         elapsed_ms = started.elapsed().as_millis(),
                         kind = err.kind(),
                         error = %err,
                         "gateway code search failed"
                     );
-                    let env = tool_error_envelope(&service, "call_tool", &err);
-                    Ok(CallToolResult::error(vec![Content::text(env.to_string())]))
-                }
-            };
-        }
-        if service == CODE_SCHEMA_TOOL_NAME && self.gateway_code_mode_enabled().await {
-            let started = Instant::now();
-            let subject = self.request_subject_log_tag(&context);
-            let auth = auth_context_from_extensions(&context.extensions);
-            if !tool_search_include_schema_allowed(auth, true) {
-                tracing::warn!(
-                    surface = "mcp",
-                    service = %service,
-                    action = "call_tool",
-                    subject,
-                    elapsed_ms = started.elapsed().as_millis(),
-                    kind = "forbidden",
-                    "gateway code schema denied by scope"
-                );
-                let env = build_error_extra(
-                    &service,
-                    "call_tool",
-                    "forbidden",
-                    "code_schema requires one of scopes: lab, lab:admin",
-                    &serde_json::json!({ "required_scopes": ["lab", "lab:admin"] }),
-                );
-                return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
-            }
-            let Some(manager) = &self.gateway_manager else {
-                let envelope = build_error(
-                    &service,
-                    "call_tool",
-                    "unknown_tool",
-                    "code schema is not enabled",
-                );
-                return Ok(CallToolResult::error(vec![Content::text(
-                    envelope.to_string(),
-                )]));
-            };
-            let id = args
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            let id_hash = hash_arguments(&Value::String(id.clone()));
-            tracing::info!(
-                surface = "mcp",
-                service = "code_schema",
-                action = "call_tool",
-                subject,
-                id_hash = %id_hash,
-                "gateway code schema start"
-            );
-            let broker = CodeModeBroker::new(&self.registry, Some(manager));
-            let caller = auth.map_or(CodeModeCaller::TrustedLocal, |auth| {
-                CodeModeCaller::Scoped {
-                    scopes: auth.scopes.clone(),
-                    subject: self.request_subject(&context).map(ToOwned::to_owned),
-                }
-            });
-            return match broker
-                .schema(&id, caller, self.code_mode_surface(false))
-                .await
-            {
-                Ok(response) => {
-                    tracing::info!(
-                        surface = "mcp",
-                        service = "code_schema",
-                        action = "call_tool",
-                        subject,
-                        id_hash = %id_hash,
-                        elapsed_ms = started.elapsed().as_millis(),
-                        "gateway code schema ok"
-                    );
-                    Ok(CallToolResult::success(vec![Content::text(
-                        serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string()),
-                    )]))
-                }
-                Err(err) => {
                     let env = tool_error_envelope(&service, "call_tool", &err);
                     Ok(CallToolResult::error(vec![Content::text(env.to_string())]))
                 }
@@ -2751,7 +2651,6 @@ fn redact_subject_for_logging(subject: &str) -> String {
 impl LabMcpServer {
     fn code_mode_surface(&self, allow_destructive_actions: bool) -> CodeModeSurface {
         CodeModeSurface::Mcp {
-            expose_builtin_services: !matches!(self.node_role, Some(NodeRole::NonMaster)),
             allow_destructive_actions,
         }
     }
@@ -3322,7 +3221,6 @@ pub fn extract_error_info(e: &anyhow::Error) -> (&'static str, String, Option<Va
 mod tests {
     use super::{extract_error_info, logging_level_rank, normalize_upstream_result};
     use crate::dispatch::error::ToolError;
-    use crate::dispatch::gateway::code_mode::{CodeModeBroker, CodeModeCaller, CodeModeSurface};
     use crate::mcp::envelope::build_error;
     use crate::mcp::error::{DispatchError, canonical_kind};
     use crate::registry::{RegisteredService, ToolRegistry};
@@ -3333,7 +3231,6 @@ mod tests {
     use std::collections::{BTreeMap, HashMap};
     use std::future::Future;
     use std::pin::Pin;
-    use std::time::Duration;
 
     #[tokio::test]
     async fn extract_error_info_preserves_unknown_action_from_real_dispatch_downcast() {
@@ -3660,106 +3557,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn code_search_expands_builtin_matches_to_action_candidates() {
-        let registry = completion_test_registry();
-        let broker = CodeModeBroker::new(&registry, None);
-
-        let results = broker
-            .search(
-                "movie.search",
-                10,
-                CodeModeCaller::TrustedLocal,
-                CodeModeSurface::Cli,
-            )
-            .await
-            .unwrap();
-
-        assert!(
-            results
-                .iter()
-                .any(|result| result.id == "lab::radarr.movie.search")
-        );
-        assert_eq!(
-            results.first().map(|result| result.id.as_str()),
-            Some("lab::radarr.movie.search")
-        );
-        assert!(results.iter().all(|result| result.upstream == "lab"));
-        assert!(results.iter().all(|result| result.schema_available));
-    }
-
-    #[tokio::test]
-    async fn code_mode_brokers_lab_action_by_stable_id() {
-        let registry = completion_test_registry();
-        let broker = CodeModeBroker::new(&registry, None);
-
-        let result = broker
-            .call_tool_id(
-                "lab::radarr.movie.search",
-                serde_json::json!({"query": "Alien"}),
-                CodeModeCaller::TrustedLocal,
-                CodeModeSurface::Cli,
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(result, Value::Null);
-    }
-
-    const SLOW_ACTIONS: &[ActionSpec] = &[ActionSpec {
-        name: "wait",
-        description: "Wait long enough to test Code Mode timeout propagation",
-        destructive: false,
-        params: &[],
-        returns: "object",
-    }];
-
-    fn slow_dispatch(
-        _action: String,
-        _params: Value,
-    ) -> Pin<Box<dyn Future<Output = Result<Value, ToolError>> + Send>> {
-        Box::pin(async {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            Ok(serde_json::json!({"ok": true}))
-        })
-    }
-
-    #[tokio::test]
-    async fn code_mode_timeout_covers_brokered_lab_calls() {
-        let mut registry = ToolRegistry::new();
-        registry.register(RegisteredService {
-            name: "slow",
-            description: "Slow test service",
-            category: "bootstrap",
-            kind: crate::registry::RegisteredServiceKind::BootstrapOperator,
-            status: "available",
-            actions: SLOW_ACTIONS,
-            dispatch: slow_dispatch,
-        });
-        let broker = CodeModeBroker::new(&registry, None);
-
-        let started = std::time::Instant::now();
-        let err = broker
-            .call_tool_id_before_deadline(
-                "lab::slow.wait",
-                serde_json::json!({}),
-                tokio::time::Instant::now() + Duration::from_millis(50),
-                CodeModeCaller::TrustedLocal,
-                CodeModeSurface::Cli,
-            )
-            .await
-            .expect_err("brokered tool call should be bounded by Code Mode timeout");
-
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "timeout should not wait for the slow dispatch to finish"
-        );
-        match err {
-            ToolError::Sdk { sdk_kind, .. } => assert_eq!(sdk_kind, "timeout"),
-            other => panic!("expected timeout sdk error, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
     async fn snapshot_catalog_hides_builtin_tools_when_tool_search_is_enabled() {
         let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
         let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
@@ -3791,7 +3588,6 @@ mod tests {
             snapshot.tools,
             [
                 "code_execute".to_string(),
-                "code_schema".to_string(),
                 "code_search".to_string(),
                 "invoke".to_string(),
                 "scout".to_string()
@@ -3799,6 +3595,19 @@ mod tests {
             .into_iter()
             .collect()
         );
+    }
+
+    #[test]
+    fn code_execute_description_contains_protocol_contract() {
+        assert!(super::CODE_EXECUTE_DESCRIPTION.contains("callTool<T = unknown>"));
+        assert!(
+            super::CODE_EXECUTE_DESCRIPTION
+                .contains("Successful return: the upstream tool's structuredContent")
+        );
+        assert!(super::CODE_EXECUTE_DESCRIPTION.contains("JSON.parse(String(e.message))"));
+        assert!(super::CODE_EXECUTE_DESCRIPTION.contains("Retry-safe:"));
+        assert!(super::CODE_EXECUTE_DESCRIPTION.contains("Promise.all"));
+        assert!(super::CODE_EXECUTE_DESCRIPTION.len() < 8192);
     }
 
     fn gateway_test_upstream(name: &str) -> crate::config::UpstreamConfig {

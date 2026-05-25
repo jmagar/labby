@@ -32,7 +32,9 @@ impl IntoResponse for ToolError {
             | "path_traversal_rejected"
             | "invalid_encoding" => StatusCode::UNPROCESSABLE_ENTITY,
             "content_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
-            "install_timeout" | "timeout" => StatusCode::GATEWAY_TIMEOUT,
+            "install_timeout" | "timeout" | "code_mode_timeout" | "code_mode_fuel_exhausted" => {
+                StatusCode::GATEWAY_TIMEOUT
+            }
             "oauth_needs_reauth" => StatusCode::UNAUTHORIZED,
             "oauth_state_invalid" => StatusCode::BAD_REQUEST,
             "forbidden" | "dev_preview_read_only" => StatusCode::FORBIDDEN,

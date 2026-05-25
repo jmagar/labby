@@ -14,7 +14,8 @@ Feature invariant status: clean.
 | lab-apis | `mcpregistry` | ServicePassthrough | false | true | labby/mcpregistry |  |
 | lab-apis | `test-utils` | HelperInternal | false | false | labby/test-utils |  |
 | labby | `acp_registry` | ServicePassthrough | true | true | lab-apis/acp_registry | `lab-apis/acp_registry` |
-| labby | `all` | AggregateDefault | true | true | lab-apis/all | `lab-apis/all`<br>`lab-admin`<br>`acp_registry`<br>`deploy`<br>`extract`<br>`mcpregistry`<br>`gateway`<br>`marketplace` |
+| labby | `all` | AggregateDefault | true | true | lab-apis/all | `lab-apis/all`<br>`lab-admin`<br>`acp_registry`<br>`deploy`<br>`extract`<br>`mcpregistry`<br>`gateway`<br>`marketplace`<br>`code_mode_wasm` |
+| labby | `code_mode_wasm` | HelperInternal | true | true | - | `dep:javy`<br>`dep:wasmtime` |
 | labby | `default` | AggregateDefault | false | false | lab-apis/default | `all` |
 | labby | `deploy` | ServicePassthrough | true | true | lab-apis/deploy | `lab-apis/deploy`<br>`dep:regex` |
 | labby | `extract` | ServicePassthrough | true | true | lab-apis/extract | `lab-apis/extract` |
