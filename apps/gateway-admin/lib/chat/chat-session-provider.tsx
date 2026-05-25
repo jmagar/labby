@@ -44,6 +44,8 @@ import {
   errorMessageFromPayload,
   sameProviderList,
 } from './acp-normalizers'
+import { filterVisibleRuns } from './session-filters'
+import { dominantModelId as computeDominantModelId } from './dominant-model'
 import type { ACPAgent, ACPRun, ACPProject, ACPMessage, ACPModelOption } from '@/components/chat/types'
 import type { BridgeSessionSummary, ProviderHealth, BridgeEvent } from '@/lib/acp/types'
 import type { SessionEventConnectionState } from './use-session-events'
@@ -75,6 +77,11 @@ export type PageContext = {
 
 export type ChatSessionDataContextValue = {
   runs: ACPRun[]
+  visibleRuns: ACPRun[]
+  hiddenRunCount: number
+  includeHiddenRuns: boolean
+  dominantModelId: string | null
+  lastDispatchError: { provider: string; message: string; at: number } | null
   selectedRunId: string | null
   selectedRun: ACPRun | null
   providerHealth: ProviderHealth | null
@@ -100,6 +107,8 @@ export type ChatSessionActionsContextValue = {
   selectAgent: (providerId: string) => void
   selectModel: (providerId: string, modelId: string) => void
   setPageContext: (ctx: PageContext) => void
+  setIncludeHiddenRuns: (include: boolean | ((prev: boolean) => boolean)) => void
+  bulkCloseHiddenSessions: () => Promise<{ closedCount: number; failedCount: number }>
 }
 
 export type ChatSessionConnectionContextValue = {
@@ -188,6 +197,15 @@ export function ChatSessionProvider({
   const [selectedModelByProvider, setSelectedModelByProvider] = React.useState<Record<string, string>>({})
   const [optimisticMessages, setOptimisticMessages] = React.useState<ACPMessage[]>([])
   const [pageContext, setPageContext] = React.useState<PageContext>(null)
+  const [includeHiddenRuns, setIncludeHiddenRuns] = React.useState(false)
+  // Transient dispatch error surface that does NOT mutate `providerHealth`.
+  // Earlier code path stomped synthetic `{ ready: false, ... }` into
+  // `providerHealth` whenever a session or prompt call failed, which made the
+  // provider look permanently down even when only one dispatch had failed.
+  // Auto-clears when the user switches providers (see effect below).
+  const [lastDispatchError, setLastDispatchError] = React.useState<
+    { provider: string; message: string; at: number } | null
+  >(null)
 
   // SSE state
   const [events, setEvents] = React.useState<BridgeEvent[]>([])
@@ -362,13 +380,11 @@ export function ChatSessionProvider({
             payload as ErrorPayload | null,
             'Failed to create ACP session.',
           )
-          setProviderHealth((current) => ({
-            provider: current?.provider ?? 'codex-acp',
-            ready: false,
-            command: current?.command ?? '',
-            args: current?.args ?? [],
+          setLastDispatchError({
+            provider: providerHealth?.provider ?? selectedProviderId ?? 'codex-acp',
             message,
-          }))
+            at: Date.now(),
+          })
           throw new Error(message)
         }
         // Narrow: if payload has an `id` field it is a SessionCreatePayload; otherwise ErrorPayload
@@ -453,13 +469,11 @@ export function ChatSessionProvider({
         })
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to send prompt to ACP session.'
-        setProviderHealth((current) => ({
-          provider: current?.provider ?? selectedProviderId ?? 'codex-acp',
-          ready: false,
-          command: current?.command ?? '',
-          args: current?.args ?? [],
+        setLastDispatchError({
+          provider: providerHealth?.provider ?? selectedProviderId ?? 'codex-acp',
           message,
-        }))
+          at: Date.now(),
+        })
         throw error
       }
     },
@@ -467,6 +481,7 @@ export function ChatSessionProvider({
       createSession,
       fetchAcp,
       isMobileViewport,
+      providerHealth?.provider,
       refreshSessions,
       selectedProviderId,
       selectedAgent.id,
@@ -511,6 +526,16 @@ export function ChatSessionProvider({
       setProviderHealth(selected)
     }
   }, [providers, selectedProviderId])
+
+  // Clear lastDispatchError when the user moves to a different provider — the
+  // error is scoped to whichever provider failed; following them around is
+  // misleading.
+  React.useEffect(() => {
+    if (!lastDispatchError) return
+    if (lastDispatchError.provider !== selectedProviderId) {
+      setLastDispatchError(null)
+    }
+  }, [selectedProviderId, lastDispatchError])
 
   // Auto-bootstrap first session — after sessions have been loaded so we don't race with refreshSessions.
   // Gated on `autoBootstrap`: the provider mounts on every admin page, but we only want to mint a
@@ -645,9 +670,65 @@ export function ChatSessionProvider({
 
   // ---- Context values ----
 
+  const visibleRuns = React.useMemo(
+    () => filterVisibleRuns(runs, { includeHidden: includeHiddenRuns }),
+    [runs, includeHiddenRuns],
+  )
+  const hiddenRunCount = runs.length - visibleRuns.length
+  const dominantModelId = React.useMemo(() => computeDominantModelId(visibleRuns), [visibleRuns])
+
+  const bulkCloseHiddenSessions = React.useCallback(async () => {
+    // The API auto-injects `confirm: true` for destructive actions and
+    // `principal` from the auth context, so the client only sends the selector.
+    const response = await fetchAcp('', {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'session.bulk_close',
+        params: {
+          // Default sweep selector per lab-de6yc.1: failed/closed older than 7 days.
+          selector: {
+            states: ['failed', 'closed'],
+            max_age_days: 7,
+            max_count: 500,
+          },
+        },
+      }),
+    })
+    if (!response.ok) {
+      const errorPayload = await readJsonSafe<ErrorPayload>(response)
+      throw new Error(errorMessageFromPayload(errorPayload, 'Failed to clean up sessions'))
+    }
+    const payload = (await readJsonSafe(response)) as
+      | { closed?: unknown; failed?: unknown }
+      | null
+    if (
+      !payload ||
+      !Array.isArray(payload.closed) ||
+      !Array.isArray(payload.failed) ||
+      payload.closed.some((id) => typeof id !== 'string') ||
+      payload.failed.some(
+        (item) =>
+          typeof item !== 'object' ||
+          item == null ||
+          typeof (item as { id?: unknown }).id !== 'string',
+      )
+    ) {
+      throw new Error('Invalid cleanup response payload')
+    }
+    const closedCount = payload.closed.length
+    const failedCount = payload.failed.length
+    await refreshSessions()
+    return { closedCount, failedCount }
+  }, [fetchAcp, refreshSessions])
+
   const dataValue = React.useMemo<ChatSessionDataContextValue>(
     () => ({
       runs,
+      visibleRuns,
+      hiddenRunCount,
+      includeHiddenRuns,
+      dominantModelId,
+      lastDispatchError,
       selectedRunId,
       selectedRun,
       providerHealth,
@@ -660,7 +741,7 @@ export function ChatSessionProvider({
       sessionsLoaded,
       pageContext,
     }),
-    [runs, selectedRunId, selectedRun, providerHealth, providers, selectedProviderId, selectedAgent, selectedModel, agents, projects, sessionsLoaded, pageContext],
+    [runs, visibleRuns, hiddenRunCount, includeHiddenRuns, dominantModelId, lastDispatchError, selectedRunId, selectedRun, providerHealth, providers, selectedProviderId, selectedAgent, selectedModel, agents, projects, sessionsLoaded, pageContext],
   )
 
   const actionsValue = React.useMemo<ChatSessionActionsContextValue>(
@@ -673,8 +754,10 @@ export function ChatSessionProvider({
       selectAgent,
       selectModel,
       setPageContext: setPageContextStable,
+      setIncludeHiddenRuns,
+      bulkCloseHiddenSessions,
     }),
-    [createSession, selectRun, sendPrompt, refreshSessions, refreshProvider, selectAgent, selectModel, setPageContextStable],
+    [createSession, selectRun, sendPrompt, refreshSessions, refreshProvider, selectAgent, selectModel, setPageContextStable, bulkCloseHiddenSessions],
   )
 
   const connectionValue = React.useMemo<ChatSessionConnectionContextValue>(

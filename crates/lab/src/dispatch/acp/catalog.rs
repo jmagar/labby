@@ -1,7 +1,7 @@
 //! Action catalog for the `acp` (Agent Client Protocol) service.
 //!
 //! Single authoritative source for MCP, CLI, and API adapters.
-//! `session.cancel` and `session.close` are marked destructive.
+//! `session.cancel`, `session.close`, and `session.bulk_close` are marked destructive.
 
 use lab_apis::core::action::{ActionSpec, ParamSpec};
 
@@ -109,6 +109,56 @@ pub const ACTIONS: &[ActionSpec] = &[
                 ty: "string",
                 required: false,
                 description: "Caller principal (defaults to empty = anonymous)",
+            },
+        ],
+    },
+    ActionSpec {
+        name: "session.start_and_prompt",
+        description: "Atomically create an ACP session and queue its first prompt. Returns session metadata + SSE stream ticket. Closes the orphan-session window of separate create+prompt calls.",
+        destructive: false,
+        returns: "Value",
+        params: &[
+            ParamSpec {
+                name: "provider",
+                ty: "string",
+                required: false,
+                description: "Provider id (defaults to gateway default)",
+            },
+            ParamSpec {
+                name: "model",
+                ty: "string",
+                required: false,
+                description: "Model id; provider's default if omitted",
+            },
+            ParamSpec {
+                name: "title",
+                ty: "string",
+                required: false,
+                description: "Human-readable session title",
+            },
+            ParamSpec {
+                name: "cwd",
+                ty: "string",
+                required: false,
+                description: "Working directory for the session",
+            },
+            ParamSpec {
+                name: "prompt",
+                ty: "string",
+                required: true,
+                description: "First user prompt text",
+            },
+            ParamSpec {
+                name: "page_context",
+                ty: "object",
+                required: false,
+                description: "Optional page context: {route, entityType?, entityId?}",
+            },
+            ParamSpec {
+                name: "principal",
+                ty: "string",
+                required: true,
+                description: "Caller principal for ownership of the new session",
             },
         ],
     },
@@ -257,6 +307,27 @@ pub const ACTIONS: &[ActionSpec] = &[
                 ty: "string",
                 required: false,
                 description: "Caller principal for ownership verification",
+            },
+        ],
+    },
+    ActionSpec {
+        name: "session.bulk_close",
+        description: "Bulk close sessions matching a typed selector. Self-service only — \
+                      only the caller's own sessions are touched. [destructive]",
+        destructive: true,
+        returns: r#"{ "closed": string[], "failed": [{ "id": string, "kind": string, "message": string }] }"#,
+        params: &[
+            ParamSpec {
+                name: "selector",
+                ty: "object",
+                required: true,
+                description: "BulkCloseSelector { states?: AcpSessionState[], max_age_days?: number, max_count?: number (default 500) }",
+            },
+            ParamSpec {
+                name: "principal",
+                ty: "string",
+                required: true,
+                description: "Caller principal; only the caller's sessions are touched",
             },
         ],
     },

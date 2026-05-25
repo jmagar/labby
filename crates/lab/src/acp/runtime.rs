@@ -1252,6 +1252,9 @@ fn redact_provider_stderr_line(line: &str) -> (String, bool) {
         .map(redact_stdio_value)
         .collect::<Vec<_>>()
         .join(" ");
+    // Layer broader sanitization (IPs, JWTs, home paths) over the per-token
+    // key=value redaction.
+    let redacted = sanitize_provider_error(&redacted);
     if redacted.chars().count() <= MAX_PROVIDER_STDERR_CHARS {
         return (redacted, false);
     }
@@ -1261,6 +1264,41 @@ fn redact_provider_stderr_line(line: &str) -> (String, bool) {
         .take(MAX_PROVIDER_STDERR_CHARS)
         .collect::<String>();
     (truncated, true)
+}
+
+/// Strip identifying network endpoints, JWT-shaped tokens, and absolute home
+/// paths from provider error/stderr text before surfacing it to clients.
+/// Composes with [`redact_stdio_value`] which already handles `key=value`
+/// secret patterns at the token level.
+pub fn sanitize_provider_error(message: &str) -> String {
+    use std::sync::OnceLock;
+    static PATTERNS: OnceLock<Vec<(regex::Regex, &'static str)>> = OnceLock::new();
+    let patterns = PATTERNS.get_or_init(|| {
+        vec![
+            // IPv4 with optional :port. Conservative — does not match IPv6.
+            (
+                regex::Regex::new(r"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b").unwrap(),
+                "[redacted-ip]",
+            ),
+            // JWT-shaped token: any whitespace-delimited word starting with the
+            // standard `eyJ` header prefix.
+            (
+                regex::Regex::new(r"\beyJ[A-Za-z0-9_.-]+\b").unwrap(),
+                "[redacted-jwt]",
+            ),
+            // Absolute paths under per-user roots — collapses usernames and
+            // working-directory layouts that would otherwise leak through.
+            (
+                regex::Regex::new(r#"/(?:home|Users|root)/[^ \t\n"']+"#).unwrap(),
+                "[path]",
+            ),
+        ]
+    });
+    let mut out = message.to_string();
+    for (re, repl) in patterns.iter() {
+        out = re.replace_all(&out, *repl).to_string();
+    }
+    out
 }
 
 async fn run_codex_session(
@@ -3172,6 +3210,36 @@ mod tests {
             env.iter().all(|(_, value)| !value.contains("secret")),
             "provider env must not include service credentials: {env:?}"
         );
+    }
+
+    #[test]
+    fn sanitize_provider_error_strips_ip_jwt_and_home_paths() {
+        let raw = "failed to auth to 10.0.0.5:8000 with eyJabc.def.ghi at /home/user/.lab/creds";
+        let clean = super::sanitize_provider_error(raw);
+        assert!(!clean.contains("10.0.0.5"), "IP should be redacted: {clean}");
+        assert!(!clean.contains("eyJabc"), "JWT should be redacted: {clean}");
+        assert!(
+            !clean.contains("/home/user"),
+            "home path should be redacted: {clean}"
+        );
+        assert!(clean.contains("[redacted-ip]"));
+        assert!(clean.contains("[redacted-jwt]"));
+        assert!(clean.contains("[path]"));
+    }
+
+    #[test]
+    fn sanitize_provider_error_passes_known_safe_messages_unchanged() {
+        let raw = "model not found: gpt-5.1";
+        assert_eq!(super::sanitize_provider_error(raw), raw);
+    }
+
+    #[test]
+    fn redact_provider_stderr_line_strips_ip_and_path() {
+        let (line, truncated) =
+            redact_provider_stderr_line("connect failed at 192.168.1.100:443 in /home/jmagar/workspace");
+        assert!(!truncated);
+        assert!(!line.contains("192.168.1.100"));
+        assert!(!line.contains("/home/jmagar"));
     }
 
     #[test]

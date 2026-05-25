@@ -48,13 +48,38 @@ export function ChatShell() {
   const [maxTokens, setMaxTokens] = React.useState(8192)
   const [draftText, setDraftText] = React.useState('')
   const [attachmentsResetToken, setAttachmentsResetToken] = React.useState(0)
-  const { runs, selectedRun, selectedRunId, providerHealth, selectedAgent, selectedModel, agents, projects } =
-    useChatSessionData()
-  const { selectRun, createSession, sendPrompt, selectAgent, selectModel } = useChatSessionActions()
+  const {
+    visibleRuns,
+    hiddenRunCount,
+    includeHiddenRuns,
+    dominantModelId,
+    lastDispatchError,
+    selectedRun,
+    selectedRunId,
+    providerHealth,
+    selectedAgent,
+    selectedModel,
+    agents,
+    projects,
+  } = useChatSessionData()
+  const {
+    selectRun,
+    createSession,
+    sendPrompt,
+    selectAgent,
+    selectModel,
+    setIncludeHiddenRuns,
+    bulkCloseHiddenSessions,
+  } = useChatSessionActions()
   const { messages } = useChatSessionStream()
   const { connectionState } = useChatSessionConnection()
   const providerReady = Boolean(providerHealth?.ready)
-  const providerUnavailableMessage = providerReady ? null : providerHealth?.message?.trim() || null
+  // Union the actual provider-down message with the transient dispatch-error
+  // surface so the user sees a banner for ANY actionable failure — but the
+  // input itself only disables when the provider is genuinely down.
+  const providerUnavailableMessage = providerReady
+    ? lastDispatchError?.message ?? null
+    : providerHealth?.message?.trim() || lastDispatchError?.message || null
 
   const createRun = React.useCallback(async () => {
     try {
@@ -228,11 +253,16 @@ export function ChatShell() {
               <SessionSidebar
                 className="shadow-[var(--aurora-shadow-strong),var(--aurora-highlight-strong)] md:shadow-none"
                 projects={projects}
-                runs={runs}
+                runs={visibleRuns}
                 selectedRunId={selectedRunId}
                 selectedProjectId="workspace"
                 onSelectRun={selectRun}
                 onNewRun={() => void createRun()}
+                hiddenRunCount={hiddenRunCount}
+                includeHiddenRuns={includeHiddenRuns}
+                onToggleIncludeHidden={() => setIncludeHiddenRuns((v) => !v)}
+                onBulkCloseHidden={bulkCloseHiddenSessions}
+                dominantModelId={dominantModelId}
               />
             </div>
           </>

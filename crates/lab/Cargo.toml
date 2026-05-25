@@ -91,7 +91,7 @@ ulid = "1"
 num_cpus = "1"
 
 # optional — deploy feature
-regex = { version = "1", optional = true }
+regex = { version = "1" }
 
 rmcp.workspace = true
 # Transport-layer body-cap wrapper (dispatch/upstream/http_client.rs) uses
@@ -142,7 +142,7 @@ marketplace = ["mcpregistry"]
 services-all = [
 ]
 default = ["all"]
-deploy = ["lab-apis/deploy", "dep:regex"]
+deploy = ["lab-apis/deploy"]
 extract = ["lab-apis/extract"]
 fs = ["dep:walkdir", "dep:globset", "dep:unicode-normalization", "dep:rustix"]
 lab-admin = []

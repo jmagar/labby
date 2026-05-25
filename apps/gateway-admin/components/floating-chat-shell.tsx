@@ -44,9 +44,28 @@ export function FloatingChatShell({
   config,
 }: FloatingChatShellProps) {
   // ---- Context consumers ----
-  const { runs, selectedRun, selectedRunId, providerHealth, selectedAgent, agents, projects, pageContext } =
-    useChatSessionData()
-  const { createSession, selectRun, sendPrompt: sendPromptAction, selectAgent } = useChatSessionActions()
+  const {
+    visibleRuns,
+    hiddenRunCount,
+    includeHiddenRuns,
+    dominantModelId,
+    lastDispatchError,
+    selectedRun,
+    selectedRunId,
+    providerHealth,
+    selectedAgent,
+    agents,
+    projects,
+    pageContext,
+  } = useChatSessionData()
+  const {
+    createSession,
+    selectRun,
+    sendPrompt: sendPromptAction,
+    selectAgent,
+    setIncludeHiddenRuns,
+    bulkCloseHiddenSessions,
+  } = useChatSessionActions()
   const { connectionState } = useChatSessionConnection()
   const { messages } = useChatSessionStream()
 
@@ -55,7 +74,11 @@ export function FloatingChatShell({
   const [lastActionError, setLastActionError] = React.useState<string | null>(null)
 
   const providerReady = Boolean(providerHealth?.ready)
-  const visibleError = lastActionError ?? (!providerReady ? providerHealth?.message : null)
+  // Surface order: explicit action error → transient dispatch error → provider-down banner.
+  const visibleError =
+    lastActionError ??
+    lastDispatchError?.message ??
+    (!providerReady ? providerHealth?.message : null)
 
   // ---- sendPrompt (reads pageContext from provider + config) ----
   const sendPrompt = React.useCallback(
@@ -188,11 +211,16 @@ export function FloatingChatShell({
           <SessionSidebar
             className="hidden w-[180px] shrink-0 md:flex"
             projects={projects}
-            runs={runs}
+            runs={visibleRuns}
             selectedRunId={selectedRunId}
             selectedProjectId="workspace"
             onSelectRun={(runId) => selectRun(runId)}
             onNewRun={() => void createRun()}
+            hiddenRunCount={hiddenRunCount}
+            includeHiddenRuns={includeHiddenRuns}
+            onToggleIncludeHidden={() => setIncludeHiddenRuns((v) => !v)}
+            onBulkCloseHidden={bulkCloseHiddenSessions}
+            dominantModelId={dominantModelId}
           />
         )}
 

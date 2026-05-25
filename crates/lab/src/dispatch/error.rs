@@ -158,6 +158,23 @@ impl ToolError {
         }
     }
 
+    /// Human-readable message text. `Display` on `ToolError` emits the full
+    /// JSON envelope; this returns only the message field so callers building
+    /// nested error payloads (e.g. `BulkCloseFailure`) can avoid double-encoding.
+    #[must_use]
+    pub fn user_message(&self) -> &str {
+        match self {
+            Self::UnknownAction { message, .. }
+            | Self::MissingParam { message, .. }
+            | Self::InvalidParam { message, .. }
+            | Self::UnknownInstance { message, .. }
+            | Self::AmbiguousTool { message, .. }
+            | Self::ConfirmationRequired { message }
+            | Self::Conflict { message, .. }
+            | Self::Sdk { message, .. } => message.as_str(),
+        }
+    }
+
     /// Whether this error represents an internal/fatal failure (ERROR level)
     /// vs a caller/user error (WARN level).
     ///

@@ -163,6 +163,15 @@ export type SendPromptForSelectedProviderOptions = {
   includePageContext?: boolean
 }
 
+type StartAndPromptResult = {
+  session_id: string
+  provider_session_id?: string
+  model_id?: string
+  provider: string
+  title: string
+  stream_ticket?: string
+}
+
 export async function sendPromptForSelectedProvider({
   payload,
   selectedRun,
@@ -177,6 +186,58 @@ export async function sendPromptForSelectedProvider({
   pageContext,
   includePageContext = false,
 }: SendPromptForSelectedProviderOptions) {
+  // When no session is selected, fire one atomic action instead of two
+  // sequential calls. This collapses the prior orphan-row race: any failure
+  // here is server-side atomic — either the session exists with its first
+  // prompt queued, or nothing was created.
+  if (!selectedRun) {
+    const optimisticRunId = `pending-${Date.now()}`
+    const optimisticId = `optimistic-${optimisticRunId}-${Date.now()}`
+    addOptimisticMessage({
+      id: optimisticId,
+      runId: optimisticRunId,
+      role: 'user' as const,
+      text: payload.text,
+      createdAt: new Date(),
+      thoughts: [],
+      toolCalls: [],
+      version: 0,
+    })
+
+    const orchestratorBody = {
+      action: 'session.start_and_prompt',
+      params: {
+        prompt: payload.text,
+        ...(selectedProviderId && { provider: selectedProviderId }),
+        ...(selectedModelId && { model: selectedModelId }),
+        ...(payload.attachments.length > 0 && { attachments: payload.attachments }),
+        ...(includePageContext && pageContext !== null && pageContext !== undefined && { page_context: pageContext }),
+      },
+    }
+
+    const response = await fetchAcp('', {
+      method: 'POST',
+      body: JSON.stringify(orchestratorBody),
+    })
+    if (!response.ok) {
+      removeOptimisticMessage(optimisticId)
+      const errorPayload = await readJsonSafe<ErrorPayload>(response)
+      throw new Error(
+        errorMessageFromPayload(errorPayload, 'Failed to start ACP session.'),
+      )
+    }
+    // Drop the optimistic placeholder — refreshSessions() below will surface
+    // the materialized run with its real id, and the SSE stream will replay
+    // the user message we just queued server-side.
+    removeOptimisticMessage(optimisticId)
+    const _result = (await readJsonSafe(response)) as StartAndPromptResult | null
+    // The server-side action atomically queued the prompt; surfacing the new
+    // run via the standard refresh is sufficient.
+    void _result
+    await refreshSessions()
+    return
+  }
+
   const runId = await ensurePromptRunIdForProvider(
     selectedRun,
     selectedProviderId,

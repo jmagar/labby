@@ -64,11 +64,41 @@ export type RawSessionSummary = {
 
 // ---- Normalization helpers ----
 
+const PLACEHOLDER_TITLES = new Set(['New session', 'action route session', ''])
+
+function shortModelId(id: string | null | undefined): string | null {
+  if (!id) return null
+  // Strip the codex effort suffix: "gpt-5.5/medium" → "gpt-5.5".
+  return id.split('/')[0] ?? id
+}
+
+function timeAgo(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return null
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
+  if (seconds < 60) return 'now'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
+  return `${Math.floor(seconds / 86400)}d ago`
+}
+
+export function deriveSessionTitle(session: RawSessionSummary): string {
+  if (!PLACEHOLDER_TITLES.has(session.title ?? '')) return session.title
+  const parts = [
+    session.provider,
+    shortModelId(session.modelId ?? session.model_id ?? null),
+    timeAgo(session.createdAt ?? session.created_at ?? null),
+  ].filter((part): part is string => Boolean(part))
+  if (parts.length === 0) return session.title || 'session'
+  return parts.join(' · ')
+}
+
 export function normalizeSessionSummary(session: RawSessionSummary): BridgeSessionSummary {
   return {
     id: session.id,
     provider: session.provider,
-    title: session.title,
+    title: deriveSessionTitle(session),
     cwd: session.cwd,
     status: (session.status ?? session.state ?? 'idle') as BridgeSessionSummary['status'],
     createdAt: session.createdAt ?? session.created_at ?? '',
