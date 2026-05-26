@@ -30,3 +30,5 @@ pub mod process;
 pub mod registry;
 #[cfg(test)]
 pub mod test_support;
+#[cfg(feature = "fs")]
+pub mod workspace;
