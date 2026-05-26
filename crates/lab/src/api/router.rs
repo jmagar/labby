@@ -1062,21 +1062,18 @@ fn build_v1_router(state: &AppState, api_auth_configured: bool) -> Router<AppSta
             // runtime refuses to mount them on an unauthenticated API surface.
             // Static web UI auth settings do not bypass `/v1` auth when
             // bearer/OAuth auth is configured.
-            match crate::workspace::WorkspaceRuntime::http_routes(
-                state.clone(),
+            if crate::workspace::WorkspaceRuntime::should_mount_http_routes(
+                state.web_ui_auth_disabled,
                 api_auth_configured,
             ) {
-                Some(routes) => {
-                    v1 = v1.nest("/fs", routes);
-                }
-                None => {
-                    tracing::warn!(
-                        subsystem = "startup",
-                        phase = "fs.mount.skipped",
-                        reason = "web_ui_auth_disabled",
-                        "fs service is configured but LAB_WEB_UI_AUTH_DISABLED=true would expose workspace files unauthenticated; refusing to mount /v1/fs"
-                    );
-                }
+                v1 = v1.nest("/fs", services::fs::routes(state.clone()));
+            } else {
+                tracing::warn!(
+                    subsystem = "startup",
+                    phase = "fs.mount.skipped",
+                    reason = "web_ui_auth_disabled",
+                    "fs service is configured but LAB_WEB_UI_AUTH_DISABLED=true would expose workspace files unauthenticated; refusing to mount /v1/fs"
+                );
             }
         }
     }
