@@ -224,6 +224,10 @@ lab-gateway-bin
   -> lab-observability
 ```
 
+The arrows above are direct binary/composition dependencies, not a chain where
+`lab-gateway` imports `lab-oauth`. Gateway and OAuth are sibling product crates.
+The binary composes both with shared auth/config/runtime dependencies.
+
 Full Lab binary:
 
 ```text

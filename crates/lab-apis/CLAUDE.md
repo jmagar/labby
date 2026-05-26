@@ -5,11 +5,10 @@ HTTP client library for feature-gated homelab services, plus always-on bootstrap
 
 Sub-docs for key sub-modules:
 - [`src/core/CLAUDE.md`](src/core/CLAUDE.md) — HttpClient, Auth, traits, error taxonomy
-- [`src/extract/CLAUDE.md`](src/extract/CLAUDE.md) — synthetic bootstrap service rules
 
 ## Feature Flags
 
-Opt-in feature count can drift as registry/bootstrap integrations are added. `core`, `device_runtime`, `marketplace`, `acp`, and `doctor` are always compiled — no gate possible. `extract` is now gated behind the `extract` feature flag (enables `russh`, `russh-sftp`, `russh-config`, `quick-xml`, and `rusqlite`).
+Opt-in feature count can drift as registry/bootstrap integrations are added. `core`, `device_runtime`, `marketplace`, `acp`, and `doctor` are always compiled — no gate possible.
 
 - `servarr` is pulled in **transitively** by `radarr`, `sonarr`, `prowlarr` — do not list it
   in `all` directly.

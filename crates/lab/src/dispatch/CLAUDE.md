@@ -184,7 +184,6 @@ Always-on meta-services (those without a feature flag) register directly from
 `dispatch::*` in `registry.rs` without a `mcp/services/` shim. This is the
 **canonical pattern** for these services, not an exception. Current examples:
 
-- `extract` — `crate::dispatch::extract::dispatch`
 - `gateway` — `crate::dispatch::gateway::dispatch`
 - `doctor` — `crate::dispatch::doctor::dispatch`
 - `logs` — `crate::dispatch::logs::dispatch`
@@ -238,8 +237,8 @@ operation is intrinsically composite. The current sanctioned cross-call:
 
 Dependency direction is one-way:
 
-- setup may depend on doctor and extract.
-- doctor and extract MUST NOT depend on setup.
+- setup may depend on doctor.
+- doctor MUST NOT depend on setup.
 
 Surface adapters (CLI/MCP/HTTP) MUST NOT chain dispatch calls themselves —
 that work belongs in the shared dispatch layer so all three surfaces share

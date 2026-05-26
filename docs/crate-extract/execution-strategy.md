@@ -367,17 +367,25 @@ pnpm --dir templates/lab-web-app build
 Minimum generated-client gate:
 
 ```bash
-labby internal export-openapi --products gateway --out packages/lab-api-client/generated/openapi.json
+cargo run -p labby --all-features -- docs generate
+cargo run -p labby --all-features -- docs check
+cp docs/generated/openapi.json packages/lab-api-client/generated/openapi.json
 pnpm --dir packages/lab-api-client generate
 pnpm --dir packages/lab-api-client typecheck
 ```
 
+This is the transitional gate while OpenAPI is still generated through
+generated-docs. Replace it with a product REST/OpenAPI exporter once that command
+exists.
+
 Minimum gateway standalone gate:
 
 ```bash
-cargo build -p lab --bin lab-gateway --all-features
+cargo build -p <package-that-declares-binary> --bin lab-gateway --all-features
 lab-gateway --help
 ```
+
+This gate starts only after a `lab-gateway` binary target exists.
 
 ## Boundary Enforcement Ideas
 

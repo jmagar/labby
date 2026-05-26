@@ -5,7 +5,7 @@
 //! dispatch layer.
 //!
 //! Applied to every v1 route group that exposes setup or local state:
-//! `/v1/setup`, `/v1/extract`, `/v1/marketplace`, `/v1/doctor`. It is
+//! `/v1/setup`, `/v1/marketplace`, `/v1/doctor`. It is
 //! intentionally conservative: a missing `Host` header is rejected too (no
 //! browser-driven request omits it).
 //!

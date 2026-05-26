@@ -19,7 +19,6 @@ Commands:
   setup        Open the web-based first-run wizard (or settings) — lab-bg3e.3
   help         Print the service + action catalog
   completions  Generate shell completions
-  extract      Scan a local or SSH appdata path and extract service credentials
   gateway      Manage proxied upstream MCP gateways
   oauth        Run local OAuth callback relay helpers
   logs         Search fleet logs on the configured master
@@ -917,49 +916,6 @@ Options:
 
           [default: auto]
           [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby extract`
-
-```text
-Scan a local or SSH appdata path and extract service credentials
-
-Usage: extract [OPTIONS] [URI]
-
-Arguments:
-  [URI]
-          Appdata path to scan. Local (`/path` or `~/path`) or SSH (`host:/path`)
-
-Options:
-      --apply
-          Write the extracted creds into `~/.lab/.env` (destructive — prompts)
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --diff
-          Show what would change vs the current `~/.lab/.env`, no writes
-
-  -y, --yes
-          Skip the destructive-action confirmation prompt
-
-      --dry-run
-          Don't actually write — just show what would happen with `--apply`
-
-      --force
-          Overwrite conflicting keys instead of skipping them
-
-      --json
-          Render as JSON instead of a table
-
-      --env-path <PATH>
-          Override the env-file path (defaults to `~/.lab/.env`)
 
   -h, --help
           Print help

@@ -52,7 +52,6 @@ pub(crate) fn process_tool_search_enabled() -> bool {
 }
 
 use anyhow::{Context, Result};
-use lab_apis::extract::types::ServiceCreds;
 use lab_auth::config as auth_config;
 use serde::{Deserialize, Serialize, Serializer};
 use tempfile::NamedTempFile;
@@ -1877,7 +1876,15 @@ fn scan_instances_from(
     out
 }
 
-// ─── .env writer (used by `labby extract --apply`) ─────────────────────────────
+// ─── .env writer ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvCredential {
+    pub service: String,
+    pub url: Option<String>,
+    pub secret: Option<String>,
+    pub env_field: String,
+}
 
 /// Merge `creds` into the `.env` file at `path` via the canonical
 /// [`env_merge::merge`] primitive. Preferred over [`write_env`] /
@@ -1892,7 +1899,7 @@ fn scan_instances_from(
 #[allow(dead_code)]
 pub fn write_service_creds(
     path: &Path,
-    creds: &[ServiceCreds],
+    creds: &[EnvCredential],
     force: bool,
 ) -> Result<env_merge::MergeOutcome, env_merge::MergeError> {
     let mut entries: Vec<env_merge::EnvEntry> = Vec::new();
@@ -1944,9 +1951,8 @@ pub fn backup_env(path: &Path) -> Result<PathBuf> {
     Ok(backup)
 }
 
-/// Merge `new_creds` into the `.env` file at `path` following the 8-rule algorithm.
+/// Merge `new_creds` into the `.env` file at `path`.
 ///
-/// Rule summary (full spec in `crates/lab-apis/src/extract/CLAUDE.md`):
 /// 1. Backup is the caller's responsibility — call [`backup_env`] before this.
 /// 2. Atomic write: `path.tmp` → rename.
 /// 3. Existing key order and comments are preserved.
@@ -1960,7 +1966,7 @@ pub fn backup_env(path: &Path) -> Result<PathBuf> {
 ///
 /// # Errors
 /// Returns an error if the tmp file cannot be written or renamed.
-pub fn write_env(path: &Path, new_creds: &[ServiceCreds], force: bool) -> Result<Vec<String>> {
+pub fn write_env(path: &Path, new_creds: &[EnvCredential], force: bool) -> Result<Vec<String>> {
     // Read the existing file (empty if absent).
     let existing_raw = if path.exists() {
         std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?
@@ -2073,7 +2079,7 @@ pub fn write_env(path: &Path, new_creds: &[ServiceCreds], force: bool) -> Result
 /// conflicts skipped unless `force=true`, idempotent on same values.
 /// Returns a `Vec<String>` of conflict warnings.
 ///
-/// Prefer this over [`write_env`] when the pairs are not derived from [`ServiceCreds`].
+/// Prefer this over [`write_env`] when callers already have flat env pairs.
 ///
 /// # Errors
 /// Returns an error if the tmp file cannot be written or renamed.
@@ -2169,7 +2175,7 @@ pub fn write_env_pairs(
 /// Returns true if all (key, value) pairs that would be written by `write_env`
 /// are already present in `path` with matching values. Used to implement
 /// idempotence: if this returns true, skip backup and write entirely.
-pub fn env_is_up_to_date(path: &Path, new_creds: &[ServiceCreds]) -> bool {
+pub fn env_is_up_to_date(path: &Path, new_creds: &[EnvCredential]) -> bool {
     let Ok(raw) = std::fs::read_to_string(path) else {
         return false;
     };
@@ -2525,16 +2531,12 @@ root = "/srv/lab-stash"
 
     // ─── write_env / backup_env tests ───────────────────────────────────────
 
-    fn radarr_cred() -> ServiceCreds {
-        ServiceCreds {
+    fn radarr_cred() -> EnvCredential {
+        EnvCredential {
             service: "radarr".to_owned(),
             url: Some("http://localhost:7878".to_owned()),
             secret: Some("abc123".to_owned()),
             env_field: "RADARR_API_KEY".to_owned(),
-            source_host: None,
-            probe_host: None,
-            runtime: None,
-            url_verified: false,
         }
     }
 
@@ -2608,15 +2610,11 @@ root = "/srv/lab-stash"
     fn write_env_quotes_value_with_special_chars() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(".env");
-        let cred = ServiceCreds {
+        let cred = EnvCredential {
             service: "svc".to_owned(),
             url: None,
             secret: Some("has space".to_owned()),
             env_field: "SVC_KEY".to_owned(),
-            source_host: None,
-            probe_host: None,
-            runtime: None,
-            url_verified: false,
         };
         write_env(&path, &[cred], false).unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
@@ -2627,15 +2625,11 @@ root = "/srv/lab-stash"
     fn env_is_up_to_date_handles_quoted_values() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(".env");
-        let cred = ServiceCreds {
+        let cred = EnvCredential {
             service: "svc".to_owned(),
             url: None,
             secret: Some("has space".to_owned()),
             env_field: "SVC_KEY".to_owned(),
-            source_host: None,
-            probe_host: None,
-            runtime: None,
-            url_verified: false,
         };
         // write_env quotes values with spaces
         write_env(&path, &[cred.clone()], false).unwrap();

@@ -1,9 +1,7 @@
 //! Shared `.env` merge primitive.
 //!
-//! Both `setup.draft.commit` and (eventually) `extract.apply` write to
-//! `~/.lab/.env` through this module. The 8-rule algorithm documented in
-//! `crates/lab-apis/src/extract/CLAUDE.md` is implemented here as the only
-//! sanctioned way to mutate the file:
+//! `setup.draft.commit` and gateway config mutations write to `~/.lab/.env`
+//! through this module. This is the only sanctioned way to mutate the file:
 //!
 //! 1. Backup is part of merge: `.env` → `.env.bak.<unix-seconds>` before any
 //!    write. Backup retention pruned to the last 10 entries.
@@ -82,6 +80,7 @@ pub struct MergeOutcome {
 }
 
 /// Dry-run classification for a merge request.
+#[cfg(test)]
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct MergePreview {
     pub changes: Vec<PreviewChange>,
@@ -89,6 +88,7 @@ pub struct MergePreview {
     pub written: usize,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct PreviewChange {
@@ -96,6 +96,7 @@ pub struct PreviewChange {
     pub status: PreviewStatus,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PreviewStatus {
@@ -344,6 +345,7 @@ pub fn merge(path: &Path, req: MergeRequest) -> Result<MergeOutcome, MergeError>
 }
 
 /// Classify a merge without writing, backing up, or pruning files.
+#[cfg(test)]
 pub fn preview(path: &Path, req: &MergeRequest) -> Result<MergePreview, MergeError> {
     let existing_raw = match fs::read_to_string(path) {
         Ok(s) => s,

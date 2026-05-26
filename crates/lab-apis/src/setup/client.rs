@@ -3,8 +3,7 @@
 //! `SetupClient` is a synthetic marker — `setup` has no remote API to wrap
 //! (all fs I/O lives in `crates/lab/src/dispatch/setup/`). This file holds
 //! validation primitives that other crates can call without pulling in fs
-//! or env machinery, mirroring the synthetic-client pattern from
-//! `crates/lab-apis/src/extract/client.rs`.
+//! or env machinery.
 
 use crate::core::plugin_ui::{FieldKind, UiSchema};
 

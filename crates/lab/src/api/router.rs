@@ -1014,16 +1014,10 @@ fn build_v1_router(state: &AppState, api_auth_configured: bool) -> Router<AppSta
                 "/docs",
                 get(|| async { Html(include_str!("openapi_docs.html")) }),
             )
-            // All v1 unauthenticated route groups (extract, marketplace,
-            // doctor, setup) are gated by host_validation_layer — non-loopback
+            // All v1 unauthenticated route groups (marketplace, doctor, setup)
+            // are gated by host_validation_layer — non-loopback
             // Host headers are rejected before reaching the dispatcher (DNS
             // rebinding mitigation for the v1 wizard, lab-bg3e.3.3).
-            .nest(
-                "/extract",
-                services::extract::routes(state.clone()).layer(axum::middleware::from_fn(
-                    crate::api::host_validation::host_validation_layer,
-                )),
-            )
             .nest(
                 "/marketplace",
                 services::marketplace::routes(state.clone()).layer(axum::middleware::from_fn(
@@ -1701,7 +1695,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/v1/extract/actions")
+                    .uri("/v1/setup/actions")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -1741,12 +1735,12 @@ mod tests {
     async fn auth_layer_rejects_missing_bearer_token() {
         let state = AppState::new();
         let app = build_router_with_bearer(state, Some("secret-token".into()), None);
-        // /v1/extract/actions is behind bearer auth; /health is NOT (lab-3qn.5).
+        // /v1/setup/actions is behind bearer auth; /health is NOT (lab-3qn.5).
         let response = app
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/v1/extract/actions")
+                    .uri("/v1/setup/actions")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -1769,7 +1763,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/v1/extract/actions")
+                    .uri("/v1/setup/actions")
                     .header(header::AUTHORIZATION, "Bearer secret-token")
                     .body(Body::empty())
                     .unwrap(),
@@ -1787,7 +1781,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/v1/extract/actions")
+                    .uri("/v1/setup/actions")
                     .header(header::AUTHORIZATION, "bearer   secret-token")
                     .body(Body::empty())
                     .unwrap(),
@@ -1809,7 +1803,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/v1/extract/actions")
+                    .uri("/v1/setup/actions")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -1963,7 +1957,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/v1/extract/actions")
+                    .uri("/v1/setup/actions")
                     .header(header::AUTHORIZATION, "Bearer secret-token")
                     .body(Body::empty())
                     .unwrap(),
@@ -1983,7 +1977,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/v1/extract/actions")
+                    .uri("/v1/setup/actions")
                     .header(header::AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -2137,7 +2131,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/v1/extract/actions")
+                    .uri("/v1/setup/actions")
                     .header(
                         header::COOKIE,
                         format!(
@@ -2254,7 +2248,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/v1/extract/actions")
+                    .uri("/v1/setup/actions")
                     .header(header::AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -2351,7 +2345,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/v1/extract/actions")
+                    .uri("/v1/setup/actions")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -2834,7 +2828,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/v1/extract/actions")
+                    .uri("/v1/setup/actions")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -2887,7 +2881,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/v1/extract/actions")
+                    .uri("/v1/setup/actions")
                     .body(Body::empty())
                     .unwrap(),
             )

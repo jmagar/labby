@@ -103,7 +103,7 @@ and may later ship an optional binary.
 
 | Crate | Type | Owns |
 |---|---|---|
-| `lab-gateway` | Rust library + optional binary | MCP upstream proxying, upstream pools, gateway config mutation, import/tombstone state, exposure filters, `scout`/`invoke`, schema resources, protected gateway routes, gateway-specific OAuth integration. |
+| `lab-gateway` | Rust library + optional binary | MCP upstream proxying, upstream pools, gateway config mutation, import/tombstone state, exposure filters, `scout`/`invoke`, schema resources, protected gateway routes, gateway-specific OAuth/protected-resource metadata and integration hooks. |
 | `lab-marketplace` | Rust library + optional binary | Unified plugin/agent/MCP marketplace catalog, sync, package metadata, install/update planning, marketplace API actions. |
 | `lab-acp` | Rust library + optional binary | ACP provider configuration, adapter process runtime, sessions, model discovery, chat/session APIs, ACP persistence. |
 | `lab-fleet` | Rust library + optional binary | Node runtime, controller/node role resolution, enrollment, node WebSocket admission, device/fleet inventory, node log ingestion interfaces. |
@@ -113,6 +113,19 @@ and may later ship an optional binary.
 | `lab-workspace` | Rust library + optional binary | Workspace filesystem browser, file preview contracts, workspace root resolution, file API actions. |
 | `lab-setup` | Rust library + optional binary | Setup checks, repair flows, plugin hook behavior, idempotent local environment preparation. |
 | `lab-doctor` | Rust library + optional binary | Health checks, audits, service reachability checks, diagnostic summaries. |
+
+### Operator Services Not Yet Product Crates
+
+Some current always-on Lab services are operator/bootstrap utilities rather than
+clear reusable product runtimes.
+
+| Current service | Current role | Extraction decision |
+|---|---|---|
+| `device` | Fleet device enrollment and node-facing operations. | Fold into `lab-fleet`; do not create a separate `lab-device` crate unless fleet/device ownership splits later. |
+
+`extract` was retired before this extraction plan. Do not add `lab-extract` to
+the required crate set or reintroduce the CLI/MCP/API surface unless there is a
+new product decision to rebuild credential discovery.
 
 ## Frontend Package Set
 
@@ -138,7 +151,7 @@ Product runtime/domain logic
   -> MCP action-dispatch handlers for compact agent/tool exposure
 ```
 
-For example, Gateway may expose REST routes such as:
+For example, Gateway may expose target REST routes such as:
 
 ```http
 GET    /v1/gateways
@@ -153,6 +166,15 @@ POST   /v1/gateways/{name}/reload
 POST   /v1/gateways/{name}/oauth/start
 DELETE /v1/gateways/{name}/oauth/token
 ```
+
+Current Lab still exposes Gateway's product API primarily through action
+dispatch:
+
+| Surface | Current route/tool | Target route/tool |
+|---|---|---|
+| REST/admin HTTP | `POST /v1/gateway` with `{ action, params }` | Resource routes such as `GET /v1/gateways` and `GET /v1/gateways/{name}/tools` |
+| MCP | `gateway({ action, params })` | unchanged compact action dispatch |
+| CLI | `labby gateway ...` commands over dispatch/runtime helpers | thin commands over the same runtime/domain functions |
 
 The MCP surface can still expose a single compact service tool:
 
@@ -238,13 +260,26 @@ async fn gateway_schema(/* ... */) -> Result<Json<GatewaySchemaResponse>, ApiErr
 }
 ```
 
-The Lab binary or a dedicated generator crate should export OpenAPI documents:
+The Lab binary or a dedicated generator crate should export product OpenAPI
+documents. This command is a target extraction deliverable; it does not exist in
+the current CLI yet:
 
 ```bash
 labby internal export-openapi \
   --products gateway,acp,marketplace,fleet,stash \
   --out packages/lab-api-client/generated/openapi.json
 ```
+
+Until that exporter exists, the only current OpenAPI artifact is the
+ActionSpec-derived generated-docs file:
+
+```bash
+cargo run -p labby --all-features -- docs generate
+cargo run -p labby --all-features -- docs check
+```
+
+That produces `docs/generated/openapi.json`, which is useful for documentation
+and transition checks but is not the final typed web-client contract.
 
 The OpenAPI document should include:
 
@@ -500,10 +535,16 @@ lab-gateway =
   lab-runtime
   + lab-config
   + lab-auth
-  + lab-oauth client/server pieces required for gateway routes
   + lab-catalog
   + lab-surface
   + lab-observability
+  + lab-gateway
+
+lab-gateway binary/composition =
+  lab-runtime
+  + lab-config
+  + lab-auth
+  + lab-oauth
   + lab-gateway
 
 lab-acp =
@@ -524,6 +565,11 @@ lab-marketplace =
   + lab-observability
   + lab-marketplace
 ```
+
+Gateway must not import the `lab-oauth` product runtime directly. Gateway should
+depend on shared auth contracts and expose route/protected-resource metadata;
+the final application or standalone binary composes `lab-gateway` and
+`lab-oauth` together.
 
 The full `labby` binary should not be the only place product runtime wiring
 exists. Each product runtime must eventually expose a builder or similar API

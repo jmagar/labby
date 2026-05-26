@@ -2,17 +2,12 @@
 //!
 //! Provides cross-cutting primitives (HTTP client, auth, errors), gateway-adjacent
 //! operator modules (marketplace, mcpregistry, device_runtime, deploy, doctor, setup,
-//! stash, acp, acp_registry), and the `extract` bootstrap utility for scanning hosts
-//! for service credentials.
+//! stash, acp, acp_registry).
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 /// Cross-cutting primitives: HTTP client, auth, errors, status, action specs.
 pub mod core;
-
-/// Bootstrap utility: extract API keys from existing service config files.
-#[cfg(feature = "extract")]
-pub mod extract;
 
 /// Marketplace: browse and install Claude Code plugins.
 pub mod marketplace;

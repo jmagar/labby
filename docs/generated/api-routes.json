@@ -465,22 +465,6 @@
   },
   {
     "method": "POST",
-    "path": "/v1/extract",
-    "surface": "api",
-    "handler_group": "extract",
-    "feature": null,
-    "runtime_condition": null,
-    "auth_required": true,
-    "bearer_only": false,
-    "session_cookie_allowed": true,
-    "csrf_required": true,
-    "host_validation": true,
-    "master_only": true,
-    "cache_posture": "not cacheable",
-    "notes": "extract action dispatch"
-  },
-  {
-    "method": "POST",
     "path": "/v1/fleet/hello",
     "surface": "api",
     "handler_group": "nodes",

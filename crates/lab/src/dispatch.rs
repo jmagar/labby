@@ -4,7 +4,6 @@ pub mod clients;
 pub mod deploy;
 pub mod doctor;
 pub mod error;
-pub mod extract;
 pub mod fs;
 #[cfg(feature = "gateway")]
 pub mod gateway;

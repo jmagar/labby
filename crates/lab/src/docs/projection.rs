@@ -363,10 +363,7 @@ pub(super) fn service_surfaces(service: &str) -> SurfaceAvailability {
         cli: !matches!(service, "device" | "fs"),
         mcp: true,
         api: service_has_action_api_route(service)
-            || matches!(
-                service,
-                "device" | "extract" | "marketplace" | "doctor" | "setup"
-            ),
+            || matches!(service, "device" | "marketplace" | "doctor" | "setup"),
         web_ui: matches!(
             service,
             "gateway" | "marketplace" | "logs" | "setup" | "device" | "fs"
@@ -430,7 +427,6 @@ fn sdk_only_metas() -> Vec<&'static PluginMeta> {
 #[allow(clippy::too_many_lines)]
 fn meta_for(name: &str) -> Option<&'static PluginMeta> {
     match name {
-        "extract" => Some(&lab_apis::extract::META),
         "marketplace" => Some(&lab_apis::marketplace::META),
         "doctor" => Some(&lab_apis::doctor::META),
         "setup" => Some(&lab_apis::setup::META),

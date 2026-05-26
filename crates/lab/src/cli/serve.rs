@@ -1776,7 +1776,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/v1/extract/actions")
+                    .uri("/v1/setup/actions")
                     .body(Body::empty())
                     .expect("request"),
             )

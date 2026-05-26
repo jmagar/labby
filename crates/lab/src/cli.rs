@@ -7,7 +7,6 @@
 pub mod completions;
 pub mod docs;
 pub mod doctor;
-pub mod extract;
 pub mod gateway;
 pub mod health;
 pub mod help;
@@ -83,8 +82,6 @@ pub enum Command {
     Help(help::HelpArgs),
     /// Generate shell completions.
     Completions(completions::CompletionsArgs),
-    /// Scan a local or SSH appdata path and extract service credentials.
-    Extract(extract::ExtractCmd),
     /// Manage proxied upstream MCP gateways.
     Gateway(gateway::GatewayArgs),
     /// Run local OAuth callback relay helpers.
@@ -110,7 +107,6 @@ pub enum Command {
 /// Dispatch a parsed [`Cli`] to the correct handler.
 pub async fn dispatch(cli: Cli, config: LabConfig) -> Result<ExitCode> {
     let format = cli.format();
-    let color = cli.color;
     match cli.command {
         Command::Serve(args) => serve::run(args, &config).await,
         Command::Mcp(args) => serve::run_mcp(args, &config).await,
@@ -121,7 +117,6 @@ pub async fn dispatch(cli: Cli, config: LabConfig) -> Result<ExitCode> {
         Command::Setup(args) => setup::run(args, format).await,
         Command::Help(args) => help::run(args, format),
         Command::Completions(args) => completions::run(&args),
-        Command::Extract(cmd) => cmd.run(color).await.map(|()| ExitCode::SUCCESS),
         Command::Gateway(args) => gateway::run(args, format, &config).await,
         Command::Oauth(args) => oauth::run(args, &config).await,
         Command::Logs(args) => logs::run(args, format, &config).await,

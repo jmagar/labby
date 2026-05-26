@@ -616,7 +616,7 @@ fn load_deploy_inventory() -> Vec<SshHostTarget> {
 
     // Read denylist from env (comma-separated), defaulting to github.com.
     const DEFAULT_DENYLIST: &[&str] = &["github.com"];
-    let denylist_raw = std::env::var("LAB_EXTRACT_SSH_DENYLIST").ok();
+    let denylist_raw = std::env::var("LAB_DEPLOY_SSH_DENYLIST").ok();
     let denylist: std::collections::BTreeSet<String> = match denylist_raw.as_deref() {
         Some(raw) if !raw.is_empty() => raw
             .split(',')

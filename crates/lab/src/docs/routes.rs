@@ -102,7 +102,6 @@ pub fn build_route_docs(service_names: &[String]) -> Vec<RouteDoc> {
             "auth",
             "remove OAuth email allowlist entry",
         ),
-        host_validated_auth("POST", "/v1/extract", "extract", "extract action dispatch"),
         host_validated_auth(
             "POST",
             "/v1/marketplace",
@@ -324,7 +323,7 @@ impl RouteDocExt for RouteDoc {
 pub fn service_has_action_api_route(service: &str) -> bool {
     !matches!(
         service,
-        "device" | "deploy" | "lab_admin" | "extract" | "marketplace" | "doctor" | "setup"
+        "device" | "deploy" | "lab_admin" | "marketplace" | "doctor" | "setup"
     )
 }
 

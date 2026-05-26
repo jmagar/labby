@@ -49,10 +49,5 @@ impl Report {
 /// Used by `system.checks` to verify env-var presence.
 #[allow(clippy::too_many_lines)]
 pub fn service_env_checks() -> Vec<(&'static str, &'static [EnvVar])> {
-    let list = vec![(
-        lab_apis::extract::META.name,
-        lab_apis::extract::META.required_env,
-    )];
-
-    list
+    Vec::new()
 }

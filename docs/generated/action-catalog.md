@@ -11,6 +11,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `acp` | `provider.list` | false | false |  | `Value` | cli, mcp, api |
 | `acp` | `provider.select` | false | false | `provider*: string` | `Value` | cli, mcp, api |
 | `acp` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api |
+| `acp` | `session.bulk_close` | false | true | `selector*: object`<br>`principal*: string` | `{ "closed": string[], "failed": [{ "id": string, "kind": string, "message": string }] }` | cli, mcp, api |
 | `acp` | `session.cancel` | false | true | `session_id*: string`<br>`principal: string` | `Value` | cli, mcp, api |
 | `acp` | `session.close` | false | true | `session_id*: string`<br>`principal: string` | `Value` | cli, mcp, api |
 | `acp` | `session.events` | false | false | `session_id*: string`<br>`since: integer` | `{ "events": AcpEvent[], "count": number }` | cli, mcp, api |
@@ -20,6 +21,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `acp` | `session.permission.reject` | false | false | `session_id*: string`<br>`request_id*: string`<br>`principal: string` | `Value` | cli, mcp, api |
 | `acp` | `session.prompt` | false | false | `session_id*: string`<br>`text*: string`<br>`principal*: string`<br>`provider: string`<br>`continuity_mode: string`<br>`page_context: object` | `Value` | cli, mcp, api |
 | `acp` | `session.start` | false | false | `provider: string`<br>`title: string`<br>`cwd: string`<br>`principal: string` | `Value` | cli, mcp, api |
+| `acp` | `session.start_and_prompt` | false | false | `provider: string`<br>`model: string`<br>`title: string`<br>`cwd: string`<br>`prompt*: string`<br>`page_context: object`<br>`principal*: string` | `Value` | cli, mcp, api |
 | `acp` | `session.subscribe_ticket` | false | false | `session_id*: string`<br>`principal: string` | `Value` | cli, mcp, api |
 | `deploy` | `config.list` | false | false |  | `ConfigListing` | cli, mcp |
 | `deploy` | `help` | false | false |  | `Catalog` | cli, mcp |
@@ -39,12 +41,6 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `doctor` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api |
 | `doctor` | `service.probe` | false | false | `service*: string`<br>`instance: string` | `Finding` | cli, mcp, api |
 | `doctor` | `system.checks` | false | false |  | `DoctorReport` | cli, mcp, api |
-| `extract` | `apply` | false | true | `uri*: string`<br>`services: string[]`<br>`env_path: string`<br>`force: bool` | `WritePlan` | cli, mcp, api |
-| `extract` | `diff` | false | false | `uri*: string`<br>`services: string[]`<br>`env_path: string`<br>`force: bool` | `WritePlan` | cli, mcp, api |
-| `extract` | `help` | false | false |  | `Catalog` | cli, mcp, api |
-| `extract` | `list_hosts` | false | false |  | `string[]` | cli, mcp, api |
-| `extract` | `scan` | false | false | `uri: string`<br>`hosts: string[]`<br>`redact_secrets: bool` | `DiscoveredService[]` | cli, mcp, api |
-| `extract` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api |
 | `fs` | `fs.list` | false | false | `path: string` | `{entries: [{name, path, kind, size, modified, accessible}], truncated: bool}` | mcp, api, web |
 | `fs` | `fs.preview` | false | false | `path*: string`<br>`max_bytes: integer` | `binary (streamed); mime from safe-MIME whitelist or application/octet-stream` | api, web |
 | `fs` | `help` | true | false |  | `HelpPayload` | mcp, api, web |

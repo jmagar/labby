@@ -102,8 +102,7 @@ The following kinds are emitted by the `stash` dispatch service.
 ### Setup / env_merge kinds (lab-bg3e.3)
 
 Stable kinds emitted by `crates/lab/src/config/env_merge.rs` (the shared
-`.env` merge primitive used by `setup.draft.commit` and, later,
-`extract.apply`). Surfaced through `MergeError::kind()` and pass-through to
+`.env` merge primitive used by setup and gateway config writes). Surfaced through `MergeError::kind()` and pass-through to
 `ToolError::Sdk { sdk_kind }` envelopes.
 
 - `merge_temp_create` — could not create the same-directory `tempfile` used

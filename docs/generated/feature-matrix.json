@@ -16,8 +16,7 @@
       "dependencies": [
         "deploy",
         "mcpregistry",
-        "acp_registry",
-        "extract"
+        "acp_registry"
       ],
       "included_in_default": false,
       "included_in_all": false,
@@ -43,22 +42,6 @@
       "included_in_all": true,
       "classification": "service_passthrough",
       "mapped_crate_feature": "labby/deploy",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "extract",
-      "dependencies": [
-        "dep:russh",
-        "dep:russh-sftp",
-        "dep:russh-config",
-        "dep:quick-xml",
-        "dep:rusqlite"
-      ],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/extract",
       "exception_reason": null
     },
     {
@@ -101,7 +84,6 @@
         "lab-admin",
         "acp_registry",
         "deploy",
-        "extract",
         "mcpregistry",
         "gateway",
         "marketplace",
@@ -142,25 +124,12 @@
       "crate_name": "labby",
       "feature": "deploy",
       "dependencies": [
-        "lab-apis/deploy",
-        "dep:regex"
+        "lab-apis/deploy"
       ],
       "included_in_default": true,
       "included_in_all": true,
       "classification": "service_passthrough",
       "mapped_crate_feature": "lab-apis/deploy",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "labby",
-      "feature": "extract",
-      "dependencies": [
-        "lab-apis/extract"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "lab-apis/extract",
       "exception_reason": null
     },
     {

@@ -10,9 +10,9 @@ tokio | reqwest | serde | thiserror
 
 ## What It Is
 
-Core library for 21 homelab capability modules: HTTP-backed integrations such as Radarr, Sonarr, Prowlarr, Plex, qBittorrent, UniFi, Unraid, Overseerr, and Tailscale, plus non-HTTP modules such as `extract`.
+Core library for homelab capability modules: HTTP-backed integrations such as Radarr, Sonarr, Prowlarr, Plex, qBittorrent, UniFi, Unraid, Overseerr, and Tailscale.
 
-HTTP-backed services expose typed async clients with request/response types and structured error handling. Non-HTTP modules follow the same crate-level contracts while implementing local, SSH-backed, parser-driven, or synthetic workflows in our own code.
+HTTP-backed services expose typed async clients with request/response types and structured error handling. Non-HTTP capability modules follow the same crate-level contracts when they are reusable outside the product binary.
 
 Designed to be a library — not a binary, not an MCP server. Use it in your own Rust projects.
 
@@ -99,8 +99,6 @@ See `docs/ERRORS.md` in the monorepo for the canonical error vocabulary.
 | **Fully Implemented** | Radarr, UniFi, ByteStash |
 | **Partially Implemented** | OpenAI (Chat, Embeddings), Overseerr (search, request management) |
 | **Client Stub** | Sonarr, Prowlarr, Plex, Tautulli, SABnzbd, qBittorrent, Tailscale, Linkding, Memos, Arcane, Gotify, Qdrant, TEI, Apprise |
-| **Extract** | Synthetic capability module for service credential scanning |
-
 "Stub" means the client struct exists and compiles, but methods are minimal or unimplemented. Contributions welcome.
 
 ## Module Structure
@@ -156,7 +154,7 @@ Non-HTTP modules may not use these env keys at all. Their config still must be s
 
 ## Feature Flags
 
-21 opt-in features. `core` and `extract` always compile.
+Optional service integrations are exposed as opt-in features. `core` always compiles.
 
 ```rust
 radarr, sonarr, prowlarr     // pulls in shared "servarr" types automatically
@@ -165,7 +163,7 @@ linkding, memos, bytestash, arcane, unraid, unifi
 gotify, openai, qdrant, tei, apprise
 ```
 
-Convenience: `features = ["all"]` enables all 21.
+Convenience: `features = ["all"]` enables all service integrations.
 
 ## Testing
 

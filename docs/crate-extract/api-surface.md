@@ -27,7 +27,18 @@ product runtime/domain logic
 
 REST/admin HTTP should be resource-shaped and represented in OpenAPI.
 
-Gateway example target routes:
+Current Lab still exposes many product APIs through action dispatch routes.
+Extraction must preserve those current routes until replacement resource routes
+exist.
+
+| Product | Current REST/admin route | Target REST/admin shape |
+|---|---|---|
+| Gateway | `POST /v1/gateway` with `{ action, params }` | resource routes under `/v1/gateways` |
+| ACP | `POST /v1/acp` with `{ action, params }` | resource routes for providers, sessions, events, and messages |
+| Marketplace | `POST /v1/marketplace` with `{ action, params }` | resource routes for sources, packages, agents, sync, and install plans |
+| Stash | `POST /v1/stash` with `{ action, params }` | resource routes for artifacts, snapshots, revisions, and providers |
+
+Gateway target route examples:
 
 ```http
 GET    /v1/gateways

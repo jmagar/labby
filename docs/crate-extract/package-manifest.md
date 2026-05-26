@@ -142,7 +142,12 @@ Owns:
 - `scout`/`invoke`,
 - schema resources,
 - gateway REST facade,
-- gateway-specific OAuth/protected route integration.
+- gateway-specific OAuth/protected route metadata and integration hooks.
+
+Must not own:
+
+- OAuth server/runtime implementation. Gateway apps compose `lab-gateway` with
+  `lab-oauth` through the application or binary layer.
 
 Required API:
 
@@ -206,6 +211,12 @@ Owns:
 - enrollment,
 - node WebSocket admission,
 - device/fleet inventory.
+
+Current `device` service:
+
+- fold into `lab-fleet`,
+- do not create a separate `lab-device` package unless fleet/device ownership
+  later proves independently reusable.
 
 ### `lab-stash`
 
@@ -277,6 +288,24 @@ Owns:
 - audits,
 - reachability checks,
 - diagnostic summaries.
+
+### Retired: `extract`
+
+Type: removed from current extraction scope
+
+The retired `extract` feature owned:
+
+- local and SSH appdata scanning,
+- config-file parsers for legacy homelab service credentials,
+- `.env` write-plan generation,
+- bootstrap CLI/MCP/API actions.
+
+Decision:
+
+- Do not list `lab-extract` as a required extraction crate.
+- Do not carry the old CLI/MCP/API surface into standalone products.
+- Keep generic `.env` merge and secret masking primitives in `lab-config` for
+  setup and gateway config writes.
 
 ## Frontend Packages
 

@@ -189,6 +189,11 @@ The spec's dependency-direction section should be treated as load-bearing, not s
 
 ## Recommended Spec Updates
 
+Status: resolved in `docs/crate-extract/spec.md`,
+`docs/crate-extract/contract.md`, `docs/crate-extract/api-surface.md`, and
+`docs/crate-extract/testing-strategy.md`. This section remains as the research
+record for why those changes were made.
+
 1. Replace the REST client generation stack from `schemars -> utoipa` with `utoipa::ToSchema -> OpenAPI` for REST DTOs, and reserve `schemars` for MCP/action schemas where needed.
 
 2. Add a note that current Lab OpenAPI is ActionSpec-derived and must be treated as transitional for frontend client generation.

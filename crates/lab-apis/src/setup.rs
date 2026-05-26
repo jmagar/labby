@@ -10,8 +10,7 @@
 //! - `SetupClient` — synthetic marker for the validation helpers used by
 //!   the wizard's "type-check before touching disk" guard rail.
 //!
-//! Always compiled (no feature gate), matching the `extract` and `doctor`
-//! Bootstrap peers.
+//! Always compiled (no feature gate), matching other Bootstrap peers.
 
 pub mod client;
 pub mod error;

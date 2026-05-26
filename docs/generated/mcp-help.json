@@ -1,133 +1,6 @@
 {
   "services": [
     {
-      "name": "extract",
-      "description": "Pull API keys and URLs from existing service config files",
-      "category": "bootstrap",
-      "status": "available",
-      "requires_http_subject": false,
-      "actions": [
-        {
-          "name": "help",
-          "description": "Show this action catalog",
-          "destructive": false,
-          "params": [],
-          "returns": "Catalog"
-        },
-        {
-          "name": "schema",
-          "description": "Return the parameter schema for a named action",
-          "destructive": false,
-          "params": [
-            {
-              "name": "action",
-              "ty": "string",
-              "required": true,
-              "description": "Action name to describe"
-            }
-          ],
-          "returns": "Schema"
-        },
-        {
-          "name": "list_hosts",
-          "description": "Return SSH config host aliases available for fleet scanning",
-          "destructive": false,
-          "params": [],
-          "returns": "string[]"
-        },
-        {
-          "name": "scan",
-          "description": "Scan an appdata path and return discovered service credentials",
-          "destructive": false,
-          "params": [
-            {
-              "name": "uri",
-              "ty": "string",
-              "required": false,
-              "description": "Local path or 'host:/abs/path' for SSH; omit for fleet scan"
-            },
-            {
-              "name": "hosts",
-              "ty": "string[]",
-              "required": false,
-              "description": "Restrict fleet scan to these SSH config aliases; omit for all hosts"
-            },
-            {
-              "name": "redact_secrets",
-              "ty": "bool",
-              "required": false,
-              "description": "Return browser-safe results without secret values"
-            }
-          ],
-          "returns": "DiscoveredService[]"
-        },
-        {
-          "name": "apply",
-          "description": "Scan and write discovered credentials into ~/.lab/.env (with backup)",
-          "destructive": true,
-          "params": [
-            {
-              "name": "uri",
-              "ty": "string",
-              "required": true,
-              "description": "Same as scan"
-            },
-            {
-              "name": "services",
-              "ty": "string[]",
-              "required": false,
-              "description": "Optional filter; defaults to everything found"
-            },
-            {
-              "name": "env_path",
-              "ty": "string",
-              "required": false,
-              "description": "Override target env file path"
-            },
-            {
-              "name": "force",
-              "ty": "bool",
-              "required": false,
-              "description": "Overwrite conflicting env keys instead of skipping them"
-            }
-          ],
-          "returns": "WritePlan"
-        },
-        {
-          "name": "diff",
-          "description": "Show what 'apply' would change vs the current env file (no writes)",
-          "destructive": false,
-          "params": [
-            {
-              "name": "uri",
-              "ty": "string",
-              "required": true,
-              "description": "Local path or 'host:/abs/path' for SSH — same format as scan"
-            },
-            {
-              "name": "services",
-              "ty": "string[]",
-              "required": false,
-              "description": "Optional filter; defaults to everything found"
-            },
-            {
-              "name": "env_path",
-              "ty": "string",
-              "required": false,
-              "description": "Override target env file path"
-            },
-            {
-              "name": "force",
-              "ty": "bool",
-              "required": false,
-              "description": "Show overwrite changes instead of skipped conflicts"
-            }
-          ],
-          "returns": "WritePlan"
-        }
-      ]
-    },
-    {
       "name": "gateway",
       "description": "Manage proxied upstream MCP gateways",
       "category": "bootstrap",
@@ -2502,6 +2375,56 @@
           "returns": "Value"
         },
         {
+          "name": "session.start_and_prompt",
+          "description": "Atomically create an ACP session and queue its first prompt. Returns session metadata + SSE stream ticket. Closes the orphan-session window of separate create+prompt calls.",
+          "destructive": false,
+          "params": [
+            {
+              "name": "provider",
+              "ty": "string",
+              "required": false,
+              "description": "Provider id (defaults to gateway default)"
+            },
+            {
+              "name": "model",
+              "ty": "string",
+              "required": false,
+              "description": "Model id; provider's default if omitted"
+            },
+            {
+              "name": "title",
+              "ty": "string",
+              "required": false,
+              "description": "Human-readable session title"
+            },
+            {
+              "name": "cwd",
+              "ty": "string",
+              "required": false,
+              "description": "Working directory for the session"
+            },
+            {
+              "name": "prompt",
+              "ty": "string",
+              "required": true,
+              "description": "First user prompt text"
+            },
+            {
+              "name": "page_context",
+              "ty": "object",
+              "required": false,
+              "description": "Optional page context: {route, entityType?, entityId?}"
+            },
+            {
+              "name": "principal",
+              "ty": "string",
+              "required": true,
+              "description": "Caller principal for ownership of the new session"
+            }
+          ],
+          "returns": "Value"
+        },
+        {
           "name": "session.prompt",
           "description": "Send a prompt to a session. Optional provider switches the active runtime inside the same Lab session before dispatch.",
           "destructive": false,
@@ -2648,6 +2571,26 @@
             }
           ],
           "returns": "Value"
+        },
+        {
+          "name": "session.bulk_close",
+          "description": "Bulk close sessions matching a typed selector. Self-service only — only the caller's own sessions are touched. [destructive]",
+          "destructive": true,
+          "params": [
+            {
+              "name": "selector",
+              "ty": "object",
+              "required": true,
+              "description": "BulkCloseSelector { states?: AcpSessionState[], max_age_days?: number, max_count?: number (default 500) }"
+            },
+            {
+              "name": "principal",
+              "ty": "string",
+              "required": true,
+              "description": "Caller principal; only the caller's sessions are touched"
+            }
+          ],
+          "returns": "{ \"closed\": string[], \"failed\": [{ \"id\": string, \"kind\": string, \"message\": string }] }"
         },
         {
           "name": "session.events",

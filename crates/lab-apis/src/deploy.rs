@@ -7,7 +7,7 @@
 //! `lab` binary's shared dispatch layer at `crates/lab/src/dispatch/deploy/`.
 //!
 //! `deploy` is a synthetic service: it has no upstream API. It reuses the
-//! `Bootstrap` category alongside `extract`.
+//! `Bootstrap` category.
 
 pub mod error;
 pub mod types;

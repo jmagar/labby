@@ -393,7 +393,7 @@ The migration is complete when:
 
 If executing this incrementally, start here:
 
-1. extract shared CLI param parsing
+1. factor out shared CLI param parsing
 2. add the shared API dispatch wrapper
 3. create `dispatch/bytestash.rs`
 4. migrate ByteStash end to end

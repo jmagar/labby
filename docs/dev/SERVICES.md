@@ -27,9 +27,6 @@ Product-local surfaces are split into two categories:
 `gateway` is the reference control-plane surface and is allowed to live
 entirely in `lab`.
 
-`extract` is the reference non-HTTP capability module and keeps its core logic
-in `lab-apis`.
-
 The ACP/chat work should follow the capability-module pattern for ACP itself:
 - `acp` becomes the first-class capability/service
 - `chat` remains the UI route and presentation layer over that service
@@ -67,7 +64,6 @@ this file. The current code-owned inventories are generated under
 - [environment reference](../generated/env-reference.md)
 - [action catalog](../generated/action-catalog.md)
 - [feature matrix](../generated/feature-matrix.md)
-- [onboarding audit](../generated/onboarding-audit.md)
 
 The generated service catalog distinguishes always-on, feature-gated,
 runtime-conditional, synthetic, and SDK-only entries. `device_runtime` remains
@@ -84,9 +80,7 @@ an always-on SDK capability module, but the exposed registry service is
 - Uptime Kuma status-page mutation, maintenance windows, and fuller supervised socket actor lifecycle
 
 Upstream source coverage lives in [`docs/upstream-api/`](../upstream-api/README.md).
-Implementation coverage lives in [`docs/coverage/`](../coverage/README.md), and
-current onboarding status is generated in
-[`docs/generated/onboarding-audit.md`](../generated/onboarding-audit.md).
+Implementation coverage lives in [`docs/coverage/`](../coverage/README.md).
 
 ## Plugin Metadata
 
@@ -175,10 +169,8 @@ Run `just docs-generate` after changing registry entries, `PluginMeta`,
 `ActionSpec`, API route metadata, Cargo features, or onboarding checks. Run
 `just docs-check` before handing off generated-docs changes.
 
-## Synthetic Service
+## Product-Local Services
 
-[`EXTRACT.md`](../services/EXTRACT.md) documents `extract`, which is not a remote API
-service but still follows the shared dispatch model for consistency.
 [`GATEWAY.md`](../services/GATEWAY.md) documents a product-local management surface that
 edits and reloads `[[upstream]]` config and therefore does not fit the usual
 `lab-apis` service shape. [`acp/README.md`](../acp/README.md) documents ACP as a

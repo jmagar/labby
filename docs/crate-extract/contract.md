@@ -65,12 +65,20 @@ Contract:
   dependency is explicitly listed in this contract.
 - Cross-product integration MUST happen in the final application/binary
   composition layer or through a small shared interface.
+- Application and binary composition crates MAY depend on multiple product
+  crates. That is how reusable products such as `lab-gateway` and `lab-oauth`
+  are wired together without forcing one product crate to import the other.
 - Product crates MUST expose a library API usable without invoking a Lab binary.
 - Product crates MUST keep business logic out of standalone binary wrappers.
 
 Allowed product-to-product dependency exceptions:
 
 - None at this time.
+
+Implication: `lab-gateway` MUST NOT depend on `lab-oauth`. Gateway consumes
+shared auth contracts from `lab-auth` and exposes gateway-specific route metadata
+or integration hooks. A full Gateway app or binary composes `lab-gateway` and
+`lab-oauth` side by side.
 
 ### Frontend Packages
 
@@ -398,17 +406,29 @@ pnpm --dir templates/lab-web-app build
 Minimum generated-client verification:
 
 ```bash
-labby internal export-openapi --products gateway --out packages/lab-api-client/generated/openapi.json
+cargo run -p labby --all-features -- docs generate
+cargo run -p labby --all-features -- docs check
+cp docs/generated/openapi.json packages/lab-api-client/generated/openapi.json
 pnpm --dir packages/lab-api-client generate
 pnpm --dir packages/lab-api-client typecheck
 ```
 
+This is a transitional gate. Before `@jmagar/lab-api-client` is considered
+contract-ready, replace the `docs/generated/openapi.json` input with a real
+product REST/OpenAPI export command, for example
+`labby internal export-openapi --products gateway --out ...`, once that command
+exists.
+
 Minimum standalone-binary verification:
 
 ```bash
-cargo build -p lab --bin lab-gateway --all-features
+cargo build -p <package-that-declares-binary> --bin lab-gateway --all-features
 lab-gateway --help
 ```
+
+Current Lab has no `lab-gateway` binary. This gate applies only after the
+standalone binary package or bin target exists. Use the actual Cargo package name
+that declares the binary.
 
 When package names become ambiguous in the workspace, use version-qualified
 Cargo package selectors.

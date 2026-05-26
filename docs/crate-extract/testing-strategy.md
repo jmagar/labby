@@ -65,10 +65,16 @@ REST OpenAPI tests should target resource-shaped routes.
 Required:
 
 ```bash
-labby internal export-openapi --products gateway --out packages/lab-api-client/generated/openapi.json
+cargo run -p labby --all-features -- docs generate
+cargo run -p labby --all-features -- docs check
+cp docs/generated/openapi.json packages/lab-api-client/generated/openapi.json
 pnpm --dir packages/lab-api-client generate
 pnpm --dir packages/lab-api-client typecheck
 ```
+
+This is a transitional test input. The current generated-docs OpenAPI is useful
+for wiring the client pipeline, but the final reusable client must switch to a
+product REST/OpenAPI export once that exporter exists.
 
 Also required:
 
@@ -98,7 +104,7 @@ Template:
 For each standalone binary:
 
 ```bash
-cargo build -p lab --bin <binary> --all-features
+cargo build -p <package-that-declares-binary> --bin <binary> --all-features
 <binary> --help
 ```
 

@@ -322,72 +322,6 @@
         ]
       }
     },
-    "/v1/extract": {
-      "post": {
-        "tags": [
-          "extract"
-        ],
-        "summary": "Dispatch action to extract",
-        "description": "Execute an action on the extract service. Use `action: \"help\"` to list available actions.",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ActionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful action response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request (unknown action, confirmation required)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorUnknownAction"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorSdk"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation error (missing or invalid param)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorMissingParam"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer_auth": []
-          }
-        ]
-      }
-    },
     "/v1/fs": {
       "post": {
         "tags": [
@@ -912,6 +846,21 @@
           }
         }
       },
+      "AcpSessionBulk_closeParams": {
+        "type": "object",
+        "required": [
+          "selector",
+          "principal"
+        ],
+        "properties": {
+          "principal": {
+            "type": "string"
+          },
+          "selector": {
+            "type": "object"
+          }
+        }
+      },
       "AcpSessionCancelParams": {
         "type": "object",
         "required": [
@@ -1052,6 +1001,36 @@
             "type": "string"
           },
           "principal": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "AcpSessionStart_and_promptParams": {
+        "type": "object",
+        "required": [
+          "prompt",
+          "principal"
+        ],
+        "properties": {
+          "cwd": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "page_context": {
+            "type": "object"
+          },
+          "principal": {
+            "type": "string"
+          },
+          "prompt": {
             "type": "string"
           },
           "provider": {
@@ -1354,80 +1333,6 @@
               "type": "string"
             },
             "description": "Valid action names for this service."
-          }
-        }
-      },
-      "ExtractApplyParams": {
-        "type": "object",
-        "required": [
-          "uri"
-        ],
-        "properties": {
-          "env_path": {
-            "type": "string"
-          },
-          "force": {
-            "type": "string"
-          },
-          "services": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "uri": {
-            "type": "string"
-          }
-        }
-      },
-      "ExtractDiffParams": {
-        "type": "object",
-        "required": [
-          "uri"
-        ],
-        "properties": {
-          "env_path": {
-            "type": "string"
-          },
-          "force": {
-            "type": "string"
-          },
-          "services": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "uri": {
-            "type": "string"
-          }
-        }
-      },
-      "ExtractScanParams": {
-        "type": "object",
-        "properties": {
-          "hosts": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "redact_secrets": {
-            "type": "string"
-          },
-          "uri": {
-            "type": "string"
-          }
-        }
-      },
-      "ExtractSchemaParams": {
-        "type": "object",
-        "required": [
-          "action"
-        ],
-        "properties": {
-          "action": {
-            "type": "string"
           }
         }
       },

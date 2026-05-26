@@ -7,9 +7,8 @@
 //! Dependency direction must stay one-way:
 //!
 //! ```text
-//!   setup → doctor / extract     (allowed)
+//!   setup → doctor               (allowed)
 //!   doctor → setup               (FORBIDDEN)
-//!   extract → setup              (FORBIDDEN)
 //!   any non-orchestrator → setup (FORBIDDEN)
 //! ```
 //!
@@ -51,7 +50,7 @@ fn no_peer_service_imports_setup_dispatch() {
         "Architecture violation — these files import `{FORBIDDEN_IMPORT}` \
          outside the orchestrator (see crates/lab/src/dispatch/CLAUDE.md \
          § Orchestrator Exception):\n  {}\n\n\
-         Bootstrap dependency direction is one-way: setup → doctor/extract; \
+         Bootstrap dependency direction is one-way: setup → doctor; \
          peers MUST NOT depend on setup. If you need shared logic, extract \
          it into `crate::dispatch::helpers` or a new shared module.",
         violations

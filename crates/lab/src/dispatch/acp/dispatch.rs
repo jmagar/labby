@@ -291,7 +291,8 @@ pub async fn dispatch_with_registry(
             // Synthesize the effective prompt with page-context prefix, just
             // like `session.prompt` does.
             let placeholder_session_id = ""; // session does not exist yet; helper tolerates empty.
-            let effective_text = build_prompt_with_context(placeholder_session_id, raw_text, page_ctx.as_ref());
+            let effective_text =
+                build_prompt_with_context(placeholder_session_id, raw_text, page_ctx.as_ref());
             ensure_prompt_size(&effective_text)?;
 
             let result = registry
@@ -421,19 +422,21 @@ pub async fn dispatch_with_registry(
 
         "session.bulk_close" => {
             require_confirm(&params, "session.bulk_close")?;
-            let selector_value = params
-                .get("selector")
-                .cloned()
-                .ok_or_else(|| ToolError::MissingParam {
-                    message: "selector is required".to_string(),
-                    param: "selector".to_string(),
+            let selector_value =
+                params
+                    .get("selector")
+                    .cloned()
+                    .ok_or_else(|| ToolError::MissingParam {
+                        message: "selector is required".to_string(),
+                        param: "selector".to_string(),
+                    })?;
+            let selector: BulkCloseSelector =
+                serde_json::from_value(selector_value).map_err(|error| {
+                    ToolError::InvalidParam {
+                        message: format!("invalid selector: {error}"),
+                        param: "selector".to_string(),
+                    }
                 })?;
-            let selector: BulkCloseSelector = serde_json::from_value(selector_value).map_err(
-                |error| ToolError::InvalidParam {
-                    message: format!("invalid selector: {error}"),
-                    param: "selector".to_string(),
-                },
-            )?;
             selector.validate_non_empty()?;
             let principal = require_str(&params, "principal")?;
             let result = registry.bulk_close_sessions(selector, principal).await?;
@@ -747,12 +750,15 @@ mod tests {
         assert!(v.is_object());
         // Schema entry must surface the canonical params so clients can wire UIs.
         let params = v["params"].as_array().expect("params array");
-        let names: Vec<&str> = params
-            .iter()
-            .filter_map(|p| p["name"].as_str())
-            .collect();
-        assert!(names.contains(&"prompt"), "schema missing prompt: {names:?}");
-        assert!(names.contains(&"principal"), "schema missing principal: {names:?}");
+        let names: Vec<&str> = params.iter().filter_map(|p| p["name"].as_str()).collect();
+        assert!(
+            names.contains(&"prompt"),
+            "schema missing prompt: {names:?}"
+        );
+        assert!(
+            names.contains(&"principal"),
+            "schema missing principal: {names:?}"
+        );
     }
 
     #[tokio::test]

@@ -315,11 +315,11 @@ mod tests {
 
     #[test]
     fn golden_scout_flux_ssh_inspect_host() {
-        // `extract` tool: no name/segment hits; 2 tokens found in haystack (+2 each) = 4.0
+        // `scanner` tool: no name/segment hits; 2 tokens found in haystack (+2 each) = 4.0
         let score = score_name_haystack(
             "scout flux ssh inspect host",
-            "extract",
-            "extract\nscan local and ssh hosts for service credentials",
+            "scanner",
+            "scanner\nscan local and ssh hosts for service status",
         );
         assert!(approx_eq(score, 4.0), "expected 4.0, got {score}");
     }
@@ -332,35 +332,27 @@ mod tests {
 
     #[test]
     fn noise_floor_tool_dropped_by_floor_fraction() {
-        // `extract` scores 4.0 (noise floor only via 2 haystack hits) vs `logs` at 22.0.
-        // With floor fraction 0.25: floor = 22.0 * 0.25 = 5.5 → extract (4.0) is dropped.
+        // `scanner` scores 4.0 (noise floor only via 2 haystack hits) vs `logs` at 22.0.
+        // With floor fraction 0.25: floor = 22.0 * 0.25 = 5.5 → scanner (4.0) is dropped.
         // logs description contains none of the query tokens → score is exactly 22.0.
-        // extract description contains "docker" and "container" → 2×2.0 = 4.0 noise floor.
+        // scanner description contains "docker" and "container" → 2×2.0 = 4.0 noise floor.
         let logs_tool = make_tool("logs", "live log streaming", 1.0);
-        let extract_tool = make_tool(
-            "extract",
-            "scan docker containers for service credentials",
-            1.0,
-        );
+        let scanner_tool = make_tool("scanner", "scan docker containers for service status", 1.0);
         let index = ToolIndex {
-            tools: vec![logs_tool, extract_tool],
+            tools: vec![logs_tool, scanner_tool],
             metadata: ToolIndexMetadata::default(),
         };
         let results = index.search("docker container inspect logs dookie", 10, 0.25);
-        assert_eq!(results.len(), 1, "extract should be dropped by score floor");
+        assert_eq!(results.len(), 1, "scanner should be dropped by score floor");
         assert_eq!(results[0].tool.name, "logs");
     }
 
     #[test]
     fn floor_disabled_returns_all_positive_scores() {
         let logs_tool = make_tool("logs", "live log streaming", 1.0);
-        let extract_tool = make_tool(
-            "extract",
-            "scan docker containers for service credentials",
-            1.0,
-        );
+        let scanner_tool = make_tool("scanner", "scan docker containers for service status", 1.0);
         let index = ToolIndex {
-            tools: vec![logs_tool, extract_tool],
+            tools: vec![logs_tool, scanner_tool],
             metadata: ToolIndexMetadata::default(),
         };
         let results = index.search("docker container inspect logs dookie", 10, 0.0);

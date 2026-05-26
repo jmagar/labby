@@ -4,8 +4,7 @@
 //! and therefore belong in the `lab` binary, not in the `lab-apis` SDK.
 //!
 //! **Shared pure types** (`SshHostTarget`, `parse_ssh_config`) remain in
-//! `lab_apis::core::ssh` because `extract` also uses them. Only the
-//! process-spawning code lives here.
+//! `lab_apis::core::ssh`. Only the process-spawning code lives here.
 
 use std::future::Future;
 use std::pin::Pin;

@@ -1849,11 +1849,7 @@ impl AcpSessionRegistry {
     /// fast-path state lock and the summary lock are updated so any consumer
     /// that reads either sees the new value.
     #[cfg(test)]
-    pub async fn force_summary_state_for_tests(
-        &self,
-        session_id: &str,
-        state: AcpSessionState,
-    ) {
+    pub async fn force_summary_state_for_tests(&self, session_id: &str, state: AcpSessionState) {
         if let Ok(session) = self.get_session_arc(session_id).await {
             *session.state.write().await = state.clone();
             session.summary.write().await.state = state;

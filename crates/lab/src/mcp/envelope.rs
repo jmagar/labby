@@ -310,14 +310,14 @@ mod tests {
 
     #[test]
     fn success_has_no_error_key() {
-        let env = build_success("extract", "scan", &json!({}));
+        let env = build_success("setup", "draft", &json!({}));
         let s = serde_json::to_string(&env).unwrap();
         assert!(!s.contains("\"error\""));
     }
 
     #[test]
     fn error_has_no_data_key() {
-        let env = build_error("extract", "scan", "network_error", "refused");
+        let env = build_error("setup", "draft", "network_error", "refused");
         let s = serde_json::to_string(&env).unwrap();
         assert!(!s.contains("\"data\""));
     }

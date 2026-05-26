@@ -1491,7 +1491,17 @@ mod tests {
         let remaining = queue.drain_batch(10).await.expect("remaining");
         assert!(remaining.is_empty(), "queue should be acked");
 
-        let snapshot = store.node("device-1").await.expect("snapshot");
+        let snapshot = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let snapshot = store.node("device-1").await.expect("snapshot");
+                if !snapshot.connected {
+                    return snapshot;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("node should be marked disconnected after websocket close");
         assert!(!snapshot.connected);
         assert_eq!(
             snapshot

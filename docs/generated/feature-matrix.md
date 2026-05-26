@@ -7,18 +7,16 @@ Feature invariant status: clean.
 | Crate | Feature | Class | In Default | In All | Maps To | Dependencies |
 | --- | --- | --- | --- | --- | --- | --- |
 | lab-apis | `acp_registry` | ServicePassthrough | false | true | labby/acp_registry |  |
-| lab-apis | `all` | AggregateDefault | false | false | labby/all | `deploy`<br>`mcpregistry`<br>`acp_registry`<br>`extract` |
+| lab-apis | `all` | AggregateDefault | false | false | labby/all | `deploy`<br>`mcpregistry`<br>`acp_registry` |
 | lab-apis | `default` | AggregateDefault | false | false | labby/default |  |
 | lab-apis | `deploy` | ServicePassthrough | false | true | labby/deploy |  |
-| lab-apis | `extract` | ServicePassthrough | false | true | labby/extract | `dep:russh`<br>`dep:russh-sftp`<br>`dep:russh-config`<br>`dep:quick-xml`<br>`dep:rusqlite` |
 | lab-apis | `mcpregistry` | ServicePassthrough | false | true | labby/mcpregistry |  |
 | lab-apis | `test-utils` | HelperInternal | false | false | labby/test-utils |  |
 | labby | `acp_registry` | ServicePassthrough | true | true | lab-apis/acp_registry | `lab-apis/acp_registry` |
-| labby | `all` | AggregateDefault | true | true | lab-apis/all | `lab-apis/all`<br>`lab-admin`<br>`acp_registry`<br>`deploy`<br>`extract`<br>`mcpregistry`<br>`gateway`<br>`marketplace`<br>`code_mode_wasm` |
+| labby | `all` | AggregateDefault | true | true | lab-apis/all | `lab-apis/all`<br>`lab-admin`<br>`acp_registry`<br>`deploy`<br>`mcpregistry`<br>`gateway`<br>`marketplace`<br>`code_mode_wasm` |
 | labby | `code_mode_wasm` | HelperInternal | true | true | - | `dep:javy`<br>`dep:wasmtime` |
 | labby | `default` | AggregateDefault | false | false | lab-apis/default | `all` |
-| labby | `deploy` | ServicePassthrough | true | true | lab-apis/deploy | `lab-apis/deploy`<br>`dep:regex` |
-| labby | `extract` | ServicePassthrough | true | true | lab-apis/extract | `lab-apis/extract` |
+| labby | `deploy` | ServicePassthrough | true | true | lab-apis/deploy | `lab-apis/deploy` |
 | labby | `fs` | BinaryOnly | false | false | - | `dep:walkdir`<br>`dep:globset`<br>`dep:unicode-normalization`<br>`dep:rustix` |
 | labby | `gateway` | IntentionalException | true | true | - |  |
 | labby | `lab-admin` | BinaryOnly | true | true | - |  |

@@ -249,7 +249,6 @@ const ALWAYS_VISIBLE_SERVICES: &[&str] = &[
     "setup",
     "doctor",
     "plugins",
-    "extract",
     "gateway",
     "help",
     "completions",
@@ -367,25 +366,6 @@ pub fn build_docs_registry() -> ToolRegistry {
 #[allow(clippy::too_many_lines)]
 fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
     let mut reg = ToolRegistry::new();
-
-    // extract is always-on (no feature flag).
-    {
-        let meta = lab_apis::extract::META;
-        let actions: &'static [ActionSpec] = crate::dispatch::extract::ACTIONS;
-        reg.register(RegisteredService {
-            name: meta.name,
-            description: meta.description,
-            category: category_slug(meta.category),
-            kind: registered_service_kind(meta.name, meta.category),
-            status: if actions.is_empty() {
-                "stub"
-            } else {
-                "available"
-            },
-            actions,
-            dispatch: dispatch_fn!(crate::dispatch::extract::dispatch),
-        });
-    }
 
     reg.register(RegisteredService {
         name: "gateway",
@@ -601,8 +581,9 @@ fn registered_service_kind(
     }
 
     match name {
-        "extract" | "doctor" | "setup" | "marketplace" | "deploy" | "acp" | "stash"
-        | "loggifly" => RegisteredServiceKind::BootstrapOperator,
+        "doctor" | "setup" | "marketplace" | "deploy" | "acp" | "stash" | "loggifly" => {
+            RegisteredServiceKind::BootstrapOperator
+        }
         _ => RegisteredServiceKind::BuiltInUpstreamApi,
     }
 }
@@ -619,20 +600,10 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn extract_is_always_registered() {
-        let reg = build_default_registry();
-        assert!(
-            reg.services().iter().any(|s| s.name == "extract"),
-            "extract must be in the default registry"
-        );
-    }
-
-    #[test]
     fn all_features_registers_all_services() {
         let reg = build_default_registry();
         let names: Vec<&str> = reg.services().iter().map(|s| s.name).collect();
-        // extract is always-on (no feature flag)
-        assert!(names.contains(&"extract"), "extract missing");
+        assert!(!names.contains(&"extract"), "extract has been retired");
         // feature-gated services — present only when the flag is enabled
     }
 
@@ -642,7 +613,6 @@ mod tests {
             "gateway",
             "setup",
             "doctor",
-            "extract",
             "logs",
             "device",
             "marketplace",
@@ -679,15 +649,7 @@ mod tests {
             .iter()
             .map(|service| service.name)
             .collect();
-        for kept in [
-            "setup",
-            "doctor",
-            "extract",
-            "gateway",
-            "marketplace",
-            "acp",
-            "stash",
-        ] {
+        for kept in ["setup", "doctor", "gateway", "marketplace", "acp", "stash"] {
             assert!(names.contains(kept), "{kept} should stay available");
         }
     }
@@ -714,7 +676,6 @@ mod tests {
 
     #[test]
     fn service_meta_tracks_feature_enabled_services() {
-        assert!(service_meta("extract").is_none());
         assert!(service_meta("gateway").is_none());
     }
 
@@ -740,7 +701,6 @@ mod tests {
         // ever changes the build itself would break on the feature-gated import.
         let http_router_services: std::collections::HashSet<&'static str> = {
             let mut s = std::collections::HashSet::new();
-            s.insert(lab_apis::extract::META.name); // always-on
             s.insert(lab_apis::acp::META.name); // always-on
             s.insert("device");
             s.insert("gateway");
@@ -781,18 +741,6 @@ mod tests {
             "services in HTTP router but NOT in MCP registry: {only_in_router:?}\n\
              Add them to build_default_registry() in mcp/registry.rs",
         );
-    }
-
-    #[tokio::test]
-    async fn dispatch_fn_round_trips() {
-        let reg = build_default_registry();
-        let extract = reg
-            .services()
-            .iter()
-            .find(|s| s.name == "extract")
-            .expect("extract must be registered");
-        let result = (extract.dispatch)("help".to_string(), serde_json::json!({})).await;
-        assert!(result.is_ok(), "extract help dispatch should succeed");
     }
 
     const ACTIONS_ONE: &[ActionSpec] = &[

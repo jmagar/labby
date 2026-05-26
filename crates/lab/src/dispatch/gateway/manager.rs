@@ -10,8 +10,8 @@ use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
 use crate::config::{
-    LabConfig, ProtectedMcpRouteConfig, ToolSearchConfig, UpstreamConfig, UpstreamImportTombstone,
-    backup_env, env_is_up_to_date, write_env,
+    EnvCredential, LabConfig, ProtectedMcpRouteConfig, ToolSearchConfig, UpstreamConfig,
+    UpstreamImportTombstone, backup_env, env_is_up_to_date, write_env,
 };
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::error::ToolError;
@@ -23,7 +23,6 @@ use crate::oauth::upstream::cache::OauthClientCache;
 use crate::oauth::upstream::encryption::EncryptionKey;
 use crate::oauth::upstream::manager::UpstreamOauthManager;
 use crate::registry::ToolRegistry;
-use lab_apis::extract::types::ServiceCreds;
 
 use super::SHARED_GATEWAY_OAUTH_SUBJECT;
 use super::config::{
@@ -2979,15 +2978,11 @@ impl GatewayManager {
 
         let auth_header = normalize_gateway_bearer_token(token_value);
         let env_path = self.env_path();
-        let creds = [ServiceCreds {
+        let creds = [EnvCredential {
             service: "gateway".to_string(),
             url: None,
             secret: Some(auth_header),
             env_field: env_name.to_string(),
-            source_host: None,
-            probe_host: None,
-            runtime: None,
-            url_verified: false,
         }];
 
         if !env_is_up_to_date(&env_path, &creds) {

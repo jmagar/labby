@@ -23,11 +23,6 @@ thiserror.workspace = true
 jiff.workspace = true
 tracing.workspace = true
 percent-encoding.workspace = true
-russh = { workspace = true, optional = true }
-russh-sftp = { workspace = true, optional = true }
-russh-config = { workspace = true, optional = true }
-quick-xml = { workspace = true, optional = true }
-rusqlite = { workspace = true, optional = true }
 tempfile.workspace = true
 
 [dev-dependencies]
@@ -45,17 +40,9 @@ all = [
   "deploy",
   "mcpregistry",
   "acp_registry",
-  "extract",
 ]
 default = []
 deploy = []
-extract = [
-  "dep:russh",
-  "dep:russh-sftp",
-  "dep:russh-config",
-  "dep:quick-xml",
-  "dep:rusqlite",
-]
 mcpregistry = []
 test-utils = []
 [lints]

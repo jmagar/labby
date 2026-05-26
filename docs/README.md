@@ -13,7 +13,7 @@ The docs are split by topic so contributors do not have to recover architecture,
 - Use [SERVICES.md](./dev/SERVICES.md), [CLI.md](./surfaces/CLI.md), [MCP.md](./surfaces/MCP.md), and [TUI.md](./surfaces/TUI.md) for surface-specific behavior.
 - Use [design/CLI_DESIGN_SYSTEM.md](./design/CLI_DESIGN_SYSTEM.md) for the human-readable CLI output language and shared color policy.
 - Use [design/component-development.md](./design/component-development.md) and [design/design-system-contract.md](./design/design-system-contract.md) when building or revising Labby web UI components.
-- Use [CONFIG.md](./runtime/CONFIG.md), [EXTRACT.md](./services/EXTRACT.md), and [OPERATIONS.md](./OPERATIONS.md) for setup and operator workflows.
+- Use [CONFIG.md](./runtime/CONFIG.md) and [OPERATIONS.md](./OPERATIONS.md) for setup and operator workflows.
 - Refer to [OAUTH.md](./runtime/OAUTH.md) for bearer vs OAuth mode selection, Google-backed authorization flow, lab-issued JWT behavior, and callback-forwarding constraints.
 - Use [GATEWAY.md](./services/GATEWAY.md) when managing upstream MCP gateways over CLI, MCP, `/v1/gateway`, or Gateway-managed OAuth protected MCP routes.
 - Use [acp/README.md](./acp/README.md) for ACP service architecture, the `acp` vs `chat` boundary, and gateway integration direction.
@@ -76,12 +76,11 @@ The docs are split by topic so contributors do not have to recover architecture,
 3. [OAUTH.md](./runtime/OAUTH.md) (if deploying with OAuth)
 4. [GATEWAY.md](./services/GATEWAY.md) (if managing upstream MCP gateways)
 5. [UPSTREAM.md](./services/UPSTREAM.md) (if proxying upstream MCP servers)
-6. [EXTRACT.md](./services/EXTRACT.md)
-7. [DEVICE_RUNTIME.md](./runtime/DEVICE_RUNTIME.md)
-8. [NODE_RUNTIME_CONTRACT.md](./runtime/NODE_RUNTIME_CONTRACT.md)
-9. [DEPLOY.md](./runtime/DEPLOY.md)
-10. [OPERATIONS.md](./OPERATIONS.md)
-11. [CLI.md](./surfaces/CLI.md)
+6. [DEVICE_RUNTIME.md](./runtime/DEVICE_RUNTIME.md)
+7. [NODE_RUNTIME_CONTRACT.md](./runtime/NODE_RUNTIME_CONTRACT.md)
+8. [DEPLOY.md](./runtime/DEPLOY.md)
+9. [OPERATIONS.md](./OPERATIONS.md)
+10. [CLI.md](./surfaces/CLI.md)
 
 ## Topic Map
 
@@ -177,8 +176,6 @@ The docs are split by topic so contributors do not have to recover architecture,
   Phase-by-phase guide and checklist for moving existing services into the shared dispatch layer.
 - [CONVENTIONS.md](./CONVENTIONS.md)
   Locked engineering rules around async, HTTP, testing, docs, API surface, and privacy.
-- [EXTRACT.md](./services/EXTRACT.md)
-  The synthetic bootstrap service, URI forms, parser strategy, and `.env` merge semantics.
 - [OPERATIONS.md](./OPERATIONS.md)
   Repo helpers, doctor/health workflows, CI expectations, release behavior, and update rules.
 - [CICD.md](./runtime/CICD.md)
@@ -227,7 +224,6 @@ Use the smallest correct doc:
 - serialization and output-shape rules: [design/SERIALIZATION.md](./design/SERIALIZATION.md)
 - dispatch-layer ownership and adapter rules: [DISPATCH.md](./dev/DISPATCH.md)
 - service-layer migration execution plan: [SERVICE_LAYER_MIGRATION.md](./dev/SERVICE_LAYER_MIGRATION.md)
-- extract/bootstrap flows: [EXTRACT.md](./services/EXTRACT.md)
 - stash versioning service and provider sync model: [STASH.md](./services/STASH.md)
 - marketplace service and plugin workspace flows: [MARKETPLACE.md](./services/MARKETPLACE.md)
 - deploy-service actions: [DEPLOY_SERVICE.md](./runtime/DEPLOY_SERVICE.md)

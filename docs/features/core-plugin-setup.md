@@ -33,7 +33,7 @@ This is not a parallel "plugin wizard." It is the same wizard with a render-time
 | `lab-bg3e.1` UiSchema/PluginMeta | CLOSED | **Shipped** (`crates/lab-apis/src/core/plugin_ui.rs`, `EnvVar.ui` field, commit `78a8f7f7`) | Ready to use. |
 | `lab-bg3e.2` doctor dispatch | CLOSED | **Shipped** (full 3-tier `crates/lab/src/dispatch/doctor/`, commit `0c7f4cbc`) | `service_probe`, `audit.full` SSE both available. |
 | `lab-bg3e.3` setup dispatch + env_merge | CLOSED | **Not implemented.** No `crates/lab/src/dispatch/setup/`, no `crates/lab-apis/src/setup/`, no `crates/lab/src/config/env_merge.rs`. | Closed prematurely. Reopen + ship before this plan starts. |
-| `lab-bg3e.4` /setup wizard React | CLOSED | **Not implemented.** `app/(admin)/setup/page.tsx` is still the `extract.scan` viewer; no `(wizard)` route group; no `ServiceForm`. | Closed prematurely. Reopen + ship before this plan's wizard extension starts. |
+| `lab-bg3e.4` /setup wizard React | CLOSED | **Not implemented.** `app/(admin)/setup/page.tsx` is still a legacy credential viewer; no `(wizard)` route group; no `ServiceForm`. | Closed prematurely. Reopen + ship before this plan's wizard extension starts. |
 | `lab-bg3e.5` /settings nested-rail | CLOSED | **Not implemented.** `/settings` is still the gateway-fleet posture dashboard. | Closed prematurely. Reopen + ship before this plan's settings extension starts. |
 
 The first acceptance criterion below is to reopen the three premature closures and update them with refreshed status.
@@ -94,7 +94,7 @@ The first acceptance criterion below is to reopen the three premature closures a
 - [ ] Each service plugin's README lists the required env vars (sourced from `PluginMeta.required_env`) and a one-liner pointing at `/setup-core` to fill them in.
 
 ### Env-aware CLI
-- [ ] `lab help` shows only services whose required env vars are present. Always-visible operator commands (`init`, `setup`, `doctor`, `plugins`, `extract`, `gateway`, `help`, `completions`, `scaffold`, `audit`, `marketplace`) are never filtered.
+- [ ] `lab help` shows only services whose required env vars are present. Always-visible operator commands (`init`, `setup`, `doctor`, `plugins`, `gateway`, `help`, `completions`, `scaffold`, `audit`, `marketplace`) are never filtered.
 - [ ] `LAB_SHOW_ALL=1` and `lab help --all` bypass the filter.
 - [ ] The MCP `lab://catalog` resource uses the same filter (registry filter). `--services foo,bar` continues to override at `labby serve` / `labby mcp` level.
 - [ ] (Optional polish) `labby --help` (clap-derived, top-level) honors the same filter via `Cli::command_for_update()` + `mut_subcommand("<svc>", |c| c.hide(true))`.

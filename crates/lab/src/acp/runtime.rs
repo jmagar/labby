@@ -1295,7 +1295,7 @@ pub fn sanitize_provider_error(message: &str) -> String {
         ]
     });
     let mut out = message.to_string();
-    for (re, repl) in patterns.iter() {
+    for (re, repl) in patterns {
         out = re.replace_all(&out, *repl).to_string();
     }
     out
@@ -3215,8 +3215,11 @@ mod tests {
     #[test]
     fn sanitize_provider_error_strips_ip_jwt_and_home_paths() {
         let raw = "failed to auth to 10.0.0.5:8000 with eyJabc.def.ghi at /home/user/.lab/creds";
-        let clean = super::sanitize_provider_error(raw);
-        assert!(!clean.contains("10.0.0.5"), "IP should be redacted: {clean}");
+        let clean = sanitize_provider_error(raw);
+        assert!(
+            !clean.contains("10.0.0.5"),
+            "IP should be redacted: {clean}"
+        );
         assert!(!clean.contains("eyJabc"), "JWT should be redacted: {clean}");
         assert!(
             !clean.contains("/home/user"),
@@ -3230,13 +3233,14 @@ mod tests {
     #[test]
     fn sanitize_provider_error_passes_known_safe_messages_unchanged() {
         let raw = "model not found: gpt-5.1";
-        assert_eq!(super::sanitize_provider_error(raw), raw);
+        assert_eq!(sanitize_provider_error(raw), raw);
     }
 
     #[test]
     fn redact_provider_stderr_line_strips_ip_and_path() {
-        let (line, truncated) =
-            redact_provider_stderr_line("connect failed at 192.168.1.100:443 in /home/jmagar/workspace");
+        let (line, truncated) = redact_provider_stderr_line(
+            "connect failed at 192.168.1.100:443 in /home/jmagar/workspace",
+        );
         assert!(!truncated);
         assert!(!line.contains("192.168.1.100"));
         assert!(!line.contains("/home/jmagar"));

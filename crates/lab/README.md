@@ -18,7 +18,6 @@ Binary lives at `target/release/labby`.
 
 ```bash
 lab radarr movie.search --query "The Matrix"
-labby extract scan
 labby --help
 ```
 
@@ -103,7 +102,6 @@ All surfaces delegate business logic to `lab-apis` clients. Logic lives in SDK, 
 
 **Fully typed CLI (tier 1):**
 - `radarr` — movie search, add, queue
-- `extract` — scan hosts for service credentials
 - `bytestash` — note storage
 - `unifi` — network management
 

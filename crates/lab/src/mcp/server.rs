@@ -1379,7 +1379,8 @@ impl ServerHandler for LabMcpServer {
                 .await
             {
                 Ok(response) => {
-                    let output = serde_json::to_string(&response).unwrap_or_else(|_| "null".to_string());
+                    let output =
+                        serde_json::to_string(&response).unwrap_or_else(|_| "null".to_string());
                     let output_tokens = estimate_tokens(&output);
                     tracing::info!(
                         surface = "mcp",
@@ -1622,7 +1623,8 @@ impl ServerHandler for LabMcpServer {
                 Ok(upstream_results) => {
                     let results =
                         merge_tool_search_results(builtin_results, upstream_results, top_k);
-                    let output = serde_json::to_string(&results).unwrap_or_else(|_| "[]".to_string());
+                    let output =
+                        serde_json::to_string(&results).unwrap_or_else(|_| "[]".to_string());
                     let output_tokens = estimate_tokens(&output);
                     tracing::info!(
                         surface = "mcp",
@@ -2076,9 +2078,8 @@ impl ServerHandler for LabMcpServer {
                 });
                 match pool.call_tool(&upstream_name, upstream_params).await {
                     Some(Ok(result)) => {
-                        let output_tokens = estimate_tokens(
-                            &serde_json::to_string(&result).unwrap_or_default(),
-                        );
+                        let output_tokens =
+                            estimate_tokens(&serde_json::to_string(&result).unwrap_or_default());
                         tracing::info!(
                             surface = "mcp",
                             service = %service,

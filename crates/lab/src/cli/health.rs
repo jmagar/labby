@@ -23,16 +23,6 @@ pub struct HealthRow {
 pub async fn run(format: OutputFormat) -> Result<ExitCode> {
     let mut rows: Vec<HealthRow> = Vec::new();
 
-    // extract has no network endpoint — always available.
-    rows.push(HealthRow {
-        service: "extract".into(),
-        reachable: true,
-        auth_ok: true,
-        version: None,
-        latency_ms: 0,
-        message: Some("local scan service (always available)".into()),
-    });
-
     // Probe mcpregistry (uses configured or default public registry URL; no credentials required).
     #[cfg(feature = "mcpregistry")]
     {

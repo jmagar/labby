@@ -9,7 +9,7 @@ Copy this template into a new file under `docs/plans/` (e.g. `docs/plans/feat-fo
 <!-- One-line summary. Prefix with the type: feat / enhance / fix / refactor / docs -->
 
 **Type:** `feat` | `enhance` | `fix` | `refactor`
-**Service(s) affected:** <!-- e.g. radarr, unraid, marketplace, gateway, extract, _new_ -->
+**Service(s) affected:** <!-- e.g. radarr, unraid, marketplace, gateway, _new_ -->
 **Priority:** `p0-critical` | `p1-high` | `p2-normal` | `p3-low`
 
 ---

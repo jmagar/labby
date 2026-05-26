@@ -86,6 +86,21 @@ Current leaning:
 - Gateway is the proof that matters, but a smaller product may be useful as a
   pattern spike.
 
+### Resolved: `extract` is retired
+
+Known:
+
+- It primarily discovers credentials from existing homelab appdata and writes
+  Lab `.env` values.
+- Some supported parsers target older service integrations.
+
+Decision:
+
+- `extract` is removed from the current product surface.
+- Do not create a `lab-extract` crate in this extraction plan.
+- Rebuild credential discovery only if a future product requirement justifies a
+  new design.
+
 ## REST and Client Generation
 
 ### Should generated client wrappers be generated or hand-written?

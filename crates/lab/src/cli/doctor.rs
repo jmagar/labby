@@ -354,14 +354,6 @@ fn exit_code(report: &Report) -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::service_env_checks;
-
-    #[test]
-    fn extract_is_always_in_checks() {
-        let checks = service_env_checks();
-        assert!(checks.iter().any(|(name, _)| *name == "extract"));
-    }
-
     #[test]
     fn auth_checks_returns_findings() {
         let findings = crate::dispatch::doctor::run_auth_checks();

@@ -754,11 +754,8 @@ mod tests {
         assert!(paths.contains_key("/health"), "missing /health path");
         assert!(paths.contains_key("/ready"), "missing /ready path");
 
-        // At least extract (always-on) should have a /v1/extract path
-        assert!(
-            paths.contains_key("/v1/extract"),
-            "missing /v1/extract path"
-        );
+        // At least setup (always-on) should have a /v1/setup path
+        assert!(paths.contains_key("/v1/setup"), "missing /v1/setup path");
 
         // Components must include our error schemas
         let schemas = spec["components"]["schemas"]

@@ -48,9 +48,6 @@ fn render_human(value: &Value, theme: CliTheme) -> String {
 }
 
 fn render_object(map: &serde_json::Map<String, Value>, theme: CliTheme, indent: usize) -> String {
-    if is_extract_report(map) {
-        return render_extract_report(map, theme, indent);
-    }
     if is_doctor_report(map) {
         return render_doctor_report(map, theme, indent);
     }
@@ -103,10 +100,6 @@ fn render_record_array(items: &[Value], theme: CliTheme, field_name: Option<&str
     if items.iter().all(is_doctor_finding) {
         return render_finding_rows(items, theme);
     }
-    if items.iter().all(is_extract_cred) {
-        return render_extract_creds(items, theme);
-    }
-
     let headers = collect_headers(items);
     let rows = items
         .iter()
@@ -308,136 +301,6 @@ fn render_finding_rows(items: &[Value], theme: CliTheme) -> String {
     render_table(&headers, &rows, theme)
 }
 
-fn render_extract_report(
-    map: &serde_json::Map<String, Value>,
-    theme: CliTheme,
-    _indent: usize,
-) -> String {
-    let creds = map
-        .get("creds")
-        .and_then(Value::as_array)
-        .map_or(&[][..], Vec::as_slice);
-    let warnings = map
-        .get("warnings")
-        .and_then(Value::as_array)
-        .map_or(&[][..], Vec::as_slice);
-    let found = map
-        .get("found")
-        .and_then(Value::as_array)
-        .map_or(&[][..], Vec::as_slice);
-
-    let mut out = String::new();
-    writeln!(out, "{}", theme.heading("Extract Report")).ok();
-    if let Some(target) = map.get("target") {
-        writeln!(
-            out,
-            "{} {}",
-            theme.primary("Scan target:"),
-            render_target(target, theme.context())
-        )
-        .ok();
-    }
-    let verified = creds
-        .iter()
-        .filter(|cred| {
-            cred.as_object()
-                .and_then(|map| map.get("url_verified"))
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-        })
-        .count();
-    writeln!(
-        out,
-        "{} {} | {} {} | {} {} | {} {}",
-        theme.primary("Found:"),
-        theme.value(found.len().to_string().as_str()),
-        theme.primary("Credentials:"),
-        theme.value(creds.len().to_string().as_str()),
-        theme.primary("Verified:"),
-        theme.value(verified.to_string().as_str()),
-        theme.primary("Warnings:"),
-        theme.value(warnings.len().to_string().as_str())
-    )
-    .ok();
-
-    if !found.is_empty() {
-        let preview = preview_scalar_list(found, 4, theme.context());
-        writeln!(out, "{} {}", theme.muted("Services:"), preview).ok();
-    }
-
-    if !creds.is_empty() {
-        out.push('\n');
-        out.push_str(&render_extract_creds(creds, theme));
-    }
-
-    if !warnings.is_empty() {
-        out.push('\n');
-        let headers = vec![
-            "Service".to_string(),
-            "Host".to_string(),
-            "Runtime".to_string(),
-            "Warning".to_string(),
-        ];
-        let rows = warnings
-            .iter()
-            .filter_map(Value::as_object)
-            .map(|map| {
-                vec![
-                    map.get("service")
-                        .map_or_else(|| "-".to_string(), |v| render_cell_text(v, theme)),
-                    map.get("host")
-                        .map_or_else(|| theme.muted("-"), |v| render_cell_text(v, theme)),
-                    map.get("runtime")
-                        .map_or_else(|| theme.muted("-"), |v| render_runtime(v, theme.context())),
-                    map.get("message")
-                        .map_or_else(|| "-".to_string(), |v| render_cell_text(v, theme)),
-                ]
-            })
-            .collect::<Vec<_>>();
-        writeln!(out, "{}", theme.heading("Warnings")).ok();
-        out.push_str(&render_table(&headers, &rows, theme));
-    }
-
-    out
-}
-
-fn render_extract_creds(items: &[Value], theme: CliTheme) -> String {
-    let headers = vec![
-        "Service".to_string(),
-        "URL".to_string(),
-        "Verified".to_string(),
-        "Secret".to_string(),
-        "Env".to_string(),
-        "Source".to_string(),
-        "Probe".to_string(),
-        "Runtime".to_string(),
-    ];
-    let rows = items
-        .iter()
-        .filter_map(Value::as_object)
-        .map(|map| {
-            vec![
-                map.get("service")
-                    .map_or_else(|| "-".to_string(), |v| render_cell_text(v, theme)),
-                map.get("url")
-                    .map_or_else(|| theme.muted("-"), |v| render_cell_text(v, theme)),
-                map.get("url_verified")
-                    .map_or_else(|| theme.muted("-"), |v| render_cell_text(v, theme)),
-                render_secret_state(map.get("secret"), theme.context()),
-                map.get("env_field")
-                    .map_or_else(|| "-".to_string(), |v| render_cell_text(v, theme)),
-                map.get("source_host")
-                    .map_or_else(|| theme.muted("-"), |v| render_cell_text(v, theme)),
-                map.get("probe_host")
-                    .map_or_else(|| theme.muted("-"), |v| render_cell_text(v, theme)),
-                map.get("runtime")
-                    .map_or_else(|| theme.muted("-"), |v| render_runtime(v, theme.context())),
-            ]
-        })
-        .collect::<Vec<_>>();
-    render_table(&headers, &rows, theme)
-}
-
 fn render_array(items: &[Value], theme: CliTheme, indent: usize) -> String {
     let prefix = indent_str(indent);
     if items.is_empty() {
@@ -575,50 +438,6 @@ fn render_secret_state(value: Option<&Value>, ctx: RenderContext) -> String {
     }
 }
 
-fn render_uri(value: &Value, ctx: RenderContext) -> String {
-    let theme = CliTheme::from_context(ctx);
-    match value {
-        Value::String(s) => theme.value(s),
-        Value::Object(map) => {
-            let host = map.get("host").and_then(Value::as_str);
-            let path = map.get("path").and_then(Value::as_str);
-            match (host, path) {
-                (Some(host), Some(path)) => theme.value(&format!("{host}:{path}")),
-                _ => render_cell_text(value, theme),
-            }
-        }
-        _ => render_cell_text(value, theme),
-    }
-}
-
-fn render_target(value: &Value, ctx: RenderContext) -> String {
-    let theme = CliTheme::from_context(ctx);
-    match value {
-        Value::Object(map) => match map.get("mode").and_then(Value::as_str) {
-            Some("fleet") => theme.value("fleet"),
-            Some("targeted") => map
-                .get("uri")
-                .map_or_else(|| theme.value("targeted"), |uri| render_uri(uri, ctx)),
-            _ => render_cell_text(value, theme),
-        },
-        _ => render_cell_text(value, theme),
-    }
-}
-
-fn render_runtime(value: &Value, ctx: RenderContext) -> String {
-    let theme = CliTheme::from_context(ctx);
-    let Some(map) = value.as_object() else {
-        return render_cell_text(value, theme);
-    };
-    let name = map.get("container_name").and_then(Value::as_str);
-    let image = map.get("image").and_then(Value::as_str);
-    match (name, image) {
-        (Some(name), Some(image)) if !image.is_empty() => theme.value(&format!("{name} ({image})")),
-        (Some(name), _) => theme.value(name),
-        _ => render_cell_text(value, theme),
-    }
-}
-
 fn preview_scalar_list(items: &[Value], limit: usize, ctx: RenderContext) -> String {
     let theme = CliTheme::from_context(ctx);
     let mut parts = Vec::new();
@@ -658,30 +477,12 @@ fn is_doctor_finding(value: &Value) -> bool {
         && map.contains_key("message")
 }
 
-fn is_extract_cred(value: &Value) -> bool {
-    let Some(map) = value.as_object() else {
-        return false;
-    };
-    map.contains_key("service")
-        && map.contains_key("url")
-        && map.contains_key("secret")
-        && map.contains_key("env_field")
-}
-
 fn is_doctor_report(map: &serde_json::Map<String, Value>) -> bool {
     map.contains_key("findings")
         && map
             .get("findings")
             .and_then(Value::as_array)
             .is_some_and(|items| items.iter().all(is_doctor_finding))
-}
-
-fn is_extract_report(map: &serde_json::Map<String, Value>) -> bool {
-    map.contains_key("creds")
-        && map
-            .get("creds")
-            .and_then(Value::as_array)
-            .is_some_and(|items| items.iter().all(is_extract_cred))
 }
 
 fn collect_headers(items: &[Value]) -> Vec<String> {
@@ -1115,55 +916,5 @@ mod tests {
             "nested ActionEntry rendered as '{{N keys}}' artifact"
         );
         assert!(!plain.contains("keys}"), "any 'keys}}' artifact leaked");
-    }
-
-    #[test]
-    fn extract_report_renders_fleet_provenance_and_url_only_results() {
-        let val = json!({
-            "target": {"mode": "fleet"},
-            "found": ["radarr", "sonarr", "plex"],
-            "creds": [
-                {
-                    "service": "radarr",
-                    "url": "http://100.64.0.12:7878",
-                    "secret": null,
-                    "env_field": "RADARR_API_KEY",
-                    "source_host": "media-node",
-                    "probe_host": "100.64.0.12",
-                    "runtime": {
-                        "container_name": "radarr",
-                        "image": "lscr.io/linuxserver/radarr:latest"
-                    },
-                    "url_verified": true
-                }
-            ],
-            "warnings": [
-                {
-                    "service": "plex",
-                    "host": "media-node",
-                    "runtime": {
-                        "container_name": "plex",
-                        "image": "plexinc/pms-docker:latest"
-                    },
-                    "message": "config root could not be resolved"
-                }
-            ]
-        });
-
-        let out = render(&val, human_format()).unwrap();
-        assert!(out.contains("Extract Report"));
-        assert!(out.contains("Scan target:"));
-        assert!(out.contains("fleet"));
-        assert!(out.contains("Verified:"));
-        assert!(out.contains("Source"));
-        assert!(out.contains("Probe"));
-        assert!(out.contains("Runtime"));
-        assert!(out.contains("radarr"));
-        assert!(out.contains("media-node"));
-        assert!(out.contains("100.64.0.12"));
-        assert!(out.contains("lscr.io/linuxserver/radarr:latest"));
-        assert!(out.contains("✓") || out.contains("ok"));
-        assert!(out.contains("plex"));
-        assert!(out.contains("config root could not be resolved"));
     }
 }

@@ -8,6 +8,25 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.17.7] - 2026-05-26
+
+### Highlights
+
+- **Retired extract service removal**: removed the dead `extract` API client, CLI command, dispatch layer, HTTP route, generated docs, and service docs.
+- **Crate extraction docs cleanup**: aligned the extraction planning docs with retired `extract`, target route examples, OAuth ownership, standalone binary verification, and generated OpenAPI verification.
+- **Verification stability**: fixed the host sccache wrapper toolchain resolution issue and tightened a websocket disconnect test that was racing server cleanup.
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | chore: remove retired extract service |
+
+### Version bumps
+
+- Rust workspace: `0.17.6 -> 0.17.7`
+- Gateway admin package: `0.17.6 -> 0.17.7`
+
+---
+
 ## [0.17.6] - 2026-05-26
 
 ### Highlights

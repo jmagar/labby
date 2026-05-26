@@ -824,7 +824,7 @@ mod tests {
         let v = dispatch("schema.get", json!({})).await.unwrap();
         let services = v.get("services").and_then(Value::as_object).unwrap();
         // Every service that has a PluginMeta entry should appear; synthetic
-        // services without meta (extract/doctor/setup) are skipped — they
+        // services without meta (doctor/setup) are skipped — they
         // have no env config to render in the wizard.
         for entry in build_default_registry().services() {
             if service_meta(entry.name).is_some() {

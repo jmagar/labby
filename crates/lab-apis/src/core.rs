@@ -25,7 +25,7 @@ pub mod plugin_ui;
 pub mod traits;
 
 /// Shared SSH primitives (host config parsing, hardened options) used by
-/// `extract` and `deploy`.
+/// `deploy`.
 pub mod ssh;
 
 // Convenience re-exports so service modules can `use crate::core::{Auth, HttpClient, ApiError, ...}`.

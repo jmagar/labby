@@ -1,4 +1,4 @@
-//! Shared SSH primitives used by `extract` (scan over SFTP).
+//! Shared SSH primitives used by deploy and other SSH-backed operators.
 //!
 //! This module owns:
 //!

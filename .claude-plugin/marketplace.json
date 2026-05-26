@@ -769,6 +769,14 @@
             "description": "Comprehensive UI/UX design plugin for mobile (iOS, Android, React Native) and web applications with design systems, accessibility, and modern patterns"
         },
         {
+            "name": "webwright",
+            "source": {
+                "source": "url",
+                "url": "https://github.com/microsoft/Webwright.git"
+            },
+            "description": "Turn your coding agent into a browser agent using a local Playwright workspace, screenshots, action logs, and visual self-verification."
+        },
+        {
             "name": "zsh-tool",
             "source": {
                 "source": "github",

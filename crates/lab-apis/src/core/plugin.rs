@@ -68,7 +68,7 @@ pub enum Category {
     Notifications,
     /// AI / inference / vector search (`OpenAI`, Qdrant, TEI).
     Ai,
-    /// Bootstrap utilities (extract, init, doctor).
+    /// Bootstrap utilities (init, doctor, setup).
     Bootstrap,
     /// Marketplace and registry services (Marketplace, MCP Registry).
     Marketplace,

@@ -25,7 +25,8 @@ Exit criteria:
 - package boundaries are named,
 - contract rules are explicit,
 - lane ownership is clear,
-- open questions are tracked.
+- open questions are tracked,
+- `extract` is recorded as retired and excluded from the extraction package set.
 
 ## Milestone 1: Shared Platform Seams
 

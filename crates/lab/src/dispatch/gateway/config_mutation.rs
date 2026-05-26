@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use lab_apis::extract::types::ServiceCreds;
-
+use crate::config::EnvCredential;
 use crate::dispatch::error::ToolError;
 
 pub(super) fn read_env_values(
@@ -16,7 +15,7 @@ pub(super) fn read_env_values(
 pub(super) fn values_to_service_creds(
     service: &str,
     values: &BTreeMap<String, String>,
-) -> Vec<ServiceCreds> {
+) -> Vec<EnvCredential> {
     values
         .iter()
         .map(|(field, value)| {
@@ -30,15 +29,11 @@ pub(super) fn values_to_service_creds(
             } else {
                 Some(value.clone())
             };
-            ServiceCreds {
+            EnvCredential {
                 service: service.to_string(),
                 url,
                 secret,
                 env_field: field.clone(),
-                source_host: None,
-                probe_host: None,
-                runtime: None,
-                url_verified: false,
             }
         })
         .collect()

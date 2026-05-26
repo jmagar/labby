@@ -37,7 +37,6 @@ control plane.
 | Workspace filesystem browser | Browse and preview files under the configured workspace root through the guarded `fs` service for Labby attachment and editor workflows. |
 | Setup and health audits | Use `labby init`, `labby doctor`, `labby health`, `labby scaffold service`, and `labby audit onboarding` to bootstrap config, validate service reachability/auth, and keep new integrations aligned with the repo contract. |
 | Service operations | Use one action catalog across CLI, MCP, and HTTP to operate Radarr, Sonarr, Plex, UniFi, Unraid, qBittorrent, Gotify, Qdrant, OpenAI-compatible APIs, and the rest of the service integrations. |
-| Credential bootstrap | Scan local or SSH appdata paths with `labby extract`, preview diffs, and apply discovered service URLs/API keys into `~/.lab/.env` with backups and atomic writes. |
 | Deployment and monitors | Build and push the Lab release binary to SSH targets, manage rollout policy, and use monitor definitions from `plugins/monitors/monitors.json` through `labby deploy monitor`. |
 
 These features are exposed consistently:
@@ -97,7 +96,6 @@ Then open `/marketplace`, `/registry`, `/gateway`, `/logs`, `/setup`, `/activity
 Bootstrap and operate a fleet:
 
 ```bash
-labby extract /mnt/appdata --diff
 labby doctor
 labby nodes enrollments list
 labby logs search dookie oauth
@@ -121,7 +119,6 @@ Current inventories are generated from code-owned metadata:
 - [environment reference](./docs/generated/env-reference.md)
 - [API routes](./docs/generated/api-routes.md)
 - [feature matrix](./docs/generated/feature-matrix.md)
-- [onboarding audit](./docs/generated/onboarding-audit.md)
 
 Refresh them with `just docs-generate` and verify them with `just docs-check`.
 `lab_admin` is compiled by the default `all` feature but only registers in the
@@ -211,7 +208,6 @@ labby mcp
 labby doctor
 labby health
 lab plugins
-labby extract /mnt/appdata --diff
 ```
 
 `labby serve` starts the hosted runtime path: the Axum HTTP server for the product API,
@@ -304,7 +300,6 @@ Top-level commands are defined in [crates/lab/src/cli.rs](./crates/lab/src/cli.r
 | `labby marketplace` | Manage Claude Code, Codex, MCP Registry, and ACP Registry marketplace entries |
 | `labby gateway` | Manage proxied upstream MCP gateways |
 | `labby oauth` | Run local OAuth callback relay helpers |
-| `labby extract` | Scan local or SSH appdata paths and extract service credentials |
 | `labby audit` | Audit service onboarding against the repo contract |
 | `labby scaffold` | Generate a new service onboarding scaffold |
 | `labby install` / `labby uninstall` | Patch `.mcp.json` service entries |
@@ -498,7 +493,7 @@ Feature-gated upstream integrations:
 `bytestash`, `gotify`, `apprise`, `openai`, `qdrant`, `tei`,
 `deploy`, `mcpregistry`, `acp_registry`, `fs`, `lab-admin`.
 
-Always-on product/capability services include `extract`, `gateway`, `doctor`, `logs`,
+Always-on product/capability services include `gateway`, `doctor`, `logs`,
 `device`, `marketplace`, and `acp`. `lab_admin` is feature-enabled by `all` but
 runtime-gated.
 
@@ -584,7 +579,6 @@ Start at [docs/README.md](./docs/README.md). Topic ownership:
 | [docs/OPERATIONS.md](./docs/OPERATIONS.md) | Repo helpers, doctor/health workflows, CI, releases, updates |
 | [docs/CICD.md](./docs/runtime/CICD.md) | GitHub Actions check matrix and release behavior |
 | [docs/TESTING.md](./docs/dev/TESTING.md) | Test runner contract and verification expectations |
-| [docs/EXTRACT.md](./docs/services/EXTRACT.md) | Bootstrap credential extraction and `.env` merge semantics |
 | [docs/GATEWAY.md](./docs/services/GATEWAY.md) | Upstream MCP gateway CRUD, reload/test flows, exposure policy |
 | [docs/UPSTREAM.md](./docs/services/UPSTREAM.md) | Upstream MCP proxy setup, tool merging, circuit breaker, resources |
 | [docs/MARKETPLACE.md](./docs/services/MARKETPLACE.md) | Marketplace service, plugin workspace mirrors, save/deploy flows |

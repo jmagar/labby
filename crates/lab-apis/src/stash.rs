@@ -5,9 +5,8 @@
 //! be deployed to local paths or remote gateways.
 //!
 //! This module is **always-on** (no feature gate), matching the pattern of
-//! `extract` and `device_runtime`. The pure domain types live in
-//! [`types`]. Client and provider implementations will be added in later
-//! tasks.
+//! `device_runtime`. The pure domain types live in [`types`]. Client and
+//! provider implementations will be added in later tasks.
 
 pub mod types;
 
