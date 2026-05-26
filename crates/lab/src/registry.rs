@@ -942,13 +942,8 @@ mod tests {
 
     #[test]
     fn bootstrap_constructor_sets_stub_status_for_empty_actions() {
-        let service = RegisteredService::bootstrap(
-            "demo",
-            "Demo service",
-            "bootstrap",
-            &[],
-            noop_dispatch,
-        );
+        let service =
+            RegisteredService::bootstrap("demo", "Demo service", "bootstrap", &[], noop_dispatch);
 
         assert_eq!(service.status, "stub");
     }

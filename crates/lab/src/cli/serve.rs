@@ -635,7 +635,8 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
     // configured.
     #[cfg(feature = "fs")]
     {
-        let workspace_runtime = crate::workspace::WorkspaceRuntimeBuilder::new(config.clone()).build();
+        let workspace_runtime =
+            crate::workspace::WorkspaceRuntimeBuilder::new(config.clone()).build();
         if let Some(root) = workspace_runtime.workspace_root() {
             tracing::info!(
                 subsystem = "startup",
