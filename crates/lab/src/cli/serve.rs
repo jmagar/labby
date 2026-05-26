@@ -634,21 +634,21 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
     // service as enabled at startup just because a `[workspace].root` is
     // configured.
     #[cfg(feature = "fs")]
-    match crate::dispatch::fs::resolve_workspace_root(config) {
-        Ok(root) => {
+    {
+        let workspace_runtime = crate::workspace::WorkspaceRuntimeBuilder::new(config.clone()).build();
+        if let Some(root) = workspace_runtime.workspace_root() {
             tracing::info!(
                 subsystem = "startup",
                 phase = "fs.workspace_root",
                 path = %root.display(),
                 "workspace filesystem browser enabled"
             );
-            state = state.with_workspace_root(root);
-        }
-        Err(e) => {
+            state = state.with_workspace_root(root.to_path_buf());
+        } else {
             tracing::warn!(
                 subsystem = "startup",
                 phase = "fs.workspace_root",
-                error = %e,
+                error = workspace_runtime.workspace_root_error(),
                 "workspace.root invalid; fs service disabled"
             );
         }
