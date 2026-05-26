@@ -1058,19 +1058,25 @@ fn build_v1_router(state: &AppState, api_auth_configured: bool) -> Router<AppSta
             .iter()
             .any(|service| service.name == "fs")
         {
-            // SECURITY: fs operations read workspace files, so refuse to
-            // mount them on an unauthenticated API surface. Static web UI
-            // auth settings do not bypass `/v1` auth when bearer/OAuth auth
-            // is configured.
-            if state.web_ui_auth_disabled && !api_auth_configured {
-                tracing::warn!(
-                    subsystem = "startup",
-                    phase = "fs.mount.skipped",
-                    reason = "web_ui_auth_disabled",
-                    "fs service is configured but LAB_WEB_UI_AUTH_DISABLED=true would expose workspace files unauthenticated; refusing to mount /v1/fs"
-                );
-            } else {
-                v1 = v1.nest("/fs", services::fs::routes(state.clone()));
+            // SECURITY: fs operations read workspace files, so the workspace
+            // runtime refuses to mount them on an unauthenticated API surface.
+            // Static web UI auth settings do not bypass `/v1` auth when
+            // bearer/OAuth auth is configured.
+            match crate::workspace::WorkspaceRuntime::http_routes(
+                state.clone(),
+                api_auth_configured,
+            ) {
+                Some(routes) => {
+                    v1 = v1.nest("/fs", routes);
+                }
+                None => {
+                    tracing::warn!(
+                        subsystem = "startup",
+                        phase = "fs.mount.skipped",
+                        reason = "web_ui_auth_disabled",
+                        "fs service is configured but LAB_WEB_UI_AUTH_DISABLED=true would expose workspace files unauthenticated; refusing to mount /v1/fs"
+                    );
+                }
             }
         }
     }
