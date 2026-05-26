@@ -7,13 +7,13 @@ use super::server::LabMcpServer;
 use crate::dispatch::upstream::pool::UpstreamPool;
 use crate::mcp::prompts::list_all as list_builtin_prompts;
 
-pub(crate) const TOOL_SEARCH_TOOL_NAME: &str = "scout";
-pub(crate) const TOOL_EXECUTE_TOOL_NAME: &str = "invoke";
+pub(crate) const TOOL_SEARCH_TOOL_NAME: &str = "tool_search";
+pub(crate) const TOOL_EXECUTE_TOOL_NAME: &str = "tool_execute";
 pub(crate) const CODE_SEARCH_TOOL_NAME: &str = "code_search";
 pub(crate) const CODE_EXECUTE_TOOL_NAME: &str = "code_execute";
+pub(crate) const LEGACY_SCOUT_TOOL_NAME: &str = "scout";
+pub(crate) const LEGACY_INVOKE_TOOL_NAME: &str = "invoke";
 pub(crate) const LEGACY_TOOL_INVOKE_TOOL_NAME: &str = "tool_invoke";
-pub(crate) const LEGACY_TOOL_SEARCH_TOOL_NAME: &str = "tool_search";
-pub(crate) const LEGACY_TOOL_EXECUTE_TOOL_NAME: &str = "tool_execute";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ToolSearchVisibility {

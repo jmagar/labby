@@ -9,13 +9,13 @@ use super::catalog::ACTIONS;
 use super::client::require_gateway_manager;
 use super::manager::{GatewayManager, ImportTombstoneSelector};
 use super::params::{
-    GatewayAddParams, GatewayClientConfigParams, GatewayDiscoverParams, GatewayImportParams,
-    GatewayImportTombstoneParams, GatewayMcpCleanupParams, GatewayMcpToggleParams,
-    GatewayNameParams, GatewayOauthNameParams, GatewayReloadParams, GatewayStatusParams,
-    GatewayTestParams, GatewayUpdateParams, GatewayUpdatePatch, ProtectedRouteNameParams,
-    ProtectedRouteSpecParams, ProtectedRouteUpdateParams, ServiceConfigGetParams,
-    ServiceConfigSetParams, ToolSearchSetParams, VirtualServerMcpPolicyParams,
-    VirtualServerNameParams, VirtualServerSurfaceParams,
+    CodeModeSetParams, GatewayAddParams, GatewayClientConfigParams, GatewayDiscoverParams,
+    GatewayImportParams, GatewayImportTombstoneParams, GatewayMcpCleanupParams,
+    GatewayMcpToggleParams, GatewayNameParams, GatewayOauthNameParams, GatewayReloadParams,
+    GatewayStatusParams, GatewayTestParams, GatewayUpdateParams, GatewayUpdatePatch,
+    ProtectedRouteNameParams, ProtectedRouteSpecParams, ProtectedRouteUpdateParams,
+    ServiceConfigGetParams, ServiceConfigSetParams, ToolSearchSetParams,
+    VirtualServerMcpPolicyParams, VirtualServerNameParams, VirtualServerSurfaceParams,
 };
 use super::types::{
     DiscoveredServerView, ImportErrorView, ImportSkipReason, ImportSkipView,
@@ -43,7 +43,9 @@ pub async fn dispatch_with_manager(
         "gateway.scout.get"
         | "gateway.scout.set"
         | "gateway.tool_search.get"
-        | "gateway.tool_search.set" => handle_tool_actions(manager, action, params_value).await,
+        | "gateway.tool_search.set"
+        | "gateway.code_mode.get"
+        | "gateway.code_mode.set" => handle_tool_actions(manager, action, params_value).await,
         "gateway.discover" => handle_discover(manager, params_value).await,
         "gateway.import" => handle_import(manager, params_value).await,
         "gateway.import_pending.list" => to_json(manager.list_pending_imports().await),
@@ -353,6 +355,25 @@ async fn handle_tool_actions(
                 next.max_tools = max_tools;
             }
             to_json(manager.set_tool_search_config(next, None, None).await?)
+        }
+        "gateway.code_mode.get" => to_json(manager.code_mode_config().await),
+        "gateway.code_mode.set" => {
+            let params: CodeModeSetParams = parse_params(params_value)?;
+            let mut next = manager.code_mode_config().await;
+            next.enabled = params.enabled;
+            if let Some(timeout_ms) = params.timeout_ms {
+                next.timeout_ms = timeout_ms;
+            }
+            if let Some(max_tool_calls) = params.max_tool_calls {
+                next.max_tool_calls = max_tool_calls;
+            }
+            if let Some(max_response_bytes) = params.max_response_bytes {
+                next.max_response_bytes = max_response_bytes;
+            }
+            if let Some(max_response_tokens) = params.max_response_tokens {
+                next.max_response_tokens = max_response_tokens;
+            }
+            to_json(manager.set_code_mode_config(next, None, None).await?)
         }
         unknown => unknown_action(unknown),
     }

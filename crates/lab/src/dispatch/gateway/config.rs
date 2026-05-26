@@ -233,9 +233,8 @@ pub fn update_upstream(
     }
     if patch.tool_search.is_some() {
         return Err(ToolError::InvalidParam {
-            message:
-                "scout config is gateway-wide; use gateway.scout.set instead of gateway.update"
-                    .to_string(),
+            message: "tool_search config is gateway-wide; use gateway.tool_search.set instead of gateway.update"
+                .to_string(),
             param: "tool_search".to_string(),
         });
     }
@@ -455,6 +454,7 @@ pub fn validate_protected_mcp_routes(routes: &[ProtectedMcpRouteConfig]) -> Resu
 
 fn validate_config(cfg: &LabConfig) -> Result<(), ToolError> {
     validate_tool_search(&cfg.tool_search)?;
+    validate_code_mode(&cfg.code_mode)?;
     validate_upstreams(&cfg.upstream)?;
     validate_protected_mcp_routes(&cfg.protected_mcp_routes)
 }
@@ -483,6 +483,35 @@ pub fn validate_tool_search(
         _ => ToolError::InvalidParam {
             message: e.to_string(),
             param: "tool_search".to_string(),
+        },
+    })
+}
+
+pub fn validate_code_mode(code_mode: &crate::config::CodeModeConfig) -> Result<(), ToolError> {
+    code_mode.validate().map_err(|e| match e {
+        crate::config::ConfigError::InvalidCodeModeTimeout { .. } => ToolError::InvalidParam {
+            message: e.to_string(),
+            param: "code_mode.timeout_ms".to_string(),
+        },
+        crate::config::ConfigError::InvalidCodeModeMaxToolCalls { .. } => ToolError::InvalidParam {
+            message: e.to_string(),
+            param: "code_mode.max_tool_calls".to_string(),
+        },
+        crate::config::ConfigError::InvalidCodeModeMaxResponseBytes { .. } => {
+            ToolError::InvalidParam {
+                message: e.to_string(),
+                param: "code_mode.max_response_bytes".to_string(),
+            }
+        }
+        crate::config::ConfigError::InvalidCodeModeMaxResponseTokens { .. } => {
+            ToolError::InvalidParam {
+                message: e.to_string(),
+                param: "code_mode.max_response_tokens".to_string(),
+            }
+        }
+        _ => ToolError::InvalidParam {
+            message: e.to_string(),
+            param: "code_mode".to_string(),
         },
     })
 }

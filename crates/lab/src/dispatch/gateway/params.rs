@@ -251,6 +251,19 @@ pub struct ToolSearchSetParams {
     pub max_tools: Option<usize>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodeModeSetParams {
+    pub enabled: bool,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub max_tool_calls: Option<usize>,
+    #[serde(default)]
+    pub max_response_bytes: Option<usize>,
+    #[serde(default)]
+    pub max_response_tokens: Option<usize>,
+}
+
 /// Parameters for `gateway.discover` — read-only scan of external MCP configs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GatewayDiscoverParams {
