@@ -32,7 +32,7 @@ Copy or adapt backend code from:
 - `crates/lab/src/dispatch/gateway/**`
 - `crates/lab/src/api/services/gateway.rs`
 - `crates/lab/src/cli/gateway.rs`
-- Gateway action/resource registration from `crates/lab/src/mcp/registry.rs`
+- Gateway MCP server/resource/tool registration from `crates/lab/src/mcp/server.rs`, `crates/lab/src/mcp/registry.rs`, `crates/lab/src/mcp/catalog.rs`, `crates/lab/src/mcp/resources.rs`, `crates/lab/src/mcp/error.rs`, and `crates/lab/src/mcp/upstream.rs`
 - Shared helpers only when required by Gateway behavior.
 
 Copy or adapt web code from:
@@ -87,15 +87,26 @@ cargo check
 - [ ] Port protected MCP route matching, OAuth metadata/challenge, upstream auth, and proxy behavior.
 - [ ] Write focused unit tests for route matching, catalog import idempotency, tombstone behavior, and tool-search ranking.
 
-## Task 3: Rebuild CLI, MCP, And API Surfaces
+## Task 3: Rebuild MCP Gateway Surface
+
+- [ ] Port the rmcp server integration needed for Gateway from `crates/lab/src/mcp/server.rs`.
+- [ ] Preserve both MCP transports from rmcp-template: stdio via `lab-gateway mcp` and Streamable HTTP via `lab-gateway serve mcp`.
+- [ ] Add the first-party MCP tool named `gateway` with flat action dispatch and `help`/`schema` actions.
+- [ ] Preserve the synthetic Gateway meta-tools exposed when scout mode is enabled: `scout`, `invoke`, `code_search`, `code_schema`, and `code_execute`.
+- [ ] Keep compatibility aliases only where the current Lab MCP surface already has them: `tool_search`, `tool_execute`, and `tool_invoke`.
+- [ ] Preserve `lab://gateway/servers` and `lab://gateway/<name>/schema` MCP resources, including exposure-policy filtering and schema visibility rules.
+- [ ] Preserve upstream MCP proxying for tools, resources, prompts, and list-changed notifications.
+- [ ] Preserve MCP auth/scope behavior: `gateway.help` and `gateway.schema` are readable discovery actions; mutating Gateway actions require write/admin scope; schema-bearing scout/code paths require the stronger schema-visibility scope.
+- [ ] Add MCP integration tests for `list_tools`, `call_tool(gateway)`, `scout`, `invoke`, `list_resources`, `read_resource(lab://gateway/servers)`, `read_resource(lab://gateway/<name>/schema)`, auth denial, and upstream disconnected errors.
+
+## Task 4: Rebuild CLI And API Surfaces
 
 - [ ] Add Gateway CLI subcommands equivalent to `crates/lab/src/cli/gateway.rs`.
-- [ ] Add one MCP tool named `gateway` with flat action dispatch and `help`/`schema` actions.
 - [ ] Add HTTP routes equivalent to `crates/lab/src/api/services/gateway.rs`.
 - [ ] Add parity tests proving `scout`, `invoke`, `status`, `list`, `get`, protected-route actions, OAuth actions, and cleanup actions are reachable from CLI, MCP, and API.
 - [ ] Add structured error tests for missing params, unknown action, auth denial, and upstream failure.
 
-## Task 4: Extract Product Web UI
+## Task 5: Extract Product Web UI
 
 - [ ] Replace the template web app with a Gateway-focused app.
 - [ ] Copy Gateway pages, Gateway components, upstream OAuth components, protected route panels, Gateway clients, hooks, and minimal shared UI/theme/auth helpers.
@@ -109,18 +120,19 @@ pnpm --dir apps/web test
 pnpm --dir apps/web build
 ```
 
-## Task 5: Import Existing Lab Gateway State
+## Task 6: Import Existing Lab Gateway State
 
 - [ ] Add `lab-gateway import lab --lab-home ~/.lab --dry-run`.
 - [ ] Import Gateway config, runtime catalog entries, protected routes, tombstones, and OAuth metadata into `~/.lab-gateway`.
 - [ ] Make import idempotent and safe to run repeatedly.
 - [ ] Verify no post-import code path writes to `~/.lab`.
 
-## Task 6: Standalone Runtime Smoke
+## Task 7: Standalone Runtime Smoke
 
 - [ ] Start the standalone Gateway with loopback no-auth mode.
 - [ ] Verify `/health` responds from the standalone service.
-- [ ] Call one read-only Gateway action through CLI, MCP, API, and the web UI.
+- [ ] Call one read-only Gateway action through CLI, MCP stdio, MCP HTTP, API, and the web UI.
+- [ ] Read `lab://gateway/servers` through MCP and call `scout` plus `invoke` against a known configured upstream.
 - [ ] Confirm the standalone service reads and writes only `~/.lab-gateway` and `LAB_GATEWAY_*` configuration.
 
 ## Verification

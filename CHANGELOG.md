@@ -8,6 +8,25 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.17.5] - 2026-05-26
+
+### Highlights
+
+- **Crate extraction spec**: added the crate/package extraction spec, contract, dependency map, inventory, package manifest, API surface, roadmap, testing strategy, and open-question docs.
+- **Execution strategy**: documented isolated worktree lanes, parallel extraction waves, choke-point ownership, and integration responsibilities.
+- **Gateway extraction planning**: tightened the standalone Gateway extraction plan around MCP resources, rmcp transports, scout/invoke behavior, and fresh-clone prune guidance.
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | docs: add crate extraction architecture docs |
+
+### Version bumps
+
+- Rust workspace: `0.17.4 -> 0.17.5`
+- Gateway admin package: `0.17.4 -> 0.17.5`
+
+---
+
 ## [0.17.4] - 2026-05-24
 
 ### Highlights
