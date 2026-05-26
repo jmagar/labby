@@ -8,6 +8,25 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.18.0] - 2026-05-26
+
+### Highlights
+
+- **Gateway tool naming reset**: restored the primary MCP tools to `tool_search` and `tool_execute` while keeping `scout`, `invoke`, and `tool_invoke` as compatibility aliases.
+- **Gateway admin controls**: added Code Mode configuration support and a `/gateways` toggle that remains gated behind Tool Search.
+- **Gateway API parity**: exposed primary `gateway.tool_search.*` actions and new `gateway.code_mode.*` actions with validation and docs coverage.
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | feat: restore gateway tool names and code mode toggle |
+
+### Version bumps
+
+- Rust workspace: `0.17.7 -> 0.18.0`
+- Gateway admin package: `0.17.7 -> 0.18.0`
+
+---
+
 ## [0.17.7] - 2026-05-26
 
 ### Highlights

@@ -29,9 +29,8 @@ use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
 use crate::dispatch::gateway::code_mode::{CodeModeBroker, CodeModeCaller, CodeModeSurface};
 use crate::dispatch::gateway::manager::{GatewayManager, GatewayToolSearchResult};
 use crate::mcp::catalog::{
-    CODE_EXECUTE_TOOL_NAME, CODE_SEARCH_TOOL_NAME, LEGACY_TOOL_EXECUTE_TOOL_NAME,
-    LEGACY_TOOL_INVOKE_TOOL_NAME, LEGACY_TOOL_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME,
-    TOOL_SEARCH_TOOL_NAME,
+    CODE_EXECUTE_TOOL_NAME, CODE_SEARCH_TOOL_NAME, LEGACY_INVOKE_TOOL_NAME, LEGACY_SCOUT_TOOL_NAME,
+    LEGACY_TOOL_INVOKE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME,
 };
 use crate::mcp::elicitation::{ElicitResult, elicit_confirm};
 use crate::mcp::envelope::{build_error, build_error_extra, build_success};
@@ -1109,7 +1108,7 @@ impl ServerHandler for LabMcpServer {
                 "Search Lab and proxied upstream tool catalogs \
                 using 2-4 intent words (e.g. \"docker container restart\", \
                 \"send push notification\", \"unifi wifi clients\"). \
-                Use this before invoke to discover available tool names \
+                Use this before tool_execute to discover available tool names \
                 and their required arguments. Returns tool names, descriptions, \
                 and optionally full input schemas. \
                 Covers: Docker/containers (arcane), notifications (apprise/gotify), \
@@ -1198,15 +1197,15 @@ impl ServerHandler for LabMcpServer {
             };
             tools.push(Tool::new(
                 TOOL_EXECUTE_TOOL_NAME,
-                "Invoke one Lab or upstream tool discovered through scout. \
-                Pass the exact tool name returned by scout and a JSON \
-                arguments object matching that tool's schema. If scout returns \
+                "Invoke one Lab or upstream tool discovered through tool_search. \
+                Pass the exact tool name returned by tool_search and a JSON \
+                arguments object matching that tool's schema. If tool_search returns \
                 duplicate tool names, pass either name as upstream::tool or set \
                 upstream to the returned upstream server name. \
                 Lab built-in tools take {\"action\": \"<name>\", \"params\": {...}}. \
                 Upstream tools use their own schema (retrieve with \
-                scout include_schema=true). \
-                When scout returns no match, call scout with \
+                tool_search include_schema=true). \
+                When tool_search returns no match, call tool_search with \
                 different keywords before giving up.",
                 tool_execute_schema,
             ));
@@ -1548,7 +1547,7 @@ impl ServerHandler for LabMcpServer {
             );
             return Ok(CallToolResult::success(vec![Content::text(output)]));
         }
-        if service == TOOL_SEARCH_TOOL_NAME || service == LEGACY_TOOL_SEARCH_TOOL_NAME {
+        if service == TOOL_SEARCH_TOOL_NAME || service == LEGACY_SCOUT_TOOL_NAME {
             let started = Instant::now();
             let input_tokens = estimate_tokens_args(&args);
             let subject = self.request_subject_log_tag(&context);
@@ -1568,7 +1567,7 @@ impl ServerHandler for LabMcpServer {
                     &service,
                     "call_tool",
                     "forbidden",
-                    "scout requires one of scopes: lab:read, lab, lab:admin",
+                    "tool_search requires one of scopes: lab:read, lab, lab:admin",
                     &serde_json::json!({ "required_scopes": ["lab:read", "lab", "lab:admin"] }),
                 );
                 return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
@@ -1702,7 +1701,7 @@ impl ServerHandler for LabMcpServer {
         }
         if matches!(
             service.as_str(),
-            TOOL_EXECUTE_TOOL_NAME | LEGACY_TOOL_EXECUTE_TOOL_NAME | LEGACY_TOOL_INVOKE_TOOL_NAME
+            TOOL_EXECUTE_TOOL_NAME | LEGACY_INVOKE_TOOL_NAME | LEGACY_TOOL_INVOKE_TOOL_NAME
         ) {
             let started = Instant::now();
             let input_tokens = estimate_tokens_args(&args);
@@ -2044,7 +2043,7 @@ impl ServerHandler for LabMcpServer {
                         extra.insert(
                             "hint".to_string(),
                             serde_json::json!(
-                                "Call scout to discover available tools. If scout returned duplicate tool names, retry with `upstream::tool` or set `upstream`."
+                                "Call tool_search to discover available tools. If tool_search returned duplicate tool names, retry with `upstream::tool` or set `upstream`."
                             ),
                         );
                     }
@@ -3000,9 +2999,9 @@ fn tool_execute_scope_allowed(auth: Option<&crate::api::oauth::AuthContext>) -> 
     })
 }
 
-/// Returns `true` when the caller is allowed to invoke the scout (tool_search) tool.
+/// Returns `true` when the caller is allowed to invoke the tool_search tool.
 ///
-/// Scout requires at least `lab:read`; invoke requires the stronger `lab` or `lab:admin`.
+/// tool_search requires at least `lab:read`; tool_execute requires the stronger `lab` or `lab:admin`.
 /// `None` auth means stdio transport — trusted by design (no per-request AuthContext).
 fn tool_search_scope_allowed(auth: Option<&crate::api::oauth::AuthContext>) -> bool {
     auth.is_none_or(|auth| {
@@ -3320,9 +3319,9 @@ mod tests {
         assert_eq!(estimate_tokens_args(&empty), 1);
 
         let mut populated = serde_json::Map::new();
-        populated.insert("name".into(), Value::String("scout".into()));
-        // `{"name":"scout"}` is 16 chars → 4 tokens.
-        assert_eq!(estimate_tokens_args(&populated), 4);
+        populated.insert("name".into(), Value::String("tool_search".into()));
+        // `{"name":"tool_search"}` is 22 chars → 6 tokens.
+        assert_eq!(estimate_tokens_args(&populated), 6);
     }
 
     #[tokio::test]
@@ -3682,8 +3681,8 @@ mod tests {
             [
                 "code_execute".to_string(),
                 "code_search".to_string(),
-                "invoke".to_string(),
-                "scout".to_string()
+                "tool_execute".to_string(),
+                "tool_search".to_string()
             ]
             .into_iter()
             .collect()
@@ -3822,7 +3821,7 @@ mod tests {
         });
         let client = ().serve(client_transport).await.expect("client starts");
 
-        let mut params = CallToolRequestParams::new("invoke".to_string());
+        let mut params = CallToolRequestParams::new("tool_execute".to_string());
         params.arguments = Some(
             serde_json::json!({
                 "name": "PowerShell",
@@ -3835,14 +3834,14 @@ mod tests {
         let result = client
             .call_tool(params)
             .await
-            .expect("invoke returns result");
+            .expect("tool_execute returns result");
 
         assert_eq!(result.is_error, Some(true));
         let envelope: Value =
             serde_json::from_str(tool_result_text(&result)).expect("error envelope is json");
         let error = &envelope["error"];
         assert_eq!(envelope["ok"], false);
-        assert_eq!(envelope["service"], "invoke");
+        assert_eq!(envelope["service"], "tool_execute");
         assert_eq!(envelope["action"], "call_tool");
         assert_eq!(error["kind"], "ambiguous_tool");
         assert_eq!(
@@ -4155,7 +4154,7 @@ mod tests {
 
         assert!(
             !super::tool_execute_scope_allowed(Some(&base)),
-            "lab:read can search but cannot invoke"
+            "lab:read can search but cannot execute"
         );
     }
 
@@ -4285,15 +4284,15 @@ mod tests {
         // None = stdio transport → trusted (always permitted)
         assert!(super::tool_search_scope_allowed(None));
 
-        // lab:read is the minimum acceptable scope for scout
+        // lab:read is the minimum acceptable scope for tool_search
         let read_only = make_auth(&["lab:read"]);
         assert!(super::tool_search_scope_allowed(Some(&read_only)));
 
-        // bare lab must also pass scout
+        // bare lab must also pass tool_search
         let lab = make_auth(&["lab"]);
         assert!(super::tool_search_scope_allowed(Some(&lab)));
 
-        // lab:admin must pass scout (identified as a gap in the original review)
+        // lab:admin must pass tool_search (identified as a gap in the original review)
         let admin = make_auth(&["lab:admin"]);
         assert!(super::tool_search_scope_allowed(Some(&admin)));
 
@@ -4308,22 +4307,22 @@ mod tests {
 
     #[test]
     fn scout_allows_lab_read_but_invoke_requires_lab() {
-        // Intentional asymmetry: scout is a read-only discovery operation and therefore
+        // Intentional asymmetry: tool_search is a read-only discovery operation and therefore
         // accepts lab:read in addition to the stronger lab / lab:admin.
-        // tool_execute (invoke) must NOT accept lab:read — it executes upstream tools
+        // tool_execute must NOT accept lab:read — it executes upstream tools
         // which may have side effects.
         let read_only = make_auth(&["lab:read"]);
 
-        // scout: lab:read is permitted
+        // tool_search: lab:read is permitted
         assert!(
             super::tool_search_scope_allowed(Some(&read_only)),
-            "scout should accept lab:read"
+            "tool_search should accept lab:read"
         );
 
-        // invoke: lab:read must NOT be sufficient
+        // tool_execute: lab:read must NOT be sufficient
         assert!(
             !super::tool_execute_scope_allowed(Some(&read_only)),
-            "invoke must reject lab:read — requires lab or lab:admin"
+            "tool_execute must reject lab:read — requires lab or lab:admin"
         );
     }
 

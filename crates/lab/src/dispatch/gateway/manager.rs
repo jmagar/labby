@@ -29,7 +29,7 @@ use super::config::{
     default_gateway_bearer_env_name, insert_protected_mcp_route, insert_upstream,
     load_gateway_config, remove_protected_mcp_route, remove_upstream, tombstone_removed_import,
     update_protected_mcp_route, update_upstream, validate_bearer_token_env_name,
-    validate_tool_search, write_gateway_config,
+    validate_code_mode, validate_tool_search, write_gateway_config,
 };
 use super::config_mutation::{read_env_values, values_to_service_creds};
 use super::index::{SearchHit, ToolIndex};
@@ -1671,6 +1671,21 @@ impl GatewayManager {
         self.persist_config(cfg).await?;
         self.reload_with_origin_unlocked(origin, owner).await?;
         Ok(self.tool_search_config().await)
+    }
+
+    pub async fn set_code_mode_config(
+        &self,
+        next: crate::config::CodeModeConfig,
+        origin: Option<&str>,
+        owner: Option<UpstreamRuntimeOwner>,
+    ) -> Result<crate::config::CodeModeConfig, ToolError> {
+        validate_code_mode(&next)?;
+        let _mutation_guard = self.config_mutation.lock().await;
+        let mut cfg = self.config.read().await.clone();
+        cfg.code_mode = next;
+        self.persist_config(cfg).await?;
+        self.reload_with_origin_unlocked(origin, owner).await?;
+        Ok(self.code_mode_config().await)
     }
 
     pub async fn protected_route_list(&self) -> Vec<ProtectedMcpRouteConfig> {

@@ -12,6 +12,8 @@ import type {
   SupportedService,
   ToolSearchConfig,
   ToolSearchConfigInput,
+  CodeModeConfig,
+  CodeModeConfigInput,
   ProtectedMcpRoute,
   ProtectedMcpRouteInput,
   ProtectedMcpRouteTestResult,
@@ -574,6 +576,21 @@ export const gatewayApi = {
   ): Promise<ToolSearchConfig> {
     return gatewayAction<ToolSearchConfig>(
       'gateway.tool_search.set',
+      confirmGatewayParams(input),
+      signal,
+    )
+  },
+
+  async getCodeModeConfig(signal?: AbortSignal): Promise<CodeModeConfig> {
+    return gatewayAction<CodeModeConfig>('gateway.code_mode.get', {}, signal)
+  },
+
+  async setCodeModeConfig(
+    input: CodeModeConfigInput,
+    signal?: AbortSignal,
+  ): Promise<CodeModeConfig> {
+    return gatewayAction<CodeModeConfig>(
+      'gateway.code_mode.set',
       confirmGatewayParams(input),
       signal,
     )

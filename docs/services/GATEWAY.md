@@ -91,8 +91,8 @@ When enabled, Lab hides raw proxied upstream tools from MCP `list_tools()` and e
 
 | Tool | Purpose |
 |------|---------|
-| `scout` | Search healthy discovered Lab and upstream tools across the gateway. Legacy alias: `tool_search`. |
-| `invoke` | Invoke one tool returned by `scout`. Legacy aliases: `tool_execute`, `tool_invoke`. |
+| `tool_search` | Search healthy discovered Lab and upstream tools across the gateway. Legacy alias: `scout`. |
+| `tool_execute` | Invoke one tool returned by `tool_search`. Legacy aliases: `invoke`, `tool_invoke`. |
 | `code_search` | Return Code Mode candidates with stable ids and schema availability. |
 | `code_schema` | Return the exact schema/contract for one `code_search` id. |
 | `code_execute` | Execute a constrained Code Mode snippet through the gateway broker when enabled. |
@@ -120,11 +120,21 @@ labby gateway tool-search disable
 HTTP/MCP gateway management actions:
 
 ```json
-{ "action": "gateway.scout.get", "params": {} }
+{ "action": "gateway.tool_search.get", "params": {} }
 ```
 
 ```json
-{ "action": "gateway.scout.set", "params": { "enabled": true, "top_k_default": 10, "max_tools": 5000 } }
+{ "action": "gateway.tool_search.set", "params": { "enabled": true, "top_k_default": 10, "max_tools": 5000 } }
+```
+
+Code Mode management actions:
+
+```json
+{ "action": "gateway.code_mode.get", "params": {} }
+```
+
+```json
+{ "action": "gateway.code_mode.set", "params": { "enabled": true, "timeout_ms": 5000, "max_tool_calls": 8 } }
 ```
 
 Search call shape on the MCP surface:
@@ -179,7 +189,7 @@ Lab ids use `lab::<service>.<action>` and return an `ActionSpec`-derived
 contract (`schema_format: "lab_action_spec"`). Upstream ids use
 `upstream::<upstream-name>::<tool-name>` and return the upstream JSON Schema
 cached by the gateway (`schema_format: "json_schema"`). `code_schema` requires
-the same schema visibility scope as `scout include_schema=true`: `lab` or
+the same schema visibility scope as `tool_search include_schema=true`: `lab` or
 `lab:admin`.
 
 `code_execute` is disabled by default. Enable it explicitly with:
@@ -214,14 +224,14 @@ Rules:
 - `include_schema` defaults to `false`; schemas are sanitized before return when requested
 - `code_search` is read-only discovery and accepts `lab:read`, `lab`, or `lab:admin`
 - `code_schema` exposes full schemas and requires `lab` or `lab:admin`
-- `code_execute` requires `lab` or `lab:admin`, is disabled unless `[code_mode].enabled = true`, and brokers calls through the same gateway visibility checks as `invoke`
+- `code_execute` requires `lab` or `lab:admin`, is disabled unless `[code_mode].enabled = true`, and brokers calls through the same gateway visibility checks as `tool_execute`
 - destructive Lab actions in MCP Code Mode require both top-level `code_execute.confirm = true` and per-call `params.confirm = true`; Code Mode does not prompt per action via MCP elicitation
 - gateway action provenance fields (`origin` and `owner`) are reserved in Code Mode and are overwritten by the broker
 - `code_execute` enforces `timeout_ms` by killing the child process and enforces `max_tool_calls` in the parent before brokering each call
 - invalid Code Mode ids return `invalid_code_mode_id`
 - unavailable or overlarge upstream schemas return `schema_unavailable`
 - old `[[upstream]].tool_search` blocks are accepted only as migration input and are dropped on the next gateway config write
-- `gateway.update` rejects `patch.tool_search`; use `gateway.scout.set` instead
+- `gateway.update` rejects `patch.tool_search`; use `gateway.tool_search.set` instead
 
 Tool-search observability:
 

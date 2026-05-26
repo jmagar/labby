@@ -35,35 +35,113 @@ pub const ACTIONS: &[ActionSpec] = &[
         params: &[],
     },
     ActionSpec {
-        name: "gateway.scout.get",
-        description: "Read the gateway-wide scout (tool discovery) settings",
+        name: "gateway.tool_search.get",
+        description: "Read the gateway-wide tool_search settings",
         destructive: false,
-        returns: "ScoutConfig",
+        returns: "ToolSearchConfig",
         params: &[],
     },
     ActionSpec {
-        name: "gateway.scout.set",
-        description: "Enable or disable gateway-wide scout/invoke mode for all exposed upstream tools",
+        name: "gateway.tool_search.set",
+        description: "Enable or disable gateway-wide tool_search/tool_execute mode for all exposed upstream tools",
         destructive: true,
-        returns: "ScoutConfig",
+        returns: "ToolSearchConfig",
         params: &[
             ParamSpec {
                 name: "enabled",
                 ty: "boolean",
                 required: true,
-                description: "Whether scout/invoke mode is enabled for the gateway",
+                description: "Whether tool_search/tool_execute mode is enabled for the gateway",
             },
             ParamSpec {
                 name: "top_k_default",
                 ty: "integer",
                 required: false,
-                description: "Default result count for scout when top_k is omitted",
+                description: "Default result count for tool_search when top_k is omitted",
             },
             ParamSpec {
                 name: "max_tools",
                 ty: "integer",
                 required: false,
                 description: "Maximum number of tools to index per rebuild",
+            },
+        ],
+    },
+    ActionSpec {
+        name: "gateway.scout.get",
+        description: "Legacy alias for gateway.tool_search.get",
+        destructive: false,
+        returns: "ToolSearchConfig",
+        params: &[],
+    },
+    ActionSpec {
+        name: "gateway.scout.set",
+        description: "Legacy alias for gateway.tool_search.set",
+        destructive: true,
+        returns: "ToolSearchConfig",
+        params: &[
+            ParamSpec {
+                name: "enabled",
+                ty: "boolean",
+                required: true,
+                description: "Whether tool_search/tool_execute mode is enabled for the gateway",
+            },
+            ParamSpec {
+                name: "top_k_default",
+                ty: "integer",
+                required: false,
+                description: "Default result count for tool_search when top_k is omitted",
+            },
+            ParamSpec {
+                name: "max_tools",
+                ty: "integer",
+                required: false,
+                description: "Maximum number of tools to index per rebuild",
+            },
+        ],
+    },
+    ActionSpec {
+        name: "gateway.code_mode.get",
+        description: "Read gateway-wide Code Mode execution settings",
+        destructive: false,
+        returns: "CodeModeConfig",
+        params: &[],
+    },
+    ActionSpec {
+        name: "gateway.code_mode.set",
+        description: "Enable or disable gateway-wide Code Mode execution",
+        destructive: true,
+        returns: "CodeModeConfig",
+        params: &[
+            ParamSpec {
+                name: "enabled",
+                ty: "boolean",
+                required: true,
+                description: "Whether Code Mode execution is enabled for the gateway",
+            },
+            ParamSpec {
+                name: "timeout_ms",
+                ty: "integer",
+                required: false,
+                description: "Maximum wall-clock time for one Code Mode execution",
+            },
+            ParamSpec {
+                name: "max_tool_calls",
+                ty: "integer",
+                required: false,
+                description: "Maximum host-brokered tool calls allowed in one execution",
+            },
+            ParamSpec {
+                name: "max_response_bytes",
+                ty: "integer",
+                required: false,
+                description: "Maximum serialized response envelope size",
+            },
+            ParamSpec {
+                name: "max_response_tokens",
+                ty: "integer",
+                required: false,
+                description: "Approximate maximum response tokens",
             },
         ],
     },
@@ -784,6 +862,7 @@ mod tests {
     fn gateway_read_actions_remain_non_destructive() {
         for action in [
             "gateway.list",
+            "gateway.tool_search.get",
             "gateway.get",
             "gateway.test",
             "gateway.status",
@@ -801,5 +880,35 @@ mod tests {
                 .expect("gateway action");
             assert!(!spec.destructive, "{action} should remain non-destructive");
         }
+    }
+
+    #[test]
+    fn gateway_tool_search_actions_are_primary_catalog_entries() {
+        let get = ACTIONS
+            .iter()
+            .find(|spec| spec.name == "gateway.tool_search.get")
+            .expect("gateway.tool_search.get catalog entry");
+        assert!(!get.destructive);
+
+        let set = ACTIONS
+            .iter()
+            .find(|spec| spec.name == "gateway.tool_search.set")
+            .expect("gateway.tool_search.set catalog entry");
+        assert!(set.destructive);
+    }
+
+    #[test]
+    fn gateway_code_mode_actions_are_catalog_entries() {
+        let get = ACTIONS
+            .iter()
+            .find(|spec| spec.name == "gateway.code_mode.get")
+            .expect("gateway.code_mode.get catalog entry");
+        assert!(!get.destructive);
+
+        let set = ACTIONS
+            .iter()
+            .find(|spec| spec.name == "gateway.code_mode.set")
+            .expect("gateway.code_mode.set catalog entry");
+        assert!(set.destructive);
     }
 }

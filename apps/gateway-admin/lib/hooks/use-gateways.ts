@@ -30,6 +30,8 @@ import type {
   SupportedService,
   ToolSearchConfig,
   ToolSearchConfigInput,
+  CodeModeConfig,
+  CodeModeConfigInput,
   ProtectedMcpRoute,
   ProtectedMcpRouteInput,
   ProtectedMcpRouteTestResult,
@@ -45,7 +47,15 @@ const DEFAULT_TOOL_SEARCH_CONFIG: ToolSearchConfig = {
   top_k_default: 10,
   max_tools: 5000,
 }
+const DEFAULT_CODE_MODE_CONFIG: CodeModeConfig = {
+  enabled: false,
+  timeout_ms: 5000,
+  max_tool_calls: 8,
+  max_response_bytes: 24 * 1024,
+  max_response_tokens: 6000,
+}
 let mockToolSearchConfig: ToolSearchConfig = DEFAULT_TOOL_SEARCH_CONFIG
+let mockCodeModeConfig: CodeModeConfig = DEFAULT_CODE_MODE_CONFIG
 let mockProtectedRoutes: ProtectedMcpRoute[] = [
   {
     name: 'tools',
@@ -148,6 +158,14 @@ const fetchToolSearchConfig = async (): Promise<ToolSearchConfig> => {
   return gatewayApi.getToolSearchConfig()
 }
 
+const fetchCodeModeConfig = async (): Promise<CodeModeConfig> => {
+  if (USE_MOCK_DATA) {
+    await mockDelay()
+    return mockCodeModeConfig
+  }
+  return gatewayApi.getCodeModeConfig()
+}
+
 const fetchProtectedRoutes = async (): Promise<ProtectedMcpRoute[]> => {
   if (USE_MOCK_DATA) {
     await mockDelay()
@@ -164,6 +182,7 @@ export const SUPPORTED_SERVICES_KEY = '/gateway-supported-services'
 export const serviceConfigKey = (service: string) => `/gateway-service-config/${service}`
 export const serviceActionsKey = (service: string) => `/gateway-service-actions/${service}`
 export const TOOL_SEARCH_CONFIG_KEY = '/gateway-tool-search-config'
+export const CODE_MODE_CONFIG_KEY = '/gateway-code-mode-config'
 export const PROTECTED_MCP_ROUTES_KEY = '/gateway-protected-mcp-routes'
 
 async function refreshGatewayCache(id?: string, extraKeys: string[] = []) {
@@ -240,6 +259,14 @@ export function useGatewayToolSearchConfig() {
   return useSWR<ToolSearchConfig>(TOOL_SEARCH_CONFIG_KEY, fetchToolSearchConfig, {
     revalidateOnFocus: false,
     fallbackData: USE_MOCK_DATA ? DEFAULT_TOOL_SEARCH_CONFIG : undefined,
+    revalidateOnMount: !USE_MOCK_DATA,
+  })
+}
+
+export function useGatewayCodeModeConfig() {
+  return useSWR<CodeModeConfig>(CODE_MODE_CONFIG_KEY, fetchCodeModeConfig, {
+    revalidateOnFocus: false,
+    fallbackData: USE_MOCK_DATA ? DEFAULT_CODE_MODE_CONFIG : undefined,
     revalidateOnMount: !USE_MOCK_DATA,
   })
 }
@@ -559,6 +586,21 @@ export function useGatewayMutations() {
     return result
   }, [])
 
+  const setCodeModeConfig = useCallback(async (input: CodeModeConfigInput): Promise<CodeModeConfig> => {
+    if (USE_MOCK_DATA) {
+      await mockDelay()
+      mockCodeModeConfig = {
+        ...mockCodeModeConfig,
+        ...input,
+      }
+      await mutate(CODE_MODE_CONFIG_KEY, mockCodeModeConfig, false)
+      return mockCodeModeConfig
+    }
+    const result = await gatewayApi.setCodeModeConfig(input)
+    await mutate(CODE_MODE_CONFIG_KEY, result, false)
+    return result
+  }, [])
+
   const addProtectedRoute = useCallback(
     async (route: ProtectedMcpRouteInput, signal?: AbortSignal): Promise<ProtectedMcpRoute> => {
       if (USE_MOCK_DATA) {
@@ -762,6 +804,7 @@ export function useGatewayMutations() {
     previewExposurePolicy,
     saveServiceConfig,
     setToolSearchConfig,
+    setCodeModeConfig,
     addProtectedRoute,
     updateProtectedRoute,
     removeProtectedRoute,

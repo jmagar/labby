@@ -402,6 +402,54 @@ test('gatewayApi.setToolSearchConfig sends confirm=true for gateway-wide updates
   )
 })
 
+test('gatewayApi.getCodeModeConfig reads gateway-wide code mode settings', async () => {
+  await withGatewayFetch(
+    {
+      'gateway.code_mode.get': () => ({
+        enabled: true,
+        timeout_ms: 2500,
+        max_tool_calls: 3,
+        max_response_bytes: 12000,
+        max_response_tokens: 3000,
+      }),
+    },
+    async (requests) => {
+      const config = await gatewayApi.getCodeModeConfig()
+
+      assert.deepEqual(config, {
+        enabled: true,
+        timeout_ms: 2500,
+        max_tool_calls: 3,
+        max_response_bytes: 12000,
+        max_response_tokens: 3000,
+      })
+      assert.equal(requests[0]?.action, 'gateway.code_mode.get')
+      assert.deepEqual(requests[0]?.params, {})
+    },
+  )
+})
+
+test('gatewayApi.setCodeModeConfig sends confirm=true for gateway-wide updates', async () => {
+  await withGatewayFetch(
+    {
+      'gateway.code_mode.set': (params) => params,
+    },
+    async (requests) => {
+      const config = await gatewayApi.setCodeModeConfig({
+        enabled: true,
+        timeout_ms: 2500,
+        max_tool_calls: 3,
+      })
+
+      assert.equal(config.enabled, true)
+      assert.equal(config.timeout_ms, 2500)
+      assert.equal(config.max_tool_calls, 3)
+      assert.equal(requests[0]?.action, 'gateway.code_mode.set')
+      assert.equal(requests[0]?.params.confirm, true)
+    },
+  )
+})
+
 test('gatewayApi protected route actions use gateway service action payloads', async () => {
   const route = {
     name: 'tools',

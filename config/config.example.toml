@@ -143,6 +143,17 @@
 # top_k_default = 10                        # valid range: 1..=50
 # max_tools = 5000                          # valid range: 1..=10000
 
+# ── Gateway Code Mode ────────────────────────────────────────────────────────
+
+[code_mode]
+# Enable constrained code_execute snippets for upstream tools discovered through
+# tool_search. Execution is disabled by default even when tool_search is enabled.
+# enabled = false                           # default: false
+# timeout_ms = 5000                         # valid range: 1..=60000
+# max_tool_calls = 8                        # valid range: 1..=50
+# max_response_bytes = 24576                # valid range: 1024..=1048576
+# max_response_tokens = 6000                # valid range: 256..=256000
+
 # ── OAuth Relay Machines ─────────────────────────────────────────────────────
 
 # Full callback base URL for a named remote OAuth listener.

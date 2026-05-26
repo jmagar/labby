@@ -268,6 +268,22 @@ export interface ToolSearchConfigInput {
   max_tools?: number
 }
 
+export interface CodeModeConfig {
+  enabled: boolean
+  timeout_ms: number
+  max_tool_calls: number
+  max_response_bytes: number
+  max_response_tokens: number
+}
+
+export interface CodeModeConfigInput {
+  enabled: boolean
+  timeout_ms?: number
+  max_tool_calls?: number
+  max_response_bytes?: number
+  max_response_tokens?: number
+}
+
 export interface ProtectedMcpRoute {
   name: string
   enabled: boolean
