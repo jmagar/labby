@@ -145,6 +145,14 @@ workspace manifests unless the lane explicitly owns integration for that wave.
 - `crates/lab/src/dispatch/stash/**`
 - stash runtime builder and tests.
 
+`lab-oauth` lane owns:
+
+- `crates/lab/src/oauth/**`
+- auth/OAuth route fragments currently wired through `crates/lab/src/api/router.rs`
+- development auth flow runtime pieces,
+- OAuth metadata/callback/token administration route extraction,
+- OAuth runtime builder and tests.
+
 `lab-logs` lane owns:
 
 - `crates/lab/src/dispatch/logs.rs`
@@ -242,6 +250,7 @@ Run these lanes in parallel:
 - `lab-marketplace`
 - `lab-fleet`
 - `lab-stash`
+- `lab-oauth`
 - `lab-logs`
 - `lab-workspace`
 - `lab-setup`
@@ -321,8 +330,8 @@ Exit criteria:
 1. Start from the integration branch.
 2. Merge shared platform lanes first.
 3. Merge product lanes from smallest/least coupled to largest when possible:
-   `lab-doctor`, `lab-stash`, `lab-workspace`, `lab-logs`, `lab-fleet`,
-   `lab-marketplace`, `lab-acp`, `lab-gateway`.
+   `lab-doctor`, `lab-stash`, `lab-workspace`, `lab-logs`, `lab-oauth`,
+   `lab-fleet`, `lab-marketplace`, `lab-acp`, `lab-gateway`.
 4. Merge frontend lanes after the first product REST/OpenAPI contract is stable.
 5. Merge standalone binaries last.
 

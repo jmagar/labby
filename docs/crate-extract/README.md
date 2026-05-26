@@ -20,6 +20,11 @@ Lab into reusable Rust crates, TypeScript packages, and standalone binaries.
 - `testing-strategy.md` — verification strategy and future CI gates.
 - `open-questions.md` — unresolved decisions intentionally kept out of the spec.
 
+## Decision Records
+
+- `../adr/README.md` — accepted ADRs derived from this crate/package extraction
+  plan.
+
 ## Reading Order
 
 1. `spec.md`
@@ -33,3 +38,4 @@ Lab into reusable Rust crates, TypeScript packages, and standalone binaries.
 9. `migration-roadmap.md`
 10. `testing-strategy.md`
 11. `open-questions.md`
+12. `../adr/README.md`

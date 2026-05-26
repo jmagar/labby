@@ -7,6 +7,8 @@ The docs are split by topic so contributors do not have to recover architecture,
 ## Start Here
 
 - Read [ARCH.md](./ARCH.md) to understand the crate split, runtime surfaces, and shared contracts.
+- Use [crate-extract/README.md](./crate-extract/README.md) for the reusable crate/package extraction spec, contract, execution strategy, and open questions.
+- Use [adr/README.md](./adr/README.md) for accepted architecture decision records.
 - Read [CONVENTIONS.md](./CONVENTIONS.md) before changing implementation patterns or core APIs.
 - Use [SERVICES.md](./dev/SERVICES.md), [CLI.md](./surfaces/CLI.md), [MCP.md](./surfaces/MCP.md), and [TUI.md](./surfaces/TUI.md) for surface-specific behavior.
 - Use [design/CLI_DESIGN_SYSTEM.md](./design/CLI_DESIGN_SYSTEM.md) for the human-readable CLI output language and shared color policy.
@@ -87,6 +89,10 @@ The docs are split by topic so contributors do not have to recover architecture,
   System shape, crate boundaries, shared contracts, and runtime flow.
 - [TECH.md](./TECH.md)
   Stack choices, toolchain, feature posture, verification surfaces, and release tooling.
+- [crate-extract/README.md](./crate-extract/README.md)
+  Architecture, contract, dependency map, execution strategy, and verification plan for extracting Lab into reusable Rust crates, TypeScript packages, and standalone binaries.
+- [adr/README.md](./adr/README.md)
+  Accepted architecture decision records.
 - [MCP.md](./surfaces/MCP.md)
   Transport model, prompts/completions/logging capabilities, one-tool-per-service design, discovery, envelopes, and destructive-op elicitation.
 - [RMCP.md](./surfaces/RMCP.md)
@@ -249,3 +255,5 @@ Use the smallest correct doc:
   See [CONVENTIONS.md](./CONVENTIONS.md).
 - “What is the expected CI and release behavior?”
   See [OPERATIONS.md](./OPERATIONS.md) and [TECH.md](./TECH.md).
+- “How do we extract Lab into reusable crates/packages?”
+  See [crate-extract/README.md](./crate-extract/README.md).

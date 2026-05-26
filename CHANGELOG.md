@@ -8,6 +8,25 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.17.6] - 2026-05-26
+
+### Highlights
+
+- **Crate extraction ADRs**: added accepted architecture decision records for the reusable Rust crate, TypeScript package, runtime composition, surface, client-generation, distribution, execution-lane, and verification decisions.
+- **Decision record index**: added a dedicated ADR index and linked it from the crate-extract and main documentation entrypoints.
+- **Extraction execution ownership**: captured OAuth lane ownership and merge ordering updates in the extraction execution strategy.
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | docs: add crate extraction ADR records |
+
+### Version bumps
+
+- Rust workspace: `0.17.5 -> 0.17.6`
+- Gateway admin package: `0.17.5 -> 0.17.6`
+
+---
+
 ## [0.17.5] - 2026-05-26
 
 ### Highlights
