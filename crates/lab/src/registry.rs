@@ -151,11 +151,8 @@ impl std::fmt::Debug for RegisteredService {
 
 impl RegisteredService {
     /// Construct a local/bootstrap/operator service registration.
-    ///
-    /// Product runtime builders use this when returning registry fragments so
-    /// the global registry does not have to duplicate service metadata shape.
     #[must_use]
-    pub const fn bootstrap(
+    pub const fn bootstrap_operator(
         name: &'static str,
         description: &'static str,
         category: &'static str,
@@ -541,7 +538,13 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
     // resource should read `dispatch::fs::catalog::ACTIONS` directly, not via
     // this registry entry.
     #[cfg(feature = "fs")]
-    reg.register(crate::workspace::WorkspaceRuntime::registered_service());
+    reg.register(RegisteredService::bootstrap_operator(
+        "fs",
+        "Workspace filesystem browser (read-only, deny-listed)",
+        "bootstrap",
+        crate::mcp::services::fs::ACTIONS,
+        dispatch_fn!(crate::mcp::services::fs::dispatch),
+    ));
 
     reg
 }
@@ -902,7 +905,7 @@ mod tests {
 
     #[cfg(feature = "fs")]
     #[test]
-    fn default_registry_uses_workspace_runtime_fs_fragment() {
+    fn default_registry_uses_mcp_filtered_fs_actions() {
         let registry = build_default_registry();
         let fs = registry
             .services()
@@ -916,7 +919,7 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_constructor_sets_available_status_for_actions() {
+    fn bootstrap_operator_constructor_sets_available_status_for_actions() {
         static ACTIONS: &[ActionSpec] = &[ActionSpec {
             name: "demo.list",
             description: "Demo action",
@@ -925,7 +928,7 @@ mod tests {
             returns: "null",
         }];
 
-        let service = RegisteredService::bootstrap(
+        let service = RegisteredService::bootstrap_operator(
             "demo",
             "Demo service",
             "bootstrap",
@@ -941,9 +944,14 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_constructor_sets_stub_status_for_empty_actions() {
-        let service =
-            RegisteredService::bootstrap("demo", "Demo service", "bootstrap", &[], noop_dispatch);
+    fn bootstrap_operator_constructor_sets_stub_status_for_empty_actions() {
+        let service = RegisteredService::bootstrap_operator(
+            "demo",
+            "Demo service",
+            "bootstrap",
+            &[],
+            noop_dispatch,
+        );
 
         assert_eq!(service.status, "stub");
     }

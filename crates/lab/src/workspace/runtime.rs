@@ -1,50 +1,31 @@
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
-
-use axum::Router;
-use serde_json::Value;
-
-use crate::api::state::AppState;
-use crate::config::LabConfig;
-use crate::dispatch::error::ToolError;
-use crate::registry::{DispatchFn, RegisteredService};
-
-fn workspace_dispatch(
-    action: String,
-    params: Value,
-) -> Pin<Box<dyn Future<Output = Result<Value, ToolError>> + Send>> {
-    Box::pin(async move { crate::mcp::services::fs::dispatch(&action, params).await })
-}
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceRuntime {
-    workspace_root: Option<PathBuf>,
-    workspace_root_error: Option<String>,
+    workspace_root: Result<PathBuf, String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WorkspaceRuntimeConfig {
+    pub root: Option<PathBuf>,
+    pub home: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceRuntimeBuilder {
-    config: LabConfig,
+    config: WorkspaceRuntimeConfig,
 }
 
 impl WorkspaceRuntimeBuilder {
     #[must_use]
-    pub fn new(config: LabConfig) -> Self {
+    pub fn new(config: WorkspaceRuntimeConfig) -> Self {
         Self { config }
     }
 
     #[must_use]
     pub fn build(self) -> WorkspaceRuntime {
-        match crate::dispatch::fs::resolve_workspace_root(&self.config) {
-            Ok(workspace_root) => WorkspaceRuntime {
-                workspace_root: Some(workspace_root),
-                workspace_root_error: None,
-            },
-            Err(error) => WorkspaceRuntime {
-                workspace_root: None,
-                workspace_root_error: Some(error.to_string()),
-            },
+        WorkspaceRuntime {
+            workspace_root: resolve_workspace_root(&self.config).map_err(|error| error.to_string()),
         }
     }
 }
@@ -52,34 +33,81 @@ impl WorkspaceRuntimeBuilder {
 impl WorkspaceRuntime {
     #[must_use]
     pub fn workspace_root(&self) -> Option<&Path> {
-        self.workspace_root.as_deref()
+        self.workspace_root.as_deref().ok()
     }
 
     #[must_use]
     pub fn workspace_root_error(&self) -> Option<&str> {
-        self.workspace_root_error.as_deref()
+        self.workspace_root.as_ref().err().map(String::as_str)
     }
 
     #[must_use]
-    pub fn registered_service() -> RegisteredService {
-        let dispatch: DispatchFn = workspace_dispatch;
-        RegisteredService::bootstrap(
-            "fs",
-            "Workspace filesystem browser (read-only, deny-listed)",
-            "bootstrap",
-            crate::mcp::services::fs::ACTIONS,
-            dispatch,
-        )
+    pub const fn should_mount_http_routes(
+        web_ui_auth_disabled: bool,
+        api_auth_configured: bool,
+    ) -> bool {
+        !web_ui_auth_disabled || api_auth_configured
     }
+}
 
-    #[must_use]
-    pub fn http_routes(state: AppState, api_auth_configured: bool) -> Option<Router<AppState>> {
-        if state.web_ui_auth_disabled && !api_auth_configured {
-            return None;
+fn resolve_workspace_root(config: &WorkspaceRuntimeConfig) -> std::io::Result<PathBuf> {
+    let root = match &config.root {
+        Some(root) => {
+            let home = config.home.as_ref().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "HOME is not set and workspace.root uses home expansion",
+                )
+            })?;
+            expand_home_path(root, home)
         }
+        None => {
+            let home = config.home.as_ref().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "HOME is not set and workspace.root is not configured",
+                )
+            })?;
+            home.join(".lab").join("stash")
+        }
+    };
+    canonicalize_workspace_dir(root)
+}
 
-        Some(crate::api::services::fs::routes(state))
+fn expand_home_path(path: &Path, home: &Path) -> PathBuf {
+    let raw = path.as_os_str().to_string_lossy();
+    if raw == "~" {
+        return home.to_path_buf();
     }
+    if let Some(rest) = raw.strip_prefix("~/") {
+        return home.join(rest);
+    }
+    path.to_path_buf()
+}
+
+fn canonicalize_workspace_dir(path: PathBuf) -> std::io::Result<PathBuf> {
+    if !path.is_absolute() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("workspace.root must be absolute; got {}", path.display()),
+        ));
+    }
+    if path.exists() && !std::fs::metadata(&path)?.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("workspace.root is not a directory: {}", path.display()),
+        ));
+    }
+    std::fs::create_dir_all(&path)?;
+    let canonical = std::fs::canonicalize(&path)?;
+    let meta = std::fs::metadata(&canonical)?;
+    if !meta.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("workspace.root is not a directory: {}", canonical.display()),
+        ));
+    }
+    Ok(canonical)
 }
 
 #[cfg(test)]
@@ -89,8 +117,10 @@ mod tests {
     #[test]
     fn builder_resolves_configured_workspace_root() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let mut config = LabConfig::default();
-        config.workspace.root = Some(temp.path().to_path_buf());
+        let config = WorkspaceRuntimeConfig {
+            root: Some(temp.path().to_path_buf()),
+            home: Some(temp.path().to_path_buf()),
+        };
 
         let runtime = WorkspaceRuntimeBuilder::new(config).build();
 
@@ -106,8 +136,10 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let file = temp.path().join("not-a-dir");
         std::fs::write(&file, b"not a directory").expect("write");
-        let mut config = LabConfig::default();
-        config.workspace.root = Some(file);
+        let config = WorkspaceRuntimeConfig {
+            root: Some(file),
+            home: Some(temp.path().to_path_buf()),
+        };
 
         let runtime = WorkspaceRuntimeBuilder::new(config).build();
 
@@ -116,26 +148,44 @@ mod tests {
     }
 
     #[test]
-    fn registered_service_uses_mcp_filtered_actions() {
-        let service = WorkspaceRuntime::registered_service();
-        let names: Vec<&str> = service.actions.iter().map(|action| action.name).collect();
+    fn builder_uses_home_default_when_root_is_unset() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = WorkspaceRuntimeConfig {
+            root: None,
+            home: Some(temp.path().to_path_buf()),
+        };
 
-        assert_eq!(service.name, "fs");
-        assert!(names.contains(&"fs.list"));
-        assert!(!names.contains(&"fs.preview"));
+        let runtime = WorkspaceRuntimeBuilder::new(config).build();
+
+        assert_eq!(
+            runtime.workspace_root().expect("workspace root"),
+            std::fs::canonicalize(temp.path().join(".lab").join("stash")).expect("canonical")
+        );
     }
 
-    #[tokio::test]
-    async fn http_routes_refuse_disabled_auth_without_api_auth() {
-        let state = AppState::new().with_web_ui_auth_disabled(true);
+    #[test]
+    fn builder_expands_tilde_workspace_root() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = WorkspaceRuntimeConfig {
+            root: Some(PathBuf::from("~/stash")),
+            home: Some(temp.path().to_path_buf()),
+        };
 
-        assert!(WorkspaceRuntime::http_routes(state, false).is_none());
+        let runtime = WorkspaceRuntimeBuilder::new(config).build();
+
+        assert_eq!(
+            runtime.workspace_root().expect("workspace root"),
+            std::fs::canonicalize(temp.path().join("stash")).expect("canonical")
+        );
     }
 
-    #[tokio::test]
-    async fn http_routes_mount_when_api_auth_is_configured() {
-        let state = AppState::new().with_web_ui_auth_disabled(true);
+    #[test]
+    fn mount_policy_refuses_disabled_auth_without_api_auth() {
+        assert!(!WorkspaceRuntime::should_mount_http_routes(true, false));
+    }
 
-        assert!(WorkspaceRuntime::http_routes(state, true).is_some());
+    #[test]
+    fn mount_policy_allows_disabled_auth_when_api_auth_is_configured() {
+        assert!(WorkspaceRuntime::should_mount_http_routes(true, true));
     }
 }

@@ -8,4 +8,4 @@
 mod runtime;
 
 #[cfg(feature = "fs")]
-pub use runtime::{WorkspaceRuntime, WorkspaceRuntimeBuilder};
+pub use runtime::{WorkspaceRuntime, WorkspaceRuntimeBuilder, WorkspaceRuntimeConfig};
