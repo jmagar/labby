@@ -116,7 +116,7 @@ mod workspace_runtime_constructor_tests {
 Run:
 
 ```bash
-cargo test -p lab bootstrap_constructor_sets_available_status_for_actions --all-features
+cargo test -p labby bootstrap_constructor_sets_available_status_for_actions --all-features
 ```
 
 Expected: compile failure because `RegisteredService::bootstrap` does not exist.
@@ -157,7 +157,7 @@ impl RegisteredService {
 Run:
 
 ```bash
-cargo test -p lab bootstrap_constructor --all-features
+cargo test -p labby bootstrap_constructor --all-features
 ```
 
 Expected: both constructor tests pass.
@@ -340,7 +340,7 @@ pub mod workspace;
 Run:
 
 ```bash
-cargo test -p lab workspace::runtime::tests --all-features
+cargo test -p labby workspace::runtime::tests --all-features
 ```
 
 Expected: tests compile or fail only on exact `LabConfig.workspace.root` field access. If the field name differs, inspect `crates/lab/src/config.rs` and update the test assignment to the actual workspace-root field.
@@ -361,7 +361,7 @@ Do not change `dispatch::fs::resolve_workspace_root`; the builder must use the e
 Run:
 
 ```bash
-cargo test -p lab workspace::runtime::tests --all-features
+cargo test -p labby workspace::runtime::tests --all-features
 ```
 
 Expected: all workspace runtime tests pass.
@@ -408,7 +408,7 @@ mod workspace_runtime_registry_tests {
 Run:
 
 ```bash
-cargo test -p lab default_registry_uses_workspace_runtime_fs_fragment --all-features
+cargo test -p labby default_registry_uses_workspace_runtime_fs_fragment --all-features
 ```
 
 Expected: pass before the code change is possible, because current behavior already filters `fs.preview`. Keep this test anyway; it locks the invariant before replacing the inline registration.
@@ -444,7 +444,7 @@ Leave the existing security comment above the registration in place. It explains
 Run:
 
 ```bash
-cargo test -p lab default_registry_uses_workspace_runtime_fs_fragment --all-features
+cargo test -p labby default_registry_uses_workspace_runtime_fs_fragment --all-features
 ```
 
 Expected: pass.
@@ -454,7 +454,7 @@ Expected: pass.
 Run:
 
 ```bash
-cargo test -p lab registry --all-features
+cargo test -p labby registry --all-features
 ```
 
 Expected: pass.
@@ -555,7 +555,7 @@ This intentionally drops the raw error value from the warning because the builde
 Run:
 
 ```bash
-cargo check -p lab --all-features
+cargo check -p labby --all-features
 ```
 
 Expected: pass.
@@ -579,13 +579,13 @@ git commit -m "refactor: resolve workspace root through runtime builder"
 Run the existing router tests that cover disabled-auth behavior:
 
 ```bash
-cargo test -p lab setup_actions_require_auth_when_web_auth_disabled_without_bearer --all-features
+cargo test -p labby setup_actions_require_auth_when_web_auth_disabled_without_bearer --all-features
 ```
 
 Expected: pass. If the exact test name has changed, run:
 
 ```bash
-cargo test -p lab web_auth_disabled --all-features
+cargo test -p labby web_auth_disabled --all-features
 ```
 
 Expected: pass.
@@ -625,7 +625,7 @@ Keep the surrounding security comment. The runtime now owns the boolean decision
 Run:
 
 ```bash
-cargo test -p lab --test api_fs_headers --all-features
+cargo test -p labby --test api_fs_headers --all-features
 ```
 
 Expected: pass.
@@ -635,7 +635,7 @@ Expected: pass.
 Run:
 
 ```bash
-cargo test -p lab router --all-features
+cargo test -p labby router --all-features
 ```
 
 Expected: pass.
@@ -659,7 +659,7 @@ git commit -m "refactor: mount fs routes through workspace runtime"
 Run:
 
 ```bash
-cargo test -p lab workspace --all-features
+cargo test -p labby workspace --all-features
 ```
 
 Expected: pass.
@@ -669,8 +669,8 @@ Expected: pass.
 Run:
 
 ```bash
-cargo test -p lab fs --all-features
-cargo test -p lab --test api_fs_headers --all-features
+cargo test -p labby fs --all-features
+cargo test -p labby --test api_fs_headers --all-features
 ```
 
 Expected: pass.
@@ -680,8 +680,8 @@ Expected: pass.
 Run:
 
 ```bash
-cargo test -p lab registry --all-features
-cargo test -p lab docs --all-features
+cargo test -p labby registry --all-features
+cargo test -p labby docs --all-features
 ```
 
 Expected: pass.

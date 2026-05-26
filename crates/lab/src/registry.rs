@@ -149,6 +149,35 @@ impl std::fmt::Debug for RegisteredService {
     }
 }
 
+impl RegisteredService {
+    /// Construct a local/bootstrap/operator service registration.
+    ///
+    /// Product runtime builders use this when returning registry fragments so
+    /// the global registry does not have to duplicate service metadata shape.
+    #[must_use]
+    pub const fn bootstrap(
+        name: &'static str,
+        description: &'static str,
+        category: &'static str,
+        actions: &'static [ActionSpec],
+        dispatch: DispatchFn,
+    ) -> Self {
+        Self {
+            name,
+            description,
+            category,
+            kind: RegisteredServiceKind::BootstrapOperator,
+            status: if actions.is_empty() {
+                "stub"
+            } else {
+                "available"
+            },
+            actions,
+            dispatch,
+        }
+    }
+}
+
 /// Runtime policy classification for registered services.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegisteredServiceKind {
@@ -877,5 +906,43 @@ mod tests {
             elapsed < Duration::from_millis(1),
             "empty-prefix action completion took {elapsed:?} for {expected} cached actions"
         );
+    }
+
+    #[test]
+    fn bootstrap_constructor_sets_available_status_for_actions() {
+        static ACTIONS: &[ActionSpec] = &[ActionSpec {
+            name: "demo.list",
+            description: "Demo action",
+            destructive: false,
+            params: &[],
+            returns: "null",
+        }];
+
+        let service = RegisteredService::bootstrap(
+            "demo",
+            "Demo service",
+            "bootstrap",
+            ACTIONS,
+            noop_dispatch,
+        );
+
+        assert_eq!(service.name, "demo");
+        assert_eq!(service.category, "bootstrap");
+        assert_eq!(service.kind, RegisteredServiceKind::BootstrapOperator);
+        assert_eq!(service.status, "available");
+        assert_eq!(service.actions[0].name, "demo.list");
+    }
+
+    #[test]
+    fn bootstrap_constructor_sets_stub_status_for_empty_actions() {
+        let service = RegisteredService::bootstrap(
+            "demo",
+            "Demo service",
+            "bootstrap",
+            &[],
+            noop_dispatch,
+        );
+
+        assert_eq!(service.status, "stub");
     }
 }
