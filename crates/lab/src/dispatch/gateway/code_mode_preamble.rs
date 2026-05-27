@@ -142,14 +142,18 @@ const JS_RESERVED: &[&str] = &[
 /// Examples:
 /// - `movie.search` → `movieSearch`
 /// - `tv-show.get` → `tvShowGet`
+/// - `create/issue` → `createIssue`
+/// - `list:repos` → `listRepos`
 /// - `delete` → `delete_` (reserved word)
+/// - `2fa_setup` → `_2faSetup` (leading digit prefixed with `_`)
 ///
 /// KNOWN COLLISION: `movie.search` and `movie_search` both map to `movieSearch`
 /// — last insert wins when building the namespace. A `tracing::debug!` is emitted
 /// when a collision is detected.
 pub fn tool_name_to_camel(name: &str) -> String {
-    // Split on dots and hyphens; underscores are kept as-is within segments
-    let segments: Vec<&str> = name.split(['.', '-']).collect();
+    // Split on dots, hyphens, forward-slashes, and colons.
+    // Underscores are kept as-is within segments since they are valid in JS identifiers.
+    let segments: Vec<&str> = name.split(['.', '-', '/', ':']).collect();
     let camel = segments
         .iter()
         .enumerate()
@@ -160,13 +164,18 @@ pub fn tool_name_to_camel(name: &str) -> String {
                 let mut chars = seg.chars();
                 match chars.next() {
                     None => String::new(),
-                    Some(first) => {
-                        first.to_uppercase().to_string() + chars.as_str()
-                    }
+                    Some(first) => first.to_uppercase().to_string() + chars.as_str(),
                 }
             }
         })
         .collect::<String>();
+
+    // Prefix with `_` if the result starts with a digit (invalid JS identifier start).
+    let camel = if camel.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("_{camel}")
+    } else {
+        camel
+    };
 
     if JS_RESERVED.contains(&camel.as_str()) {
         format!("{camel}_")
@@ -201,10 +210,7 @@ pub fn schema_to_ts(schema: &Value, depth: usize) -> String {
 
     // anyOf → union
     if let Some(any_of) = obj.get("anyOf").and_then(Value::as_array) {
-        let variants: Vec<String> = any_of
-            .iter()
-            .map(|v| schema_to_ts(v, depth + 1))
-            .collect();
+        let variants: Vec<String> = any_of.iter().map(|v| schema_to_ts(v, depth + 1)).collect();
         return variants.join(" | ");
     }
 
@@ -233,9 +239,10 @@ pub fn schema_to_ts(schema: &Value, depth: usize) -> String {
         Some("boolean") => "boolean".to_string(),
         Some("null") => "null".to_string(),
         Some("array") => {
-            let item_ts = obj
-                .get("items")
-                .map_or_else(|| "unknown".to_string(), |items| schema_to_ts(items, depth + 1));
+            let item_ts = obj.get("items").map_or_else(
+                || "unknown".to_string(),
+                |items| schema_to_ts(items, depth + 1),
+            );
             format!("Array<{item_ts}>")
         }
         Some("object") | None => {
@@ -244,17 +251,17 @@ pub fn schema_to_ts(schema: &Value, depth: usize) -> String {
                 let required: Vec<&str> = obj
                     .get("required")
                     .and_then(Value::as_array)
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(Value::as_str)
-                            .collect()
-                    })
+                    .map(|arr| arr.iter().filter_map(Value::as_str).collect())
                     .unwrap_or_default();
 
                 let mut fields: Vec<String> = props
                     .iter()
                     .map(|(key, val)| {
-                        let optional = if required.contains(&key.as_str()) { "" } else { "?" };
+                        let optional = if required.contains(&key.as_str()) {
+                            ""
+                        } else {
+                            "?"
+                        };
                         let ts_type = schema_to_ts(val, depth + 1);
                         // Sanitize key: if it contains special chars, quote it
                         let safe_key = if key.chars().all(|c| c.is_alphanumeric() || c == '_') {
@@ -317,7 +324,11 @@ fn build_jsdoc(description: &str, schema: Option<&Value>) -> String {
             param_keys.sort();
             for key in param_keys {
                 let prop = &props[key];
-                if let Some(desc) = prop.as_object().and_then(|p| p.get("description")).and_then(Value::as_str) {
+                if let Some(desc) = prop
+                    .as_object()
+                    .and_then(|p| p.get("description"))
+                    .and_then(Value::as_str)
+                {
                     let truncated = if desc.len() > JSDOC_SUMMARY_MAX {
                         format!("{}…", &desc[..JSDOC_SUMMARY_MAX])
                     } else {
@@ -342,7 +353,9 @@ fn build_jsdoc(description: &str, schema: Option<&Value>) -> String {
 /// Used by the JS proxy so that `codemode.radarr.movieSearch(p)` can call
 /// `callTool("upstream::radarr::movie.search", p)`.
 #[allow(dead_code)]
-pub fn build_reverse_camel_map(tools: &[UpstreamTool]) -> std::collections::HashMap<String, String> {
+pub fn build_reverse_camel_map(
+    tools: &[UpstreamTool],
+) -> std::collections::HashMap<String, String> {
     let mut map = std::collections::HashMap::new();
     for tool in tools {
         let camel = tool_name_to_camel(tool.tool.name.as_ref());
@@ -391,27 +404,28 @@ pub fn generate_js_proxy(tools: &[UpstreamTool], upstreams: &[String]) -> String
         }
 
         // Serialize the upstream name safely.
-        let upstream_json = serde_json::to_string(upstream_name)
-            .unwrap_or_else(|_| "\"unknown\"".to_string());
+        let upstream_json =
+            serde_json::to_string(upstream_name).unwrap_or_else(|_| "\"unknown\"".to_string());
 
         let mut method_defs = Vec::new();
         for (camel, dotted) in &camel_to_dotted {
             let tool_id = format!("upstream::{upstream_name}::{dotted}");
-            let tool_id_json = serde_json::to_string(&tool_id)
-                .unwrap_or_else(|_| "\"unknown\"".to_string());
-            method_defs.push(format!("    {camel}: function(p) {{ return callTool({tool_id_json}, p == null ? {{}} : p); }}"));
+            let tool_id_json =
+                serde_json::to_string(&tool_id).unwrap_or_else(|_| "\"unknown\"".to_string());
+            // Always use a JSON-quoted property key so that any residual special
+            // characters in the camelCase name (e.g. from exotic tool schemas) never
+            // cause a JS syntax error inside QuickJS.
+            let camel_json =
+                serde_json::to_string(camel.as_str()).unwrap_or_else(|_| format!("\"{camel}\""));
+            method_defs.push(format!("    {camel_json}: function(p) {{ return callTool({tool_id_json}, p == null ? {{}} : p); }}"));
         }
 
         let methods = method_defs.join(",\n");
-        let _ = write!(
-            parts,
-            "codemode[{upstream_json}] = {{\n{methods}\n}};\n"
-        );
+        let _ = write!(parts, "codemode[{upstream_json}] = {{\n{methods}\n}};\n");
     }
 
     // Emit __meta__.upstreams value.
-    let upstreams_json = serde_json::to_string(upstreams)
-        .unwrap_or_else(|_| "[]".to_string());
+    let upstreams_json = serde_json::to_string(upstreams).unwrap_or_else(|_| "[]".to_string());
 
     format!(
         "// Code Mode preamble — auto-generated\n\
@@ -492,9 +506,7 @@ pub fn generate_preamble(tools: &[UpstreamTool], truncated: bool, dropped_count:
         }
 
         let fn_body = fn_decls.join("\n");
-        upstream_blocks.push(format!(
-            "  namespace {upstream_name} {{\n{fn_body}\n  }}"
-        ));
+        upstream_blocks.push(format!("  namespace {upstream_name} {{\n{fn_body}\n  }}"));
     }
 
     // Add built-in callTool escape hatch namespace
@@ -518,9 +530,7 @@ pub fn generate_preamble(tools: &[UpstreamTool], truncated: bool, dropped_count:
         "declare const __catalog__: undefined;".to_string()
     };
 
-    format!(
-        "declare namespace codemode {{\n{namespace_body}\n}}\n{catalog_decl}"
-    )
+    format!("declare namespace codemode {{\n{namespace_body}\n}}\n{catalog_decl}")
 }
 
 #[cfg(test)]
@@ -533,8 +543,18 @@ mod tests {
     use super::*;
     use crate::dispatch::upstream::types::UpstreamTool;
 
-    fn make_upstream_tool(upstream: &str, name: &str, description: Option<&str>, schema: Option<Value>, destructive: bool) -> UpstreamTool {
-        let tool = Tool::new(name.to_string(), description.unwrap_or("").to_string(), Arc::new(serde_json::Map::new()));
+    fn make_upstream_tool(
+        upstream: &str,
+        name: &str,
+        description: Option<&str>,
+        schema: Option<Value>,
+        destructive: bool,
+    ) -> UpstreamTool {
+        let tool = Tool::new(
+            name.to_string(),
+            description.unwrap_or("").to_string(),
+            Arc::new(serde_json::Map::new()),
+        );
         UpstreamTool {
             tool,
             input_schema: schema,
@@ -547,87 +567,125 @@ mod tests {
 
     #[test]
     fn typed_preamble_roundtrip_basic_structure() {
-        let tools = vec![
-            make_upstream_tool("radarr", "movie.search", Some("Search for movies"), Some(json!({
+        let tools = vec![make_upstream_tool(
+            "radarr",
+            "movie.search",
+            Some("Search for movies"),
+            Some(json!({
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Search query"},
                     "year": {"type": "integer"}
                 },
                 "required": ["query"]
-            })), false),
-        ];
+            })),
+            false,
+        )];
 
         let preamble = generate_preamble(&tools, false, 0);
 
         // PRESENCE: namespace with upstream name exists
-        assert!(preamble.contains("namespace radarr"),
-            "preamble must have radarr namespace, got:\n{preamble}");
+        assert!(
+            preamble.contains("namespace radarr"),
+            "preamble must have radarr namespace, got:\n{preamble}"
+        );
         // PRESENCE: camelCase function name for dotted tool name
-        assert!(preamble.contains("movieSearch"),
-            "preamble must have camelCase movieSearch, got:\n{preamble}");
+        assert!(
+            preamble.contains("movieSearch"),
+            "preamble must have camelCase movieSearch, got:\n{preamble}"
+        );
         // PRESENCE: typed parameter from schema
-        assert!(preamble.contains("query: string") || preamble.contains("query"),
-            "preamble must have query param");
+        assert!(
+            preamble.contains("query: string") || preamble.contains("query"),
+            "preamble must have query param"
+        );
         // PRESENCE: Promise return type
-        assert!(preamble.contains("Promise<unknown>"),
-            "preamble must have Promise<unknown> return type");
+        assert!(
+            preamble.contains("Promise<unknown>"),
+            "preamble must have Promise<unknown> return type"
+        );
         // PRESENCE: outer namespace wrapper
-        assert!(preamble.contains("declare namespace codemode"),
-            "preamble must wrap in declare namespace codemode");
+        assert!(
+            preamble.contains("declare namespace codemode"),
+            "preamble must wrap in declare namespace codemode"
+        );
 
         // ABSENCE: dotted name must not appear as a function name in TypeScript
-        assert!(!preamble.contains("function movie.search"),
-            "preamble must not have dotted name in TS function");
+        assert!(
+            !preamble.contains("function movie.search"),
+            "preamble must not have dotted name in TS function"
+        );
         // ABSENCE: no markdown fences
-        assert!(!preamble.contains("```"),
-            "preamble must not have markdown fences");
+        assert!(
+            !preamble.contains("```"),
+            "preamble must not have markdown fences"
+        );
         // ABSENCE: must be namespace, not const declaration for upstream
-        assert!(!preamble.contains("declare const radarr"),
-            "upstream should be namespace, not const");
+        assert!(
+            !preamble.contains("declare const radarr"),
+            "upstream should be namespace, not const"
+        );
     }
 
     #[test]
     fn typed_preamble_optional_params_marked_correctly() {
-        let tools = vec![
-            make_upstream_tool("sonarr", "series.search", Some("Search series"), Some(json!({
+        let tools = vec![make_upstream_tool(
+            "sonarr",
+            "series.search",
+            Some("Search series"),
+            Some(json!({
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
                     "year": {"type": "integer"}
                 },
                 "required": ["query"]
-            })), false),
-        ];
+            })),
+            false,
+        )];
 
         let preamble = generate_preamble(&tools, false, 0);
 
         // PRESENCE: required param has no question mark
-        assert!(preamble.contains("query: string"),
-            "required param must not be optional");
+        assert!(
+            preamble.contains("query: string"),
+            "required param must not be optional"
+        );
         // PRESENCE: optional param has question mark
-        assert!(preamble.contains("year?: number"),
-            "optional integer param should be year?: number");
+        assert!(
+            preamble.contains("year?: number"),
+            "optional integer param should be year?: number"
+        );
         // ABSENCE: required param must not be marked optional
-        assert!(!preamble.contains("query?: string"),
-            "required param must not be optional");
+        assert!(
+            !preamble.contains("query?: string"),
+            "required param must not be optional"
+        );
     }
 
     #[test]
     fn typed_preamble_truncation_notice_when_dropped() {
-        let tools = vec![
-            make_upstream_tool("radarr", "movie.search", Some("Search"), None, false),
-        ];
+        let tools = vec![make_upstream_tool(
+            "radarr",
+            "movie.search",
+            Some("Search"),
+            None,
+            false,
+        )];
 
         let preamble_normal = generate_preamble(&tools, false, 0);
         let preamble_truncated = generate_preamble(&tools, true, 5);
 
         // PRESENCE: truncated preamble has the note
-        assert!(preamble_truncated.contains("5 tools omitted"),
-            "truncated preamble must mention dropped count");
+        assert!(
+            preamble_truncated.contains("5 tools omitted"),
+            "truncated preamble must mention dropped count"
+        );
         // ABSENCE: non-truncated preamble must not have the truncation note
-        assert!(!preamble_normal.contains("tools omitted"),
-            "non-truncated preamble must not have truncation note");
+        assert!(
+            !preamble_normal.contains("tools omitted"),
+            "non-truncated preamble must not have truncation note"
+        );
     }
 
     // ── Preamble cache ────────────────────────────────────────────────────────
@@ -637,10 +695,16 @@ mod tests {
         let cache = PreambleCache::new();
 
         // Cold cache: must be None
-        assert!(cache.get(42, ScopeTier::Admin).is_none(),
-            "fresh cache must return None");
+        assert!(
+            cache.get(42, ScopeTier::Admin).is_none(),
+            "fresh cache must return None"
+        );
 
-        cache.insert(42, ScopeTier::Admin, "declare namespace codemode {}".to_string());
+        cache.insert(
+            42,
+            ScopeTier::Admin,
+            "declare namespace codemode {}".to_string(),
+        );
 
         // PRESENCE: inserted value is returned
         assert_eq!(
@@ -650,14 +714,20 @@ mod tests {
         );
 
         // ABSENCE: different tier is a cache miss
-        assert!(cache.get(42, ScopeTier::Read).is_none(),
-            "different scope tier must be cache miss");
+        assert!(
+            cache.get(42, ScopeTier::Read).is_none(),
+            "different scope tier must be cache miss"
+        );
         // ABSENCE: different hash is a cache miss
-        assert!(cache.get(99, ScopeTier::Admin).is_none(),
-            "different hash must be cache miss");
+        assert!(
+            cache.get(99, ScopeTier::Admin).is_none(),
+            "different hash must be cache miss"
+        );
         // ABSENCE: execute tier is also a miss if not inserted
-        assert!(cache.get(42, ScopeTier::Execute).is_none(),
-            "Execute tier must be distinct from Admin");
+        assert!(
+            cache.get(42, ScopeTier::Execute).is_none(),
+            "Execute tier must be distinct from Admin"
+        );
     }
 
     #[test]
@@ -667,8 +737,14 @@ mod tests {
         cache.insert(1, ScopeTier::Read, "read-preamble".to_string());
 
         // PRESENCE: each tier has its own value
-        assert_eq!(cache.get(1, ScopeTier::Admin), Some("admin-preamble".to_string()));
-        assert_eq!(cache.get(1, ScopeTier::Read), Some("read-preamble".to_string()));
+        assert_eq!(
+            cache.get(1, ScopeTier::Admin),
+            Some("admin-preamble".to_string())
+        );
+        assert_eq!(
+            cache.get(1, ScopeTier::Read),
+            Some("read-preamble".to_string())
+        );
         // ABSENCE: values are not mixed up
         assert_ne!(
             cache.get(1, ScopeTier::Admin),
@@ -682,12 +758,24 @@ mod tests {
     #[test]
     fn aggregate_catalog_hash_is_order_independent() {
         let upstreams_a = vec![
-            UpstreamCatalogHash { upstream: "radarr".to_string(), hash: 1 },
-            UpstreamCatalogHash { upstream: "sonarr".to_string(), hash: 2 },
+            UpstreamCatalogHash {
+                upstream: "radarr".to_string(),
+                hash: 1,
+            },
+            UpstreamCatalogHash {
+                upstream: "sonarr".to_string(),
+                hash: 2,
+            },
         ];
         let upstreams_b = vec![
-            UpstreamCatalogHash { upstream: "sonarr".to_string(), hash: 2 },
-            UpstreamCatalogHash { upstream: "radarr".to_string(), hash: 1 },
+            UpstreamCatalogHash {
+                upstream: "sonarr".to_string(),
+                hash: 2,
+            },
+            UpstreamCatalogHash {
+                upstream: "radarr".to_string(),
+                hash: 1,
+            },
         ];
 
         // PRESENCE: same set in different order must produce equal hash
@@ -700,9 +788,18 @@ mod tests {
 
     #[test]
     fn aggregate_catalog_hash_changes_when_upstream_changes() {
-        let v1 = vec![UpstreamCatalogHash { upstream: "radarr".to_string(), hash: 1 }];
-        let v2 = vec![UpstreamCatalogHash { upstream: "radarr".to_string(), hash: 2 }];
-        let v3 = vec![UpstreamCatalogHash { upstream: "sonarr".to_string(), hash: 1 }];
+        let v1 = vec![UpstreamCatalogHash {
+            upstream: "radarr".to_string(),
+            hash: 1,
+        }];
+        let v2 = vec![UpstreamCatalogHash {
+            upstream: "radarr".to_string(),
+            hash: 2,
+        }];
+        let v3 = vec![UpstreamCatalogHash {
+            upstream: "sonarr".to_string(),
+            hash: 1,
+        }];
 
         // PRESENCE: different hash value changes the aggregate
         assert_ne!(
@@ -737,5 +834,51 @@ mod tests {
         assert_eq!(tool_name_to_camel("delete"), "delete_");
         // ABSENCE: dotted name must not appear in camel output for multi-segment names
         assert!(!tool_name_to_camel("movie.search").contains('.'));
+    }
+
+    #[test]
+    fn tool_name_to_camel_handles_slashes_and_colons() {
+        // PRESENCE: forward-slashes and colons split into camelCase segments
+        assert_eq!(tool_name_to_camel("create/issue"), "createIssue");
+        assert_eq!(tool_name_to_camel("list:repos"), "listRepos");
+        assert_eq!(tool_name_to_camel("repos/create/branch"), "reposCreateBranch");
+        // PRESENCE: underscores are kept as-is (valid JS identifier chars)
+        assert_eq!(tool_name_to_camel("create_issue"), "create_issue");
+        // PRESENCE: leading digit gets prefixed with underscore
+        assert_eq!(tool_name_to_camel("2fa_setup"), "_2fa_setup");
+        // ABSENCE: slashes must not appear in output (would break JS syntax)
+        assert!(!tool_name_to_camel("create/issue").contains('/'));
+        assert!(!tool_name_to_camel("list:repos").contains(':'));
+    }
+
+    #[test]
+    fn generate_js_proxy_quoted_keys_tolerate_special_chars() {
+        use crate::dispatch::upstream::types::UpstreamTool;
+        use std::sync::Arc;
+
+        // Tool with a slash in the name — previously caused "Exception generated
+        // by QuickJS" because the unquoted key was a JS syntax error.
+        let schema = Arc::new(
+            serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({"type": "object", "properties": {}}),
+            )
+            .unwrap(),
+        );
+        let tool = UpstreamTool {
+            upstream_name: Arc::from("github"),
+            tool: rmcp::model::Tool::new("create/issue", "Create an issue", Arc::clone(&schema)),
+            destructive: false,
+            input_schema: None,
+        };
+        let js = generate_js_proxy(&[tool], &["github".to_string()]);
+
+        // PRESENCE: the upstream object must be present
+        assert!(js.contains("codemode[\"github\"]"), "upstream block missing");
+        // PRESENCE: the tool key must appear as a quoted string (not unquoted)
+        assert!(js.contains("\"createIssue\""), "camelCase key must be quoted");
+        // ABSENCE: no unquoted slash-containing key that would break JS syntax
+        assert!(!js.contains("create/issue:"), "slash in unquoted key would break JS");
+        // PRESENCE: callTool must be wired to the original dotted tool id
+        assert!(js.contains("upstream::github::create/issue"), "original tool id must be preserved");
     }
 }
