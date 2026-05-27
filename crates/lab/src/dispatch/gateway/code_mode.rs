@@ -23,6 +23,7 @@ use tokio::process::{Child, ChildStdin, Command};
 
 use crate::dispatch::error::ToolError;
 use crate::dispatch::gateway::manager::GatewayManager;
+use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
 use crate::registry::ToolRegistry;
 
 const LAB_ACTION_UNKNOWN_TOOL_HINT: &str = "Code Mode handles upstream MCP tools only. For Lab actions, use the `tool_execute` MCP tool: \
@@ -183,6 +184,30 @@ impl CodeModeCaller {
                 .any(|scope| matches!(scope.as_str(), "lab" | "lab:admin")),
         }
     }
+
+    #[must_use]
+    pub fn runtime_owner(&self, surface: CodeModeSurface) -> UpstreamRuntimeOwner {
+        let surface = match surface {
+            CodeModeSurface::Mcp { .. } => "mcp",
+            CodeModeSurface::Cli => "cli",
+        };
+        let subject = match self {
+            Self::TrustedLocal => None,
+            Self::Scoped { subject, .. } => subject.clone(),
+        };
+        let raw = subject
+            .as_ref()
+            .map(|subject| format!("{surface}:{subject}"))
+            .unwrap_or_else(|| format!("{surface}:trusted-local"));
+        UpstreamRuntimeOwner {
+            surface: surface.to_string(),
+            subject,
+            request_id: None,
+            session_id: None,
+            client_name: None,
+            raw: Some(raw),
+        }
+    }
 }
 
 pub struct CodeModeBroker<'a> {
@@ -213,8 +238,9 @@ impl<'a> CodeModeBroker<'a> {
         };
 
         let allow_cold_connect = caller.can_execute();
+        let owner = caller.runtime_owner(_surface);
         let (catalog, serialized_size, truncated) = self
-            .code_search_catalog(manager, allow_cold_connect)
+            .code_search_catalog(manager, allow_cold_connect, &owner)
             .await?;
         tracing::info!(
             surface = "dispatch",
@@ -270,9 +296,10 @@ impl<'a> CodeModeBroker<'a> {
         &self,
         manager: &GatewayManager,
         allow_cold_connect: bool,
+        owner: &UpstreamRuntimeOwner,
     ) -> Result<(Vec<CodeModeCatalogEntry>, usize, bool), ToolError> {
         let mut entries = manager
-            .code_mode_catalog_tools(allow_cold_connect)
+            .code_mode_catalog_tools(allow_cold_connect, Some(owner))
             .await?
             .into_iter()
             .map(|tool| {
@@ -553,8 +580,8 @@ impl<'a> CodeModeBroker<'a> {
         &self,
         id: &str,
         params: Value,
-        _caller: CodeModeCaller,
-        _surface: CodeModeSurface,
+        caller: CodeModeCaller,
+        surface: CodeModeSurface,
     ) -> Result<Value, ToolError> {
         let parsed = CodeModeToolId::parse(id)?;
         let Some(manager) = self.gateway_manager else {
@@ -565,7 +592,8 @@ impl<'a> CodeModeBroker<'a> {
         };
         match parsed.reference {
             CodeModeToolRef::UpstreamTool { upstream, tool } => {
-                self.call_upstream_tool(manager, &upstream, &tool, params)
+                let owner = caller.runtime_owner(surface);
+                self.call_upstream_tool(manager, &upstream, &tool, params, &owner)
                     .await
             }
         }
@@ -577,9 +605,10 @@ impl<'a> CodeModeBroker<'a> {
         upstream: &str,
         tool: &str,
         params: Value,
+        owner: &UpstreamRuntimeOwner,
     ) -> Result<Value, ToolError> {
         manager
-            .resolve_code_mode_upstream_tool(upstream, tool)
+            .resolve_code_mode_upstream_tool(upstream, tool, Some(owner))
             .await?;
         let Some(pool) = manager.current_pool().await else {
             return Err(ToolError::Sdk {

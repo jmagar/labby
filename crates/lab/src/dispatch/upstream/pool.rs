@@ -1486,10 +1486,9 @@ impl UpstreamPool {
                 continue;
             }
 
-            let upstream_name: Arc<str> = Arc::from(config.name.as_str());
             catalog
                 .entry(config.name.clone())
-                .or_insert_with(|| lazy_upstream_entry(config, Arc::clone(&upstream_name)));
+                .or_insert_with(|| lazy_upstream_entry(config, Arc::from(config.name.as_str())));
 
             if config.proxy_resources {
                 resource_names.push(config.name.clone());
@@ -1506,25 +1505,18 @@ impl UpstreamPool {
         &self,
         config: &UpstreamConfig,
         oauth_subject: Option<&str>,
+        runtime_owner: Option<&UpstreamRuntimeOwner>,
     ) -> anyhow::Result<bool> {
         if !config.enabled {
             return Ok(false);
         }
-        if !self
-            .healthy_tools_for_upstream(&config.name)
-            .await
-            .is_empty()
-        {
+        if self.has_healthy_tools_for_upstream(&config.name).await {
             return Ok(false);
         }
 
         let connect_lock = self.lazy_connect_lock(&config.name).await;
         let _connect_guard = connect_lock.lock().await;
-        if !self
-            .healthy_tools_for_upstream(&config.name)
-            .await
-            .is_empty()
-        {
+        if self.has_healthy_tools_for_upstream(&config.name).await {
             return Ok(false);
         }
 
@@ -1541,12 +1533,13 @@ impl UpstreamPool {
 
         let started = Instant::now();
         let subject = config.oauth.as_ref().and(oauth_subject);
+        let runtime_owner = runtime_owner.or(self.runtime_owner.as_ref());
         let (conn, tools) = match connect_upstream(
             config,
             subject,
             self.oauth_client_cache.as_ref(),
             self.runtime_origin.as_deref(),
-            self.runtime_owner.as_ref(),
+            runtime_owner,
         )
         .await
         {
@@ -1593,21 +1586,13 @@ impl UpstreamPool {
         if !config.enabled {
             return Ok(false);
         }
-        if !self
-            .healthy_tools_for_upstream(&config.name)
-            .await
-            .is_empty()
-        {
+        if self.has_healthy_tools_for_upstream(&config.name).await {
             return Ok(false);
         }
 
         let connect_lock = self.lazy_connect_lock(&config.name).await;
         let _connect_guard = connect_lock.lock().await;
-        if !self
-            .healthy_tools_for_upstream(&config.name)
-            .await
-            .is_empty()
-        {
+        if self.has_healthy_tools_for_upstream(&config.name).await {
             return Ok(false);
         }
 
@@ -1644,11 +1629,7 @@ impl UpstreamPool {
         if !config.enabled {
             return Ok(false);
         }
-        if !self
-            .healthy_tools_for_upstream(&config.name)
-            .await
-            .is_empty()
-        {
+        if self.has_healthy_tools_for_upstream(&config.name).await {
             return Ok(false);
         }
         self.seed_lazy_upstreams(std::slice::from_ref(config)).await;
@@ -1931,6 +1912,17 @@ impl UpstreamPool {
                 })
             })
             .collect()
+    }
+
+    async fn has_healthy_tools_for_upstream(&self, upstream: &str) -> bool {
+        let catalog = self.catalog.read().await;
+        catalog.get(upstream).is_some_and(|entry| {
+            entry.tool_health.is_routable()
+                && entry
+                    .tools
+                    .values()
+                    .any(|tool| entry.exposure_policy.matches(tool.tool.name.as_ref()))
+        })
     }
 
     pub async fn find_tool_candidates(&self, tool_name: &str) -> Vec<(String, UpstreamTool)> {
@@ -4019,6 +4011,26 @@ mod tests {
         rmcp::model::Tool::new(name.to_string(), "", Arc::new(serde_json::Map::new()))
     }
 
+    fn test_upstream_tool(upstream_name: &Arc<str>, name: &str) -> UpstreamTool {
+        let schema = Arc::new(serde_json::Map::new());
+        let tool = rmcp::model::Tool::new(name.to_string(), format!("{name} description"), schema);
+        UpstreamTool {
+            tool,
+            input_schema: None,
+            upstream_name: Arc::clone(upstream_name),
+        }
+    }
+
+    fn test_upstream_tools(
+        upstream_name: &Arc<str>,
+        names: &[&str],
+    ) -> HashMap<String, UpstreamTool> {
+        names
+            .iter()
+            .map(|name| (name.to_string(), test_upstream_tool(upstream_name, name)))
+            .collect()
+    }
+
     #[tokio::test]
     async fn seed_lazy_upstreams_records_enabled_names_without_connections() {
         let pool = UpstreamPool::new();
@@ -4586,24 +4598,7 @@ mod tests {
         let upstream_name_arc: Arc<str> = Arc::from(upstream_name);
         pool.catalog.write().await.insert(
             upstream_name.to_string(),
-            UpstreamEntry {
-                name: Arc::clone(&upstream_name_arc),
-                tools: HashMap::new(),
-                exposure_policy: ToolExposurePolicy::All,
-                prompt_count: 0,
-                resource_count: 0,
-                prompt_names: Vec::new(),
-                resource_uris: Vec::new(),
-                tool_health: UpstreamHealth::Healthy,
-                prompt_health: UpstreamHealth::Healthy,
-                resource_health: UpstreamHealth::Healthy,
-                tool_unhealthy_since: None,
-                prompt_unhealthy_since: None,
-                resource_unhealthy_since: None,
-                tool_last_error: None,
-                prompt_last_error: None,
-                resource_last_error: None,
-            },
+            healthy_in_process_entry(Arc::clone(&upstream_name_arc), HashMap::new()),
         );
         pool.connections.write().await.insert(
             upstream_name.to_string(),
@@ -4688,27 +4683,15 @@ mod tests {
 
         let pool = Arc::new(UpstreamPool::new().with_request_timeout(Duration::from_millis(25)));
         let upstream_name_arc: Arc<str> = Arc::from(upstream_name);
-        pool.catalog.write().await.insert(
-            upstream_name.to_string(),
-            UpstreamEntry {
-                name: Arc::clone(&upstream_name_arc),
-                tools: HashMap::new(),
-                exposure_policy: ToolExposurePolicy::All,
-                prompt_count: 1,
-                resource_count: 1,
-                prompt_names: vec!["slow.prompt".to_string()],
-                resource_uris: vec!["file:///tmp/slow".to_string()],
-                tool_health: UpstreamHealth::Healthy,
-                prompt_health: UpstreamHealth::Healthy,
-                resource_health: UpstreamHealth::Healthy,
-                tool_unhealthy_since: None,
-                prompt_unhealthy_since: None,
-                resource_unhealthy_since: None,
-                tool_last_error: None,
-                prompt_last_error: None,
-                resource_last_error: None,
-            },
-        );
+        let mut entry = healthy_in_process_entry(Arc::clone(&upstream_name_arc), HashMap::new());
+        entry.prompt_count = 1;
+        entry.resource_count = 1;
+        entry.prompt_names = vec!["slow.prompt".to_string()];
+        entry.resource_uris = vec!["file:///tmp/slow".to_string()];
+        pool.catalog
+            .write()
+            .await
+            .insert(upstream_name.to_string(), entry);
         pool.connections.write().await.insert(
             upstream_name.to_string(),
             UpstreamConnection {
@@ -4920,41 +4903,14 @@ mod tests {
     async fn hidden_upstream_tools_do_not_appear_in_listings() {
         let pool = UpstreamPool::new();
         let upstream_name: Arc<str> = Arc::from("github");
-        let mut tools = HashMap::new();
-        for name in ["search_repos", "github_create_issue", "delete_repo"] {
-            let schema = Arc::new(serde_json::Map::new());
-            let tool = rmcp::model::Tool::new(name, format!("{name} description"), schema);
-            tools.insert(
-                name.to_string(),
-                UpstreamTool {
-                    tool,
-                    input_schema: None,
-                    upstream_name: Arc::clone(&upstream_name),
-                },
-            );
-        }
-        let entry = UpstreamEntry {
-            name: Arc::clone(&upstream_name),
-            tools,
-            exposure_policy: ToolExposurePolicy::from_patterns(vec![
-                "search_repos".to_string(),
-                "github_*".to_string(),
-            ])
-            .expect("policy"),
-            prompt_count: 0,
-            resource_count: 0,
-            prompt_names: Vec::new(),
-            resource_uris: Vec::new(),
-            tool_health: UpstreamHealth::Healthy,
-            prompt_health: UpstreamHealth::Healthy,
-            resource_health: UpstreamHealth::Healthy,
-            tool_unhealthy_since: None,
-            prompt_unhealthy_since: None,
-            resource_unhealthy_since: None,
-            tool_last_error: None,
-            prompt_last_error: None,
-            resource_last_error: None,
-        };
+        let tools = test_upstream_tools(
+            &upstream_name,
+            &["search_repos", "github_create_issue", "delete_repo"],
+        );
+        let mut entry = healthy_in_process_entry(Arc::clone(&upstream_name), tools);
+        entry.exposure_policy =
+            ToolExposurePolicy::from_patterns(vec!["search_repos".into(), "github_*".into()])
+                .expect("policy");
 
         pool.catalog
             .write()
@@ -4976,38 +4932,10 @@ mod tests {
     async fn hidden_upstream_tools_cannot_be_called_directly() {
         let pool = UpstreamPool::new();
         let upstream_name: Arc<str> = Arc::from("github");
-        let mut tools = HashMap::new();
-        for name in ["search_repos", "delete_repo"] {
-            let schema = Arc::new(serde_json::Map::new());
-            let tool = rmcp::model::Tool::new(name, format!("{name} description"), schema);
-            tools.insert(
-                name.to_string(),
-                UpstreamTool {
-                    tool,
-                    input_schema: None,
-                    upstream_name: Arc::clone(&upstream_name),
-                },
-            );
-        }
-        let entry = UpstreamEntry {
-            name: Arc::clone(&upstream_name),
-            tools,
-            exposure_policy: ToolExposurePolicy::from_patterns(vec!["search_repos".into()])
-                .expect("policy"),
-            prompt_count: 0,
-            resource_count: 0,
-            prompt_names: Vec::new(),
-            resource_uris: Vec::new(),
-            tool_health: UpstreamHealth::Healthy,
-            prompt_health: UpstreamHealth::Healthy,
-            resource_health: UpstreamHealth::Healthy,
-            tool_unhealthy_since: None,
-            prompt_unhealthy_since: None,
-            resource_unhealthy_since: None,
-            tool_last_error: None,
-            prompt_last_error: None,
-            resource_last_error: None,
-        };
+        let tools = test_upstream_tools(&upstream_name, &["search_repos", "delete_repo"]);
+        let mut entry = healthy_in_process_entry(Arc::clone(&upstream_name), tools);
+        entry.exposure_policy =
+            ToolExposurePolicy::from_patterns(vec!["search_repos".into()]).expect("policy");
 
         pool.catalog
             .write()
@@ -5022,24 +4950,7 @@ mod tests {
     async fn upstream_last_error_tracks_capability_failure_details() {
         let pool = UpstreamPool::new();
         let upstream_name: Arc<str> = Arc::from("github");
-        let entry = UpstreamEntry {
-            name: Arc::clone(&upstream_name),
-            tools: HashMap::new(),
-            exposure_policy: ToolExposurePolicy::All,
-            prompt_count: 0,
-            resource_count: 0,
-            prompt_names: Vec::new(),
-            resource_uris: Vec::new(),
-            tool_health: UpstreamHealth::Healthy,
-            prompt_health: UpstreamHealth::Healthy,
-            resource_health: UpstreamHealth::Healthy,
-            tool_unhealthy_since: None,
-            prompt_unhealthy_since: None,
-            resource_unhealthy_since: None,
-            tool_last_error: None,
-            prompt_last_error: None,
-            resource_last_error: None,
-        };
+        let entry = healthy_in_process_entry(Arc::clone(&upstream_name), HashMap::new());
 
         pool.catalog
             .write()
@@ -5067,24 +4978,7 @@ mod tests {
     async fn upstream_tool_last_error_ignores_non_tool_failures() {
         let pool = UpstreamPool::new();
         let upstream_name: Arc<str> = Arc::from("github");
-        let entry = UpstreamEntry {
-            name: Arc::clone(&upstream_name),
-            tools: HashMap::new(),
-            exposure_policy: ToolExposurePolicy::All,
-            prompt_count: 0,
-            resource_count: 0,
-            prompt_names: Vec::new(),
-            resource_uris: Vec::new(),
-            tool_health: UpstreamHealth::Healthy,
-            prompt_health: UpstreamHealth::Healthy,
-            resource_health: UpstreamHealth::Healthy,
-            tool_unhealthy_since: None,
-            prompt_unhealthy_since: None,
-            resource_unhealthy_since: None,
-            tool_last_error: None,
-            prompt_last_error: None,
-            resource_last_error: None,
-        };
+        let entry = healthy_in_process_entry(Arc::clone(&upstream_name), HashMap::new());
 
         pool.catalog
             .write()
@@ -5122,39 +5016,15 @@ mod tests {
     #[test]
     fn failed_in_process_entry_from_existing_preserves_last_known_good_catalog() {
         let upstream_name: Arc<str> = Arc::from("labby::github-chat");
-        let schema = Arc::new(serde_json::Map::new());
-        let tool = rmcp::model::Tool::new("query_repository", "Query a GitHub repository", schema);
-        let mut tools = HashMap::new();
-        tools.insert(
-            "query_repository".to_string(),
-            UpstreamTool {
-                tool,
-                input_schema: None,
-                upstream_name: Arc::clone(&upstream_name),
-            },
-        );
-
-        let existing = UpstreamEntry {
-            name: Arc::clone(&upstream_name),
-            tools,
-            exposure_policy: ToolExposurePolicy::from_patterns(vec![
-                "query_repository".to_string(),
-            ])
-            .expect("policy"),
-            prompt_count: 2,
-            resource_count: 3,
-            prompt_names: vec!["prompt.one".into(), "prompt.two".into()],
-            resource_uris: vec!["lab://resource/one".into(), "lab://resource/two".into()],
-            tool_health: UpstreamHealth::Healthy,
-            prompt_health: UpstreamHealth::Healthy,
-            resource_health: UpstreamHealth::Healthy,
-            tool_unhealthy_since: None,
-            prompt_unhealthy_since: None,
-            resource_unhealthy_since: None,
-            tool_last_error: None,
-            prompt_last_error: None,
-            resource_last_error: None,
-        };
+        let tools = test_upstream_tools(&upstream_name, &["query_repository"]);
+        let mut existing = healthy_in_process_entry(Arc::clone(&upstream_name), tools);
+        existing.exposure_policy =
+            ToolExposurePolicy::from_patterns(vec!["query_repository".to_string()])
+                .expect("policy");
+        existing.prompt_count = 2;
+        existing.resource_count = 3;
+        existing.prompt_names = vec!["prompt.one".into(), "prompt.two".into()];
+        existing.resource_uris = vec!["lab://resource/one".into(), "lab://resource/two".into()];
 
         let failed = failed_in_process_entry_from_existing(
             existing,

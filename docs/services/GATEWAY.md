@@ -156,7 +156,7 @@ CLI (`labby gateway code search|schema|exec`). Both adapters use the same stable
 ids, schema response types, sandbox runner, visibility checks, and brokered
 execution path.
 
-`code_search` returns stable ids for Lab actions and upstream tools:
+`code_search` returns stable ids for upstream tools:
 
 ```json
 { "query": "github issues", "top_k": 10 }
@@ -166,7 +166,6 @@ Example candidate ids:
 
 ```json
 [
-  { "id": "lab::gateway.gateway.schema", "name": "gateway.schema", "upstream": "lab", "schema_available": true },
   { "id": "upstream::github::search_issues", "name": "search_issues", "upstream": "github", "schema_available": true }
 ]
 ```
@@ -174,19 +173,19 @@ Example candidate ids:
 `code_schema` then resolves one candidate id to the precise contract:
 
 ```json
-{ "id": "lab::gateway.gateway.schema" }
+{ "id": "upstream::github::search_issues" }
 ```
 
 Native CLI equivalents:
 
 ```bash
 labby gateway code search "gateway servers" --json
-labby gateway code schema "lab::gateway.gateway.servers" --json
-labby gateway code exec --code 'await callTool("lab::gateway.gateway.servers", {})' --json
+labby gateway code schema "upstream::github::search_issues" --json
+labby gateway code exec --code 'await callTool("upstream::github::search_issues", {"query":"repo:jmagar/lab gateway"})' --json
 ```
 
-Lab ids use `lab::<service>.<action>` and return an `ActionSpec`-derived
-contract (`schema_format: "lab_action_spec"`). Upstream ids use
+Code Mode handles upstream MCP tools only. Lab actions should be called through
+the `tool_execute` MCP tool instead. Upstream ids use
 `upstream::<upstream-name>::<tool-name>` and return the upstream JSON Schema
 cached by the gateway (`schema_format: "json_schema"`). `code_schema` requires
 the same schema visibility scope as `tool_search include_schema=true`: `lab` or
@@ -210,7 +209,7 @@ upstream exposure checks. `params` must be JSON-serializable:
 
 ```json
 {
-  "code": "const result = await callTool(\"lab::radarr.movie.search\", {\"query\":\"Alien\"});\nif (result.total > 0) {\n  await callTool(\"lab::radarr.queue.list\", {});\n}"
+  "code": "const result = await callTool(\"upstream::github::search_issues\", {\"query\":\"repo:jmagar/lab gateway\"});"
 }
 ```
 
@@ -225,7 +224,7 @@ Rules:
 - `code_search` is read-only discovery and accepts `lab:read`, `lab`, or `lab:admin`
 - `code_schema` exposes full schemas and requires `lab` or `lab:admin`
 - `code_execute` requires `lab` or `lab:admin`, is disabled unless `[code_mode].enabled = true`, and brokers calls through the same gateway visibility checks as `tool_execute`
-- destructive Lab actions in MCP Code Mode require both top-level `code_execute.confirm = true` and per-call `params.confirm = true`; Code Mode does not prompt per action via MCP elicitation
+- Lab actions are not supported inside Code Mode `callTool`; use the `tool_execute` MCP tool for Lab actions
 - gateway action provenance fields (`origin` and `owner`) are reserved in Code Mode and are overwritten by the broker
 - `code_execute` enforces `timeout_ms` by killing the child process and enforces `max_tool_calls` in the parent before brokering each call
 - invalid Code Mode ids return `invalid_code_mode_id`

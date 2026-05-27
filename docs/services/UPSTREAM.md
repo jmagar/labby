@@ -22,15 +22,15 @@ To proxy an upstream server through `lab`, you configure one or more `[[upstream
 
 `lab` will:
 
-1. connect to every configured upstream at startup
-2. run tool discovery against each upstream
-3. merge discovered tools into its own MCP catalog
+1. seed enabled upstream names into the gateway catalog at startup without opening connections
+2. connect to an upstream lazily on first search, exact tool execution, resource read, prompt request, or explicit gateway test/reload path that needs live discovery
+3. merge discovered tools into its own MCP catalog after that upstream is first contacted
 4. serve the combined catalog through whichever MCP transport you expose from `lab`
 
-OAuth upstreams are discovered at startup only when Lab has upstream OAuth
-runtime state and a stored credential for the shared Gateway subject. Without
-that credential, subject-less discovery deliberately skips OAuth upstreams so a
-user-specific token view is not cached globally.
+OAuth upstreams are discovered only when Lab has upstream OAuth runtime state
+and an explicit subject for selecting the token set. Subject-less discovery
+deliberately skips OAuth upstreams so a user-specific token view is not cached
+globally.
 
 That means the client connects only to `lab`:
 

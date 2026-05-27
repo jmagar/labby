@@ -28,6 +28,7 @@ use crate::dispatch::error::ToolError as DispatchToolError;
 use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
 use crate::dispatch::gateway::code_mode::{CodeModeBroker, CodeModeCaller, CodeModeSurface};
 use crate::dispatch::gateway::manager::{GatewayManager, GatewayToolSearchResult};
+use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
 use crate::mcp::catalog::{
     CODE_EXECUTE_TOOL_NAME, CODE_SEARCH_TOOL_NAME, LEGACY_INVOKE_TOOL_NAME, LEGACY_SCOUT_TOOL_NAME,
     LEGACY_TOOL_INVOKE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME,
@@ -1985,8 +1986,13 @@ impl ServerHandler for LabMcpServer {
                 .await;
                 return Ok(result);
             }
+            let runtime_owner = self.request_runtime_owner(&context);
             let resolved = manager
-                .resolve_tool_execute_with_upstream(&tool_name, requested_upstream.as_deref())
+                .resolve_tool_execute_with_upstream(
+                    &tool_name,
+                    requested_upstream.as_deref(),
+                    Some(&runtime_owner),
+                )
                 .await;
             let (upstream_name, upstream_tool) = match resolved {
                 Ok(value) => value,
@@ -2708,6 +2714,22 @@ impl LabMcpServer {
 
     fn request_actor_key<'a>(&self, context: &'a RequestContext<RoleServer>) -> Option<&'a str> {
         actor_key_from_extensions(&context.extensions)
+    }
+
+    fn request_runtime_owner(&self, context: &RequestContext<RoleServer>) -> UpstreamRuntimeOwner {
+        let subject = self.request_subject(context).map(ToOwned::to_owned);
+        let raw = subject
+            .as_ref()
+            .map(|subject| format!("mcp:{subject}"))
+            .unwrap_or_else(|| "mcp:anonymous".to_string());
+        UpstreamRuntimeOwner {
+            surface: "mcp".to_string(),
+            subject,
+            request_id: None,
+            session_id: None,
+            client_name: None,
+            raw: Some(raw),
+        }
     }
 
     async fn oauth_upstream_configs(&self) -> Vec<crate::config::UpstreamConfig> {
