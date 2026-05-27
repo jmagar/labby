@@ -5601,6 +5601,76 @@ mod tests {
         assert_eq!(view.exposed_prompt_count, 4);
     }
 
+    // ── gateway_code_mode_enabled delegation regression (#2) ─────────────────
+
+    #[tokio::test]
+    async fn code_mode_enabled_reads_code_mode_config_not_tool_search() {
+        use crate::config::CodeModeConfig;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
+
+        manager
+            .seed_config(LabConfig {
+                code_mode: CodeModeConfig {
+                    enabled: true,
+                    ..CodeModeConfig::default()
+                },
+                tool_search: ToolSearchConfig {
+                    enabled: false,
+                    ..ToolSearchConfig::default()
+                },
+                ..LabConfig::default()
+            })
+            .await;
+
+        // PRESENCE: code_mode_enabled() reflects code_mode.enabled = true
+        assert!(
+            manager.code_mode_enabled().await,
+            "code_mode_enabled() must return true when code_mode.enabled = true"
+        );
+        // ABSENCE: does NOT read from tool_search.enabled
+        assert!(
+            !manager.tool_search_enabled().await,
+            "tool_search_enabled() must return false when tool_search.enabled = false"
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_search_enabled_reads_tool_search_config_not_code_mode() {
+        use crate::config::CodeModeConfig;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
+
+        manager
+            .seed_config(LabConfig {
+                code_mode: CodeModeConfig {
+                    enabled: false,
+                    ..CodeModeConfig::default()
+                },
+                tool_search: ToolSearchConfig {
+                    enabled: true,
+                    ..ToolSearchConfig::default()
+                },
+                ..LabConfig::default()
+            })
+            .await;
+
+        // PRESENCE: tool_search_enabled() reflects tool_search.enabled = true
+        assert!(
+            manager.tool_search_enabled().await,
+            "tool_search_enabled() must return true when tool_search.enabled = true"
+        );
+        // ABSENCE: does NOT read from code_mode.enabled
+        assert!(
+            !manager.code_mode_enabled().await,
+            "code_mode_enabled() must return false when code_mode.enabled = false"
+        );
+    }
+
     #[test]
     fn observability_source_covers_gateway_manager_reconcile_events() {
         let source = include_str!("manager.rs");

@@ -3207,4 +3207,84 @@ service_scope = "user"
         // unset remains None; safe default applied at orchestrator entry
         assert!(d.max_parallel.is_none());
     }
+
+    // ── Code Mode: validate_mode_exclusive ───────────────────────────────────
+
+    #[test]
+    fn validate_mode_exclusive_rejects_both_enabled() {
+        // All four input combinations
+        assert!(validate_mode_exclusive(true, true).is_err(),
+            "both enabled must be rejected");
+        assert!(validate_mode_exclusive(false, true).is_ok(),
+            "only code_mode enabled is ok");
+        assert!(validate_mode_exclusive(true, false).is_ok(),
+            "only tool_search enabled is ok");
+        assert!(validate_mode_exclusive(false, false).is_ok(),
+            "neither enabled is ok");
+
+        // PRESENCE: error message must contain the key phrase
+        let err = validate_mode_exclusive(true, true).unwrap_err();
+        assert!(err.to_string().contains("cannot both be enabled"),
+            "error message must mention 'cannot both be enabled', got: {err}");
+
+        // ABSENCE: success variants must not contain that phrase
+        assert!(validate_mode_exclusive(false, false).is_ok());
+    }
+
+    // ── Code Mode: CodeModeConfig defaults ───────────────────────────────────
+
+    #[test]
+    fn code_mode_config_token_estimate_divisor_defaults_to_4() {
+        let config = CodeModeConfig::default();
+        // PRESENCE: default divisor is exactly 4
+        assert_eq!(config.token_estimate_divisor, 4,
+            "token_estimate_divisor default must be 4");
+        // ABSENCE: it is not 0 or 1 (which would drastically change truncation)
+        assert_ne!(config.token_estimate_divisor, 0);
+        assert_ne!(config.token_estimate_divisor, 1);
+    }
+
+    #[test]
+    fn code_mode_config_defaults_are_sane() {
+        let config = CodeModeConfig::default();
+        // PRESENCE: enabled defaults to false (must be opted-in)
+        assert!(!config.enabled,
+            "code_mode must be disabled by default");
+        // PRESENCE: timeout and call limits are positive
+        assert!(config.timeout_ms > 0);
+        assert!(config.max_tool_calls > 0);
+        assert!(config.max_response_bytes > 0);
+        assert!(config.max_response_tokens > 0);
+        // ABSENCE: not wildly large (sanity bounds)
+        assert!(config.timeout_ms <= 60_000);
+        assert!(config.max_tool_calls <= 50);
+    }
+
+    // ── Process-wide atomic flags ─────────────────────────────────────────────
+
+    #[test]
+    fn process_flags_are_independent_of_each_other() {
+        // Snapshot current state to restore after test
+        let prev_code = is_code_mode_enabled();
+        let prev_ts = process_tool_search_enabled();
+
+        // PRESENCE: setting code mode does not affect tool_search flag
+        set_process_code_mode_enabled(true);
+        set_process_tool_search_enabled(false);
+        assert!(is_code_mode_enabled(),
+            "code mode must be true after set_process_code_mode_enabled(true)");
+        assert!(!process_tool_search_enabled(),
+            "tool_search must be false after set_process_tool_search_enabled(false)");
+
+        // ABSENCE: reversing code mode flag does not flip tool_search
+        set_process_code_mode_enabled(false);
+        assert!(!is_code_mode_enabled(),
+            "code mode must be false after set_process_code_mode_enabled(false)");
+        assert!(!process_tool_search_enabled(),
+            "tool_search must remain false");
+
+        // Restore
+        set_process_code_mode_enabled(prev_code);
+        set_process_tool_search_enabled(prev_ts);
+    }
 }

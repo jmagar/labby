@@ -522,3 +522,220 @@ pub fn generate_preamble(tools: &[UpstreamTool], truncated: bool, dropped_count:
         "declare namespace codemode {{\n{namespace_body}\n}}\n{catalog_decl}"
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use rmcp::model::Tool;
+    use serde_json::json;
+
+    use super::*;
+    use crate::dispatch::upstream::types::UpstreamTool;
+
+    fn make_upstream_tool(upstream: &str, name: &str, description: Option<&str>, schema: Option<Value>, destructive: bool) -> UpstreamTool {
+        let tool = Tool::new(name.to_string(), description.unwrap_or("").to_string(), Arc::new(serde_json::Map::new()));
+        UpstreamTool {
+            tool,
+            input_schema: schema,
+            upstream_name: Arc::from(upstream),
+            destructive,
+        }
+    }
+
+    // ── Preamble roundtrip ────────────────────────────────────────────────────
+
+    #[test]
+    fn typed_preamble_roundtrip_basic_structure() {
+        let tools = vec![
+            make_upstream_tool("radarr", "movie.search", Some("Search for movies"), Some(json!({
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "year": {"type": "integer"}
+                },
+                "required": ["query"]
+            })), false),
+        ];
+
+        let preamble = generate_preamble(&tools, false, 0);
+
+        // PRESENCE: namespace with upstream name exists
+        assert!(preamble.contains("namespace radarr"),
+            "preamble must have radarr namespace, got:\n{preamble}");
+        // PRESENCE: camelCase function name for dotted tool name
+        assert!(preamble.contains("movieSearch"),
+            "preamble must have camelCase movieSearch, got:\n{preamble}");
+        // PRESENCE: typed parameter from schema
+        assert!(preamble.contains("query: string") || preamble.contains("query"),
+            "preamble must have query param");
+        // PRESENCE: Promise return type
+        assert!(preamble.contains("Promise<unknown>"),
+            "preamble must have Promise<unknown> return type");
+        // PRESENCE: outer namespace wrapper
+        assert!(preamble.contains("declare namespace codemode"),
+            "preamble must wrap in declare namespace codemode");
+
+        // ABSENCE: dotted name must not appear as a function name in TypeScript
+        assert!(!preamble.contains("function movie.search"),
+            "preamble must not have dotted name in TS function");
+        // ABSENCE: no markdown fences
+        assert!(!preamble.contains("```"),
+            "preamble must not have markdown fences");
+        // ABSENCE: must be namespace, not const declaration for upstream
+        assert!(!preamble.contains("declare const radarr"),
+            "upstream should be namespace, not const");
+    }
+
+    #[test]
+    fn typed_preamble_optional_params_marked_correctly() {
+        let tools = vec![
+            make_upstream_tool("sonarr", "series.search", Some("Search series"), Some(json!({
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "year": {"type": "integer"}
+                },
+                "required": ["query"]
+            })), false),
+        ];
+
+        let preamble = generate_preamble(&tools, false, 0);
+
+        // PRESENCE: required param has no question mark
+        assert!(preamble.contains("query: string"),
+            "required param must not be optional");
+        // PRESENCE: optional param has question mark
+        assert!(preamble.contains("year?: number"),
+            "optional integer param should be year?: number");
+        // ABSENCE: required param must not be marked optional
+        assert!(!preamble.contains("query?: string"),
+            "required param must not be optional");
+    }
+
+    #[test]
+    fn typed_preamble_truncation_notice_when_dropped() {
+        let tools = vec![
+            make_upstream_tool("radarr", "movie.search", Some("Search"), None, false),
+        ];
+
+        let preamble_normal = generate_preamble(&tools, false, 0);
+        let preamble_truncated = generate_preamble(&tools, true, 5);
+
+        // PRESENCE: truncated preamble has the note
+        assert!(preamble_truncated.contains("5 tools omitted"),
+            "truncated preamble must mention dropped count");
+        // ABSENCE: non-truncated preamble must not have the truncation note
+        assert!(!preamble_normal.contains("tools omitted"),
+            "non-truncated preamble must not have truncation note");
+    }
+
+    // ── Preamble cache ────────────────────────────────────────────────────────
+
+    #[test]
+    fn preamble_cache_hit_returns_cached_value() {
+        let cache = PreambleCache::new();
+
+        // Cold cache: must be None
+        assert!(cache.get(42, ScopeTier::Admin).is_none(),
+            "fresh cache must return None");
+
+        cache.insert(42, ScopeTier::Admin, "declare namespace codemode {}".to_string());
+
+        // PRESENCE: inserted value is returned
+        assert_eq!(
+            cache.get(42, ScopeTier::Admin),
+            Some("declare namespace codemode {}".to_string()),
+            "cache must return inserted value"
+        );
+
+        // ABSENCE: different tier is a cache miss
+        assert!(cache.get(42, ScopeTier::Read).is_none(),
+            "different scope tier must be cache miss");
+        // ABSENCE: different hash is a cache miss
+        assert!(cache.get(99, ScopeTier::Admin).is_none(),
+            "different hash must be cache miss");
+        // ABSENCE: execute tier is also a miss if not inserted
+        assert!(cache.get(42, ScopeTier::Execute).is_none(),
+            "Execute tier must be distinct from Admin");
+    }
+
+    #[test]
+    fn preamble_cache_separate_entries_per_tier() {
+        let cache = PreambleCache::new();
+        cache.insert(1, ScopeTier::Admin, "admin-preamble".to_string());
+        cache.insert(1, ScopeTier::Read, "read-preamble".to_string());
+
+        // PRESENCE: each tier has its own value
+        assert_eq!(cache.get(1, ScopeTier::Admin), Some("admin-preamble".to_string()));
+        assert_eq!(cache.get(1, ScopeTier::Read), Some("read-preamble".to_string()));
+        // ABSENCE: values are not mixed up
+        assert_ne!(
+            cache.get(1, ScopeTier::Admin),
+            cache.get(1, ScopeTier::Read),
+            "different tiers must return different values"
+        );
+    }
+
+    // ── Aggregate catalog hash ────────────────────────────────────────────────
+
+    #[test]
+    fn aggregate_catalog_hash_is_order_independent() {
+        let upstreams_a = vec![
+            UpstreamCatalogHash { upstream: "radarr".to_string(), hash: 1 },
+            UpstreamCatalogHash { upstream: "sonarr".to_string(), hash: 2 },
+        ];
+        let upstreams_b = vec![
+            UpstreamCatalogHash { upstream: "sonarr".to_string(), hash: 2 },
+            UpstreamCatalogHash { upstream: "radarr".to_string(), hash: 1 },
+        ];
+
+        // PRESENCE: same set in different order must produce equal hash
+        assert_eq!(
+            aggregate_catalog_hash(&upstreams_a),
+            aggregate_catalog_hash(&upstreams_b),
+            "aggregate hash must be order-independent"
+        );
+    }
+
+    #[test]
+    fn aggregate_catalog_hash_changes_when_upstream_changes() {
+        let v1 = vec![UpstreamCatalogHash { upstream: "radarr".to_string(), hash: 1 }];
+        let v2 = vec![UpstreamCatalogHash { upstream: "radarr".to_string(), hash: 2 }];
+        let v3 = vec![UpstreamCatalogHash { upstream: "sonarr".to_string(), hash: 1 }];
+
+        // PRESENCE: different hash value changes the aggregate
+        assert_ne!(
+            aggregate_catalog_hash(&v1),
+            aggregate_catalog_hash(&v2),
+            "changing hash must change aggregate"
+        );
+        // PRESENCE: different upstream name changes the aggregate
+        assert_ne!(
+            aggregate_catalog_hash(&v1),
+            aggregate_catalog_hash(&v3),
+            "changing upstream name must change aggregate"
+        );
+    }
+
+    #[test]
+    fn aggregate_catalog_hash_empty_is_stable() {
+        // PRESENCE: empty slice returns a deterministic value
+        let h1 = aggregate_catalog_hash(&[]);
+        let h2 = aggregate_catalog_hash(&[]);
+        assert_eq!(h1, h2, "empty aggregate must be deterministic");
+    }
+
+    // ── tool_name_to_camel ────────────────────────────────────────────────────
+
+    #[test]
+    fn tool_name_to_camel_converts_dotted_names() {
+        // PRESENCE: basic dotted name conversion
+        assert_eq!(tool_name_to_camel("movie.search"), "movieSearch");
+        assert_eq!(tool_name_to_camel("tv-show.get"), "tvShowGet");
+        // PRESENCE: reserved word gets underscore suffix
+        assert_eq!(tool_name_to_camel("delete"), "delete_");
+        // ABSENCE: dotted name must not appear in camel output for multi-segment names
+        assert!(!tool_name_to_camel("movie.search").contains('.'));
+    }
+}

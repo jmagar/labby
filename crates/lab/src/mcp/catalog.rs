@@ -254,3 +254,47 @@ impl LabMcpServer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Tool name constants (Cloudflare-parity + legacy aliases) ─────────────
+
+    #[test]
+    fn canonical_tool_names_are_search_and_execute() {
+        // PRESENCE: canonical names match expected Cloudflare-parity values
+        assert_eq!(TOOL_SEARCH_TOOL_NAME, "search",
+            "canonical search tool name must be 'search'");
+        assert_eq!(TOOL_EXECUTE_TOOL_NAME, "execute",
+            "canonical execute tool name must be 'execute'");
+
+        // PRESENCE: legacy aliases are the old names
+        assert_eq!(GATEWAY_LEGACY_TOOL_SEARCH_NAME, "tool_search",
+            "legacy search alias must be 'tool_search'");
+        assert_eq!(GATEWAY_LEGACY_EXECUTE_NAME, "tool_execute",
+            "legacy execute alias must be 'tool_execute'");
+
+        // ABSENCE: canonical names must not be the legacy names
+        assert_ne!(TOOL_SEARCH_TOOL_NAME, "tool_search",
+            "canonical name must not be the legacy name");
+        assert_ne!(TOOL_EXECUTE_TOOL_NAME, "tool_execute",
+            "canonical name must not be the legacy name");
+
+        // ABSENCE: legacy names must not match each other
+        assert_ne!(GATEWAY_LEGACY_TOOL_SEARCH_NAME, GATEWAY_LEGACY_EXECUTE_NAME);
+    }
+
+    #[test]
+    fn code_mode_tool_names_are_distinct_from_gateway_tools() {
+        // PRESENCE: code mode tools have their own names
+        assert_eq!(CODE_SEARCH_TOOL_NAME, "code_search");
+        assert_eq!(CODE_EXECUTE_TOOL_NAME, "code_execute");
+
+        // ABSENCE: code mode names must not overlap with gateway tool names
+        assert_ne!(CODE_SEARCH_TOOL_NAME, TOOL_SEARCH_TOOL_NAME,
+            "code_search must differ from search");
+        assert_ne!(CODE_EXECUTE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME,
+            "code_execute must differ from execute");
+    }
+}

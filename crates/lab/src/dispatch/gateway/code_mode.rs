@@ -2297,4 +2297,222 @@ mod tests {
             Some("code_mode_fuel_exhausted")
         );
     }
+
+    // ── normalize_user_code ───────────────────────────────────────────────────
+
+    #[test]
+    fn normalize_user_code_strips_javascript_markdown_fences() {
+        let fenced = "```javascript\nconsole.log('hi');\n```";
+        let result = super::normalize_user_code(fenced);
+
+        // PRESENCE: inner code preserved
+        assert!(result.contains("console.log('hi');"),
+            "inner code must survive fence stripping");
+        // ABSENCE: fences removed
+        assert!(!result.contains("```"),
+            "backtick fences must be stripped, got: {result}");
+        assert!(!result.contains("javascript"),
+            "language tag must be stripped");
+    }
+
+    #[test]
+    fn normalize_user_code_strips_typescript_fences() {
+        let fenced = "```typescript\nconst x: number = 1;\n```";
+        let result = super::normalize_user_code(fenced);
+        assert!(result.contains("const x: number = 1;"));
+        assert!(!result.contains("```"));
+        assert!(!result.contains("typescript"));
+    }
+
+    #[test]
+    fn normalize_user_code_wraps_bare_async_main_function() {
+        let bare = "async function main() { return 42; }";
+        let result = super::normalize_user_code(bare);
+
+        // PRESENCE: original declaration preserved
+        assert!(result.starts_with("async function main()"),
+            "original decl must be preserved");
+        // PRESENCE: main() call appended
+        assert!(result.contains("main();"),
+            "main() invocation must be appended, got: {result}");
+    }
+
+    #[test]
+    fn normalize_user_code_wraps_bare_sync_main_function() {
+        let bare = "function main() { return 42; }";
+        let result = super::normalize_user_code(bare);
+        assert!(result.starts_with("function main()"));
+        assert!(result.contains("main();"));
+    }
+
+    #[test]
+    fn normalize_user_code_does_not_double_wrap_when_main_already_called() {
+        // Code that already has main() after the function should NOT get a second
+        // invocation. (The normalizer only checks starts_with, so two function decls
+        // that start the string would each add main(); — but a plain string with
+        // main() appended manually must be left alone if it doesn't start with main decl.)
+        let already_called = "const x = 1;\nmain();";
+        let result = super::normalize_user_code(already_called);
+        // ABSENCE: no spurious main() added to non-main-decl code
+        assert_eq!(result.matches("main()").count(), 1,
+            "non-main-decl code must not get main() injected, got: {result}");
+    }
+
+    #[test]
+    fn normalize_user_code_unwraps_export_default_async() {
+        let exported = "export default async function() { return 42; }";
+        let result = super::normalize_user_code(exported);
+
+        // ABSENCE: export default removed
+        assert!(!result.contains("export default"),
+            "export default must be removed, got: {result}");
+        // PRESENCE: wrapped as async IIFE
+        assert!(result.starts_with("(async function"),
+            "must wrap as async IIFE, got: {result}");
+        assert!(result.contains("()()") || result.ends_with("()"),
+            "IIFE must be immediately invoked, got: {result}");
+    }
+
+    #[test]
+    fn normalize_user_code_unwraps_export_default_sync() {
+        let exported = "export default function() { return 42; }";
+        let result = super::normalize_user_code(exported);
+        assert!(!result.contains("export default"));
+        assert!(result.starts_with("(function"));
+    }
+
+    #[test]
+    fn normalize_user_code_passthrough_for_plain_expressions() {
+        let plain = "const result = await callTool('lab::test', {});";
+        let result = super::normalize_user_code(plain);
+        // PRESENCE: no transformation applied
+        assert_eq!(result, plain,
+            "plain expressions must pass through unchanged");
+    }
+
+    // ── CodeModeSurface allow_destructive_actions ─────────────────────────────
+
+    #[test]
+    fn code_mode_surface_mcp_gates_on_flag() {
+        let mcp_allow = super::CodeModeSurface::Mcp { allow_destructive_actions: true };
+        let mcp_deny = super::CodeModeSurface::Mcp { allow_destructive_actions: false };
+
+        // PRESENCE: true flag → allowed
+        assert!(mcp_allow.allow_destructive_actions(),
+            "Mcp with allow_destructive_actions=true must return true");
+        // PRESENCE: false flag → denied
+        assert!(!mcp_deny.allow_destructive_actions(),
+            "Mcp with allow_destructive_actions=false must return false");
+    }
+
+    #[test]
+    fn code_mode_surface_cli_always_allows_destructive() {
+        let cli = super::CodeModeSurface::Cli;
+        // PRESENCE: CLI always permits
+        assert!(cli.allow_destructive_actions(),
+            "CLI surface must always allow destructive actions");
+    }
+
+    // ── CodeModeCaller oauth_subject ──────────────────────────────────────────
+
+    #[test]
+    fn oauth_subject_uses_sub_when_present() {
+        let caller = super::CodeModeCaller::Scoped {
+            scopes: vec!["lab:admin".to_string()],
+            sub: Some("user@example.com".to_string()),
+        };
+
+        // PRESENCE: explicit sub is returned
+        assert_eq!(caller.oauth_subject(), Some("user@example.com"),
+            "oauth_subject must return the JWT sub when present");
+        // ABSENCE: not None
+        assert!(caller.oauth_subject().is_some());
+    }
+
+    #[test]
+    fn oauth_subject_falls_back_to_shared_when_sub_absent() {
+        let caller = super::CodeModeCaller::Scoped {
+            scopes: vec!["lab:admin".to_string()],
+            sub: None,
+        };
+
+        // PRESENCE: falls back to some non-None shared subject
+        let subject = caller.oauth_subject();
+        assert!(subject.is_some(),
+            "oauth_subject must return Some (shared fallback) when sub is None");
+        // ABSENCE: not the same as the user-specific email
+        assert_ne!(subject, Some("user@example.com"),
+            "fallback subject must not be user-specific");
+    }
+
+    #[test]
+    fn oauth_subject_trusted_local_returns_shared_subject() {
+        let caller = super::CodeModeCaller::TrustedLocal;
+        // PRESENCE: trusted local also returns a subject (the shared gateway subject)
+        assert!(caller.oauth_subject().is_some(),
+            "TrustedLocal must return Some oauth_subject");
+    }
+
+    // ── CodeModeCaller can_execute / can_read scope checks ────────────────────
+
+    #[test]
+    fn scoped_caller_can_execute_with_lab_scope() {
+        let caller = super::CodeModeCaller::Scoped {
+            scopes: vec!["lab".to_string()],
+            sub: None,
+        };
+        assert!(caller.can_execute());
+        assert!(caller.can_read());
+    }
+
+    #[test]
+    fn scoped_caller_read_only_cannot_execute() {
+        let caller = super::CodeModeCaller::Scoped {
+            scopes: vec!["lab:read".to_string()],
+            sub: None,
+        };
+        // PRESENCE: can read
+        assert!(caller.can_read());
+        // ABSENCE: cannot execute
+        assert!(!caller.can_execute(),
+            "lab:read scope must not permit execution");
+    }
+
+    // ── token_estimate_divisor affects truncation (#12b) ─────────────────────
+
+    #[test]
+    fn token_estimate_divisor_affects_truncation_decision() {
+        // A payload of ~4000 bytes.  With divisor=4 → ~1000 tokens (fits inside
+        // max_response_tokens=2000).  With divisor=1 → ~4000 tokens (exceeds 2000).
+        let payload = "x".repeat(4000);
+        let make_response = || CodeModeExecutionResponse {
+            result: None,
+            calls: vec![CodeModeExecutedCall {
+                id: "upstream::test::large".to_string(),
+                result: json!({"payload": payload.clone()}),
+            }],
+            logs: Vec::new(),
+        };
+
+        // divisor=4: 4000 bytes / 4 = 1000 estimated tokens → within 2000 → NOT truncated
+        let fits = truncate_execution_response(make_response(), usize::MAX, 2000, 4);
+        // PRESENCE: result is the original object, not a truncation marker
+        assert!(fits.calls[0].result.get("payload").is_some(),
+            "divisor=4 must not truncate 4 kB payload against 2000-token limit");
+        // ABSENCE: no truncation marker
+        assert!(fits.calls[0].result.get("truncated").is_none(),
+            "divisor=4 result must not carry a truncated flag");
+
+        // divisor=1: 4000 bytes / 1 = 4000 estimated tokens → exceeds 2000 → TRUNCATED
+        let truncated = truncate_execution_response(make_response(), usize::MAX, 2000, 1);
+        // PRESENCE: truncation marker is injected
+        assert_eq!(
+            truncated.calls[0].result.get("truncated"),
+            Some(&json!(true)),
+            "divisor=1 must truncate 4 kB payload against 2000-token limit"
+        );
+        // ABSENCE: original payload content not preserved in the marker
+        assert!(truncated.calls[0].result.get("payload").is_none(),
+            "truncation marker must not keep original payload key");
+    }
 }
