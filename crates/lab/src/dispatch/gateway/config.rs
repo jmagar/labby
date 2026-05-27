@@ -58,6 +58,7 @@ const KNOWN_LAB_CONFIG_KEYS: &[&str] = &[
     "quarantined_virtual_servers",
     "deploy",
     "public_urls",
+    "code_mode",
 ];
 
 /// Serialize `cfg` to TOML and atomically replace the file at `path`.
