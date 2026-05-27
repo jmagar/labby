@@ -1,4 +1,7 @@
 use std::collections::HashMap;
+use std::sync::LazyLock;
+
+use regex::Regex;
 
 use crate::config::{ToolSearchConfig, UpstreamConfig};
 use crate::dispatch::gateway::service_catalog::service_meta;
@@ -66,8 +69,20 @@ pub(super) fn sanitize_tool_text(input: &str, max_len: usize) -> String {
         .collect()
 }
 
+/// Regex that matches common secret token patterns even when embedded in
+/// longer strings (e.g. `Authorization: Bearer sk-abc123...`). Applied as a
+/// secondary pass after the whitespace-split pass so that both standalone and
+/// embedded secrets are caught.
+static SECRET_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82}|glpat-[A-Za-z0-9_-]{20}|xox[bp]-[A-Za-z0-9-]+|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)",
+    )
+    .expect("SECRET_REGEX is valid")
+});
+
 fn redact_secret_like_segments(input: &str) -> String {
-    input
+    // First pass: whitespace-split heuristic (fast path for standalone tokens).
+    let after_split = input
         .split_whitespace()
         .map(|segment| {
             let looks_secret = segment.starts_with("sk-")
@@ -78,13 +93,18 @@ fn redact_secret_like_segments(input: &str) -> String {
                 || segment.starts_with("xoxp-")
                 || segment.starts_with("eyJ");
             if looks_secret {
-                "<redacted>".to_string()
+                "[REDACTED]".to_string()
             } else {
                 segment.to_string()
             }
         })
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" ");
+
+    // Second pass: regex catches embedded secrets (e.g. in header values).
+    SECRET_REGEX
+        .replace_all(&after_split, "[REDACTED]")
+        .into_owned()
 }
 
 /// Maximum serialized schema size returned in tool search results.

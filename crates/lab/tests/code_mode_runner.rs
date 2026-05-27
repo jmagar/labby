@@ -103,6 +103,9 @@ fn code_mode_runner_evaluates_js_in_a_minimal_host_environment() {
     stderr
         .read_to_string(&mut stderr_text)
         .expect("read runner stderr");
+    // Console.log capture routes to stderr only on the WASM/Javy path; the
+    // Boa path defers console capture to Bead 3 (boa_runtime integration).
+    #[cfg(feature = "code_mode_wasm")]
     assert!(stderr_text.contains("runner console check"));
 }
 
