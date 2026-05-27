@@ -1,5 +1,9 @@
 # Gateway Lazy Upstream Runtime Implementation Plan
 
+> **Status:** Implemented in PR #77. The unchecked task boxes and
+> “Expected: FAIL” notes below are the original TDD execution record, not open
+> follow-up work. Current behavior is verified by the PR tests and service docs.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Stop `labby serve` from eagerly starting every configured upstream MCP server while preserving full gateway `scout`, `invoke`, `code_search`, and `code_execute` access.
