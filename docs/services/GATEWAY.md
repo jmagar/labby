@@ -213,6 +213,19 @@ upstream exposure checks. `params` must be JSON-serializable:
 }
 ```
 
+### Mutual Exclusion
+
+`tool_search` and `code_mode` cannot both be enabled at the same time. This is enforced atomically
+inside a config mutation lock to prevent TOCTOU races:
+
+- Enabling `tool_search` while `code_mode.enabled = true` is rejected with `InvalidParam`.
+- Enabling `code_mode` while `tool_search.enabled = true` is rejected with `InvalidParam`.
+- Disabling either mode is always permitted regardless of the other mode's state.
+
+The legacy `tool_search` and `tool_execute` tool names are kept as backward-compatible aliases.
+They emit a `WARN`-level trace event with `legacy_name` and `canonical_name` fields on every
+invocation. Use the canonical `search` and `execute` names in new clients.
+
 Rules:
 
 - `top_k_default` is validated in the range `1..=50`
@@ -223,8 +236,8 @@ Rules:
 - `include_schema` defaults to `false`; schemas are sanitized before return when requested
 - `code_search` is read-only discovery and accepts `lab:read`, `lab`, or `lab:admin`
 - `code_schema` exposes full schemas and requires `lab` or `lab:admin`
-- `code_execute` requires `lab` or `lab:admin`, is disabled unless `[code_mode].enabled = true`, and brokers calls through the same gateway visibility checks as `tool_execute`
-- Lab actions are not supported inside Code Mode `callTool`; use the `tool_execute` MCP tool for Lab actions
+- `code_execute` requires `lab` or `lab:admin`, is disabled unless `[code_mode].enabled = true`, and brokers calls through the same gateway visibility checks as `execute` (canonical) / `tool_execute` (legacy alias)
+- Lab actions are not supported inside Code Mode `callTool`; use the `execute` MCP tool for Lab actions
 - gateway action provenance fields (`origin` and `owner`) are reserved in Code Mode and are overwritten by the broker
 - `code_execute` enforces `timeout_ms` by killing the child process and enforces `max_tool_calls` in the parent before brokering each call
 - invalid Code Mode ids return `invalid_code_mode_id`

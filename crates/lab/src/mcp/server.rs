@@ -1794,7 +1794,8 @@ impl ServerHandler for LabMcpServer {
                     service = "tool_execute",
                     action = "call_tool",
                     subject,
-                    name = "tool_execute",
+                    legacy_name = GATEWAY_LEGACY_EXECUTE_NAME,
+                    canonical_name = TOOL_EXECUTE_TOOL_NAME,
                     "Legacy alias invoked -- use 'execute' instead"
                 );
             }

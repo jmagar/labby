@@ -1686,14 +1686,24 @@ impl GatewayManager {
         // read current code_mode.enabled from inside the lock, then validate.
         let _mutation_guard = self.config_mutation.lock().await;
         let mut cfg = self.config.read().await.clone();
+        let old_enabled = cfg.tool_search.enabled;
         crate::config::validate_mode_exclusive(next.enabled, cfg.code_mode.enabled)
             .map_err(|e| ToolError::InvalidParam {
                 message: e.to_string(),
                 param: "tool_search/code_mode".to_string(),
             })?;
-        cfg.tool_search = next;
+        cfg.tool_search = next.clone();
         self.persist_config(cfg).await?;
         self.reload_with_origin_unlocked(origin, owner).await?;
+        tracing::info!(
+            surface = "dispatch",
+            service = "gateway",
+            action = "gateway.mode_change",
+            mode = "tool_search",
+            enabled = next.enabled,
+            previous = old_enabled,
+            "gateway mode changed"
+        );
         Ok(self.tool_search_config().await)
     }
 
@@ -1709,6 +1719,7 @@ impl GatewayManager {
         // read current tool_search.enabled from inside the lock, then validate.
         let _mutation_guard = self.config_mutation.lock().await;
         let mut cfg = self.config.read().await.clone();
+        let old_enabled = cfg.code_mode.enabled;
         crate::config::validate_mode_exclusive(cfg.tool_search.enabled, next.enabled)
             .map_err(|e| ToolError::InvalidParam {
                 message: e.to_string(),
@@ -1732,6 +1743,15 @@ impl GatewayManager {
                 "code_mode enabled — upstream pool warm-up triggered"
             );
         }
+        tracing::info!(
+            surface = "dispatch",
+            service = "gateway",
+            action = "gateway.mode_change",
+            mode = "code_mode",
+            enabled = next.enabled,
+            previous = old_enabled,
+            "gateway mode changed"
+        );
         Ok(self.code_mode_config().await)
     }
 

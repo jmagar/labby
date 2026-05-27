@@ -31,6 +31,11 @@ value.
 
 ## Typed Catalog — What Is Injected Into Your Sandbox
 
+The typed preamble is delivered via the `code_search({action: 'preamble'})` response —
+not via the `code_execute` tool description. The tool description stays static and short.
+The preamble content is fetched via `code_search` and injected into the sandbox at
+execution time before your code runs.
+
 At execution time, before your code runs, the sandbox receives a preamble of TypeScript
 declarations for every upstream tool currently connected to this gateway. It looks like
 this (content varies by connected upstreams):
@@ -215,8 +220,7 @@ type CodeModeError = {
 
     // Resource budget — split your work
     | "tool_call_limit_exceeded"   // hit max_tool_calls for this execution
-    | "code_mode_timeout"          // total execution time exceeded timeout_ms
-    | "code_mode_fuel_exhausted";  // JS fuel budget exhausted
+    | "code_mode_timeout";         // total execution time exceeded timeout_ms
 
   message: string;
   valid?: string[];        // for unknown_tool/unknown_action: valid options
@@ -243,7 +247,7 @@ async () => {
         // Your code has a bug — don't retry, surface it
         throw e;
       case "tool_call_limit_exceeded":
-      case "code_mode_fuel_exhausted":
+      case "code_mode_timeout":
         // You did too much — return what you have so far
         return { partial: true, error: err.kind };
       default:
@@ -283,15 +287,6 @@ rather than relying on `calls` — `calls` is there for debugging, not for prima
 | Max tool calls | 8 | `code_mode.max_tool_calls` | 1..=50 |
 | Response bytes | 24 576 (24 KB) | `code_mode.max_response_bytes` | 1 024..=1 048 576 |
 | Response tokens | 6 000 | `code_mode.max_response_tokens` | 256..=256 000 |
-| JS fuel (base) | 50 000 000 | (not configurable per call) | — |
-
-### Fuel budget guidance
-
-- Base overhead: ~100K fuel for the JS module and promise scheduler
-- Per `callTool` / `codemode.*` boundary: ~2K fuel for promise plumbing
-- 50M fuel supports heavy fan-out plus moderate result processing
-- If you hit `code_mode_fuel_exhausted`: reduce local computation over large arrays,
-  or split across multiple `code` calls
 
 ### Result truncation
 

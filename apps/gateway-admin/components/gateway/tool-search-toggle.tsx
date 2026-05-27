@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { Code2, Search } from 'lucide-react'
+import { mutate } from 'swr'
 import { toast } from 'sonner'
 
 import { AURORA_STRONG_PANEL } from '@/components/aurora/tokens'
@@ -11,6 +12,8 @@ import {
   useGatewayCodeModeConfig,
   useGatewayMutations,
   useGatewayToolSearchConfig,
+  CODE_MODE_CONFIG_KEY,
+  TOOL_SEARCH_CONFIG_KEY,
 } from '@/lib/hooks/use-gateways'
 import { cn, getErrorMessage } from '@/lib/utils'
 
@@ -32,6 +35,14 @@ export function ToolSearchTogglePanel() {
 
   async function handleToggle(enabled: boolean) {
     if (!toolSearchConfig || isSavingRef.current) return
+    // Mutual exclusion: disabling tool_search while code_mode is on is blocked
+    // server-side, but warn the user proactively in the UI.
+    if (!enabled && codeModeConfig?.enabled) {
+      toast.error(
+        'Cannot disable tool search while code mode is enabled. Disable code mode first.',
+      )
+      return
+    }
     isSavingRef.current = true
     setIsSaving(true)
     try {
@@ -40,6 +51,8 @@ export function ToolSearchTogglePanel() {
         top_k_default: toolSearchConfig.top_k_default,
         max_tools: toolSearchConfig.max_tools,
       })
+      // Invalidate code_mode config cache so it reflects any server-side state change.
+      await mutate(CODE_MODE_CONFIG_KEY)
       toast.success(enabled ? 'Server tool search enabled.' : 'Server tool search disabled.')
     } catch (requestError) {
       toast.error(getErrorMessage(requestError, 'Failed to update server tool search'))
@@ -61,6 +74,8 @@ export function ToolSearchTogglePanel() {
         max_response_bytes: codeModeConfig.max_response_bytes,
         max_response_tokens: codeModeConfig.max_response_tokens,
       })
+      // Invalidate tool_search config cache so it reflects any server-side state change.
+      await mutate(TOOL_SEARCH_CONFIG_KEY)
       toast.success(enabled ? 'Code mode execution enabled.' : 'Code mode execution disabled.')
     } catch (requestError) {
       toast.error(getErrorMessage(requestError, 'Failed to update code mode'))

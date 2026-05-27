@@ -45,6 +45,46 @@ fn lab_action_unknown_tool_hint() -> String {
 const CODE_SEARCH_CATALOG_SOFT_CAP_BYTES: usize = 256 * 1024;
 const CODE_SEARCH_CATALOG_HARD_CAP_BYTES: usize = 512 * 1024;
 
+/// Normalize user-submitted code before sandbox execution.
+/// Mirrors the 3 transforms in Cloudflare's normalize.ts:
+/// 1. Strip markdown fences (```javascript/typescript/``` wrappers)
+/// 2. Wrap bare function declarations (async function main() → add main(); call)
+/// 3. Unwrap export default (export default async function → anonymous IIFE)
+fn normalize_user_code(code: &str) -> String {
+    // 1. Strip markdown fences
+    let code = {
+        let trimmed = code.trim();
+        if let Some(stripped) = trimmed
+            .strip_prefix("```javascript\n")
+            .or_else(|| trimmed.strip_prefix("```typescript\n"))
+            .or_else(|| trimmed.strip_prefix("```js\n"))
+            .or_else(|| trimmed.strip_prefix("```ts\n"))
+            .or_else(|| trimmed.strip_prefix("```\n"))
+        {
+            stripped
+                .trim_end_matches("```")
+                .trim_end()
+        } else {
+            trimmed
+        }
+    };
+
+    // 2. Wrap bare async function main / function main
+    if code.starts_with("async function main(") || code.starts_with("function main(") {
+        return format!("{code}\nmain();");
+    }
+
+    // 3. Unwrap export default async/sync function → anonymous IIFE
+    if let Some(inner) = code.strip_prefix("export default async function") {
+        return format!("(async function{})()", inner.trim_end_matches(';'));
+    }
+    if let Some(inner) = code.strip_prefix("export default function") {
+        return format!("(function{})()", inner.trim_end_matches(';'));
+    }
+
+    code.to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeModeToolId {
     pub raw: String,
@@ -441,6 +481,7 @@ impl<'a> CodeModeBroker<'a> {
                 message: "code_execute requires one of scopes: lab, lab:admin".to_string(),
             });
         }
+        let started = std::time::Instant::now();
         let response = self
             .execute_sandboxed(
                 code,
@@ -452,12 +493,30 @@ impl<'a> CodeModeBroker<'a> {
                 config.max_log_bytes,
             )
             .await?;
-        Ok(truncate_execution_response(
+        let was_truncated = !response_within_budget(
+            &response,
+            config.max_response_bytes,
+            config.max_response_tokens,
+            config.token_estimate_divisor,
+        );
+        let response = truncate_execution_response(
             response,
             config.max_response_bytes,
             config.max_response_tokens,
             config.token_estimate_divisor,
-        ))
+        );
+        tracing::info!(
+            surface = "dispatch",
+            service = "code_mode",
+            action = "code_execute",
+            tool_calls = response.calls.len(),
+            elapsed_ms = started.elapsed().as_millis(),
+            result_bytes = response.result.as_ref().map(|v| v.to_string().len()).unwrap_or(0),
+            logs_count = response.logs.len(),
+            truncated = was_truncated,
+            "code execution complete"
+        );
+        Ok(response)
     }
 
     async fn code_search_catalog(
@@ -524,6 +583,14 @@ impl<'a> CodeModeBroker<'a> {
             let dropped = original_len - entries.len();
             if dropped > 0 {
                 entries.push(CodeModeCatalogEntry::truncation_sentinel(dropped));
+                tracing::warn!(
+                    surface = "dispatch",
+                    service = "code_mode",
+                    action = "code_search.catalog",
+                    tools_omitted = dropped,
+                    catalog_bytes = serialized_size,
+                    "catalog truncated for code mode"
+                );
             }
             serialized_size = serialized_catalog_size(&entries)?;
         }
@@ -569,6 +636,9 @@ impl<'a> CodeModeBroker<'a> {
         } else {
             super::code_mode_preamble::generate_js_proxy(&[], &[])
         };
+
+        // Normalize user code before combining with preamble.
+        let code = normalize_user_code(code);
 
         // Prepend preamble to user code. The runner wraps everything in an
         // async IIFE, so the preamble's `var codemode = ...` becomes
