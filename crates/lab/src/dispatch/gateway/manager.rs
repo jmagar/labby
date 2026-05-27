@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use arc_swap::{ArcSwap, ArcSwapOption};
+use futures::StreamExt;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
@@ -16,7 +17,7 @@ use crate::config::{
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::error::ToolError;
 use crate::dispatch::upstream::pool::{
-    UpstreamCachedSummary, UpstreamPool, in_process_upstream_name,
+    UpstreamCachedSummary, UpstreamPool, in_process_upstream_name, upstream_discovery_concurrency,
 };
 use crate::dispatch::upstream::types::{UpstreamRuntimeOwner, UpstreamTool};
 use crate::oauth::upstream::cache::OauthClientCache;
@@ -334,8 +335,6 @@ pub struct GatewayManager {
     pub(super) oauth_redirect_uri: Option<Arc<String>>,
     tool_indexes: Arc<dashmap::DashMap<String, GatewayToolIndexState>>,
     protected_route_index: Arc<RwLock<ProtectedRouteIndex>>,
-    #[cfg(test)]
-    test_lazy_tool_fixtures: Arc<dashmap::DashMap<String, Vec<rmcp::model::Tool>>>,
 }
 
 impl GatewayManager {
@@ -357,8 +356,6 @@ impl GatewayManager {
             oauth_redirect_uri: None,
             tool_indexes: Arc::new(dashmap::DashMap::new()),
             protected_route_index: Arc::new(RwLock::new(ProtectedRouteIndex::default())),
-            #[cfg(test)]
-            test_lazy_tool_fixtures: Arc::new(dashmap::DashMap::new()),
         }
     }
 
@@ -1961,13 +1958,7 @@ impl GatewayManager {
                     .with_runtime_origin(runtime_origin_tag(origin))
                     .with_runtime_owner(owner),
             );
-            let registry = self.builtin_service_registry();
-            pool.discover_all_for_subject_with_in_process_peers(
-                &cfg.upstream,
-                SHARED_GATEWAY_OAUTH_SUBJECT,
-                &registry,
-            )
-            .await;
+            pool.seed_lazy_upstreams(&cfg.upstream).await;
             Some(pool)
         };
         tracing::info!(
@@ -2272,29 +2263,7 @@ impl GatewayManager {
             return Ok(());
         }
 
-        let pool = match self.runtime.current_pool().await {
-            Some(pool) => pool,
-            None => {
-                let mut base_pool = match &self.oauth_client_cache {
-                    Some(cache) => UpstreamPool::new().with_oauth_client_cache(cache.clone()),
-                    None => UpstreamPool::new(),
-                };
-                base_pool = base_pool.with_runtime_owner(Some(UpstreamRuntimeOwner {
-                    surface: "dispatch".to_string(),
-                    subject: Some(SHARED_GATEWAY_OAUTH_SUBJECT.to_string()),
-                    request_id: None,
-                    session_id: None,
-                    client_name: None,
-                    raw: None,
-                }));
-                let pool = Arc::new(base_pool);
-                pool.seed_lazy_upstreams(&cfg.upstream).await;
-                self.runtime.swap(Some(Arc::clone(&pool))).await;
-                pool
-            }
-        };
-
-        pool.seed_lazy_upstreams(&cfg.upstream).await;
+        self.ensure_lazy_upstream_pool(&cfg).await;
         self.refresh_tool_search_indexes_if_stale(wait_for_refresh)
             .await;
         Ok(())
@@ -2316,6 +2285,22 @@ impl GatewayManager {
             });
         };
 
+        let pool = self.ensure_lazy_upstream_pool(&cfg).await;
+
+        let subject = upstream
+            .oauth
+            .as_ref()
+            .map(|_| SHARED_GATEWAY_OAUTH_SUBJECT);
+        pool.ensure_tools_for_upstream(upstream, subject)
+            .await
+            .map_err(|err| ToolError::Sdk {
+                sdk_kind: "upstream_connect_error".to_string(),
+                message: format!("failed to connect upstream `{upstream_name}`: {err}"),
+            })?;
+        Ok(())
+    }
+
+    async fn ensure_lazy_upstream_pool(&self, cfg: &LabConfig) -> Arc<UpstreamPool> {
         let pool = match self.runtime.current_pool().await {
             Some(pool) => pool,
             None => {
@@ -2332,38 +2317,21 @@ impl GatewayManager {
                     raw: None,
                 }));
                 let pool = Arc::new(base_pool);
-                pool.seed_lazy_upstreams(&cfg.upstream).await;
                 self.runtime.swap(Some(Arc::clone(&pool))).await;
                 pool
             }
         };
-
         pool.seed_lazy_upstreams(&cfg.upstream).await;
-        #[cfg(test)]
-        if let Some((_, tools)) = self.test_lazy_tool_fixtures.remove(upstream_name) {
-            pool.install_test_tools_for_upstream(upstream, tools)
-                .await
-                .map_err(|err| ToolError::Sdk {
-                    sdk_kind: "upstream_connect_error".to_string(),
-                    message: format!("failed to connect upstream `{upstream_name}`: {err}"),
-                })?;
-            return Ok(());
-        }
-        let subject = upstream
-            .oauth
-            .as_ref()
-            .map(|_| SHARED_GATEWAY_OAUTH_SUBJECT);
-        pool.ensure_tools_for_upstream(upstream, subject)
-            .await
-            .map_err(|err| ToolError::Sdk {
-                sdk_kind: "upstream_connect_error".to_string(),
-                message: format!("failed to connect upstream `{upstream_name}`: {err}"),
-            })?;
-        Ok(())
+        pool
     }
 
-    pub async fn code_mode_catalog_tools(&self) -> Result<Vec<UpstreamTool>, ToolError> {
-        self.ensure_search_runtime_ready(true).await?;
+    pub async fn code_mode_catalog_tools(
+        &self,
+        allow_cold_connect: bool,
+    ) -> Result<Vec<UpstreamTool>, ToolError> {
+        if allow_cold_connect {
+            self.ensure_search_runtime_ready(true).await?;
+        }
         let Some(pool) = self.current_pool().await else {
             return Ok(Vec::new());
         };
@@ -2383,7 +2351,26 @@ impl GatewayManager {
             });
         }
         let selector = ToolExecuteSelector::parse(name, upstream)?;
+        let priority_by_upstream: HashMap<String, f32> = self
+            .config
+            .read()
+            .await
+            .upstream
+            .iter()
+            .map(|upstream| (upstream.name.clone(), upstream.priority.max(0.0)))
+            .collect();
         if let Some(upstream_name) = selector.upstream.as_deref() {
+            if priority_by_upstream
+                .get(upstream_name)
+                .copied()
+                .unwrap_or(1.0)
+                <= 0.0
+            {
+                return Err(ToolError::Sdk {
+                    sdk_kind: "unknown_tool".to_string(),
+                    message: format!("unknown tool `{}`", selector.display_name()),
+                });
+            }
             self.ensure_upstream_tool_runtime_ready(upstream_name)
                 .await?;
         } else {
@@ -2394,14 +2381,6 @@ impl GatewayManager {
             sdk_kind: "unknown_tool".to_string(),
             message: format!("tool `{name}` is not available"),
         })?;
-        let priority_by_upstream: HashMap<String, f32> = self
-            .config
-            .read()
-            .await
-            .upstream
-            .iter()
-            .map(|upstream| (upstream.name.clone(), upstream.priority.max(0.0)))
-            .collect();
         let matches: Vec<_> = if let Some(upstream_name) = selector.upstream.as_deref() {
             if priority_by_upstream
                 .get(upstream_name)
@@ -2851,10 +2830,22 @@ impl GatewayManager {
                 );
                 continue;
             }
+            if state.warming.swap(true, Ordering::Relaxed) {
+                tracing::debug!(
+                    surface = "mcp",
+                    service = "gateway",
+                    action = "tool_search.reprobe",
+                    event = "skipped",
+                    operation = "health",
+                    upstream = %upstream.name,
+                    reason = "already_warming",
+                    "gateway tool index reprobe skipped"
+                );
+                continue;
+            }
             if let Ok(mut guard) = state.last_reprobe_attempt_at.lock() {
                 *guard = Some(now);
             }
-            state.warming.store(true, Ordering::Relaxed);
             tracing::info!(
                 surface = "mcp",
                 service = "gateway",
@@ -2867,7 +2858,7 @@ impl GatewayManager {
             pending.push((upstream, state));
         }
 
-        let tasks = pending.into_iter().map(|(upstream, state)| {
+        let tasks = pending.into_iter().map(move |(upstream, state)| {
             let pool = Arc::clone(&pool);
             let semantic_urls = semantic_urls.clone();
             async move {
@@ -2881,7 +2872,11 @@ impl GatewayManager {
                     upstream = %upstream.name,
                     "gateway tool index reprobe start"
                 );
-                if let Err(err) = pool.reprobe_tools_for_upstream(&upstream).await {
+                let subject = upstream
+                    .oauth
+                    .as_ref()
+                    .map(|_| SHARED_GATEWAY_OAUTH_SUBJECT);
+                if let Err(err) = pool.ensure_tools_for_upstream(&upstream, subject).await {
                     tracing::warn!(
                         surface = "mcp",
                         service = "gateway",
@@ -2991,12 +2986,19 @@ impl GatewayManager {
             }
         });
 
+        let concurrency = upstream_discovery_concurrency();
         if wait_for_refresh {
-            futures::future::join_all(tasks).await;
+            futures::stream::iter(tasks)
+                .buffer_unordered(concurrency)
+                .collect::<Vec<_>>()
+                .await;
         } else {
-            for task in tasks {
-                tokio::spawn(task);
-            }
+            tokio::spawn(async move {
+                futures::stream::iter(tasks)
+                    .buffer_unordered(concurrency)
+                    .collect::<Vec<_>>()
+                    .await;
+            });
         }
     }
 
@@ -3007,18 +3009,6 @@ impl GatewayManager {
             ..LabConfig::default()
         })
         .await;
-    }
-
-    #[cfg(test)]
-    fn install_test_lazy_tool_fixture(&self, upstream: &str, tool: &str) {
-        self.test_lazy_tool_fixtures.insert(
-            upstream.to_string(),
-            vec![rmcp::model::Tool::new(
-                tool.to_string(),
-                format!("{tool} description"),
-                Arc::new(serde_json::Map::new()),
-            )],
-        );
     }
 
     fn notify_catalog_changes(&self, diff: &GatewayCatalogDiff) {
@@ -3732,6 +3722,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn resolve_tool_execute_explicit_priority_zero_does_not_warm_upstream() {
+        let mut upstream = fixture_http_upstream("suppressed");
+        upstream.priority = 0.0;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
+        manager
+            .seed_config(LabConfig {
+                tool_search: ToolSearchConfig {
+                    enabled: true,
+                    ..ToolSearchConfig::default()
+                },
+                upstream: vec![upstream],
+                ..LabConfig::default()
+            })
+            .await;
+        let err = manager
+            .resolve_tool_execute_with_upstream("secret-tool", Some("suppressed"))
+            .await
+            .expect_err("priority=0 upstream must not be warmed or invoked explicitly");
+
+        match err {
+            ToolError::Sdk { sdk_kind, .. } => assert_eq!(sdk_kind, "unknown_tool"),
+            other => panic!("expected unknown_tool sdk error, got {other:?}"),
+        }
+        if let Some(pool) = manager.current_pool().await {
+            assert!(
+                pool.healthy_tools_for_upstream("suppressed")
+                    .await
+                    .is_empty(),
+                "priority=0 explicit invoke must not warm suppressed upstream tools"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn resolve_code_mode_upstream_tool_hides_priority_zero_upstreams() {
         let mut upstream = fixture_http_upstream("suppressed");
         upstream.priority = 0.0;
@@ -3820,58 +3846,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_tool_execute_with_upstream_warms_requested_upstream() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("config.toml");
-        let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
-        manager
-            .seed_config(LabConfig {
-                tool_search: ToolSearchConfig {
-                    enabled: true,
-                    ..ToolSearchConfig::default()
-                },
-                upstream: vec![
-                    fixture_http_upstream("alpha"),
-                    fixture_http_upstream("beta"),
-                ],
-                ..LabConfig::default()
-            })
+    async fn resolve_tool_execute_with_upstream_resolves_requested_upstream() {
+        let (manager, pool) = tool_search_manager_with_upstreams(vec![
+            fixture_http_upstream("alpha"),
+            fixture_http_upstream("beta"),
+        ])
+        .await;
+        pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
             .await;
-        manager.install_test_lazy_tool_fixture("alpha", "ping");
 
         let (upstream, tool) = manager
             .resolve_tool_execute_with_upstream("ping", Some("alpha"))
             .await
-            .expect("explicit upstream should warm and resolve requested upstream");
+            .expect("explicit upstream should resolve requested upstream");
 
         assert_eq!(upstream, "alpha");
         assert_eq!(tool.tool.name.as_ref(), "ping");
-        let pool = manager.current_pool().await.expect("lazy pool installed");
         assert_eq!(pool.healthy_tools_for_upstream("alpha").await.len(), 1);
         assert!(pool.healthy_tools_for_upstream("beta").await.is_empty());
     }
 
     #[tokio::test]
-    async fn resolve_code_mode_upstream_tool_warms_requested_upstream() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("config.toml");
-        let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
-        manager
-            .seed_config(LabConfig {
-                tool_search: ToolSearchConfig {
-                    enabled: true,
-                    ..ToolSearchConfig::default()
-                },
-                upstream: vec![fixture_http_upstream("alpha")],
-                ..LabConfig::default()
-            })
+    async fn resolve_code_mode_upstream_tool_resolves_requested_upstream() {
+        let (manager, pool) = tool_search_manager_with_pool(fixture_http_upstream("alpha")).await;
+        pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
             .await;
-        manager.install_test_lazy_tool_fixture("alpha", "ping");
 
         let tool = manager
             .resolve_code_mode_upstream_tool("alpha", "ping")
             .await
-            .expect("code mode should warm and resolve requested upstream");
+            .expect("code mode should resolve requested upstream");
 
         assert_eq!(tool.tool.name.as_ref(), "ping");
     }

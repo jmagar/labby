@@ -20,7 +20,7 @@ use rmcp::transport::streamable_http_client::{
 };
 use rmcp::{RoleClient, ServiceExt};
 use serde_json::Value;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::UpstreamConfig;
@@ -125,7 +125,7 @@ fn upstream_transport(config: &UpstreamConfig) -> &'static str {
     }
 }
 
-fn upstream_discovery_concurrency() -> usize {
+pub(crate) fn upstream_discovery_concurrency() -> usize {
     std::env::var("LAB_UPSTREAM_DISCOVERY_CONCURRENCY")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -557,6 +557,8 @@ pub struct UpstreamPool {
     oauth_client_cache: Option<OauthClientCache>,
     /// Background reprobe task cancellation tokens, keyed by upstream name.
     probe_tasks: Arc<RwLock<HashMap<String, CancellationToken>>>,
+    /// Per-upstream lazy connection gates to prevent duplicate cold starts.
+    lazy_connect_locks: Arc<RwLock<HashMap<String, Arc<Mutex<()>>>>>,
     /// Request/session identity stamped onto spawned stdio upstreams.
     runtime_origin: Option<String>,
     /// Structured owner metadata stamped onto spawned stdio upstreams.
@@ -743,6 +745,7 @@ impl UpstreamPool {
             resource_upstreams: Arc::new(RwLock::new(Vec::new())),
             oauth_client_cache: None,
             probe_tasks: Arc::new(RwLock::new(HashMap::new())),
+            lazy_connect_locks: Arc::new(RwLock::new(HashMap::new())),
             runtime_origin: None,
             runtime_owner: None,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
@@ -1515,6 +1518,16 @@ impl UpstreamPool {
             return Ok(false);
         }
 
+        let connect_lock = self.lazy_connect_lock(&config.name).await;
+        let _connect_guard = connect_lock.lock().await;
+        if !self
+            .healthy_tools_for_upstream(&config.name)
+            .await
+            .is_empty()
+        {
+            return Ok(false);
+        }
+
         self.seed_lazy_upstreams(std::slice::from_ref(config)).await;
         let stale_connection = {
             let mut connections = self.connections.write().await;
@@ -1528,14 +1541,26 @@ impl UpstreamPool {
 
         let started = Instant::now();
         let subject = config.oauth.as_ref().and(oauth_subject);
-        let (conn, tools) = connect_upstream(
+        let (conn, tools) = match connect_upstream(
             config,
             subject,
             self.oauth_client_cache.as_ref(),
             self.runtime_origin.as_deref(),
             self.runtime_owner.as_ref(),
         )
-        .await?;
+        .await
+        {
+            Ok(connected) => connected,
+            Err(error) => {
+                self.record_failure_for(
+                    &config.name,
+                    UpstreamCapability::Tools,
+                    format!("lazy upstream connect failed: {error}"),
+                )
+                .await;
+                return Err(error);
+            }
+        };
         let tool_count = tools.len();
         self.connections
             .write()
@@ -1568,6 +1593,16 @@ impl UpstreamPool {
         if !config.enabled {
             return Ok(false);
         }
+        if !self
+            .healthy_tools_for_upstream(&config.name)
+            .await
+            .is_empty()
+        {
+            return Ok(false);
+        }
+
+        let connect_lock = self.lazy_connect_lock(&config.name).await;
+        let _connect_guard = connect_lock.lock().await;
         if !self
             .healthy_tools_for_upstream(&config.name)
             .await
@@ -1621,6 +1656,23 @@ impl UpstreamPool {
         self.record_success_for(&config.name, UpstreamCapability::Tools)
             .await;
         Ok(true)
+    }
+
+    async fn lazy_connect_lock(&self, upstream_name: &str) -> Arc<Mutex<()>> {
+        if let Some(lock) = self
+            .lazy_connect_locks
+            .read()
+            .await
+            .get(upstream_name)
+            .cloned()
+        {
+            return lock;
+        }
+        let mut locks = self.lazy_connect_locks.write().await;
+        locks
+            .entry(upstream_name.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
     }
 
     pub async fn reprobe_tools_for_upstream(

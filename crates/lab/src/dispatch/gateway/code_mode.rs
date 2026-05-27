@@ -212,7 +212,10 @@ impl<'a> CodeModeBroker<'a> {
             return Ok(Value::Array(Vec::new()));
         };
 
-        let (catalog, serialized_size, truncated) = self.code_search_catalog(manager).await?;
+        let allow_cold_connect = caller.can_execute();
+        let (catalog, serialized_size, truncated) = self
+            .code_search_catalog(manager, allow_cold_connect)
+            .await?;
         tracing::info!(
             surface = "dispatch",
             service = "code_search",
@@ -266,9 +269,10 @@ impl<'a> CodeModeBroker<'a> {
     async fn code_search_catalog(
         &self,
         manager: &GatewayManager,
+        allow_cold_connect: bool,
     ) -> Result<(Vec<CodeModeCatalogEntry>, usize, bool), ToolError> {
         let mut entries = manager
-            .code_mode_catalog_tools()
+            .code_mode_catalog_tools(allow_cold_connect)
             .await?
             .into_iter()
             .map(|tool| {
