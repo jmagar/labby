@@ -41,8 +41,58 @@ use crate::mcp::logging::{DispatchLogOutcome, logging_level_rank};
 use crate::registry::ToolRegistry;
 
 const CODE_MODE_MAX_CODE_BYTES: usize = 20_000;
-const CODE_EXECUTE_DESCRIPTION: &str =
-    include_str!("../dispatch/gateway/code_execute_description.md");
+/// Tool description for the `code` MCP tool (Code Mode).
+///
+/// Source of truth: `docs/contracts/CODE_NODE_CONTRACT_FOR_RETARD_AGENTS.md`
+/// Full spec:       `docs/specs/CODE_MODE_SPEC_FOR_RETARD_AGENTS.md`
+///
+/// This description is what the model receives. Keep it under 8192 bytes.
+/// The contract doc is the canonical reference — if this and that doc diverge,
+/// update this string to match the contract doc.
+const CODE_EXECUTE_DESCRIPTION: &str = "\
+Execute JavaScript in the Code Mode sandbox. Every upstream MCP tool is pre-declared \
+as a typed TypeScript helper in the `codemode` namespace — read the types, call the \
+functions. No separate discovery step required.
+
+`Promise.all([...])` dispatches `callTool` requests in parallel — batch independent \
+reads instead of awaiting serially.
+
+```ts
+// codemode.<upstream>.<tool>() helpers are auto-generated from the live catalog.
+// Use them. callTool is the escape hatch for dynamic IDs or truncated catalogs.
+declare function callTool<T = unknown>(
+  id: `upstream::${string}::${string}`,
+  params: Record<string, unknown>
+): Promise<T>;
+```
+
+Successful return: the upstream tool's structuredContent if present, else the parsed \
+text of the first content[0] block. Never the raw MCP envelope.
+
+Error handling:
+```ts
+// To recover: const env: CodeModeError = JSON.parse(String(e.message));
+// Retry-safe:    rate_limited (honor retry_after_ms), timeout, network_error
+// Fix-and-retry: missing_param, invalid_param, validation_failed, confirmation_required
+// Terminal:      unknown_tool, unknown_action, auth_failed, server_error, internal_error
+```
+
+Scope: `lab:read` — catalog read only. `lab` / `lab:admin` — callTool execution.
+
+Results are capped to the configured envelope budget (default 24 KB / 6000 tokens). \
+Oversized results are replaced with a truncation marker containing `truncated`, \
+`original_size`, `original_tokens`, `preview`, and `next_action`. Reduce data inside \
+the sandbox before returning — that is the point of Code Mode.
+
+Fuel budget:
+- Base overhead: ~100K fuel for the JS runtime.
+- Per callTool boundary: ~2K fuel.
+- Default 50M fuel supports heavy fan-out plus moderate result processing.
+- `code_mode_fuel_exhausted`: split the work across calls or reduce local processing.
+
+Lab actions (`lab::*` tool IDs) are not available in Code Mode. For Lab built-in \
+actions use the `execute` tool in Tool Search mode.";
+
 
 #[cfg(test)]
 use crate::mcp::peers::PeerNotifier;
@@ -3780,6 +3830,8 @@ mod tests {
 
     #[test]
     fn code_execute_description_contains_protocol_contract() {
+        // Source of truth: docs/contracts/CODE_NODE_CONTRACT_FOR_RETARD_AGENTS.md
+        // Full spec:       docs/specs/CODE_MODE_SPEC_FOR_RETARD_AGENTS.md
         assert!(super::CODE_EXECUTE_DESCRIPTION.contains("callTool<T = unknown>"));
         assert!(
             super::CODE_EXECUTE_DESCRIPTION
@@ -3788,6 +3840,14 @@ mod tests {
         assert!(super::CODE_EXECUTE_DESCRIPTION.contains("JSON.parse(String(e.message))"));
         assert!(super::CODE_EXECUTE_DESCRIPTION.contains("Retry-safe:"));
         assert!(super::CODE_EXECUTE_DESCRIPTION.contains("Promise.all"));
+        assert!(
+            super::CODE_EXECUTE_DESCRIPTION.contains("codemode"),
+            "description must explain the codemode typed helper namespace"
+        );
+        assert!(
+            !super::CODE_EXECUTE_DESCRIPTION.contains("code_search"),
+            "description must not reference the deprecated code_search tool"
+        );
         assert!(super::CODE_EXECUTE_DESCRIPTION.len() < 8192);
     }
 
