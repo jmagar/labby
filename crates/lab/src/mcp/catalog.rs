@@ -7,8 +7,12 @@ use super::server::LabMcpServer;
 use crate::dispatch::upstream::pool::UpstreamPool;
 use crate::mcp::prompts::list_all as list_builtin_prompts;
 
-pub(crate) const TOOL_SEARCH_TOOL_NAME: &str = "tool_search";
-pub(crate) const TOOL_EXECUTE_TOOL_NAME: &str = "tool_execute";
+/// Canonical (Cloudflare-parity) tool names for the gateway search and execute tools.
+pub(crate) const TOOL_SEARCH_TOOL_NAME: &str = "search";
+pub(crate) const TOOL_EXECUTE_TOOL_NAME: &str = "execute";
+/// Legacy aliases kept for backward compatibility — emit a deprecation warning when invoked.
+pub(crate) const GATEWAY_LEGACY_TOOL_SEARCH_NAME: &str = "tool_search";
+pub(crate) const GATEWAY_LEGACY_EXECUTE_NAME: &str = "tool_execute";
 pub(crate) const CODE_SEARCH_TOOL_NAME: &str = "code_search";
 pub(crate) const CODE_EXECUTE_TOOL_NAME: &str = "code_execute";
 pub(crate) const LEGACY_SCOUT_TOOL_NAME: &str = "scout";

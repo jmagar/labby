@@ -30,7 +30,8 @@ use crate::dispatch::gateway::code_mode::{CodeModeBroker, CodeModeCaller, CodeMo
 use crate::dispatch::gateway::manager::{GatewayManager, GatewayToolSearchResult};
 use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
 use crate::mcp::catalog::{
-    CODE_EXECUTE_TOOL_NAME, CODE_SEARCH_TOOL_NAME, LEGACY_INVOKE_TOOL_NAME, LEGACY_SCOUT_TOOL_NAME,
+    CODE_EXECUTE_TOOL_NAME, CODE_SEARCH_TOOL_NAME, GATEWAY_LEGACY_EXECUTE_NAME,
+    GATEWAY_LEGACY_TOOL_SEARCH_NAME, LEGACY_INVOKE_TOOL_NAME, LEGACY_SCOUT_TOOL_NAME,
     LEGACY_TOOL_INVOKE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME,
 };
 use crate::mcp::elicitation::{ElicitResult, elicit_confirm};
@@ -1127,6 +1128,7 @@ impl ServerHandler for LabMcpServer {
         let visibility = self.tool_search_visibility().await;
         let manager_tool_search_enabled = visibility.exposes_synthetic_tools();
         let process_tool_search_enabled = crate::config::process_tool_search_enabled();
+        let process_code_mode_enabled = crate::config::is_code_mode_enabled();
         let hide_raw_tools = visibility.hides_raw_tools();
         let visibility_mode = visibility.mode_label();
         for svc in self.registry.services() {
@@ -1159,7 +1161,7 @@ impl ServerHandler for LabMcpServer {
                 "Search Lab and proxied upstream tool catalogs \
                 using 2-4 intent words (e.g. \"docker container restart\", \
                 \"send push notification\", \"unifi wifi clients\"). \
-                Use this before tool_execute to discover available tool names \
+                Use this before execute to discover available tool names \
                 and their required arguments. Returns tool names, descriptions, \
                 and optionally full input schemas. \
                 Covers: Docker/containers (arcane), notifications (apprise/gotify), \
@@ -1248,15 +1250,15 @@ impl ServerHandler for LabMcpServer {
             };
             tools.push(Tool::new(
                 TOOL_EXECUTE_TOOL_NAME,
-                "Invoke one Lab or upstream tool discovered through tool_search. \
-                Pass the exact tool name returned by tool_search and a JSON \
-                arguments object matching that tool's schema. If tool_search returns \
+                "Invoke one Lab or upstream tool discovered through search. \
+                Pass the exact tool name returned by search and a JSON \
+                arguments object matching that tool's schema. If search returns \
                 duplicate tool names, pass either name as upstream::tool or set \
                 upstream to the returned upstream server name. \
                 Lab built-in tools take {\"action\": \"<name>\", \"params\": {...}}. \
                 Upstream tools use their own schema (retrieve with \
-                tool_search include_schema=true). \
-                When tool_search returns no match, call tool_search with \
+                search include_schema=true). \
+                When search returns no match, call search with \
                 different keywords before giving up.",
                 tool_execute_schema,
             ));
@@ -1326,6 +1328,7 @@ impl ServerHandler for LabMcpServer {
             suppressed_builtin_tool_count,
             manager_tool_search_enabled,
             process_tool_search_enabled,
+            process_code_mode_enabled,
             hide_raw_tools,
             visibility_mode,
             total_tool_count = tools.len(),
@@ -1421,7 +1424,7 @@ impl ServerHandler for LabMcpServer {
             let caller = auth.map_or(CodeModeCaller::TrustedLocal, |auth| {
                 CodeModeCaller::Scoped {
                     scopes: auth.scopes.clone(),
-                    subject: self.request_subject(&context).map(ToOwned::to_owned),
+                    sub: self.request_subject(&context).map(ToOwned::to_owned),
                 }
             });
             return match broker
@@ -1556,7 +1559,7 @@ impl ServerHandler for LabMcpServer {
             let caller = auth.map_or(CodeModeCaller::TrustedLocal, |auth| {
                 CodeModeCaller::Scoped {
                     scopes: auth.scopes.clone(),
-                    subject: self.request_subject(&context).map(ToOwned::to_owned),
+                    sub: self.request_subject(&context).map(ToOwned::to_owned),
                 }
             });
             let before = self.snapshot_catalog().await;
@@ -1598,11 +1601,24 @@ impl ServerHandler for LabMcpServer {
             );
             return Ok(CallToolResult::success(vec![Content::text(output)]));
         }
-        if service == TOOL_SEARCH_TOOL_NAME || service == LEGACY_SCOUT_TOOL_NAME {
+        if service == TOOL_SEARCH_TOOL_NAME
+            || service == GATEWAY_LEGACY_TOOL_SEARCH_NAME
+            || service == LEGACY_SCOUT_TOOL_NAME
+        {
             let started = Instant::now();
             let input_tokens = estimate_tokens_args(&args);
             let subject = self.request_subject_log_tag(&context);
             let auth = auth_context_from_extensions(&context.extensions);
+            if service == GATEWAY_LEGACY_TOOL_SEARCH_NAME {
+                tracing::warn!(
+                    surface = "mcp",
+                    service = "tool_search",
+                    action = "call_tool",
+                    subject,
+                    name = "tool_search",
+                    "Legacy alias invoked -- use 'search' instead"
+                );
+            }
             if !tool_search_scope_allowed(auth) {
                 tracing::warn!(
                     surface = "mcp",
@@ -1764,10 +1780,24 @@ impl ServerHandler for LabMcpServer {
         }
         if matches!(
             service.as_str(),
-            TOOL_EXECUTE_TOOL_NAME | LEGACY_INVOKE_TOOL_NAME | LEGACY_TOOL_INVOKE_TOOL_NAME
+            TOOL_EXECUTE_TOOL_NAME
+                | GATEWAY_LEGACY_EXECUTE_NAME
+                | LEGACY_INVOKE_TOOL_NAME
+                | LEGACY_TOOL_INVOKE_TOOL_NAME
         ) {
             let started = Instant::now();
             let input_tokens = estimate_tokens_args(&args);
+            if service == GATEWAY_LEGACY_EXECUTE_NAME {
+                let subject = self.request_subject_log_tag(&context);
+                tracing::warn!(
+                    surface = "mcp",
+                    service = "tool_execute",
+                    action = "call_tool",
+                    subject,
+                    name = "tool_execute",
+                    "Legacy alias invoked -- use 'execute' instead"
+                );
+            }
             let tool_name = args
                 .get("name")
                 .and_then(Value::as_str)
@@ -3820,8 +3850,8 @@ mod tests {
             [
                 "code_execute".to_string(),
                 "code_search".to_string(),
-                "tool_execute".to_string(),
-                "tool_search".to_string()
+                "execute".to_string(),
+                "search".to_string()
             ]
             .into_iter()
             .collect()
@@ -3887,6 +3917,7 @@ mod tests {
             tool,
             input_schema: None,
             upstream_name: std::sync::Arc::clone(&upstream_name),
+            destructive: false,
         };
         crate::dispatch::upstream::types::UpstreamEntry {
             name: std::sync::Arc::clone(&upstream_name),

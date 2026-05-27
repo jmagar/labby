@@ -51,6 +51,29 @@ pub(crate) fn process_tool_search_enabled() -> bool {
     PROCESS_TOOL_SEARCH_ENABLED.load(Ordering::Acquire)
 }
 
+// Gateway startup/reload writes this process-wide flag whenever root
+// `[code_mode]` changes. Mirrors PROCESS_TOOL_SEARCH_ENABLED — used by in-process
+// peer MCP servers that must know whether Code Mode tools are exposed.
+static PROCESS_CODE_MODE_ENABLED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn set_process_code_mode_enabled(enabled: bool) {
+    let previous = PROCESS_CODE_MODE_ENABLED.swap(enabled, Ordering::AcqRel);
+    if previous != enabled {
+        tracing::info!(
+            surface = "mcp",
+            service = "code_mode",
+            action = "code_mode.process_enablement",
+            previous_enabled = previous,
+            enabled,
+            "process-wide code mode enablement changed"
+        );
+    }
+}
+
+pub(crate) fn is_code_mode_enabled() -> bool {
+    PROCESS_CODE_MODE_ENABLED.load(Ordering::Acquire)
+}
+
 use anyhow::{Context, Result};
 use lab_auth::config as auth_config;
 use serde::{Deserialize, Serialize, Serializer};
@@ -365,6 +388,7 @@ impl LabConfig {
     pub fn validate(&self) -> Result<(), ConfigError> {
         self.tool_search.validate()?;
         self.code_mode.validate()?;
+        validate_mode_exclusive(self.tool_search.enabled, self.code_mode.enabled)?;
         for upstream in &self.upstream {
             upstream.validate()?;
         }
@@ -416,6 +440,24 @@ pub(crate) fn root_tool_search_present(raw: &str) -> bool {
                 .map(|table| table.contains_key("tool_search"))
         })
         .unwrap_or(false)
+}
+
+/// Enforce mutual exclusion between tool_search and code_mode.
+///
+/// Returns `ConfigError::DualModeConflict` if both are simultaneously enabled.
+/// Call this from all three validation sites: startup (LabConfig::validate),
+/// config load (dispatch/gateway/config.rs validate_config), and runtime
+/// config mutation (manager.rs set_*_config inside the lock).
+pub(crate) fn validate_mode_exclusive(
+    tool_search_enabled: bool,
+    code_mode_enabled: bool,
+) -> Result<(), ConfigError> {
+    if tool_search_enabled && code_mode_enabled {
+        return Err(ConfigError::DualModeConflict {
+            message: "tool_search and code_mode cannot both be enabled. Disable one before enabling the other.",
+        });
+    }
+    Ok(())
 }
 
 fn default_true() -> bool {
@@ -503,6 +545,10 @@ fn default_code_mode_max_response_tokens() -> usize {
     6_000
 }
 
+fn default_token_estimate_divisor() -> u32 {
+    4
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeModeConfig {
     /// Enable the constrained Code Mode executor. Catalog search can be enabled
@@ -521,6 +567,11 @@ pub struct CodeModeConfig {
     /// Approximate maximum response tokens returned by code_execute.
     #[serde(default = "default_code_mode_max_response_tokens")]
     pub max_response_tokens: usize,
+    /// Token estimation divisor. bytes/4 is intentionally conservative (real
+    /// tokenization ≈ 1 token/3 bytes for JSON). Lower = more conservative =
+    /// fewer tools per execution.
+    #[serde(default = "default_token_estimate_divisor")]
+    pub token_estimate_divisor: u32,
 }
 
 impl Default for CodeModeConfig {
@@ -531,6 +582,7 @@ impl Default for CodeModeConfig {
             max_tool_calls: default_code_mode_max_tool_calls(),
             max_response_bytes: default_code_mode_max_response_bytes(),
             max_response_tokens: default_code_mode_max_response_tokens(),
+            token_estimate_divisor: default_token_estimate_divisor(),
         }
     }
 }
@@ -1021,6 +1073,8 @@ pub enum ConfigError {
         field: &'static str,
         value: String,
     },
+    #[error("{message}")]
+    DualModeConflict { message: &'static str },
 }
 
 /// Outbound OAuth configuration for an upstream MCP server.
