@@ -26,6 +26,8 @@ mod process;
 mod registry;
 #[cfg(test)]
 mod test_support;
+#[cfg(feature = "fs")]
+mod workspace;
 
 use std::process::ExitCode;
 
