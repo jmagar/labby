@@ -1619,7 +1619,19 @@ impl ServerHandler for LabMcpServer {
             let builtin_results = self
                 .search_builtin_tools(&query, top_k, include_schema, score_floor_fraction)
                 .await;
-            return match manager.search_tools(&query, top_k, include_schema).await {
+            let runtime_owner = self.request_runtime_owner(&context);
+            let oauth_subject =
+                oauth_upstream_subject_for_request(auth, self.request_subject(&context));
+            return match manager
+                .search_tools(
+                    &query,
+                    top_k,
+                    include_schema,
+                    Some(&runtime_owner),
+                    oauth_subject.as_deref(),
+                )
+                .await
+            {
                 Ok(upstream_results) => {
                     let results =
                         merge_tool_search_results(builtin_results, upstream_results, top_k);
@@ -1724,7 +1736,8 @@ impl ServerHandler for LabMcpServer {
                 .unwrap_or_else(|| serde_json::json!({}));
             let arguments_hash = hash_arguments(&arguments);
             let subject = self.request_subject_log_tag(&context);
-            if !tool_execute_scope_allowed(auth_context_from_extensions(&context.extensions)) {
+            let auth = auth_context_from_extensions(&context.extensions);
+            if !tool_execute_scope_allowed(auth) {
                 tracing::warn!(
                     surface = "mcp",
                     service = %service,
@@ -1987,11 +2000,16 @@ impl ServerHandler for LabMcpServer {
                 return Ok(result);
             }
             let runtime_owner = self.request_runtime_owner(&context);
+            let oauth_subject = oauth_upstream_subject_for_request(
+                auth_context_from_extensions(&context.extensions),
+                self.request_subject(&context),
+            );
             let resolved = manager
                 .resolve_tool_execute_with_upstream(
                     &tool_name,
                     requested_upstream.as_deref(),
                     Some(&runtime_owner),
+                    oauth_subject.as_deref(),
                 )
                 .await;
             let (upstream_name, upstream_tool) = match resolved {
@@ -2341,8 +2359,25 @@ impl ServerHandler for LabMcpServer {
         let upstream_action = "call_tool";
         let upstream_capability = "tools";
         let upstream_operation = "tool.call";
+        let raw_runtime_owner = self.request_runtime_owner(&context);
+        let raw_oauth_subject = oauth_upstream_subject_for_request(
+            auth_context_from_extensions(&context.extensions),
+            self.request_subject(&context),
+        );
+        let raw_resolved = if let Some(manager) = &self.gateway_manager {
+            manager
+                .resolve_raw_upstream_tool(
+                    &service,
+                    Some(&raw_runtime_owner),
+                    raw_oauth_subject.as_deref(),
+                )
+                .await
+                .ok()
+        } else {
+            None
+        };
         if let Some(pool) = self.current_upstream_pool().await
-            && let Some((upstream_name, _tool)) = pool.find_tool(&service).await
+            && let Some((upstream_name, _tool)) = raw_resolved
         {
             let before = self.snapshot_catalog().await;
             tracing::info!(

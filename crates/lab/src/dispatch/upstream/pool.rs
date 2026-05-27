@@ -59,9 +59,9 @@ pub struct UpstreamCachedSummary {
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
 /// Per-service timeout for in-process peer registration and capability probing.
 const IN_PROCESS_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
-/// Default cap for initial upstream discovery. Stdio upstreams can fan out into
-/// several child processes, so unbounded startup discovery can exhaust the
-/// container PID limit before any single upstream is unhealthy.
+/// Default cap for bulk discovery and concurrent lazy reprobes. Stdio upstreams
+/// can fan out into several child processes, so unbounded connection attempts
+/// can exhaust the container PID limit before any single upstream is unhealthy.
 const DEFAULT_UPSTREAM_DISCOVERY_CONCURRENCY: usize = 3;
 /// Per-request timeout for upstream tool/resource/prompt RPCs.
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -141,6 +141,10 @@ fn is_websocket_url(url: &str) -> bool {
             .as_deref(),
         Some("ws" | "wss")
     )
+}
+
+fn upstream_name_is_uri_safe(name: &str) -> bool {
+    !name.contains('/') && !name.contains('?') && !name.contains('#')
 }
 
 pub(crate) fn redact_resource_uri_for_logging(uri: &str) -> &str {
@@ -542,6 +546,22 @@ fn bare_upstream_resource_uri(uri: &str) -> &str {
         .unwrap_or(uri)
 }
 
+fn cached_upstream_tool(
+    tool: rmcp::model::Tool,
+    upstream_name: &Arc<str>,
+) -> (String, UpstreamTool) {
+    let name = tool.name.to_string();
+    (
+        name,
+        UpstreamTool {
+            input_schema: (!tool.input_schema.is_empty())
+                .then(|| Value::Object((*tool.input_schema).clone())),
+            tool,
+            upstream_name: Arc::clone(upstream_name),
+        },
+    )
+}
+
 /// Upstream connection pool — holds live connections and discovered tool catalogs.
 #[derive(Clone)]
 pub struct UpstreamPool {
@@ -919,7 +939,7 @@ impl UpstreamPool {
                     "duplicate upstream name — skipping all but the first"
                 );
             }
-            if config.name.contains('/') || config.name.contains('?') || config.name.contains('#') {
+            if !upstream_name_is_uri_safe(&config.name) {
                 tracing::warn!(
                     upstream = %config.name,
                     "upstream name contains URI-unsafe characters (/, ?, #) — skipping"
@@ -952,7 +972,7 @@ impl UpstreamPool {
                 continue;
             }
             // Skip names with URI-unsafe characters.
-            if config.name.contains('/') || config.name.contains('?') || config.name.contains('#') {
+            if !upstream_name_is_uri_safe(&config.name) {
                 continue;
             }
             // OAuth HTTP upstreams require an explicit subject to select the
@@ -1098,11 +1118,6 @@ impl UpstreamPool {
                     let upstream_name: Arc<str> = Arc::from(name.as_str());
                     let mut tool_map: HashMap<String, UpstreamTool> = HashMap::new();
                     for tool in tools {
-                        let schema = if tool.input_schema.is_empty() {
-                            None
-                        } else {
-                            Some(Value::Object((*tool.input_schema).clone()))
-                        };
                         let tool_name = tool.name.to_string();
                         // Reject duplicate tool names across upstreams.
                         if let Some(existing_upstream) = global_tool_names.get(&tool_name) {
@@ -1115,14 +1130,8 @@ impl UpstreamPool {
                             continue;
                         }
                         global_tool_names.insert(tool_name.clone(), name.clone());
-                        tool_map.insert(
-                            tool_name,
-                            UpstreamTool {
-                                tool,
-                                input_schema: schema,
-                                upstream_name: Arc::clone(&upstream_name),
-                            },
-                        );
+                        let (_, upstream_tool) = cached_upstream_tool(tool, &upstream_name);
+                        tool_map.insert(tool_name, upstream_tool);
                     }
 
                     let exposure_policy = resolve_exposure_policy(&name, expose_tools);
@@ -1471,7 +1480,7 @@ impl UpstreamPool {
             if !processed_names.insert(&config.name) {
                 continue;
             }
-            if config.name.contains('/') || config.name.contains('?') || config.name.contains('#') {
+            if !upstream_name_is_uri_safe(&config.name) {
                 tracing::warn!(
                     upstream = %config.name,
                     "upstream name contains URI-unsafe characters (/, ?, #) — skipping"
@@ -1681,18 +1690,7 @@ impl UpstreamPool {
         let upstream_name: Arc<str> = Arc::from(config.name.as_str());
         let tools = tools
             .into_iter()
-            .map(|tool| {
-                let name = tool.name.to_string();
-                (
-                    name,
-                    UpstreamTool {
-                        input_schema: (!tool.input_schema.is_empty())
-                            .then(|| Value::Object((*tool.input_schema).clone())),
-                        tool,
-                        upstream_name: Arc::clone(&upstream_name),
-                    },
-                )
-            })
+            .map(|tool| cached_upstream_tool(tool, &upstream_name))
             .collect::<HashMap<_, _>>();
 
         let mut catalog = self.catalog.write().await;
@@ -1782,18 +1780,9 @@ impl UpstreamPool {
                     let mut tool_map = HashMap::new();
                     let tool_count = registration.tools.len();
                     for tool in registration.tools {
-                        let schema = if tool.input_schema.is_empty() {
-                            None
-                        } else {
-                            Some(Value::Object((*tool.input_schema).clone()))
-                        };
                         tool_map.insert(
                             tool.name.to_string(),
-                            UpstreamTool {
-                                tool,
-                                input_schema: schema,
-                                upstream_name: Arc::clone(&registration.entry_name),
-                            },
+                            cached_upstream_tool(tool, &registration.entry_name).1,
                         );
                     }
 
@@ -2578,7 +2567,7 @@ impl UpstreamPool {
     pub async fn gateway_synthetic_resources(&self) -> Vec<Resource> {
         let mut out = vec![
             RawResource::new("lab://gateway/servers", "gateway/servers")
-                .with_description("Index of upstream MCP servers connected to the gateway")
+                .with_description("Index of upstream MCP servers registered with the gateway")
                 .with_mime_type("application/json")
                 .no_annotation(),
         ];
@@ -4086,6 +4075,73 @@ mod tests {
         assert_eq!(pool.connection_count_for_tests().await, 0);
         assert_eq!(pool.healthy_tools_for_upstream("fast").await.len(), 1);
         assert!(pool.healthy_tools_for_upstream("slow").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ensure_tools_for_upstream_singleflights_concurrent_connects() {
+        let pool = Arc::new(UpstreamPool::new());
+        let config = named_test_upstream_config("alpha");
+        pool.seed_lazy_upstreams(std::slice::from_ref(&config))
+            .await;
+
+        let connect_count = Arc::new(AtomicUsize::new(0));
+        let connector: TestUpstreamConnector = {
+            let connect_count = Arc::clone(&connect_count);
+            Arc::new(move |_config| {
+                let connect_count = Arc::clone(&connect_count);
+                Box::pin(async move {
+                    connect_count.fetch_add(1, Ordering::Relaxed);
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    Ok((None, vec![test_tool("ping")]))
+                })
+            })
+        };
+
+        let mut tasks = Vec::new();
+        for _ in 0..8 {
+            let pool = Arc::clone(&pool);
+            let config = config.clone();
+            let connector = Arc::clone(&connector);
+            tasks.push(tokio::spawn(async move {
+                pool.ensure_tools_for_upstream_with_connector(&config, None, connector)
+                    .await
+                    .expect("lazy connect succeeds")
+            }));
+        }
+
+        let results = futures::future::join_all(tasks).await;
+        let connected = results
+            .into_iter()
+            .map(|result| result.expect("task joins"))
+            .filter(|connected| *connected)
+            .count();
+        assert_eq!(connected, 1);
+        assert_eq!(connect_count.load(Ordering::Relaxed), 1);
+        assert_eq!(pool.healthy_tools_for_upstream("alpha").await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn ensure_tools_for_upstream_records_lazy_connect_failures() {
+        let pool = UpstreamPool::new();
+        let config = UpstreamConfig {
+            url: Some("http://127.0.0.1:9/mcp".to_string()),
+            command: None,
+            ..named_test_upstream_config("broken")
+        };
+        pool.seed_lazy_upstreams(std::slice::from_ref(&config))
+            .await;
+
+        let err = pool
+            .ensure_tools_for_upstream(&config, None, None)
+            .await
+            .expect_err("connect should fail");
+
+        assert!(!err.to_string().is_empty());
+        let last_error = pool
+            .upstream_tool_last_error("broken")
+            .await
+            .expect("lazy failure is recorded");
+        assert!(last_error.contains("lazy upstream connect failed"));
     }
 
     #[test]

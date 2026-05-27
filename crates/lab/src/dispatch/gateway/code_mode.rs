@@ -22,6 +22,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
 use tokio::process::{Child, ChildStdin, Command};
 
 use crate::dispatch::error::ToolError;
+use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
 use crate::dispatch::gateway::manager::GatewayManager;
 use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
 use crate::registry::ToolRegistry;
@@ -208,6 +209,17 @@ impl CodeModeCaller {
             raw: Some(raw),
         }
     }
+
+    #[must_use]
+    pub fn oauth_subject(&self) -> Option<&str> {
+        match self {
+            Self::TrustedLocal => Some(SHARED_GATEWAY_OAUTH_SUBJECT),
+            Self::Scoped { scopes, subject } if scopes.iter().any(|scope| scope == "lab:admin") => {
+                Some(SHARED_GATEWAY_OAUTH_SUBJECT)
+            }
+            Self::Scoped { subject, .. } => subject.as_deref(),
+        }
+    }
 }
 
 pub struct CodeModeBroker<'a> {
@@ -239,8 +251,9 @@ impl<'a> CodeModeBroker<'a> {
 
         let allow_cold_connect = caller.can_execute();
         let owner = caller.runtime_owner(_surface);
+        let oauth_subject = caller.oauth_subject();
         let (catalog, serialized_size, truncated) = self
-            .code_search_catalog(manager, allow_cold_connect, &owner)
+            .code_search_catalog(manager, allow_cold_connect, &owner, oauth_subject)
             .await?;
         tracing::info!(
             surface = "dispatch",
@@ -297,9 +310,10 @@ impl<'a> CodeModeBroker<'a> {
         manager: &GatewayManager,
         allow_cold_connect: bool,
         owner: &UpstreamRuntimeOwner,
+        oauth_subject: Option<&str>,
     ) -> Result<(Vec<CodeModeCatalogEntry>, usize, bool), ToolError> {
         let mut entries = manager
-            .code_mode_catalog_tools(allow_cold_connect, Some(owner))
+            .code_mode_catalog_tools(allow_cold_connect, Some(owner), oauth_subject)
             .await?
             .into_iter()
             .map(|tool| {
@@ -593,7 +607,8 @@ impl<'a> CodeModeBroker<'a> {
         match parsed.reference {
             CodeModeToolRef::UpstreamTool { upstream, tool } => {
                 let owner = caller.runtime_owner(surface);
-                self.call_upstream_tool(manager, &upstream, &tool, params, &owner)
+                let oauth_subject = caller.oauth_subject();
+                self.call_upstream_tool(manager, &upstream, &tool, params, &owner, oauth_subject)
                     .await
             }
         }
@@ -606,9 +621,10 @@ impl<'a> CodeModeBroker<'a> {
         tool: &str,
         params: Value,
         owner: &UpstreamRuntimeOwner,
+        oauth_subject: Option<&str>,
     ) -> Result<Value, ToolError> {
         manager
-            .resolve_code_mode_upstream_tool(upstream, tool, Some(owner))
+            .resolve_code_mode_upstream_tool(upstream, tool, Some(owner), oauth_subject)
             .await?;
         let Some(pool) = manager.current_pool().await else {
             return Err(ToolError::Sdk {
@@ -1521,6 +1537,64 @@ mod tests {
             .expect("code search succeeds");
 
         assert_eq!(result, json!(0));
+    }
+
+    #[tokio::test]
+    async fn code_search_read_scope_does_not_cold_start_upstreams() {
+        use std::sync::Arc;
+
+        let registry = super::ToolRegistry::new();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let runtime = super::super::runtime::GatewayRuntimeHandle::default();
+        let pool = Arc::new(crate::dispatch::upstream::pool::UpstreamPool::new());
+        pool.seed_lazy_upstreams(&[crate::config::UpstreamConfig {
+            enabled: true,
+            name: "alpha".to_string(),
+            url: Some("http://127.0.0.1:9/mcp".to_string()),
+            bearer_token_env: None,
+            command: None,
+            args: Vec::new(),
+            env: std::collections::BTreeMap::new(),
+            proxy_resources: false,
+            proxy_prompts: false,
+            expose_tools: None,
+            expose_resources: None,
+            expose_prompts: None,
+            oauth: None,
+            imported_from: None,
+            priority: 1.0,
+            tool_search: crate::config::ToolSearchConfig::default(),
+        }])
+        .await;
+        runtime.swap(Some(Arc::clone(&pool))).await;
+        let manager = super::GatewayManager::new(dir.path().join("config.toml"), runtime);
+        manager
+            .seed_config(crate::config::LabConfig {
+                tool_search: crate::config::ToolSearchConfig {
+                    enabled: true,
+                    ..crate::config::ToolSearchConfig::default()
+                },
+                ..crate::config::LabConfig::default()
+            })
+            .await;
+        let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+
+        let result = broker
+            .search(
+                "async () => tools.length",
+                super::CodeModeCaller::Scoped {
+                    scopes: vec!["lab:read".to_string()],
+                    subject: Some("reader".to_string()),
+                },
+                super::CodeModeSurface::Mcp {
+                    allow_destructive_actions: false,
+                },
+            )
+            .await
+            .expect("read-only search succeeds from cached catalog");
+
+        assert_eq!(result, json!(0));
+        assert_eq!(pool.connection_count_for_tests().await, 0);
     }
 
     #[tokio::test]
