@@ -28,6 +28,7 @@ use crate::dispatch::error::ToolError as DispatchToolError;
 use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
 use crate::dispatch::gateway::code_mode::{CodeModeBroker, CodeModeCaller, CodeModeSurface};
 use crate::dispatch::gateway::manager::{GatewayManager, GatewayToolSearchResult};
+use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
 use crate::mcp::catalog::{
     CODE_EXECUTE_TOOL_NAME, CODE_SEARCH_TOOL_NAME, LEGACY_INVOKE_TOOL_NAME, LEGACY_SCOUT_TOOL_NAME,
     LEGACY_TOOL_INVOKE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME,
@@ -1618,7 +1619,19 @@ impl ServerHandler for LabMcpServer {
             let builtin_results = self
                 .search_builtin_tools(&query, top_k, include_schema, score_floor_fraction)
                 .await;
-            return match manager.search_tools(&query, top_k, include_schema).await {
+            let runtime_owner = self.request_runtime_owner(&context);
+            let oauth_subject =
+                oauth_upstream_subject_for_request(auth, self.request_subject(&context));
+            return match manager
+                .search_tools(
+                    &query,
+                    top_k,
+                    include_schema,
+                    Some(&runtime_owner),
+                    oauth_subject.as_deref(),
+                )
+                .await
+            {
                 Ok(upstream_results) => {
                     let results =
                         merge_tool_search_results(builtin_results, upstream_results, top_k);
@@ -1723,7 +1736,8 @@ impl ServerHandler for LabMcpServer {
                 .unwrap_or_else(|| serde_json::json!({}));
             let arguments_hash = hash_arguments(&arguments);
             let subject = self.request_subject_log_tag(&context);
-            if !tool_execute_scope_allowed(auth_context_from_extensions(&context.extensions)) {
+            let auth = auth_context_from_extensions(&context.extensions);
+            if !tool_execute_scope_allowed(auth) {
                 tracing::warn!(
                     surface = "mcp",
                     service = %service,
@@ -1985,8 +1999,18 @@ impl ServerHandler for LabMcpServer {
                 .await;
                 return Ok(result);
             }
+            let runtime_owner = self.request_runtime_owner(&context);
+            let oauth_subject = oauth_upstream_subject_for_request(
+                auth_context_from_extensions(&context.extensions),
+                self.request_subject(&context),
+            );
             let resolved = manager
-                .resolve_tool_execute_with_upstream(&tool_name, requested_upstream.as_deref())
+                .resolve_tool_execute_with_upstream(
+                    &tool_name,
+                    requested_upstream.as_deref(),
+                    Some(&runtime_owner),
+                    oauth_subject.as_deref(),
+                )
                 .await;
             let (upstream_name, upstream_tool) = match resolved {
                 Ok(value) => value,
@@ -2335,8 +2359,57 @@ impl ServerHandler for LabMcpServer {
         let upstream_action = "call_tool";
         let upstream_capability = "tools";
         let upstream_operation = "tool.call";
+        let raw_runtime_owner = self.request_runtime_owner(&context);
+        let raw_oauth_subject = oauth_upstream_subject_for_request(
+            auth_context_from_extensions(&context.extensions),
+            self.request_subject(&context),
+        );
+        let raw_resolved = if let Some(manager) = &self.gateway_manager {
+            Some(
+                manager
+                    .resolve_raw_upstream_tool(
+                        &service,
+                        Some(&raw_runtime_owner),
+                        raw_oauth_subject.as_deref(),
+                    )
+                    .await,
+            )
+        } else {
+            None
+        };
+        if let Some(Err(err)) = &raw_resolved
+            && !matches!(err.kind(), "unknown_tool" | "not_found")
+        {
+            let elapsed_ms = start.elapsed().as_millis();
+            let kind = canonical_kind(err.kind());
+            tracing::warn!(
+                surface = "mcp",
+                service,
+                action = upstream_action,
+                tool = %service,
+                elapsed_ms,
+                kind,
+                error = %err,
+                "upstream proxy resolution failed"
+            );
+            let envelope = tool_error_envelope(&service, upstream_action, err);
+            self.emit_dispatch_notification(
+                &context,
+                &service,
+                upstream_action,
+                elapsed_ms,
+                DispatchLogOutcome::Failure {
+                    level: LoggingLevel::Warning,
+                    kind,
+                },
+            )
+            .await;
+            return Ok(CallToolResult::error(vec![Content::text(
+                envelope.to_string(),
+            )]));
+        }
         if let Some(pool) = self.current_upstream_pool().await
-            && let Some((upstream_name, _tool)) = pool.find_tool(&service).await
+            && let Some(Ok((upstream_name, _tool))) = raw_resolved
         {
             let before = self.snapshot_catalog().await;
             tracing::info!(
@@ -2708,6 +2781,22 @@ impl LabMcpServer {
 
     fn request_actor_key<'a>(&self, context: &'a RequestContext<RoleServer>) -> Option<&'a str> {
         actor_key_from_extensions(&context.extensions)
+    }
+
+    fn request_runtime_owner(&self, context: &RequestContext<RoleServer>) -> UpstreamRuntimeOwner {
+        let subject = self.request_subject(context).map(ToOwned::to_owned);
+        let raw = subject
+            .as_ref()
+            .map(|subject| format!("mcp:{subject}"))
+            .unwrap_or_else(|| "mcp:anonymous".to_string());
+        UpstreamRuntimeOwner {
+            surface: "mcp".to_string(),
+            subject,
+            request_id: None,
+            session_id: None,
+            client_name: None,
+            raw: Some(raw),
+        }
     }
 
     async fn oauth_upstream_configs(&self) -> Vec<crate::config::UpstreamConfig> {

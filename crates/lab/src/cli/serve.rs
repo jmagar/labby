@@ -20,9 +20,9 @@ use tokio::sync::mpsc;
 use crate::api::AppState;
 use crate::config::{LabConfig, config_toml_path, resolve_auth_for_config};
 use crate::dispatch::clients::SharedServiceClients;
+use crate::dispatch::gateway::install_gateway_manager;
 use crate::dispatch::gateway::manager::{GatewayManager, GatewayRuntimeHandle};
 use crate::dispatch::gateway::types::CatalogChangeNotifier;
-use crate::dispatch::gateway::{SHARED_GATEWAY_OAUTH_SUBJECT, install_gateway_manager};
 use crate::dispatch::logs::client::{
     bootstrap_running_log_system, resolve_queue_capacity, resolve_retention, resolve_store_path,
     resolve_subscriber_capacity,
@@ -283,19 +283,14 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
     };
     tracing::info!(
         subsystem = "gateway_client",
-        phase = "discovery.start",
+        phase = "discovery.lazy.start",
         upstream_count = config.upstream.len(),
         oauth_upstream_count = config
             .upstream
             .iter()
             .filter(|upstream| upstream.oauth.is_some())
             .count(),
-        in_process_peer_count = registry
-            .services()
-            .iter()
-            .filter(|service| !service.actions.is_empty())
-            .count(),
-        "starting upstream gateway discovery"
+        "preparing lazy upstream gateway catalog"
     );
     crate::config::set_process_tool_search_enabled(config.tool_search.enabled);
     let mut pool_builder = crate::dispatch::upstream::pool::UpstreamPool::new();
@@ -304,23 +299,13 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
     }
     let pool = Arc::new(pool_builder);
     if !suppress_upstream_runtime {
-        if upstream_oauth_runtime.is_some() {
-            pool.discover_all_for_subject_with_in_process_peers(
-                &config.upstream,
-                SHARED_GATEWAY_OAUTH_SUBJECT,
-                &registry,
-            )
-            .await;
-        } else {
-            pool.discover_all_with_in_process_peers(&config.upstream, &registry)
-                .await;
-        }
+        pool.seed_lazy_upstreams(&config.upstream).await;
         tracing::info!(
             subsystem = "gateway_client",
-            phase = "discovery.finish",
+            phase = "discovery.lazy",
             upstream_count = config.upstream.len(),
-            discovered_upstream_count = pool.upstream_count().await,
-            "upstream gateway discovery complete"
+            seeded_upstream_count = pool.upstream_count().await,
+            "upstream gateway discovery deferred until first use"
         );
         gateway_runtime.swap(Some(pool)).await;
     } else {

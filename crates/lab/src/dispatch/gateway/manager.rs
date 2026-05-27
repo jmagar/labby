@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use arc_swap::{ArcSwap, ArcSwapOption};
+use futures::StreamExt;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
@@ -16,7 +17,7 @@ use crate::config::{
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::error::ToolError;
 use crate::dispatch::upstream::pool::{
-    UpstreamCachedSummary, UpstreamPool, in_process_upstream_name,
+    UpstreamCachedSummary, UpstreamPool, in_process_upstream_name, upstream_discovery_concurrency,
 };
 use crate::dispatch::upstream::types::{UpstreamRuntimeOwner, UpstreamTool};
 use crate::oauth::upstream::cache::OauthClientCache;
@@ -268,6 +269,24 @@ fn ensure_enabled_stdio_admin_ack(
     Ok(())
 }
 
+fn pending_import_view(upstream: &UpstreamConfig) -> PendingImportView {
+    PendingImportView {
+        name: upstream.name.clone(),
+        url: upstream.url.clone(),
+        command: upstream.command.clone(),
+        source_client: upstream
+            .imported_from
+            .as_ref()
+            .map(|source| source.client.clone())
+            .unwrap_or_default(),
+        source_path: upstream
+            .imported_from
+            .as_ref()
+            .map(|source| source.path.clone())
+            .unwrap_or_default(),
+    }
+}
+
 #[derive(Clone)]
 struct GatewayToolIndexState {
     index: Arc<ArcSwapOption<ToolIndex>>,
@@ -318,12 +337,19 @@ pub struct GatewayToolSearchResult {
     pub input_schema: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Clone)]
+struct ToolSearchReprobeFailure {
+    upstream: String,
+    message: String,
+}
+
 #[derive(Clone)]
 pub struct GatewayManager {
     pub(super) path: PathBuf,
     pub(super) runtime: GatewayRuntimeHandle,
     pub(super) config: Arc<RwLock<LabConfig>>,
     pub(super) config_mutation: Arc<Mutex<()>>,
+    lazy_pool_init: Arc<Mutex<()>>,
     service_clients: Option<SharedServiceClients>,
     notifier: Option<CatalogChangeNotifier>,
     pub(super) oauth_client_cache: Option<OauthClientCache>,
@@ -343,6 +369,7 @@ impl GatewayManager {
             runtime,
             config: Arc::new(RwLock::new(LabConfig::default())),
             config_mutation: Arc::new(Mutex::new(())),
+            lazy_pool_init: Arc::new(Mutex::new(())),
             service_clients: None,
             notifier: None,
             oauth_client_cache: None,
@@ -939,21 +966,7 @@ impl GatewayManager {
         let cfg = self.config.read().await;
         cfg.upstream_pending
             .iter()
-            .map(|u| PendingImportView {
-                name: u.name.clone(),
-                url: u.url.clone(),
-                command: u.command.clone(),
-                source_client: u
-                    .imported_from
-                    .as_ref()
-                    .map(|s| s.client.clone())
-                    .unwrap_or_default(),
-                source_path: u
-                    .imported_from
-                    .as_ref()
-                    .map(|s| s.path.clone())
-                    .unwrap_or_default(),
-            })
+            .map(pending_import_view)
             .collect()
     }
 
@@ -973,21 +986,7 @@ impl GatewayManager {
             })?;
 
         let mut spec = cfg.upstream_pending.remove(idx);
-        let view = PendingImportView {
-            name: spec.name.clone(),
-            url: spec.url.clone(),
-            command: spec.command.clone(),
-            source_client: spec
-                .imported_from
-                .as_ref()
-                .map(|s| s.client.clone())
-                .unwrap_or_default(),
-            source_path: spec
-                .imported_from
-                .as_ref()
-                .map(|s| s.path.clone())
-                .unwrap_or_default(),
-        };
+        let view = pending_import_view(&spec);
 
         spec.enabled = false;
         cfg.upstream.push(spec);
@@ -1016,21 +1015,7 @@ impl GatewayManager {
             })?;
 
         let spec = cfg.upstream_pending.remove(idx);
-        let view = PendingImportView {
-            name: spec.name.clone(),
-            url: spec.url.clone(),
-            command: spec.command.clone(),
-            source_client: spec
-                .imported_from
-                .as_ref()
-                .map(|s| s.client.clone())
-                .unwrap_or_default(),
-            source_path: spec
-                .imported_from
-                .as_ref()
-                .map(|s| s.path.clone())
-                .unwrap_or_default(),
-        };
+        let view = pending_import_view(&spec);
 
         // Create a tombstone so this server is never re-discovered.
         if let Some(source) = spec.imported_from {
@@ -1567,14 +1552,6 @@ impl GatewayManager {
                     message: format!("gateway `{updated_name}` not found after update"),
                 })?;
             ensure_enabled_stdio_admin_ack(updated, allow_stdio, "gateway.update")?;
-            cfg.upstream
-                .iter()
-                .any(|u| u.name == updated_name)
-                .then_some(())
-                .ok_or_else(|| ToolError::Sdk {
-                    sdk_kind: "not_found".to_string(),
-                    message: format!("gateway `{updated_name}` not found after update"),
-                })?;
             self.persist_gateway_bearer_token(&env_name, token_value)
                 .await?;
         } else {
@@ -1940,8 +1917,8 @@ impl GatewayManager {
             surface = "dispatch",
             service = "gateway",
             action = "gateway.reload",
-            event = "health.schedule",
-            operation = "health",
+            event = "pool.seed.start",
+            operation = "lazy_runtime_seed",
             phase = "pool.build.start",
             upstream_count = cfg.upstream.len(),
             "gateway reconcile"
@@ -1957,21 +1934,15 @@ impl GatewayManager {
                     .with_runtime_origin(runtime_origin_tag(origin))
                     .with_runtime_owner(owner),
             );
-            let registry = self.builtin_service_registry();
-            pool.discover_all_for_subject_with_in_process_peers(
-                &cfg.upstream,
-                SHARED_GATEWAY_OAUTH_SUBJECT,
-                &registry,
-            )
-            .await;
+            pool.seed_lazy_upstreams(&cfg.upstream).await;
             Some(pool)
         };
         tracing::info!(
             surface = "dispatch",
             service = "gateway",
             action = "gateway.reload",
-            event = "health.finish",
-            operation = "health",
+            event = "pool.seed.finish",
+            operation = "lazy_runtime_seed",
             phase = "pool.build.finish",
             elapsed_ms = started.elapsed().as_millis(),
             "gateway reconcile"
@@ -2117,6 +2088,8 @@ impl GatewayManager {
         query: &str,
         top_k: usize,
         include_schema: bool,
+        owner: Option<&UpstreamRuntimeOwner>,
+        oauth_subject: Option<&str>,
     ) -> Result<Vec<GatewayToolSearchResult>, ToolError> {
         let cfg = self.config.read().await;
         let tool_search_cfg = cfg.tool_search.clone();
@@ -2148,8 +2121,8 @@ impl GatewayManager {
         }
 
         let has_cached_index = self.has_cached_tool_search_index();
-        self.refresh_tool_search_indexes_if_stale(!has_cached_index)
-            .await;
+        self.ensure_search_runtime_ready(!has_cached_index, owner, oauth_subject)
+            .await?;
 
         let requested = top_k.max(1).min(50);
         let semantic_urls = match (
@@ -2260,10 +2233,123 @@ impl GatewayManager {
             .collect())
     }
 
+    pub async fn ensure_search_runtime_ready(
+        &self,
+        wait_for_refresh: bool,
+        owner: Option<&UpstreamRuntimeOwner>,
+        oauth_subject: Option<&str>,
+    ) -> Result<(), ToolError> {
+        let cfg = self.config.read().await.clone();
+        if !cfg.tool_search.enabled {
+            return Ok(());
+        }
+
+        self.ensure_lazy_upstream_pool(&cfg, owner).await;
+        let failures = self
+            .refresh_tool_search_indexes_if_stale(wait_for_refresh, owner, oauth_subject)
+            .await;
+        if wait_for_refresh && !failures.is_empty() && !self.has_cached_tool_search_index() {
+            let details = failures
+                .iter()
+                .map(|failure| format!("{}: {}", failure.upstream, failure.message))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(ToolError::Sdk {
+                sdk_kind: "upstream_connect_error".to_string(),
+                message: format!("failed to build tool search index: {details}"),
+            });
+        }
+        Ok(())
+    }
+
+    pub async fn ensure_upstream_tool_runtime_ready(
+        &self,
+        upstream_name: &str,
+        owner: Option<&UpstreamRuntimeOwner>,
+        oauth_subject: Option<&str>,
+    ) -> Result<(), ToolError> {
+        let cfg = self.config.read().await.clone();
+        let Some(upstream) = cfg
+            .upstream
+            .iter()
+            .find(|candidate| candidate.name == upstream_name)
+        else {
+            return Err(ToolError::Sdk {
+                sdk_kind: "unknown_upstream".to_string(),
+                message: format!("unknown upstream `{upstream_name}`"),
+            });
+        };
+
+        let pool = self.ensure_lazy_upstream_pool(&cfg, owner).await;
+
+        let subject = upstream.oauth.as_ref().and(oauth_subject);
+        pool.ensure_tools_for_upstream(upstream, subject, owner)
+            .await
+            .map_err(|err| ToolError::Sdk {
+                sdk_kind: "upstream_connect_error".to_string(),
+                message: format!("failed to connect upstream `{upstream_name}`: {err}"),
+            })?;
+        Ok(())
+    }
+
+    async fn ensure_lazy_upstream_pool(
+        &self,
+        cfg: &LabConfig,
+        owner: Option<&UpstreamRuntimeOwner>,
+    ) -> Arc<UpstreamPool> {
+        if let Some(pool) = self.runtime.current_pool().await {
+            pool.seed_lazy_upstreams(&cfg.upstream).await;
+            return pool;
+        }
+
+        let _init_guard = self.lazy_pool_init.lock().await;
+        let pool = if let Some(pool) = self.runtime.current_pool().await {
+            pool
+        } else {
+            let mut base_pool = match &self.oauth_client_cache {
+                Some(cache) => UpstreamPool::new().with_oauth_client_cache(cache.clone()),
+                None => UpstreamPool::new(),
+            };
+            base_pool = base_pool.with_runtime_owner(Some(owner.cloned().unwrap_or_else(|| {
+                UpstreamRuntimeOwner {
+                    surface: "dispatch".to_string(),
+                    subject: Some(SHARED_GATEWAY_OAUTH_SUBJECT.to_string()),
+                    request_id: None,
+                    session_id: None,
+                    client_name: None,
+                    raw: None,
+                }
+            })));
+            let pool = Arc::new(base_pool);
+            self.runtime.swap(Some(Arc::clone(&pool))).await;
+            pool
+        };
+        pool.seed_lazy_upstreams(&cfg.upstream).await;
+        pool
+    }
+
+    pub async fn code_mode_catalog_tools(
+        &self,
+        allow_cold_connect: bool,
+        owner: Option<&UpstreamRuntimeOwner>,
+        oauth_subject: Option<&str>,
+    ) -> Result<Vec<UpstreamTool>, ToolError> {
+        if allow_cold_connect {
+            self.ensure_search_runtime_ready(true, owner, oauth_subject)
+                .await?;
+        }
+        let Some(pool) = self.current_pool().await else {
+            return Ok(Vec::new());
+        };
+        Ok(pool.healthy_tools().await)
+    }
+
     pub async fn resolve_tool_execute_with_upstream(
         &self,
         name: &str,
         upstream: Option<&str>,
+        owner: Option<&UpstreamRuntimeOwner>,
+        oauth_subject: Option<&str>,
     ) -> Result<(String, UpstreamTool), ToolError> {
         if !self.config.read().await.tool_search.enabled {
             return Err(ToolError::Sdk {
@@ -2272,11 +2358,6 @@ impl GatewayManager {
                     .to_string(),
             });
         }
-        let pool = self.current_pool().await.ok_or_else(|| ToolError::Sdk {
-            sdk_kind: "unknown_tool".to_string(),
-            message: format!("tool `{name}` is not available"),
-        })?;
-
         let selector = ToolExecuteSelector::parse(name, upstream)?;
         let priority_by_upstream: HashMap<String, f32> = self
             .config
@@ -2286,22 +2367,36 @@ impl GatewayManager {
             .iter()
             .map(|upstream| (upstream.name.clone(), upstream.priority.max(0.0)))
             .collect();
-        let matches: Vec<_> = if let Some(upstream_name) = selector.upstream.as_deref() {
+        if let Some(upstream_name) = selector.upstream.as_deref() {
             if priority_by_upstream
                 .get(upstream_name)
                 .copied()
                 .unwrap_or(1.0)
                 <= 0.0
             {
-                Vec::new()
-            } else {
-                pool.healthy_tools_for_upstream(upstream_name)
-                    .await
-                    .into_iter()
-                    .filter(|tool| tool.tool.name.as_ref() == selector.tool_name)
-                    .map(|tool| (upstream_name.to_string(), tool))
-                    .collect()
+                return Err(ToolError::Sdk {
+                    sdk_kind: "unknown_tool".to_string(),
+                    message: format!("unknown tool `{}`", selector.display_name()),
+                });
             }
+            self.ensure_upstream_tool_runtime_ready(upstream_name, owner, oauth_subject)
+                .await?;
+        } else {
+            self.ensure_search_runtime_ready(true, owner, oauth_subject)
+                .await?;
+        }
+
+        let pool = self.current_pool().await.ok_or_else(|| ToolError::Sdk {
+            sdk_kind: "unknown_tool".to_string(),
+            message: format!("tool `{name}` is not available"),
+        })?;
+        let matches: Vec<_> = if let Some(upstream_name) = selector.upstream.as_deref() {
+            pool.healthy_tools_for_upstream(upstream_name)
+                .await
+                .into_iter()
+                .filter(|tool| tool.tool.name.as_ref() == selector.tool_name)
+                .map(|tool| (upstream_name.to_string(), tool))
+                .collect()
         } else {
             pool.find_tool_candidates(&selector.tool_name)
                 .await
@@ -2337,6 +2432,8 @@ impl GatewayManager {
         &self,
         upstream: &str,
         tool: &str,
+        owner: Option<&UpstreamRuntimeOwner>,
+        oauth_subject: Option<&str>,
     ) -> Result<UpstreamTool, ToolError> {
         let cfg = self.config.read().await;
         if !cfg.tool_search.enabled {
@@ -2362,6 +2459,8 @@ impl GatewayManager {
             });
         }
 
+        self.ensure_upstream_tool_runtime_ready(upstream, owner, oauth_subject)
+            .await?;
         let pool = self.current_pool().await.ok_or_else(|| ToolError::Sdk {
             sdk_kind: "unknown_tool".to_string(),
             message: format!("upstream tool `{upstream}::{tool}` was not found"),
@@ -2375,6 +2474,98 @@ impl GatewayManager {
                 sdk_kind: "unknown_tool".to_string(),
                 message: format!("upstream tool `{upstream}::{tool}` was not found"),
             })
+    }
+
+    pub async fn resolve_raw_upstream_tool(
+        &self,
+        tool: &str,
+        owner: Option<&UpstreamRuntimeOwner>,
+        oauth_subject: Option<&str>,
+    ) -> Result<(String, UpstreamTool), ToolError> {
+        let selector = ToolExecuteSelector::parse(tool, None)?;
+        let cfg = self.config.read().await.clone();
+        let priority_by_upstream: HashMap<String, f32> = cfg
+            .upstream
+            .iter()
+            .map(|upstream| (upstream.name.clone(), upstream.priority.max(0.0)))
+            .collect();
+
+        let Some(pool) = self.current_pool().await else {
+            return Err(ToolError::Sdk {
+                sdk_kind: "unknown_tool".to_string(),
+                message: format!("unknown tool `{}`", selector.display_name()),
+            });
+        };
+
+        if let Some(upstream_name) = selector.upstream.as_deref() {
+            if priority_by_upstream
+                .get(upstream_name)
+                .copied()
+                .unwrap_or(1.0)
+                <= 0.0
+            {
+                return Err(ToolError::Sdk {
+                    sdk_kind: "unknown_tool".to_string(),
+                    message: format!("unknown tool `{}`", selector.display_name()),
+                });
+            }
+            self.ensure_upstream_tool_runtime_ready(upstream_name, owner, oauth_subject)
+                .await?;
+            return pool
+                .healthy_tools_for_upstream(upstream_name)
+                .await
+                .into_iter()
+                .find(|candidate| candidate.tool.name.as_ref() == selector.tool_name)
+                .map(|tool| (upstream_name.to_string(), tool))
+                .ok_or_else(|| ToolError::Sdk {
+                    sdk_kind: "unknown_tool".to_string(),
+                    message: format!("unknown tool `{}`", selector.display_name()),
+                });
+        }
+
+        if let Some((upstream, tool)) = pool.find_tool(&selector.tool_name).await
+            && priority_by_upstream.get(&upstream).copied().unwrap_or(1.0) > 0.0
+        {
+            return Ok((upstream, tool));
+        }
+
+        let mut matches = Vec::new();
+        for upstream in cfg
+            .upstream
+            .iter()
+            .filter(|upstream| upstream.enabled && upstream.priority.max(0.0) > 0.0)
+        {
+            self.ensure_upstream_tool_runtime_ready(&upstream.name, owner, oauth_subject)
+                .await?;
+            matches.extend(
+                pool.healthy_tools_for_upstream(&upstream.name)
+                    .await
+                    .into_iter()
+                    .filter(|candidate| candidate.tool.name.as_ref() == selector.tool_name)
+                    .map(|tool| (upstream.name.clone(), tool)),
+            );
+        }
+
+        if matches.is_empty() {
+            return Err(ToolError::Sdk {
+                sdk_kind: "unknown_tool".to_string(),
+                message: format!("unknown tool `{}`", selector.display_name()),
+            });
+        }
+        if matches.len() > 1 {
+            let valid = matches
+                .iter()
+                .map(|(upstream, tool)| format!("{upstream}::{}", tool.tool.name))
+                .collect::<Vec<_>>();
+            return Err(ToolError::AmbiguousTool {
+                message: format!(
+                    "tool `{}` matched multiple upstream tools",
+                    selector.tool_name
+                ),
+                valid,
+            });
+        }
+        Ok(matches.into_iter().next().expect("checked len"))
     }
 
     fn has_cached_tool_search_index(&self) -> bool {
@@ -2656,14 +2847,19 @@ impl GatewayManager {
     /// TTL-gated on `TOOL_SEARCH_REPROBE_TTL`: if the last attempted reprobe
     /// is younger than the TTL, skip the live probe and keep the cached
     /// index. Remaining stale upstreams are reprobed concurrently.
-    async fn refresh_tool_search_indexes_if_stale(&self, wait_for_refresh: bool) {
+    async fn refresh_tool_search_indexes_if_stale(
+        &self,
+        wait_for_refresh: bool,
+        owner: Option<&UpstreamRuntimeOwner>,
+        oauth_subject: Option<&str>,
+    ) -> Vec<ToolSearchReprobeFailure> {
         let cfg = self.config.read().await.clone();
         if !cfg.tool_search.enabled {
-            return;
+            return Vec::new();
         }
         let Some(pool) = self.current_pool().await else {
             tracing::warn!(
-                surface = "mcp",
+                surface = "dispatch",
                 service = "gateway",
                 action = "tool_search.reprobe",
                 event = "skipped",
@@ -2671,11 +2867,13 @@ impl GatewayManager {
                 kind = "upstream_pool_empty",
                 "gateway tool index reprobe skipped without pool"
             );
-            return;
+            return Vec::new();
         };
 
         let now = Instant::now();
         let max_tools = cfg.tool_search.max_tools;
+        let owner = owner.cloned();
+        let oauth_subject = oauth_subject.map(ToOwned::to_owned);
         let semantic_urls = match (
             cfg.tool_search.resolved_qdrant_url(),
             cfg.tool_search.resolved_tei_url(),
@@ -2692,7 +2890,7 @@ impl GatewayManager {
         for upstream in cfg.upstream {
             if !upstream.enabled {
                 tracing::debug!(
-                    surface = "mcp",
+                    surface = "dispatch",
                     service = "gateway",
                     action = "tool_search.reprobe",
                     event = "skipped",
@@ -2723,7 +2921,7 @@ impl GatewayManager {
             // a post-restart/reload cold index does not stay cold indefinitely.
             if fresh && has_tools {
                 tracing::debug!(
-                    surface = "mcp",
+                    surface = "dispatch",
                     service = "gateway",
                     action = "tool_search.reprobe",
                     event = "skipped",
@@ -2734,12 +2932,24 @@ impl GatewayManager {
                 );
                 continue;
             }
+            if state.warming.swap(true, Ordering::Relaxed) {
+                tracing::debug!(
+                    surface = "dispatch",
+                    service = "gateway",
+                    action = "tool_search.reprobe",
+                    event = "skipped",
+                    operation = "health",
+                    upstream = %upstream.name,
+                    reason = "already_warming",
+                    "gateway tool index reprobe skipped"
+                );
+                continue;
+            }
             if let Ok(mut guard) = state.last_reprobe_attempt_at.lock() {
                 *guard = Some(now);
             }
-            state.warming.store(true, Ordering::Relaxed);
             tracing::info!(
-                surface = "mcp",
+                surface = "dispatch",
                 service = "gateway",
                 action = "tool_search.reprobe",
                 event = "scheduled",
@@ -2750,13 +2960,15 @@ impl GatewayManager {
             pending.push((upstream, state));
         }
 
-        let tasks = pending.into_iter().map(|(upstream, state)| {
+        let tasks = pending.into_iter().map(move |(upstream, state)| {
             let pool = Arc::clone(&pool);
             let semantic_urls = semantic_urls.clone();
+            let owner = owner.clone();
+            let oauth_subject = oauth_subject.clone();
             async move {
                 let reprobe_started = Instant::now();
                 tracing::debug!(
-                    surface = "mcp",
+                    surface = "dispatch",
                     service = "gateway",
                     action = "tool_search.reprobe",
                     event = "start",
@@ -2764,21 +2976,29 @@ impl GatewayManager {
                     upstream = %upstream.name,
                     "gateway tool index reprobe start"
                 );
-                if let Err(err) = pool.reprobe_tools_for_upstream(&upstream).await {
+                let subject = upstream.oauth.as_ref().and(oauth_subject.as_deref());
+                if let Err(err) = pool
+                    .ensure_tools_for_upstream(&upstream, subject, owner.as_ref())
+                    .await
+                {
+                    let message = err.to_string();
                     tracing::warn!(
-                        surface = "mcp",
+                        surface = "dispatch",
                         service = "gateway",
                         action = "tool_search.reprobe",
                         event = "error",
                         operation = "health",
                         elapsed_ms = reprobe_started.elapsed().as_millis(),
                         kind = "upstream_reprobe_failed",
-                        error = %err,
+                        error = %message,
                         upstream = %upstream.name,
                         "gateway tool index reprobe failed"
                     );
                     state.warming.store(false, Ordering::Relaxed);
-                    return;
+                    return Some(ToolSearchReprobeFailure {
+                        upstream: upstream.name,
+                        message,
+                    });
                 }
                 let healthy_tools = pool.healthy_tools_for_upstream(&upstream.name).await;
                 let upstream_clone = upstream.clone();
@@ -2792,7 +3012,7 @@ impl GatewayManager {
                     });
                     if index.metadata.truncated {
                         tracing::warn!(
-                            surface = "mcp",
+                            surface = "dispatch",
                             service = "gateway",
                             action = "tool_search.reprobe",
                             upstream = %upstream.name,
@@ -2847,7 +3067,7 @@ impl GatewayManager {
                         state.index.store(Some(Arc::new(index)));
                     }
                     tracing::info!(
-                        surface = "mcp",
+                        surface = "dispatch",
                         service = "gateway",
                         action = "tool_search.reprobe",
                         event = "finish",
@@ -2858,28 +3078,50 @@ impl GatewayManager {
                         "gateway tool index reprobe finish"
                     );
                 } else {
+                    let message = match built {
+                        Err(err) => err.to_string(),
+                        Ok(_) => "tool index build failed".to_string(),
+                    };
                     tracing::warn!(
-                        surface = "mcp",
+                        surface = "dispatch",
                         service = "gateway",
                         action = "tool_search.reprobe",
                         event = "error",
                         operation = "health",
                         elapsed_ms = reprobe_started.elapsed().as_millis(),
-                        kind = "tool_index_build_failed",
+                        kind = "tool_index_build_join_error",
+                        error = %message,
                         upstream = %upstream.name,
                         "gateway tool index reprobe build failed"
                     );
+                    state.warming.store(false, Ordering::Relaxed);
+                    return Some(ToolSearchReprobeFailure {
+                        upstream: upstream.name,
+                        message,
+                    });
                 }
                 state.warming.store(false, Ordering::Relaxed);
+                None
             }
         });
 
+        let concurrency = upstream_discovery_concurrency();
         if wait_for_refresh {
-            futures::future::join_all(tasks).await;
+            futures::stream::iter(tasks)
+                .buffer_unordered(concurrency)
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .flatten()
+                .collect()
         } else {
-            for task in tasks {
-                tokio::spawn(task);
-            }
+            tokio::spawn(async move {
+                futures::stream::iter(tasks)
+                    .buffer_unordered(concurrency)
+                    .collect::<Vec<_>>()
+                    .await;
+            });
+            Vec::new()
         }
     }
 
@@ -3240,6 +3482,7 @@ mod tests {
     };
     use crate::dispatch::gateway::discovery::DiscoveredServer;
     use crate::dispatch::gateway::projection::ServiceHealth;
+    use crate::dispatch::upstream::types::{ToolExposurePolicy, UpstreamEntry, UpstreamHealth};
     use crate::oauth::upstream::cache::OauthClientCache;
     use crate::oauth::upstream::encryption::load_key;
     use base64::Engine as _;
@@ -3477,10 +3720,7 @@ mod tests {
         (manager, pool)
     }
 
-    fn healthy_entry_with_tool(
-        upstream: &str,
-        tool_name: &str,
-    ) -> crate::dispatch::upstream::types::UpstreamEntry {
+    fn healthy_entry_with_tool(upstream: &str, tool_name: &str) -> UpstreamEntry {
         let upstream_name: Arc<str> = Arc::from(upstream);
         let schema = Arc::new(serde_json::Map::new());
         let tool = rmcp::model::Tool::new(
@@ -3493,17 +3733,27 @@ mod tests {
             input_schema: None,
             upstream_name: Arc::clone(&upstream_name),
         };
-        crate::dispatch::upstream::types::UpstreamEntry {
-            name: Arc::clone(&upstream_name),
-            tools: HashMap::from([(tool_name.to_string(), upstream_tool)]),
-            exposure_policy: crate::dispatch::upstream::types::ToolExposurePolicy::All,
+        fixture_upstream_entry(
+            upstream,
+            HashMap::from([(tool_name.to_string(), upstream_tool)]),
+        )
+    }
+
+    fn fixture_upstream_entry(
+        upstream: &str,
+        tools: HashMap<String, UpstreamTool>,
+    ) -> UpstreamEntry {
+        UpstreamEntry {
+            name: Arc::from(upstream),
+            tools,
+            exposure_policy: ToolExposurePolicy::All,
             prompt_count: 0,
             resource_count: 0,
             prompt_names: Vec::new(),
             resource_uris: Vec::new(),
-            tool_health: crate::dispatch::upstream::types::UpstreamHealth::Healthy,
-            prompt_health: crate::dispatch::upstream::types::UpstreamHealth::Healthy,
-            resource_health: crate::dispatch::upstream::types::UpstreamHealth::Healthy,
+            tool_health: UpstreamHealth::Healthy,
+            prompt_health: UpstreamHealth::Healthy,
+            resource_health: UpstreamHealth::Healthy,
             tool_unhealthy_since: None,
             prompt_unhealthy_since: None,
             resource_unhealthy_since: None,
@@ -3520,10 +3770,10 @@ mod tests {
         let upstream = fixture_http_upstream("downstream");
         let (manager, _pool) = tool_search_manager_with_pool(upstream).await;
 
-        let _first_results = manager
-            .search_tools("missing tool", 5, false)
+        let _first_err = manager
+            .search_tools("missing tool", 5, false, None, None)
             .await
-            .expect("failed reprobe still returns current search result set");
+            .expect_err("cold failed reprobe returns an actionable error");
         let state = manager
             .tool_indexes
             .get("downstream")
@@ -3535,10 +3785,10 @@ mod tests {
             .expect("attempt timestamp lock");
         assert!(first_attempt.is_some(), "failed reprobe records attempt");
 
-        let _second_results = manager
-            .search_tools("missing tool", 5, false)
+        let _second_err = manager
+            .search_tools("missing tool", 5, false, None, None)
             .await
-            .expect("empty index retries on every call");
+            .expect_err("empty failed index retries on every call");
         let second_attempt = *state
             .last_reprobe_attempt_at
             .lock()
@@ -3553,6 +3803,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn search_tools_seeds_cold_lazy_runtime_before_searching() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
+        manager
+            .seed_config(LabConfig {
+                tool_search: ToolSearchConfig {
+                    enabled: true,
+                    ..ToolSearchConfig::default()
+                },
+                upstream: vec![fixture_http_upstream("alpha")],
+                ..LabConfig::default()
+            })
+            .await;
+
+        manager
+            .ensure_search_runtime_ready(true, None, None)
+            .await
+            .expect_err("failed live discovery returns an actionable error");
+
+        let pool = manager
+            .current_pool()
+            .await
+            .expect("manager keeps a shared lazy pool installed");
+        assert!(pool.cached_upstream_summary("alpha").await.is_some());
+    }
+
+    #[tokio::test]
+    async fn reload_seeds_lazy_upstreams_without_connecting() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        write_gateway_config(
+            &path,
+            &LabConfig {
+                tool_search: ToolSearchConfig {
+                    enabled: true,
+                    ..ToolSearchConfig::default()
+                },
+                upstream: vec![fixture_http_upstream("alpha")],
+                ..LabConfig::default()
+            },
+        )
+        .expect("write config");
+
+        let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
+        manager
+            .reload_with_origin(None, None)
+            .await
+            .expect("reload");
+
+        let pool = manager.current_pool().await.expect("pool installed");
+        assert!(pool.cached_upstream_summary("alpha").await.is_some());
+        assert_eq!(pool.connection_count_for_tests().await, 0);
+        assert!(pool.healthy_tools_for_upstream("alpha").await.is_empty());
+    }
+
+    #[tokio::test]
     async fn resolve_tool_execute_hides_priority_zero_upstreams() {
         let mut upstream = fixture_http_upstream("suppressed");
         upstream.priority = 0.0;
@@ -3564,13 +3871,49 @@ mod tests {
         .await;
 
         let err = manager
-            .resolve_tool_execute_with_upstream("secret-tool", None)
+            .resolve_tool_execute_with_upstream("secret-tool", None, None, None)
             .await
             .expect_err("priority=0 upstream tools must not be invokable by known name");
 
         match err {
             ToolError::Sdk { sdk_kind, .. } => assert_eq!(sdk_kind, "unknown_tool"),
             other => panic!("expected unknown_tool sdk error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_tool_execute_explicit_priority_zero_does_not_warm_upstream() {
+        let mut upstream = fixture_http_upstream("suppressed");
+        upstream.priority = 0.0;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
+        manager
+            .seed_config(LabConfig {
+                tool_search: ToolSearchConfig {
+                    enabled: true,
+                    ..ToolSearchConfig::default()
+                },
+                upstream: vec![upstream],
+                ..LabConfig::default()
+            })
+            .await;
+        let err = manager
+            .resolve_tool_execute_with_upstream("secret-tool", Some("suppressed"), None, None)
+            .await
+            .expect_err("priority=0 upstream must not be warmed or invoked explicitly");
+
+        match err {
+            ToolError::Sdk { sdk_kind, .. } => assert_eq!(sdk_kind, "unknown_tool"),
+            other => panic!("expected unknown_tool sdk error, got {other:?}"),
+        }
+        if let Some(pool) = manager.current_pool().await {
+            assert!(
+                pool.healthy_tools_for_upstream("suppressed")
+                    .await
+                    .is_empty(),
+                "priority=0 explicit invoke must not warm suppressed upstream tools"
+            );
         }
     }
 
@@ -3586,7 +3929,7 @@ mod tests {
         .await;
 
         let err = manager
-            .resolve_code_mode_upstream_tool("suppressed", "secret-tool")
+            .resolve_code_mode_upstream_tool("suppressed", "secret-tool", None, None)
             .await
             .expect_err("priority=0 upstream tools must not be invokable by code mode id");
 
@@ -3615,7 +3958,7 @@ mod tests {
         .await;
 
         let ambiguous = manager
-            .resolve_tool_execute_with_upstream("PowerShell", None)
+            .resolve_tool_execute_with_upstream("PowerShell", None, None, None)
             .await
             .expect_err("bare duplicate tool name should stay ambiguous");
         match ambiguous {
@@ -3627,7 +3970,7 @@ mod tests {
         }
 
         let (upstream, tool) = manager
-            .resolve_tool_execute_with_upstream("steamy-windows-mcp::PowerShell", None)
+            .resolve_tool_execute_with_upstream("steamy-windows-mcp::PowerShell", None, None, None)
             .await
             .expect("qualified selector should route to one upstream");
 
@@ -3654,12 +3997,105 @@ mod tests {
         .await;
 
         let (upstream, tool) = manager
-            .resolve_tool_execute_with_upstream("PowerShell", Some("agent-os_windows-mcp"))
+            .resolve_tool_execute_with_upstream(
+                "PowerShell",
+                Some("agent-os_windows-mcp"),
+                None,
+                None,
+            )
             .await
             .expect("explicit upstream should disambiguate duplicate tool names");
 
         assert_eq!(upstream, "agent-os_windows-mcp");
         assert_eq!(tool.tool.name.as_ref(), "PowerShell");
+    }
+
+    #[tokio::test]
+    async fn resolve_tool_execute_with_upstream_resolves_requested_upstream() {
+        let (manager, pool) = tool_search_manager_with_upstreams(vec![
+            fixture_http_upstream("alpha"),
+            fixture_http_upstream("beta"),
+        ])
+        .await;
+        pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
+            .await;
+
+        let (upstream, tool) = manager
+            .resolve_tool_execute_with_upstream("ping", Some("alpha"), None, None)
+            .await
+            .expect("explicit upstream should resolve requested upstream");
+
+        assert_eq!(upstream, "alpha");
+        assert_eq!(tool.tool.name.as_ref(), "ping");
+        assert_eq!(pool.healthy_tools_for_upstream("alpha").await.len(), 1);
+        assert!(pool.healthy_tools_for_upstream("beta").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resolve_code_mode_upstream_tool_resolves_requested_upstream() {
+        let (manager, pool) = tool_search_manager_with_pool(fixture_http_upstream("alpha")).await;
+        pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
+            .await;
+
+        let tool = manager
+            .resolve_code_mode_upstream_tool("alpha", "ping", None, None)
+            .await
+            .expect("code mode should resolve requested upstream");
+
+        assert_eq!(tool.tool.name.as_ref(), "ping");
+    }
+
+    #[tokio::test]
+    async fn resolve_raw_upstream_tool_resolves_cached_tool_without_tool_search() {
+        let mut upstream = fixture_http_upstream("alpha");
+        upstream.tool_search.enabled = false;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        let runtime = GatewayRuntimeHandle::default();
+        let pool = Arc::new(UpstreamPool::new());
+        runtime.swap(Some(Arc::clone(&pool))).await;
+        let manager = GatewayManager::new(path, runtime);
+        manager
+            .seed_config(LabConfig {
+                tool_search: ToolSearchConfig {
+                    enabled: false,
+                    ..ToolSearchConfig::default()
+                },
+                upstream: vec![upstream],
+                ..LabConfig::default()
+            })
+            .await;
+        pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
+            .await;
+
+        let (upstream, tool) = manager
+            .resolve_raw_upstream_tool("ping", None, None)
+            .await
+            .expect("raw proxy resolution should not require tool_search");
+
+        assert_eq!(upstream, "alpha");
+        assert_eq!(tool.tool.name.as_ref(), "ping");
+    }
+
+    #[tokio::test]
+    async fn resolve_raw_upstream_tool_honors_qualified_upstream_name() {
+        let (manager, pool) = tool_search_manager_with_upstreams(vec![
+            fixture_http_upstream("alpha"),
+            fixture_http_upstream("beta"),
+        ])
+        .await;
+        pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
+            .await;
+        pool.insert_entry_for_tests("beta", healthy_entry_with_tool("beta", "ping"))
+            .await;
+
+        let (upstream, tool) = manager
+            .resolve_raw_upstream_tool("beta::ping", None, None)
+            .await
+            .expect("qualified raw tool should resolve requested upstream");
+
+        assert_eq!(upstream, "beta");
+        assert_eq!(tool.tool.name.as_ref(), "ping");
     }
 
     #[tokio::test]
@@ -3691,7 +4127,7 @@ mod tests {
 
         let results = tokio::time::timeout(
             Duration::from_millis(100),
-            manager.search_tools("cached marker", 5, false),
+            manager.search_tools("cached marker", 5, false, None, None),
         )
         .await
         .expect("cached search must not wait for live stale refresh")
@@ -4795,31 +5231,21 @@ mod tests {
     #[tokio::test]
     async fn runtime_view_includes_last_upstream_error() {
         let pool = UpstreamPool::new();
-        let upstream_name: Arc<str> = Arc::from("broken-upstream");
-        let entry = crate::dispatch::upstream::types::UpstreamEntry {
-            name: Arc::clone(&upstream_name),
-            tools: HashMap::new(),
-            exposure_policy: crate::dispatch::upstream::types::ToolExposurePolicy::All,
-            prompt_count: 0,
-            resource_count: 0,
-            prompt_names: Vec::new(),
-            resource_uris: Vec::new(),
-            tool_health: crate::dispatch::upstream::types::UpstreamHealth::Unhealthy {
-                consecutive_failures: 1,
-            },
-            prompt_health: crate::dispatch::upstream::types::UpstreamHealth::Unhealthy {
-                consecutive_failures: 1,
-            },
-            resource_health: crate::dispatch::upstream::types::UpstreamHealth::Unhealthy {
-                consecutive_failures: 1,
-            },
-            tool_unhealthy_since: Some(std::time::Instant::now()),
-            prompt_unhealthy_since: Some(std::time::Instant::now()),
-            resource_unhealthy_since: Some(std::time::Instant::now()),
-            tool_last_error: Some("stdio handshake failed".to_string()),
-            prompt_last_error: None,
-            resource_last_error: None,
+        let now = std::time::Instant::now();
+        let mut entry = fixture_upstream_entry("broken-upstream", HashMap::new());
+        entry.tool_health = UpstreamHealth::Unhealthy {
+            consecutive_failures: 1,
         };
+        entry.prompt_health = UpstreamHealth::Unhealthy {
+            consecutive_failures: 1,
+        };
+        entry.resource_health = UpstreamHealth::Unhealthy {
+            consecutive_failures: 1,
+        };
+        entry.tool_unhealthy_since = Some(now);
+        entry.prompt_unhealthy_since = Some(now);
+        entry.resource_unhealthy_since = Some(now);
+        entry.tool_last_error = Some("stdio handshake failed".to_string());
 
         pool.insert_entry_for_tests("broken-upstream", entry).await;
 
@@ -4834,27 +5260,12 @@ mod tests {
     async fn reload_evicts_removed_upstream_oauth_clients() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("config.toml");
+        let mut kept_upstream = fixture_http_upstream("kept");
+        kept_upstream.url = Some("https://fixture.example.com:7001".to_string());
         write_gateway_config(
             &path,
             &LabConfig {
-                upstream: vec![UpstreamConfig {
-                    enabled: true,
-                    name: "kept".to_string(),
-                    url: Some("https://fixture.example.com:7001".to_string()),
-                    bearer_token_env: None,
-                    command: None,
-                    args: Vec::new(),
-                    env: BTreeMap::new(),
-                    proxy_resources: false,
-                    proxy_prompts: false,
-                    expose_tools: None,
-                    expose_resources: None,
-                    expose_prompts: None,
-                    oauth: None,
-                    imported_from: None,
-                    priority: 1.0,
-                    tool_search: ToolSearchConfig::default(),
-                }],
+                upstream: vec![kept_upstream],
                 ..LabConfig::default()
             },
         )
@@ -4870,30 +5281,16 @@ mod tests {
 
         let manager = GatewayManager::new(path.clone(), GatewayRuntimeHandle::default())
             .with_oauth_client_cache(cache.clone());
+        let mut removed_upstream = fixture_http_upstream("removed");
+        removed_upstream.url = Some("http://127.0.0.1:7000".to_string());
+        removed_upstream.oauth = Some(UpstreamOauthConfig {
+            mode: UpstreamOauthMode::AuthorizationCodePkce,
+            registration: UpstreamOauthRegistration::Dynamic,
+            scopes: None,
+        });
         manager
             .seed_config(LabConfig {
-                upstream: vec![UpstreamConfig {
-                    enabled: true,
-                    name: "removed".to_string(),
-                    url: Some("http://127.0.0.1:7000".to_string()),
-                    bearer_token_env: None,
-                    command: None,
-                    args: Vec::new(),
-                    env: BTreeMap::new(),
-                    proxy_resources: false,
-                    proxy_prompts: false,
-                    expose_tools: None,
-                    expose_resources: None,
-                    expose_prompts: None,
-                    oauth: Some(UpstreamOauthConfig {
-                        mode: UpstreamOauthMode::AuthorizationCodePkce,
-                        registration: UpstreamOauthRegistration::Dynamic,
-                        scopes: None,
-                    }),
-                    imported_from: None,
-                    priority: 1.0,
-                    tool_search: ToolSearchConfig::default(),
-                }],
+                upstream: vec![removed_upstream],
                 ..LabConfig::default()
             })
             .await;
@@ -4993,29 +5390,20 @@ mod tests {
     #[tokio::test]
     async fn runtime_view_preserves_non_benign_prompt_and_resource_errors() {
         let pool = UpstreamPool::new();
-        let upstream_name: Arc<str> = Arc::from("partial-upstream");
-        let entry = crate::dispatch::upstream::types::UpstreamEntry {
-            name: Arc::clone(&upstream_name),
-            tools: HashMap::new(),
-            exposure_policy: crate::dispatch::upstream::types::ToolExposurePolicy::All,
-            prompt_count: 3,
-            resource_count: 2,
-            prompt_names: Vec::new(),
-            resource_uris: Vec::new(),
-            tool_health: crate::dispatch::upstream::types::UpstreamHealth::Healthy,
-            prompt_health: crate::dispatch::upstream::types::UpstreamHealth::Unhealthy {
-                consecutive_failures: 1,
-            },
-            resource_health: crate::dispatch::upstream::types::UpstreamHealth::Unhealthy {
-                consecutive_failures: 1,
-            },
-            tool_unhealthy_since: None,
-            prompt_unhealthy_since: Some(std::time::Instant::now()),
-            resource_unhealthy_since: Some(std::time::Instant::now()),
-            tool_last_error: None,
-            prompt_last_error: Some("prompt listing unsupported".to_string()),
-            resource_last_error: Some("resource listing unsupported".to_string()),
+        let now = std::time::Instant::now();
+        let mut entry = fixture_upstream_entry("partial-upstream", HashMap::new());
+        entry.prompt_count = 3;
+        entry.resource_count = 2;
+        entry.prompt_health = UpstreamHealth::Unhealthy {
+            consecutive_failures: 1,
         };
+        entry.resource_health = UpstreamHealth::Unhealthy {
+            consecutive_failures: 1,
+        };
+        entry.prompt_unhealthy_since = Some(now);
+        entry.resource_unhealthy_since = Some(now);
+        entry.prompt_last_error = Some("prompt listing unsupported".to_string());
+        entry.resource_last_error = Some("resource listing unsupported".to_string());
 
         pool.insert_entry_for_tests("partial-upstream", entry).await;
 
@@ -5025,28 +5413,9 @@ mod tests {
             Some("resource listing unsupported")
         );
 
-        let server = server_view_from_upstream(
-            Some(&pool),
-            &UpstreamConfig {
-                enabled: true,
-                name: "partial-upstream".to_string(),
-                url: Some("http://127.0.0.1:8080/mcp".to_string()),
-                bearer_token_env: None,
-                command: None,
-                args: Vec::new(),
-                env: BTreeMap::new(),
-                proxy_resources: true,
-                proxy_prompts: false,
-                expose_tools: None,
-                expose_resources: None,
-                expose_prompts: None,
-                oauth: None,
-                imported_from: None,
-                priority: 1.0,
-                tool_search: ToolSearchConfig::default(),
-            },
-        )
-        .await;
+        let mut upstream = fixture_http_upstream("partial-upstream");
+        upstream.proxy_resources = true;
+        let server = server_view_from_upstream(Some(&pool), &upstream).await;
 
         assert_eq!(server.warnings.len(), 1);
         assert_eq!(server.warnings[0].message, "resource listing unsupported");
@@ -5055,63 +5424,34 @@ mod tests {
     #[tokio::test]
     async fn runtime_view_ignores_method_not_found_capability_errors() {
         let pool = UpstreamPool::new();
-        let upstream_name: Arc<str> = Arc::from("partial-upstream");
-        let entry = crate::dispatch::upstream::types::UpstreamEntry {
-            name: Arc::clone(&upstream_name),
-            tools: HashMap::new(),
-            exposure_policy: crate::dispatch::upstream::types::ToolExposurePolicy::All,
-            prompt_count: 1,
-            resource_count: 1,
-            prompt_names: Vec::new(),
-            resource_uris: Vec::new(),
-            tool_health: crate::dispatch::upstream::types::UpstreamHealth::Healthy,
-            prompt_health: crate::dispatch::upstream::types::UpstreamHealth::Unhealthy {
-                consecutive_failures: 1,
-            },
-            resource_health: crate::dispatch::upstream::types::UpstreamHealth::Unhealthy {
-                consecutive_failures: 1,
-            },
-            tool_unhealthy_since: None,
-            prompt_unhealthy_since: Some(std::time::Instant::now()),
-            resource_unhealthy_since: Some(std::time::Instant::now()),
-            tool_last_error: None,
-            prompt_last_error: Some(
-                "failed to list prompts from upstream: Mcp error: -32601: Method not found"
-                    .to_string(),
-            ),
-            resource_last_error: Some(
-                "failed to list resources from upstream: Mcp error: -32601: Method not found"
-                    .to_string(),
-            ),
+        let now = std::time::Instant::now();
+        let mut entry = fixture_upstream_entry("partial-upstream", HashMap::new());
+        entry.prompt_count = 1;
+        entry.resource_count = 1;
+        entry.prompt_health = UpstreamHealth::Unhealthy {
+            consecutive_failures: 1,
         };
+        entry.resource_health = UpstreamHealth::Unhealthy {
+            consecutive_failures: 1,
+        };
+        entry.prompt_unhealthy_since = Some(now);
+        entry.resource_unhealthy_since = Some(now);
+        entry.prompt_last_error = Some(
+            "failed to list prompts from upstream: Mcp error: -32601: Method not found".to_string(),
+        );
+        entry.resource_last_error = Some(
+            "failed to list resources from upstream: Mcp error: -32601: Method not found"
+                .to_string(),
+        );
 
         pool.insert_entry_for_tests("partial-upstream", entry).await;
 
         let runtime = runtime_view(Some(&pool), "partial-upstream", None).await;
         assert_eq!(runtime.last_error, None);
 
-        let server = server_view_from_upstream(
-            Some(&pool),
-            &UpstreamConfig {
-                enabled: true,
-                name: "partial-upstream".to_string(),
-                url: Some("http://127.0.0.1:8080/mcp".to_string()),
-                bearer_token_env: None,
-                command: None,
-                args: Vec::new(),
-                env: BTreeMap::new(),
-                proxy_resources: true,
-                proxy_prompts: false,
-                expose_tools: None,
-                expose_resources: None,
-                expose_prompts: None,
-                oauth: None,
-                imported_from: None,
-                priority: 1.0,
-                tool_search: ToolSearchConfig::default(),
-            },
-        )
-        .await;
+        let mut upstream = fixture_http_upstream("partial-upstream");
+        upstream.proxy_resources = true;
+        let server = server_view_from_upstream(Some(&pool), &upstream).await;
 
         assert!(server.warnings.is_empty());
     }
@@ -5119,43 +5459,12 @@ mod tests {
     #[tokio::test]
     async fn custom_gateway_connected_includes_resources_and_prompts() {
         let pool = UpstreamPool::new();
-        let upstream = UpstreamConfig {
-            enabled: true,
-            name: "partial-upstream".to_string(),
-            url: Some("http://127.0.0.1:9001/mcp".to_string()),
-            bearer_token_env: None,
-            command: None,
-            args: Vec::new(),
-            env: BTreeMap::new(),
-            proxy_resources: true,
-            proxy_prompts: false,
-            expose_tools: None,
-            expose_resources: None,
-            expose_prompts: None,
-            oauth: None,
-            imported_from: None,
-            priority: 1.0,
-            tool_search: ToolSearchConfig::default(),
-        };
-        let upstream_name: Arc<str> = Arc::from("partial-upstream");
-        let entry = crate::dispatch::upstream::types::UpstreamEntry {
-            name: Arc::clone(&upstream_name),
-            tools: HashMap::new(),
-            exposure_policy: crate::dispatch::upstream::types::ToolExposurePolicy::All,
-            prompt_count: 4,
-            resource_count: 2,
-            prompt_names: Vec::new(),
-            resource_uris: Vec::new(),
-            tool_health: crate::dispatch::upstream::types::UpstreamHealth::Healthy,
-            prompt_health: crate::dispatch::upstream::types::UpstreamHealth::Healthy,
-            resource_health: crate::dispatch::upstream::types::UpstreamHealth::Healthy,
-            tool_unhealthy_since: None,
-            prompt_unhealthy_since: None,
-            resource_unhealthy_since: None,
-            tool_last_error: None,
-            prompt_last_error: None,
-            resource_last_error: None,
-        };
+        let mut upstream = fixture_http_upstream("partial-upstream");
+        upstream.url = Some("http://127.0.0.1:9001/mcp".to_string());
+        upstream.proxy_resources = true;
+        let mut entry = fixture_upstream_entry("partial-upstream", HashMap::new());
+        entry.prompt_count = 4;
+        entry.resource_count = 2;
 
         pool.insert_entry_for_tests("partial-upstream", entry).await;
 
@@ -5178,8 +5487,8 @@ mod tests {
             "event = \"old_pool.drain.start\"",
             "action = \"tool_search.rebuild\"",
             "action = \"tool_search.reprobe\"",
-            "event = \"health.schedule\"",
-            "operation = \"health\"",
+            "event = \"pool.seed.start\"",
+            "operation = \"lazy_runtime_seed\"",
             "kind = \"upstream_reprobe_failed\"",
         ] {
             assert!(

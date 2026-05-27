@@ -22,15 +22,15 @@ To proxy an upstream server through `lab`, you configure one or more `[[upstream
 
 `lab` will:
 
-1. connect to every configured upstream at startup
-2. run tool discovery against each upstream
-3. merge discovered tools into its own MCP catalog
+1. seed enabled upstream names into the gateway catalog at startup without opening connections
+2. connect to an upstream lazily on first tool search, exact tool execution, Code Mode call, or explicit gateway test path that needs live discovery
+3. merge discovered tools into its own MCP catalog after that upstream is first contacted
 4. serve the combined catalog through whichever MCP transport you expose from `lab`
 
-OAuth upstreams are discovered at startup only when Lab has upstream OAuth
-runtime state and a stored credential for the shared Gateway subject. Without
-that credential, subject-less discovery deliberately skips OAuth upstreams so a
-user-specific token view is not cached globally.
+OAuth upstreams are discovered only when Lab has upstream OAuth runtime state
+and an explicit subject for selecting the token set. Subject-less discovery
+deliberately skips OAuth upstreams so a user-specific token view is not cached
+globally.
 
 That means the client connects only to `lab`:
 
@@ -155,11 +155,13 @@ Operator browser flow lives in [GATEWAY.md](./GATEWAY.md).
 
 - HTTP upstream transport only. Stdio upstreams cannot use OAuth in this phase
   because stdio sessions do not carry a stable authenticated subject.
-- Subject-less discovery skips OAuth upstreams. The hosted gateway startup,
-  `gateway.reload`, and `gateway.test` use the explicit shared subject
-  `gateway` so configured OAuth upstreams can be discovered after an operator
-  completes the upstream OAuth flow. If no credential exists yet, they remain
-  configured but report no discovered capabilities until authorization succeeds.
+- Subject-less discovery skips OAuth upstreams. Hosted gateway startup and
+  `gateway.reload` only seed configured upstream names; live discovery happens
+  later from a lazy path with an explicit subject. Shared background refresh and
+  `gateway.test` use the explicit shared subject `gateway` so configured OAuth
+  upstreams can be discovered after an operator completes the upstream OAuth
+  flow. If no credential exists yet, they remain configured but report no
+  discovered capabilities until authorization succeeds.
   The authorization initiation flow (`POST /v1/gateway/oauth/start`) requires
   an authenticated HTTP session.
 - `/mcp` over HTTP and the hosted web UI are the supported call surfaces.
@@ -293,9 +295,16 @@ internally, but the current operator-facing flow defaults to the shared subject
 
 ## Discovery
 
-At startup, lab connects to all configured upstreams in parallel. Each upstream gets a 15-second timeout for connection and tool discovery (`list_tools()`).
+At startup, lab seeds enabled upstream names into the shared gateway catalog
+without opening upstream connections. Live tool discovery is lazy: the first
+tool search, exact tool execution, or Code Mode upstream call connects only the
+needed upstream. Background search-index refreshes use the same bounded
+discovery concurrency as bulk discovery paths.
 
-Failed upstreams are marked unhealthy. Healthy upstreams continue operating. A single failed upstream does not prevent others from connecting.
+Each live discovery attempt gets a 15-second timeout for connection and tool
+discovery (`list_tools()`). Failed upstreams are marked unhealthy. Healthy
+upstreams continue operating. A single failed upstream does not prevent others
+from connecting later.
 
 After startup, proxied RMCP operations continue to use explicit per-RPC
 timeouts. Tool calls, prompt reads, resource reads, and discovery/listing
@@ -303,9 +312,9 @@ operations must fail closed with logged timeout/error events rather than
 blocking indefinitely behind one hung upstream.
 
 ```text
-upstream discovery succeeded  upstream=remote-lab tool_count=12
-upstream discovery failed     upstream=broken-server error="connection refused"
-upstream discovery timed out  upstream=slow-server timeout_secs=15
+gateway lazy upstream catalog seeded  upstream_count=3
+lazy upstream tools connected         upstream=remote-lab tool_count=12
+gateway tool index reprobe failed     upstream=broken-server kind=upstream_reprobe_failed
 ```
 
 ## How Routing Works
@@ -483,11 +492,14 @@ https://lab.example.com/mcp
 
 ### 5. Verify discovery
 
-Startup logs should include lines like:
+Startup logs should show lazy seeding rather than live upstream discovery:
 
 ```text
-upstream discovery succeeded  upstream=remote-lab tool_count=12
+phase="discovery.lazy" upstream_count=3
 ```
+
+Then trigger a first search or invoke and verify live discovery for only the
+requested upstream, for example `lazy upstream tools connected upstream=remote-lab`.
 
 Then an MCP client connected to `lab` should see the upstream tools in `list_tools()`.
 
