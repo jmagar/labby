@@ -2497,6 +2497,32 @@ impl GatewayManager {
             });
         };
 
+        if let Some(upstream_name) = selector.upstream.as_deref() {
+            if priority_by_upstream
+                .get(upstream_name)
+                .copied()
+                .unwrap_or(1.0)
+                <= 0.0
+            {
+                return Err(ToolError::Sdk {
+                    sdk_kind: "unknown_tool".to_string(),
+                    message: format!("unknown tool `{}`", selector.display_name()),
+                });
+            }
+            self.ensure_upstream_tool_runtime_ready(upstream_name, owner, oauth_subject)
+                .await?;
+            return pool
+                .healthy_tools_for_upstream(upstream_name)
+                .await
+                .into_iter()
+                .find(|candidate| candidate.tool.name.as_ref() == selector.tool_name)
+                .map(|tool| (upstream_name.to_string(), tool))
+                .ok_or_else(|| ToolError::Sdk {
+                    sdk_kind: "unknown_tool".to_string(),
+                    message: format!("unknown tool `{}`", selector.display_name()),
+                });
+        }
+
         if let Some((upstream, tool)) = pool.find_tool(&selector.tool_name).await
             && priority_by_upstream.get(&upstream).copied().unwrap_or(1.0) > 0.0
         {
@@ -4048,6 +4074,27 @@ mod tests {
             .expect("raw proxy resolution should not require tool_search");
 
         assert_eq!(upstream, "alpha");
+        assert_eq!(tool.tool.name.as_ref(), "ping");
+    }
+
+    #[tokio::test]
+    async fn resolve_raw_upstream_tool_honors_qualified_upstream_name() {
+        let (manager, pool) = tool_search_manager_with_upstreams(vec![
+            fixture_http_upstream("alpha"),
+            fixture_http_upstream("beta"),
+        ])
+        .await;
+        pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
+            .await;
+        pool.insert_entry_for_tests("beta", healthy_entry_with_tool("beta", "ping"))
+            .await;
+
+        let (upstream, tool) = manager
+            .resolve_raw_upstream_tool("beta::ping", None, None)
+            .await
+            .expect("qualified raw tool should resolve requested upstream");
+
+        assert_eq!(upstream, "beta");
         assert_eq!(tool.tool.name.as_ref(), "ping");
     }
 

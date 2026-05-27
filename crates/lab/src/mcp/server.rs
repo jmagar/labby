@@ -2365,19 +2365,51 @@ impl ServerHandler for LabMcpServer {
             self.request_subject(&context),
         );
         let raw_resolved = if let Some(manager) = &self.gateway_manager {
-            manager
-                .resolve_raw_upstream_tool(
-                    &service,
-                    Some(&raw_runtime_owner),
-                    raw_oauth_subject.as_deref(),
-                )
-                .await
-                .ok()
+            Some(
+                manager
+                    .resolve_raw_upstream_tool(
+                        &service,
+                        Some(&raw_runtime_owner),
+                        raw_oauth_subject.as_deref(),
+                    )
+                    .await,
+            )
         } else {
             None
         };
+        if let Some(Err(err)) = &raw_resolved
+            && !matches!(err.kind(), "unknown_tool" | "not_found")
+        {
+            let elapsed_ms = start.elapsed().as_millis();
+            let kind = canonical_kind(err.kind());
+            tracing::warn!(
+                surface = "mcp",
+                service,
+                action = upstream_action,
+                tool = %service,
+                elapsed_ms,
+                kind,
+                error = %err,
+                "upstream proxy resolution failed"
+            );
+            let envelope = tool_error_envelope(&service, upstream_action, err);
+            self.emit_dispatch_notification(
+                &context,
+                &service,
+                upstream_action,
+                elapsed_ms,
+                DispatchLogOutcome::Failure {
+                    level: LoggingLevel::Warning,
+                    kind,
+                },
+            )
+            .await;
+            return Ok(CallToolResult::error(vec![Content::text(
+                envelope.to_string(),
+            )]));
+        }
         if let Some(pool) = self.current_upstream_pool().await
-            && let Some((upstream_name, _tool)) = raw_resolved
+            && let Some(Ok((upstream_name, _tool))) = raw_resolved
         {
             let before = self.snapshot_catalog().await;
             tracing::info!(
