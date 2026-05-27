@@ -149,6 +149,32 @@ impl std::fmt::Debug for RegisteredService {
     }
 }
 
+impl RegisteredService {
+    /// Construct a local/bootstrap/operator service registration.
+    #[must_use]
+    pub const fn bootstrap_operator(
+        name: &'static str,
+        description: &'static str,
+        category: &'static str,
+        actions: &'static [ActionSpec],
+        dispatch: DispatchFn,
+    ) -> Self {
+        Self {
+            name,
+            description,
+            category,
+            kind: RegisteredServiceKind::BootstrapOperator,
+            status: if actions.is_empty() {
+                "stub"
+            } else {
+                "available"
+            },
+            actions,
+            dispatch,
+        }
+    }
+}
+
 /// Runtime policy classification for registered services.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegisteredServiceKind {
@@ -512,15 +538,13 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
     // resource should read `dispatch::fs::catalog::ACTIONS` directly, not via
     // this registry entry.
     #[cfg(feature = "fs")]
-    reg.register(RegisteredService {
-        name: "fs",
-        description: "Workspace filesystem browser (read-only, deny-listed)",
-        category: "bootstrap",
-        kind: RegisteredServiceKind::BootstrapOperator,
-        status: "available",
-        actions: crate::mcp::services::fs::ACTIONS,
-        dispatch: dispatch_fn!(crate::mcp::services::fs::dispatch),
-    });
+    reg.register(RegisteredService::bootstrap_operator(
+        "fs",
+        "Workspace filesystem browser (read-only, deny-listed)",
+        "bootstrap",
+        crate::mcp::services::fs::ACTIONS,
+        dispatch_fn!(crate::mcp::services::fs::dispatch),
+    ));
 
     reg
 }
@@ -877,5 +901,58 @@ mod tests {
             elapsed < Duration::from_millis(1),
             "empty-prefix action completion took {elapsed:?} for {expected} cached actions"
         );
+    }
+
+    #[cfg(feature = "fs")]
+    #[test]
+    fn default_registry_uses_mcp_filtered_fs_actions() {
+        let registry = build_default_registry();
+        let fs = registry
+            .services()
+            .iter()
+            .find(|service| service.name == "fs")
+            .expect("fs registered");
+        let names: Vec<&str> = fs.actions.iter().map(|action| action.name).collect();
+
+        assert!(names.contains(&"fs.list"));
+        assert!(!names.contains(&"fs.preview"));
+    }
+
+    #[test]
+    fn bootstrap_operator_constructor_sets_available_status_for_actions() {
+        static ACTIONS: &[ActionSpec] = &[ActionSpec {
+            name: "demo.list",
+            description: "Demo action",
+            destructive: false,
+            params: &[],
+            returns: "null",
+        }];
+
+        let service = RegisteredService::bootstrap_operator(
+            "demo",
+            "Demo service",
+            "bootstrap",
+            ACTIONS,
+            noop_dispatch,
+        );
+
+        assert_eq!(service.name, "demo");
+        assert_eq!(service.category, "bootstrap");
+        assert_eq!(service.kind, RegisteredServiceKind::BootstrapOperator);
+        assert_eq!(service.status, "available");
+        assert_eq!(service.actions[0].name, "demo.list");
+    }
+
+    #[test]
+    fn bootstrap_operator_constructor_sets_stub_status_for_empty_actions() {
+        let service = RegisteredService::bootstrap_operator(
+            "demo",
+            "Demo service",
+            "bootstrap",
+            &[],
+            noop_dispatch,
+        );
+
+        assert_eq!(service.status, "stub");
     }
 }

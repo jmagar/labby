@@ -1372,6 +1372,29 @@
           }
         }
       },
+      "GatewayGatewayCode_modeSetParams": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "max_response_bytes": {
+            "type": "integer"
+          },
+          "max_response_tokens": {
+            "type": "integer"
+          },
+          "max_tool_calls": {
+            "type": "integer"
+          },
+          "timeout_ms": {
+            "type": "integer"
+          }
+        }
+      },
       "GatewayGatewayDiscoverParams": {
         "type": "object",
         "properties": {
@@ -1781,6 +1804,23 @@
           },
           "spec": {
             "type": "string"
+          }
+        }
+      },
+      "GatewayGatewayTool_searchSetParams": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "max_tools": {
+            "type": "integer"
+          },
+          "top_k_default": {
+            "type": "integer"
           }
         }
       },
