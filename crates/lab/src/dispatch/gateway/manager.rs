@@ -384,7 +384,9 @@ impl GatewayManager {
             oauth_redirect_uri: None,
             tool_indexes: Arc::new(dashmap::DashMap::new()),
             protected_route_index: Arc::new(RwLock::new(ProtectedRouteIndex::default())),
-            preamble_cache: Arc::new(crate::dispatch::gateway::code_mode_preamble::PreambleCache::new()),
+            preamble_cache: Arc::new(
+                crate::dispatch::gateway::code_mode_preamble::PreambleCache::new(),
+            ),
         }
     }
 
@@ -562,25 +564,22 @@ impl GatewayManager {
             ProtectedRouteIndex::from_routes(&config.protected_mcp_routes);
         let code_mode_enabled = config.code_mode.enabled;
         *self.config.write().await = config;
-        // If code_mode is already enabled at startup, eagerly warm the upstream pool
-        // so that the catalog is not empty on the first lab:read call. This is
-        // fire-and-forget; seed_config must remain cheap and non-blocking.
+        // If code_mode is already enabled at startup, eagerly connect all upstreams
+        // so that the catalog is populated on the first lab:read call.
+        // This is fire-and-forget; seed_config must remain cheap and non-blocking.
         if code_mode_enabled {
             let self_clone = self.clone();
-            // Fire-and-forget best-effort pre-warm. ensure_lazy_upstream_pool is
-            // infallible (returns Arc<UpstreamPool>) — it handles its own error paths
-            // internally. This is NOT a synchronization guarantee: the first lab:read
-            // code_search may still race the spawn. lab:execute callers trigger
-            // ensure_lazy_upstream_pool synchronously on first access, which is the
-            // actual initialization guarantee.
             tokio::spawn(async move {
                 let cfg = self_clone.config.read().await.clone();
-                self_clone.ensure_lazy_upstream_pool(&cfg, None).await;
+                let pool = self_clone.ensure_lazy_upstream_pool(&cfg, None).await;
+                // Trigger per-upstream connections so healthy_tools() is non-empty.
+                self_clone.spawn_code_mode_upstream_connections(pool, &cfg, None, None);
                 tracing::info!(
                     surface = "dispatch",
                     service = "gateway",
                     action = "code_mode.warm_up",
-                    "code_mode enabled at startup — upstream pool warm-up triggered"
+                    upstream_count = cfg.upstream.iter().filter(|u| u.enabled).count(),
+                    "code_mode startup — upstream connection tasks spawned"
                 );
             });
         }
@@ -1687,11 +1686,12 @@ impl GatewayManager {
         let _mutation_guard = self.config_mutation.lock().await;
         let mut cfg = self.config.read().await.clone();
         let old_enabled = cfg.tool_search.enabled;
-        crate::config::validate_mode_exclusive(next.enabled, cfg.code_mode.enabled)
-            .map_err(|e| ToolError::InvalidParam {
+        crate::config::validate_mode_exclusive(next.enabled, cfg.code_mode.enabled).map_err(
+            |e| ToolError::InvalidParam {
                 message: e.to_string(),
                 param: "tool_search/code_mode".to_string(),
-            })?;
+            },
+        )?;
         cfg.tool_search = next.clone();
         self.persist_config(cfg).await?;
         self.reload_with_origin_unlocked(origin, owner).await?;
@@ -1720,16 +1720,18 @@ impl GatewayManager {
         let _mutation_guard = self.config_mutation.lock().await;
         let mut cfg = self.config.read().await.clone();
         let old_enabled = cfg.code_mode.enabled;
-        crate::config::validate_mode_exclusive(cfg.tool_search.enabled, next.enabled)
-            .map_err(|e| ToolError::InvalidParam {
+        crate::config::validate_mode_exclusive(cfg.tool_search.enabled, next.enabled).map_err(
+            |e| ToolError::InvalidParam {
                 message: e.to_string(),
                 param: "tool_search/code_mode".to_string(),
-            })?;
+            },
+        )?;
         // Capture whether we are transitioning from disabled → enabled before updating.
         let was_disabled = !cfg.code_mode.enabled;
         cfg.code_mode = next.clone();
         self.persist_config(cfg).await?;
-        self.reload_with_origin_unlocked(origin, owner.clone()).await?;
+        self.reload_with_origin_unlocked(origin, owner.clone())
+            .await?;
         // When code_mode transitions false → true, eagerly warm the upstream pool so
         // that the catalog is not empty on the first lab:read call.
         if was_disabled && next.enabled {
@@ -2430,13 +2432,71 @@ impl GatewayManager {
         oauth_subject: Option<&str>,
     ) -> Result<Vec<UpstreamTool>, ToolError> {
         if allow_cold_connect {
-            self.ensure_search_runtime_ready(true, owner, oauth_subject)
-                .await?;
+            let cfg = self.config.read().await.clone();
+            if cfg.code_mode.enabled && !cfg.tool_search.enabled {
+                // Exclusive code mode: `ensure_search_runtime_ready` gates on
+                // `tool_search.enabled` and is a no-op here.  Create the pool,
+                // then fire background connection tasks for all enabled upstreams
+                // so the catalog populates on the first or second call.
+                let pool = self.ensure_lazy_upstream_pool(&cfg, owner).await;
+                self.spawn_code_mode_upstream_connections(pool, &cfg, owner, oauth_subject);
+            } else {
+                self.ensure_search_runtime_ready(true, owner, oauth_subject)
+                    .await?;
+            }
         }
         let Some(pool) = self.current_pool().await else {
             return Ok(Vec::new());
         };
         Ok(pool.healthy_tools().await)
+    }
+
+    /// Fire-and-forget: spawn per-upstream connection tasks for exclusive code mode.
+    ///
+    /// Unlike `refresh_tool_search_indexes_if_stale` this does NOT build vector
+    /// search indexes.  It only ensures each enabled upstream has its tool list
+    /// in the pool so `healthy_tools()` is non-empty.
+    fn spawn_code_mode_upstream_connections(
+        &self,
+        pool: std::sync::Arc<crate::dispatch::upstream::pool::UpstreamPool>,
+        cfg: &LabConfig,
+        owner: Option<&UpstreamRuntimeOwner>,
+        oauth_subject: Option<&str>,
+    ) {
+        let owner = owner.cloned();
+        let oauth_subject = oauth_subject.map(ToOwned::to_owned);
+        for upstream in cfg.upstream.iter().filter(|u| u.enabled) {
+            let pool = std::sync::Arc::clone(&pool);
+            let upstream = upstream.clone();
+            let owner = owner.clone();
+            let oauth_subject = oauth_subject.clone();
+            tokio::spawn(async move {
+                // `ensure_tools_for_upstream` skips the upstream internally
+                // when it already has healthy tools.
+                let subject = upstream.oauth.as_ref().and(oauth_subject.as_deref());
+                if let Err(err) = pool
+                    .ensure_tools_for_upstream(&upstream, subject, owner.as_ref())
+                    .await
+                {
+                    tracing::debug!(
+                        surface = "dispatch",
+                        service = "gateway",
+                        action = "code_mode.warm_upstream",
+                        upstream = %upstream.name,
+                        error = %err,
+                        "code_mode upstream connection failed (non-fatal)"
+                    );
+                } else {
+                    tracing::debug!(
+                        surface = "dispatch",
+                        service = "gateway",
+                        action = "code_mode.warm_upstream",
+                        upstream = %upstream.name,
+                        "code_mode upstream connected"
+                    );
+                }
+            });
+        }
     }
 
     /// Access the shared preamble cache for TypeScript declaration generation.
@@ -2453,7 +2513,9 @@ impl GatewayManager {
     /// On a cold pool with no loaded indexes this returns an empty vec, which
     /// produces aggregate hash 0 and a guaranteed cache miss — callers fall
     /// through to the normal catalog-fetch path.
-    pub fn per_upstream_catalog_hashes(&self) -> Vec<crate::dispatch::gateway::code_mode_preamble::UpstreamCatalogHash> {
+    pub fn per_upstream_catalog_hashes(
+        &self,
+    ) -> Vec<crate::dispatch::gateway::code_mode_preamble::UpstreamCatalogHash> {
         self.tool_indexes
             .iter()
             .filter_map(|entry| {
@@ -2560,12 +2622,11 @@ impl GatewayManager {
         oauth_subject: Option<&str>,
     ) -> Result<UpstreamTool, ToolError> {
         let cfg = self.config.read().await;
-        if !cfg.tool_search.enabled {
+        if !cfg.code_mode.enabled {
             return Err(ToolError::Sdk {
                 sdk_kind: "unknown_tool".to_string(),
-                message:
-                    "tool search is not enabled; code mode upstream tools require tool_search mode"
-                        .to_string(),
+                message: "code_mode is not enabled; set [code_mode] enabled = true in config"
+                    .to_string(),
             });
         }
         let priority = cfg
@@ -4158,7 +4219,25 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_code_mode_upstream_tool_resolves_requested_upstream() {
-        let (manager, pool) = tool_search_manager_with_pool(fixture_http_upstream("alpha")).await;
+        use crate::config::CodeModeConfig;
+        // resolve_code_mode_upstream_tool requires code_mode.enabled = true —
+        // it is only reachable when code mode is active.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        let runtime = GatewayRuntimeHandle::default();
+        let pool = Arc::new(UpstreamPool::new());
+        runtime.swap(Some(Arc::clone(&pool))).await;
+        let manager = GatewayManager::new(path, runtime);
+        manager
+            .seed_config(LabConfig {
+                code_mode: CodeModeConfig {
+                    enabled: true,
+                    ..CodeModeConfig::default()
+                },
+                upstream: vec![fixture_http_upstream("alpha")],
+                ..LabConfig::default()
+            })
+            .await;
         pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
             .await;
 
