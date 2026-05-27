@@ -94,7 +94,6 @@ Fuel budget:
 Lab actions (`lab::*` tool IDs) are not available in Code Mode. For Lab built-in \
 actions use the `execute` tool in Tool Search mode.";
 
-
 #[cfg(test)]
 use crate::mcp::peers::PeerNotifier;
 
@@ -1360,7 +1359,10 @@ impl ServerHandler for LabMcpServer {
             let input_tokens = estimate_tokens_args(&args);
             let subject = self.request_subject_log_tag(&context);
             let auth = auth_context_from_extensions(&context.extensions);
-            let code_action = args.get("action").and_then(Value::as_str).unwrap_or("execute");
+            let code_action = args
+                .get("action")
+                .and_then(Value::as_str)
+                .unwrap_or("execute");
             let Some(manager) = &self.gateway_manager else {
                 let envelope = build_error(
                     &service,
@@ -1368,7 +1370,9 @@ impl ServerHandler for LabMcpServer {
                     "code_mode_disabled",
                     "Code Mode is not enabled (gateway_manager missing)",
                 );
-                return Ok(CallToolResult::error(vec![Content::text(envelope.to_string())]));
+                return Ok(CallToolResult::error(vec![Content::text(
+                    envelope.to_string(),
+                )]));
             };
             match code_action {
                 "search" => {
@@ -4137,10 +4141,7 @@ mod tests {
         let snapshot = server.snapshot_catalog().await;
 
         // Code Mode: exactly `code`. NO search, execute, code_search, or code_execute.
-        assert_eq!(
-            snapshot.tools,
-            ["code".to_string()].into_iter().collect()
-        );
+        assert_eq!(snapshot.tools, ["code".to_string()].into_iter().collect());
         assert!(
             !snapshot.tools.contains("search"),
             "search must not appear in Code Mode"
@@ -4157,6 +4158,50 @@ mod tests {
             !snapshot.tools.contains("code_execute"),
             "code_execute must not appear in Code Mode"
         );
+    }
+
+    #[tokio::test]
+    async fn snapshot_catalog_shows_no_gateway_tools_when_neither_mode_is_enabled() {
+        // When both tool_search.enabled=false and code_mode.enabled=false,
+        // none of the five gateway meta-tools (search, execute, code, code_search,
+        // code_execute) should appear in the snapshot.
+        let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
+        let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+            std::path::PathBuf::from("config.toml"),
+            runtime,
+        ));
+        manager
+            .seed_config(crate::config::LabConfig {
+                tool_search: crate::config::ToolSearchConfig {
+                    enabled: false,
+                    ..crate::config::ToolSearchConfig::default()
+                },
+                code_mode: crate::config::CodeModeConfig {
+                    enabled: false,
+                    ..crate::config::CodeModeConfig::default()
+                },
+                ..crate::config::LabConfig::default()
+            })
+            .await;
+        let server = super::LabMcpServer {
+            registry: std::sync::Arc::new(completion_test_registry()),
+            gateway_manager: Some(manager),
+            node_role: None,
+            peers: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            logging_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+                logging_level_rank(rmcp::model::LoggingLevel::Info),
+            )),
+        };
+
+        let snapshot = server.snapshot_catalog().await;
+
+        // Raw mode — none of the five gateway meta-tools should appear.
+        for meta_tool in ["search", "execute", "code", "code_search", "code_execute"] {
+            assert!(
+                !snapshot.tools.contains(meta_tool),
+                "gateway meta-tool '{meta_tool}' must not appear when neither mode is enabled"
+            );
+        }
     }
 
     #[test]

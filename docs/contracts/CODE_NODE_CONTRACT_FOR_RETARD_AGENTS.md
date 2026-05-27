@@ -31,10 +31,10 @@ value.
 
 ## Typed Catalog — What Is Injected Into Your Sandbox
 
-The typed preamble is delivered via the `code_search({action: 'preamble'})` response —
-not via the `code_execute` tool description. The tool description stays static and short.
-The preamble content is fetched via `code_search` and injected into the sandbox at
-execution time before your code runs.
+The typed preamble is injected by the server into the sandbox before your code runs —
+not fetched by you via a discovery call. The `code` tool description stays static and
+short. The preamble content is built server-side from the live upstream catalog and
+prepended to your code at execution time.
 
 At execution time, before your code runs, the sandbox receives a preamble of TypeScript
 declarations for every upstream tool currently connected to this gateway. It looks like
