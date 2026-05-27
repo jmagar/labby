@@ -619,21 +619,27 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
     // service as enabled at startup just because a `[workspace].root` is
     // configured.
     #[cfg(feature = "fs")]
-    match crate::dispatch::fs::resolve_workspace_root(config) {
-        Ok(root) => {
+    {
+        let workspace_runtime = crate::workspace::WorkspaceRuntimeBuilder::new(
+            crate::workspace::WorkspaceRuntimeConfig {
+                root: config.workspace.root.clone(),
+                home: workspace_runtime_home(),
+            },
+        )
+        .build();
+        if let Some(root) = workspace_runtime.workspace_root() {
             tracing::info!(
                 subsystem = "startup",
                 phase = "fs.workspace_root",
                 path = %root.display(),
                 "workspace filesystem browser enabled"
             );
-            state = state.with_workspace_root(root);
-        }
-        Err(e) => {
+            state = state.with_workspace_root(root.to_path_buf());
+        } else {
             tracing::warn!(
                 subsystem = "startup",
                 phase = "fs.workspace_root",
-                error = %e,
+                error = workspace_runtime.workspace_root_error(),
                 "workspace.root invalid; fs service disabled"
             );
         }
@@ -694,6 +700,24 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         matches!(transport, Transport::Http),
     )
     .await
+}
+
+#[cfg(feature = "fs")]
+fn workspace_runtime_home() -> Option<PathBuf> {
+    workspace_runtime_home_from_env_values(
+        std::env::var_os("HOME"),
+        std::env::var_os("USERPROFILE"),
+    )
+}
+
+#[cfg(feature = "fs")]
+fn workspace_runtime_home_from_env_values(
+    home: Option<std::ffi::OsString>,
+    userprofile: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    home.filter(|value| !value.is_empty())
+        .or_else(|| userprofile.filter(|value| !value.is_empty()))
+        .map(PathBuf::from)
 }
 
 struct UpstreamOauthRuntime {
@@ -1544,6 +1568,9 @@ fn find_listening_inode(path: &str, hex_port: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
@@ -1553,6 +1580,7 @@ mod tests {
         build_http_router, filter_registry, is_loopback_host, resolve_lab_spawn_depth,
         resolve_port, resolve_session_ttl_secs, resolve_stateful_mode, resolve_transport,
         resolve_web_ui_auth_disabled, should_run_stdio, stdio_recursion_guard_active,
+        workspace_runtime_home_from_env_values,
     };
     use crate::api::AppState;
     use crate::cli::Cli;
@@ -1649,6 +1677,28 @@ mod tests {
         assert!(resolve_web_ui_auth_disabled(&WebPreferences::default(), true, false).unwrap());
         assert!(!resolve_web_ui_auth_disabled(&WebPreferences::default(), true, true).unwrap());
         assert!(!resolve_web_ui_auth_disabled(&WebPreferences::default(), false, false).unwrap());
+    }
+
+    #[cfg(feature = "fs")]
+    #[test]
+    fn workspace_runtime_home_uses_userprofile_when_home_is_absent() {
+        let resolved = workspace_runtime_home_from_env_values(
+            None,
+            Some(OsString::from("/tmp/lab-userprofile")),
+        );
+
+        assert_eq!(resolved, Some(PathBuf::from("/tmp/lab-userprofile")));
+    }
+
+    #[cfg(feature = "fs")]
+    #[test]
+    fn workspace_runtime_home_uses_userprofile_when_home_is_empty() {
+        let resolved = workspace_runtime_home_from_env_values(
+            Some(OsString::from("")),
+            Some(OsString::from("/tmp/lab-userprofile")),
+        );
+
+        assert_eq!(resolved, Some(PathBuf::from("/tmp/lab-userprofile")));
     }
 
     #[test]

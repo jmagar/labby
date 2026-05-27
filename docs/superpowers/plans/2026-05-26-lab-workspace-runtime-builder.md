@@ -4,7 +4,7 @@
 
 **Goal:** Introduce the first product-style runtime builder for the workspace filesystem service (`fs`) while preserving current `labby` behavior.
 
-**Architecture:** Add an in-repo `workspace` product module that composes the existing `dispatch::fs`, `mcp::services::fs`, and `api::services::fs` adapters through a narrow runtime API. The runtime builder resolves workspace-root state from explicit `LabConfig`, exposes the MCP registry fragment, and centralizes HTTP route mount policy without moving code into a separate crate yet.
+**Architecture:** Add an in-repo `workspace` product module that introduces a narrow, surface-neutral runtime API for the filesystem product. The runtime builder resolves workspace-root state from explicit runtime config, preserves startup errors for logging, and centralizes the HTTP route mount policy as a boolean decision. CLI, MCP registry, and HTTP router code continue to own their protocol adapters.
 
 **Tech Stack:** Rust 2024, Axum, Tokio, existing `ToolRegistry`/`RegisteredService`, existing `dispatch::fs` and `api::services::fs` modules.
 
@@ -17,29 +17,29 @@
   - Re-exports `WorkspaceRuntime` and `WorkspaceRuntimeBuilder` when `fs` is enabled.
 
 - Create `crates/lab/src/workspace/runtime.rs`
-  - Owns `WorkspaceRuntime`, `WorkspaceRuntimeBuilder`, the `fs` registry fragment, and HTTP route mount policy.
-  - Uses explicit `LabConfig` input for workspace-root resolution.
-  - Does not implement file browsing logic; it delegates to the existing `dispatch::fs` and `api::services::fs` adapters.
+  - Owns `WorkspaceRuntime`, `WorkspaceRuntimeBuilder`, `WorkspaceRuntimeConfig`, workspace-root resolution, and HTTP route mount policy.
+  - Uses explicit `WorkspaceRuntimeConfig` input (`root`, `home`) for workspace-root resolution.
+  - Does not implement file browsing logic and does not import MCP/API adapters.
 
 - Modify `crates/lab/src/lib.rs`
   - Add `pub mod workspace;`.
 
 - Modify `crates/lab/src/registry.rs`
   - Add a small constructor for bootstrap `RegisteredService` values.
-  - Replace the inline `fs` registration block with `crate::workspace::WorkspaceRuntime::registered_service()`.
+  - Keep `fs` registration in the registry using the MCP-filtered action list.
 
 - Modify `crates/lab/src/cli/serve.rs`
   - Use `WorkspaceRuntimeBuilder` to resolve and attach `workspace_root` to `AppState`.
   - Preserve existing startup log messages.
 
 - Modify `crates/lab/src/api/router.rs`
-  - Use `WorkspaceRuntime::http_routes(...)` for `/v1/fs` mount policy.
+  - Use `WorkspaceRuntime::should_mount_http_routes(...)` for `/v1/fs` mount policy.
   - Preserve the current security rule: do not mount `/v1/fs` when `LAB_WEB_UI_AUTH_DISABLED=true` and no API auth is configured.
 
 - Test in `crates/lab/src/workspace/runtime.rs`
   - Builder resolves a configured absolute workspace root.
+  - Builder expands `~` against explicit home.
   - Builder returns `None` for invalid workspace root.
-  - Registry fragment exposes the MCP-filtered action list, not `fs.preview`.
   - HTTP route policy refuses unauthenticated disabled-auth mode.
 
 ---
@@ -72,7 +72,7 @@ mod workspace_runtime_constructor_tests {
     }
 
     #[test]
-    fn bootstrap_constructor_sets_available_status_for_actions() {
+    fn bootstrap_operator_constructor_sets_available_status_for_actions() {
         static ACTIONS: &[ActionSpec] = &[ActionSpec {
             name: "demo.list",
             description: "Demo action",
@@ -81,7 +81,7 @@ mod workspace_runtime_constructor_tests {
             returns: "null",
         }];
 
-        let service = RegisteredService::bootstrap(
+        let service = RegisteredService::bootstrap_operator(
             "demo",
             "Demo service",
             "bootstrap",
@@ -97,8 +97,8 @@ mod workspace_runtime_constructor_tests {
     }
 
     #[test]
-    fn bootstrap_constructor_sets_stub_status_for_empty_actions() {
-        let service = RegisteredService::bootstrap(
+    fn bootstrap_operator_constructor_sets_stub_status_for_empty_actions() {
+        let service = RegisteredService::bootstrap_operator(
             "demo",
             "Demo service",
             "bootstrap",
@@ -116,10 +116,10 @@ mod workspace_runtime_constructor_tests {
 Run:
 
 ```bash
-cargo test -p lab bootstrap_constructor_sets_available_status_for_actions --all-features
+cargo test -p labby bootstrap_operator_constructor_sets_available_status_for_actions --all-features
 ```
 
-Expected: compile failure because `RegisteredService::bootstrap` does not exist.
+Expected: compile failure because `RegisteredService::bootstrap_operator` does not exist.
 
 - [ ] **Step 3: Implement the constructor**
 
@@ -129,10 +129,8 @@ Add this `impl` block after the `impl std::fmt::Debug for RegisteredService` blo
 impl RegisteredService {
     /// Construct a local/bootstrap/operator service registration.
     ///
-    /// Product runtime builders use this when returning registry fragments so
-    /// the global registry does not have to duplicate service metadata shape.
     #[must_use]
-    pub const fn bootstrap(
+    pub const fn bootstrap_operator(
         name: &'static str,
         description: &'static str,
         category: &'static str,
@@ -157,7 +155,7 @@ impl RegisteredService {
 Run:
 
 ```bash
-cargo test -p lab bootstrap_constructor --all-features
+cargo test -p labby bootstrap_operator_constructor --all-features
 ```
 
 Expected: both constructor tests pass.
@@ -193,82 +191,68 @@ Create `crates/lab/src/workspace.rs`:
 mod runtime;
 
 #[cfg(feature = "fs")]
-pub use runtime::{WorkspaceRuntime, WorkspaceRuntimeBuilder};
+pub use runtime::{WorkspaceRuntime, WorkspaceRuntimeBuilder, WorkspaceRuntimeConfig};
 ```
 
-Create `crates/lab/src/workspace/runtime.rs` with the tests first:
+Create `crates/lab/src/workspace/runtime.rs` with a surface-neutral runtime and tests first:
 
 ```rust
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
-
-use axum::Router;
-use serde_json::Value;
-
-use crate::api::state::AppState;
-use crate::config::LabConfig;
-use crate::dispatch::error::ToolError;
-use crate::registry::{DispatchFn, RegisteredService};
-
-fn workspace_dispatch(
-    action: String,
-    params: Value,
-) -> Pin<Box<dyn Future<Output = Result<Value, ToolError>> + Send>> {
-    Box::pin(async move { crate::mcp::services::fs::dispatch(&action, params).await })
-}
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceRuntime {
-    workspace_root: Option<PathBuf>,
+    workspace_root: Result<PathBuf, String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WorkspaceRuntimeConfig {
+    pub root: Option<PathBuf>,
+    pub home: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceRuntimeBuilder {
-    config: LabConfig,
+    config: WorkspaceRuntimeConfig,
 }
 
 impl WorkspaceRuntimeBuilder {
     #[must_use]
-    pub fn new(config: LabConfig) -> Self {
+    pub fn new(config: WorkspaceRuntimeConfig) -> Self {
         Self { config }
     }
 
     #[must_use]
     pub fn build(self) -> WorkspaceRuntime {
-        let workspace_root = crate::dispatch::fs::resolve_workspace_root(&self.config).ok();
-        WorkspaceRuntime { workspace_root }
+        WorkspaceRuntime {
+            workspace_root: resolve_workspace_root(&self.config).map_err(|error| error.to_string()),
+        }
     }
 }
 
 impl WorkspaceRuntime {
     #[must_use]
     pub fn workspace_root(&self) -> Option<&Path> {
-        self.workspace_root.as_deref()
+        self.workspace_root.as_deref().ok()
     }
 
     #[must_use]
-    pub fn registered_service() -> RegisteredService {
-        RegisteredService::bootstrap(
-            "fs",
-            "Workspace filesystem browser (read-only, deny-listed)",
-            "bootstrap",
-            crate::mcp::services::fs::ACTIONS,
-            workspace_dispatch as DispatchFn,
-        )
+    pub fn workspace_root_error(&self) -> Option<&str> {
+        self.workspace_root.as_ref().err().map(String::as_str)
     }
 
     #[must_use]
-    pub fn http_routes(
-        state: AppState,
+    pub const fn should_mount_http_routes(
+        web_ui_auth_disabled: bool,
         api_auth_configured: bool,
-    ) -> Option<Router<AppState>> {
-        if state.web_ui_auth_disabled && !api_auth_configured {
-            return None;
-        }
-
-        Some(crate::api::services::fs::routes(state))
+    ) -> bool {
+        !web_ui_auth_disabled || api_auth_configured
     }
+}
+
+fn resolve_workspace_root(config: &WorkspaceRuntimeConfig) -> std::io::Result<PathBuf> {
+    // Resolve `root` or default `home/.lab/stash`, expand `~`, create the
+    // directory, canonicalize it, and reject non-directories/relative paths.
+    canonicalize_workspace_dir(expand_configured_root(config)?)
 }
 
 #[cfg(test)]
@@ -278,8 +262,10 @@ mod tests {
     #[test]
     fn builder_resolves_configured_workspace_root() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let mut config = LabConfig::default();
-        config.workspace.root = Some(temp.path().to_path_buf());
+        let config = WorkspaceRuntimeConfig {
+            root: Some(temp.path().to_path_buf()),
+            home: Some(temp.path().to_path_buf()),
+        };
 
         let runtime = WorkspaceRuntimeBuilder::new(config).build();
 
@@ -294,36 +280,41 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let file = temp.path().join("not-a-dir");
         std::fs::write(&file, b"not a directory").expect("write");
-        let mut config = LabConfig::default();
-        config.workspace.root = Some(file);
+        let config = WorkspaceRuntimeConfig {
+            root: Some(file),
+            home: Some(temp.path().to_path_buf()),
+        };
 
         let runtime = WorkspaceRuntimeBuilder::new(config).build();
 
         assert!(runtime.workspace_root().is_none());
+        assert!(runtime.workspace_root_error().is_some());
     }
 
     #[test]
-    fn registered_service_uses_mcp_filtered_actions() {
-        let service = WorkspaceRuntime::registered_service();
-        let names: Vec<&str> = service.actions.iter().map(|action| action.name).collect();
+    fn builder_expands_tilde_workspace_root() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = WorkspaceRuntimeConfig {
+            root: Some(PathBuf::from("~/stash")),
+            home: Some(temp.path().to_path_buf()),
+        };
 
-        assert_eq!(service.name, "fs");
-        assert!(names.contains(&"fs.list"));
-        assert!(!names.contains(&"fs.preview"));
+        let runtime = WorkspaceRuntimeBuilder::new(config).build();
+
+        assert_eq!(
+            runtime.workspace_root().expect("workspace root"),
+            std::fs::canonicalize(temp.path().join("stash")).expect("canonical")
+        );
     }
 
     #[test]
-    fn http_routes_refuse_disabled_auth_without_api_auth() {
-        let state = AppState::new().with_web_ui_auth_disabled(true);
-
-        assert!(WorkspaceRuntime::http_routes(state, false).is_none());
+    fn mount_policy_refuses_disabled_auth_without_api_auth() {
+        assert!(!WorkspaceRuntime::should_mount_http_routes(true, false));
     }
 
     #[test]
-    fn http_routes_mount_when_api_auth_is_configured() {
-        let state = AppState::new().with_web_ui_auth_disabled(true);
-
-        assert!(WorkspaceRuntime::http_routes(state, true).is_some());
+    fn mount_policy_allows_disabled_auth_when_api_auth_is_configured() {
+        assert!(WorkspaceRuntime::should_mount_http_routes(true, true));
     }
 }
 ```
@@ -340,28 +331,25 @@ pub mod workspace;
 Run:
 
 ```bash
-cargo test -p lab workspace::runtime::tests --all-features
+cargo test -p labby workspace::runtime::tests --all-features
 ```
 
-Expected: tests compile or fail only on exact `LabConfig.workspace.root` field access. If the field name differs, inspect `crates/lab/src/config.rs` and update the test assignment to the actual workspace-root field.
+Expected: tests compile or fail only on exact helper implementation details.
 
-- [ ] **Step 3: Confirm the workspace-root field**
+- [ ] **Step 3: Confirm workspace-root compatibility**
 
-The current `LabConfig` shape is `config.workspace.root`, where `workspace` is `WorkspacePreferences` and `root` is `Option<PathBuf>`. Keep both test assignments as:
+The serve adapter passes `config.workspace.root` and `HOME` into `WorkspaceRuntimeConfig`. Preserve the previous config behavior:
 
-```rust
-let mut config = LabConfig::default();
-config.workspace.root = Some(temp.path().to_path_buf());
-```
-
-Do not change `dispatch::fs::resolve_workspace_root`; the builder must use the existing resolver.
+- `None` defaults to `$HOME/.lab/stash`.
+- `~` and `~/...` expand against `$HOME`.
+- relative configured roots are rejected after expansion.
 
 - [ ] **Step 4: Run the focused tests and verify they pass**
 
 Run:
 
 ```bash
-cargo test -p lab workspace::runtime::tests --all-features
+cargo test -p labby workspace::runtime::tests --all-features
 ```
 
 Expected: all workspace runtime tests pass.
@@ -375,12 +363,12 @@ git commit -m "feat: add workspace runtime builder"
 
 ---
 
-### Task 3: Wire Workspace Runtime Into The Registry
+### Task 3: Preserve The Fs Registry Fragment
 
 **Files:**
 - Modify: `crates/lab/src/registry.rs`
 
-- [ ] **Step 1: Add a failing registry test**
+- [ ] **Step 1: Add a characterization registry test**
 
 Add this test in `crates/lab/src/registry.rs` under an existing `#[cfg(test)]` test module, or create a new `#[cfg(test)] mod workspace_runtime_registry_tests` at the end of the file:
 
@@ -388,7 +376,7 @@ Add this test in `crates/lab/src/registry.rs` under an existing `#[cfg(test)]` t
 #[cfg(all(test, feature = "fs"))]
 mod workspace_runtime_registry_tests {
     #[test]
-    fn default_registry_uses_workspace_runtime_fs_fragment() {
+    fn default_registry_uses_mcp_filtered_fs_actions() {
         let registry = crate::registry::build_default_registry();
         let fs = registry
             .services()
@@ -408,12 +396,12 @@ mod workspace_runtime_registry_tests {
 Run:
 
 ```bash
-cargo test -p lab default_registry_uses_workspace_runtime_fs_fragment --all-features
+cargo test -p labby default_registry_uses_mcp_filtered_fs_actions --all-features
 ```
 
-Expected: pass before the code change is possible, because current behavior already filters `fs.preview`. Keep this test anyway; it locks the invariant before replacing the inline registration.
+Expected: pass before the code change is possible, because current behavior already filters `fs.preview`. Keep this test anyway; it locks the invariant while other runtime wiring moves.
 
-- [ ] **Step 3: Replace inline `fs` registration**
+- [ ] **Step 3: Replace inline `fs` registration with the constructor**
 
 In `crates/lab/src/registry.rs`, replace this block:
 
@@ -434,17 +422,23 @@ with:
 
 ```rust
 #[cfg(feature = "fs")]
-reg.register(crate::workspace::WorkspaceRuntime::registered_service());
+reg.register(RegisteredService::bootstrap_operator(
+    "fs",
+    "Workspace filesystem browser (read-only, deny-listed)",
+    "bootstrap",
+    crate::mcp::services::fs::ACTIONS,
+    dispatch_fn!(crate::mcp::services::fs::dispatch),
+));
 ```
 
-Leave the existing security comment above the registration in place. It explains why the runtime fragment uses the MCP-filtered action set.
+Leave the existing security comment above the registration in place. It explains why the registry uses the MCP-filtered action set.
 
 - [ ] **Step 4: Run the focused registry test**
 
 Run:
 
 ```bash
-cargo test -p lab default_registry_uses_workspace_runtime_fs_fragment --all-features
+cargo test -p labby default_registry_uses_mcp_filtered_fs_actions --all-features
 ```
 
 Expected: pass.
@@ -454,7 +448,7 @@ Expected: pass.
 Run:
 
 ```bash
-cargo test -p lab registry --all-features
+cargo test -p labby registry --all-features
 ```
 
 Expected: pass.
@@ -463,7 +457,7 @@ Expected: pass.
 
 ```bash
 git add crates/lab/src/registry.rs
-git commit -m "refactor: register fs through workspace runtime"
+git commit -m "refactor: register fs through bootstrap constructor"
 ```
 
 ---
@@ -488,7 +482,13 @@ mod workspace_runtime_startup_tests {
         let mut config = LabConfig::default();
         config.workspace.root = Some(temp.path().to_path_buf());
 
-        let runtime = crate::workspace::WorkspaceRuntimeBuilder::new(config).build();
+        let runtime = crate::workspace::WorkspaceRuntimeBuilder::new(
+            crate::workspace::WorkspaceRuntimeConfig {
+                root: config.workspace.root.clone(),
+                home: Some(temp.path().to_path_buf()),
+            },
+        )
+        .build();
 
         assert!(runtime.workspace_root().is_some());
     }
@@ -529,7 +529,13 @@ Replace the block with:
 ```rust
 #[cfg(feature = "fs")]
 {
-    let workspace_runtime = crate::workspace::WorkspaceRuntimeBuilder::new(config.clone()).build();
+    let workspace_runtime = crate::workspace::WorkspaceRuntimeBuilder::new(
+        crate::workspace::WorkspaceRuntimeConfig {
+            root: config.workspace.root.clone(),
+            home: std::env::var_os("HOME").map(PathBuf::from),
+        },
+    )
+    .build();
     if let Some(root) = workspace_runtime.workspace_root() {
         tracing::info!(
             subsystem = "startup",
@@ -542,20 +548,21 @@ Replace the block with:
         tracing::warn!(
             subsystem = "startup",
             phase = "fs.workspace_root",
+            error = workspace_runtime.workspace_root_error(),
             "workspace.root invalid; fs service disabled"
         );
     }
 }
 ```
 
-This intentionally drops the raw error value from the warning because the builder stores only the successful runtime state. If retaining the exact error string is required, extend `WorkspaceRuntime` with `workspace_root_error: Option<String>` in Task 2 and log it here.
+This preserves the raw startup error through `workspace_root_error()` while keeping the runtime builder independent from `LabConfig`.
 
 - [ ] **Step 4: Run a compile check**
 
 Run:
 
 ```bash
-cargo check -p lab --all-features
+cargo check -p labby --all-features
 ```
 
 Expected: pass.
@@ -579,13 +586,13 @@ git commit -m "refactor: resolve workspace root through runtime builder"
 Run the existing router tests that cover disabled-auth behavior:
 
 ```bash
-cargo test -p lab setup_actions_require_auth_when_web_auth_disabled_without_bearer --all-features
+cargo test -p labby setup_actions_require_auth_when_web_auth_disabled_without_bearer --all-features
 ```
 
 Expected: pass. If the exact test name has changed, run:
 
 ```bash
-cargo test -p lab web_auth_disabled --all-features
+cargo test -p labby web_auth_disabled --all-features
 ```
 
 Expected: pass.
@@ -596,36 +603,31 @@ In `crates/lab/src/api/router.rs`, replace the body of the existing `#[cfg(featu
 
 ```rust
 #[cfg(feature = "fs")]
-if state
-    .registry
-    .services()
-    .iter()
-    .any(|service| service.name == "fs")
-{
-    match crate::workspace::WorkspaceRuntime::http_routes(state.clone(), api_auth_configured) {
-        Some(routes) => {
-            v1 = v1.nest("/fs", routes);
-        }
-        None => {
-            tracing::warn!(
-                subsystem = "startup",
-                phase = "fs.mount.skipped",
-                reason = "web_ui_auth_disabled",
-                "fs service is configured but LAB_WEB_UI_AUTH_DISABLED=true would expose workspace files unauthenticated; refusing to mount /v1/fs"
-            );
-        }
+if state.registry.services().iter().any(|service| service.name == "fs") {
+    if crate::workspace::WorkspaceRuntime::should_mount_http_routes(
+        state.web_ui_auth_disabled,
+        api_auth_configured,
+    ) {
+        v1 = v1.nest("/fs", services::fs::routes(state.clone()));
+    } else {
+        tracing::warn!(
+            subsystem = "startup",
+            phase = "fs.mount.skipped",
+            reason = "web_ui_auth_disabled",
+            "fs service is configured but LAB_WEB_UI_AUTH_DISABLED=true would expose workspace files unauthenticated; refusing to mount /v1/fs"
+        );
     }
 }
 ```
 
-Keep the surrounding security comment. The runtime now owns the boolean decision; the router still owns the `/v1/fs` path.
+Keep the surrounding security comment. The runtime owns the boolean decision; the router still owns the `/v1/fs` path and route adapter.
 
 - [ ] **Step 3: Run the fs API tests**
 
 Run:
 
 ```bash
-cargo test -p lab --test api_fs_headers --all-features
+cargo test -p labby --test api_fs_headers --all-features
 ```
 
 Expected: pass.
@@ -635,7 +637,7 @@ Expected: pass.
 Run:
 
 ```bash
-cargo test -p lab router --all-features
+cargo test -p labby router --all-features
 ```
 
 Expected: pass.
@@ -659,7 +661,7 @@ git commit -m "refactor: mount fs routes through workspace runtime"
 Run:
 
 ```bash
-cargo test -p lab workspace --all-features
+cargo test -p labby workspace --all-features
 ```
 
 Expected: pass.
@@ -669,8 +671,8 @@ Expected: pass.
 Run:
 
 ```bash
-cargo test -p lab fs --all-features
-cargo test -p lab --test api_fs_headers --all-features
+cargo test -p labby fs --all-features
+cargo test -p labby --test api_fs_headers --all-features
 ```
 
 Expected: pass.
@@ -680,8 +682,8 @@ Expected: pass.
 Run:
 
 ```bash
-cargo test -p lab registry --all-features
-cargo test -p lab docs --all-features
+cargo test -p labby registry --all-features
+cargo test -p labby docs --all-features
 ```
 
 Expected: pass.
@@ -722,10 +724,11 @@ If no fixes were required, do not create an empty commit.
 ## Acceptance Criteria
 
 - `crates/lab/src/workspace/runtime.rs` exists and exposes `WorkspaceRuntimeBuilder`.
-- `WorkspaceRuntimeBuilder::new(config).build()` resolves the workspace root from explicit `LabConfig`.
-- `registry.rs` registers `fs` through `WorkspaceRuntime::registered_service()`.
+- `WorkspaceRuntimeBuilder::new(config).build()` resolves the workspace root from explicit `WorkspaceRuntimeConfig`.
+- `WorkspaceRuntimeConfig` preserves `$HOME/.lab/stash` defaulting and `~` expansion behavior.
+- `registry.rs` registers `fs` through `RegisteredService::bootstrap_operator(...)` with the MCP-filtered action slice.
 - `cli/serve.rs` attaches `AppState.workspace_root` through the workspace runtime builder.
-- `api/router.rs` delegates `/v1/fs` mount policy to `WorkspaceRuntime::http_routes(...)`.
+- `api/router.rs` delegates `/v1/fs` mount policy to `WorkspaceRuntime::should_mount_http_routes(...)`.
 - MCP still exposes `fs.list` and does not expose `fs.preview`.
 - HTTP still exposes `/v1/fs/list` and `/v1/fs/preview` when auth policy allows mounting.
 - `/v1/fs` still refuses to mount when web UI auth is disabled and no API auth is configured.
@@ -734,7 +737,7 @@ If no fixes were required, do not create an empty commit.
 ## Self-Review
 
 - Spec coverage: This plan implements the first product runtime-builder proof from `docs/crate-extract/spec.md` without creating a standalone crate or changing the REST/MCP contract.
-- Boundary check: `workspace` composes adapters but does not move file-browser business logic. The current `dispatch::fs` remains the domain/action layer.
+- Boundary check: `workspace` is surface-neutral and does not import MCP/API adapters. The current `dispatch::fs` remains the domain/action layer.
 - Placeholder scan: No task uses placeholder markers or unspecified validation.
-- Type consistency: The plan consistently uses `WorkspaceRuntime`, `WorkspaceRuntimeBuilder`, `registered_service`, `workspace_root`, and `http_routes`.
+- Type consistency: The plan consistently uses `WorkspaceRuntime`, `WorkspaceRuntimeBuilder`, `WorkspaceRuntimeConfig`, `workspace_root`, `workspace_root_error`, and `should_mount_http_routes`.
 - Known caveat: `cargo nextest run --workspace --all-features` may expose unrelated existing failures; record those rather than widening this slice.
