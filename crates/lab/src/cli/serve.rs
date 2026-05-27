@@ -730,7 +730,9 @@ fn workspace_runtime_home_from_env_values(
     home: Option<std::ffi::OsString>,
     userprofile: Option<std::ffi::OsString>,
 ) -> Option<PathBuf> {
-    home.or(userprofile).map(PathBuf::from)
+    home.filter(|value| !value.is_empty())
+        .or_else(|| userprofile.filter(|value| !value.is_empty()))
+        .map(PathBuf::from)
 }
 
 struct UpstreamOauthRuntime {
@@ -1697,6 +1699,17 @@ mod tests {
     fn workspace_runtime_home_uses_userprofile_when_home_is_absent() {
         let resolved = workspace_runtime_home_from_env_values(
             None,
+            Some(OsString::from("/tmp/lab-userprofile")),
+        );
+
+        assert_eq!(resolved, Some(PathBuf::from("/tmp/lab-userprofile")));
+    }
+
+    #[cfg(feature = "fs")]
+    #[test]
+    fn workspace_runtime_home_uses_userprofile_when_home_is_empty() {
+        let resolved = workspace_runtime_home_from_env_values(
+            Some(OsString::from("")),
             Some(OsString::from("/tmp/lab-userprofile")),
         );
 
