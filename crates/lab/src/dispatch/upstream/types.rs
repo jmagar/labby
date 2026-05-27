@@ -22,6 +22,9 @@ pub struct UpstreamTool {
     pub input_schema: Option<Value>,
     /// Name of the upstream server this tool belongs to.
     pub upstream_name: Arc<str>,
+    /// Whether this tool has been marked as destructive via MCP annotations.destructiveHint.
+    /// Absent or null annotation defaults to false (conservative: only block explicit destructive=true).
+    pub destructive: bool,
 }
 
 /// Visibility metadata for one discovered upstream tool.

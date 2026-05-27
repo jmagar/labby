@@ -551,6 +551,13 @@ fn cached_upstream_tool(
     upstream_name: &Arc<str>,
 ) -> (String, UpstreamTool) {
     let name = tool.name.to_string();
+    // Absent or null annotations.destructiveHint → false (conservative: only
+    // treat as destructive when explicitly set to true by the upstream server).
+    let destructive = tool
+        .annotations
+        .as_ref()
+        .and_then(|a| a.destructive_hint)
+        .unwrap_or(false);
     (
         name,
         UpstreamTool {
@@ -558,6 +565,7 @@ fn cached_upstream_tool(
                 .then(|| Value::Object((*tool.input_schema).clone())),
             tool,
             upstream_name: Arc::clone(upstream_name),
+            destructive,
         },
     )
 }
@@ -4053,6 +4061,7 @@ mod tests {
             tool,
             input_schema: None,
             upstream_name: Arc::clone(upstream_name),
+            destructive: false,
         }
     }
 
@@ -5394,6 +5403,7 @@ mod tests {
                 ),
                 input_schema: Some(serde_json::json!({"type": "object"})),
                 upstream_name: Arc::from("alpha"),
+                destructive: false,
             },
         );
         let entry = healthy_in_process_entry(Arc::from("alpha"), tools);
@@ -5425,6 +5435,7 @@ mod tests {
             tool: rmcp::model::Tool::new(name, "desc", Arc::new(serde_json::Map::new())),
             input_schema: Some(serde_json::json!({"type": "object"})),
             upstream_name: Arc::from("alpha"),
+            destructive: false,
         };
 
         let mut tools = HashMap::new();
