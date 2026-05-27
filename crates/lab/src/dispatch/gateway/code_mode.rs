@@ -25,11 +25,18 @@ use crate::dispatch::error::ToolError;
 use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
 use crate::dispatch::gateway::manager::GatewayManager;
 use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
+use crate::mcp::catalog::TOOL_EXECUTE_TOOL_NAME;
 use crate::registry::ToolRegistry;
 
-const LAB_ACTION_UNKNOWN_TOOL_HINT: &str = "Code Mode handles upstream MCP tools only. For Lab actions, use the `tool_execute` MCP tool: \
-     name=<service> (e.g. \"radarr\"), arguments={action: \"<dotted.action>\", params: {...}}. \
-     Example: tool_execute(name=\"radarr\", arguments={action:\"movie.search\", params:{query:\"Matrix\"}}).";
+// Tool name strings are sourced from mcp/catalog.rs constants at runtime to
+// avoid stale literal references when tool names change.
+fn lab_action_unknown_tool_hint() -> String {
+    format!(
+        "Code Mode handles upstream MCP tools only. For Lab actions, use the `{TOOL_EXECUTE_TOOL_NAME}` MCP tool: \
+         name=<service> (e.g. \"radarr\"), arguments={{action: \"<dotted.action>\", params: {{...}}}}. \
+         Example: {TOOL_EXECUTE_TOOL_NAME}(name=\"radarr\", arguments={{action:\"movie.search\", params:{{query:\"Matrix\"}}}})."
+    )
+}
 const CODE_SEARCH_CATALOG_SOFT_CAP_BYTES: usize = 256 * 1024;
 const CODE_SEARCH_CATALOG_HARD_CAP_BYTES: usize = 512 * 1024;
 
@@ -141,7 +148,14 @@ impl CodeModeCatalogEntry {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CodeModeExecutionResponse {
+    /// The final return value of the async function. None when the function
+    /// returns undefined, null, or throws (the throw case surfaces via ToolError).
+    pub result: Option<Value>,
     pub calls: Vec<CodeModeExecutedCall>,
+    /// Captured console.log/warn/error lines. Populated in Bead 3 (boa_runtime
+    /// console capture). For now this is always an empty Vec — the field is
+    /// present in the serialized response as required by the contract.
+    pub logs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -488,7 +502,7 @@ impl<'a> CodeModeBroker<'a> {
                                 .boxed(),
                             );
                         }
-                        CodeModeRunnerOutput::Done => {
+                        CodeModeRunnerOutput::Done { result, logs } => {
                             if !pending_tool_calls.is_empty() {
                                 terminate_code_mode_runner(&mut child).await;
                                 return Err(ToolError::Sdk {
@@ -517,7 +531,9 @@ impl<'a> CodeModeBroker<'a> {
                             }
                             calls.sort_by_key(|(seq, _)| *seq);
                             return Ok(CodeModeExecutionResponse {
+                                result,
                                 calls: calls.into_iter().map(|(_, call)| call).collect(),
+                                logs,
                             });
                         }
                         CodeModeRunnerOutput::Error { kind, message } => {
@@ -703,7 +719,18 @@ pub enum CodeModeRunnerInput {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CodeModeRunnerOutput {
     ToolCall { seq: u64, id: String, params: Value },
-    Done,
+    /// Runner completed successfully. `result` is the serialized return value of
+    /// the async function (None when the function returns undefined/null).
+    /// `logs` is reserved for Bead 3 console capture; always empty for now.
+    Done {
+        // #[serde(default)] makes this variant forward-compatible: old runner binaries
+        // that emit {"type":"done"} without these fields deserialize to None/[] instead
+        // of failing with a missing-field error (lab-y08q1.1.2).
+        #[serde(default)]
+        result: Option<Value>,
+        #[serde(default)]
+        logs: Vec<String>,
+    },
     Error { kind: String, message: String },
 }
 
@@ -781,7 +808,8 @@ fn lab_action_unknown_tool() -> ToolError {
     ToolError::Sdk {
         sdk_kind: "unknown_tool".to_string(),
         message: format!(
-            "lab:: IDs are not supported by Code Mode. {LAB_ACTION_UNKNOWN_TOOL_HINT}"
+            "lab:: IDs are not supported by Code Mode. {}",
+            lab_action_unknown_tool_hint()
         ),
     }
 }
@@ -1089,7 +1117,10 @@ globalThis.__labSettleToolCall = (message) => {{
     return;
   }}
   if (input.type === "tool_error") {{
-    pending.reject(new Error(`${{input.kind}}: ${{input.message}}`));
+    // Reject with a JS string whose content is JSON-encoded CodeModeError so that
+    // JSON.parse(String(e.message)) in the sandbox recovers the structured error.
+    // Both the Javy and Boa paths had the same plain-string bug ("kind: message").
+    pending.reject(new Error(JSON.stringify({{kind: input.kind, message: input.message}})));
     return;
   }}
   throw new Error("runner received unexpected protocol message");
@@ -1105,21 +1136,26 @@ globalThis.__labMainPromise = (async () => {{
         .with(|cx| cx.eval::<(), _>(wrapped))
         .map_err(javy_error_message)?;
 
-    loop {
+    // Run the event loop until the main promise settles.
+    let resolved_result = loop {
         runtime
             .resolve_pending_jobs()
             .map_err(|err| err.to_string())?;
         match javy_main_promise_state(&runtime)? {
-            JavyMainPromiseState::Resolved => break,
+            JavyMainPromiseState::Resolved(result) => break result,
             JavyMainPromiseState::Rejected(message) => return Err(message),
             JavyMainPromiseState::Pending => {
                 let input = runner_read_input()?;
                 javy_settle_tool_promise(&runtime, &input)?;
             }
         }
-    }
+    };
 
-    runner_emit(CodeModeRunnerOutput::Done)
+    // logs field: populated in Bead 3 (console capture). Empty Vec for now.
+    runner_emit(CodeModeRunnerOutput::Done {
+        result: resolved_result,
+        logs: Vec::new(),
+    })
 }
 
 #[cfg(not(feature = "code_mode_wasm"))]
@@ -1147,11 +1183,18 @@ fn run_code_mode_runner() -> Result<(), String> {
         .ok_or_else(|| "Code Mode script did not return a promise".to_string())?;
     let promise = JsPromise::from_object(object.clone()).map_err(js_error_message)?;
 
+    let mut resolved_result: Option<Value> = None;
     loop {
         context.run_jobs().map_err(js_error_message)?;
 
         match promise.state() {
-            PromiseState::Fulfilled(_) => break,
+            PromiseState::Fulfilled(value) => {
+                // JsValue::to_json returns None for undefined/null — both map to
+                // Option::None per the contract (result field is None when function
+                // returns undefined or has no explicit return).
+                resolved_result = value.to_json(&mut context).ok().flatten();
+                break;
+            }
             PromiseState::Rejected(reason) => return Err(js_value_message(&reason, &mut context)),
             PromiseState::Pending => {
                 let input = runner_read_input()?;
@@ -1160,13 +1203,19 @@ fn run_code_mode_runner() -> Result<(), String> {
         }
     }
 
-    runner_emit(CodeModeRunnerOutput::Done)
+    // logs field: populated in Bead 3 (boa_runtime console capture). Empty Vec for now.
+    runner_emit(CodeModeRunnerOutput::Done {
+        result: resolved_result,
+        logs: Vec::new(),
+    })
 }
 
 #[cfg(feature = "code_mode_wasm")]
 enum JavyMainPromiseState {
     Pending,
-    Resolved,
+    /// The async function returned. `result` is the JSON-serialized return value,
+    /// or None when the function returned undefined/null.
+    Resolved(Option<Value>),
     Rejected(String),
 }
 
@@ -1252,7 +1301,21 @@ fn javy_main_promise_state(runtime: &javy::Runtime) -> Result<JavyMainPromiseSta
             let promise: javy::quickjs::Promise<'_> = cx.globals().get("__labMainPromise")?;
             match promise.result::<javy::quickjs::Value<'_>>() {
                 None => Ok(JavyMainPromiseState::Pending),
-                Some(Ok(_)) => Ok(JavyMainPromiseState::Resolved),
+                Some(Ok(val)) => {
+                    // Serialize the resolved value to JSON via cx.json_stringify.
+                    // undefined/null cannot be stringified and map to None (no result).
+                    let result = if val.is_undefined() || val.is_null() {
+                        None
+                    } else {
+                        match cx.json_stringify(val) {
+                            Ok(Some(json_str)) => serde_json::from_str(&json_str.to_string()?)
+                                .ok()
+                                .and_then(|v: Value| if v.is_null() { None } else { Some(v) }),
+                            _ => None,
+                        }
+                    };
+                    Ok(JavyMainPromiseState::Resolved(result))
+                }
                 Some(Err(err)) => {
                     let message = javy::from_js_error(cx.clone(), err).to_string();
                     Ok(JavyMainPromiseState::Rejected(message))
@@ -1329,10 +1392,22 @@ fn settle_code_mode_tool_promise(
     input: CodeModeRunnerInput,
     context: &mut Context,
 ) -> Result<(), String> {
+    // FINDING: Both the Boa (native) path and the Javy (wasm) path had the same
+    // bug — tool errors were rejected with a plain "kind: message" string instead
+    // of a JSON-encoded CodeModeError object. The contract specifies:
+    //   JSON.parse(String(e.message))
+    // so the rejection reason must be a JS string whose content is valid JSON.
+    // Fixed here (Boa) and in globalThis.__labSettleToolCall (Javy wrapper below).
     let (seq, result) = match input {
         CodeModeRunnerInput::ToolResult { seq, result } => (seq, Ok(result)),
         CodeModeRunnerInput::ToolError { seq, kind, message } => {
-            (seq, Err(format!("{kind}: {message}")))
+            // Produce a JSON string matching CodeModeError so that
+            // JSON.parse(String(e.message)) succeeds in the sandbox.
+            let json = serde_json::to_string(&json!({"kind": kind, "message": message}))
+                // Fallback must NOT interpolate runtime-controlled values: kind/message could
+                // contain quotes or backslashes that would produce invalid JSON (lab-y08q1.1.1).
+                .unwrap_or_else(|_| r#"{"kind":"internal_error","message":"failed to serialize tool error"}"#.to_string());
+            (seq, Err(json))
         }
         CodeModeRunnerInput::Start { .. } => {
             return Err("runner received unexpected start message".to_string());
@@ -1358,8 +1433,10 @@ fn settle_code_mode_tool_promise(
                 .call(&JsValue::undefined(), &[value], context)
                 .map_err(js_error_message)?;
         }
-        Err(message) => {
-            let reason = JsValue::from(js_string!(message.as_str()));
+        Err(json_message) => {
+            // Reject with a JS string containing JSON — the sandbox catches this
+            // and the agent calls JSON.parse(String(e.message)) to decode it.
+            let reason = JsValue::from(js_string!(json_message.as_str()));
             resolvers
                 .reject
                 .call(&JsValue::undefined(), &[reason], context)
@@ -1691,6 +1768,7 @@ mod tests {
     #[test]
     fn truncates_code_execute_response_with_per_call_marker() {
         let response = CodeModeExecutionResponse {
+            result: None,
             calls: vec![
                 CodeModeExecutedCall {
                     id: "upstream::github::search_issues".to_string(),
@@ -1701,6 +1779,7 @@ mod tests {
                     result: json!({"payload": "x".repeat(5000)}),
                 },
             ],
+            logs: Vec::new(),
         };
 
         let truncated = truncate_execution_response(response, 1400, 6000);

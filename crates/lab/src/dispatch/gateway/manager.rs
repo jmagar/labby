@@ -545,7 +545,30 @@ impl GatewayManager {
         crate::config::set_process_tool_search_enabled(config.tool_search.enabled);
         *self.protected_route_index.write().await =
             ProtectedRouteIndex::from_routes(&config.protected_mcp_routes);
+        let code_mode_enabled = config.code_mode.enabled;
         *self.config.write().await = config;
+        // If code_mode is already enabled at startup, eagerly warm the upstream pool
+        // so that the catalog is not empty on the first lab:read call. This is
+        // fire-and-forget; seed_config must remain cheap and non-blocking.
+        if code_mode_enabled {
+            let self_clone = self.clone();
+            // Fire-and-forget best-effort pre-warm. ensure_lazy_upstream_pool is
+            // infallible (returns Arc<UpstreamPool>) — it handles its own error paths
+            // internally. This is NOT a synchronization guarantee: the first lab:read
+            // code_search may still race the spawn. lab:execute callers trigger
+            // ensure_lazy_upstream_pool synchronously on first access, which is the
+            // actual initialization guarantee.
+            tokio::spawn(async move {
+                let cfg = self_clone.config.read().await.clone();
+                self_clone.ensure_lazy_upstream_pool(&cfg, None).await;
+                tracing::info!(
+                    surface = "dispatch",
+                    service = "gateway",
+                    action = "code_mode.warm_up",
+                    "code_mode enabled at startup — upstream pool warm-up triggered"
+                );
+            });
+        }
     }
 
     pub async fn resolve_protected_route(
@@ -1659,9 +1682,24 @@ impl GatewayManager {
         validate_code_mode(&next)?;
         let _mutation_guard = self.config_mutation.lock().await;
         let mut cfg = self.config.read().await.clone();
-        cfg.code_mode = next;
+        // Capture whether we are transitioning from disabled → enabled before updating.
+        let was_disabled = !cfg.code_mode.enabled;
+        cfg.code_mode = next.clone();
         self.persist_config(cfg).await?;
-        self.reload_with_origin_unlocked(origin, owner).await?;
+        self.reload_with_origin_unlocked(origin, owner.clone()).await?;
+        // When code_mode transitions false → true, eagerly warm the upstream pool so
+        // that the catalog is not empty on the first lab:read call.
+        if was_disabled && next.enabled {
+            let cfg_now = self.config.read().await.clone();
+            let owner_ref = owner.as_ref();
+            self.ensure_lazy_upstream_pool(&cfg_now, owner_ref).await;
+            tracing::info!(
+                surface = "dispatch",
+                service = "gateway",
+                action = "code_mode.warm_up",
+                "code_mode enabled — upstream pool warm-up triggered"
+            );
+        }
         Ok(self.code_mode_config().await)
     }
 
@@ -2071,6 +2109,10 @@ impl GatewayManager {
 
     pub async fn tool_search_enabled(&self) -> bool {
         self.config.read().await.tool_search.enabled
+    }
+
+    pub async fn code_mode_enabled(&self) -> bool {
+        self.config.read().await.code_mode.enabled
     }
 
     pub async fn code_mode_config(&self) -> crate::config::CodeModeConfig {
