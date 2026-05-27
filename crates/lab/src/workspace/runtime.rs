@@ -76,7 +76,7 @@ fn expand_home_path(path: &Path, home: Option<&Path>) -> std::io::Result<PathBuf
             )
         });
     }
-    if let Some(rest) = raw.strip_prefix("~/") {
+    if let Some(rest) = raw.strip_prefix("~/").or_else(|| raw.strip_prefix("~\\")) {
         return home.map(|home| home.join(rest)).ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -170,6 +170,22 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let config = WorkspaceRuntimeConfig {
             root: Some(PathBuf::from("~/stash")),
+            home: Some(temp.path().to_path_buf()),
+        };
+
+        let runtime = WorkspaceRuntimeBuilder::new(config).build();
+
+        assert_eq!(
+            runtime.workspace_root().expect("workspace root"),
+            std::fs::canonicalize(temp.path().join("stash")).expect("canonical")
+        );
+    }
+
+    #[test]
+    fn builder_expands_windows_style_tilde_workspace_root() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = WorkspaceRuntimeConfig {
+            root: Some(PathBuf::from("~\\stash")),
             home: Some(temp.path().to_path_buf()),
         };
 
