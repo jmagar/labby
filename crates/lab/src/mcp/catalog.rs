@@ -64,7 +64,7 @@ impl LabMcpServer {
 
     pub(crate) async fn gateway_code_mode_enabled(&self) -> bool {
         match &self.gateway_manager {
-            Some(manager) => manager.tool_search_enabled().await,
+            Some(manager) => manager.code_mode_enabled().await,
             None => false,
         }
     }
