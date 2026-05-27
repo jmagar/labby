@@ -10,9 +10,12 @@ use crate::mcp::prompts::list_all as list_builtin_prompts;
 /// Canonical (Cloudflare-parity) tool names for the gateway search and execute tools.
 pub(crate) const TOOL_SEARCH_TOOL_NAME: &str = "search";
 pub(crate) const TOOL_EXECUTE_TOOL_NAME: &str = "execute";
+/// Canonical Code Mode tool name (single `code` tool — Cloudflare-parity).
+pub(crate) const CODE_TOOL_NAME: &str = "code";
 /// Legacy aliases kept for backward compatibility — emit a deprecation warning when invoked.
 pub(crate) const GATEWAY_LEGACY_TOOL_SEARCH_NAME: &str = "tool_search";
 pub(crate) const GATEWAY_LEGACY_EXECUTE_NAME: &str = "tool_execute";
+/// Legacy Code Mode tool names — hidden from list_tools, kept callable for backward compat.
 pub(crate) const CODE_SEARCH_TOOL_NAME: &str = "code_search";
 pub(crate) const CODE_EXECUTE_TOOL_NAME: &str = "code_execute";
 pub(crate) const LEGACY_SCOUT_TOOL_NAME: &str = "scout";
@@ -22,8 +25,16 @@ pub(crate) const LEGACY_TOOL_INVOKE_TOOL_NAME: &str = "tool_invoke";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ToolSearchVisibility {
     Raw,
+    /// Full gateway broker — advertises `search` + `execute`.
     RootSynthetic,
+    /// In-process peer mode — same tool surface as RootSynthetic but without
+    /// a live gateway_manager. This is a Tool Search mode sub-variant, not
+    /// Code Mode. It must NOT appear when code_mode is enabled.
     InProcessPeer,
+    /// Cloudflare-parity Code Mode — advertises exactly ONE tool: `code`.
+    /// Discovery happens through the typed TypeScript preamble injected into
+    /// the sandbox, not through a separate advertised discovery tool.
+    CodeMode,
 }
 
 impl ToolSearchVisibility {
@@ -31,8 +42,15 @@ impl ToolSearchVisibility {
         !matches!(self, Self::Raw)
     }
 
+    /// Returns true when the mode registers the Tool Search surface
+    /// (`search` + `execute`). Does NOT include Code Mode.
     pub(crate) fn exposes_synthetic_tools(self) -> bool {
-        matches!(self, Self::RootSynthetic)
+        matches!(self, Self::RootSynthetic | Self::InProcessPeer)
+    }
+
+    /// Returns true when the mode registers the Code Mode surface (`code`).
+    pub(crate) fn exposes_code_tool(self) -> bool {
+        matches!(self, Self::CodeMode)
     }
 
     pub(crate) fn mode_label(self) -> &'static str {
@@ -40,6 +58,7 @@ impl ToolSearchVisibility {
             Self::Raw => "raw",
             Self::RootSynthetic => "tool_search_root",
             Self::InProcessPeer => "tool_search_in_process_peer",
+            Self::CodeMode => "code_mode",
         }
     }
 }
@@ -102,13 +121,25 @@ impl LabMcpServer {
     }
 
     pub(crate) async fn tool_search_visibility(&self) -> ToolSearchVisibility {
-        let manager_tool_search_enabled = if let Some(manager) = &self.gateway_manager {
-            manager.tool_search_enabled().await
-        } else {
-            false
-        };
+        let (manager_tool_search_enabled, manager_code_mode_enabled) =
+            if let Some(manager) = &self.gateway_manager {
+                (
+                    manager.tool_search_enabled().await,
+                    manager.code_mode_enabled().await,
+                )
+            } else {
+                (false, false)
+            };
+        // Code Mode takes priority — mutual exclusion is enforced at config
+        // level so both cannot be true simultaneously.
+        if manager_code_mode_enabled {
+            return ToolSearchVisibility::CodeMode;
+        }
         if manager_tool_search_enabled {
             return ToolSearchVisibility::RootSynthetic;
+        }
+        if self.gateway_manager.is_none() && crate::config::is_code_mode_enabled() {
+            return ToolSearchVisibility::CodeMode;
         }
         if self.gateway_manager.is_none() && crate::config::process_tool_search_enabled() {
             return ToolSearchVisibility::InProcessPeer;
@@ -201,10 +232,14 @@ impl LabMcpServer {
     pub(crate) async fn snapshot_catalog(&self) -> CatalogSnapshot {
         let visibility = self.tool_search_visibility().await;
         let mut tools = BTreeSet::new();
-        if visibility.exposes_synthetic_tools() {
+        if visibility.exposes_code_tool() {
+            // Code Mode — advertise exactly one tool: `code`.
+            // Legacy aliases (code_search, code_execute) are NOT advertised.
+            tools.insert(CODE_TOOL_NAME.to_string());
+        } else if visibility.exposes_synthetic_tools() {
+            // Tool Search mode — advertise `search` + `execute`.
+            // Legacy aliases (tool_search, tool_execute) are NOT advertised.
             tools.insert(TOOL_SEARCH_TOOL_NAME.to_string());
-            tools.insert(CODE_SEARCH_TOOL_NAME.to_string());
-            tools.insert(CODE_EXECUTE_TOOL_NAME.to_string());
             tools.insert(TOOL_EXECUTE_TOOL_NAME.to_string());
         } else {
             for svc in self.registry.services() {
@@ -286,15 +321,46 @@ mod tests {
     }
 
     #[test]
-    fn code_mode_tool_names_are_distinct_from_gateway_tools() {
-        // PRESENCE: code mode tools have their own names
+    fn code_mode_tool_name_is_code() {
+        // PRESENCE: canonical Code Mode tool name is `code`
+        assert_eq!(CODE_TOOL_NAME, "code");
+
+        // ABSENCE: `code` must not collide with Tool Search mode names
+        assert_ne!(CODE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME,
+            "code must differ from search");
+        assert_ne!(CODE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME,
+            "code must differ from execute");
+    }
+
+    #[test]
+    fn legacy_code_mode_names_are_hidden_aliases() {
+        // Legacy Code Mode tool names — still callable but NOT advertised.
         assert_eq!(CODE_SEARCH_TOOL_NAME, "code_search");
         assert_eq!(CODE_EXECUTE_TOOL_NAME, "code_execute");
 
-        // ABSENCE: code mode names must not overlap with gateway tool names
-        assert_ne!(CODE_SEARCH_TOOL_NAME, TOOL_SEARCH_TOOL_NAME,
-            "code_search must differ from search");
-        assert_ne!(CODE_EXECUTE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME,
-            "code_execute must differ from execute");
+        // They must differ from all canonical names.
+        assert_ne!(CODE_SEARCH_TOOL_NAME, CODE_TOOL_NAME);
+        assert_ne!(CODE_EXECUTE_TOOL_NAME, CODE_TOOL_NAME);
+        assert_ne!(CODE_SEARCH_TOOL_NAME, TOOL_SEARCH_TOOL_NAME);
+        assert_ne!(CODE_EXECUTE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME);
+    }
+
+    #[test]
+    fn tool_search_visibility_code_mode_methods() {
+        // CodeMode hides raw tools
+        assert!(ToolSearchVisibility::CodeMode.hides_raw_tools());
+        // CodeMode does NOT expose Tool Search synthetic tools
+        assert!(!ToolSearchVisibility::CodeMode.exposes_synthetic_tools());
+        // CodeMode exposes the code tool
+        assert!(ToolSearchVisibility::CodeMode.exposes_code_tool());
+        // RootSynthetic exposes Tool Search but NOT code tool
+        assert!(ToolSearchVisibility::RootSynthetic.exposes_synthetic_tools());
+        assert!(!ToolSearchVisibility::RootSynthetic.exposes_code_tool());
+        // InProcessPeer is a Tool Search sub-variant, not Code Mode
+        assert!(ToolSearchVisibility::InProcessPeer.exposes_synthetic_tools());
+        assert!(!ToolSearchVisibility::InProcessPeer.exposes_code_tool());
+        // Raw exposes neither
+        assert!(!ToolSearchVisibility::Raw.exposes_synthetic_tools());
+        assert!(!ToolSearchVisibility::Raw.exposes_code_tool());
     }
 }
