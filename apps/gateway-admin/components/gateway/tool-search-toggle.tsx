@@ -82,11 +82,11 @@ export function ToolSearchTogglePanel() {
             <p className="mt-1 text-sm text-aurora-text-muted">
               Expose server-wide{' '}
               <code className="rounded bg-aurora-panel-strong px-1.5 py-0.5 text-aurora-text-primary">
-                tool_search
+                search
               </code>{' '}
               and{' '}
               <code className="rounded bg-aurora-panel-strong px-1.5 py-0.5 text-aurora-text-primary">
-                tool_execute
+                execute
               </code>{' '}
               instead of listing every upstream tool directly.
             </p>
@@ -121,9 +121,9 @@ export function ToolSearchTogglePanel() {
             <p className="mt-1 text-sm text-aurora-text-muted">
               Allow{' '}
               <code className="rounded bg-aurora-panel-strong px-1.5 py-0.5 text-aurora-text-primary">
-                code_execute
+                execute
               </code>{' '}
-              to run constrained snippets against upstream tools discovered through tool search.
+              to run constrained snippets against upstream tools discovered through search.
             </p>
           </div>
         </div>

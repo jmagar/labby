@@ -43,7 +43,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "gateway.tool_search.set",
-        description: "Enable or disable gateway-wide tool_search/tool_execute mode for all exposed upstream tools",
+        description: "Enable or disable gateway-wide Code Mode (search/execute) for all exposed upstream tools",
         destructive: true,
         returns: "ToolSearchConfig",
         params: &[
@@ -51,7 +51,7 @@ pub const ACTIONS: &[ActionSpec] = &[
                 name: "enabled",
                 ty: "boolean",
                 required: true,
-                description: "Whether tool_search/tool_execute mode is enabled for the gateway",
+                description: "Whether Code Mode (search/execute) is enabled for the gateway",
             },
             ParamSpec {
                 name: "top_k_default",

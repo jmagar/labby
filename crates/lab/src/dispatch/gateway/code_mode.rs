@@ -131,7 +131,7 @@ impl CodeModeCatalogEntry {
                 .to_string(),
             schema: None,
             note: Some(
-                "Some entries were dropped to fit the 256KB inline catalog cap. Use scout for full RRF discovery.".to_string(),
+                "Some entries were dropped to fit the 256KB inline catalog cap. Use search for full RRF discovery.".to_string(),
             ),
             dropped_count: Some(dropped_count),
         }
@@ -240,7 +240,7 @@ impl<'a> CodeModeBroker<'a> {
         if !caller.can_read() {
             return Err(ToolError::Sdk {
                 sdk_kind: "forbidden".to_string(),
-                message: "code_search requires one of scopes: lab:read, lab, lab:admin".to_string(),
+                message: "search requires one of scopes: lab:read, lab, lab:admin".to_string(),
             });
         }
 
@@ -256,7 +256,7 @@ impl<'a> CodeModeBroker<'a> {
             .await?;
         tracing::info!(
             surface = "dispatch",
-            service = "code_search",
+            service = "search",
             action = "catalog.build",
             catalog_size_bytes = serialized_size,
             entry_count = catalog.len(),
@@ -277,7 +277,7 @@ impl<'a> CodeModeBroker<'a> {
         if !caller.can_execute() {
             return Err(ToolError::Sdk {
                 sdk_kind: "forbidden".to_string(),
-                message: "code_execute requires one of scopes: lab, lab:admin".to_string(),
+                message: "execute requires one of scopes: lab, lab:admin".to_string(),
             });
         }
         let response = self
@@ -336,7 +336,7 @@ impl<'a> CodeModeBroker<'a> {
             return Err(ToolError::Sdk {
                 sdk_kind: "invalid_param".to_string(),
                 message: format!(
-                    "Code Mode inline catalog is {serialized_size} bytes, above the 512KB hard cap; use scout for full RRF discovery"
+                    "Code Mode inline catalog is {serialized_size} bytes, above the 512KB hard cap; use search for full RRF discovery"
                 ),
             });
         }
@@ -807,7 +807,7 @@ fn evaluate_code_search(code: &str, catalog: &[CodeModeCatalogEntry]) -> Result<
          (async () => {{\n\
            const __codeModeSearch = ({code});\n\
            if (typeof __codeModeSearch !== 'function') {{\n\
-             throw new TypeError('code_search code must evaluate to a function');\n\
+             throw new TypeError('search code must evaluate to a function');\n\
            }}\n\
            return await __codeModeSearch();\n\
          }})()"
@@ -910,7 +910,7 @@ fn truncation_marker(value: &Value) -> Value {
         "original_size": serialized.len(),
         "original_tokens": estimated_tokens(serialized.len()),
         "preview": preview,
-        "next_action": "Use a narrower query, request fewer fields, or split the work across multiple code_execute calls."
+        "next_action": "Use a narrower query, request fewer fields, or split the work across multiple execute() calls."
     })
 }
 

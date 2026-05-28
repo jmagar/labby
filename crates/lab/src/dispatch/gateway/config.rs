@@ -50,7 +50,6 @@ const KNOWN_LAB_CONFIG_KEYS: &[&str] = &[
     "services",
     "auth",
     "tool_search",
-    "scout",
     "upstream",
     "upstream_import_tombstones",
     "protected_mcp_routes",

@@ -2200,7 +2200,7 @@ impl GatewayManager {
                     ),
                     Err(e) => {
                         tracing::warn!(
-                            service = "tool_search",
+                            service = "semantic",
                             action = "semantic_search",
                             error = %e,
                             "semantic search unavailable, falling back to lexical results"
@@ -2358,7 +2358,7 @@ impl GatewayManager {
         if !self.config.read().await.tool_search.enabled {
             return Err(ToolError::Sdk {
                 sdk_kind: "unknown_tool".to_string(),
-                message: "tool search is not enabled; tool_execute requires tool_search mode"
+                message: "Code Mode is not enabled; execute requires Code Mode to be enabled"
                     .to_string(),
             });
         }
@@ -2750,7 +2750,7 @@ impl GatewayManager {
                                 )
                                 .await
                             {
-                                tracing::warn!(service = "tool_search", action = "semantic.ensure_collection", error = %e, "semantic index: collection init failed");
+                                tracing::warn!(service = "semantic", action = "semantic.ensure_collection", error = %e, "semantic index: collection init failed");
                                 return;
                             }
                             match crate::dispatch::gateway::semantic::index_tools(
@@ -2764,10 +2764,10 @@ impl GatewayManager {
                             .await
                             {
                                 Ok(()) => {
-                                    tracing::info!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, count = tools_to_index.len(), "semantic tool index updated")
+                                    tracing::info!(service = "semantic", action = "semantic.index", upstream = %upstream_for_sem, count = tools_to_index.len(), "semantic tool index updated")
                                 }
                                 Err(e) => {
-                                    tracing::warn!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, error = %e, "semantic index failed — lexical search unaffected")
+                                    tracing::warn!(service = "semantic", action = "semantic.index", upstream = %upstream_for_sem, error = %e, "semantic index failed — lexical search unaffected")
                                 }
                             }
                         });
@@ -2814,7 +2814,7 @@ impl GatewayManager {
                                     )
                                     .await
                                 {
-                                    tracing::warn!(service = "scout", action = "semantic.ensure_collection", error = %e, "stale-gen sweep: collection init failed");
+                                    tracing::warn!(service = "semantic", action = "semantic.ensure_collection", error = %e, "stale-gen sweep: collection init failed");
                                     return;
                                 }
                                 match crate::dispatch::gateway::semantic::index_tools(
@@ -2828,10 +2828,10 @@ impl GatewayManager {
                                 .await
                                 {
                                     Ok(()) => {
-                                        tracing::info!(service = "scout", action = "semantic.sweep", upstream = %upstream_for_sem, "stale Qdrant entries purged for empty upstream")
+                                        tracing::info!(service = "semantic", action = "semantic.sweep", upstream = %upstream_for_sem, "stale Qdrant entries purged for empty upstream")
                                     }
                                     Err(e) => {
-                                        tracing::warn!(service = "scout", action = "semantic.sweep", upstream = %upstream_for_sem, error = %e, "stale-gen Qdrant sweep failed")
+                                        tracing::warn!(service = "semantic", action = "semantic.sweep", upstream = %upstream_for_sem, error = %e, "stale-gen Qdrant sweep failed")
                                     }
                                 }
                             });
@@ -3045,7 +3045,7 @@ impl GatewayManager {
                                 )
                                 .await
                             {
-                                tracing::warn!(service = "tool_search", action = "semantic.ensure_collection", error = %e, "semantic index: collection init failed");
+                                tracing::warn!(service = "semantic", action = "semantic.ensure_collection", error = %e, "semantic index: collection init failed");
                                 return;
                             }
                             match crate::dispatch::gateway::semantic::index_tools(
@@ -3059,10 +3059,10 @@ impl GatewayManager {
                             .await
                             {
                                 Ok(()) => {
-                                    tracing::info!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, count = tools_to_index.len(), "semantic tool index updated")
+                                    tracing::info!(service = "semantic", action = "semantic.index", upstream = %upstream_for_sem, count = tools_to_index.len(), "semantic tool index updated")
                                 }
                                 Err(e) => {
-                                    tracing::warn!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, error = %e, "semantic index failed — lexical search unaffected")
+                                    tracing::warn!(service = "semantic", action = "semantic.index", upstream = %upstream_for_sem, error = %e, "semantic index failed — lexical search unaffected")
                                 }
                             }
                         });

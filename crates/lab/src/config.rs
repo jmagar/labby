@@ -30,7 +30,7 @@ use std::{
 // Gateway startup/reload writes this process-wide flag whenever root
 // `[tool_search]` changes. In-process peer MCP servers do not hold a
 // GatewayManager, but they must still hide raw built-in tools when the root
-// server is operating in synthetic `tool_search`/`tool_execute` mode.
+// server is operating in synthetic `search`/`execute` Code Mode.
 static PROCESS_TOOL_SEARCH_ENABLED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn set_process_tool_search_enabled(enabled: bool) {
@@ -38,8 +38,8 @@ pub(crate) fn set_process_tool_search_enabled(enabled: bool) {
     if previous != enabled {
         tracing::info!(
             surface = "mcp",
-            service = "tool_search",
-            action = "tool_search.process_enablement",
+            service = "code_mode",
+            action = "code_mode.process_enablement",
             previous_enabled = previous,
             enabled,
             "process-wide tool search enablement changed"
@@ -515,10 +515,10 @@ pub struct CodeModeConfig {
     /// Maximum host-brokered tool calls allowed in one Code Mode execution.
     #[serde(default = "default_code_mode_max_tool_calls")]
     pub max_tool_calls: usize,
-    /// Maximum serialized response envelope size returned by code_execute.
+    /// Maximum serialized response envelope size returned by execute.
     #[serde(default = "default_code_mode_max_response_bytes")]
     pub max_response_bytes: usize,
-    /// Approximate maximum response tokens returned by code_execute.
+    /// Approximate maximum response tokens returned by execute.
     #[serde(default = "default_code_mode_max_response_tokens")]
     pub max_response_tokens: usize,
 }

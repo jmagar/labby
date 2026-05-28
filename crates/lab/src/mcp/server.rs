@@ -2299,9 +2299,9 @@ fn tool_execute_scope_allowed(auth: Option<&crate::api::oauth::AuthContext>) -> 
     })
 }
 
-/// Returns `true` when the caller is allowed to invoke the tool_search tool.
+/// Returns `true` when the caller is allowed to invoke the `search` tool.
 ///
-/// tool_search requires at least `lab:read`; tool_execute requires the stronger `lab` or `lab:admin`.
+/// `search` requires at least `lab:read`; `execute` requires the stronger `lab` or `lab:admin`.
 /// `None` auth means stdio transport — trusted by design (no per-request AuthContext).
 fn tool_search_scope_allowed(auth: Option<&crate::api::oauth::AuthContext>) -> bool {
     auth.is_none_or(|auth| {
@@ -2620,9 +2620,9 @@ mod tests {
         assert_eq!(estimate_tokens_args(&empty), 1);
 
         let mut populated = serde_json::Map::new();
-        populated.insert("name".into(), Value::String("tool_search".into()));
-        // `{"name":"tool_search"}` is 22 chars → 6 tokens.
-        assert_eq!(estimate_tokens_args(&populated), 6);
+        populated.insert("name".into(), Value::String("search".into()));
+        // `{"name":"search"}` is 18 chars → 5 tokens.
+        assert_eq!(estimate_tokens_args(&populated), 5);
     }
 
     #[tokio::test]
@@ -3355,23 +3355,23 @@ mod tests {
     }
 
     #[test]
-    fn scout_allows_lab_read_but_invoke_requires_lab() {
-        // Intentional asymmetry: tool_search is a read-only discovery operation and therefore
+    fn search_allows_lab_read_but_execute_requires_lab() {
+        // Intentional asymmetry: `search` is a read-only discovery operation and therefore
         // accepts lab:read in addition to the stronger lab / lab:admin.
-        // tool_execute must NOT accept lab:read — it executes upstream tools
+        // `execute` must NOT accept lab:read — it executes upstream tools
         // which may have side effects.
         let read_only = make_auth(&["lab:read"]);
 
-        // tool_search: lab:read is permitted
+        // search: lab:read is permitted
         assert!(
             super::tool_search_scope_allowed(Some(&read_only)),
-            "tool_search should accept lab:read"
+            "search should accept lab:read"
         );
 
-        // tool_execute: lab:read must NOT be sufficient
+        // execute: lab:read must NOT be sufficient
         assert!(
             !super::tool_execute_scope_allowed(Some(&read_only)),
-            "tool_execute must reject lab:read — requires lab or lab:admin"
+            "execute must reject lab:read — requires lab or lab:admin"
         );
     }
 
