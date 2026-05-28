@@ -8,6 +8,77 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.20.0] - 2026-05-27
+
+### Highlights
+
+- **Code Mode input shape locked to Cloudflare parity** — the `code` MCP tool's
+  input schema is now EXACTLY `{ "code": "string" }` with `code` required.
+  Removed the `action` discriminator (`search`/`preamble`/`execute`) plus
+  `max_tool_calls` and `confirm` from the input. Three new tests
+  (`code_tool_input_schema_is_locked_to_cloudflare_parity`,
+  `code_tool_input_schema_rejects_action_discriminator`,
+  `code_tool_description_template_uses_types_placeholder`) lock the shape so
+  pre-commit (`cargo clippy -D warnings` + `cargo nextest run`) fails if anyone
+  re-introduces a discriminator. Matches `cloudflare/agents/packages/codemode/src/tool.ts::codeSchema`.
+- **Typed catalog moved into the tool description via `{{types}}`** — at
+  `list_tools` time the server substitutes the generated
+  `declare namespace codemode { ... }` block into the `code` tool's
+  `description` field, matching Cloudflare's `createCodeTool` exactly. No more
+  separate `code(action="preamble")` round-trip.
+- **Removed `code_search` JS-against-JSON-catalog pattern** — the spec marked it
+  dead; `CodeModeBroker::search`, `evaluate_code_search`, and the
+  `gateway code search` CLI subcommand are all gone.
+- **Docs synced to implementation** — `CODE_NODE_CONTRACT_FOR_RETARD_AGENTS.md`
+  and `CODE_MODE_SPEC_FOR_RETARD_AGENTS.md` now use snake_case examples and
+  `timeout_ms = 30000`, matching the code.
+
+### Breaking changes
+
+- The `code` MCP tool no longer accepts `action`, `max_tool_calls`, or `confirm`
+  in its input. Callers using `code({action:"execute", code:"..."})` must drop
+  the wrapper and call `code({code:"..."})`. Callers using
+  `code({action:"search", ...})` or `code({action:"preamble"})` have no
+  replacement — read the typed namespace from the tool's description instead.
+- The `lab gateway code search` CLI subcommand is removed. Use
+  `lab gateway code exec` (no behavior change beyond the rename).
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | feat: lock `code` tool input to Cloudflare parity `{ code }` + `{{types}}` description injection |
+
+### Version bumps
+
+- Rust workspace: `0.19.0 -> 0.20.0`
+- Gateway admin package: `0.19.0 -> 0.20.0`
+
+---
+
+## [0.19.0] - 2026-05-27
+
+### Highlights
+
+- **Cloudflare Code Mode parity**: tool names now normalize to snake_case (`movie.search` → `movie_search`) so models trained on Cloudflare examples call the right helpers.
+- **Removed legacy tool aliases**: `tool_search`, `tool_execute`, `code_search`, `code_execute`, `scout`, `invoke`, `tool_invoke` are no longer accepted — only `code`, `search`, `execute` remain (breaking for legacy clients).
+- **Typed return types in preamble**: `generate_preamble` now passes upstream `output_schema` through `schema_to_ts`, replacing `Promise<unknown>` with derived types when available.
+- **Bounded preamble cache**: `PreambleCache` is now a 64-entry LRU (was unbounded `DashMap`), preventing memory growth under upstream catalog churn.
+- **Canonical error kinds only**: removed non-contract `code_mode_disabled` and `code_execution_failed`; mapped to `internal_error` / `server_error` so agents switching on `err.kind` don't hit the default branch.
+- **Higher default Code Mode timeout**: 5000 ms → 30000 ms (Cloudflare parity); still TOML-configurable via `[code_mode].timeout_ms`.
+- **Pure computation valid in Code Mode**: removed the "must call callTool at least once" rejection so filter/sort/reduce snippets work.
+- **Fixed embedded web assets test**: `serves_embedded_web_assets_without_configured_directory` now skips with a build hint when `apps/gateway-admin/out/` is empty rather than failing.
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | feat: Cloudflare Code Mode parity — snake_case names, bounded cache, typed returns, canonical error kinds |
+| f02f8341 | fix: address all PR review issues in Code Mode gateway |
+
+### Version bumps
+
+- Rust workspace: `0.18.1 -> 0.19.0`
+- Gateway admin package: `0.18.1 -> 0.19.0`
+
+---
+
 ## [0.18.1] - 2026-05-27
 
 ### Highlights

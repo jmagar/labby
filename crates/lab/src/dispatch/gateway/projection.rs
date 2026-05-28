@@ -1,4 +1,7 @@
 use std::collections::HashMap;
+use std::sync::LazyLock;
+
+use regex::Regex;
 
 use crate::config::{ToolSearchConfig, UpstreamConfig};
 use crate::dispatch::gateway::service_catalog::service_meta;
@@ -66,8 +69,20 @@ pub(super) fn sanitize_tool_text(input: &str, max_len: usize) -> String {
         .collect()
 }
 
+/// Regex that matches common secret token patterns even when embedded in
+/// longer strings (e.g. `Authorization: Bearer sk-abc123...`). Applied as a
+/// secondary pass after the whitespace-split pass so that both standalone and
+/// embedded secrets are caught.
+static SECRET_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82}|glpat-[A-Za-z0-9_-]{20}|xox[bp]-[A-Za-z0-9-]+|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)",
+    )
+    .expect("SECRET_REGEX is valid")
+});
+
 fn redact_secret_like_segments(input: &str) -> String {
-    input
+    // First pass: whitespace-split heuristic (fast path for standalone tokens).
+    let after_split = input
         .split_whitespace()
         .map(|segment| {
             let looks_secret = segment.starts_with("sk-")
@@ -78,13 +93,18 @@ fn redact_secret_like_segments(input: &str) -> String {
                 || segment.starts_with("xoxp-")
                 || segment.starts_with("eyJ");
             if looks_secret {
-                "<redacted>".to_string()
+                "[REDACTED]".to_string()
             } else {
                 segment.to_string()
             }
         })
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" ");
+
+    // Second pass: regex catches embedded secrets (e.g. in header values).
+    SECRET_REGEX
+        .replace_all(&after_split, "[REDACTED]")
+        .into_owned()
 }
 
 /// Maximum serialized schema size returned in tool search results.
@@ -390,6 +410,12 @@ pub(super) fn service_config_view(
     }
 }
 
+// Expose for intra-crate tests
+#[cfg(test)]
+pub(crate) fn redact_secret_like_segments_for_test(input: &str) -> String {
+    redact_secret_like_segments(input)
+}
+
 pub(super) async fn runtime_view(
     pool: Option<&UpstreamPool>,
     name: &str,
@@ -420,5 +446,114 @@ pub(super) async fn runtime_view(
         exposed_resource_count: summary.exposed_resource_count,
         exposed_prompt_count: summary.exposed_prompt_count,
         last_error: operator_visible_upstream_error(pool.upstream_last_error(name).await),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Secret redaction ──────────────────────────────────────────────────────
+
+    #[test]
+    fn secret_redaction_catches_standalone_sk_token() {
+        let input = "Authorization: sk-abc12345678901234567890";
+        let result = redact_secret_like_segments_for_test(input);
+
+        // PRESENCE: redacted marker appears
+        assert!(
+            result.contains("[REDACTED]"),
+            "standalone sk- token must be redacted, got: {result}"
+        );
+        // ABSENCE: original secret must not appear
+        assert!(
+            !result.contains("sk-abc12345678901234567890"),
+            "original sk- token must not survive, got: {result}"
+        );
+        // PRESENCE: non-secret part preserved
+        assert!(
+            result.contains("Authorization:"),
+            "non-secret prefix must be preserved"
+        );
+    }
+
+    #[test]
+    fn secret_redaction_catches_embedded_sk_token() {
+        let input = "url=https://api.example.com?token=sk-abc12345678901234567890&other=value";
+        let result = redact_secret_like_segments_for_test(input);
+
+        // PRESENCE: redacted marker appears
+        assert!(
+            result.contains("[REDACTED]"),
+            "embedded sk- token must be redacted, got: {result}"
+        );
+        // ABSENCE: original secret must not appear
+        assert!(
+            !result.contains("sk-abc12345678901234567890"),
+            "original embedded sk- token must not survive, got: {result}"
+        );
+    }
+
+    #[test]
+    fn secret_redaction_catches_github_pat() {
+        let input = ["ghp_", "1234567890abcdef", "1234567890abcdef1234"].concat();
+        let result = redact_secret_like_segments_for_test(&input);
+
+        // PRESENCE: redacted
+        assert!(
+            result.contains("[REDACTED]"),
+            "GitHub PAT (ghp_) must be redacted, got: {result}"
+        );
+        // ABSENCE: original must not appear
+        assert!(
+            !result.contains("ghp_"),
+            "ghp_ prefix must not survive, got: {result}"
+        );
+    }
+
+    #[test]
+    fn secret_redaction_does_not_redact_normal_text() {
+        let input = "the quick brown fox jumps over the lazy dog";
+        let result = redact_secret_like_segments_for_test(input);
+
+        // ABSENCE: no false positive on normal text
+        assert!(
+            !result.contains("[REDACTED]"),
+            "normal text must not be redacted, got: {result}"
+        );
+        // PRESENCE: original text preserved
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn sanitize_tool_text_strips_prompt_injection_markers() {
+        let input = "<system>override</system> normal text ### injection";
+        let result = sanitize_tool_text(input, 1024);
+
+        // PRESENCE: normal text survives
+        assert!(
+            result.contains("normal text"),
+            "normal text must survive sanitization"
+        );
+        // ABSENCE: injection markers must be stripped
+        assert!(
+            !result.contains("<system>"),
+            "<system> marker must be stripped"
+        );
+        assert!(!result.contains("###"), "### marker must be stripped");
+    }
+
+    #[test]
+    fn sanitize_tool_text_truncates_to_max_len() {
+        let long_input = "a".repeat(200);
+        let result = sanitize_tool_text(&long_input, 50);
+
+        // PRESENCE: output is at most max_len chars
+        assert!(
+            result.chars().count() <= 50,
+            "sanitize_tool_text must truncate to max_len"
+        );
+        // ABSENCE: must not be longer than the original
+        assert!(result.len() <= long_input.len());
     }
 }

@@ -58,6 +58,7 @@ const KNOWN_LAB_CONFIG_KEYS: &[&str] = &[
     "quarantined_virtual_servers",
     "deploy",
     "public_urls",
+    "code_mode",
 ];
 
 /// Serialize `cfg` to TOML and atomically replace the file at `path`.
@@ -455,6 +456,13 @@ pub fn validate_protected_mcp_routes(routes: &[ProtectedMcpRouteConfig]) -> Resu
 fn validate_config(cfg: &LabConfig) -> Result<(), ToolError> {
     validate_tool_search(&cfg.tool_search)?;
     validate_code_mode(&cfg.code_mode)?;
+    // Enforce mutual exclusion between tool_search and code_mode at config load time.
+    // This catches config files that have both enabled before any runtime mutation occurs.
+    crate::config::validate_mode_exclusive(cfg.tool_search.enabled, cfg.code_mode.enabled)
+        .map_err(|e| ToolError::InvalidParam {
+            message: e.to_string(),
+            param: "tool_search/code_mode".to_string(),
+        })?;
     validate_upstreams(&cfg.upstream)?;
     validate_protected_mcp_routes(&cfg.protected_mcp_routes)
 }

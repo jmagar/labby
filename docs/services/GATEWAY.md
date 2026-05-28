@@ -83,21 +83,41 @@ Typical patch payloads:
 { "action": "gateway.update", "params": { "confirm": true, "name": "github", "patch": { "expose_tools": null } } }
 ```
 
-## Tool Search Mode
+## Exclusive Gateway Modes
 
-Gateway tool-search mode is a single gateway-wide switch. It is not configured per upstream server.
+Lab exposes exactly **one** mode at a time. Tool Search mode and Code Mode are mutually exclusive —
+enabling one while the other is active is rejected with `InvalidParam`.
 
-When enabled, Lab hides raw proxied upstream tools from MCP `list_tools()` and exposes synthetic gateway tools instead:
+### Tool Search Mode
 
-| Tool | Purpose |
-|------|---------|
-| `tool_search` | Search healthy discovered Lab and upstream tools across the gateway. Legacy alias: `scout`. |
-| `tool_execute` | Invoke one tool returned by `tool_search`. Legacy aliases: `invoke`, `tool_invoke`. |
-| `code_search` | Return Code Mode candidates with stable ids and schema availability. |
-| `code_schema` | Return the exact schema/contract for one `code_search` id. |
-| `code_execute` | Execute a constrained Code Mode snippet through the gateway broker when enabled. |
+When enabled, Lab hides raw proxied upstream tools from MCP `list_tools()` and exposes
+**exactly two** synthetic gateway tools:
 
-This keeps the MCP catalog small while still allowing clients to reach every exposed upstream tool. Per-upstream `expose_tools` filters still apply before tools enter the searchable catalog.
+| Tool | Purpose | Legacy aliases (callable, hidden from `list_tools`) |
+|------|---------|------|
+| `search` | Search healthy discovered Lab and upstream tools across the gateway. | `tool_search`, `scout` |
+| `execute` | Invoke one tool returned by `search`. | `tool_execute`, `invoke`, `tool_invoke` |
+
+This keeps the MCP catalog small while still allowing clients to reach every exposed upstream tool.
+Per-upstream `expose_tools` filters still apply before tools enter the searchable catalog.
+
+### Code Mode
+
+When enabled, Lab hides raw proxied upstream tools from MCP `list_tools()` and exposes
+**exactly one** synthetic gateway tool:
+
+| Tool | Purpose | Legacy aliases (callable, hidden from `list_tools`) |
+|------|---------|------|
+| `code` | Typed TypeScript sandbox. Discovery via injected preamble; execution via constrained JS runner. | `code_search`, `code_execute` |
+
+Discovery happens through the typed TypeScript preamble injected into the sandbox (`codemode.<upstream>.<tool>()`
+typed helpers), NOT through a separate advertised discovery tool. The `code` tool dispatches via `action`:
+`search` for catalog read, `execute` for sandbox execution.
+
+Code Mode is schema-first discovery plus opt-in sandboxed execution. Business logic lives in gateway dispatch
+and is exposed through the `code` MCP tool and the native CLI (`labby gateway code search|schema|exec`).
+Both adapters use the same stable ids, schema response types, sandbox runner, visibility checks, and brokered
+execution path.
 
 Configuration lives at root `[tool_search]` in `config.toml`:
 
@@ -149,49 +169,7 @@ Invoke call shape on the MCP surface:
 { "name": "search_issues", "arguments": { "query": "repo:jmagar/lab tool_search" } }
 ```
 
-Code Mode is schema-first discovery plus opt-in sandboxed execution. The
-business logic lives in gateway dispatch and is exposed through two adapters:
-the MCP meta-tools (`code_search`, `code_schema`, `code_execute`) and the native
-CLI (`labby gateway code search|schema|exec`). Both adapters use the same stable
-ids, schema response types, sandbox runner, visibility checks, and brokered
-execution path.
-
-`code_search` returns stable ids for upstream tools:
-
-```json
-{ "query": "github issues", "top_k": 10 }
-```
-
-Example candidate ids:
-
-```json
-[
-  { "id": "upstream::github::search_issues", "name": "search_issues", "upstream": "github", "schema_available": true }
-]
-```
-
-`code_schema` then resolves one candidate id to the precise contract:
-
-```json
-{ "id": "upstream::github::search_issues" }
-```
-
-Native CLI equivalents:
-
-```bash
-labby gateway code search "gateway servers" --json
-labby gateway code schema "upstream::github::search_issues" --json
-labby gateway code exec --code 'await callTool("upstream::github::search_issues", {"query":"repo:jmagar/lab gateway"})' --json
-```
-
-Code Mode handles upstream MCP tools only. Lab actions should be called through
-the `tool_execute` MCP tool instead. Upstream ids use
-`upstream::<upstream-name>::<tool-name>` and return the upstream JSON Schema
-cached by the gateway (`schema_format: "json_schema"`). `code_schema` requires
-the same schema visibility scope as `tool_search include_schema=true`: `lab` or
-`lab:admin`.
-
-`code_execute` is disabled by default. Enable it explicitly with:
+The `code` tool is disabled by default. Enable it explicitly with:
 
 ```toml
 [code_mode]
@@ -203,15 +181,57 @@ max_tool_calls = 8
 Execution runs in a short-lived child process with an embedded JavaScript engine.
 The child gets an empty environment, a temporary working directory, no Node/Deno
 host APIs, and no direct access to the Lab runtime. The only host capability is
-the injected `callTool(id, params)` function, which sends each requested call
-back to the parent gateway for normal visibility, scope, destructive-action, and
-upstream exposure checks. `params` must be JSON-serializable:
+the injected `codemode.<upstream>.<tool>()` typed helpers and the escape-hatch
+`callTool(id, params)` function, which sends each requested call back to the
+parent gateway for normal visibility, scope, destructive-action, and upstream
+exposure checks. `params` must be JSON-serializable.
+
+Code Mode handles upstream MCP tools only. Lab actions should be called through
+the `execute` MCP tool instead (in Tool Search mode). Upstream ids use
+`upstream::<upstream-name>::<tool-name>`.
+
+MCP call shape for catalog search (`action: "search"`):
+
+```json
+{ "action": "search", "code": "async () => tools.filter(t => /container/i.test(t.description))" }
+```
+
+MCP call shape for execution (`action: "execute"`):
 
 ```json
 {
-  "code": "const result = await callTool(\"upstream::github::search_issues\", {\"query\":\"repo:jmagar/lab gateway\"});"
+  "action": "execute",
+  "code": "const result = await callTool('upstream::github::search_issues', {\"query\":\"repo:jmagar/lab gateway\"}); return result;"
 }
 ```
+
+### Mutual Exclusion
+
+`[tool_search]` and `[code_mode]` cannot both be enabled at the same time. This is enforced
+atomically inside a config mutation lock to prevent TOCTOU races:
+
+- Enabling `tool_search` while `code_mode.enabled = true` is rejected with `InvalidParam`.
+- Enabling `code_mode` while `tool_search.enabled = true` is rejected with `InvalidParam`.
+- Disabling either mode is always permitted regardless of the other mode's state.
+- If `config.toml` has both enabled at startup, Lab logs at `ERROR` level and `tool_search` wins.
+
+Advertised tools per active mode:
+
+| Mode | Advertised MCP tools |
+|------|---------------------|
+| Tool Search | `search`, `execute` |
+| Code Mode | `code` |
+| Neither | raw Lab service tools + healthy upstream tools |
+
+Legacy aliases emit a `WARN`-level trace event with `legacy_alias` and `canonical` fields on every
+invocation. Use canonical names in new clients:
+
+| Canonical | Legacy aliases |
+|-----------|---------------|
+| `search` | `tool_search`, `scout` |
+| `execute` | `tool_execute`, `invoke`, `tool_invoke` |
+| `code` (search subaction) | `code_search` |
+| `code` (execute subaction) | `code_execute` |
 
 Rules:
 
@@ -221,12 +241,11 @@ Rules:
 - `code_mode.max_tool_calls` is validated in the range `1..=50`
 - `query` must be non-empty and no longer than 500 characters
 - `include_schema` defaults to `false`; schemas are sanitized before return when requested
-- `code_search` is read-only discovery and accepts `lab:read`, `lab`, or `lab:admin`
-- `code_schema` exposes full schemas and requires `lab` or `lab:admin`
-- `code_execute` requires `lab` or `lab:admin`, is disabled unless `[code_mode].enabled = true`, and brokers calls through the same gateway visibility checks as `tool_execute`
-- Lab actions are not supported inside Code Mode `callTool`; use the `tool_execute` MCP tool for Lab actions
+- `code(search)` is read-only discovery and accepts `lab:read`, `lab`, or `lab:admin`
+- `code(execute)` requires `lab` or `lab:admin`, is disabled unless `[code_mode].enabled = true`, and brokers calls through the same gateway visibility checks as `execute` (canonical) / `tool_execute` (legacy alias)
+- Lab actions are not supported inside Code Mode `callTool`; use the `execute` MCP tool for Lab actions
 - gateway action provenance fields (`origin` and `owner`) are reserved in Code Mode and are overwritten by the broker
-- `code_execute` enforces `timeout_ms` by killing the child process and enforces `max_tool_calls` in the parent before brokering each call
+- `code(execute)` enforces `timeout_ms` by killing the child process and enforces `max_tool_calls` in the parent before brokering each call
 - invalid Code Mode ids return `invalid_code_mode_id`
 - unavailable or overlarge upstream schemas return `schema_unavailable`
 - old `[[upstream]].tool_search` blocks are accepted only as migration input and are dropped on the next gateway config write

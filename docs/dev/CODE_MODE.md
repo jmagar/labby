@@ -1,26 +1,40 @@
 # Code Mode
 
-Code Mode exposes two MCP tools when gateway tool search is enabled:
+Code Mode exposes a **single** MCP tool — `code` — when `[code_mode] enabled = true` in
+`config.toml`. This is mutually exclusive with Tool Search mode (`search` + `execute`).
 
-- `code_search` injects the current upstream MCP tool catalog as `const tools = [...]`
-  inside a constrained JavaScript search sandbox. Each catalog entry contains
-  `id`, `upstream`, `name`, `description`, and sanitized `schema`.
-- `code_execute` runs JavaScript snippets that call `callTool(id, params)` for
-  upstream MCP tool IDs returned by `code_search`.
+The `code` tool accepts a single required field:
+
+```json
+{ "code": "<JavaScript async arrow function body>" }
+```
+
+The sandbox injects the typed `codemode.*` namespace (built from the upstream catalog)
+before your function runs. Each `codemode.<server>.<helper>(params)` call dispatches to the
+real upstream server via `callTool` under the hood. You can also call `callTool` directly
+using `upstream::<server>::<tool>` IDs.
+
+Required scope: `lab:read` to access the catalog; `lab` or `lab:admin` to execute code.
 
 Lab actions are intentionally not exposed through Code Mode. Use the normal
-`invoke`/`tool_execute` surface for Lab service actions.
+`execute` (Tool Search mode) or CLI surface for Lab service actions.
 
 ## Catalog Budget
 
-The inline catalog has a 256KB soft cap and 512KB hard cap. Over the soft cap,
-the catalog is stably pruned and a `__truncated__` sentinel entry is appended.
-Over the hard cap, `code_search` returns `invalid_param` and callers should use
-`scout` for RRF discovery.
+The inline catalog has a 256KB soft cap. Over the soft cap, the catalog is stably
+pruned and two overflow signals are emitted:
+
+- A `__truncated__` sentinel entry is appended to the catalog array (id and name both
+  `"__truncated__"`, upstream `"__catalog__"`), indicating how many tools were dropped.
+- The TypeScript preamble declares `__catalog__` as `string | undefined` (instead of
+  `undefined`) so sandbox code can detect the truncation and fall back to `callTool`.
+
+Use `callTool("upstream::<server>::<tool>", params)` as the escape hatch when tools are
+not listed in the catalog due to overflow.
 
 ## Execute Response Budget
 
-`code_execute` returns a capped envelope. Defaults:
+`code(execute)` returns a capped envelope. Defaults:
 
 - `max_response_bytes = 24576`
 - `max_response_tokens = 6000`

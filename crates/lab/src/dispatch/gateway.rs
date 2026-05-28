@@ -1,6 +1,7 @@
 mod catalog;
 mod client;
 pub mod code_mode;
+pub mod code_mode_preamble;
 pub(crate) mod config;
 mod config_mutation;
 pub mod discovery;
@@ -23,4 +24,5 @@ mod virtual_servers;
 pub use catalog::ACTIONS;
 pub use client::{current_gateway_manager, install_gateway_manager};
 pub use dispatch::{dispatch, dispatch_with_manager};
+pub(crate) use index::score_name_haystack;
 pub(crate) use shared::SHARED_GATEWAY_OAUTH_SUBJECT;

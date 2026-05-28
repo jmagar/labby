@@ -1165,6 +1165,7 @@ mod tests {
                     tool,
                     input_schema: None,
                     upstream_name: std::sync::Arc::clone(&upstream_name),
+                    destructive: false,
                 },
             );
         }

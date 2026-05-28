@@ -90,13 +90,22 @@ fn code_mode_runner_evaluates_js_in_a_minimal_host_environment() {
     )
     .expect("write second result");
 
-    assert_eq!(read_protocol_line(&mut stdout), json!({"type": "done"}));
+    // Done now carries result (the function return value) and logs.
+    let done = read_protocol_line(&mut stdout);
+    assert_eq!(done["type"], "done");
+    // The test code has no explicit return — result is None (serialized as null).
+    assert!(done["result"].is_null());
+    // logs is always [] until Bead 3 console capture is implemented.
+    assert_eq!(done["logs"], json!([]));
     let status = child.wait().expect("wait for runner");
     assert!(status.success(), "runner exited with {status}");
     let mut stderr_text = String::new();
     stderr
         .read_to_string(&mut stderr_text)
         .expect("read runner stderr");
+    // Console.log capture routes to stderr only on the WASM/Javy path; the
+    // Boa path defers console capture to Bead 3 (boa_runtime integration).
+    #[cfg(feature = "code_mode_wasm")]
     assert!(stderr_text.contains("runner console check"));
 }
 
@@ -191,7 +200,126 @@ fn code_mode_runner_fans_out_promise_all_tool_calls() {
     )
     .expect("write after result");
 
-    assert_eq!(read_protocol_line(&mut stdout), json!({"type": "done"}));
+    // Done now carries result (the function return value) and logs.
+    let done = read_protocol_line(&mut stdout);
+    assert_eq!(done["type"], "done");
+    // The test code has no explicit return — result is None (serialized as null).
+    assert!(done["result"].is_null());
+    // logs is always [] until Bead 3 console capture is implemented.
+    assert_eq!(done["logs"], json!([]));
+    let status = child.wait().expect("wait for runner");
+    assert!(status.success(), "runner exited with {status}");
+}
+
+/// Verify that Done carries a non-null result when the async function explicitly
+/// returns a value. This tests the result field extraction fix (bead lab-y08q1.1).
+#[test]
+fn code_mode_runner_done_carries_return_value() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+
+    // The function fetches one tool result and returns it directly.
+    let code = r#"
+        const result = await callTool("upstream::test::ping", {"msg": "hello"});
+        return result;
+    "#;
+
+    writeln!(stdin, "{}", json!({"type": "start", "code": code})).expect("write start");
+
+    assert_eq!(
+        read_protocol_line(&mut stdout),
+        json!({
+            "type": "tool_call",
+            "seq": 0,
+            "id": "upstream::test::ping",
+            "params": {"msg": "hello"}
+        })
+    );
+    writeln!(
+        stdin,
+        "{}",
+        json!({"type": "tool_result", "seq": 0, "result": {"pong": true}})
+    )
+    .expect("write tool result");
+
+    let done = read_protocol_line(&mut stdout);
+    assert_eq!(done["type"], "done", "expected done message");
+    // The function returned the tool result — should be non-null.
+    assert_eq!(
+        done["result"],
+        json!({"pong": true}),
+        "done.result must carry the function return value"
+    );
+    assert_eq!(done["logs"], json!([]), "logs must be empty until Bead 3");
+    let status = child.wait().expect("wait for runner");
+    assert!(status.success(), "runner exited with {status}");
+}
+
+/// Verify that tool errors are rejected with a JSON-encoded CodeModeError object,
+/// not a plain "kind: message" string. This tests the error format fix (bead lab-y08q1.1).
+#[test]
+fn code_mode_runner_tool_error_produces_json_encoded_error() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+
+    // The function catches the error and returns the parsed CodeModeError shape.
+    // If the rejection is plain text, JSON.parse will throw SyntaxError and
+    // the function itself will error, causing Done to never appear.
+    let code = r#"
+        try {
+            await callTool("upstream::test::fail", {});
+        } catch (e) {
+            const parsed = JSON.parse(String(e.message));
+            return {caught: true, kind: parsed.kind, msg: parsed.message};
+        }
+    "#;
+
+    writeln!(stdin, "{}", json!({"type": "start", "code": code})).expect("write start");
+
+    assert_eq!(
+        read_protocol_line(&mut stdout),
+        json!({
+            "type": "tool_call",
+            "seq": 0,
+            "id": "upstream::test::fail",
+            "params": {}
+        })
+    );
+    // Inject a tool_error — the runner must reject the promise with JSON.
+    writeln!(
+        stdin,
+        "{}",
+        json!({"type": "tool_error", "seq": 0, "kind": "server_error", "message": "upstream exploded"})
+    )
+    .expect("write tool_error");
+
+    let done = read_protocol_line(&mut stdout);
+    assert_eq!(
+        done["type"], "done",
+        "expected done message — if missing, JSON.parse threw SyntaxError"
+    );
+    // The catch block should have parsed the JSON error and returned the structured result.
+    assert_eq!(done["result"]["caught"], json!(true));
+    assert_eq!(done["result"]["kind"], json!("server_error"));
+    assert_eq!(done["result"]["msg"], json!("upstream exploded"));
     let status = child.wait().expect("wait for runner");
     assert!(status.success(), "runner exited with {status}");
 }

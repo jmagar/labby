@@ -43,6 +43,7 @@ anyhow.workspace = true
 thiserror.workspace = true
 jiff.workspace = true
 boa_engine = "0.21.1"
+boa_runtime = "0.21"
 javy = { version = "7.0.0", optional = true }
 wasmtime = { version = "44.0.1", optional = true, default-features = false, features = [
   "cranelift",
@@ -80,6 +81,7 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 hmac.workspace = true
 chacha20poly1305 = "0.10"
 dashmap = "6"
+lru = "0.16"
 diffy-imara = "0.3"
 arc-swap = "1"
 tokio-util = { version = "0.7", features = ["rt", "compat"] }

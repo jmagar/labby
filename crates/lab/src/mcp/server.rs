@@ -5,6 +5,7 @@
 
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
+use std::cmp::Ordering as CmpOrdering;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Instant;
@@ -26,9 +27,9 @@ use crate::config::NodeRole;
 use crate::dispatch::error::ToolError as DispatchToolError;
 use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
 use crate::dispatch::gateway::code_mode::{CodeModeBroker, CodeModeCaller, CodeModeSurface};
-use crate::dispatch::gateway::manager::GatewayManager;
+use crate::dispatch::gateway::manager::{GatewayManager, GatewayToolSearchResult};
 use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
-use crate::mcp::catalog::{TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME};
+use crate::mcp::catalog::{CODE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME};
 use crate::mcp::elicitation::{ElicitResult, elicit_confirm};
 use crate::mcp::envelope::{build_error, build_error_extra, build_success};
 use crate::mcp::error::DispatchError;
@@ -42,20 +43,29 @@ const CODE_MODE_MAX_CODE_BYTES: usize = 20_000;
 /// Source of truth: `docs/contracts/CODE_NODE_CONTRACT_FOR_RETARD_AGENTS.md`
 /// Full spec:       `docs/specs/CODE_MODE_SPEC_FOR_RETARD_AGENTS.md`
 ///
-/// This description is what the model receives. Keep it under 8192 bytes.
-/// The contract doc is the canonical reference — if this and that doc diverge,
-/// update this string to match the contract doc.
+/// Cloudflare `createCodeTool` parity (`cloudflare/agents/packages/codemode/src/tool.ts`):
+/// the typed catalog of upstream MCP tools is injected into THIS description
+/// at `{{types}}` substitution time during `list_tools`. The model reads it
+/// once and writes a single `code` snippet — no discovery round-trip, no
+/// `action` discriminator, no separate "preamble" sub-tool.
+///
+/// `{{types}}` is replaced with the auto-generated `declare namespace codemode { ... }`
+/// block produced by `CodeModeBroker::preamble_string()`.
 const CODE_EXECUTE_DESCRIPTION: &str = "\
 Execute JavaScript in the Code Mode sandbox. Every upstream MCP tool is pre-declared \
-as a typed TypeScript helper in the `codemode` namespace — read the types, call the \
-functions. No separate discovery step required.
+as a typed TypeScript helper in the `codemode` namespace — read the types below, \
+call the functions. No separate discovery step.
 
 `Promise.all([...])` dispatches `callTool` requests in parallel — batch independent \
 reads instead of awaiting serially.
 
+The typed catalog of every upstream MCP tool currently connected to this gateway \
+follows. Read the namespace, write your async function against it.
+
 ```ts
-// codemode.<upstream>.<tool>() helpers are auto-generated from the live catalog.
-// Use them. callTool is the escape hatch for dynamic IDs or truncated catalogs.
+{{types}}
+
+// callTool is the escape hatch for dynamic ids or tools dropped by the catalog cap.
 declare function callTool<T = unknown>(
   id: `upstream::${string}::${string}`,
   params: Record<string, unknown>
@@ -88,6 +98,33 @@ Fuel budget:
 
 Lab actions (`lab::*` tool IDs) are not available in Code Mode. For Lab built-in \
 actions use the `execute` tool in Tool Search mode.";
+
+/// Total budget for the rendered description (template + injected types). MCP \
+/// clients vary, but most cap tool descriptions around 8–16 KB; 16 KB is safe.
+const CODE_DESCRIPTION_RENDER_MAX_BYTES: usize = 16 * 1024;
+
+/// **LOCKED CONTRACT** — the `code` tool's input schema is exactly this and
+/// nothing else. Pre-commit must fail if anything is added, removed, or
+/// reordered. See:
+/// - `cloudflare/agents/packages/codemode/src/tool.ts` — upstream parity
+/// - `docs/specs/CODE_MODE_SPEC_FOR_RETARD_AGENTS.md` — local spec
+/// - `crate::mcp::tests::code_tool_input_schema_is_locked` — guard test
+///
+/// If you genuinely need to change this, update Cloudflare parity rationale
+/// in the spec doc, then update the guard test, then this function. In that
+/// order. Do not skip steps.
+pub(crate) fn code_tool_input_schema() -> Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "code": {
+                "type": "string",
+                "description": "JavaScript statements to execute inside an async function body in the Code Mode sandbox. Use await callTool(id, params) with JSON-serializable params. Do NOT wrap in an arrow function — write the body directly."
+            }
+        },
+        "required": ["code"]
+    })
+}
 
 #[cfg(test)]
 use crate::mcp::peers::PeerNotifier;
@@ -1122,6 +1159,7 @@ impl ServerHandler for LabMcpServer {
         let visibility = self.tool_search_visibility().await;
         let manager_tool_search_enabled = visibility.exposes_synthetic_tools();
         let process_tool_search_enabled = crate::config::process_tool_search_enabled();
+        let process_code_mode_enabled = crate::config::is_code_mode_enabled();
         let hide_raw_tools = visibility.hides_raw_tools();
         let visibility_mode = visibility.mode_label();
         for svc in self.registry.services() {
@@ -1134,62 +1172,143 @@ impl ServerHandler for LabMcpServer {
                 }
             }
         }
-        if manager_tool_search_enabled {
-            // Gateway meta-tools: search (Boa JS against upstream catalog) + execute (subprocess sandbox).
+        if visibility.exposes_code_tool() {
+            // ── Code Mode ── one advertised tool: `code`. ───────────────────────
+            //
+            // CLOUDFLARE-PARITY CONTRACT (locked by tests; see
+            // crates/lab/src/mcp/tests/code_tool_input_schema_is_locked.rs):
+            //   Input schema is EXACTLY { code: string } with code required.
+            //   No `action` discriminator. No `max_tool_calls`. No `confirm`.
+            //   Anything else is a spec violation per
+            //   docs/specs/CODE_MODE_SPEC_FOR_RETARD_AGENTS.md.
+            //
+            // The typed catalog is injected into the tool's DESCRIPTION at
+            // `{{types}}` substitution time — matching `createCodeTool` in
+            // `cloudflare/agents/packages/codemode/src/tool.ts`.
+            let code_tool_schema = match code_tool_input_schema() {
+                Value::Object(map) => Arc::new(map),
+                _ => unreachable!("code_tool_input_schema must return an object"),
+            };
+
+            // Build the per-request description: substitute the typed namespace
+            // for `{{types}}`. On any preamble-generation error or oversized
+            // output, fall back to an empty namespace block — the model can
+            // still call `callTool` directly with raw upstream::server::tool ids.
+            let description = if self.gateway_code_mode_enabled().await {
+                let auth = auth_context_from_extensions(&context.extensions);
+                let caller = auth.map_or(CodeModeCaller::TrustedLocal, |auth| {
+                    CodeModeCaller::Scoped {
+                        scopes: auth.scopes.clone(),
+                        sub: self.request_subject(&context).map(ToOwned::to_owned),
+                    }
+                });
+                let broker = CodeModeBroker::new(&self.registry, self.gateway_manager.as_deref());
+                match broker
+                    .preamble_string(caller, self.code_mode_surface(false))
+                    .await
+                {
+                    Ok(types) => {
+                        let rendered = CODE_EXECUTE_DESCRIPTION.replace("{{types}}", &types);
+                        if rendered.len() > CODE_DESCRIPTION_RENDER_MAX_BYTES {
+                            tracing::warn!(
+                                surface = "mcp",
+                                service = CODE_TOOL_NAME,
+                                action = "tool.describe",
+                                rendered_bytes = rendered.len(),
+                                cap_bytes = CODE_DESCRIPTION_RENDER_MAX_BYTES,
+                                "Code Mode rendered description exceeded cap; falling back to empty namespace block"
+                            );
+                            CODE_EXECUTE_DESCRIPTION
+                                .replace("{{types}}", "declare namespace codemode { /* catalog too large — use callTool with upstream::<server>::<tool> ids */ }")
+                        } else {
+                            rendered
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            surface = "mcp",
+                            service = CODE_TOOL_NAME,
+                            action = "tool.describe",
+                            kind = err.kind(),
+                            error = %err,
+                            "Code Mode preamble generation failed; advertising tool with empty namespace block"
+                        );
+                        CODE_EXECUTE_DESCRIPTION
+                            .replace("{{types}}", "declare namespace codemode { /* preamble unavailable — use callTool with upstream::<server>::<tool> ids */ }")
+                    }
+                }
+            } else {
+                CODE_EXECUTE_DESCRIPTION
+                    .replace("{{types}}", "declare namespace codemode { /* code mode is enabled but no upstreams are connected */ }")
+            };
+
+            tracing::info!(
+                surface = "mcp",
+                service = CODE_TOOL_NAME,
+                action = "tool.describe",
+                description_bytes = description.len(),
+                "registered Code Mode tool description"
+            );
+            tools.push(Tool::new(CODE_TOOL_NAME, description, code_tool_schema));
+            gateway_tool_count += 1;
+        } else if visibility.exposes_synthetic_tools() {
+            // ── Tool Search mode ── `search` + `execute` only. ───────────────
+            // Legacy aliases (tool_search, tool_execute) are NOT advertised.
             // See mcp/CLAUDE.md for the exception rationale and dispatch/gateway/dispatch.rs guard.
-            let search_schema = match serde_json::json!({
+            let tool_search_schema = match serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "code": {
-                        "type": "string",
-                        "description": "JavaScript async arrow function to search the upstream MCP tool catalog. \
-                            The sandbox injects `const tools = [...]` where each entry has id, upstream, \
-                            name, description, and schema. Return JSON-serializable results. \
-                            Examples: \
-                            `async () => tools.filter(t => /container.*log/i.test(t.description)).map(t => ({id:t.id, schema:t.schema}))`; \
-                            `async () => tools.find(t => t.id === \"upstream::github::search_issues\")`; \
-                            `async () => tools.filter(t => t.upstream === \"github\").slice(0, 20)`."
-                    }
+                    "query": { "type": "string", "maxLength": 500 },
+                    "top_k": { "type": "integer", "minimum": 1, "maximum": 50 },
+                    "include_schema": { "type": "boolean", "default": false }
                 },
-                "required": ["code"]
+                "required": ["query"]
             }) {
                 Value::Object(map) => Arc::new(map),
-                _ => unreachable!("search schema must be an object"),
+                _ => unreachable!("tool_search schema must be an object"),
             };
             tools.push(Tool::new(
                 TOOL_SEARCH_TOOL_NAME,
-                "Filter the upstream MCP tool catalog with JavaScript. Write an async arrow function \
-                that filters `const tools = [...]` (each entry: id, upstream, name, description, schema) \
-                and returns what you need. No embedding model, no vector DB — the agent writes the filter. \
-                Use before execute() to discover the right tool id.",
-                search_schema,
+                "Search Lab and proxied upstream tool catalogs \
+                using 2-4 intent words (e.g. \"docker container restart\", \
+                \"send push notification\", \"unifi wifi clients\"). \
+                Use this before execute to discover available tool names \
+                and their required arguments. Returns tool names, descriptions, \
+                and optionally full input schemas. \
+                Covers: Docker/containers (arcane), notifications (apprise/gotify), \
+                networking (unifi/tailscale), storage (unraid), AI/RAG (axon), \
+                and all other connected upstream MCP servers.",
+                tool_search_schema,
             ));
             gateway_tool_count += 1;
-            let execute_schema = match serde_json::json!({
+            let tool_execute_schema = match serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "code": {
+                    "name": { "type": "string" },
+                    "upstream": {
                         "type": "string",
-                        "description": "JavaScript statements to execute inside an async function body. Use await callTool(id, params) with JSON-serializable params. Do NOT wrap in an arrow function — write the body directly."
-                    }
+                        "description": "Optional upstream MCP server name. Equivalent to passing name as upstream::tool."
+                    },
+                    "arguments": { "type": "object" }
                 },
-                "required": ["code"]
+                "required": ["name", "arguments"]
             }) {
                 Value::Object(map) => Arc::new(map),
-                _ => unreachable!("execute schema must be an object"),
+                _ => unreachable!("tool_execute schema must be an object"),
             };
-            debug_assert!(CODE_EXECUTE_DESCRIPTION.len() < 8192);
-            tracing::info!(
-                surface = "mcp",
-                service = "execute",
-                action = "tool.describe",
-                description_bytes = CODE_EXECUTE_DESCRIPTION.len(),
-                "registered Code Mode execute description"
-            );
             tools.push(Tool::new(
                 TOOL_EXECUTE_TOOL_NAME,
-                CODE_EXECUTE_DESCRIPTION,
-                execute_schema,
+                "Invoke one Lab or upstream tool discovered through search. \
+                Pass the exact tool name returned by search and a JSON \
+                arguments object matching that tool's schema. If search returns \
+                duplicate tool names, pass either name as upstream::tool or set \
+                upstream to the returned upstream server name. \
+                Lab built-in tools take {\"action\": \"<name>\", \"params\": {...}}. \
+                Upstream tools use their own schema (retrieve with \
+                search include_schema=true). \
+                When search returns no match, call search with \
+                different keywords before giving up.",
+                tool_execute_schema,
             ));
             gateway_tool_count += 1;
         }
@@ -1257,6 +1376,7 @@ impl ServerHandler for LabMcpServer {
             suppressed_builtin_tool_count,
             manager_tool_search_enabled,
             process_tool_search_enabled,
+            process_code_mode_enabled,
             hide_raw_tools,
             visibility_mode,
             total_tool_count = tools.len(),
@@ -1296,115 +1416,32 @@ impl ServerHandler for LabMcpServer {
         let param_key_count = params.as_object().map_or(0, serde_json::Map::len);
 
         let svc = self.registry.services().iter().find(|s| s.name == service);
-        if service == TOOL_SEARCH_TOOL_NAME {
+
+        // ── Canonical Code Mode tool: `code` (action = search | execute) ─────
+        if service == CODE_TOOL_NAME && self.gateway_code_mode_enabled().await {
             let started = Instant::now();
             let input_tokens = estimate_tokens_args(&args);
             let subject = self.request_subject_log_tag(&context);
             let auth = auth_context_from_extensions(&context.extensions);
-            if !tool_search_scope_allowed(auth) {
-                tracing::warn!(
-                    surface = "mcp",
-                    service = %service,
-                    action = "call_tool",
-                    subject,
-                    elapsed_ms = started.elapsed().as_millis(),
-                    input_tokens,
-                    kind = "forbidden",
-                    "gateway code search denied by scope"
-                );
-                let env = build_error_extra(
-                    &service,
-                    "call_tool",
-                    "forbidden",
-                    "code_search requires one of scopes: lab:read, lab, lab:admin",
-                    &serde_json::json!({ "required_scopes": ["lab:read", "lab", "lab:admin"] }),
-                );
-                return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
-            }
-            let code = args
-                .get("code")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            let code_hash = hash_arguments(&Value::String(code.clone()));
             let Some(manager) = &self.gateway_manager else {
                 let envelope = build_error(
                     &service,
                     "call_tool",
-                    "unknown_tool",
-                    "code search is not enabled",
+                    "internal_error",
+                    "Code Mode is not enabled (gateway_manager missing)",
                 );
                 return Ok(CallToolResult::error(vec![Content::text(
                     envelope.to_string(),
                 )]));
             };
-            tracing::info!(
-                surface = "mcp",
-                service = "code_search",
-                action = "call_tool",
-                subject,
-                code_hash = %code_hash,
-                code_len = code.len(),
-                input_tokens,
-                "gateway code search start"
-            );
-            let broker = CodeModeBroker::new(&self.registry, Some(manager));
-            let caller = auth.map_or(CodeModeCaller::TrustedLocal, |auth| {
-                CodeModeCaller::Scoped {
-                    scopes: auth.scopes.clone(),
-                    subject: self.request_subject(&context).map(ToOwned::to_owned),
-                }
-            });
-            return match broker
-                .search(&code, caller, self.code_mode_surface(false))
-                .await
-            {
-                Ok(response) => {
-                    let output =
-                        serde_json::to_string(&response).unwrap_or_else(|_| "null".to_string());
-                    let output_tokens = estimate_tokens(&output);
-                    tracing::info!(
-                        surface = "mcp",
-                        service = "code_search",
-                        action = "call_tool",
-                        subject,
-                        code_hash = %code_hash,
-                        code_len = code.len(),
-                        elapsed_ms = started.elapsed().as_millis(),
-                        input_tokens,
-                        output_tokens,
-                        "gateway code search ok"
-                    );
-                    Ok(CallToolResult::success(vec![Content::text(output)]))
-                }
-                Err(err) => {
-                    tracing::warn!(
-                        surface = "mcp",
-                        service = "code_search",
-                        action = "call_tool",
-                        subject,
-                        code_hash = %code_hash,
-                        code_len = code.len(),
-                        elapsed_ms = started.elapsed().as_millis(),
-                        input_tokens,
-                        kind = err.kind(),
-                        error = %err,
-                        "gateway code search failed"
-                    );
-                    let env = tool_error_envelope(&service, "call_tool", &err);
-                    Ok(CallToolResult::error(vec![Content::text(env.to_string())]))
-                }
-            };
-        }
-        if service == TOOL_EXECUTE_TOOL_NAME {
-            let started = Instant::now();
-            let input_tokens = estimate_tokens_args(&args);
-            let subject = self.request_subject_log_tag(&context);
-            let auth = auth_context_from_extensions(&context.extensions);
+            // Cloudflare-parity: the `code` tool takes only `{ code: string }`.
+            // There is no `action` discriminator and no `max_tool_calls` /
+            // `confirm` in the input — that pattern is the spec violation we
+            // removed. See `code_tool_input_schema()` above.
             if !tool_execute_scope_allowed(auth) {
                 tracing::warn!(
                     surface = "mcp",
-                    service = %service,
+                    service = CODE_TOOL_NAME,
                     action = "call_tool",
                     subject,
                     elapsed_ms = started.elapsed().as_millis(),
@@ -1416,23 +1453,21 @@ impl ServerHandler for LabMcpServer {
                     &service,
                     "call_tool",
                     "forbidden",
-                    "code_execute requires one of scopes: lab, lab:admin",
+                    "code requires one of scopes: lab, lab:admin",
                     &serde_json::json!({ "required_scopes": ["lab", "lab:admin"] }),
                 );
                 return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
             }
-            let Some(manager) = &self.gateway_manager else {
-                let envelope = build_error(
+            let config = manager.code_mode_config().await;
+            if !config.enabled {
+                let env = build_error(
                     &service,
                     "call_tool",
-                    "unknown_tool",
-                    "code execute is not enabled",
+                    "internal_error",
+                    "Code Mode execution is disabled; set [code_mode].enabled = true to enable it",
                 );
-                return Ok(CallToolResult::error(vec![Content::text(
-                    envelope.to_string(),
-                )]));
-            };
-            let config = manager.code_mode_config().await;
+                return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+            }
             let code = args.get("code").and_then(Value::as_str).unwrap_or_default();
             if code.trim().is_empty() {
                 let env = build_error_extra(
@@ -1454,23 +1489,18 @@ impl ServerHandler for LabMcpServer {
                 );
                 return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
             }
-            let requested_max_tool_calls = args
-                .get("max_tool_calls")
-                .and_then(Value::as_u64)
-                .map(|value| value as usize)
-                .unwrap_or(config.max_tool_calls)
-                .max(1)
-                .min(config.max_tool_calls);
-            let allow_destructive_actions =
-                args.get("confirm").and_then(Value::as_bool) == Some(true);
+            // No per-call `max_tool_calls` or `confirm` in the input contract
+            // (Cloudflare parity). Use the configured defaults for both.
+            let max_tool_calls = config.max_tool_calls.max(1);
+            let allow_destructive_actions = false;
             let code_hash = hash_arguments(&Value::String(code.to_string()));
             tracing::info!(
                 surface = "mcp",
-                service = "code_execute",
+                service = CODE_TOOL_NAME,
                 action = "call_tool",
                 subject,
                 code_hash = %code_hash,
-                max_tool_calls = requested_max_tool_calls,
+                max_tool_calls,
                 input_tokens,
                 "gateway code execute start"
             );
@@ -1478,14 +1508,14 @@ impl ServerHandler for LabMcpServer {
             let caller = auth.map_or(CodeModeCaller::TrustedLocal, |auth| {
                 CodeModeCaller::Scoped {
                     scopes: auth.scopes.clone(),
-                    subject: self.request_subject(&context).map(ToOwned::to_owned),
+                    sub: self.request_subject(&context).map(ToOwned::to_owned),
                 }
             });
             let before = self.snapshot_catalog().await;
             let response = match broker
                 .execute(
                     code,
-                    requested_max_tool_calls,
+                    max_tool_calls,
                     caller,
                     self.code_mode_surface(allow_destructive_actions),
                     config,
@@ -1508,7 +1538,7 @@ impl ServerHandler for LabMcpServer {
             let output_tokens = estimate_tokens(&output);
             tracing::info!(
                 surface = "mcp",
-                service = "code_execute",
+                service = CODE_TOOL_NAME,
                 action = "call_tool",
                 subject,
                 code_hash = %code_hash,
@@ -1519,6 +1549,643 @@ impl ServerHandler for LabMcpServer {
                 "gateway code execute ok"
             );
             return Ok(CallToolResult::success(vec![Content::text(output)]));
+        }
+
+        if service == TOOL_SEARCH_TOOL_NAME {
+            let started = Instant::now();
+            let input_tokens = estimate_tokens_args(&args);
+            let subject = self.request_subject_log_tag(&context);
+            let auth = auth_context_from_extensions(&context.extensions);
+            if !tool_search_scope_allowed(auth) {
+                tracing::warn!(
+                    surface = "mcp",
+                    service = %service,
+                    action = "call_tool",
+                    subject,
+                    elapsed_ms = started.elapsed().as_millis(),
+                    input_tokens,
+                    kind = "forbidden",
+                    "gateway tool search denied by scope"
+                );
+                let env = build_error_extra(
+                    &service,
+                    "call_tool",
+                    "forbidden",
+                    "tool_search requires one of scopes: lab:read, lab, lab:admin",
+                    &serde_json::json!({ "required_scopes": ["lab:read", "lab", "lab:admin"] }),
+                );
+                return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+            }
+            let query = args
+                .get("query")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let query_hash = hash_arguments(&Value::String(query.clone()));
+            let requested_top_k = args
+                .get("top_k")
+                .and_then(Value::as_u64)
+                .map(|value| value as usize);
+            let include_schema_requested = args
+                .get("include_schema")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let include_schema = tool_search_include_schema_allowed(auth, include_schema_requested);
+            let Some(manager) = &self.gateway_manager else {
+                let envelope = build_error(
+                    &service,
+                    "call_tool",
+                    "unknown_tool",
+                    "tool search is not enabled",
+                );
+                return Ok(CallToolResult::error(vec![Content::text(
+                    envelope.to_string(),
+                )]));
+            };
+            let top_k = match requested_top_k {
+                Some(value) => value,
+                None => manager.tool_search_config().await.top_k_default,
+            };
+            tracing::info!(
+                surface = "mcp",
+                service = "tool_search",
+                action = "call_tool",
+                subject,
+                query_hash = %query_hash,
+                query_len = query.len(),
+                top_k,
+                include_schema,
+                input_tokens,
+                "gateway tool search start"
+            );
+            let score_floor_fraction = manager.tool_search_config().await.score_floor_fraction;
+            let builtin_results = self
+                .search_builtin_tools(&query, top_k, include_schema, score_floor_fraction)
+                .await;
+            let runtime_owner = self.request_runtime_owner(&context);
+            let oauth_subject =
+                oauth_upstream_subject_for_request(auth, self.request_subject(&context));
+            return match manager
+                .search_tools(
+                    &query,
+                    top_k,
+                    include_schema,
+                    Some(&runtime_owner),
+                    oauth_subject.as_deref(),
+                )
+                .await
+            {
+                Ok(upstream_results) => {
+                    let results =
+                        merge_tool_search_results(builtin_results, upstream_results, top_k);
+                    let output =
+                        serde_json::to_string(&results).unwrap_or_else(|_| "[]".to_string());
+                    let output_tokens = estimate_tokens(&output);
+                    tracing::info!(
+                        surface = "mcp",
+                        service = "tool_search",
+                        action = "call_tool",
+                        subject,
+                        query_hash = %query_hash,
+                        query_len = query.len(),
+                        top_k,
+                        include_schema,
+                        result_count = results.len(),
+                        elapsed_ms = started.elapsed().as_millis(),
+                        input_tokens,
+                        output_tokens,
+                        "gateway tool search ok"
+                    );
+                    Ok(CallToolResult::success(vec![Content::text(output)]))
+                }
+                Err(err) => {
+                    let kind = err.kind();
+                    if kind == "index_warming" && !builtin_results.is_empty() {
+                        let output = serde_json::to_string(&builtin_results)
+                            .unwrap_or_else(|_| "[]".to_string());
+                        let output_tokens = estimate_tokens(&output);
+                        tracing::info!(
+                            surface = "mcp",
+                            service = "tool_search",
+                            action = "call_tool",
+                            subject,
+                            query_hash = %query_hash,
+                            query_len = query.len(),
+                            top_k,
+                            include_schema,
+                            result_count = builtin_results.len(),
+                            elapsed_ms = started.elapsed().as_millis(),
+                            input_tokens,
+                            output_tokens,
+                            upstream_kind = kind,
+                            "gateway tool search ok"
+                        );
+                        return Ok(CallToolResult::success(vec![Content::text(output)]));
+                    }
+                    tracing::warn!(
+                        surface = "mcp",
+                        service = "tool_search",
+                        action = "call_tool",
+                        subject,
+                        query_hash = %query_hash,
+                        query_len = query.len(),
+                        top_k,
+                        include_schema,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        input_tokens,
+                        kind,
+                        error = %err,
+                        "gateway tool search failed"
+                    );
+                    let mut extra = serde_json::Map::new();
+                    if kind == "index_warming" {
+                        extra.insert("retry_after_ms".to_string(), serde_json::json!(2000));
+                    }
+                    if kind == "invalid_param" {
+                        extra.insert("param".to_string(), serde_json::json!("query"));
+                    }
+                    let env = build_error_extra(
+                        &service,
+                        "call_tool",
+                        kind,
+                        &err.to_string(),
+                        &Value::Object(extra),
+                    );
+                    Ok(CallToolResult::error(vec![Content::text(env.to_string())]))
+                }
+            };
+        }
+        if service == TOOL_EXECUTE_TOOL_NAME {
+            let started = Instant::now();
+            let input_tokens = estimate_tokens_args(&args);
+            let tool_name = args
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let requested_upstream = args
+                .get("upstream")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let arguments = args
+                .get("arguments")
+                .cloned()
+                .filter(|value| value.is_object())
+                .unwrap_or_else(|| serde_json::json!({}));
+            let arguments_hash = hash_arguments(&arguments);
+            let subject = self.request_subject_log_tag(&context);
+            let auth = auth_context_from_extensions(&context.extensions);
+            if !tool_execute_scope_allowed(auth) {
+                tracing::warn!(
+                    surface = "mcp",
+                    service = %service,
+                    action = "call_tool",
+                    subject,
+                    upstream_tool = %tool_name,
+                    arguments_hash = %arguments_hash,
+                    elapsed_ms = started.elapsed().as_millis(),
+                    input_tokens,
+                    kind = "forbidden",
+                    "gateway tool execute denied by scope"
+                );
+                let env = build_error_extra(
+                    &service,
+                    "call_tool",
+                    "forbidden",
+                    "tool_execute requires one of scopes: lab, lab:admin",
+                    &serde_json::json!({ "required_scopes": ["lab", "lab:admin"] }),
+                );
+                return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+            }
+            let Some(manager) = &self.gateway_manager else {
+                let envelope = build_error(
+                    &service,
+                    "call_tool",
+                    "unknown_tool",
+                    "tool execute is not enabled",
+                );
+                return Ok(CallToolResult::error(vec![Content::text(
+                    envelope.to_string(),
+                )]));
+            };
+            if let Some(entry) = self
+                .registry
+                .services()
+                .iter()
+                .find(|svc| svc.name == tool_name)
+            {
+                if !self.service_visible_on_mcp(entry.name).await {
+                    tracing::warn!(
+                        surface = "mcp",
+                        service = %service,
+                        action = "call_tool",
+                        subject,
+                        upstream = "lab",
+                        upstream_tool = %tool_name,
+                        arguments_hash = %arguments_hash,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        input_tokens,
+                        kind = "not_found",
+                        "gateway tool execute failed"
+                    );
+                    let env = build_error(
+                        &service,
+                        "call_tool",
+                        "not_found",
+                        &format!("service `{tool_name}` is not enabled on the mcp surface"),
+                    );
+                    return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+                }
+
+                let builtin_action = arguments
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let builtin_params = arguments.get("params").cloned().unwrap_or(Value::Null);
+
+                if !self
+                    .action_allowed_on_mcp(entry.name, &builtin_action)
+                    .await
+                {
+                    tracing::warn!(
+                        surface = "mcp",
+                        service = %service,
+                        action = "call_tool",
+                        subject,
+                        upstream = "lab",
+                        upstream_tool = %tool_name,
+                        arguments_hash = %arguments_hash,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        input_tokens,
+                        kind = "unknown_action",
+                        "gateway tool execute failed"
+                    );
+                    let mut extra = serde_json::Map::new();
+                    if let Some(valid) = self.allowed_mcp_actions(entry.name).await {
+                        extra.insert(
+                            "valid".to_string(),
+                            serde_json::to_value(valid).unwrap_or(Value::Array(Vec::new())),
+                        );
+                    }
+                    let env = build_error_extra(
+                        &service,
+                        "call_tool",
+                        "unknown_action",
+                        &format!(
+                            "action `{builtin_action}` is not exposed for service `{}`",
+                            entry.name
+                        ),
+                        &Value::Object(extra),
+                    );
+                    return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+                }
+
+                if !tool_execute_builtin_action_allowed(
+                    entry,
+                    &builtin_action,
+                    auth_context_from_extensions(&context.extensions),
+                ) {
+                    tracing::warn!(
+                        surface = "mcp",
+                        service = %service,
+                        action = "call_tool",
+                        subject,
+                        upstream = "lab",
+                        upstream_tool = %tool_name,
+                        builtin_action = %builtin_action,
+                        arguments_hash = %arguments_hash,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        input_tokens,
+                        kind = "forbidden",
+                        "gateway tool execute denied by built-in action scope"
+                    );
+                    let env = build_error_extra(
+                        &service,
+                        "call_tool",
+                        "forbidden",
+                        &format!(
+                            "action `{builtin_action}` for service `{}` requires `lab:admin` scope",
+                            entry.name
+                        ),
+                        &serde_json::json!({ "required_scopes": ["lab:admin"] }),
+                    );
+                    return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+                }
+
+                let is_destructive = entry
+                    .actions
+                    .iter()
+                    .any(|action| action.name == builtin_action && action.destructive);
+                if is_destructive {
+                    match elicit_confirm(&context, entry.name, &builtin_action).await {
+                        ElicitResult::Confirmed => {}
+                        ElicitResult::Declined | ElicitResult::Cancelled => {
+                            let env = build_error(
+                                &service,
+                                "call_tool",
+                                "confirmation_required",
+                                &format!(
+                                    "action `{builtin_action}` is destructive — confirm to proceed"
+                                ),
+                            );
+                            return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+                        }
+                        ElicitResult::NotSupported => {
+                            if builtin_params.get("confirm").and_then(Value::as_bool) != Some(true)
+                            {
+                                let env = build_error(
+                                    &service,
+                                    "call_tool",
+                                    "confirmation_required",
+                                    &format!(
+                                        "action `{builtin_action}` is destructive — pass \
+                                         {{\"confirm\":true}} in params or use a client \
+                                         that supports MCP elicitation"
+                                    ),
+                                );
+                                return Ok(CallToolResult::error(vec![Content::text(
+                                    env.to_string(),
+                                )]));
+                            }
+                        }
+                        ElicitResult::Failed => {
+                            let env = build_error(
+                                &service,
+                                "call_tool",
+                                "confirmation_required",
+                                &format!(
+                                    "action `{builtin_action}` is destructive — confirmation failed, retry with a client that supports MCP elicitation"
+                                ),
+                            );
+                            return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+                        }
+                    }
+                }
+
+                tracing::info!(
+                    surface = "mcp",
+                    service = %service,
+                    action = "call_tool",
+                    subject,
+                    upstream = "lab",
+                    upstream_tool = %tool_name,
+                    builtin_action = %builtin_action,
+                    arguments_hash = %arguments_hash,
+                    "gateway tool execute start"
+                );
+                let params = if entry.name == "gateway" {
+                    inject_gateway_origin_param(builtin_params, self.request_subject(&context))
+                } else {
+                    builtin_params
+                };
+                let result = (entry.dispatch)(builtin_action.clone(), params)
+                    .await
+                    .map_err(|te| anyhow::Error::from(DispatchError::from(te)));
+                let elapsed_ms = started.elapsed().as_millis();
+                match &result {
+                    Ok(value) => {
+                        let output_tokens = estimate_tokens_value(value);
+                        tracing::info!(
+                            surface = "mcp",
+                            service = %service,
+                            action = "call_tool",
+                            subject,
+                            upstream = "lab",
+                            upstream_tool = %tool_name,
+                            builtin_action = %builtin_action,
+                            arguments_hash = %arguments_hash,
+                            elapsed_ms,
+                            input_tokens,
+                            output_tokens,
+                            "gateway tool execute ok"
+                        );
+                    }
+                    Err(err) => {
+                        let (kind, _, _) = extract_error_info(err);
+                        tracing::warn!(
+                            surface = "mcp",
+                            service = %service,
+                            action = "call_tool",
+                            subject,
+                            upstream = "lab",
+                            upstream_tool = %tool_name,
+                            builtin_action = %builtin_action,
+                            arguments_hash = %arguments_hash,
+                            elapsed_ms,
+                            input_tokens,
+                            kind,
+                            "gateway tool execute failed"
+                        );
+                    }
+                }
+                let (result, outcome) = format_dispatch_result(
+                    result,
+                    entry.name,
+                    &builtin_action,
+                    elapsed_ms,
+                    &subject,
+                    self.request_actor_key(&context),
+                );
+                self.emit_dispatch_notification(
+                    &context,
+                    entry.name,
+                    &builtin_action,
+                    elapsed_ms,
+                    outcome,
+                )
+                .await;
+                return Ok(result);
+            }
+            let runtime_owner = self.request_runtime_owner(&context);
+            let oauth_subject = oauth_upstream_subject_for_request(
+                auth_context_from_extensions(&context.extensions),
+                self.request_subject(&context),
+            );
+            let resolved = manager
+                .resolve_tool_execute_with_upstream(
+                    &tool_name,
+                    requested_upstream.as_deref(),
+                    Some(&runtime_owner),
+                    oauth_subject.as_deref(),
+                )
+                .await;
+            let (upstream_name, upstream_tool) = match resolved {
+                Ok(value) => value,
+                Err(crate::dispatch::error::ToolError::AmbiguousTool { message, valid }) => {
+                    tracing::warn!(
+                        surface = "mcp",
+                        service = %service,
+                        action = "call_tool",
+                        subject,
+                        upstream_tool = %tool_name,
+                        requested_upstream = requested_upstream.as_deref().unwrap_or(""),
+                        arguments_hash = %arguments_hash,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        input_tokens,
+                        kind = "ambiguous_tool",
+                        valid_count = valid.len(),
+                        "gateway tool execute failed"
+                    );
+                    let mut extra = serde_json::Map::new();
+                    extra.insert("valid".to_string(), serde_json::json!(valid));
+                    extra.insert(
+                        "hint".to_string(),
+                        serde_json::json!(
+                            "Retry with one of the fully-qualified names in `valid`, or set `upstream` to the desired upstream server name and `name` to the raw tool name."
+                        ),
+                    );
+                    let env = build_error_extra(
+                        &service,
+                        "call_tool",
+                        "ambiguous_tool",
+                        &message,
+                        &Value::Object(extra),
+                    );
+                    return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+                }
+                Err(err) => {
+                    let kind = err.kind();
+                    tracing::warn!(
+                        surface = "mcp",
+                        service = %service,
+                        action = "call_tool",
+                        subject,
+                        upstream_tool = %tool_name,
+                        requested_upstream = requested_upstream.as_deref().unwrap_or(""),
+                        arguments_hash = %arguments_hash,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        input_tokens,
+                        kind,
+                        error = %err,
+                        "gateway tool execute failed"
+                    );
+                    let mut extra = serde_json::Map::new();
+                    if kind == "unknown_tool" {
+                        extra.insert(
+                            "hint".to_string(),
+                            serde_json::json!(
+                                "Call tool_search to discover available tools. If tool_search returned duplicate tool names, retry with `upstream::tool` or set `upstream`."
+                            ),
+                        );
+                    }
+                    let env = build_error_extra(
+                        &service,
+                        "call_tool",
+                        kind,
+                        &err.to_string(),
+                        &Value::Object(extra),
+                    );
+                    return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+                }
+            };
+            let upstream_tool_name = upstream_tool.tool.name.to_string();
+            if let Some(pool) = self.current_upstream_pool().await {
+                tracing::info!(
+                    surface = "mcp",
+                    service = %service,
+                    action = "call_tool",
+                    subject,
+                    upstream = %upstream_name,
+                    upstream_tool = %upstream_tool_name,
+                    arguments_hash = %arguments_hash,
+                    input_tokens,
+                    "gateway tool execute start"
+                );
+                let mut upstream_params = CallToolRequestParams::new(upstream_tool_name.clone());
+                upstream_params.arguments = Some(match arguments {
+                    Value::Object(map) => map,
+                    _ => serde_json::Map::new(),
+                });
+                match pool.call_tool(&upstream_name, upstream_params).await {
+                    Some(Ok(result)) => {
+                        let output_tokens =
+                            estimate_tokens(&serde_json::to_string(&result).unwrap_or_default());
+                        tracing::info!(
+                            surface = "mcp",
+                            service = %service,
+                            action = "call_tool",
+                            subject,
+                            upstream = %upstream_name,
+                            upstream_tool = %upstream_tool_name,
+                            arguments_hash = %arguments_hash,
+                            elapsed_ms = started.elapsed().as_millis(),
+                            input_tokens,
+                            output_tokens,
+                            "gateway tool execute ok"
+                        );
+                        return Ok(result);
+                    }
+                    Some(Err(e)) => {
+                        tracing::warn!(
+                            surface = "mcp",
+                            service = %service,
+                            action = "call_tool",
+                            subject,
+                            upstream = %upstream_name,
+                            upstream_tool = %upstream_tool_name,
+                            arguments_hash = %arguments_hash,
+                            elapsed_ms = started.elapsed().as_millis(),
+                            input_tokens,
+                            kind = "upstream_error",
+                            error = %e,
+                            "gateway tool execute failed"
+                        );
+                        let env = build_error(&service, "call_tool", "upstream_error", &e);
+                        return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+                    }
+                    None => {
+                        tracing::warn!(
+                            surface = "mcp",
+                            service = %service,
+                            action = "call_tool",
+                            subject,
+                            upstream = %upstream_name,
+                            upstream_tool = %upstream_tool_name,
+                            arguments_hash = %arguments_hash,
+                            elapsed_ms = started.elapsed().as_millis(),
+                            input_tokens,
+                            kind = "upstream_error",
+                            "gateway tool execute upstream disconnected"
+                        );
+                        let env = build_error(
+                            &service,
+                            "call_tool",
+                            "upstream_error",
+                            &format!("upstream `{upstream_name}` is not connected"),
+                        );
+                        return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+                    }
+                }
+            }
+            // resolve_tool_execute succeeded but no upstream pool is wired
+            // yet (e.g. gateway manager present but runtime handle hasn't
+            // swapped in a pool). Without this branch, execution falls
+            // through to the catch-all "no dispatcher wired" error below,
+            // which is misleading — surface a structured upstream_error
+            // envelope instead.
+            tracing::warn!(
+                surface = "mcp",
+                service = %service,
+                action = "call_tool",
+                subject,
+                upstream = %upstream_name,
+                upstream_tool = %upstream_tool_name,
+                arguments_hash = %arguments_hash,
+                elapsed_ms = started.elapsed().as_millis(),
+                input_tokens,
+                kind = "upstream_error",
+                "gateway tool execute dispatched without upstream pool"
+            );
+            let env = build_error(
+                &service,
+                "call_tool",
+                "upstream_error",
+                "no upstream pool available to dispatch tool_execute",
+            );
+            return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
         }
         if svc.is_some() && !self.service_visible_on_mcp(&service).await {
             let envelope = build_error(
@@ -2233,6 +2900,77 @@ impl LabMcpServer {
             "MCP peer catalog-change notification complete"
         );
     }
+
+    async fn search_builtin_tools(
+        &self,
+        query: &str,
+        top_k: usize,
+        include_schema: bool,
+        score_floor_fraction: f32,
+    ) -> Vec<GatewayToolSearchResult> {
+        let needle = query.trim().to_ascii_lowercase();
+        if needle.is_empty() || needle.len() > 500 {
+            return Vec::new();
+        }
+
+        let mut results = Vec::new();
+        for service in self.registry.services() {
+            if !self.service_visible_on_mcp(service.name).await {
+                continue;
+            }
+            let actions = self.searchable_builtin_actions(service).await;
+
+            let action_text = actions
+                .iter()
+                .map(|action| format!("{} {}", action.name, action.description))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let haystack = format!("{}\n{}\n{}", service.name, service.description, action_text)
+                .to_ascii_lowercase();
+            let score = crate::dispatch::gateway::score_name_haystack(
+                &needle,
+                &service.name.to_ascii_lowercase(),
+                &haystack,
+            );
+            if score <= 0.0 {
+                continue;
+            }
+
+            results.push(GatewayToolSearchResult {
+                name: service.name.to_string(),
+                description: builtin_tool_search_description(service, &actions),
+                upstream: "lab".to_string(),
+                score,
+                input_schema: include_schema.then(|| builtin_tool_search_schema(&actions)),
+            });
+        }
+
+        results.sort_by(compare_tool_search_results);
+
+        // Apply score floor relative to this source's top result.
+        if score_floor_fraction > 0.0 {
+            if let Some(top) = results.first() {
+                let floor = top.score * score_floor_fraction;
+                results.retain(|r| r.score >= floor);
+            }
+        }
+
+        results.truncate(top_k.max(1).min(50));
+        results
+    }
+
+    async fn searchable_builtin_actions<'a>(
+        &self,
+        service: &'a crate::registry::RegisteredService,
+    ) -> Vec<&'a lab_apis::core::action::ActionSpec> {
+        let mut actions = service.actions.iter().collect::<Vec<_>>();
+        if let Some(allowed_actions) = self.allowed_mcp_actions(service.name).await
+            && !allowed_actions.is_empty()
+        {
+            actions.retain(|action| allowed_actions.iter().any(|allowed| allowed == action.name));
+        }
+        actions
+    }
 }
 
 fn tool_error_envelope(service: &str, action: &str, err: &DispatchToolError) -> Value {
@@ -2252,6 +2990,66 @@ fn tool_error_envelope(service: &str, action: &str, err: &DispatchToolError) -> 
     } else {
         build_error_extra(service, action, &kind, &message, &Value::Object(serialized))
     }
+}
+
+fn merge_tool_search_results(
+    mut left: Vec<GatewayToolSearchResult>,
+    right: Vec<GatewayToolSearchResult>,
+    top_k: usize,
+) -> Vec<GatewayToolSearchResult> {
+    left.extend(right);
+    left.sort_by(compare_tool_search_results);
+    left.truncate(top_k.max(1).min(50));
+    left
+}
+
+fn compare_tool_search_results(
+    a: &GatewayToolSearchResult,
+    b: &GatewayToolSearchResult,
+) -> CmpOrdering {
+    b.score
+        .partial_cmp(&a.score)
+        .unwrap_or(CmpOrdering::Equal)
+        .then_with(|| a.name.cmp(&b.name))
+        .then_with(|| a.upstream.cmp(&b.upstream))
+}
+
+fn builtin_tool_search_description(
+    service: &crate::registry::RegisteredService,
+    actions: &[&lab_apis::core::action::ActionSpec],
+) -> String {
+    let mut description = service.description.to_string();
+    let visible_actions = actions
+        .iter()
+        .take(12)
+        .map(|action| action.name)
+        .collect::<Vec<_>>();
+    if !visible_actions.is_empty() {
+        description.push_str(". Actions: ");
+        description.push_str(&visible_actions.join(", "));
+        if actions.len() > visible_actions.len() {
+            description.push_str(", ...");
+        }
+    }
+    description
+}
+
+fn builtin_tool_search_schema(actions: &[&lab_apis::core::action::ActionSpec]) -> Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "description": "Lab service action to perform. Use \"help\" to list actions.",
+                "enum": actions.iter().map(|action| action.name).collect::<Vec<_>>(),
+            },
+            "params": {
+                "type": "object",
+                "description": "Action-specific parameters."
+            }
+        },
+        "required": ["action"]
+    })
 }
 
 fn subject_from_extensions(extensions: &rmcp::model::Extensions) -> Option<&str> {
@@ -2302,7 +3100,6 @@ fn tool_search_scope_allowed(auth: Option<&crate::api::oauth::AuthContext>) -> b
     })
 }
 
-#[cfg(test)]
 fn tool_search_include_schema_allowed(
     auth: Option<&crate::api::oauth::AuthContext>,
     requested: bool,
@@ -2355,7 +3152,6 @@ fn estimate_tokens(s: &str) -> usize {
 }
 
 /// Token count of a JSON value, computed against its serialized form.
-#[cfg(test)]
 fn estimate_tokens_value(value: &Value) -> usize {
     estimate_tokens(&serde_json::to_string(value).unwrap_or_default())
 }
@@ -2906,6 +3702,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tool_search_indexes_builtin_lab_services() {
+        let server = super::LabMcpServer {
+            registry: std::sync::Arc::new(completion_test_registry()),
+            gateway_manager: None,
+            node_role: None,
+            peers: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            logging_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+                logging_level_rank(rmcp::model::LoggingLevel::Info),
+            )),
+        };
+
+        let results = server
+            .search_builtin_tools("movie search", 5, true, 0.0)
+            .await;
+
+        let radarr = results
+            .iter()
+            .find(|result| result.name == "radarr")
+            .expect("radarr should match action text");
+        assert_eq!(radarr.upstream, "lab");
+        assert!(
+            radarr.description.contains("movie.search"),
+            "description should include action hints"
+        );
+        assert!(
+            radarr
+                .input_schema
+                .as_ref()
+                .and_then(|schema| schema.pointer("/properties/action/enum"))
+                .and_then(Value::as_array)
+                .is_some_and(|actions| actions.iter().any(|action| action == "movie.search")),
+            "schema should expose Lab action choices"
+        );
+    }
+
+    #[tokio::test]
     async fn snapshot_catalog_hides_builtin_tools_when_tool_search_is_enabled() {
         let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
         let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
@@ -2933,12 +3765,117 @@ mod tests {
 
         let snapshot = server.snapshot_catalog().await;
 
+        // Tool Search mode: exactly `search` + `execute`. NO code_search, code_execute, or code.
         assert_eq!(
             snapshot.tools,
             ["execute".to_string(), "search".to_string()]
                 .into_iter()
                 .collect()
         );
+        assert!(
+            !snapshot.tools.contains("code_search"),
+            "code_search must not appear in Tool Search mode"
+        );
+        assert!(
+            !snapshot.tools.contains("code_execute"),
+            "code_execute must not appear in Tool Search mode"
+        );
+        assert!(
+            !snapshot.tools.contains("code"),
+            "code must not appear in Tool Search mode"
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshot_catalog_shows_code_tool_in_code_mode() {
+        let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
+        let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+            std::path::PathBuf::from("config.toml"),
+            runtime,
+        ));
+        manager
+            .seed_config(crate::config::LabConfig {
+                code_mode: crate::config::CodeModeConfig {
+                    enabled: true,
+                    ..crate::config::CodeModeConfig::default()
+                },
+                ..crate::config::LabConfig::default()
+            })
+            .await;
+        let server = super::LabMcpServer {
+            registry: std::sync::Arc::new(completion_test_registry()),
+            gateway_manager: Some(manager),
+            node_role: None,
+            peers: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            logging_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+                logging_level_rank(rmcp::model::LoggingLevel::Info),
+            )),
+        };
+
+        let snapshot = server.snapshot_catalog().await;
+
+        // Code Mode: exactly `code`. NO search, execute, code_search, or code_execute.
+        assert_eq!(snapshot.tools, ["code".to_string()].into_iter().collect());
+        assert!(
+            !snapshot.tools.contains("search"),
+            "search must not appear in Code Mode"
+        );
+        assert!(
+            !snapshot.tools.contains("execute"),
+            "execute must not appear in Code Mode"
+        );
+        assert!(
+            !snapshot.tools.contains("code_search"),
+            "code_search must not appear in Code Mode"
+        );
+        assert!(
+            !snapshot.tools.contains("code_execute"),
+            "code_execute must not appear in Code Mode"
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshot_catalog_shows_no_gateway_tools_when_neither_mode_is_enabled() {
+        // When both tool_search.enabled=false and code_mode.enabled=false,
+        // none of the five gateway meta-tools (search, execute, code, code_search,
+        // code_execute) should appear in the snapshot.
+        let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
+        let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+            std::path::PathBuf::from("config.toml"),
+            runtime,
+        ));
+        manager
+            .seed_config(crate::config::LabConfig {
+                tool_search: crate::config::ToolSearchConfig {
+                    enabled: false,
+                    ..crate::config::ToolSearchConfig::default()
+                },
+                code_mode: crate::config::CodeModeConfig {
+                    enabled: false,
+                    ..crate::config::CodeModeConfig::default()
+                },
+                ..crate::config::LabConfig::default()
+            })
+            .await;
+        let server = super::LabMcpServer {
+            registry: std::sync::Arc::new(completion_test_registry()),
+            gateway_manager: Some(manager),
+            node_role: None,
+            peers: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            logging_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+                logging_level_rank(rmcp::model::LoggingLevel::Info),
+            )),
+        };
+
+        let snapshot = server.snapshot_catalog().await;
+
+        // Raw mode — none of the five gateway meta-tools should appear.
+        for meta_tool in ["search", "execute", "code", "code_search", "code_execute"] {
+            assert!(
+                !snapshot.tools.contains(meta_tool),
+                "gateway meta-tool '{meta_tool}' must not appear when neither mode is enabled"
+            );
+        }
     }
 
     #[test]
@@ -3000,6 +3937,7 @@ mod tests {
             tool,
             input_schema: None,
             upstream_name: std::sync::Arc::clone(&upstream_name),
+            destructive: false,
         };
         crate::dispatch::upstream::types::UpstreamEntry {
             name: std::sync::Arc::clone(&upstream_name),
@@ -3028,6 +3966,104 @@ mod tests {
             .and_then(|content| content.as_text())
             .map(|text| text.text.as_str())
             .expect("tool result should contain text content")
+    }
+
+    #[tokio::test]
+    async fn invoke_ambiguous_tool_error_envelope_guides_retry() {
+        let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
+        let pool = std::sync::Arc::new(crate::dispatch::upstream::pool::UpstreamPool::new());
+        runtime.swap(Some(std::sync::Arc::clone(&pool))).await;
+
+        let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+            tempfile::tempdir()
+                .expect("tempdir")
+                .path()
+                .join("config.toml"),
+            runtime,
+        ));
+        manager
+            .seed_config(crate::config::LabConfig {
+                tool_search: crate::config::ToolSearchConfig {
+                    enabled: true,
+                    ..crate::config::ToolSearchConfig::default()
+                },
+                upstream: vec![
+                    gateway_test_upstream("agent-os_windows-mcp"),
+                    gateway_test_upstream("steamy-windows-mcp"),
+                ],
+                ..crate::config::LabConfig::default()
+            })
+            .await;
+        pool.insert_entry_for_tests(
+            "agent-os_windows-mcp",
+            healthy_gateway_entry("agent-os_windows-mcp", "PowerShell"),
+        )
+        .await;
+        pool.insert_entry_for_tests(
+            "steamy-windows-mcp",
+            healthy_gateway_entry("steamy-windows-mcp", "PowerShell"),
+        )
+        .await;
+
+        let server = super::LabMcpServer {
+            registry: std::sync::Arc::new(ToolRegistry::new()),
+            gateway_manager: Some(manager),
+            node_role: None,
+            peers: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            logging_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+                logging_level_rank(rmcp::model::LoggingLevel::Info),
+            )),
+        };
+        let (server_transport, client_transport) = tokio::io::duplex(65_536);
+        let server_task = tokio::spawn(async move {
+            let running = server.serve(server_transport).await.expect("server starts");
+            running.waiting().await.expect("server waits");
+        });
+        let client = ().serve(client_transport).await.expect("client starts");
+
+        let mut params = CallToolRequestParams::new("execute".to_string());
+        params.arguments = Some(
+            serde_json::json!({
+                "name": "PowerShell",
+                "arguments": {}
+            })
+            .as_object()
+            .expect("arguments object")
+            .clone(),
+        );
+        let result = client
+            .call_tool(params)
+            .await
+            .expect("tool_execute returns result");
+
+        assert_eq!(result.is_error, Some(true));
+        let envelope: Value =
+            serde_json::from_str(tool_result_text(&result)).expect("error envelope is json");
+        let error = &envelope["error"];
+        assert_eq!(envelope["ok"], false);
+        assert_eq!(envelope["service"], "execute");
+        assert_eq!(envelope["action"], "call_tool");
+        assert_eq!(error["kind"], "ambiguous_tool");
+        assert_eq!(
+            error["message"],
+            "tool `PowerShell` matched multiple upstream tools"
+        );
+        assert_eq!(
+            error["valid"],
+            serde_json::json!([
+                "agent-os_windows-mcp::PowerShell",
+                "steamy-windows-mcp::PowerShell"
+            ])
+        );
+        assert!(
+            error["hint"]
+                .as_str()
+                .is_some_and(|hint| hint.contains("set `upstream`")),
+            "hint should explain the explicit upstream retry path: {error}"
+        );
+
+        drop(client);
+        server_task.abort();
     }
 
     #[tokio::test]
@@ -3147,6 +4183,63 @@ mod tests {
                 .iter()
                 .any(|action| action["name"] == "session.list")
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
+    async fn tool_search_filters_builtin_schema_to_allowed_mcp_actions() {
+        let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
+        let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+            std::path::PathBuf::from("config.toml"),
+            runtime,
+        ));
+        manager
+            .seed_config(crate::config::LabConfig {
+                virtual_servers: vec![crate::config::VirtualServerConfig {
+                    id: "deploy".to_string(),
+                    service: "deploy".to_string(),
+                    enabled: true,
+                    surfaces: crate::config::VirtualServerSurfacesConfig {
+                        cli: false,
+                        api: false,
+                        mcp: true,
+                        webui: false,
+                    },
+                    mcp_policy: Some(crate::config::VirtualServerMcpPolicyConfig {
+                        allowed_actions: vec!["server.info".to_string()],
+                    }),
+                }],
+                ..crate::config::LabConfig::default()
+            })
+            .await;
+
+        let server = super::LabMcpServer {
+            registry: std::sync::Arc::new(crate::registry::build_default_registry()),
+            gateway_manager: Some(manager),
+            node_role: None,
+            peers: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            logging_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+                logging_level_rank(rmcp::model::LoggingLevel::Info),
+            )),
+        };
+
+        let results = server
+            .search_builtin_tools("plex session info", 5, true, 0.0)
+            .await;
+        let plex = results
+            .iter()
+            .find(|result| result.name == "deploy")
+            .expect("plex should match allowed action text");
+        assert!(plex.description.contains("server.info"));
+        assert!(!plex.description.contains("session.list"));
+        let actions = plex
+            .input_schema
+            .as_ref()
+            .and_then(|schema| schema.pointer("/properties/action/enum"))
+            .and_then(Value::as_array)
+            .expect("action enum");
+        assert!(actions.iter().any(|action| action == "server.info"));
+        assert!(!actions.iter().any(|action| action == "session.list"));
     }
 
     #[test]
@@ -3460,6 +4553,94 @@ mod tests {
         assert!(
             super::tool_search_include_schema_allowed(None, true),
             "stdio (None auth) must see schemas"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // LOCKED CONTRACT: the `code` tool's input schema is EXACTLY
+    //   { "type": "object", "properties": { "code": { "type": "string" } },
+    //     "required": ["code"] }
+    //
+    // Pre-commit (`cargo clippy -- -D warnings` + `cargo nextest run`) MUST
+    // fail if anyone re-introduces an `action` discriminator, `max_tool_calls`,
+    // `confirm`, or any other top-level property. The Cloudflare reference
+    // is `cloudflare/agents/packages/codemode/src/tool.ts::codeSchema`:
+    //
+    //     const codeSchema = z.object({
+    //       code: z.string().describe("JavaScript async arrow function to execute")
+    //     });
+    //
+    // If you genuinely need to deviate, update
+    // `docs/specs/CODE_MODE_SPEC_FOR_RETARD_AGENTS.md` and
+    // `docs/contracts/CODE_NODE_CONTRACT_FOR_RETARD_AGENTS.md` FIRST, then
+    // update this test, then update `code_tool_input_schema()`. In that order.
+    // ──────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn code_tool_input_schema_is_locked_to_cloudflare_parity() {
+        let schema = super::code_tool_input_schema();
+
+        assert_eq!(
+            schema["type"],
+            serde_json::json!("object"),
+            "code tool input must be a JSON object"
+        );
+
+        let props = schema["properties"]
+            .as_object()
+            .expect("`properties` must be an object");
+        let prop_names: std::collections::BTreeSet<&str> =
+            props.keys().map(String::as_str).collect();
+        assert_eq!(
+            prop_names,
+            std::collections::BTreeSet::from(["code"]),
+            "code tool input must declare ONLY `code` (Cloudflare parity). \
+             Forbidden additions: action / max_tool_calls / confirm / anything else. \
+             See docs/specs/CODE_MODE_SPEC_FOR_RETARD_AGENTS.md."
+        );
+
+        assert_eq!(
+            props["code"]["type"],
+            serde_json::json!("string"),
+            "code property must be of type string"
+        );
+
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .expect("`required` must be an array")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert_eq!(
+            required,
+            vec!["code"],
+            "code tool input must require exactly `code`"
+        );
+    }
+
+    #[test]
+    fn code_tool_input_schema_rejects_action_discriminator() {
+        let schema = super::code_tool_input_schema();
+        let props = schema["properties"].as_object().expect("properties object");
+        for forbidden in ["action", "max_tool_calls", "confirm", "params", "args"] {
+            assert!(
+                !props.contains_key(forbidden),
+                "input schema MUST NOT include `{forbidden}` (spec violation — see \
+                 docs/specs/CODE_MODE_SPEC_FOR_RETARD_AGENTS.md \
+                 \"Merge code_search + code_execute via action discriminator\")"
+            );
+        }
+    }
+
+    #[test]
+    fn code_tool_description_template_uses_types_placeholder() {
+        // The description carries the typed catalog via {{types}} substitution
+        // at list_tools time. Removing the placeholder breaks Cloudflare parity.
+        assert!(
+            super::CODE_EXECUTE_DESCRIPTION.contains("{{types}}"),
+            "CODE_EXECUTE_DESCRIPTION must contain the `{{{{types}}}}` placeholder \
+             — that is where the typed `declare namespace codemode {{ ... }}` block \
+             is substituted at list_tools time."
         );
     }
 }

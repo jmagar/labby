@@ -67,14 +67,14 @@ This means the sandbox receives something like:
 
 declare namespace codemode {
   namespace radarr {
-    function movieSearch(params: { query: string; limit?: number }): Promise<{
+    function movie_search(params: { query: string; limit?: number }): Promise<{
       movies: Array<{ id: number; title: string; year: number; imdbId: string }>;
     }>;
-    function movieAdd(params: { tmdbId: number; qualityProfileId: number; rootFolderPath: string }): Promise<void>;
+    function movie_add(params: { tmdbId: number; qualityProfileId: number; rootFolderPath: string }): Promise<void>;
     // ...
   }
   namespace sonarr {
-    function seriesSearch(params: { term: string }): Promise<Array<{ id: number; title: string }>>;
+    function series_search(params: { term: string }): Promise<Array<{ id: number; title: string }>>;
     // ...
   }
   // ... all upstreams
@@ -87,12 +87,16 @@ declare function callTool<T = unknown>(
 ): Promise<T>;
 ```
 
+Tool names use snake_case (Cloudflare-parity): separators (`.`, `-`, `/`, `:`) in the
+upstream tool id all become `_`. The original id is preserved in the `callTool` escape
+hatch (`upstream::radarr::movie.search`) so the dispatcher routes correctly.
+
 The model reads the types and writes:
 
 ```typescript
 async () => {
-  const movies = await codemode.radarr.movieSearch({ query: "The Matrix" });
-  const series = await codemode.sonarr.seriesSearch({ term: "Breaking Bad" });
+  const movies = await codemode.radarr.movie_search({ query: "The Matrix" });
+  const series = await codemode.sonarr.series_search({ term: "Breaking Bad" });
   return { movies: movies.movies.slice(0, 3), series: series.slice(0, 3) };
 }
 ```
@@ -225,7 +229,7 @@ works. It must read `cfg.code_mode.enabled`.
 ```toml
 [code_mode]
 enabled = false              # mutually exclusive with [tool_search].enabled = true
-timeout_ms = 5000            # valid: 1..=60000
+timeout_ms = 30000           # valid: 1..=60000 (Cloudflare-parity default)
 max_tool_calls = 8           # valid: 1..=50
 max_response_bytes = 24576   # valid: 1024..=1048576 (24KB default)
 max_response_tokens = 6000   # valid: 256..=256000

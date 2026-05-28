@@ -2031,8 +2031,7 @@ Search, inspect, and execute Code Mode snippets through dispatch
 Usage: code [OPTIONS] <COMMAND>
 
 Commands:
-  search  Filter the inlined Code Mode tool catalog with JavaScript
-  exec    Execute a sandboxed JavaScript snippet that calls callTool(id, params)
+  exec  Execute a sandboxed JavaScript snippet that calls the typed `codemode.<upstream>.<tool>` helpers (or `callTool` directly). Cloudflare-parity: the `code` MCP tool takes only `{ code }`, so the CLI mirrors that — no separate `search` subcommand
 
 Options:
       --json
@@ -2043,33 +2042,6 @@ Options:
 
           [default: auto]
           [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby gateway code search`
-
-```text
-Filter the inlined Code Mode tool catalog with JavaScript
-
-Usage: search [OPTIONS]
-
-Options:
-      --code <CODE>
-
-
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --file <FILE>
-
 
   -h, --help
           Print help
@@ -2078,7 +2050,7 @@ Options:
 ## `labby gateway code exec`
 
 ```text
-Execute a sandboxed JavaScript snippet that calls callTool(id, params)
+Execute a sandboxed JavaScript snippet that calls the typed `codemode.<upstream>.<tool>` helpers (or `callTool` directly). Cloudflare-parity: the `code` MCP tool takes only `{ code }`, so the CLI mirrors that — no separate `search` subcommand
 
 Usage: exec [OPTIONS]
 

@@ -137,8 +137,9 @@
 # ── Gateway Tool Search ──────────────────────────────────────────────────────
 
 [tool_search]
-# Gateway-wide mode. When enabled, proxied upstream tools are hidden from
-# MCP list_tools and exposed through synthetic tool_search/tool_execute helpers.
+# Tool Search mode: hides raw upstream tools; advertises only `search` + `execute`.
+# MUTUALLY EXCLUSIVE with code_mode — dual-enabled is rejected at startup with
+# an ERROR log. Fix your config so only one is enabled.
 # enabled = false                           # default: false
 # top_k_default = 10                        # valid range: 1..=50
 # max_tools = 5000                          # valid range: 1..=10000
@@ -146,8 +147,10 @@
 # ── Gateway Code Mode ────────────────────────────────────────────────────────
 
 [code_mode]
-# Enable constrained code_execute snippets for upstream tools discovered through
-# tool_search. Execution is disabled by default even when tool_search is enabled.
+# Code Mode: hides raw upstream tools; advertises a single `code` tool.
+# Discovery happens via typed TypeScript preamble injected into the sandbox.
+# MUTUALLY EXCLUSIVE with tool_search — enabling both is rejected with InvalidParam.
+# If both are set in config.toml, tool_search wins at startup with an ERROR log.
 # enabled = false                           # default: false
 # timeout_ms = 5000                         # valid range: 1..=60000
 # max_tool_calls = 8                        # valid range: 1..=50

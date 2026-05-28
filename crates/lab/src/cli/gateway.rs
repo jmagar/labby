@@ -58,14 +58,10 @@ pub struct GatewayCodeArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum GatewayCodeCommand {
-    /// Filter the inlined Code Mode tool catalog with JavaScript
-    Search {
-        #[arg(long, conflicts_with = "file")]
-        code: Option<String>,
-        #[arg(long)]
-        file: Option<std::path::PathBuf>,
-    },
-    /// Execute a sandboxed JavaScript snippet that calls callTool(id, params)
+    /// Execute a sandboxed JavaScript snippet that calls the typed
+    /// `codemode.<upstream>.<tool>` helpers (or `callTool` directly).
+    /// Cloudflare-parity: the `code` MCP tool takes only `{ code }`, so the
+    /// CLI mirrors that — no separate `search` subcommand.
     Exec {
         #[arg(long, conflicts_with = "file")]
         code: Option<String>,
@@ -733,11 +729,6 @@ async fn run_gateway_code(
     let surface = CodeModeSurface::Cli;
 
     match args.command {
-        GatewayCodeCommand::Search { code, file } => {
-            let code = read_code_mode_source(code, file, CODE_MODE_CLI_MAX_SOURCE_BYTES)?;
-            let response = broker.search(&code, caller, surface).await?;
-            crate::output::print(&response, format)?;
-        }
         GatewayCodeCommand::Exec { code, file } => {
             let code = read_code_mode_source(code, file, CODE_MODE_CLI_MAX_SOURCE_BYTES)?;
             let config = manager.code_mode_config().await;
@@ -1180,6 +1171,8 @@ mod tests {
             ])
             .is_ok()
         );
+        // Cloudflare-parity: only `gateway code exec` survives. There is no
+        // `gateway code search` (that was the dead `code_search` pattern).
         assert!(
             Cli::try_parse_from([
                 "lab",
@@ -1189,18 +1182,8 @@ mod tests {
                 "--code",
                 "async () => tools.slice(0, 3)",
             ])
-            .is_ok()
-        );
-        assert!(
-            Cli::try_parse_from([
-                "lab",
-                "gateway",
-                "code",
-                "search",
-                "--code",
-                "async () => tools.filter(t => /github/i.test(t.id)).slice(0, 3)",
-            ])
-            .is_ok()
+            .is_err(),
+            "`gateway code search` was removed per spec — only `gateway code exec` is supported"
         );
         assert!(
             Cli::try_parse_from([

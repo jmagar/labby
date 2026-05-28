@@ -31,6 +31,11 @@ value.
 
 ## Typed Catalog — What Is Injected Into Your Sandbox
 
+The typed preamble is injected by the server into the sandbox before your code runs —
+not fetched by you via a discovery call. The `code` tool description stays static and
+short. The preamble content is built server-side from the live upstream catalog and
+prepended to your code at execution time.
+
 At execution time, before your code runs, the sandbox receives a preamble of TypeScript
 declarations for every upstream tool currently connected to this gateway. It looks like
 this (content varies by connected upstreams):
@@ -43,7 +48,7 @@ this (content varies by connected upstreams):
 declare namespace codemode {
   namespace radarr {
     /** Search for movies by title query. Returns up to limit results. */
-    function movieSearch(params: {
+    function movie_search(params: {
       query: string;
       limit?: number;
     }): Promise<{
@@ -58,7 +63,7 @@ declare namespace codemode {
     }>;
 
     /** Add a movie to Radarr for monitoring and download. */
-    function movieAdd(params: {
+    function movie_add(params: {
       tmdbId: number;
       qualityProfileId: number;
       rootFolderPath: string;
@@ -70,7 +75,7 @@ declare namespace codemode {
 
   namespace sonarr {
     /** Search for TV series by term. */
-    function seriesSearch(params: { term: string }): Promise<Array<{
+    function series_search(params: { term: string }): Promise<Array<{
       id: number;
       title: string;
       seasons: number;
@@ -82,6 +87,12 @@ declare namespace codemode {
   // ... all connected upstreams
 }
 ```
+
+**Tool names are normalized to snake_case** (Cloudflare-parity): every separator in the
+upstream tool id — `.`, `-`, `/`, `:` — becomes `_`. So `movie.search` → `movie_search`,
+`tv-show.get` → `tv_show_get`, `create/issue` → `create_issue`. JS reserved words get a
+trailing underscore (`delete` → `delete_`); leading digits get a leading underscore
+(`2fa_setup` → `_2fa_setup`).
 
 **Read the namespace. Call the functions. The types tell you everything.**
 
@@ -97,15 +108,15 @@ The return value of your function is what the tool returns.
 ```typescript
 // CORRECT — async arrow function
 async () => {
-  const result = await codemode.radarr.movieSearch({ query: "The Matrix" });
+  const result = await codemode.radarr.movie_search({ query: "The Matrix" });
   return result.movies[0];
 }
 
 // CORRECT — async function expression
 async function main() {
   const [movies, series] = await Promise.all([
-    codemode.radarr.movieSearch({ query: "Breaking Bad" }),
-    codemode.sonarr.seriesSearch({ term: "Breaking Bad" }),
+    codemode.radarr.movie_search({ query: "Breaking Bad" }),
+    codemode.sonarr.series_search({ term: "Breaking Bad" }),
   ]);
   return { movies, series };
 }
@@ -118,18 +129,18 @@ main
 async () => {
   // GOOD — fires all three simultaneously, waits for all
   const [movies, series, music] = await Promise.all([
-    codemode.radarr.movieSearch({ query: "Dune" }),
-    codemode.sonarr.seriesSearch({ term: "Dune" }),
-    codemode.navidrome.albumSearch({ query: "Dune" }),
+    codemode.radarr.movie_search({ query: "Dune" }),
+    codemode.sonarr.series_search({ term: "Dune" }),
+    codemode.navidrome.album_search({ query: "Dune" }),
   ]);
   return { movies, series, music };
 }
 
 // BAD — serial, three times slower for no reason
 async () => {
-  const movies = await codemode.radarr.movieSearch({ query: "Dune" });
-  const series = await codemode.sonarr.seriesSearch({ term: "Dune" });
-  const music = await codemode.navidrome.albumSearch({ query: "Dune" });
+  const movies = await codemode.radarr.movie_search({ query: "Dune" });
+  const series = await codemode.sonarr.series_search({ term: "Dune" });
+  const music = await codemode.navidrome.album_search({ query: "Dune" });
   return { movies, series, music };
 }
 ```
@@ -139,7 +150,7 @@ async () => {
 ```typescript
 async () => {
   // Fetch a big result set, reduce it here, return only what matters
-  const result = await codemode.radarr.movieSearch({ query: "", limit: 500 });
+  const result = await codemode.radarr.movie_search({ query: "", limit: 500 });
   return result.movies
     .filter(m => m.year >= 2020 && !m.monitored)
     .sort((a, b) => b.year - a.year)
@@ -180,7 +191,7 @@ inspecting `__catalog__` if it is present.
 | Read the typed catalog | `lab:read`, `lab`, or `lab:admin` |
 | Execute `codemode.*` calls or `callTool` | `lab` or `lab:admin` |
 
-If your token has `lab:read` scope and you call `codemode.radarr.movieSearch(...)`,
+If your token has `lab:read` scope and you call `codemode.radarr.movie_search(...)`,
 you will receive a `forbidden` error. This is not a bug in your code. Your token does
 not have execution scope. Get a token with `lab` scope.
 
@@ -215,8 +226,7 @@ type CodeModeError = {
 
     // Resource budget — split your work
     | "tool_call_limit_exceeded"   // hit max_tool_calls for this execution
-    | "code_mode_timeout"          // total execution time exceeded timeout_ms
-    | "code_mode_fuel_exhausted";  // JS fuel budget exhausted
+    | "code_mode_timeout";         // total execution time exceeded timeout_ms
 
   message: string;
   valid?: string[];        // for unknown_tool/unknown_action: valid options
@@ -230,7 +240,7 @@ type CodeModeError = {
 ```typescript
 async () => {
   try {
-    return await codemode.radarr.movieSearch({ query: "Matrix" });
+    return await codemode.radarr.movie_search({ query: "Matrix" });
   } catch (e) {
     const err: CodeModeError = JSON.parse(String(e.message));
     switch (err.kind) {
@@ -243,7 +253,7 @@ async () => {
         // Your code has a bug — don't retry, surface it
         throw e;
       case "tool_call_limit_exceeded":
-      case "code_mode_fuel_exhausted":
+      case "code_mode_timeout":
         // You did too much — return what you have so far
         return { partial: true, error: err.kind };
       default:
@@ -279,19 +289,10 @@ rather than relying on `calls` — `calls` is there for debugging, not for prima
 
 | Limit | Default | Config key | Range |
 |-------|---------|------------|-------|
-| Execution timeout | 5 000 ms | `code_mode.timeout_ms` | 1..=60 000 |
+| Execution timeout | 30 000 ms | `code_mode.timeout_ms` | 1..=60 000 |
 | Max tool calls | 8 | `code_mode.max_tool_calls` | 1..=50 |
 | Response bytes | 24 576 (24 KB) | `code_mode.max_response_bytes` | 1 024..=1 048 576 |
 | Response tokens | 6 000 | `code_mode.max_response_tokens` | 256..=256 000 |
-| JS fuel (base) | 50 000 000 | (not configurable per call) | — |
-
-### Fuel budget guidance
-
-- Base overhead: ~100K fuel for the JS module and promise scheduler
-- Per `callTool` / `codemode.*` boundary: ~2K fuel for promise plumbing
-- 50M fuel supports heavy fan-out plus moderate result processing
-- If you hit `code_mode_fuel_exhausted`: reduce local computation over large arrays,
-  or split across multiple `code` calls
 
 ### Result truncation
 

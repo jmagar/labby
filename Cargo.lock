@@ -438,6 +438,7 @@ dependencies = [
  "cow-utils",
  "dashmap",
  "dynify",
+ "either",
  "fast-float2",
  "float16",
  "futures-channel",
@@ -478,6 +479,7 @@ checksum = "17323a98cf2e631afacf1a6d659c1212c48a68bacfa85afab0a66ade80582e51"
 dependencies = [
  "boa_macros",
  "boa_string",
+ "either",
  "hashbrown 0.16.1",
  "thin-vec",
 ]
@@ -528,6 +530,24 @@ dependencies = [
  "num-traits",
  "regress",
  "rustc-hash",
+]
+
+[[package]]
+name = "boa_runtime"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "caa4d5b97ec713cc84c95be6686d82d4ae0090c45954a61d88f901889134eba5"
+dependencies = [
+ "boa_engine",
+ "boa_gc",
+ "bytemuck",
+ "either",
+ "futures",
+ "futures-lite",
+ "http",
+ "rustc-hash",
+ "serde_json",
+ "url",
 ]
 
 [[package]]
@@ -2549,7 +2569,7 @@ dependencies = [
 
 [[package]]
 name = "lab-apis"
-version = "0.18.1"
+version = "0.20.0"
 dependencies = [
  "base64",
  "futures",
@@ -2569,7 +2589,7 @@ dependencies = [
 
 [[package]]
 name = "lab-auth"
-version = "0.18.1"
+version = "0.20.0"
 dependencies = [
  "axum",
  "base64",
@@ -2597,7 +2617,7 @@ dependencies = [
 
 [[package]]
 name = "labby"
-version = "0.18.1"
+version = "0.20.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -2605,6 +2625,7 @@ dependencies = [
  "axum",
  "base64",
  "boa_engine",
+ "boa_runtime",
  "bytes",
  "chacha20poly1305",
  "clap",
@@ -2630,6 +2651,7 @@ dependencies = [
  "jsonwebtoken",
  "lab-apis",
  "lab-auth",
+ "lru",
  "nix",
  "num_cpus",
  "oauth2",
@@ -2759,6 +2781,15 @@ name = "log"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+
+[[package]]
+name = "lru"
+version = "0.16.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
+dependencies = [
+ "hashbrown 0.16.1",
+]
 
 [[package]]
 name = "lru-slab"
