@@ -1,9 +1,8 @@
 //! Semantic tool search: BM42 sparse + dense embedding + Qdrant hybrid search with RRF.
 //!
-//! NOTE: This module is no longer called from the search/execute MCP tool path.
-//! The search tool now uses JS-based Boa filtering of the upstream catalog.
-//! This module is retained for potential future use.
-#![allow(dead_code)]
+//! Called from `dispatch/gateway/manager.rs` for vector-based tool scoring and catalog warming.
+//! The MCP `search` tool uses JS-based Boa filtering; this module serves the scoring and
+//! warming paths that the gateway manager drives directly.
 //!
 //! Ported sparse-vector computation from axon (FNV-1a hash, log-TF, 65 536 buckets).
 //! This module owns the tool-search-specific layer on top of the generic lab_apis clients;

@@ -1296,7 +1296,9 @@ impl ServerHandler for LabMcpServer {
         let param_key_count = params.as_object().map_or(0, serde_json::Map::len);
 
         let svc = self.registry.services().iter().find(|s| s.name == service);
-        if service == TOOL_SEARCH_TOOL_NAME {
+        if service == TOOL_SEARCH_TOOL_NAME
+            && self.tool_search_visibility().await.exposes_synthetic_tools()
+        {
             let started = Instant::now();
             let input_tokens = estimate_tokens_args(&args);
             let subject = self.request_subject_log_tag(&context);
@@ -1310,13 +1312,13 @@ impl ServerHandler for LabMcpServer {
                     elapsed_ms = started.elapsed().as_millis(),
                     input_tokens,
                     kind = "forbidden",
-                    "gateway code search denied by scope"
+                    "gateway search denied by scope"
                 );
                 let env = build_error_extra(
                     &service,
                     "call_tool",
                     "forbidden",
-                    "code_search requires one of scopes: lab:read, lab, lab:admin",
+                    "search requires one of scopes: lab:read, lab, lab:admin",
                     &serde_json::json!({ "required_scopes": ["lab:read", "lab", "lab:admin"] }),
                 );
                 return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
@@ -1340,13 +1342,13 @@ impl ServerHandler for LabMcpServer {
             };
             tracing::info!(
                 surface = "mcp",
-                service = "code_search",
+                service = "search",
                 action = "call_tool",
                 subject,
                 code_hash = %code_hash,
                 code_len = code.len(),
                 input_tokens,
-                "gateway code search start"
+                "gateway search start"
             );
             let broker = CodeModeBroker::new(&self.registry, Some(manager));
             let caller = auth.map_or(CodeModeCaller::TrustedLocal, |auth| {
@@ -1365,7 +1367,7 @@ impl ServerHandler for LabMcpServer {
                     let output_tokens = estimate_tokens(&output);
                     tracing::info!(
                         surface = "mcp",
-                        service = "code_search",
+                        service = "search",
                         action = "call_tool",
                         subject,
                         code_hash = %code_hash,
@@ -1373,14 +1375,14 @@ impl ServerHandler for LabMcpServer {
                         elapsed_ms = started.elapsed().as_millis(),
                         input_tokens,
                         output_tokens,
-                        "gateway code search ok"
+                        "gateway search ok"
                     );
                     Ok(CallToolResult::success(vec![Content::text(output)]))
                 }
                 Err(err) => {
                     tracing::warn!(
                         surface = "mcp",
-                        service = "code_search",
+                        service = "search",
                         action = "call_tool",
                         subject,
                         code_hash = %code_hash,
@@ -1389,14 +1391,16 @@ impl ServerHandler for LabMcpServer {
                         input_tokens,
                         kind = err.kind(),
                         error = %err,
-                        "gateway code search failed"
+                        "gateway search failed"
                     );
                     let env = tool_error_envelope(&service, "call_tool", &err);
                     Ok(CallToolResult::error(vec![Content::text(env.to_string())]))
                 }
             };
         }
-        if service == TOOL_EXECUTE_TOOL_NAME {
+        if service == TOOL_EXECUTE_TOOL_NAME
+            && self.tool_search_visibility().await.exposes_synthetic_tools()
+        {
             let started = Instant::now();
             let input_tokens = estimate_tokens_args(&args);
             let subject = self.request_subject_log_tag(&context);
@@ -1410,13 +1414,13 @@ impl ServerHandler for LabMcpServer {
                     elapsed_ms = started.elapsed().as_millis(),
                     input_tokens,
                     kind = "forbidden",
-                    "gateway code execute denied by scope"
+                    "gateway execute denied by scope"
                 );
                 let env = build_error_extra(
                     &service,
                     "call_tool",
                     "forbidden",
-                    "code_execute requires one of scopes: lab, lab:admin",
+                    "execute requires one of scopes: lab, lab:admin",
                     &serde_json::json!({ "required_scopes": ["lab", "lab:admin"] }),
                 );
                 return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
@@ -1466,13 +1470,13 @@ impl ServerHandler for LabMcpServer {
             let code_hash = hash_arguments(&Value::String(code.to_string()));
             tracing::info!(
                 surface = "mcp",
-                service = "code_execute",
+                service = "execute",
                 action = "call_tool",
                 subject,
                 code_hash = %code_hash,
                 max_tool_calls = requested_max_tool_calls,
                 input_tokens,
-                "gateway code execute start"
+                "gateway execute start"
             );
             let broker = CodeModeBroker::new(&self.registry, Some(manager));
             let caller = auth.map_or(CodeModeCaller::TrustedLocal, |auth| {
@@ -1508,7 +1512,7 @@ impl ServerHandler for LabMcpServer {
             let output_tokens = estimate_tokens(&output);
             tracing::info!(
                 surface = "mcp",
-                service = "code_execute",
+                service = "execute",
                 action = "call_tool",
                 subject,
                 code_hash = %code_hash,
@@ -1516,7 +1520,7 @@ impl ServerHandler for LabMcpServer {
                 elapsed_ms = started.elapsed().as_millis(),
                 input_tokens,
                 output_tokens,
-                "gateway code execute ok"
+                "gateway execute ok"
             );
             return Ok(CallToolResult::success(vec![Content::text(output)]));
         }
@@ -2749,7 +2753,7 @@ mod tests {
             param: "query".to_string(),
         };
 
-        let envelope = super::tool_error_envelope("code_search", "call_tool", &err);
+        let envelope = super::tool_error_envelope("search", "call_tool", &err);
 
         assert_eq!(
             envelope.pointer("/error/kind"),
