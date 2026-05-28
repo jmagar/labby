@@ -80,8 +80,6 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `gateway` | `gateway.reload` | false | true |  | `GatewayCatalogDiff` | cli, mcp, api, web |
 | `gateway` | `gateway.remove` | false | true | `name*: string` | `GatewayView` | cli, mcp, api, web |
 | `gateway` | `gateway.schema` | false | false | `name*: string` | `GatewayServerSchema` | cli, mcp, api, web |
-| `gateway` | `gateway.scout.get` | false | false |  | `ToolSearchConfig` | cli, mcp, api, web |
-| `gateway` | `gateway.scout.set` | false | true | `enabled*: boolean`<br>`top_k_default: integer`<br>`max_tools: integer` | `ToolSearchConfig` | cli, mcp, api, web |
 | `gateway` | `gateway.server.get` | false | false | `id*: string` | `ServerView` | cli, mcp, api, web |
 | `gateway` | `gateway.servers` | false | false |  | `GatewayServersDoc` | cli, mcp, api, web |
 | `gateway` | `gateway.service_actions` | false | false | `service*: string` | `ServiceActionView[]` | cli, mcp, api, web |

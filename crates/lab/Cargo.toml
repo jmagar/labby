@@ -81,7 +81,7 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 hmac.workspace = true
 chacha20poly1305 = "0.10"
 dashmap = "6"
-lru = "0.12"
+lru = "0.16"
 diffy-imara = "0.3"
 arc-swap = "1"
 tokio-util = { version = "0.7", features = ["rt", "compat"] }

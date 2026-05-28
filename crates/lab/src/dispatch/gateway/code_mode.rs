@@ -390,7 +390,10 @@ impl<'a> CodeModeBroker<'a> {
         let upstream_hashes = manager.per_upstream_catalog_hashes();
         let agg_hash = aggregate_catalog_hash(&upstream_hashes);
 
-        if let Some(cached) = manager.preamble_cache().get(agg_hash, scope_tier, oauth_subject) {
+        if let Some(cached) = manager
+            .preamble_cache()
+            .get(agg_hash, scope_tier, oauth_subject)
+        {
             return Ok(serde_json::json!({
                 "tools": cached.tools_json,
                 "preamble": cached.preamble,
@@ -669,26 +672,32 @@ impl<'a> CodeModeBroker<'a> {
             sdk_kind: "internal_error".to_string(),
             message: format!("failed to create Code Mode sandbox directory: {err}"),
         })?;
-        let mut child = Command::new(exe)
-            .args(["internal", "code-mode-runner"])
+        let mut cmd = Command::new(exe);
+        cmd.args(["internal", "code-mode-runner"])
             .current_dir(temp_dir.path())
             .env_clear()
             .kill_on_drop(true)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            // Make the child its own process group leader (pgid = pid) so that
-            // killpg can reach grandchildren (e.g. any processes spawned by the
-            // Boa/Javy runtime) and not just the immediate child.
-            .process_group(0)
-            .spawn()
-            .map_err(|err| ToolError::Sdk {
-                sdk_kind: "internal_error".to_string(),
-                message: format!("failed to spawn Code Mode runner: {err}"),
-            })?;
-        // Capture pid immediately after spawn; it becomes None once the child
-        // has been waited on, so we save it for killpg before any await points.
+            .stderr(Stdio::piped());
+        // Make the child its own process group leader (pgid = pid) so that
+        // killpg can reach grandchildren (e.g. any processes spawned by the
+        // Boa/Javy runtime) and not just the immediate child.
+        // process_group is Unix-only; on Windows we fall back to kill() on the
+        // direct child only (handled in terminate_code_mode_runner).
+        #[cfg(unix)]
+        cmd.process_group(0);
+        let mut child = cmd.spawn().map_err(|err| ToolError::Sdk {
+            sdk_kind: "internal_error".to_string(),
+            message: format!("failed to spawn Code Mode runner: {err}"),
+        })?;
+        // Capture pid immediately after spawn (Unix only); it becomes None once
+        // the child has been waited on, so we save it for killpg before any
+        // await points.
+        #[cfg(unix)]
         let child_pid = child.id();
+        #[cfg(not(unix))]
+        let child_pid = None::<u32>;
 
         let mut stdin = child.stdin.take().ok_or_else(|| ToolError::Sdk {
             sdk_kind: "internal_error".to_string(),
@@ -873,7 +882,9 @@ impl<'a> CodeModeBroker<'a> {
                     }
                 }
                 completed = pending_tool_calls.next(), if !pending_tool_calls.is_empty() => {
-                    let Some((seq, id, result)) = completed else {
+                    let Some((seq, id, result)): Option<(u64, String, Result<Value, ToolError>)> =
+                        completed
+                    else {
                         continue;
                     };
                     let result = match result {
@@ -1394,13 +1405,13 @@ async fn write_runner_input(
     })
 }
 
-async fn terminate_code_mode_runner(child: &mut Child, pid: Option<u32>) {
+async fn terminate_code_mode_runner(child: &mut Child, _pid: Option<u32>) {
     // On Unix, kill the entire process group (pgid == pid because we spawned
     // with process_group(0)) so that grandchildren are not re-parented to
     // PID 1 and left running after the runner exits.
     #[cfg(unix)]
     {
-        if let Some(raw_pid) = pid {
+        if let Some(raw_pid) = _pid {
             use nix::sys::signal::Signal;
             use nix::unistd::Pid;
             let _ = nix::sys::signal::killpg(Pid::from_raw(raw_pid as i32), Signal::SIGKILL);

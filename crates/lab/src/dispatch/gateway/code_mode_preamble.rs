@@ -121,7 +121,12 @@ impl PreambleCache {
     ///
     /// Returns `CachedPreamble` so cache hits avoid any pool fetch. A hit
     /// promotes the entry to most-recently-used.
-    pub fn get(&self, aggregate: u64, tier: ScopeTier, subject: Option<&str>) -> Option<CachedPreamble> {
+    pub fn get(
+        &self,
+        aggregate: u64,
+        tier: ScopeTier,
+        subject: Option<&str>,
+    ) -> Option<CachedPreamble> {
         let key = (aggregate, tier, subject.map(ToOwned::to_owned));
         self.inner
             .lock()
@@ -131,7 +136,14 @@ impl PreambleCache {
 
     /// Insert a generated preamble and its tools JSON. If the cache is at
     /// capacity, the least-recently-used entry is evicted.
-    pub fn insert(&self, aggregate: u64, tier: ScopeTier, subject: Option<&str>, preamble: String, tools_json: Value) {
+    pub fn insert(
+        &self,
+        aggregate: u64,
+        tier: ScopeTier,
+        subject: Option<&str>,
+        preamble: String,
+        tools_json: Value,
+    ) {
         if let Ok(mut guard) = self.inner.lock() {
             guard.put(
                 (aggregate, tier, subject.map(ToOwned::to_owned)),
@@ -965,19 +977,20 @@ mod tests {
     #[test]
     fn generate_js_proxy_quoted_keys_tolerate_special_chars() {
         use crate::dispatch::upstream::types::UpstreamTool;
+        use rmcp::model::Tool;
         use std::sync::Arc;
 
         // Tool with a slash in the name — previously caused "Exception generated
         // by QuickJS" because the unquoted key was a JS syntax error.
         let schema = Arc::new(
-            serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+            serde_json::from_value::<serde_json::Map<String, Value>>(
                 serde_json::json!({"type": "object", "properties": {}}),
             )
             .unwrap(),
         );
         let tool = UpstreamTool {
             upstream_name: Arc::from("github"),
-            tool: rmcp::model::Tool::new("create/issue", "Create an issue", Arc::clone(&schema)),
+            tool: Tool::new("create/issue", "Create an issue", Arc::clone(&schema)),
             destructive: false,
             input_schema: None,
         };

@@ -1575,14 +1575,14 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
 
+    #[cfg(feature = "fs")]
+    use super::workspace_runtime_home_from_env_values;
     use super::{
         McpArgs, PeerNotifier, ServeCommand, Transport, allowed_hosts, bind_addr,
         build_http_router, filter_registry, is_loopback_host, resolve_lab_spawn_depth,
         resolve_port, resolve_session_ttl_secs, resolve_stateful_mode, resolve_transport,
         resolve_web_ui_auth_disabled, should_run_stdio, stdio_recursion_guard_active,
     };
-    #[cfg(feature = "fs")]
-    use super::workspace_runtime_home_from_env_values;
     use crate::api::AppState;
     use crate::cli::Cli;
     use crate::config::{LabConfig, McpPreferences, WebPreferences};
