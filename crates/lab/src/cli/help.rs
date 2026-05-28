@@ -1,40 +1,36 @@
-//! `lab help` — print the shared service + action catalog.
+//! `lab help` — print CLI usage for the binary or a specific subcommand.
 
 use std::process::ExitCode;
 
 use anyhow::Result;
-use clap::Args;
+use clap::{Args, CommandFactory};
 
-use crate::{
-    catalog::build_catalog,
-    config::load_toml,
-    output::{OutputFormat, print},
-    registry::{
-        build_default_registry, filter_built_in_upstream_apis, filter_by_configured_env,
-        lab_show_all_enabled,
-    },
-};
+use crate::output::OutputFormat;
 
 #[derive(Debug, Args)]
 pub struct HelpArgs {
-    /// Show every compiled-in service, even if required env vars are missing.
-    #[arg(long)]
-    pub all: bool,
+    /// Show help for a specific subcommand (e.g. `lab help gateway`).
+    pub service: Option<String>,
 }
 
 /// Run the help subcommand.
-pub fn run(args: HelpArgs, format: OutputFormat) -> Result<ExitCode> {
-    let config = load_toml(&crate::config::toml_candidates())?;
-    let registry = filter_built_in_upstream_apis(
-        build_default_registry(),
-        config.services.built_in_upstream_apis_enabled,
-    );
-    let registry = if args.all || lab_show_all_enabled() {
-        registry
-    } else {
-        filter_by_configured_env(&registry)
-    };
-    let catalog = build_catalog(&registry);
-    print(&catalog, format)?;
+pub fn run(args: HelpArgs, _format: OutputFormat) -> Result<ExitCode> {
+    let mut cmd = crate::cli::Cli::command();
+    match args.service {
+        None => {
+            cmd.print_long_help()?;
+            println!();
+        }
+        Some(ref name) => match cmd.find_subcommand_mut(name) {
+            Some(sub) => {
+                sub.print_long_help()?;
+                println!();
+            }
+            None => {
+                eprintln!("No subcommand '{name}'. Run `lab help` to see available commands.");
+                return Ok(ExitCode::FAILURE);
+            }
+        },
+    }
     Ok(ExitCode::SUCCESS)
 }

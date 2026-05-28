@@ -78,7 +78,7 @@ pub enum Command {
     Health,
     /// Open the web-based first-run wizard (or settings) — lab-bg3e.3.
     Setup(setup::SetupArgs),
-    /// Print the service + action catalog.
+    /// Show CLI help for the binary or a specific subcommand.
     Help(help::HelpArgs),
     /// Generate shell completions.
     Completions(completions::CompletionsArgs),

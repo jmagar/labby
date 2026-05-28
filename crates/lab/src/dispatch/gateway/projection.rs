@@ -136,11 +136,12 @@ pub(super) fn redacted_gateway_target(upstream: &UpstreamConfig) -> Option<Strin
 
 pub(super) fn format_redacted_gateway_command(command: &str, args: &[String]) -> String {
     if command == "env" {
-        let _ = args;
         return "env".to_string();
     }
 
-    redact_stdio_value(command)
+    let mut parts = vec![redact_stdio_value(command)];
+    parts.extend(args.iter().cloned());
+    parts.join(" ")
 }
 
 pub(super) fn empty_upstream_summary() -> UpstreamCachedSummary {

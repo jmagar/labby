@@ -134,8 +134,11 @@ pub struct GatewayGetArgs {
 
 #[derive(Debug, Args)]
 pub struct GatewayTestArgs {
-    #[arg(long)]
+    /// Server name to test (positional or --name).
+    #[arg(conflicts_with = "name_flag")]
     pub name: Option<String>,
+    #[arg(long = "name", conflicts_with = "name")]
+    pub name_flag: Option<String>,
     #[arg(long, default_value_t = false)]
     pub allow_stdio: bool,
 }
@@ -548,7 +551,7 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                 }
                 GatewayCommand::Test(args) => (
                     "gateway.test".to_string(),
-                    json!({ "name": args.name, "allow_stdio": args.allow_stdio }),
+                    json!({ "name": args.name.or(args.name_flag), "allow_stdio": args.allow_stdio }),
                 ),
                 GatewayCommand::Add(args) => (
                     "gateway.add".to_string(),
@@ -947,10 +950,7 @@ fn render_gateway_list_human(
     println!(
         "{} {}",
         theme.section(&format!("Lab Gateway · {total} servers")),
-        theme.muted(format!(
-            "({} connected, {} disconnected, {} disabled)",
-            connected, failed, disabled
-        )),
+        theme.muted(format!("(✓ {}  ⚠ {}  ⊘ {})", connected, failed, disabled)),
     );
     println!();
 
@@ -1008,50 +1008,31 @@ fn render_gateway_list_human(
         let transport_padded = format!("{:width$}", transport_raw, width = transport_width);
         let transport = theme.tertiary(&transport_padded);
 
-        let status_detail = if !s.enabled {
-            theme.muted("disabled")
-        } else if s.connected {
+        let target = s
+            .config_summary
+            .target
+            .as_deref()
+            .filter(|t| !t.is_empty())
+            .map(|t| theme.muted(if t == "env" { "$" } else { t }))
+            .unwrap_or_default();
+
+        let capabilities = if s.connected {
             let mut parts = Vec::new();
             if s.exposed_tool_count > 0 {
-                parts.push(format!(
-                    "{} {}",
-                    s.exposed_tool_count,
-                    if s.exposed_tool_count == 1 {
-                        "tool"
-                    } else {
-                        "tools"
-                    }
-                ));
+                parts.push(format!("🔧 {}", s.exposed_tool_count));
             }
             if s.exposed_prompt_count > 0 {
-                parts.push(format!(
-                    "{} {}",
-                    s.exposed_prompt_count,
-                    if s.exposed_prompt_count == 1 {
-                        "prompt"
-                    } else {
-                        "prompts"
-                    }
-                ));
+                parts.push(format!("📝 {}", s.exposed_prompt_count));
             }
             if s.exposed_resource_count > 0 {
-                parts.push(format!(
-                    "{} {}",
-                    s.exposed_resource_count,
-                    if s.exposed_resource_count == 1 {
-                        "resource"
-                    } else {
-                        "resources"
-                    }
-                ));
+                parts.push(format!("📦 {}", s.exposed_resource_count));
             }
-            let joined = if parts.is_empty() {
-                "connected".to_string()
+            if parts.is_empty() {
+                theme.secondary("✓")
             } else {
-                parts.join(" · ")
-            };
-            theme.secondary(&joined)
-        } else {
+                theme.secondary(&parts.join(" · "))
+            }
+        } else if s.enabled {
             let msg = s
                 .warnings
                 .iter()
@@ -1064,19 +1045,13 @@ fn render_gateway_list_human(
                         m.to_string()
                     }
                 })
-                .unwrap_or_else(|| "not connected".to_string());
+                .unwrap_or_else(|| "✗".to_string());
             theme.warn(&msg)
+        } else {
+            String::new()
         };
 
-        let target = s
-            .config_summary
-            .target
-            .as_deref()
-            .filter(|t| !t.is_empty())
-            .map(|t| theme.muted(t))
-            .unwrap_or_default();
-
-        println!("  {icon} {name}  {transport}  {status_detail}  {target}");
+        println!("  {icon} {name}  {transport}  {target}  {capabilities}");
     }
 }
 

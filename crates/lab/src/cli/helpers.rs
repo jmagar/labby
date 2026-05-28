@@ -72,12 +72,7 @@ where
         ),
     }
 
-    let value = result.map_err(|e| {
-        anyhow::anyhow!(
-            "{}",
-            serde_json::to_string(&e).unwrap_or_else(|_| e.to_string())
-        )
-    })?;
+    let value = result.map_err(|e| anyhow::anyhow!("{}", e.user_message()))?;
     print(&value, format)?;
     Ok(ExitCode::SUCCESS)
 }
@@ -238,7 +233,7 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert!(err.to_string().contains("missing_param"));
+            assert!(err.to_string().contains("missing required parameter `id`"));
         });
 
         drop(_guard);

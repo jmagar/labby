@@ -245,16 +245,13 @@ impl<'a> CodeModeBroker<'a> {
         }
 
         let Some(manager) = self.gateway_manager else {
-            tracing::warn!(
+            tracing::debug!(
                 surface = "dispatch",
                 service = "search",
                 action = "catalog.build",
-                "search called with no gateway_manager configured"
+                "search called with no gateway_manager; returning empty catalog"
             );
-            return Err(ToolError::Sdk {
-                sdk_kind: "internal_error".to_string(),
-                message: "gateway is not configured; search is unavailable".to_string(),
-            });
+            return evaluate_code_search(code, &[]);
         };
 
         let allow_cold_connect = caller.can_execute();

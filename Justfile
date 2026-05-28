@@ -49,9 +49,10 @@ build-release:
 marketplace: build-release
     target/release/labby marketplace generate --out target/marketplace --binary target/release/labby
 
-# Install release binary to ~/.local/bin/labby (updates the host CLI)
+# Install release binary to ~/.local/bin/labby and ~/.local/bin/lab (updates the host CLI)
 install: build-release
     install -D -m 755 bin/labby ~/.local/bin/labby
+    install -D -m 755 bin/labby ~/.local/bin/lab
 
 # Ensure host-side runtime directories are owned by the current user before
 # Docker can claim them as root during bind-mount creation.

@@ -684,6 +684,9 @@ fn render_catalog(map: &serde_json::Map<String, Value>, theme: CliTheme) -> Stri
         .unwrap_or(10)
         .min(14);
 
+    // Detail mode: single service requested — list every action vertically.
+    // Summary mode: multiple services — compact one-line preview per service.
+    let detail_mode = services.len() == 1;
     const ACTION_PREVIEW: usize = 5;
     const MAX_ACTIONS_WIDTH: usize = 64;
 
@@ -715,7 +718,6 @@ fn render_catalog(map: &serde_json::Map<String, Value>, theme: CliTheme) -> Stri
         )
         .ok();
 
-        // Action preview: first N names, middle-dot separated, truncate at MAX_ACTIONS_WIDTH.
         let names: Vec<&str> = actions
             .iter()
             .filter_map(Value::as_object)
@@ -724,32 +726,41 @@ fn render_catalog(map: &serde_json::Map<String, Value>, theme: CliTheme) -> Stri
         if names.is_empty() {
             continue;
         }
-        let sep = format!(" {} ", theme.muted("·"));
-        let indent = "      ";
-        let mut line = String::new();
-        let mut shown = 0usize;
-        for (i, n) in names.iter().take(ACTION_PREVIEW).enumerate() {
-            let colored = theme.tertiary(n);
-            let candidate = if i == 0 {
-                colored
-            } else {
-                format!("{sep}{colored}")
-            };
-            if visible_width(&line) + visible_width(&candidate) > MAX_ACTIONS_WIDTH {
-                break;
+
+        if detail_mode {
+            // One action per line so all actions are visible without truncation.
+            for n in &names {
+                writeln!(out, "      {}", theme.tertiary(n)).ok();
             }
-            line.push_str(&candidate);
-            shown += 1;
-        }
-        writeln!(out, "{indent}{line}").ok();
-        let remaining = names.len().saturating_sub(shown);
-        if remaining > 0 {
-            writeln!(
-                out,
-                "{indent}{}",
-                theme.muted(format!("(+{remaining} more — `lab help {name}`)").as_str())
-            )
-            .ok();
+        } else {
+            // Compact preview: first N names, middle-dot separated, truncate at MAX_ACTIONS_WIDTH.
+            let sep = format!(" {} ", theme.muted("·"));
+            let indent = "      ";
+            let mut line = String::new();
+            let mut shown = 0usize;
+            for (i, n) in names.iter().take(ACTION_PREVIEW).enumerate() {
+                let colored = theme.tertiary(n);
+                let candidate = if i == 0 {
+                    colored
+                } else {
+                    format!("{sep}{colored}")
+                };
+                if visible_width(&line) + visible_width(&candidate) > MAX_ACTIONS_WIDTH {
+                    break;
+                }
+                line.push_str(&candidate);
+                shown += 1;
+            }
+            writeln!(out, "{indent}{line}").ok();
+            let remaining = names.len().saturating_sub(shown);
+            if remaining > 0 {
+                writeln!(
+                    out,
+                    "{indent}{}",
+                    theme.muted(format!("(+{remaining} more — `lab help {name}`)").as_str())
+                )
+                .ok();
+            }
         }
     }
 
@@ -878,39 +889,72 @@ mod tests {
         assert!(!out.contains("is missing"));
     }
 
-    #[test]
-    fn catalog_renders_nested_layout_without_key_count_artifacts() {
-        let val = serde_json::json!({
-            "services": [
-                {
-                    "name": "radarr",
-                    "description": "Movie manager",
-                    "category": "servarr",
-                    "status": "available",
-                    "requires_http_subject": false,
-                    "actions": [
-                        {"name": "movie.search", "description": "", "destructive": false, "params": [], "returns": ""},
-                        {"name": "movie.add", "description": "", "destructive": false, "params": [], "returns": ""},
-                        {"name": "queue.list", "description": "", "destructive": false, "params": [], "returns": ""},
-                        {"name": "queue.purge", "description": "", "destructive": true, "params": [], "returns": ""},
-                        {"name": "history.list", "description": "", "destructive": false, "params": [], "returns": ""},
-                        {"name": "root.list", "description": "", "destructive": false, "params": [], "returns": ""},
-                        {"name": "tag.list", "description": "", "destructive": false, "params": [], "returns": ""}
-                    ]
-                }
+    fn make_test_service(name: &str) -> Value {
+        serde_json::json!({
+            "name": name,
+            "description": "Test service",
+            "category": "servarr",
+            "status": "available",
+            "requires_http_subject": false,
+            "actions": [
+                {"name": "movie.search", "description": "", "destructive": false, "params": [], "returns": ""},
+                {"name": "movie.add", "description": "", "destructive": false, "params": [], "returns": ""},
+                {"name": "queue.list", "description": "", "destructive": false, "params": [], "returns": ""},
+                {"name": "queue.purge", "description": "", "destructive": true, "params": [], "returns": ""},
+                {"name": "history.list", "description": "", "destructive": false, "params": [], "returns": ""},
+                {"name": "root.list", "description": "", "destructive": false, "params": [], "returns": ""},
+                {"name": "tag.list", "description": "", "destructive": false, "params": [], "returns": ""}
             ]
+        })
+    }
+
+    #[test]
+    fn catalog_summary_shows_truncation_hint() {
+        // Two services → summary mode → compact preview with "(+N more — `lab help X`)" hint.
+        let val = serde_json::json!({
+            "services": [make_test_service("alpha"), make_test_service("beta")]
         });
         let out = render(&val, human_format()).unwrap();
         let plain = strip_ansi_escapes::strip_str(&out);
         assert!(plain.contains("Lab"));
-        assert!(plain.contains("radarr"));
+        assert!(plain.contains("alpha"));
         assert!(plain.contains("servarr"));
         assert!(plain.contains("7 actions"));
         assert!(plain.contains("movie.search"));
         assert!(plain.contains("(+"));
         assert!(plain.contains("more"));
-        assert!(plain.contains("lab help radarr"));
-        // The old `{5 keys}` artifact must not appear.
+        assert!(plain.contains("lab help alpha"));
+        assert!(
+            !plain.contains("{5 keys}"),
+            "nested ActionEntry rendered as '{{N keys}}' artifact"
+        );
+        assert!(!plain.contains("keys}"), "any 'keys}}' artifact leaked");
+    }
+
+    #[test]
+    fn catalog_detail_shows_all_actions_without_hint() {
+        // Single service → detail mode → all actions listed, no truncation hint.
+        let val = serde_json::json!({
+            "services": [make_test_service("alpha")]
+        });
+        let out = render(&val, human_format()).unwrap();
+        let plain = strip_ansi_escapes::strip_str(&out);
+        assert!(plain.contains("Lab"));
+        assert!(plain.contains("alpha"));
+        assert!(plain.contains("7 actions"));
+        assert!(plain.contains("movie.search"));
+        assert!(
+            plain.contains("tag.list"),
+            "all actions should be visible in detail mode"
+        );
+        assert!(
+            !plain.contains("(+"),
+            "detail mode must not show truncation hint"
+        );
+        assert!(
+            !plain.contains("lab help alpha"),
+            "detail mode must not show hint to itself"
+        );
         assert!(
             !plain.contains("{5 keys}"),
             "nested ActionEntry rendered as '{{N keys}}' artifact"
