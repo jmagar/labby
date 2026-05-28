@@ -549,11 +549,13 @@ impl GatewayManager {
         // legacy upstream config when the root [tool_search] is explicitly disabled.
 
         // Startup dual-mode conflict: if both tool_search and code_mode are enabled,
-        // tool_search wins — silently disable code_mode and emit an error.
+        // tool_search wins — disable code_mode for this session and emit an error.
+        // The config file is not modified; the operator must resolve the conflict manually.
         if config.tool_search.enabled && config.code_mode.enabled {
             tracing::error!(
-                "code_mode and tool_search both enabled at startup -- tool_search takes priority. \
-                Disable one via config or env."
+                "code_mode and tool_search both enabled at startup — tool_search takes priority. \
+                code_mode is disabled for this session. \
+                Fix: set code_mode.enabled = false or tool_search.enabled = false in config."
             );
             config.code_mode.enabled = false;
         }
@@ -1737,7 +1739,8 @@ impl GatewayManager {
         if was_disabled && next.enabled {
             let cfg_now = self.config.read().await.clone();
             let owner_ref = owner.as_ref();
-            self.ensure_lazy_upstream_pool(&cfg_now, owner_ref).await;
+            let pool = self.ensure_lazy_upstream_pool(&cfg_now, owner_ref).await;
+            self.spawn_code_mode_upstream_connections(pool, &cfg_now, owner_ref, None);
             tracing::info!(
                 surface = "dispatch",
                 service = "gateway",
@@ -2478,13 +2481,13 @@ impl GatewayManager {
                     .ensure_tools_for_upstream(&upstream, subject, owner.as_ref())
                     .await
                 {
-                    tracing::debug!(
+                    tracing::warn!(
                         surface = "dispatch",
                         service = "gateway",
                         action = "code_mode.warm_upstream",
                         upstream = %upstream.name,
                         error = %err,
-                        "code_mode upstream connection failed (non-fatal)"
+                        "code_mode upstream connection failed during warm-up"
                     );
                 } else {
                     tracing::debug!(

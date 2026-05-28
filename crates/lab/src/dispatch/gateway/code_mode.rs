@@ -61,9 +61,7 @@ fn normalize_user_code(code: &str) -> String {
             .or_else(|| trimmed.strip_prefix("```ts\n"))
             .or_else(|| trimmed.strip_prefix("```\n"))
         {
-            stripped
-                .trim_end_matches("```")
-                .trim_end()
+            stripped.trim_end_matches("```").trim_end()
         } else {
             trimmed
         }
@@ -87,8 +85,8 @@ fn normalize_user_code(code: &str) -> String {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeModeToolId {
-    pub raw: String,
-    pub reference: CodeModeToolRef,
+    pub(crate) raw: String,
+    pub(crate) reference: CodeModeToolRef,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -197,9 +195,8 @@ pub struct CodeModeExecutionResponse {
     /// returns undefined, null, or throws (the throw case surfaces via ToolError).
     pub result: Option<Value>,
     pub calls: Vec<CodeModeExecutedCall>,
-    /// Captured console.log/warn/error lines. Populated in Bead 3 (boa_runtime
-    /// console capture). For now this is always an empty Vec — the field is
-    /// present in the serialized response as required by the contract.
+    /// Captured console.log/warn/error lines from the sandbox runner.
+    /// Populated by the Boa CapturingLogger (non-WASM) or stderr (Javy/WASM).
     pub logs: Vec<String>,
 }
 
@@ -300,6 +297,24 @@ impl CodeModeCaller {
             Self::Scoped { sub: None, .. } => Some(SHARED_GATEWAY_OAUTH_SUBJECT),
         }
     }
+
+    /// Map this caller to the broadest `ScopeTier` it holds.
+    #[must_use]
+    pub fn scope_tier(&self) -> super::code_mode_preamble::ScopeTier {
+        use super::code_mode_preamble::ScopeTier;
+        match self {
+            Self::TrustedLocal => ScopeTier::Admin,
+            Self::Scoped { scopes, .. } => {
+                if scopes.iter().any(|s| matches!(s.as_str(), "lab:admin")) {
+                    ScopeTier::Admin
+                } else if scopes.iter().any(|s| matches!(s.as_str(), "lab")) {
+                    ScopeTier::Execute
+                } else {
+                    ScopeTier::Read
+                }
+            }
+        }
+    }
 }
 
 pub struct CodeModeBroker<'a> {
@@ -329,9 +344,12 @@ impl<'a> CodeModeBroker<'a> {
             return Ok(Value::Array(Vec::new()));
         };
 
-        let allow_cold_connect = caller.can_execute();
+        // Catalog reads warm the pool regardless of execution scope.
+        // `can_execute()` guards running snippets, not reading the tool catalog.
+        let allow_cold_connect = true;
         let owner = caller.runtime_owner(_surface);
         let oauth_subject = caller.oauth_subject();
+        let started = std::time::Instant::now();
         let (catalog, serialized_size, truncated) = self
             .code_search_catalog(manager, allow_cold_connect, &owner, oauth_subject)
             .await?;
@@ -342,6 +360,7 @@ impl<'a> CodeModeBroker<'a> {
             catalog_size_bytes = serialized_size,
             entry_count = catalog.len(),
             truncated,
+            elapsed_ms = started.elapsed().as_millis(),
             "Code Mode search catalog ready"
         );
         evaluate_code_search(code, &catalog)
@@ -354,16 +373,14 @@ impl<'a> CodeModeBroker<'a> {
     /// Cached keyed on the aggregate hash of all upstream `catalog_hash` values.
     /// Cache lookup happens before fetching the catalog from the pool.
     ///
-    /// Referenced by tool description: "Use code_search({action: 'preamble'}) to get
+    /// Referenced by tool description: "Use code({action: 'preamble'}) to get
     /// typed TypeScript declarations".
     pub async fn get_preamble(
         &self,
         caller: CodeModeCaller,
         surface: CodeModeSurface,
     ) -> Result<Value, ToolError> {
-        use super::code_mode_preamble::{
-            ScopeTier, aggregate_catalog_hash, generate_preamble,
-        };
+        use super::code_mode_preamble::{aggregate_catalog_hash, generate_preamble};
 
         if !caller.can_read() {
             return Err(ToolError::Sdk {
@@ -373,46 +390,31 @@ impl<'a> CodeModeBroker<'a> {
         }
 
         let Some(manager) = self.gateway_manager else {
-            return Ok(serde_json::json!({ "tools": [], "preamble": generate_preamble(&[], false, 0) }));
+            return Ok(
+                serde_json::json!({ "tools": [], "preamble": generate_preamble(&[], false, 0) }),
+            );
         };
 
-        let scope_tier = match &caller {
-            CodeModeCaller::TrustedLocal => ScopeTier::Admin,
-            CodeModeCaller::Scoped { scopes, .. } => {
-                if scopes.iter().any(|s| matches!(s.as_str(), "lab:admin")) {
-                    ScopeTier::Admin
-                } else if scopes.iter().any(|s| matches!(s.as_str(), "lab")) {
-                    ScopeTier::Execute
-                } else {
-                    ScopeTier::Read
-                }
-            }
-        };
+        let scope_tier = caller.scope_tier();
+        // Compute owner/oauth_subject once — used in both cache-hit and cache-miss paths.
+        let owner = caller.runtime_owner(surface);
+        let oauth_subject = caller.oauth_subject();
 
         // ── Cache check BEFORE touching the pool ─────────────────────────
         let upstream_hashes = manager.per_upstream_catalog_hashes();
         let agg_hash = aggregate_catalog_hash(&upstream_hashes);
 
         if let Some(cached) = manager.preamble_cache().get(agg_hash, scope_tier) {
-            let allow_cold_connect = caller.can_execute();
-            let owner = caller.runtime_owner(surface);
-            let oauth_subject = caller.oauth_subject();
-            let (catalog, _, _) = self
-                .code_search_catalog(manager, allow_cold_connect, &owner, oauth_subject)
-                .await?;
-            let tools_json = serde_json::to_value(&catalog).unwrap_or(Value::Array(Vec::new()));
             return Ok(serde_json::json!({
-                "tools": tools_json,
-                "preamble": cached,
+                "tools": cached.tools_json,
+                "preamble": cached.preamble,
             }));
         }
 
         // ── Cache miss — generate preamble ───────────────────────────────
-        let allow_cold_connect = caller.can_execute();
-        let owner = caller.runtime_owner(surface);
-        let oauth_subject = caller.oauth_subject();
+        let preamble_started = std::time::Instant::now();
         let (catalog, _, truncated) = self
-            .code_search_catalog(manager, allow_cold_connect, &owner, oauth_subject)
+            .code_search_catalog(manager, true, &owner, oauth_subject)
             .await?;
 
         // Collect raw UpstreamTool list for preamble generation from catalog entries
@@ -424,22 +426,31 @@ impl<'a> CodeModeBroker<'a> {
 
         let dropped_count = if truncated {
             // Count dropped = pool tools - catalog tools (excluding sentinel)
-            let catalog_real_count = catalog
-                .iter()
-                .filter(|e| e.id != "__truncated__")
-                .count();
+            let catalog_real_count = catalog.iter().filter(|e| e.id != "__truncated__").count();
             pool_tools.len().saturating_sub(catalog_real_count)
         } else {
             0
         };
 
         let preamble = generate_preamble(&pool_tools, truncated, dropped_count);
+        let tools_json = serde_json::to_value(&catalog).unwrap_or(Value::Array(Vec::new()));
 
-        // Store in cache (aggregate hash 0 = cold pool, still cache it to avoid
-        // redundant generation on repeated requests before indexes warm up)
-        manager
-            .preamble_cache()
-            .insert(agg_hash, scope_tier, preamble.clone());
+        // Only cache when the pool has tools — an empty result indicates the pool
+        // hasn't warmed yet and caching it would poison all subsequent requests
+        // until the aggregate hash changes.
+        if pool_tools.is_empty() {
+            tracing::warn!(
+                surface = "dispatch",
+                service = "code_search",
+                action = "preamble.generate",
+                agg_hash,
+                "Code Mode preamble generated with empty tool pool; skipping cache"
+            );
+        } else {
+            manager
+                .preamble_cache()
+                .insert(agg_hash, scope_tier, preamble.clone(), tools_json.clone());
+        }
 
         tracing::info!(
             surface = "dispatch",
@@ -449,10 +460,10 @@ impl<'a> CodeModeBroker<'a> {
             tool_count = pool_tools.len(),
             truncated,
             preamble_len = preamble.len(),
+            elapsed_ms = preamble_started.elapsed().as_millis(),
             "Code Mode preamble generated and cached"
         );
 
-        let tools_json = serde_json::to_value(&catalog).unwrap_or(Value::Array(Vec::new()));
         Ok(serde_json::json!({
             "tools": tools_json,
             "preamble": preamble,
@@ -469,7 +480,7 @@ impl<'a> CodeModeBroker<'a> {
     ) -> Result<CodeModeExecutionResponse, ToolError> {
         if !config.enabled {
             return Err(ToolError::Sdk {
-                sdk_kind: "code_mode_disabled".to_string(),
+                sdk_kind: "internal_error".to_string(),
                 message:
                     "Code Mode execution is disabled; set [code_mode].enabled = true to enable it"
                         .to_string(),
@@ -511,7 +522,11 @@ impl<'a> CodeModeBroker<'a> {
             action = "code_execute",
             tool_calls = response.calls.len(),
             elapsed_ms = started.elapsed().as_millis(),
-            result_bytes = response.result.as_ref().map(|v| v.to_string().len()).unwrap_or(0),
+            result_bytes = response
+                .result
+                .as_ref()
+                .map(|v| v.to_string().len())
+                .unwrap_or(0),
             logs_count = response.logs.len(),
             truncated = was_truncated,
             "code execution complete"
@@ -627,10 +642,19 @@ impl<'a> CodeModeBroker<'a> {
                     upstreams.sort();
                     super::code_mode_preamble::generate_js_proxy(&tools, &upstreams)
                 }
-                Err(_) => {
-                    // If catalog fetch fails, inject minimal empty preamble so
-                    // the sandbox still runs — codemode will have no methods.
-                    super::code_mode_preamble::generate_js_proxy(&[], &[])
+                Err(err) => {
+                    tracing::warn!(
+                        surface = "dispatch",
+                        service = "code_mode",
+                        action = "code_execute",
+                        kind = err.kind(),
+                        error = %err,
+                        "catalog fetch failed before sandbox execution; no upstream tools available"
+                    );
+                    return Err(ToolError::Sdk {
+                        sdk_kind: "upstream_error".to_string(),
+                        message: format!("failed to fetch upstream tool catalog for Code Mode execution: {err}"),
+                    });
                 }
             }
         } else {
@@ -696,9 +720,18 @@ impl<'a> CodeModeBroker<'a> {
             let stderr_buf = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
             let stderr_buf_clone = stderr_buf.clone();
             tokio::spawn(async move {
+                // Mirror the runner-side hard caps so the parent buffer can't
+                // grow unbounded when the wasm feature swaps the runner backend.
+                const CAP_ENTRIES: usize = 10_000;
+                const CAP_BYTES: usize = 1024 * 1024;
                 let mut lines = TokioBufReader::new(stderr).lines();
+                let mut total_bytes = 0usize;
                 while let Ok(Some(line)) = lines.next_line().await {
+                    total_bytes += line.len() + 1;
                     let mut buf = stderr_buf_clone.lock().await;
+                    if buf.len() >= CAP_ENTRIES || total_bytes > CAP_BYTES {
+                        break;
+                    }
                     buf.push(line);
                 }
             });
@@ -742,7 +775,7 @@ impl<'a> CodeModeBroker<'a> {
                             message: format!("failed to wait for Code Mode runner: {err}"),
                         })?;
                         return Err(ToolError::Sdk {
-                            sdk_kind: "code_execution_failed".to_string(),
+                            sdk_kind: "server_error".to_string(),
                             message: format!(
                                 "Code Mode runner exited before completion with status {status}"
                             ),
@@ -783,26 +816,21 @@ impl<'a> CodeModeBroker<'a> {
                             if !pending_tool_calls.is_empty() {
                                 terminate_code_mode_runner(&mut child, child_pid).await;
                                 return Err(ToolError::Sdk {
-                                    sdk_kind: "code_execution_failed".to_string(),
+                                    sdk_kind: "internal_error".to_string(),
                                     message: "Code Mode runner completed with pending tool calls".to_string(),
                                 });
                             }
-                            if calls.is_empty() {
-                                terminate_code_mode_runner(&mut child, child_pid).await;
-                                return Err(ToolError::Sdk {
-                                    sdk_kind: "invalid_param".to_string(),
-                                    message:
-                                        "Code Mode snippet must call callTool(id, params) at least once"
-                                            .to_string(),
-                                });
-                            }
+                            // Cloudflare parity: pure computation (filter, sort, reduce
+                            // over already-known data) is a valid Code Mode use case.
+                            // Do not require at least one callTool — let the user return
+                            // a computed value from `result` without any tool calls.
                             let status = child.wait().await.map_err(|err| ToolError::Sdk {
                                 sdk_kind: "internal_error".to_string(),
                                 message: format!("failed to wait for Code Mode runner: {err}"),
                             })?;
                             if !status.success() {
                                 return Err(ToolError::Sdk {
-                                    sdk_kind: "code_execution_failed".to_string(),
+                                    sdk_kind: "server_error".to_string(),
                                     message: format!("Code Mode runner exited with status {status}"),
                                 });
                             }
@@ -836,7 +864,15 @@ impl<'a> CodeModeBroker<'a> {
                             });
                         }
                         CodeModeRunnerOutput::Error { kind, message } => {
-                            drop(child.wait().await);
+                            if let Ok(status) = child.wait().await {
+                                tracing::debug!(
+                                    surface = "dispatch",
+                                    service = "code_mode",
+                                    action = "code_execute",
+                                    exit_status = %status,
+                                    "runner exited with error"
+                                );
+                            }
                             return Err(ToolError::Sdk {
                                 sdk_kind: kind,
                                 message,
@@ -924,7 +960,13 @@ impl<'a> CodeModeBroker<'a> {
                 let owner = caller.runtime_owner(surface);
                 let oauth_subject = caller.oauth_subject();
                 self.call_upstream_tool(
-                    manager, &upstream, &tool, params, &owner, oauth_subject, surface,
+                    manager,
+                    &upstream,
+                    &tool,
+                    params,
+                    &owner,
+                    oauth_subject,
+                    surface,
                 )
                 .await
             }
@@ -1032,20 +1074,27 @@ pub enum CodeModeRunnerInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CodeModeRunnerOutput {
-    ToolCall { seq: u64, id: String, params: Value },
+    ToolCall {
+        seq: u64,
+        id: String,
+        params: Value,
+    },
     /// Runner completed successfully. `result` is the serialized return value of
     /// the async function (None when the function returns undefined/null).
-    /// `logs` is reserved for Bead 3 console capture; always empty for now.
+    /// `logs` carries captured console output (Boa path) or redirected stderr (Javy path).
     Done {
         // #[serde(default)] makes this variant forward-compatible: old runner binaries
         // that emit {"type":"done"} without these fields deserialize to None/[] instead
-        // of failing with a missing-field error (lab-y08q1.1.2).
+        // of failing with a missing-field error.
         #[serde(default)]
         result: Option<Value>,
         #[serde(default)]
         logs: Vec<String>,
     },
-    Error { kind: String, message: String },
+    Error {
+        kind: String,
+        message: String,
+    },
 }
 
 struct CodeModeRunnerState {
@@ -1094,17 +1143,37 @@ impl Finalize for CapturingLogger {}
 
 #[cfg(not(feature = "code_mode_wasm"))]
 impl Logger for CapturingLogger {
-    fn log(&self, msg: String, _state: &ConsoleState, _context: &mut Context) -> boa_engine::JsResult<()> {
+    fn log(
+        &self,
+        msg: String,
+        _state: &ConsoleState,
+        _context: &mut Context,
+    ) -> boa_engine::JsResult<()> {
         append_runner_log(msg);
         Ok(())
     }
-    fn info(&self, msg: String, state: &ConsoleState, context: &mut Context) -> boa_engine::JsResult<()> {
+    fn info(
+        &self,
+        msg: String,
+        state: &ConsoleState,
+        context: &mut Context,
+    ) -> boa_engine::JsResult<()> {
         self.log(msg, state, context)
     }
-    fn warn(&self, msg: String, state: &ConsoleState, context: &mut Context) -> boa_engine::JsResult<()> {
+    fn warn(
+        &self,
+        msg: String,
+        state: &ConsoleState,
+        context: &mut Context,
+    ) -> boa_engine::JsResult<()> {
         self.log(msg, state, context)
     }
-    fn error(&self, msg: String, state: &ConsoleState, context: &mut Context) -> boa_engine::JsResult<()> {
+    fn error(
+        &self,
+        msg: String,
+        state: &ConsoleState,
+        context: &mut Context,
+    ) -> boa_engine::JsResult<()> {
         self.log(msg, state, context)
     }
 }
@@ -1170,7 +1239,7 @@ mod wasm_runner {
         match trap {
             Trap::OutOfFuel => Some("code_mode_fuel_exhausted"),
             Trap::Interrupt => Some("code_mode_timeout"),
-            _ => Some("code_execution_failed"),
+            _ => Some("server_error"),
         }
     }
 }
@@ -1247,7 +1316,7 @@ fn evaluate_code_search(code: &str, catalog: &[CodeModeCatalogEntry]) -> Result<
 
     for _ in 0..CODE_MODE_LOOP_ITERATION_LIMIT {
         context.run_jobs().map_err(|err| ToolError::Sdk {
-            sdk_kind: "code_execution_failed".to_string(),
+            sdk_kind: "server_error".to_string(),
             message: err.to_string(),
         })?;
         match promise.state() {
@@ -1255,17 +1324,17 @@ fn evaluate_code_search(code: &str, catalog: &[CodeModeCatalogEntry]) -> Result<
                 return value
                     .to_json(&mut context)
                     .map_err(|err| ToolError::Sdk {
-                        sdk_kind: "code_execution_failed".to_string(),
+                        sdk_kind: "server_error".to_string(),
                         message: format!("failed to serialize Code Mode search result: {err}"),
                     })?
                     .ok_or_else(|| ToolError::Sdk {
-                        sdk_kind: "code_execution_failed".to_string(),
+                        sdk_kind: "server_error".to_string(),
                         message: "Code Mode search result is not JSON-serializable".to_string(),
                     });
             }
             PromiseState::Rejected(reason) => {
                 return Err(ToolError::Sdk {
-                    sdk_kind: "code_execution_failed".to_string(),
+                    sdk_kind: "server_error".to_string(),
                     message: js_value_message(&reason, &mut context),
                 });
             }
@@ -1274,7 +1343,7 @@ fn evaluate_code_search(code: &str, catalog: &[CodeModeCatalogEntry]) -> Result<
     }
 
     Err(ToolError::Sdk {
-        sdk_kind: "code_execution_failed".to_string(),
+        sdk_kind: "server_error".to_string(),
         message: "Code Mode search script did not settle before the iteration limit".to_string(),
     })
 }
@@ -1285,12 +1354,22 @@ fn truncate_execution_response(
     max_response_tokens: usize,
     token_estimate_divisor: u32,
 ) -> CodeModeExecutionResponse {
-    if response_within_budget(&response, max_response_bytes, max_response_tokens, token_estimate_divisor) {
+    if response_within_budget(
+        &response,
+        max_response_bytes,
+        max_response_tokens,
+        token_estimate_divisor,
+    ) {
         return response;
     }
 
     for idx in (0..response.calls.len()).rev() {
-        if response_within_budget(&response, max_response_bytes, max_response_tokens, token_estimate_divisor) {
+        if response_within_budget(
+            &response,
+            max_response_bytes,
+            max_response_tokens,
+            token_estimate_divisor,
+        ) {
             break;
         }
         let marker = truncation_marker(&response.calls[idx].result, token_estimate_divisor);
@@ -1309,7 +1388,8 @@ fn response_within_budget(
     match serde_json::to_vec(response) {
         Ok(bytes) => {
             bytes.len() <= max_response_bytes
-                && estimated_tokens(bytes.len(), token_estimate_divisor) <= max_response_tokens.max(1)
+                && estimated_tokens(bytes.len(), token_estimate_divisor)
+                    <= max_response_tokens.max(1)
         }
         Err(_) => false,
     }
@@ -1396,10 +1476,7 @@ async fn terminate_code_mode_runner(child: &mut Child, pid: Option<u32>) {
         if let Some(raw_pid) = pid {
             use nix::sys::signal::Signal;
             use nix::unistd::Pid;
-            let _ = nix::sys::signal::killpg(
-                Pid::from_raw(raw_pid as i32),
-                Signal::SIGKILL,
-            );
+            let _ = nix::sys::signal::killpg(Pid::from_raw(raw_pid as i32), Signal::SIGKILL);
         }
     }
     // Fallback (Windows or pid already gone): send SIGKILL to direct child only.
@@ -1476,7 +1553,10 @@ pub fn run_code_mode_runner_stdio() -> ExitCode {
     #[cfg(all(unix, target_os = "linux"))]
     {
         use nix::sys::prctl;
-        prctl::set_dumpable(false).ok();
+        if prctl::set_dumpable(false).is_err() {
+            // Non-fatal — execution continues but /proc/<pid>/environ may be readable.
+            eprintln!("WARNING: prctl(PR_SET_DUMPABLE, 0) failed; runner environment may be readable via /proc");
+        }
     }
 
     RUNNER_STATE.with(|state| {
@@ -1492,7 +1572,7 @@ pub fn run_code_mode_runner_stdio() -> ExitCode {
     let result = run_code_mode_runner();
     if let Err(err) = result {
         drop(runner_emit(CodeModeRunnerOutput::Error {
-            kind: "code_execution_failed".to_string(),
+            kind: "server_error".to_string(),
             message: err,
         }));
         return ExitCode::from(1);
@@ -1591,7 +1671,6 @@ globalThis.__labMainPromise = (async () => {{
         }
     };
 
-    // logs field: populated in Bead 3 (console capture). Empty Vec for now.
     runner_emit(CodeModeRunnerOutput::Done {
         result: resolved_result,
         logs: Vec::new(),
@@ -1641,7 +1720,14 @@ fn run_code_mode_runner() -> Result<(), String> {
                 // JsValue::to_json returns None for undefined/null — both map to
                 // Option::None per the contract (result field is None when function
                 // returns undefined or has no explicit return).
-                resolved_result = value.to_json(&mut context).ok().flatten();
+                resolved_result = match value.to_json(&mut context) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        let msg = js_error_message(&err);
+                        eprintln!("WARNING: failed to serialize Code Mode result to JSON: {msg}");
+                        None
+                    }
+                };
                 break;
             }
             PromiseState::Rejected(reason) => return Err(js_value_message(&reason, &mut context)),
@@ -1854,8 +1940,11 @@ fn settle_code_mode_tool_promise(
             // JSON.parse(String(e.message)) succeeds in the sandbox.
             let json = serde_json::to_string(&json!({"kind": kind, "message": message}))
                 // Fallback must NOT interpolate runtime-controlled values: kind/message could
-                // contain quotes or backslashes that would produce invalid JSON (lab-y08q1.1.1).
-                .unwrap_or_else(|_| r#"{"kind":"internal_error","message":"failed to serialize tool error"}"#.to_string());
+                // contain quotes or backslashes that would produce invalid JSON.
+                .unwrap_or_else(|_| {
+                    r#"{"kind":"internal_error","message":"failed to serialize tool error"}"#
+                        .to_string()
+                });
             (seq, Err(json))
         }
         CodeModeRunnerInput::Start { .. } => {
@@ -2067,39 +2156,24 @@ mod tests {
         assert_eq!(result, json!(0));
     }
 
+    /// `code(search)` in exclusive code mode (tool_search disabled) seeds the pool
+    /// via `ensure_lazy_upstream_pool` rather than the tool_search refresh path,
+    /// so it succeeds regardless of scope and does not attempt active connections.
     #[tokio::test]
-    async fn code_search_read_scope_does_not_cold_start_upstreams() {
-        use std::sync::Arc;
-
+    async fn code_search_in_exclusive_code_mode_seeds_pool_without_connecting() {
         let registry = super::ToolRegistry::new();
         let dir = tempfile::tempdir().expect("tempdir");
         let runtime = super::super::runtime::GatewayRuntimeHandle::default();
-        let pool = Arc::new(crate::dispatch::upstream::pool::UpstreamPool::new());
-        pool.seed_lazy_upstreams(&[crate::config::UpstreamConfig {
-            enabled: true,
-            name: "alpha".to_string(),
-            url: Some("http://127.0.0.1:9/mcp".to_string()),
-            bearer_token_env: None,
-            command: None,
-            args: Vec::new(),
-            env: std::collections::BTreeMap::new(),
-            proxy_resources: false,
-            proxy_prompts: false,
-            expose_tools: None,
-            expose_resources: None,
-            expose_prompts: None,
-            oauth: None,
-            imported_from: None,
-            priority: 1.0,
-            tool_search: crate::config::ToolSearchConfig::default(),
-        }])
-        .await;
-        runtime.swap(Some(Arc::clone(&pool))).await;
-        let manager = super::GatewayManager::new(dir.path().join("config.toml"), runtime);
+        // No pre-seeded pool — the pool is created lazily by the catalog path.
+        let manager = super::GatewayManager::new(dir.path().join("config.toml"), runtime.clone());
         manager
             .seed_config(crate::config::LabConfig {
-                tool_search: crate::config::ToolSearchConfig {
+                code_mode: crate::config::CodeModeConfig {
                     enabled: true,
+                    ..crate::config::CodeModeConfig::default()
+                },
+                tool_search: crate::config::ToolSearchConfig {
+                    enabled: false,
                     ..crate::config::ToolSearchConfig::default()
                 },
                 ..crate::config::LabConfig::default()
@@ -2107,6 +2181,7 @@ mod tests {
             .await;
         let broker = super::CodeModeBroker::new(&registry, Some(&manager));
 
+        // Read-only caller: `lab:read` scope.
         let result = broker
             .search(
                 "async () => tools.length",
@@ -2119,9 +2194,17 @@ mod tests {
                 },
             )
             .await
-            .expect("read-only search succeeds from cached catalog");
+            .expect("code(search) succeeds in exclusive code mode with read-only scope");
 
+        // No real upstreams configured, so catalog is empty — but no error.
         assert_eq!(result, json!(0));
+        // Pool is now seeded (not None) because ensure_lazy_upstream_pool ran.
+        assert!(
+            manager.current_pool().await.is_some(),
+            "pool must be initialized after code(search)"
+        );
+        // No active connections (lazy seeding only, no real upstreams configured).
+        let pool = runtime.current_pool().await.expect("pool initialized");
         assert_eq!(pool.connection_count_for_tests().await, 0);
     }
 
@@ -2148,6 +2231,72 @@ mod tests {
                 assert!(message.contains("\"radarr\""));
             }
             other => panic!("expected unknown_tool, got {other:?}"),
+        }
+    }
+
+    /// In exclusive code mode (`code_mode.enabled=true`, `tool_search.enabled=false`),
+    /// `resolve_code_mode_upstream_tool` must NOT reject calls with "tool search is not enabled".
+    /// It should attempt to resolve from the upstream pool and return `unknown_tool`
+    /// only if the tool is genuinely absent, not because of a mode guard.
+    #[tokio::test]
+    async fn resolve_code_mode_upstream_tool_does_not_require_tool_search_mode() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let runtime = super::super::runtime::GatewayRuntimeHandle::default();
+        let manager = super::GatewayManager::new(dir.path().join("config.toml"), runtime);
+        manager
+            .seed_config(crate::config::LabConfig {
+                code_mode: crate::config::CodeModeConfig {
+                    enabled: true,
+                    ..crate::config::CodeModeConfig::default()
+                },
+                tool_search: crate::config::ToolSearchConfig {
+                    enabled: false,
+                    ..crate::config::ToolSearchConfig::default()
+                },
+                upstream: vec![crate::config::UpstreamConfig {
+                    enabled: true,
+                    name: "testup".to_string(),
+                    url: Some("http://127.0.0.1:9/mcp".to_string()),
+                    bearer_token_env: None,
+                    command: None,
+                    args: Vec::new(),
+                    env: std::collections::BTreeMap::new(),
+                    proxy_resources: false,
+                    proxy_prompts: false,
+                    expose_tools: None,
+                    expose_resources: None,
+                    expose_prompts: None,
+                    oauth: None,
+                    imported_from: None,
+                    priority: 1.0,
+                    tool_search: crate::config::ToolSearchConfig::default(),
+                }],
+                ..crate::config::LabConfig::default()
+            })
+            .await;
+
+        let err = manager
+            .resolve_code_mode_upstream_tool("testup", "some_tool", None, None)
+            .await
+            .expect_err("tool not present — expect unknown_tool, not a mode-guard error");
+
+        match err {
+            super::ToolError::Sdk { sdk_kind, message } => {
+                // Must NOT be the old "tool search is not enabled" guard.
+                assert_ne!(
+                    message,
+                    "tool search is not enabled; code mode upstream tools require tool_search mode",
+                    "mode-guard error must not fire in exclusive code mode"
+                );
+                // Should be a pool/tool-not-found error (upstream_connect_error or unknown_tool).
+                assert!(
+                    sdk_kind == "unknown_tool"
+                        || sdk_kind == "upstream_connect_error"
+                        || sdk_kind == "upstream_error",
+                    "unexpected sdk_kind: {sdk_kind}: {message}"
+                );
+            }
+            other => panic!("expected Sdk error, got {other:?}"),
         }
     }
 
@@ -2306,13 +2455,19 @@ mod tests {
         let result = super::normalize_user_code(fenced);
 
         // PRESENCE: inner code preserved
-        assert!(result.contains("console.log('hi');"),
-            "inner code must survive fence stripping");
+        assert!(
+            result.contains("console.log('hi');"),
+            "inner code must survive fence stripping"
+        );
         // ABSENCE: fences removed
-        assert!(!result.contains("```"),
-            "backtick fences must be stripped, got: {result}");
-        assert!(!result.contains("javascript"),
-            "language tag must be stripped");
+        assert!(
+            !result.contains("```"),
+            "backtick fences must be stripped, got: {result}"
+        );
+        assert!(
+            !result.contains("javascript"),
+            "language tag must be stripped"
+        );
     }
 
     #[test]
@@ -2330,11 +2485,15 @@ mod tests {
         let result = super::normalize_user_code(bare);
 
         // PRESENCE: original declaration preserved
-        assert!(result.starts_with("async function main()"),
-            "original decl must be preserved");
+        assert!(
+            result.starts_with("async function main()"),
+            "original decl must be preserved"
+        );
         // PRESENCE: main() call appended
-        assert!(result.contains("main();"),
-            "main() invocation must be appended, got: {result}");
+        assert!(
+            result.contains("main();"),
+            "main() invocation must be appended, got: {result}"
+        );
     }
 
     #[test]
@@ -2354,8 +2513,11 @@ mod tests {
         let already_called = "const x = 1;\nmain();";
         let result = super::normalize_user_code(already_called);
         // ABSENCE: no spurious main() added to non-main-decl code
-        assert_eq!(result.matches("main()").count(), 1,
-            "non-main-decl code must not get main() injected, got: {result}");
+        assert_eq!(
+            result.matches("main()").count(),
+            1,
+            "non-main-decl code must not get main() injected, got: {result}"
+        );
     }
 
     #[test]
@@ -2364,13 +2526,19 @@ mod tests {
         let result = super::normalize_user_code(exported);
 
         // ABSENCE: export default removed
-        assert!(!result.contains("export default"),
-            "export default must be removed, got: {result}");
+        assert!(
+            !result.contains("export default"),
+            "export default must be removed, got: {result}"
+        );
         // PRESENCE: wrapped as async IIFE
-        assert!(result.starts_with("(async function"),
-            "must wrap as async IIFE, got: {result}");
-        assert!(result.contains("()()") || result.ends_with("()"),
-            "IIFE must be immediately invoked, got: {result}");
+        assert!(
+            result.starts_with("(async function"),
+            "must wrap as async IIFE, got: {result}"
+        );
+        assert!(
+            result.contains("()()") || result.ends_with("()"),
+            "IIFE must be immediately invoked, got: {result}"
+        );
     }
 
     #[test]
@@ -2386,31 +2554,43 @@ mod tests {
         let plain = "const result = await callTool('lab::test', {});";
         let result = super::normalize_user_code(plain);
         // PRESENCE: no transformation applied
-        assert_eq!(result, plain,
-            "plain expressions must pass through unchanged");
+        assert_eq!(
+            result, plain,
+            "plain expressions must pass through unchanged"
+        );
     }
 
     // ── CodeModeSurface allow_destructive_actions ─────────────────────────────
 
     #[test]
     fn code_mode_surface_mcp_gates_on_flag() {
-        let mcp_allow = super::CodeModeSurface::Mcp { allow_destructive_actions: true };
-        let mcp_deny = super::CodeModeSurface::Mcp { allow_destructive_actions: false };
+        let mcp_allow = super::CodeModeSurface::Mcp {
+            allow_destructive_actions: true,
+        };
+        let mcp_deny = super::CodeModeSurface::Mcp {
+            allow_destructive_actions: false,
+        };
 
         // PRESENCE: true flag → allowed
-        assert!(mcp_allow.allow_destructive_actions(),
-            "Mcp with allow_destructive_actions=true must return true");
+        assert!(
+            mcp_allow.allow_destructive_actions(),
+            "Mcp with allow_destructive_actions=true must return true"
+        );
         // PRESENCE: false flag → denied
-        assert!(!mcp_deny.allow_destructive_actions(),
-            "Mcp with allow_destructive_actions=false must return false");
+        assert!(
+            !mcp_deny.allow_destructive_actions(),
+            "Mcp with allow_destructive_actions=false must return false"
+        );
     }
 
     #[test]
     fn code_mode_surface_cli_always_allows_destructive() {
         let cli = super::CodeModeSurface::Cli;
         // PRESENCE: CLI always permits
-        assert!(cli.allow_destructive_actions(),
-            "CLI surface must always allow destructive actions");
+        assert!(
+            cli.allow_destructive_actions(),
+            "CLI surface must always allow destructive actions"
+        );
     }
 
     // ── CodeModeCaller oauth_subject ──────────────────────────────────────────
@@ -2423,8 +2603,11 @@ mod tests {
         };
 
         // PRESENCE: explicit sub is returned
-        assert_eq!(caller.oauth_subject(), Some("user@example.com"),
-            "oauth_subject must return the JWT sub when present");
+        assert_eq!(
+            caller.oauth_subject(),
+            Some("user@example.com"),
+            "oauth_subject must return the JWT sub when present"
+        );
         // ABSENCE: not None
         assert!(caller.oauth_subject().is_some());
     }
@@ -2438,19 +2621,26 @@ mod tests {
 
         // PRESENCE: falls back to some non-None shared subject
         let subject = caller.oauth_subject();
-        assert!(subject.is_some(),
-            "oauth_subject must return Some (shared fallback) when sub is None");
+        assert!(
+            subject.is_some(),
+            "oauth_subject must return Some (shared fallback) when sub is None"
+        );
         // ABSENCE: not the same as the user-specific email
-        assert_ne!(subject, Some("user@example.com"),
-            "fallback subject must not be user-specific");
+        assert_ne!(
+            subject,
+            Some("user@example.com"),
+            "fallback subject must not be user-specific"
+        );
     }
 
     #[test]
     fn oauth_subject_trusted_local_returns_shared_subject() {
         let caller = super::CodeModeCaller::TrustedLocal;
         // PRESENCE: trusted local also returns a subject (the shared gateway subject)
-        assert!(caller.oauth_subject().is_some(),
-            "TrustedLocal must return Some oauth_subject");
+        assert!(
+            caller.oauth_subject().is_some(),
+            "TrustedLocal must return Some oauth_subject"
+        );
     }
 
     // ── CodeModeCaller can_execute / can_read scope checks ────────────────────
@@ -2474,8 +2664,10 @@ mod tests {
         // PRESENCE: can read
         assert!(caller.can_read());
         // ABSENCE: cannot execute
-        assert!(!caller.can_execute(),
-            "lab:read scope must not permit execution");
+        assert!(
+            !caller.can_execute(),
+            "lab:read scope must not permit execution"
+        );
     }
 
     // ── token_estimate_divisor affects truncation (#12b) ─────────────────────
@@ -2497,11 +2689,15 @@ mod tests {
         // divisor=4: 4000 bytes / 4 = 1000 estimated tokens → within 2000 → NOT truncated
         let fits = truncate_execution_response(make_response(), usize::MAX, 2000, 4);
         // PRESENCE: result is the original object, not a truncation marker
-        assert!(fits.calls[0].result.get("payload").is_some(),
-            "divisor=4 must not truncate 4 kB payload against 2000-token limit");
+        assert!(
+            fits.calls[0].result.get("payload").is_some(),
+            "divisor=4 must not truncate 4 kB payload against 2000-token limit"
+        );
         // ABSENCE: no truncation marker
-        assert!(fits.calls[0].result.get("truncated").is_none(),
-            "divisor=4 result must not carry a truncated flag");
+        assert!(
+            fits.calls[0].result.get("truncated").is_none(),
+            "divisor=4 result must not carry a truncated flag"
+        );
 
         // divisor=1: 4000 bytes / 1 = 4000 estimated tokens → exceeds 2000 → TRUNCATED
         let truncated = truncate_execution_response(make_response(), usize::MAX, 2000, 1);
@@ -2512,7 +2708,9 @@ mod tests {
             "divisor=1 must truncate 4 kB payload against 2000-token limit"
         );
         // ABSENCE: original payload content not preserved in the marker
-        assert!(truncated.calls[0].result.get("payload").is_none(),
-            "truncation marker must not keep original payload key");
+        assert!(
+            truncated.calls[0].result.get("payload").is_none(),
+            "truncation marker must not keep original payload key"
+        );
     }
 }

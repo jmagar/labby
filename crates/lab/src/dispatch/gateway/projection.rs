@@ -461,14 +461,20 @@ mod tests {
         let result = redact_secret_like_segments_for_test(input);
 
         // PRESENCE: redacted marker appears
-        assert!(result.contains("[REDACTED]"),
-            "standalone sk- token must be redacted, got: {result}");
+        assert!(
+            result.contains("[REDACTED]"),
+            "standalone sk- token must be redacted, got: {result}"
+        );
         // ABSENCE: original secret must not appear
-        assert!(!result.contains("sk-abc12345678901234567890"),
-            "original sk- token must not survive, got: {result}");
+        assert!(
+            !result.contains("sk-abc12345678901234567890"),
+            "original sk- token must not survive, got: {result}"
+        );
         // PRESENCE: non-secret part preserved
-        assert!(result.contains("Authorization:"),
-            "non-secret prefix must be preserved");
+        assert!(
+            result.contains("Authorization:"),
+            "non-secret prefix must be preserved"
+        );
     }
 
     #[test]
@@ -477,11 +483,15 @@ mod tests {
         let result = redact_secret_like_segments_for_test(input);
 
         // PRESENCE: redacted marker appears
-        assert!(result.contains("[REDACTED]"),
-            "embedded sk- token must be redacted, got: {result}");
+        assert!(
+            result.contains("[REDACTED]"),
+            "embedded sk- token must be redacted, got: {result}"
+        );
         // ABSENCE: original secret must not appear
-        assert!(!result.contains("sk-abc12345678901234567890"),
-            "original embedded sk- token must not survive, got: {result}");
+        assert!(
+            !result.contains("sk-abc12345678901234567890"),
+            "original embedded sk- token must not survive, got: {result}"
+        );
     }
 
     #[test]
@@ -490,11 +500,15 @@ mod tests {
         let result = redact_secret_like_segments_for_test(&input);
 
         // PRESENCE: redacted
-        assert!(result.contains("[REDACTED]"),
-            "GitHub PAT (ghp_) must be redacted, got: {result}");
+        assert!(
+            result.contains("[REDACTED]"),
+            "GitHub PAT (ghp_) must be redacted, got: {result}"
+        );
         // ABSENCE: original must not appear
-        assert!(!result.contains("ghp_"),
-            "ghp_ prefix must not survive, got: {result}");
+        assert!(
+            !result.contains("ghp_"),
+            "ghp_ prefix must not survive, got: {result}"
+        );
     }
 
     #[test]
@@ -503,8 +517,10 @@ mod tests {
         let result = redact_secret_like_segments_for_test(input);
 
         // ABSENCE: no false positive on normal text
-        assert!(!result.contains("[REDACTED]"),
-            "normal text must not be redacted, got: {result}");
+        assert!(
+            !result.contains("[REDACTED]"),
+            "normal text must not be redacted, got: {result}"
+        );
         // PRESENCE: original text preserved
         assert_eq!(result, input);
     }
@@ -515,13 +531,16 @@ mod tests {
         let result = sanitize_tool_text(input, 1024);
 
         // PRESENCE: normal text survives
-        assert!(result.contains("normal text"),
-            "normal text must survive sanitization");
+        assert!(
+            result.contains("normal text"),
+            "normal text must survive sanitization"
+        );
         // ABSENCE: injection markers must be stripped
-        assert!(!result.contains("<system>"),
-            "<system> marker must be stripped");
-        assert!(!result.contains("###"),
-            "### marker must be stripped");
+        assert!(
+            !result.contains("<system>"),
+            "<system> marker must be stripped"
+        );
+        assert!(!result.contains("###"), "### marker must be stripped");
     }
 
     #[test]
@@ -530,8 +549,10 @@ mod tests {
         let result = sanitize_tool_text(&long_input, 50);
 
         // PRESENCE: output is at most max_len chars
-        assert!(result.chars().count() <= 50,
-            "sanitize_tool_text must truncate to max_len");
+        assert!(
+            result.chars().count() <= 50,
+            "sanitize_tool_text must truncate to max_len"
+        );
         // ABSENCE: must not be longer than the original
         assert!(result.len() <= long_input.len());
     }

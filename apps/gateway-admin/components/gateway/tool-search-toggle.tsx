@@ -62,6 +62,8 @@ export function ToolSearchTogglePanel() {
       toast.success(enabled ? 'Tool search mode enabled.' : 'Tool search mode disabled.')
     } catch (requestError) {
       toast.error(getErrorMessage(requestError, 'Failed to update tool search mode'))
+      // Re-fetch both configs so UI reflects actual server state after a partial failure.
+      await Promise.allSettled([mutate(TOOL_SEARCH_CONFIG_KEY), mutate(CODE_MODE_CONFIG_KEY)])
     } finally {
       isSavingRef.current = false
       setIsSaving(false)
@@ -93,6 +95,8 @@ export function ToolSearchTogglePanel() {
       toast.success(enabled ? 'Code mode enabled.' : 'Code mode disabled.')
     } catch (requestError) {
       toast.error(getErrorMessage(requestError, 'Failed to update code mode'))
+      // Re-fetch both configs so UI reflects actual server state after a partial failure.
+      await Promise.allSettled([mutate(CODE_MODE_CONFIG_KEY), mutate(TOOL_SEARCH_CONFIG_KEY)])
     } finally {
       isCodeModeSavingRef.current = false
       setIsCodeModeSaving(false)

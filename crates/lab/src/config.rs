@@ -530,7 +530,7 @@ impl Default for ToolSearchConfig {
 }
 
 fn default_code_mode_timeout_ms() -> u64 {
-    5_000
+    30_000
 }
 
 fn default_code_mode_max_tool_calls() -> usize {
@@ -2936,7 +2936,7 @@ url = "https://acme.example.com/mcp"
     fn code_mode_is_root_level_config_and_disabled_by_default() {
         let default_cfg = LabConfig::default();
         assert!(!default_cfg.code_mode.enabled);
-        assert_eq!(default_cfg.code_mode.timeout_ms, 5000);
+        assert_eq!(default_cfg.code_mode.timeout_ms, 30_000);
         assert_eq!(default_cfg.code_mode.max_tool_calls, 8);
         assert_eq!(default_cfg.code_mode.max_response_bytes, 24 * 1024);
         assert_eq!(default_cfg.code_mode.max_response_tokens, 6000);
@@ -3213,19 +3213,29 @@ service_scope = "user"
     #[test]
     fn validate_mode_exclusive_rejects_both_enabled() {
         // All four input combinations
-        assert!(validate_mode_exclusive(true, true).is_err(),
-            "both enabled must be rejected");
-        assert!(validate_mode_exclusive(false, true).is_ok(),
-            "only code_mode enabled is ok");
-        assert!(validate_mode_exclusive(true, false).is_ok(),
-            "only tool_search enabled is ok");
-        assert!(validate_mode_exclusive(false, false).is_ok(),
-            "neither enabled is ok");
+        assert!(
+            validate_mode_exclusive(true, true).is_err(),
+            "both enabled must be rejected"
+        );
+        assert!(
+            validate_mode_exclusive(false, true).is_ok(),
+            "only code_mode enabled is ok"
+        );
+        assert!(
+            validate_mode_exclusive(true, false).is_ok(),
+            "only tool_search enabled is ok"
+        );
+        assert!(
+            validate_mode_exclusive(false, false).is_ok(),
+            "neither enabled is ok"
+        );
 
         // PRESENCE: error message must contain the key phrase
         let err = validate_mode_exclusive(true, true).unwrap_err();
-        assert!(err.to_string().contains("cannot both be enabled"),
-            "error message must mention 'cannot both be enabled', got: {err}");
+        assert!(
+            err.to_string().contains("cannot both be enabled"),
+            "error message must mention 'cannot both be enabled', got: {err}"
+        );
 
         // ABSENCE: success variants must not contain that phrase
         assert!(validate_mode_exclusive(false, false).is_ok());
@@ -3237,8 +3247,10 @@ service_scope = "user"
     fn code_mode_config_token_estimate_divisor_defaults_to_4() {
         let config = CodeModeConfig::default();
         // PRESENCE: default divisor is exactly 4
-        assert_eq!(config.token_estimate_divisor, 4,
-            "token_estimate_divisor default must be 4");
+        assert_eq!(
+            config.token_estimate_divisor, 4,
+            "token_estimate_divisor default must be 4"
+        );
         // ABSENCE: it is not 0 or 1 (which would drastically change truncation)
         assert_ne!(config.token_estimate_divisor, 0);
         assert_ne!(config.token_estimate_divisor, 1);
@@ -3248,8 +3260,7 @@ service_scope = "user"
     fn code_mode_config_defaults_are_sane() {
         let config = CodeModeConfig::default();
         // PRESENCE: enabled defaults to false (must be opted-in)
-        assert!(!config.enabled,
-            "code_mode must be disabled by default");
+        assert!(!config.enabled, "code_mode must be disabled by default");
         // PRESENCE: timeout and call limits are positive
         assert!(config.timeout_ms > 0);
         assert!(config.max_tool_calls > 0);
@@ -3271,17 +3282,25 @@ service_scope = "user"
         // PRESENCE: setting code mode does not affect tool_search flag
         set_process_code_mode_enabled(true);
         set_process_tool_search_enabled(false);
-        assert!(is_code_mode_enabled(),
-            "code mode must be true after set_process_code_mode_enabled(true)");
-        assert!(!process_tool_search_enabled(),
-            "tool_search must be false after set_process_tool_search_enabled(false)");
+        assert!(
+            is_code_mode_enabled(),
+            "code mode must be true after set_process_code_mode_enabled(true)"
+        );
+        assert!(
+            !process_tool_search_enabled(),
+            "tool_search must be false after set_process_tool_search_enabled(false)"
+        );
 
         // ABSENCE: reversing code mode flag does not flip tool_search
         set_process_code_mode_enabled(false);
-        assert!(!is_code_mode_enabled(),
-            "code mode must be false after set_process_code_mode_enabled(false)");
-        assert!(!process_tool_search_enabled(),
-            "tool_search must remain false");
+        assert!(
+            !is_code_mode_enabled(),
+            "code mode must be false after set_process_code_mode_enabled(false)"
+        );
+        assert!(
+            !process_tool_search_enabled(),
+            "tool_search must remain false"
+        );
 
         // Restore
         set_process_code_mode_enabled(prev_code);

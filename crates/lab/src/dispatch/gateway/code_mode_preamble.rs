@@ -18,8 +18,9 @@ use crate::dispatch::upstream::types::UpstreamTool;
 /// Scope-derived tier used as a cache-key axis.
 ///
 /// `healthy_tools()` returns the same set for all callers — tool visibility is
-/// not scope-filtered.  We keep the tier axis for future correctness if that
-/// invariant changes; for now all code paths collapse to `Execute` or above.
+/// not scope-filtered. We keep the tier axis for future correctness if that
+/// invariant changes; callers with `lab:read` scope reach `Read`, `lab` scope
+/// reaches `Execute`, and `lab:admin`/`TrustedLocal` reaches `Admin`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ScopeTier {
     /// `TrustedLocal` or `lab:admin` — full access
@@ -61,14 +62,23 @@ pub fn aggregate_catalog_hash(upstreams: &[UpstreamCatalogHash]) -> u64 {
 // Preamble cache
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Thread-safe LRU-free cache for generated preamble strings.
+/// Cached entry holding both the generated TypeScript preamble and its tools JSON.
+///
+/// Returned together so cache hits avoid any pool fetch entirely.
+#[derive(Debug, Clone)]
+pub struct CachedPreamble {
+    pub preamble: String,
+    pub tools_json: Value,
+}
+
+/// Thread-safe LRU-free cache for generated preamble strings and their associated tools JSON.
 ///
 /// Key: `(aggregate_catalog_hash, ScopeTier)`.
 /// On a cold pool (aggregate == 0) callers get a cache miss and fall through to
 /// generate a minimal/empty preamble.
 #[derive(Debug, Default)]
 pub struct PreambleCache {
-    inner: DashMap<(u64, ScopeTier), String>,
+    inner: DashMap<(u64, ScopeTier), CachedPreamble>,
 }
 
 impl PreambleCache {
@@ -78,22 +88,29 @@ impl PreambleCache {
         }
     }
 
-    /// Look up a cached preamble.
-    pub fn get(&self, aggregate: u64, tier: ScopeTier) -> Option<String> {
+    /// Look up a cached preamble and its tools JSON.
+    ///
+    /// Returns `CachedPreamble` so cache hits avoid any pool fetch.
+    pub fn get(&self, aggregate: u64, tier: ScopeTier) -> Option<CachedPreamble> {
         self.inner
             .get(&(aggregate, tier))
             .map(|entry| entry.value().clone())
     }
 
-    /// Insert a generated preamble.
-    pub fn insert(&self, aggregate: u64, tier: ScopeTier, preamble: String) {
-        self.inner.insert((aggregate, tier), preamble);
+    /// Insert a generated preamble and its tools JSON.
+    pub fn insert(&self, aggregate: u64, tier: ScopeTier, preamble: String, tools_json: Value) {
+        self.inner
+            .insert((aggregate, tier), CachedPreamble { preamble, tools_json });
     }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Tool name conversion (camelCase)
+// Tool name conversion (snake_case — Cloudflare Code Mode parity)
 // ────────────────────────────────────────────────────────────────────────────
+//
+// Cloudflare's Code Mode normalizes tool ids like `my-server.list-items` to
+// `my_server_list_items` (all separators → `_`). We do the same so that an
+// LLM trained on Cloudflare examples calls the right names.
 
 /// JavaScript reserved words that need an underscore suffix.
 const JS_RESERVED: &[&str] = &[
@@ -137,50 +154,39 @@ const JS_RESERVED: &[&str] = &[
     "yield",
 ];
 
-/// Convert a dotted/hyphenated tool name to camelCase.
+/// Convert a dotted/hyphenated/slashed/coloned tool name to snake_case.
 ///
-/// Examples:
-/// - `movie.search` → `movieSearch`
-/// - `tv-show.get` → `tvShowGet`
-/// - `create/issue` → `createIssue`
-/// - `list:repos` → `listRepos`
+/// Examples (Cloudflare parity):
+/// - `movie.search` → `movie_search`
+/// - `tv-show.get` → `tv_show_get`
+/// - `create/issue` → `create_issue`
+/// - `list:repos` → `list_repos`
 /// - `delete` → `delete_` (reserved word)
-/// - `2fa_setup` → `_2faSetup` (leading digit prefixed with `_`)
+/// - `2fa_setup` → `_2fa_setup` (leading digit prefixed with `_`)
 ///
-/// KNOWN COLLISION: `movie.search` and `movie_search` both map to `movieSearch`
+/// KNOWN COLLISION: `movie.search` and `movie_search` both map to `movie_search`
 /// — last insert wins when building the namespace. A `tracing::debug!` is emitted
 /// when a collision is detected.
-pub fn tool_name_to_camel(name: &str) -> String {
-    // Split on dots, hyphens, forward-slashes, and colons.
-    // Underscores are kept as-is within segments since they are valid in JS identifiers.
-    let segments: Vec<&str> = name.split(['.', '-', '/', ':']).collect();
-    let camel = segments
-        .iter()
-        .enumerate()
-        .map(|(i, seg)| {
-            if i == 0 {
-                seg.to_string()
-            } else {
-                let mut chars = seg.chars();
-                match chars.next() {
-                    None => String::new(),
-                    Some(first) => first.to_uppercase().to_string() + chars.as_str(),
-                }
-            }
-        })
-        .collect::<String>();
+pub fn tool_name_to_snake(name: &str) -> String {
+    // Split on dots, hyphens, forward-slashes, and colons; rejoin with `_`.
+    // Underscores already in segments are preserved.
+    let snake: String = name
+        .split(['.', '-', '/', ':'])
+        .filter(|seg| !seg.is_empty())
+        .collect::<Vec<_>>()
+        .join("_");
 
     // Prefix with `_` if the result starts with a digit (invalid JS identifier start).
-    let camel = if camel.starts_with(|c: char| c.is_ascii_digit()) {
-        format!("_{camel}")
+    let snake = if snake.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("_{snake}")
     } else {
-        camel
+        snake
     };
 
-    if JS_RESERVED.contains(&camel.as_str()) {
-        format!("{camel}_")
+    if JS_RESERVED.contains(&snake.as_str()) {
+        format!("{snake}_")
     } else {
-        camel
+        snake
     }
 }
 
@@ -348,20 +354,20 @@ fn build_jsdoc(description: &str, schema: Option<&Value>) -> String {
 // JS proxy generation (runtime executable, not type declarations)
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Build a mapping from `"{upstream}::{camelName}"` → `"{upstream}::{dotted.name}"`.
+/// Build a mapping from `"{upstream}::{snake_name}"` → `"{upstream}::{dotted.name}"`.
 ///
-/// Used by the JS proxy so that `codemode.radarr.movieSearch(p)` can call
+/// Used by the JS proxy so that `codemode.radarr.movie_search(p)` can call
 /// `callTool("upstream::radarr::movie.search", p)`.
 #[allow(dead_code)]
-pub fn build_reverse_camel_map(
+pub fn build_reverse_snake_map(
     tools: &[UpstreamTool],
 ) -> std::collections::HashMap<String, String> {
     let mut map = std::collections::HashMap::new();
     for tool in tools {
-        let camel = tool_name_to_camel(tool.tool.name.as_ref());
+        let snake = tool_name_to_snake(tool.tool.name.as_ref());
         let upstream = tool.upstream_name.as_ref();
         let dotted = tool.tool.name.as_ref();
-        let key = format!("{upstream}::{camel}");
+        let key = format!("{upstream}::{snake}");
         let value = format!("{upstream}::{dotted}");
         map.insert(key, value);
     }
@@ -394,13 +400,13 @@ pub fn generate_js_proxy(tools: &[UpstreamTool], upstreams: &[String]) -> String
 
     // Emit per-upstream namespace objects.
     for (upstream_name, upstream_tools) in &by_upstream {
-        // Build camelCase → dotted name mapping, last registration wins on collision.
-        let mut camel_to_dotted: BTreeMap<String, String> = BTreeMap::new();
+        // Build snake_case → dotted name mapping, last registration wins on collision.
+        let mut snake_to_dotted: BTreeMap<String, String> = BTreeMap::new();
         let mut sorted_tools = upstream_tools.to_vec();
         sorted_tools.sort_by(|a, b| a.tool.name.cmp(&b.tool.name));
         for tool in &sorted_tools {
-            let camel = tool_name_to_camel(tool.tool.name.as_ref());
-            camel_to_dotted.insert(camel, tool.tool.name.to_string());
+            let snake = tool_name_to_snake(tool.tool.name.as_ref());
+            snake_to_dotted.insert(snake, tool.tool.name.to_string());
         }
 
         // Serialize the upstream name safely.
@@ -408,16 +414,16 @@ pub fn generate_js_proxy(tools: &[UpstreamTool], upstreams: &[String]) -> String
             serde_json::to_string(upstream_name).unwrap_or_else(|_| "\"unknown\"".to_string());
 
         let mut method_defs = Vec::new();
-        for (camel, dotted) in &camel_to_dotted {
+        for (snake, dotted) in &snake_to_dotted {
             let tool_id = format!("upstream::{upstream_name}::{dotted}");
             let tool_id_json =
                 serde_json::to_string(&tool_id).unwrap_or_else(|_| "\"unknown\"".to_string());
             // Always use a JSON-quoted property key so that any residual special
-            // characters in the camelCase name (e.g. from exotic tool schemas) never
+            // characters in the snake_case name (e.g. from exotic tool schemas) never
             // cause a JS syntax error inside QuickJS.
-            let camel_json =
-                serde_json::to_string(camel.as_str()).unwrap_or_else(|_| format!("\"{camel}\""));
-            method_defs.push(format!("    {camel_json}: function(p) {{ return callTool({tool_id_json}, p == null ? {{}} : p); }}"));
+            let snake_json =
+                serde_json::to_string(snake.as_str()).unwrap_or_else(|_| format!("\"{snake}\""));
+            method_defs.push(format!("    {snake_json}: function(p) {{ return callTool({tool_id_json}, p == null ? {{}} : p); }}"));
         }
 
         let methods = method_defs.join(",\n");
@@ -462,28 +468,28 @@ pub fn generate_preamble(tools: &[UpstreamTool], truncated: bool, dropped_count:
     let mut upstream_blocks: Vec<String> = Vec::new();
 
     for (upstream_name, upstream_tools) in &by_upstream {
-        // Build camelCase → tool mapping, detecting collisions
-        let mut camel_map: BTreeMap<String, &UpstreamTool> = BTreeMap::new();
+        // Build snake_case → tool mapping, detecting collisions
+        let mut snake_map: BTreeMap<String, &UpstreamTool> = BTreeMap::new();
         let mut sorted_tools = upstream_tools.to_vec();
         sorted_tools.sort_by(|a, b| a.tool.name.cmp(&b.tool.name));
 
         for tool in &sorted_tools {
-            let camel = tool_name_to_camel(tool.tool.name.as_ref());
-            if camel_map.contains_key(&camel) {
+            let snake = tool_name_to_snake(tool.tool.name.as_ref());
+            if snake_map.contains_key(&snake) {
                 // Note: name collision resolved, last registration wins.
                 tracing::debug!(
                     upstream = *upstream_name,
                     tool_name = tool.tool.name.as_ref(),
-                    camel_name = %camel,
+                    snake_name = %snake,
                     "Code Mode preamble: tool name collision detected, last registration wins"
                 );
             }
-            camel_map.insert(camel, tool);
+            snake_map.insert(snake, tool);
         }
 
         // Build function declarations
         let mut fn_decls: Vec<String> = Vec::new();
-        for (camel, tool) in &camel_map {
+        for (snake, tool) in &snake_map {
             let description = tool
                 .tool
                 .description
@@ -493,15 +499,28 @@ pub fn generate_preamble(tools: &[UpstreamTool], truncated: bool, dropped_count:
 
             let jsdoc = build_jsdoc(description, tool.input_schema.as_ref());
 
-            // Build params type from schema
+            // Build params type from input schema
             let params_type = tool
                 .input_schema
                 .as_ref()
                 .map(|s| schema_to_ts(s, 0))
                 .unwrap_or_else(|| "Record<string, unknown>".to_string());
 
+            // Build return type from output schema if upstream advertised one.
+            // rmcp `Tool.output_schema: Option<Arc<JsonObject>>` (rmcp 1.6+).
+            // Fall back to `unknown` when absent so the contract still parses.
+            let return_type = tool
+                .tool
+                .output_schema
+                .as_ref()
+                .map(|s| {
+                    let value = serde_json::Value::Object((**s).clone());
+                    schema_to_ts(&value, 0)
+                })
+                .unwrap_or_else(|| "unknown".to_string());
+
             fn_decls.push(format!(
-                "    {jsdoc}\n    function {camel}(params: {params_type}): Promise<unknown>;"
+                "    {jsdoc}\n    function {snake}(params: {params_type}): Promise<{return_type}>;"
             ));
         }
 
@@ -589,10 +608,10 @@ mod tests {
             preamble.contains("namespace radarr"),
             "preamble must have radarr namespace, got:\n{preamble}"
         );
-        // PRESENCE: camelCase function name for dotted tool name
+        // PRESENCE: snake_case function name for dotted tool name (Cloudflare parity)
         assert!(
-            preamble.contains("movieSearch"),
-            "preamble must have camelCase movieSearch, got:\n{preamble}"
+            preamble.contains("movie_search"),
+            "preamble must have snake_case movie_search, got:\n{preamble}"
         );
         // PRESENCE: typed parameter from schema
         assert!(
@@ -704,11 +723,12 @@ mod tests {
             42,
             ScopeTier::Admin,
             "declare namespace codemode {}".to_string(),
+            serde_json::json!([]),
         );
 
         // PRESENCE: inserted value is returned
         assert_eq!(
-            cache.get(42, ScopeTier::Admin),
+            cache.get(42, ScopeTier::Admin).map(|c| c.preamble),
             Some("declare namespace codemode {}".to_string()),
             "cache must return inserted value"
         );
@@ -733,22 +753,23 @@ mod tests {
     #[test]
     fn preamble_cache_separate_entries_per_tier() {
         let cache = PreambleCache::new();
-        cache.insert(1, ScopeTier::Admin, "admin-preamble".to_string());
-        cache.insert(1, ScopeTier::Read, "read-preamble".to_string());
+        let empty = serde_json::json!([]);
+        cache.insert(1, ScopeTier::Admin, "admin-preamble".to_string(), empty.clone());
+        cache.insert(1, ScopeTier::Read, "read-preamble".to_string(), empty);
 
         // PRESENCE: each tier has its own value
         assert_eq!(
-            cache.get(1, ScopeTier::Admin),
+            cache.get(1, ScopeTier::Admin).map(|c| c.preamble),
             Some("admin-preamble".to_string())
         );
         assert_eq!(
-            cache.get(1, ScopeTier::Read),
+            cache.get(1, ScopeTier::Read).map(|c| c.preamble),
             Some("read-preamble".to_string())
         );
         // ABSENCE: values are not mixed up
         assert_ne!(
-            cache.get(1, ScopeTier::Admin),
-            cache.get(1, ScopeTier::Read),
+            cache.get(1, ScopeTier::Admin).map(|c| c.preamble),
+            cache.get(1, ScopeTier::Read).map(|c| c.preamble),
             "different tiers must return different values"
         );
     }
@@ -823,32 +844,33 @@ mod tests {
         assert_eq!(h1, h2, "empty aggregate must be deterministic");
     }
 
-    // ── tool_name_to_camel ────────────────────────────────────────────────────
+    // ── tool_name_to_snake ────────────────────────────────────────────────────
 
     #[test]
-    fn tool_name_to_camel_converts_dotted_names() {
-        // PRESENCE: basic dotted name conversion
-        assert_eq!(tool_name_to_camel("movie.search"), "movieSearch");
-        assert_eq!(tool_name_to_camel("tv-show.get"), "tvShowGet");
+    fn tool_name_to_snake_converts_dotted_names() {
+        // PRESENCE: basic dotted/hyphenated name conversion (Cloudflare parity)
+        assert_eq!(tool_name_to_snake("movie.search"), "movie_search");
+        assert_eq!(tool_name_to_snake("tv-show.get"), "tv_show_get");
         // PRESENCE: reserved word gets underscore suffix
-        assert_eq!(tool_name_to_camel("delete"), "delete_");
-        // ABSENCE: dotted name must not appear in camel output for multi-segment names
-        assert!(!tool_name_to_camel("movie.search").contains('.'));
+        assert_eq!(tool_name_to_snake("delete"), "delete_");
+        // ABSENCE: separators must not appear in snake output
+        assert!(!tool_name_to_snake("movie.search").contains('.'));
+        assert!(!tool_name_to_snake("tv-show.get").contains('-'));
     }
 
     #[test]
-    fn tool_name_to_camel_handles_slashes_and_colons() {
-        // PRESENCE: forward-slashes and colons split into camelCase segments
-        assert_eq!(tool_name_to_camel("create/issue"), "createIssue");
-        assert_eq!(tool_name_to_camel("list:repos"), "listRepos");
-        assert_eq!(tool_name_to_camel("repos/create/branch"), "reposCreateBranch");
-        // PRESENCE: underscores are kept as-is (valid JS identifier chars)
-        assert_eq!(tool_name_to_camel("create_issue"), "create_issue");
+    fn tool_name_to_snake_handles_slashes_and_colons() {
+        // PRESENCE: forward-slashes and colons join with underscore
+        assert_eq!(tool_name_to_snake("create/issue"), "create_issue");
+        assert_eq!(tool_name_to_snake("list:repos"), "list_repos");
+        assert_eq!(tool_name_to_snake("repos/create/branch"), "repos_create_branch");
+        // PRESENCE: already-snake input is preserved
+        assert_eq!(tool_name_to_snake("create_issue"), "create_issue");
         // PRESENCE: leading digit gets prefixed with underscore
-        assert_eq!(tool_name_to_camel("2fa_setup"), "_2fa_setup");
-        // ABSENCE: slashes must not appear in output (would break JS syntax)
-        assert!(!tool_name_to_camel("create/issue").contains('/'));
-        assert!(!tool_name_to_camel("list:repos").contains(':'));
+        assert_eq!(tool_name_to_snake("2fa_setup"), "_2fa_setup");
+        // ABSENCE: separators must not appear in output (would break JS syntax)
+        assert!(!tool_name_to_snake("create/issue").contains('/'));
+        assert!(!tool_name_to_snake("list:repos").contains(':'));
     }
 
     #[test]
@@ -875,7 +897,7 @@ mod tests {
         // PRESENCE: the upstream object must be present
         assert!(js.contains("codemode[\"github\"]"), "upstream block missing");
         // PRESENCE: the tool key must appear as a quoted string (not unquoted)
-        assert!(js.contains("\"createIssue\""), "camelCase key must be quoted");
+        assert!(js.contains("\"create_issue\""), "snake_case key must be quoted");
         // ABSENCE: no unquoted slash-containing key that would break JS syntax
         assert!(!js.contains("create/issue:"), "slash in unquoted key would break JS");
         // PRESENCE: callTool must be wired to the original dotted tool id

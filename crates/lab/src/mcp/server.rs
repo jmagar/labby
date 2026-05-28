@@ -29,11 +29,7 @@ use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
 use crate::dispatch::gateway::code_mode::{CodeModeBroker, CodeModeCaller, CodeModeSurface};
 use crate::dispatch::gateway::manager::{GatewayManager, GatewayToolSearchResult};
 use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
-use crate::mcp::catalog::{
-    CODE_EXECUTE_TOOL_NAME, CODE_SEARCH_TOOL_NAME, CODE_TOOL_NAME, GATEWAY_LEGACY_EXECUTE_NAME,
-    GATEWAY_LEGACY_TOOL_SEARCH_NAME, LEGACY_INVOKE_TOOL_NAME, LEGACY_SCOUT_TOOL_NAME,
-    LEGACY_TOOL_INVOKE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME,
-};
+use crate::mcp::catalog::{CODE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME};
 use crate::mcp::elicitation::{ElicitResult, elicit_confirm};
 use crate::mcp::envelope::{build_error, build_error_extra, build_success};
 use crate::mcp::error::DispatchError;
@@ -1367,7 +1363,7 @@ impl ServerHandler for LabMcpServer {
                 let envelope = build_error(
                     &service,
                     "call_tool",
-                    "code_mode_disabled",
+                    "internal_error",
                     "Code Mode is not enabled (gateway_manager missing)",
                 );
                 return Ok(CallToolResult::error(vec![Content::text(
@@ -1464,7 +1460,75 @@ impl ServerHandler for LabMcpServer {
                         }
                     };
                 }
-                "execute" | _ => {
+                "preamble" => {
+                    if !tool_search_scope_allowed(auth) {
+                        tracing::warn!(
+                            surface = "mcp",
+                            service = CODE_TOOL_NAME,
+                            action = "call_tool",
+                            subaction = "preamble",
+                            subject,
+                            elapsed_ms = started.elapsed().as_millis(),
+                            input_tokens,
+                            kind = "forbidden",
+                            "gateway code preamble denied by scope"
+                        );
+                        let env = build_error_extra(
+                            &service,
+                            "call_tool",
+                            "forbidden",
+                            "code(preamble) requires one of scopes: lab:read, lab, lab:admin",
+                            &serde_json::json!({ "required_scopes": ["lab:read", "lab", "lab:admin"] }),
+                        );
+                        return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+                    }
+                    let broker = CodeModeBroker::new(&self.registry, Some(manager));
+                    let caller = auth.map_or(CodeModeCaller::TrustedLocal, |auth| {
+                        CodeModeCaller::Scoped {
+                            scopes: auth.scopes.clone(),
+                            sub: self.request_subject(&context).map(ToOwned::to_owned),
+                        }
+                    });
+                    return match broker
+                        .get_preamble(caller, self.code_mode_surface(false))
+                        .await
+                    {
+                        Ok(response) => {
+                            let output = serde_json::to_string(&response)
+                                .unwrap_or_else(|_| "null".to_string());
+                            let output_tokens = estimate_tokens(&output);
+                            tracing::info!(
+                                surface = "mcp",
+                                service = CODE_TOOL_NAME,
+                                action = "call_tool",
+                                subaction = "preamble",
+                                subject,
+                                elapsed_ms = started.elapsed().as_millis(),
+                                input_tokens,
+                                output_tokens,
+                                "gateway code preamble ok"
+                            );
+                            Ok(CallToolResult::success(vec![Content::text(output)]))
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                surface = "mcp",
+                                service = CODE_TOOL_NAME,
+                                action = "call_tool",
+                                subaction = "preamble",
+                                subject,
+                                elapsed_ms = started.elapsed().as_millis(),
+                                input_tokens,
+                                kind = err.kind(),
+                                error = %err,
+                                "gateway code preamble failed"
+                            );
+                            let env = tool_error_envelope(&service, "call_tool", &err);
+                            Ok(CallToolResult::error(vec![Content::text(env.to_string())]))
+                        }
+                    };
+                }
+                "execute" => {
                     if !tool_execute_scope_allowed(auth) {
                         tracing::warn!(
                             surface = "mcp",
@@ -1491,7 +1555,7 @@ impl ServerHandler for LabMcpServer {
                         let env = build_error(
                             &service,
                             "call_tool",
-                            "code_mode_disabled",
+                            "internal_error",
                             "Code Mode execution is disabled; set [code_mode].enabled = true to enable it",
                         );
                         return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
@@ -1586,278 +1650,51 @@ impl ServerHandler for LabMcpServer {
                     );
                     return Ok(CallToolResult::success(vec![Content::text(output)]));
                 }
+                _ => {
+                    tracing::warn!(
+                        surface = "mcp",
+                        service = CODE_TOOL_NAME,
+                        action = "call_tool",
+                        subaction = %code_action,
+                        subject,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        input_tokens,
+                        kind = "unknown_action",
+                        "gateway code unknown action"
+                    );
+                    let env = build_error_extra(
+                        &service,
+                        "call_tool",
+                        "unknown_action",
+                        &format!("unknown action '{code_action}' for tool 'code'"),
+                        &serde_json::json!({ "valid": ["search", "preamble", "execute"] }),
+                    );
+                    return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+                }
             }
         }
 
-        // ── Legacy Code Mode aliases (hidden from list_tools; kept callable) ──
-        if service == CODE_SEARCH_TOOL_NAME && self.gateway_code_mode_enabled().await {
-            let started = Instant::now();
-            let input_tokens = estimate_tokens_args(&args);
-            let subject = self.request_subject_log_tag(&context);
-            let auth = auth_context_from_extensions(&context.extensions);
-            tracing::warn!(
-                surface = "mcp",
-                legacy_alias = CODE_SEARCH_TOOL_NAME,
-                canonical = %format!("{CODE_TOOL_NAME}(action=search)"),
-                subject,
-                "Legacy Code Mode alias invoked — update client to use code(action='search')"
-            );
-            if !tool_search_scope_allowed(auth) {
-                tracing::warn!(
-                    surface = "mcp",
-                    service = %service,
-                    action = "call_tool",
-                    subject,
-                    elapsed_ms = started.elapsed().as_millis(),
-                    input_tokens,
-                    kind = "forbidden",
-                    "gateway code search denied by scope"
-                );
-                let env = build_error_extra(
-                    &service,
-                    "call_tool",
-                    "forbidden",
-                    "code(search) requires one of scopes: lab:read, lab, lab:admin",
-                    &serde_json::json!({ "required_scopes": ["lab:read", "lab", "lab:admin"] }),
-                );
-                return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
-            }
-            let code = args
-                .get("code")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            let code_hash = hash_arguments(&Value::String(code.clone()));
-            let Some(manager) = &self.gateway_manager else {
-                let envelope = build_error(
-                    &service,
-                    "call_tool",
-                    "unknown_tool",
-                    "code search is not enabled",
-                );
-                return Ok(CallToolResult::error(vec![Content::text(
-                    envelope.to_string(),
-                )]));
-            };
-            tracing::info!(
-                surface = "mcp",
-                service = "code_search",
-                action = "call_tool",
-                subject,
-                code_hash = %code_hash,
-                code_len = code.len(),
-                input_tokens,
-                "gateway code search start"
-            );
-            let broker = CodeModeBroker::new(&self.registry, Some(manager));
-            let caller = auth.map_or(CodeModeCaller::TrustedLocal, |auth| {
-                CodeModeCaller::Scoped {
-                    scopes: auth.scopes.clone(),
-                    sub: self.request_subject(&context).map(ToOwned::to_owned),
-                }
-            });
-            return match broker
-                .search(&code, caller, self.code_mode_surface(false))
-                .await
-            {
-                Ok(response) => {
-                    let output =
-                        serde_json::to_string(&response).unwrap_or_else(|_| "null".to_string());
-                    let output_tokens = estimate_tokens(&output);
-                    tracing::info!(
-                        surface = "mcp",
-                        service = "code_search",
-                        action = "call_tool",
-                        subject,
-                        code_hash = %code_hash,
-                        code_len = code.len(),
-                        elapsed_ms = started.elapsed().as_millis(),
-                        input_tokens,
-                        output_tokens,
-                        "gateway code search ok"
-                    );
-                    Ok(CallToolResult::success(vec![Content::text(output)]))
-                }
-                Err(err) => {
-                    tracing::warn!(
-                        surface = "mcp",
-                        service = "code_search",
-                        action = "call_tool",
-                        subject,
-                        code_hash = %code_hash,
-                        code_len = code.len(),
-                        elapsed_ms = started.elapsed().as_millis(),
-                        input_tokens,
-                        kind = err.kind(),
-                        error = %err,
-                        "gateway code search failed"
-                    );
-                    let env = tool_error_envelope(&service, "call_tool", &err);
-                    Ok(CallToolResult::error(vec![Content::text(env.to_string())]))
-                }
-            };
-        }
-        if service == CODE_EXECUTE_TOOL_NAME && self.gateway_code_mode_enabled().await {
-            let started = Instant::now();
-            let input_tokens = estimate_tokens_args(&args);
-            let subject = self.request_subject_log_tag(&context);
-            let auth = auth_context_from_extensions(&context.extensions);
-            tracing::warn!(
-                surface = "mcp",
-                legacy_alias = CODE_EXECUTE_TOOL_NAME,
-                canonical = %format!("{CODE_TOOL_NAME}(action=execute)"),
-                subject,
-                "Legacy Code Mode alias invoked — update client to use code(action='execute')"
-            );
-            if !tool_execute_scope_allowed(auth) {
-                tracing::warn!(
-                    surface = "mcp",
-                    service = %service,
-                    action = "call_tool",
-                    subject,
-                    elapsed_ms = started.elapsed().as_millis(),
-                    input_tokens,
-                    kind = "forbidden",
-                    "gateway code execute denied by scope"
-                );
-                let env = build_error_extra(
-                    &service,
-                    "call_tool",
-                    "forbidden",
-                    "code(execute) requires one of scopes: lab, lab:admin",
-                    &serde_json::json!({ "required_scopes": ["lab", "lab:admin"] }),
-                );
-                return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
-            }
-            let Some(manager) = &self.gateway_manager else {
-                let envelope = build_error(
-                    &service,
-                    "call_tool",
-                    "unknown_tool",
-                    "code execute is not enabled",
-                );
-                return Ok(CallToolResult::error(vec![Content::text(
-                    envelope.to_string(),
-                )]));
-            };
-            let config = manager.code_mode_config().await;
-            if !config.enabled {
-                let env = build_error(
-                    &service,
-                    "call_tool",
-                    "code_mode_disabled",
-                    "Code Mode execution is disabled; set [code_mode].enabled = true to enable it",
-                );
-                return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
-            }
-            let code = args.get("code").and_then(Value::as_str).unwrap_or_default();
-            if code.trim().is_empty() {
-                let env = build_error_extra(
-                    &service,
-                    "call_tool",
-                    "invalid_param",
-                    "code must not be empty",
-                    &serde_json::json!({ "param": "code" }),
-                );
-                return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
-            }
-            if code.len() > CODE_MODE_MAX_CODE_BYTES {
-                let env = build_error_extra(
-                    &service,
-                    "call_tool",
-                    "invalid_param",
-                    "code exceeds max length 20000 bytes",
-                    &serde_json::json!({ "param": "code" }),
-                );
-                return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
-            }
-            let requested_max_tool_calls = args
-                .get("max_tool_calls")
-                .and_then(Value::as_u64)
-                .map(|value| value as usize)
-                .unwrap_or(config.max_tool_calls)
-                .max(1)
-                .min(config.max_tool_calls);
-            let allow_destructive_actions =
-                args.get("confirm").and_then(Value::as_bool) == Some(true);
-            let code_hash = hash_arguments(&Value::String(code.to_string()));
-            tracing::info!(
-                surface = "mcp",
-                service = "code_execute",
-                action = "call_tool",
-                subject,
-                code_hash = %code_hash,
-                max_tool_calls = requested_max_tool_calls,
-                input_tokens,
-                "gateway code execute start"
-            );
-            let broker = CodeModeBroker::new(&self.registry, Some(manager));
-            let caller = auth.map_or(CodeModeCaller::TrustedLocal, |auth| {
-                CodeModeCaller::Scoped {
-                    scopes: auth.scopes.clone(),
-                    sub: self.request_subject(&context).map(ToOwned::to_owned),
-                }
-            });
-            let before = self.snapshot_catalog().await;
-            let response = match broker
-                .execute(
-                    code,
-                    requested_max_tool_calls,
-                    caller,
-                    self.code_mode_surface(allow_destructive_actions),
-                    config,
-                )
-                .await
-            {
-                Ok(response) => {
-                    let after = self.snapshot_catalog().await;
-                    self.notify_catalog_changes(&before, &after).await;
-                    response
-                }
-                Err(err) => {
-                    let after = self.snapshot_catalog().await;
-                    self.notify_catalog_changes(&before, &after).await;
-                    let env = tool_error_envelope(&service, "call_tool", &err);
-                    return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
-                }
-            };
-            let output = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
-            let output_tokens = estimate_tokens(&output);
-            tracing::info!(
-                surface = "mcp",
-                service = "code_execute",
-                action = "call_tool",
-                subject,
-                code_hash = %code_hash,
-                call_count = response.calls.len(),
-                elapsed_ms = started.elapsed().as_millis(),
-                input_tokens,
-                output_tokens,
-                "gateway code execute ok"
-            );
-            return Ok(CallToolResult::success(vec![Content::text(output)]));
-        }
         if service == TOOL_SEARCH_TOOL_NAME
-            || service == GATEWAY_LEGACY_TOOL_SEARCH_NAME
-            || service == LEGACY_SCOUT_TOOL_NAME
+            || service == "tool_search"
+            || service == "scout"
         {
             let started = Instant::now();
             let input_tokens = estimate_tokens_args(&args);
             let subject = self.request_subject_log_tag(&context);
             let auth = auth_context_from_extensions(&context.extensions);
-            if service == GATEWAY_LEGACY_TOOL_SEARCH_NAME {
+            if service == "tool_search" {
                 tracing::warn!(
                     surface = "mcp",
-                    legacy_alias = GATEWAY_LEGACY_TOOL_SEARCH_NAME,
+                    legacy_alias = "tool_search",
                     canonical = TOOL_SEARCH_TOOL_NAME,
                     subject,
                     "Legacy Tool Search alias invoked — update client to use canonical name 'search'"
                 );
             }
-            if service == LEGACY_SCOUT_TOOL_NAME {
+            if service == "scout" {
                 tracing::warn!(
                     surface = "mcp",
-                    legacy_alias = LEGACY_SCOUT_TOOL_NAME,
+                    legacy_alias = "scout",
                     canonical = TOOL_SEARCH_TOOL_NAME,
                     subject,
                     "Legacy Tool Search alias invoked — update client to use canonical name 'search'"
@@ -2022,19 +1859,14 @@ impl ServerHandler for LabMcpServer {
                 }
             };
         }
-        if matches!(
-            service.as_str(),
-            TOOL_EXECUTE_TOOL_NAME
-                | GATEWAY_LEGACY_EXECUTE_NAME
-                | LEGACY_INVOKE_TOOL_NAME
-                | LEGACY_TOOL_INVOKE_TOOL_NAME
-        ) {
+        if service == TOOL_EXECUTE_TOOL_NAME
+            || service == "tool_execute"
+            || service == "invoke"
+            || service == "tool_invoke"
+        {
             let started = Instant::now();
             let input_tokens = estimate_tokens_args(&args);
-            if service == GATEWAY_LEGACY_EXECUTE_NAME
-                || service == LEGACY_INVOKE_TOOL_NAME
-                || service == LEGACY_TOOL_INVOKE_TOOL_NAME
-            {
+            if service != TOOL_EXECUTE_TOOL_NAME {
                 let subject = self.request_subject_log_tag(&context);
                 tracing::warn!(
                     surface = "mcp",

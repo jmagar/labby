@@ -12,15 +12,6 @@ pub(crate) const TOOL_SEARCH_TOOL_NAME: &str = "search";
 pub(crate) const TOOL_EXECUTE_TOOL_NAME: &str = "execute";
 /// Canonical Code Mode tool name (single `code` tool — Cloudflare-parity).
 pub(crate) const CODE_TOOL_NAME: &str = "code";
-/// Legacy aliases kept for backward compatibility — emit a deprecation warning when invoked.
-pub(crate) const GATEWAY_LEGACY_TOOL_SEARCH_NAME: &str = "tool_search";
-pub(crate) const GATEWAY_LEGACY_EXECUTE_NAME: &str = "tool_execute";
-/// Legacy Code Mode tool names — hidden from list_tools, kept callable for backward compat.
-pub(crate) const CODE_SEARCH_TOOL_NAME: &str = "code_search";
-pub(crate) const CODE_EXECUTE_TOOL_NAME: &str = "code_execute";
-pub(crate) const LEGACY_SCOUT_TOOL_NAME: &str = "scout";
-pub(crate) const LEGACY_INVOKE_TOOL_NAME: &str = "invoke";
-pub(crate) const LEGACY_TOOL_INVOKE_TOOL_NAME: &str = "tool_invoke";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ToolSearchVisibility {
@@ -294,30 +285,19 @@ impl LabMcpServer {
 mod tests {
     use super::*;
 
-    // ── Tool name constants (Cloudflare-parity + legacy aliases) ─────────────
+    // ── Tool name constants (Cloudflare-parity, no aliases) ─────────────────
 
     #[test]
     fn canonical_tool_names_are_search_and_execute() {
         // PRESENCE: canonical names match expected Cloudflare-parity values
-        assert_eq!(TOOL_SEARCH_TOOL_NAME, "search",
-            "canonical search tool name must be 'search'");
-        assert_eq!(TOOL_EXECUTE_TOOL_NAME, "execute",
-            "canonical execute tool name must be 'execute'");
-
-        // PRESENCE: legacy aliases are the old names
-        assert_eq!(GATEWAY_LEGACY_TOOL_SEARCH_NAME, "tool_search",
-            "legacy search alias must be 'tool_search'");
-        assert_eq!(GATEWAY_LEGACY_EXECUTE_NAME, "tool_execute",
-            "legacy execute alias must be 'tool_execute'");
-
-        // ABSENCE: canonical names must not be the legacy names
-        assert_ne!(TOOL_SEARCH_TOOL_NAME, "tool_search",
-            "canonical name must not be the legacy name");
-        assert_ne!(TOOL_EXECUTE_TOOL_NAME, "tool_execute",
-            "canonical name must not be the legacy name");
-
-        // ABSENCE: legacy names must not match each other
-        assert_ne!(GATEWAY_LEGACY_TOOL_SEARCH_NAME, GATEWAY_LEGACY_EXECUTE_NAME);
+        assert_eq!(
+            TOOL_SEARCH_TOOL_NAME, "search",
+            "canonical search tool name must be 'search'"
+        );
+        assert_eq!(
+            TOOL_EXECUTE_TOOL_NAME, "execute",
+            "canonical execute tool name must be 'execute'"
+        );
     }
 
     #[test]
@@ -326,23 +306,14 @@ mod tests {
         assert_eq!(CODE_TOOL_NAME, "code");
 
         // ABSENCE: `code` must not collide with Tool Search mode names
-        assert_ne!(CODE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME,
-            "code must differ from search");
-        assert_ne!(CODE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME,
-            "code must differ from execute");
-    }
-
-    #[test]
-    fn legacy_code_mode_names_are_hidden_aliases() {
-        // Legacy Code Mode tool names — still callable but NOT advertised.
-        assert_eq!(CODE_SEARCH_TOOL_NAME, "code_search");
-        assert_eq!(CODE_EXECUTE_TOOL_NAME, "code_execute");
-
-        // They must differ from all canonical names.
-        assert_ne!(CODE_SEARCH_TOOL_NAME, CODE_TOOL_NAME);
-        assert_ne!(CODE_EXECUTE_TOOL_NAME, CODE_TOOL_NAME);
-        assert_ne!(CODE_SEARCH_TOOL_NAME, TOOL_SEARCH_TOOL_NAME);
-        assert_ne!(CODE_EXECUTE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME);
+        assert_ne!(
+            CODE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME,
+            "code must differ from search"
+        );
+        assert_ne!(
+            CODE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME,
+            "code must differ from execute"
+        );
     }
 
     #[test]

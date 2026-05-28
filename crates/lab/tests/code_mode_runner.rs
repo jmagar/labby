@@ -233,12 +233,7 @@ fn code_mode_runner_done_carries_return_value() {
         return result;
     "#;
 
-    writeln!(
-        stdin,
-        "{}",
-        json!({"type": "start", "code": code})
-    )
-    .expect("write start");
+    writeln!(stdin, "{}", json!({"type": "start", "code": code})).expect("write start");
 
     assert_eq!(
         read_protocol_line(&mut stdout),
@@ -259,7 +254,11 @@ fn code_mode_runner_done_carries_return_value() {
     let done = read_protocol_line(&mut stdout);
     assert_eq!(done["type"], "done", "expected done message");
     // The function returned the tool result — should be non-null.
-    assert_eq!(done["result"], json!({"pong": true}), "done.result must carry the function return value");
+    assert_eq!(
+        done["result"],
+        json!({"pong": true}),
+        "done.result must carry the function return value"
+    );
     assert_eq!(done["logs"], json!([]), "logs must be empty until Bead 3");
     let status = child.wait().expect("wait for runner");
     assert!(status.success(), "runner exited with {status}");
@@ -293,12 +292,7 @@ fn code_mode_runner_tool_error_produces_json_encoded_error() {
         }
     "#;
 
-    writeln!(
-        stdin,
-        "{}",
-        json!({"type": "start", "code": code})
-    )
-    .expect("write start");
+    writeln!(stdin, "{}", json!({"type": "start", "code": code})).expect("write start");
 
     assert_eq!(
         read_protocol_line(&mut stdout),
@@ -318,7 +312,10 @@ fn code_mode_runner_tool_error_produces_json_encoded_error() {
     .expect("write tool_error");
 
     let done = read_protocol_line(&mut stdout);
-    assert_eq!(done["type"], "done", "expected done message — if missing, JSON.parse threw SyntaxError");
+    assert_eq!(
+        done["type"], "done",
+        "expected done message — if missing, JSON.parse threw SyntaxError"
+    );
     // The catch block should have parsed the JSON error and returned the structured result.
     assert_eq!(done["result"]["caught"], json!(true));
     assert_eq!(done["result"]["kind"], json!("server_error"));
