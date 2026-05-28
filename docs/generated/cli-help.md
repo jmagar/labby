@@ -17,7 +17,7 @@ Commands:
   nodes        Query nodes from the configured controller
   health       Quick reachability check for configured services
   setup        Open the web-based first-run wizard (or settings) — lab-bg3e.3
-  help         Print the service + action catalog
+  help         Show CLI help for the binary or a specific subcommand
   completions  Generate shell completions
   gateway      Manage proxied upstream MCP gateways
   oauth        Run local OAuth callback relay helpers
@@ -873,14 +873,15 @@ Options:
 ## `labby help`
 
 ```text
-Print the service + action catalog
+Show CLI help for the binary or a specific subcommand
 
-Usage: help [OPTIONS]
+Usage: help [OPTIONS] [SERVICE]
+
+Arguments:
+  [SERVICE]
+          Show help for a specific subcommand (e.g. `lab help gateway`)
 
 Options:
-      --all
-          Show every compiled-in service, even if required env vars are missing
-
       --json
           Emit JSON instead of human-readable tables
 
@@ -1005,13 +1006,17 @@ Options:
 ## `labby gateway test`
 
 ```text
-Usage: test [OPTIONS]
+Usage: test [OPTIONS] [NAME]
+
+Arguments:
+  [NAME]
+          Server name to test (positional or --name)
 
 Options:
       --json
           Emit JSON instead of human-readable tables
 
-      --name <NAME>
+      --name <NAME_FLAG>
 
 
       --allow-stdio

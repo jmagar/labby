@@ -1720,23 +1720,6 @@
           }
         }
       },
-      "GatewayGatewayScoutSetParams": {
-        "type": "object",
-        "required": [
-          "enabled"
-        ],
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          },
-          "max_tools": {
-            "type": "integer"
-          },
-          "top_k_default": {
-            "type": "integer"
-          }
-        }
-      },
       "GatewayGatewayServerGetParams": {
         "type": "object",
         "required": [
