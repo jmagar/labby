@@ -1674,32 +1674,11 @@ impl ServerHandler for LabMcpServer {
             }
         }
 
-        if service == TOOL_SEARCH_TOOL_NAME
-            || service == "tool_search"
-            || service == "scout"
-        {
+        if service == TOOL_SEARCH_TOOL_NAME {
             let started = Instant::now();
             let input_tokens = estimate_tokens_args(&args);
             let subject = self.request_subject_log_tag(&context);
             let auth = auth_context_from_extensions(&context.extensions);
-            if service == "tool_search" {
-                tracing::warn!(
-                    surface = "mcp",
-                    legacy_alias = "tool_search",
-                    canonical = TOOL_SEARCH_TOOL_NAME,
-                    subject,
-                    "Legacy Tool Search alias invoked — update client to use canonical name 'search'"
-                );
-            }
-            if service == "scout" {
-                tracing::warn!(
-                    surface = "mcp",
-                    legacy_alias = "scout",
-                    canonical = TOOL_SEARCH_TOOL_NAME,
-                    subject,
-                    "Legacy Tool Search alias invoked — update client to use canonical name 'search'"
-                );
-            }
             if !tool_search_scope_allowed(auth) {
                 tracing::warn!(
                     surface = "mcp",
@@ -1859,23 +1838,9 @@ impl ServerHandler for LabMcpServer {
                 }
             };
         }
-        if service == TOOL_EXECUTE_TOOL_NAME
-            || service == "tool_execute"
-            || service == "invoke"
-            || service == "tool_invoke"
-        {
+        if service == TOOL_EXECUTE_TOOL_NAME {
             let started = Instant::now();
             let input_tokens = estimate_tokens_args(&args);
-            if service != TOOL_EXECUTE_TOOL_NAME {
-                let subject = self.request_subject_log_tag(&context);
-                tracing::warn!(
-                    surface = "mcp",
-                    legacy_alias = %service,
-                    canonical = TOOL_EXECUTE_TOOL_NAME,
-                    subject,
-                    "Legacy Tool Execute alias invoked — update client to use canonical name 'execute'"
-                );
-            }
             let tool_name = args
                 .get("name")
                 .and_then(Value::as_str)
@@ -4179,7 +4144,7 @@ mod tests {
         });
         let client = ().serve(client_transport).await.expect("client starts");
 
-        let mut params = CallToolRequestParams::new("tool_execute".to_string());
+        let mut params = CallToolRequestParams::new("execute".to_string());
         params.arguments = Some(
             serde_json::json!({
                 "name": "PowerShell",
@@ -4199,7 +4164,7 @@ mod tests {
             serde_json::from_str(tool_result_text(&result)).expect("error envelope is json");
         let error = &envelope["error"];
         assert_eq!(envelope["ok"], false);
-        assert_eq!(envelope["service"], "tool_execute");
+        assert_eq!(envelope["service"], "execute");
         assert_eq!(envelope["action"], "call_tool");
         assert_eq!(error["kind"], "ambiguous_tool");
         assert_eq!(
