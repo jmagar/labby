@@ -119,7 +119,7 @@ pub(crate) fn code_tool_input_schema() -> Value {
         "properties": {
             "code": {
                 "type": "string",
-                "description": "JavaScript async arrow function to execute in the Code Mode sandbox."
+                "description": "JavaScript statements to execute inside an async function body in the Code Mode sandbox. Use await callTool(id, params) with JSON-serializable params. Do NOT wrap in an arrow function — write the body directly."
             }
         },
         "required": ["code"]
