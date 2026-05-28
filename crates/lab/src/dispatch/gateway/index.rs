@@ -37,6 +37,7 @@ impl IndexedTool {
     /// `input_schema` is unavailable from the payload (not indexed); callers
     /// needing it must look the tool up by `(upstream, name)` in the live
     /// catalog.
+    #[allow(dead_code)]
     pub(crate) fn from_semantic_payload_with_priority(
         name: &str,
         upstream: &str,
@@ -71,6 +72,7 @@ pub struct ToolIndex {
     pub metadata: ToolIndexMetadata,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchHit {
     pub tool: IndexedTool,
@@ -155,6 +157,7 @@ impl ToolIndex {
     /// of the top result's score. 0.0 disables the floor (keeps all positive
     /// scores). Applied per-upstream so each source's floor cut is relative to
     /// its own best match, not a global mixed-source maximum.
+    #[allow(dead_code)]
     pub fn search(&self, query: &str, top_k: usize, score_floor_fraction: f32) -> Vec<SearchHit> {
         let needle = query.trim().to_ascii_lowercase();
         if needle.is_empty() {
@@ -195,10 +198,12 @@ impl ToolIndex {
     }
 }
 
+#[allow(dead_code)]
 fn score_tool(query: &str, tool: &IndexedTool) -> f32 {
     score_name_haystack(query, &tool.name_lower, &tool.haystack) * tool.priority
 }
 
+#[allow(dead_code)]
 pub(crate) fn score_name_haystack(query: &str, name_lower: &str, haystack: &str) -> f32 {
     // Exact name match always wins.
     if name_lower == query {

@@ -68,39 +68,6 @@ pub const ACTIONS: &[ActionSpec] = &[
         ],
     },
     ActionSpec {
-        name: "gateway.scout.get",
-        description: "Legacy alias for gateway.tool_search.get",
-        destructive: false,
-        returns: "ToolSearchConfig",
-        params: &[],
-    },
-    ActionSpec {
-        name: "gateway.scout.set",
-        description: "Legacy alias for gateway.tool_search.set",
-        destructive: true,
-        returns: "ToolSearchConfig",
-        params: &[
-            ParamSpec {
-                name: "enabled",
-                ty: "boolean",
-                required: true,
-                description: "Whether tool_search/tool_execute mode is enabled for the gateway",
-            },
-            ParamSpec {
-                name: "top_k_default",
-                ty: "integer",
-                required: false,
-                description: "Default result count for tool_search when top_k is omitted",
-            },
-            ParamSpec {
-                name: "max_tools",
-                ty: "integer",
-                required: false,
-                description: "Maximum number of tools to index per rebuild",
-            },
-        ],
-    },
-    ActionSpec {
         name: "gateway.code_mode.get",
         description: "Read gateway-wide Code Mode execution settings",
         destructive: false,
