@@ -8,6 +8,30 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.18.2] - 2026-05-28
+
+### Highlights
+
+- **Plugin config key fix**: corrected `userConfig.dozzle_mcp_url` to `user_config.dozzle_mcp_url` in dozzle plugin manifests.
+- **MCP/CI fixes**: addressed code review findings for search/execute handlers, removed aliases for old tool names, and fixed test regressions.
+- **Frontend lockfile**: reverted pnpm-workspace.yaml and lockfile to pnpm 9 compatible state.
+
+| Commit | Change |
+|--------|--------|
+| 33de9232 | docs: save session log |
+| cad82760 | fix(frontend): revert pnpm-workspace.yaml and lockfile to pnpm 9 compatible state |
+| 9eae6193 | chore: update gateway-admin pnpm lockfile and plugin manifests |
+| f368a5ed | fix(ci): fix test regression and commit help/render changes to match committed docs |
+| b4e46881 | fix(mcp): address lavra-review P1/P2 findings — error handling and tracing gaps |
+| d9c531d9 | refactor: remove all aliases for old tool names |
+| 55b861fa | fix(mcp): address comprehensive review findings on search/execute handlers |
+
+### Version bumps
+
+- Rust workspace: `0.18.1 -> 0.18.2`
+
+---
+
 ## [0.18.1] - 2026-05-27
 
 ### Highlights
