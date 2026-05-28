@@ -8,6 +8,31 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.19.0] - 2026-05-27
+
+### Highlights
+
+- **Cloudflare Code Mode parity**: tool names now normalize to snake_case (`movie.search` → `movie_search`) so models trained on Cloudflare examples call the right helpers.
+- **Removed legacy tool aliases**: `tool_search`, `tool_execute`, `code_search`, `code_execute`, `scout`, `invoke`, `tool_invoke` are no longer accepted — only `code`, `search`, `execute` remain (breaking for legacy clients).
+- **Typed return types in preamble**: `generate_preamble` now passes upstream `output_schema` through `schema_to_ts`, replacing `Promise<unknown>` with derived types when available.
+- **Bounded preamble cache**: `PreambleCache` is now a 64-entry LRU (was unbounded `DashMap`), preventing memory growth under upstream catalog churn.
+- **Canonical error kinds only**: removed non-contract `code_mode_disabled` and `code_execution_failed`; mapped to `internal_error` / `server_error` so agents switching on `err.kind` don't hit the default branch.
+- **Higher default Code Mode timeout**: 5000 ms → 30000 ms (Cloudflare parity); still TOML-configurable via `[code_mode].timeout_ms`.
+- **Pure computation valid in Code Mode**: removed the "must call callTool at least once" rejection so filter/sort/reduce snippets work.
+- **Fixed embedded web assets test**: `serves_embedded_web_assets_without_configured_directory` now skips with a build hint when `apps/gateway-admin/out/` is empty rather than failing.
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | feat: Cloudflare Code Mode parity — snake_case names, bounded cache, typed returns, canonical error kinds |
+| f02f8341 | fix: address all PR review issues in Code Mode gateway |
+
+### Version bumps
+
+- Rust workspace: `0.18.1 -> 0.19.0`
+- Gateway admin package: `0.18.1 -> 0.19.0`
+
+---
+
 ## [0.18.1] - 2026-05-27
 
 ### Highlights

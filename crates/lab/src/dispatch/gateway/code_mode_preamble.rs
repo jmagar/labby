@@ -5,8 +5,10 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::num::NonZeroUsize;
+use std::sync::Mutex;
 
-use dashmap::DashMap;
+use lru::LruCache;
 use serde_json::Value;
 
 use crate::dispatch::upstream::types::UpstreamTool;
@@ -71,36 +73,71 @@ pub struct CachedPreamble {
     pub tools_json: Value,
 }
 
-/// Thread-safe LRU-free cache for generated preamble strings and their associated tools JSON.
+/// Default bounded capacity for the preamble cache.
+///
+/// Each entry holds one generated TypeScript preamble plus its tools JSON for
+/// a distinct `(aggregate_catalog_hash, ScopeTier)` pair. The number of
+/// distinct entries scales with upstream catalog churn (every upstream connect/
+/// disconnect/reload produces a new aggregate hash) × 3 scope tiers. 64 covers
+/// many turns of churn while bounding worst-case memory.
+const DEFAULT_PREAMBLE_CACHE_CAPACITY: usize = 64;
+
+/// Thread-safe bounded-LRU cache for generated preamble strings and their
+/// associated tools JSON. Eviction is least-recently-used once capacity is
+/// reached, so memory cannot grow unbounded under catalog churn.
 ///
 /// Key: `(aggregate_catalog_hash, ScopeTier)`.
 /// On a cold pool (aggregate == 0) callers get a cache miss and fall through to
 /// generate a minimal/empty preamble.
-#[derive(Debug, Default)]
+///
+/// `LruCache::get` mutates recency, so the wrapper uses `Mutex` (not `RwLock`).
+#[derive(Debug)]
 pub struct PreambleCache {
-    inner: DashMap<(u64, ScopeTier), CachedPreamble>,
+    inner: Mutex<LruCache<(u64, ScopeTier), CachedPreamble>>,
+}
+
+impl Default for PreambleCache {
+    fn default() -> Self {
+        Self::with_capacity(DEFAULT_PREAMBLE_CACHE_CAPACITY)
+    }
 }
 
 impl PreambleCache {
     pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        let capacity = NonZeroUsize::new(capacity.max(1))
+            .expect("capacity is non-zero after max(1)");
         Self {
-            inner: DashMap::new(),
+            inner: Mutex::new(LruCache::new(capacity)),
         }
     }
 
     /// Look up a cached preamble and its tools JSON.
     ///
-    /// Returns `CachedPreamble` so cache hits avoid any pool fetch.
+    /// Returns `CachedPreamble` so cache hits avoid any pool fetch. A hit
+    /// promotes the entry to most-recently-used.
     pub fn get(&self, aggregate: u64, tier: ScopeTier) -> Option<CachedPreamble> {
         self.inner
-            .get(&(aggregate, tier))
-            .map(|entry| entry.value().clone())
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.get(&(aggregate, tier)).cloned())
     }
 
-    /// Insert a generated preamble and its tools JSON.
+    /// Insert a generated preamble and its tools JSON. If the cache is at
+    /// capacity, the least-recently-used entry is evicted.
     pub fn insert(&self, aggregate: u64, tier: ScopeTier, preamble: String, tools_json: Value) {
-        self.inner
-            .insert((aggregate, tier), CachedPreamble { preamble, tools_json });
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.put((aggregate, tier), CachedPreamble { preamble, tools_json });
+        }
+    }
+
+    /// Current entry count (test-only helper).
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.inner.lock().map(|g| g.len()).unwrap_or(0)
     }
 }
 
@@ -748,6 +785,30 @@ mod tests {
             cache.get(42, ScopeTier::Execute).is_none(),
             "Execute tier must be distinct from Admin"
         );
+    }
+
+    #[test]
+    fn preamble_cache_evicts_least_recently_used_when_full() {
+        // Capacity 2: third insert must evict the LRU entry.
+        let cache = PreambleCache::with_capacity(2);
+        let empty = serde_json::json!([]);
+
+        cache.insert(1, ScopeTier::Admin, "p1".to_string(), empty.clone());
+        cache.insert(2, ScopeTier::Admin, "p2".to_string(), empty.clone());
+        assert_eq!(cache.len(), 2);
+
+        // Touch entry 1 so entry 2 becomes the LRU.
+        drop(cache.get(1, ScopeTier::Admin));
+
+        cache.insert(3, ScopeTier::Admin, "p3".to_string(), empty);
+
+        // PRESENCE: capacity is still 2 (bounded)
+        assert_eq!(cache.len(), 2, "cache must not exceed capacity");
+        // PRESENCE: most-recently-touched entry survives
+        assert!(cache.get(1, ScopeTier::Admin).is_some(), "MRU entry survives");
+        assert!(cache.get(3, ScopeTier::Admin).is_some(), "newest entry present");
+        // ABSENCE: least-recently-used entry evicted
+        assert!(cache.get(2, ScopeTier::Admin).is_none(), "LRU entry evicted");
     }
 
     #[test]
