@@ -51,29 +51,6 @@ pub(crate) fn process_tool_search_enabled() -> bool {
     PROCESS_TOOL_SEARCH_ENABLED.load(Ordering::Acquire)
 }
 
-// Gateway startup/reload writes this process-wide flag whenever root
-// `[code_mode]` changes. Mirrors PROCESS_TOOL_SEARCH_ENABLED — used by in-process
-// peer MCP servers that must know whether Code Mode tools are exposed.
-static PROCESS_CODE_MODE_ENABLED: AtomicBool = AtomicBool::new(false);
-
-pub(crate) fn set_process_code_mode_enabled(enabled: bool) {
-    let previous = PROCESS_CODE_MODE_ENABLED.swap(enabled, Ordering::AcqRel);
-    if previous != enabled {
-        tracing::info!(
-            surface = "mcp",
-            service = "code_mode",
-            action = "code_mode.process_enablement",
-            previous_enabled = previous,
-            enabled,
-            "process-wide code mode enablement changed"
-        );
-    }
-}
-
-pub(crate) fn is_code_mode_enabled() -> bool {
-    PROCESS_CODE_MODE_ENABLED.load(Ordering::Acquire)
-}
-
 use anyhow::{Context, Result};
 use lab_auth::config as auth_config;
 use serde::{Deserialize, Serialize, Serializer};
@@ -388,7 +365,6 @@ impl LabConfig {
     pub fn validate(&self) -> Result<(), ConfigError> {
         self.tool_search.validate()?;
         self.code_mode.validate()?;
-        validate_mode_exclusive(self.tool_search.enabled, self.code_mode.enabled)?;
         for upstream in &self.upstream {
             upstream.validate()?;
         }
@@ -440,24 +416,6 @@ pub(crate) fn root_tool_search_present(raw: &str) -> bool {
                 .map(|table| table.contains_key("tool_search"))
         })
         .unwrap_or(false)
-}
-
-/// Enforce mutual exclusion between tool_search and code_mode.
-///
-/// Returns `ConfigError::DualModeConflict` if both are simultaneously enabled.
-/// Call this from all three validation sites: startup (LabConfig::validate),
-/// config load (dispatch/gateway/config.rs validate_config), and runtime
-/// config mutation (manager.rs set_*_config inside the lock).
-pub(crate) fn validate_mode_exclusive(
-    tool_search_enabled: bool,
-    code_mode_enabled: bool,
-) -> Result<(), ConfigError> {
-    if tool_search_enabled && code_mode_enabled {
-        return Err(ConfigError::DualModeConflict {
-            message: "tool_search and code_mode cannot both be enabled. Disable one before enabling the other.",
-        });
-    }
-    Ok(())
 }
 
 fn default_true() -> bool {
@@ -532,10 +490,6 @@ fn default_max_log_bytes() -> usize {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeModeConfig {
-    /// Enable the constrained Code Mode executor. Catalog search can be enabled
-    /// through `[tool_search]` without enabling execution.
-    #[serde(default)]
-    pub enabled: bool,
     /// Maximum wall-clock time for one Code Mode execution.
     #[serde(default = "default_code_mode_timeout_ms")]
     pub timeout_ms: u64,
@@ -566,7 +520,6 @@ pub struct CodeModeConfig {
 impl Default for CodeModeConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
             timeout_ms: default_code_mode_timeout_ms(),
             max_tool_calls: default_code_mode_max_tool_calls(),
             max_response_bytes: default_code_mode_max_response_bytes(),
@@ -996,8 +949,6 @@ pub enum ConfigError {
         field: &'static str,
         value: String,
     },
-    #[error("{message}")]
-    DualModeConflict { message: &'static str },
 }
 
 /// Outbound OAuth configuration for an upstream MCP server.
@@ -2790,9 +2741,8 @@ url = "https://acme.example.com/mcp"
     }
 
     #[test]
-    fn code_mode_is_root_level_config_and_disabled_by_default() {
+    fn code_mode_is_root_level_config_with_default_limits() {
         let default_cfg = LabConfig::default();
-        assert!(!default_cfg.code_mode.enabled);
         assert_eq!(default_cfg.code_mode.timeout_ms, 30_000);
         assert_eq!(default_cfg.code_mode.max_tool_calls, 8);
         assert_eq!(default_cfg.code_mode.max_response_bytes, 24 * 1024);
@@ -2801,7 +2751,6 @@ url = "https://acme.example.com/mcp"
         let cfg = toml::from_str::<LabConfig>(
             r#"
 [code_mode]
-enabled = true
 timeout_ms = 2500
 max_tool_calls = 3
 max_response_bytes = 12000
@@ -2810,7 +2759,6 @@ max_response_tokens = 3000
         )
         .expect("root code_mode parses");
 
-        assert!(cfg.code_mode.enabled);
         assert_eq!(cfg.code_mode.timeout_ms, 2500);
         assert_eq!(cfg.code_mode.max_tool_calls, 3);
         assert_eq!(cfg.code_mode.max_response_bytes, 12000);
@@ -3065,39 +3013,6 @@ service_scope = "user"
         assert!(d.max_parallel.is_none());
     }
 
-    // ── Code Mode: validate_mode_exclusive ───────────────────────────────────
-
-    #[test]
-    fn validate_mode_exclusive_rejects_both_enabled() {
-        // All four input combinations
-        assert!(
-            validate_mode_exclusive(true, true).is_err(),
-            "both enabled must be rejected"
-        );
-        assert!(
-            validate_mode_exclusive(false, true).is_ok(),
-            "only code_mode enabled is ok"
-        );
-        assert!(
-            validate_mode_exclusive(true, false).is_ok(),
-            "only tool_search enabled is ok"
-        );
-        assert!(
-            validate_mode_exclusive(false, false).is_ok(),
-            "neither enabled is ok"
-        );
-
-        // PRESENCE: error message must contain the key phrase
-        let err = validate_mode_exclusive(true, true).unwrap_err();
-        assert!(
-            err.to_string().contains("cannot both be enabled"),
-            "error message must mention 'cannot both be enabled', got: {err}"
-        );
-
-        // ABSENCE: success variants must not contain that phrase
-        assert!(validate_mode_exclusive(false, false).is_ok());
-    }
-
     // ── Code Mode: CodeModeConfig defaults ───────────────────────────────────
 
     #[test]
@@ -3116,8 +3031,6 @@ service_scope = "user"
     #[test]
     fn code_mode_config_defaults_are_sane() {
         let config = CodeModeConfig::default();
-        // PRESENCE: enabled defaults to false (must be opted-in)
-        assert!(!config.enabled, "code_mode must be disabled by default");
         // PRESENCE: timeout and call limits are positive
         assert!(config.timeout_ms > 0);
         assert!(config.max_tool_calls > 0);
@@ -3131,36 +3044,22 @@ service_scope = "user"
     // ── Process-wide atomic flags ─────────────────────────────────────────────
 
     #[test]
-    fn process_flags_are_independent_of_each_other() {
-        // Snapshot current state to restore after test
-        let prev_code = is_code_mode_enabled();
+    fn process_tool_search_flag_round_trips() {
         let prev_ts = process_tool_search_enabled();
 
-        // PRESENCE: setting code mode does not affect tool_search flag
-        set_process_code_mode_enabled(true);
-        set_process_tool_search_enabled(false);
+        set_process_tool_search_enabled(true);
         assert!(
-            is_code_mode_enabled(),
-            "code mode must be true after set_process_code_mode_enabled(true)"
+            process_tool_search_enabled(),
+            "tool_search must be true after set_process_tool_search_enabled(true)"
         );
+
+        set_process_tool_search_enabled(false);
         assert!(
             !process_tool_search_enabled(),
             "tool_search must be false after set_process_tool_search_enabled(false)"
         );
 
-        // ABSENCE: reversing code mode flag does not flip tool_search
-        set_process_code_mode_enabled(false);
-        assert!(
-            !is_code_mode_enabled(),
-            "code mode must be false after set_process_code_mode_enabled(false)"
-        );
-        assert!(
-            !process_tool_search_enabled(),
-            "tool_search must remain false"
-        );
-
         // Restore
-        set_process_code_mode_enabled(prev_code);
         set_process_tool_search_enabled(prev_ts);
     }
 }

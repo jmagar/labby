@@ -1117,7 +1117,6 @@ impl ServerHandler for LabMcpServer {
         let visibility = self.tool_search_visibility().await;
         let manager_tool_search_enabled = visibility.exposes_synthetic_tools();
         let process_tool_search_enabled = crate::config::process_tool_search_enabled();
-        let process_code_mode_enabled = crate::config::is_code_mode_enabled();
         let hide_raw_tools = visibility.hides_raw_tools();
         let visibility_mode = visibility.mode_label();
         for svc in self.registry.services() {
@@ -1255,7 +1254,6 @@ impl ServerHandler for LabMcpServer {
             suppressed_builtin_tool_count,
             manager_tool_search_enabled,
             process_tool_search_enabled,
-            process_code_mode_enabled,
             hide_raw_tools,
             visibility_mode,
             total_tool_count = tools.len(),
@@ -2945,10 +2943,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn snapshot_catalog_shows_no_gateway_tools_when_neither_mode_is_enabled() {
-        // When both tool_search.enabled=false and code_mode.enabled=false,
-        // none of the five gateway meta-tools (search, execute, code, code_search,
-        // code_execute) should appear in the snapshot.
+    async fn snapshot_catalog_shows_no_gateway_tools_when_surface_is_disabled() {
+        // When tool_search.enabled=false, none of the gateway meta-tools
+        // (search, execute, code, code_search, code_execute) should appear in
+        // the snapshot.
         let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
         let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
             std::path::PathBuf::from("config.toml"),
@@ -2959,10 +2957,6 @@ mod tests {
                 tool_search: crate::config::ToolSearchConfig {
                     enabled: false,
                     ..crate::config::ToolSearchConfig::default()
-                },
-                code_mode: crate::config::CodeModeConfig {
-                    enabled: false,
-                    ..crate::config::CodeModeConfig::default()
                 },
                 ..crate::config::LabConfig::default()
             })
