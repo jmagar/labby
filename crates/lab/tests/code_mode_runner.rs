@@ -323,3 +323,74 @@ fn code_mode_runner_tool_error_produces_json_encoded_error() {
     let status = child.wait().expect("wait for runner");
     assert!(status.success(), "runner exited with {status}");
 }
+
+/// Verify that a tool error in the middle of a fan-out does NOT abort the run
+/// (bead lab-xvff5). With `Promise.allSettled`, one rejected callTool settles as
+/// `rejected` while siblings still resolve, and the function returns normally —
+/// the runner must keep processing after the mid-fan-out error and emit Done with
+/// both outcomes.
+#[test]
+fn code_mode_runner_tool_error_does_not_abort_fan_out() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+
+    let code = r#"async () => {
+        const settled = await Promise.allSettled([
+          callTool("upstream::test::fail", {}),
+          callTool("upstream::test::ok", {})
+        ]);
+        return settled.map(s => {
+          if (s.status === "rejected") {
+            const parsed = JSON.parse(String(s.reason.message));
+            return {status: s.status, kind: parsed.kind};
+          }
+          return {status: s.status, value: s.value};
+        });
+    }"#;
+
+    writeln!(stdin, "{}", json!({"type": "start", "code": code})).expect("write start");
+
+    // Both callTool requests are emitted before either is answered (parallel fan-out).
+    let first = read_protocol_line(&mut stdout);
+    let second = read_protocol_line(&mut stdout);
+    assert_eq!(first["type"], "tool_call");
+    assert_eq!(second["type"], "tool_call");
+    assert_eq!(first["seq"], json!(0));
+    assert_eq!(second["seq"], json!(1));
+
+    // Fail seq 0 mid-fan-out; resolve seq 1 normally.
+    writeln!(
+        stdin,
+        "{}",
+        json!({"type": "tool_error", "seq": 0, "kind": "rate_limited", "message": "slow down"})
+    )
+    .expect("write tool_error");
+    writeln!(
+        stdin,
+        "{}",
+        json!({"type": "tool_result", "seq": 1, "result": {"pong": true}})
+    )
+    .expect("write tool_result");
+
+    // The run must NOT have aborted on the seq-0 failure — Done arrives with both outcomes.
+    let done = read_protocol_line(&mut stdout);
+    assert_eq!(
+        done["type"], "done",
+        "a mid-fan-out tool error must not abort the run"
+    );
+    assert_eq!(done["result"][0]["status"], json!("rejected"));
+    assert_eq!(done["result"][0]["kind"], json!("rate_limited"));
+    assert_eq!(done["result"][1]["status"], json!("fulfilled"));
+    assert_eq!(done["result"][1]["value"], json!({"pong": true}));
+    let status = child.wait().expect("wait for runner");
+    assert!(status.success(), "runner exited with {status}");
+}
