@@ -2572,10 +2572,9 @@ mod tests {
     use crate::mcp::error::{DispatchError, canonical_kind};
     use crate::registry::{RegisteredService, ToolRegistry};
     use lab_apis::core::action::ActionSpec;
-    use rmcp::model::{CallToolRequestParams, CallToolResult, Content};
-    use rmcp::{ServerHandler, ServiceExt};
+    use rmcp::ServerHandler;
+    use rmcp::model::{CallToolResult, Content};
     use serde_json::Value;
-    use std::collections::{BTreeMap, HashMap};
     use std::future::Future;
     use std::pin::Pin;
 
@@ -3010,73 +3009,6 @@ mod tests {
             "description must not reference the deprecated code_search tool"
         );
         assert!(super::CODE_EXECUTE_DESCRIPTION.len() < 8192);
-    }
-
-    fn gateway_test_upstream(name: &str) -> crate::config::UpstreamConfig {
-        crate::config::UpstreamConfig {
-            enabled: true,
-            name: name.to_string(),
-            url: Some("http://127.0.0.1:9/mcp".to_string()),
-            bearer_token_env: None,
-            command: None,
-            args: Vec::new(),
-            env: BTreeMap::new(),
-            proxy_resources: false,
-            proxy_prompts: false,
-            expose_tools: None,
-            expose_resources: None,
-            expose_prompts: None,
-            oauth: None,
-            imported_from: None,
-            priority: 1.0,
-            tool_search: crate::config::ToolSearchConfig::default(),
-        }
-    }
-
-    fn healthy_gateway_entry(
-        upstream: &str,
-        tool_name: &str,
-    ) -> crate::dispatch::upstream::types::UpstreamEntry {
-        let upstream_name: std::sync::Arc<str> = std::sync::Arc::from(upstream);
-        let schema = std::sync::Arc::new(serde_json::Map::new());
-        let tool = rmcp::model::Tool::new(
-            tool_name.to_string(),
-            format!("{tool_name} description"),
-            schema,
-        );
-        let upstream_tool = crate::dispatch::upstream::types::UpstreamTool {
-            tool,
-            input_schema: None,
-            upstream_name: std::sync::Arc::clone(&upstream_name),
-            destructive: false,
-        };
-        crate::dispatch::upstream::types::UpstreamEntry {
-            name: std::sync::Arc::clone(&upstream_name),
-            tools: HashMap::from([(tool_name.to_string(), upstream_tool)]),
-            exposure_policy: crate::dispatch::upstream::types::ToolExposurePolicy::All,
-            prompt_count: 0,
-            resource_count: 0,
-            prompt_names: Vec::new(),
-            resource_uris: Vec::new(),
-            tool_health: crate::dispatch::upstream::types::UpstreamHealth::Healthy,
-            prompt_health: crate::dispatch::upstream::types::UpstreamHealth::Healthy,
-            resource_health: crate::dispatch::upstream::types::UpstreamHealth::Healthy,
-            tool_unhealthy_since: None,
-            prompt_unhealthy_since: None,
-            resource_unhealthy_since: None,
-            tool_last_error: None,
-            prompt_last_error: None,
-            resource_last_error: None,
-        }
-    }
-
-    fn tool_result_text(result: &CallToolResult) -> &str {
-        result
-            .content
-            .first()
-            .and_then(|content| content.as_text())
-            .map(|text| text.text.as_str())
-            .expect("tool result should contain text content")
     }
 
     #[tokio::test]
