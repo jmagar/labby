@@ -38,9 +38,3 @@ pub mod mcpregistry;
 /// ACP Agent Registry client — discover and install ACP-compatible AI coding agents.
 #[cfg(feature = "acp_registry")]
 pub mod acp_registry;
-
-/// HuggingFace Text Embeddings Inference client — batch embedding via `/embed`.
-pub mod tei;
-
-/// Qdrant vector database client — collection management, upsert, hybrid search.
-pub mod qdrant;

@@ -476,10 +476,6 @@ fn default_score_floor_fraction() -> f32 {
     0.25
 }
 
-fn default_tools_collection() -> String {
-    "lab-tools".to_string()
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolSearchConfig {
     #[serde(default)]
@@ -493,24 +489,6 @@ pub struct ToolSearchConfig {
     /// Default 0.25 cuts the noise-floor pollution from incidental haystack matches.
     #[serde(default = "default_score_floor_fraction")]
     pub score_floor_fraction: f32,
-    /// Qdrant base URL for semantic tool search (e.g. `http://localhost:53333`).
-    /// Falls back to `QDRANT_URL` env var if absent. Semantic search is disabled
-    /// when neither this field nor the env var is set.
-    #[serde(default)]
-    pub qdrant_url: Option<String>,
-    /// Qdrant API key for semantic tool search. Prefer `QDRANT_API_KEY` in `.env`.
-    #[serde(default)]
-    pub qdrant_api_key: Option<Secret>,
-    /// TEI base URL for embedding queries and documents (e.g. `http://localhost:52000`).
-    /// Falls back to `TEI_URL` env var if absent.
-    #[serde(default)]
-    pub tei_url: Option<String>,
-    /// TEI API key for semantic tool search. Prefer `TEI_API_KEY` in `.env`.
-    #[serde(default)]
-    pub tei_api_key: Option<Secret>,
-    /// Qdrant collection name for tool vectors. Default: `lab-tools`.
-    #[serde(default = "default_tools_collection")]
-    pub tools_collection: String,
 }
 
 impl Default for ToolSearchConfig {
@@ -520,11 +498,6 @@ impl Default for ToolSearchConfig {
             top_k_default: default_tool_search_top_k(),
             max_tools: default_tool_search_max_tools(),
             score_floor_fraction: default_score_floor_fraction(),
-            qdrant_url: None,
-            qdrant_api_key: None,
-            tei_url: None,
-            tei_api_key: None,
-            tools_collection: default_tools_collection(),
         }
     }
 }
@@ -647,46 +620,6 @@ impl CodeModeConfig {
 }
 
 impl ToolSearchConfig {
-    /// Resolve Qdrant URL: config field → `QDRANT_URL` env var → None.
-    pub fn resolved_qdrant_url(&self) -> Option<String> {
-        self.qdrant_url
-            .clone()
-            .filter(|s| !s.is_empty())
-            .or_else(|| std::env::var("QDRANT_URL").ok().filter(|s| !s.is_empty()))
-            .map(|raw| normalize_container_loopback_url(&raw, "axon-qdrant", 6333))
-    }
-
-    /// Resolve Qdrant API key: config field → `QDRANT_API_KEY` env var → None.
-    pub fn resolved_qdrant_api_key(&self) -> Option<String> {
-        self.qdrant_api_key
-            .as_ref()
-            .map(|s| s.expose().to_string())
-            .filter(|s| !s.is_empty())
-            .or_else(|| {
-                std::env::var("QDRANT_API_KEY")
-                    .ok()
-                    .filter(|s| !s.is_empty())
-            })
-    }
-
-    /// Resolve TEI URL: config field → `TEI_URL` env var → None.
-    pub fn resolved_tei_url(&self) -> Option<String> {
-        self.tei_url
-            .clone()
-            .filter(|s| !s.is_empty())
-            .or_else(|| std::env::var("TEI_URL").ok().filter(|s| !s.is_empty()))
-            .map(|raw| normalize_container_loopback_url(&raw, "axon-tei", 80))
-    }
-
-    /// Resolve TEI API key: config field → `TEI_API_KEY` env var → None.
-    pub fn resolved_tei_api_key(&self) -> Option<String> {
-        self.tei_api_key
-            .as_ref()
-            .map(|s| s.expose().to_string())
-            .filter(|s| !s.is_empty())
-            .or_else(|| std::env::var("TEI_API_KEY").ok().filter(|s| !s.is_empty()))
-    }
-
     pub fn validate(&self) -> Result<(), ConfigError> {
         if !(1..=50).contains(&self.top_k_default) {
             return Err(ConfigError::InvalidToolSearchTopKDefault {
@@ -705,55 +638,6 @@ impl ToolSearchConfig {
         }
         Ok(())
     }
-}
-
-fn normalize_container_loopback_url(raw: &str, docker_host: &str, docker_port: u16) -> String {
-    normalize_container_loopback_url_for_runtime(
-        raw,
-        docker_host,
-        docker_port,
-        running_in_container(),
-    )
-}
-
-fn normalize_container_loopback_url_for_runtime(
-    raw: &str,
-    docker_host: &str,
-    docker_port: u16,
-    in_container: bool,
-) -> String {
-    if !in_container {
-        return raw.to_string();
-    }
-
-    let Ok(mut parsed) = url::Url::parse(raw.trim()) else {
-        return raw.to_string();
-    };
-
-    let Some(host) = parsed.host_str() else {
-        return raw.to_string();
-    };
-
-    if !matches!(host, "localhost" | "127.0.0.1" | "::1") {
-        return raw.to_string();
-    }
-
-    if parsed.set_host(Some(docker_host)).is_err() || parsed.set_port(Some(docker_port)).is_err() {
-        return raw.to_string();
-    }
-    parsed.to_string().trim_end_matches('/').to_string()
-}
-
-fn running_in_container() -> bool {
-    Path::new("/.dockerenv").exists()
-        || Path::new("/run/.containerenv").exists()
-        || std::fs::read_to_string("/proc/1/cgroup")
-            .map(|cgroup| {
-                cgroup.contains("docker")
-                    || cgroup.contains("kubepods")
-                    || cgroup.contains("containerd")
-            })
-            .unwrap_or(false)
 }
 
 /// Provenance record for an upstream imported from an external MCP config.
@@ -2903,54 +2787,6 @@ url = "https://acme.example.com/mcp"
         assert_eq!(cfg.tool_search.top_k_default, 20);
         assert_eq!(cfg.tool_search.max_tools, 8000);
         cfg.validate().expect("root tool_search validates");
-    }
-
-    #[test]
-    fn tool_search_loopback_urls_normalize_to_docker_dns_in_container() {
-        assert_eq!(
-            normalize_container_loopback_url_for_runtime(
-                "http://127.0.0.1:53333",
-                "axon-qdrant",
-                6333,
-                true
-            ),
-            "http://axon-qdrant:6333"
-        );
-        assert_eq!(
-            normalize_container_loopback_url_for_runtime(
-                "http://localhost:52000/health",
-                "axon-tei",
-                80,
-                true
-            ),
-            "http://axon-tei/health"
-        );
-    }
-
-    #[test]
-    fn tool_search_loopback_urls_stay_host_local_outside_container() {
-        assert_eq!(
-            normalize_container_loopback_url_for_runtime(
-                "http://127.0.0.1:53333",
-                "axon-qdrant",
-                6333,
-                false
-            ),
-            "http://127.0.0.1:53333"
-        );
-    }
-
-    #[test]
-    fn tool_search_non_loopback_urls_do_not_normalize_in_container() {
-        assert_eq!(
-            normalize_container_loopback_url_for_runtime(
-                "http://qdrant.internal:6333",
-                "axon-qdrant",
-                6333,
-                true
-            ),
-            "http://qdrant.internal:6333"
-        );
     }
 
     #[test]
