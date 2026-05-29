@@ -302,24 +302,6 @@ impl CodeModeCaller {
             Self::Scoped { sub: None, .. } => Some(SHARED_GATEWAY_OAUTH_SUBJECT),
         }
     }
-
-    /// Map this caller to the broadest `ScopeTier` it holds.
-    #[must_use]
-    pub fn scope_tier(&self) -> super::code_mode_preamble::ScopeTier {
-        use super::code_mode_preamble::ScopeTier;
-        match self {
-            Self::TrustedLocal => ScopeTier::Admin,
-            Self::Scoped { scopes, .. } => {
-                if scopes.iter().any(|s| matches!(s.as_str(), "lab:admin")) {
-                    ScopeTier::Admin
-                } else if scopes.iter().any(|s| matches!(s.as_str(), "lab")) {
-                    ScopeTier::Execute
-                } else {
-                    ScopeTier::Read
-                }
-            }
-        }
-    }
 }
 
 pub struct CodeModeBroker<'a> {
@@ -332,42 +314,17 @@ impl<'a> CodeModeBroker<'a> {
         Self { gateway_manager }
     }
 
-    /// Return ONLY the TypeScript declaration preamble string for the current
-    /// catalog (no tools JSON wrapper). Used by `list_tools` to substitute
-    /// `{{types}}` in the `code` tool's `description` field — the Cloudflare
-    /// `createCodeTool` pattern (see `cloudflare/agents/packages/codemode/src/tool.ts`).
-    ///
-    /// Caching reuses the same `PreambleCache` keyed on aggregate catalog hash
-    /// + scope tier, so repeated `list_tools` calls are cheap.
-    pub async fn preamble_string(
+    /// Run the caller's JavaScript arrow function over the upstream MCP tool
+    /// catalog (Cloudflare-parity `search`). The sandbox injects
+    /// `const tools = [ {id, upstream, name, description, schema}, ... ]` and
+    /// returns whatever the function returns. No vector DB, no embeddings —
+    /// the agent writes the filter.
+    pub async fn search(
         &self,
-        caller: CodeModeCaller,
-        surface: CodeModeSurface,
-    ) -> Result<String, ToolError> {
-        let response = self.get_preamble(caller, surface).await?;
-        Ok(response
-            .get("preamble")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string())
-    }
-
-    /// Return the TypeScript declaration preamble for the current catalog.
-    ///
-    /// Response shape: `{ tools: [...], preamble: "declare namespace codemode { ... }" }`
-    ///
-    /// Cached keyed on the aggregate hash of all upstream `catalog_hash` values.
-    /// Cache lookup happens before fetching the catalog from the pool.
-    ///
-    /// Referenced by tool description: "Use code({action: 'preamble'}) to get
-    /// typed TypeScript declarations".
-    pub async fn get_preamble(
-        &self,
+        code: &str,
         caller: CodeModeCaller,
         surface: CodeModeSurface,
     ) -> Result<Value, ToolError> {
-        use super::code_mode_preamble::{aggregate_catalog_hash, generate_preamble};
-
         if !caller.can_read() {
             return Err(ToolError::Sdk {
                 sdk_kind: "forbidden".to_string(),
@@ -376,91 +333,25 @@ impl<'a> CodeModeBroker<'a> {
         }
 
         let Some(manager) = self.gateway_manager else {
-            return Ok(
-                serde_json::json!({ "tools": [], "preamble": generate_preamble(&[], false, 0) }),
-            );
+            return Ok(Value::Array(Vec::new()));
         };
 
-        let scope_tier = caller.scope_tier();
-        // Compute owner/oauth_subject once — used in both cache-hit and cache-miss paths.
+        let allow_cold_connect = caller.can_execute();
         let owner = caller.runtime_owner(surface);
         let oauth_subject = caller.oauth_subject();
-
-        // ── Cache check BEFORE touching the pool ─────────────────────────
-        let upstream_hashes = manager.per_upstream_catalog_hashes();
-        let agg_hash = aggregate_catalog_hash(&upstream_hashes);
-
-        if let Some(cached) = manager
-            .preamble_cache()
-            .get(agg_hash, scope_tier, oauth_subject)
-        {
-            return Ok(serde_json::json!({
-                "tools": cached.tools_json,
-                "preamble": cached.preamble,
-            }));
-        }
-
-        // ── Cache miss — generate preamble ───────────────────────────────
-        let preamble_started = std::time::Instant::now();
-        let (catalog, _, truncated) = self
-            .code_search_catalog(manager, true, &owner, oauth_subject)
+        let (catalog, serialized_size, truncated) = self
+            .code_search_catalog(manager, allow_cold_connect, &owner, oauth_subject)
             .await?;
-
-        // Collect raw UpstreamTool list for preamble generation from catalog entries
-        // We re-derive via pool because CodeModeCatalogEntry strips input_schema
-        let pool_tools = manager
-            .code_mode_catalog_tools(false, None, None)
-            .await
-            .unwrap_or_default();
-
-        let dropped_count = if truncated {
-            // Count dropped = pool tools - catalog tools (excluding sentinel)
-            let catalog_real_count = catalog.iter().filter(|e| e.id != "__truncated__").count();
-            pool_tools.len().saturating_sub(catalog_real_count)
-        } else {
-            0
-        };
-
-        let preamble = generate_preamble(&pool_tools, truncated, dropped_count);
-        let tools_json = serde_json::to_value(&catalog).unwrap_or(Value::Array(Vec::new()));
-
-        // Only cache when the pool has tools — an empty result indicates the pool
-        // hasn't warmed yet and caching it would poison all subsequent requests
-        // until the aggregate hash changes.
-        if pool_tools.is_empty() {
-            tracing::warn!(
-                surface = "dispatch",
-                service = "code_search",
-                action = "preamble.generate",
-                agg_hash,
-                "Code Mode preamble generated with empty tool pool; skipping cache"
-            );
-        } else {
-            manager.preamble_cache().insert(
-                agg_hash,
-                scope_tier,
-                oauth_subject,
-                preamble.clone(),
-                tools_json.clone(),
-            );
-        }
-
         tracing::info!(
             surface = "dispatch",
             service = "code_search",
-            action = "preamble.generate",
-            agg_hash,
-            tool_count = pool_tools.len(),
+            action = "catalog.build",
+            catalog_size_bytes = serialized_size,
+            entry_count = catalog.len(),
             truncated,
-            preamble_len = preamble.len(),
-            elapsed_ms = preamble_started.elapsed().as_millis(),
-            "Code Mode preamble generated and cached"
+            "Code Mode search catalog ready"
         );
-
-        Ok(serde_json::json!({
-            "tools": tools_json,
-            "preamble": preamble,
-        }))
+        evaluate_code_search(code, &catalog)
     }
 
     pub async fn execute(
@@ -616,53 +507,10 @@ impl<'a> CodeModeBroker<'a> {
         max_log_entries: usize,
         max_log_bytes: usize,
     ) -> Result<CodeModeExecutionResponse, ToolError> {
-        // ── Build JS preamble from current catalog ────────────────────────
-        let preamble_code = if let Some(manager) = self.gateway_manager {
-            let allow_cold_connect = caller.can_execute();
-            let owner = caller.runtime_owner(surface);
-            let oauth_subject = caller.oauth_subject();
-            match manager
-                .code_mode_catalog_tools(allow_cold_connect, Some(&owner), oauth_subject)
-                .await
-            {
-                Ok(tools) => {
-                    let mut upstreams: Vec<String> = tools
-                        .iter()
-                        .map(|t| t.upstream_name.to_string())
-                        .collect::<std::collections::BTreeSet<_>>()
-                        .into_iter()
-                        .collect();
-                    upstreams.sort();
-                    super::code_mode_preamble::generate_js_proxy(&tools, &upstreams)
-                }
-                Err(err) => {
-                    tracing::warn!(
-                        surface = "dispatch",
-                        service = "code_mode",
-                        action = "code_execute",
-                        kind = err.kind(),
-                        error = %err,
-                        "catalog fetch failed before sandbox execution; no upstream tools available"
-                    );
-                    return Err(ToolError::Sdk {
-                        sdk_kind: "upstream_error".to_string(),
-                        message: format!(
-                            "failed to fetch upstream tool catalog for Code Mode execution: {err}"
-                        ),
-                    });
-                }
-            }
-        } else {
-            super::code_mode_preamble::generate_js_proxy(&[], &[])
-        };
-
-        // Normalize user code before combining with preamble.
-        let code = normalize_user_code(code);
-
-        // Prepend preamble to user code. The runner wraps everything in an
-        // async IIFE, so the preamble's `var codemode = ...` becomes
-        // function-local and is available to user code.
-        let code_with_preamble = format!("{preamble_code}\n{code}");
+        // Cloudflare-parity: no typed TypeScript preamble is injected. The
+        // sandbox exposes only `callTool(id, params)`; the agent uses tool ids
+        // discovered via `search`. Normalize the user code and run it directly.
+        let code_to_run = normalize_user_code(code);
 
         let exe = std::env::current_exe().map_err(|err| ToolError::Sdk {
             sdk_kind: "internal_error".to_string(),
@@ -741,9 +589,7 @@ impl<'a> CodeModeBroker<'a> {
 
         write_runner_input(
             &mut stdin,
-            &CodeModeRunnerInput::Start {
-                code: code_with_preamble,
-            },
+            &CodeModeRunnerInput::Start { code: code_to_run },
         )
         .await?;
 
@@ -1284,6 +1130,89 @@ fn serialized_catalog_size_with_sentinel(
         candidate.push(CodeModeCatalogEntry::truncation_sentinel(dropped_count));
     }
     serialized_catalog_size(&candidate)
+}
+
+/// Run the caller's JavaScript search function against the inline catalog using
+/// Boa, in-process. The script is wrapped so that `const tools = [...]` is in
+/// scope and the caller's arrow function is invoked and awaited.
+#[cfg(not(feature = "code_mode_wasm"))]
+fn evaluate_code_search(code: &str, catalog: &[CodeModeCatalogEntry]) -> Result<Value, ToolError> {
+    let catalog_json = serde_json::to_string(catalog).map_err(|err| ToolError::Sdk {
+        sdk_kind: "internal_error".to_string(),
+        message: format!("failed to encode Code Mode catalog: {err}"),
+    })?;
+    let wrapped = format!(
+        "const tools = {catalog_json};\n\
+         (async () => {{\n\
+           const __codeModeSearch = ({code});\n\
+           if (typeof __codeModeSearch !== 'function') {{\n\
+             throw new TypeError('code_search code must evaluate to a function');\n\
+           }}\n\
+           return await __codeModeSearch();\n\
+         }})()"
+    );
+
+    let mut context = Context::default();
+    configure_code_mode_runtime_limits(&mut context);
+    let value = context
+        .eval(Source::from_bytes(wrapped.as_bytes()))
+        .map_err(|err| ToolError::Sdk {
+            sdk_kind: "invalid_param".to_string(),
+            message: format!("Code Mode search JavaScript failed to evaluate: {err}"),
+        })?;
+    let object = value.as_object().ok_or_else(|| ToolError::Sdk {
+        sdk_kind: "invalid_param".to_string(),
+        message: "Code Mode search script did not return a promise".to_string(),
+    })?;
+    let promise = JsPromise::from_object(object.clone()).map_err(|err| ToolError::Sdk {
+        sdk_kind: "invalid_param".to_string(),
+        message: format!("Code Mode search script did not return a promise: {err}"),
+    })?;
+
+    for _ in 0..CODE_MODE_LOOP_ITERATION_LIMIT {
+        context.run_jobs().map_err(|err| ToolError::Sdk {
+            sdk_kind: "code_execution_failed".to_string(),
+            message: err.to_string(),
+        })?;
+        match promise.state() {
+            PromiseState::Fulfilled(value) => {
+                return value
+                    .to_json(&mut context)
+                    .map_err(|err| ToolError::Sdk {
+                        sdk_kind: "code_execution_failed".to_string(),
+                        message: format!("failed to serialize Code Mode search result: {err}"),
+                    })?
+                    .ok_or_else(|| ToolError::Sdk {
+                        sdk_kind: "code_execution_failed".to_string(),
+                        message: "Code Mode search result is not JSON-serializable".to_string(),
+                    });
+            }
+            PromiseState::Rejected(reason) => {
+                return Err(ToolError::Sdk {
+                    sdk_kind: "code_execution_failed".to_string(),
+                    message: js_value_message(&reason, &mut context),
+                });
+            }
+            PromiseState::Pending => {}
+        }
+    }
+
+    Err(ToolError::Sdk {
+        sdk_kind: "code_execution_failed".to_string(),
+        message: "Code Mode search script did not settle before the iteration limit".to_string(),
+    })
+}
+
+/// WASM builds do not bundle the Boa engine; `search` is unavailable there.
+#[cfg(feature = "code_mode_wasm")]
+fn evaluate_code_search(
+    _code: &str,
+    _catalog: &[CodeModeCatalogEntry],
+) -> Result<Value, ToolError> {
+    Err(ToolError::Sdk {
+        sdk_kind: "internal_error".to_string(),
+        message: "code search is not available in the wasm Code Mode build".to_string(),
+    })
 }
 
 fn truncate_execution_response(
@@ -2051,107 +1980,59 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn preamble_string_without_manager_returns_empty_namespace_block() {
-        // No gateway manager → no upstreams to enumerate → preamble is the
-        // empty namespace block. Never fails (so `list_tools` can still
-        // advertise `code` with a graceful fallback description).
+    async fn search_without_manager_returns_empty_array() {
+        // No gateway manager → no upstream catalog → search returns an empty
+        // array regardless of the supplied JS (it never runs the script).
         let registry = super::ToolRegistry::new();
         let broker = super::CodeModeBroker::new(&registry, None);
 
-        let preamble = broker
-            .preamble_string(
+        let result = broker
+            .search(
+                "async () => tools",
                 super::CodeModeCaller::TrustedLocal,
                 super::CodeModeSurface::Cli,
             )
             .await
-            .expect("preamble_string ok without manager");
+            .expect("search ok without manager");
 
-        assert!(
-            preamble.contains("declare namespace codemode"),
-            "preamble must still declare the codemode namespace (even when empty)"
-        );
+        assert_eq!(result, serde_json::json!([]));
     }
 
-    #[tokio::test]
-    async fn preamble_string_uses_gateway_manager_catalog_api() {
-        // With a manager and no upstreams, the preamble is the empty namespace
-        // block — but the manager catalog API is exercised (no panic, no error).
-        let registry = super::ToolRegistry::new();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let manager = super::GatewayManager::new(
-            dir.path().join("config.toml"),
-            super::super::runtime::GatewayRuntimeHandle::default(),
-        );
-        manager
-            .seed_config(crate::config::LabConfig {
-                tool_search: crate::config::ToolSearchConfig {
-                    enabled: true,
-                    ..crate::config::ToolSearchConfig::default()
-                },
-                ..crate::config::LabConfig::default()
-            })
-            .await;
-        let broker = super::CodeModeBroker::new(&registry, Some(&manager));
-
-        let preamble = broker
-            .preamble_string(
-                super::CodeModeCaller::TrustedLocal,
-                super::CodeModeSurface::Cli,
-            )
-            .await
-            .expect("preamble generation through manager succeeds");
-
-        assert!(preamble.contains("declare namespace codemode"));
+    #[cfg(not(feature = "code_mode_wasm"))]
+    #[test]
+    fn evaluate_code_search_runs_js_over_catalog() {
+        let catalog = vec![
+            super::CodeModeCatalogEntry::upstream_tool(
+                "github",
+                "search_issues",
+                "search issues",
+                None,
+            ),
+            super::CodeModeCatalogEntry::upstream_tool(
+                "docker",
+                "container_logs",
+                "tail container logs",
+                None,
+            ),
+        ];
+        let result = super::evaluate_code_search(
+            "async () => tools.filter(t => t.upstream === 'github').map(t => t.name)",
+            &catalog,
+        )
+        .expect("search evaluates");
+        assert_eq!(result, serde_json::json!(["search_issues"]));
     }
 
-    /// In exclusive code mode (tool_search disabled), the preamble path seeds
-    /// the pool via `ensure_lazy_upstream_pool` rather than the tool_search
-    /// refresh path, so it succeeds with `lab:read` scope and does not attempt
-    /// active connections.
-    #[tokio::test]
-    async fn preamble_in_exclusive_code_mode_seeds_pool_without_connecting() {
-        let registry = super::ToolRegistry::new();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let runtime = super::super::runtime::GatewayRuntimeHandle::default();
-        let manager = super::GatewayManager::new(dir.path().join("config.toml"), runtime.clone());
-        manager
-            .seed_config(crate::config::LabConfig {
-                code_mode: crate::config::CodeModeConfig {
-                    enabled: true,
-                    ..crate::config::CodeModeConfig::default()
-                },
-                tool_search: crate::config::ToolSearchConfig {
-                    enabled: false,
-                    ..crate::config::ToolSearchConfig::default()
-                },
-                ..crate::config::LabConfig::default()
-            })
-            .await;
-        let broker = super::CodeModeBroker::new(&registry, Some(&manager));
-
-        // Read-only caller: `lab:read` scope.
-        let preamble = broker
-            .preamble_string(
-                super::CodeModeCaller::Scoped {
-                    scopes: vec!["lab:read".to_string()],
-                    sub: Some("reader".to_string()),
-                },
-                super::CodeModeSurface::Mcp {
-                    allow_destructive_actions: false,
-                },
-            )
-            .await
-            .expect("preamble succeeds in exclusive code mode with read-only scope");
-
-        assert!(preamble.contains("declare namespace codemode"));
-        // Pool is now seeded (not None) because the catalog path ran.
-        assert!(
-            manager.current_pool().await.is_some(),
-            "pool must be initialized after preamble generation"
-        );
-        // No active connections (lazy seeding only, no real upstreams configured).
-        let pool = runtime.current_pool().await.expect("pool initialized");
-        assert_eq!(pool.connection_count_for_tests().await, 0);
+    #[cfg(not(feature = "code_mode_wasm"))]
+    #[test]
+    fn evaluate_code_search_rejects_non_function() {
+        let err = super::evaluate_code_search("42", &[]).expect_err("non-function must error");
+        match err {
+            super::ToolError::Sdk { sdk_kind, .. } => {
+                assert_eq!(sdk_kind, "code_execution_failed");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[tokio::test]

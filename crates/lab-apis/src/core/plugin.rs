@@ -66,7 +66,7 @@ pub enum Category {
     Network,
     /// Push-notification dispatchers (Gotify, Apprise).
     Notifications,
-    /// AI / inference / vector search (`OpenAI`, Qdrant, TEI).
+    /// AI / inference (`OpenAI`).
     Ai,
     /// Bootstrap utilities (init, doctor, setup).
     Bootstrap,

@@ -1,13 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 use std::time::Duration;
 
-use arc_swap::{ArcSwap, ArcSwapOption};
-use futures::StreamExt;
+use arc_swap::ArcSwap;
 use tokio::sync::{Mutex, RwLock};
-use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
 use crate::config::{
@@ -17,7 +14,7 @@ use crate::config::{
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::error::ToolError;
 use crate::dispatch::upstream::pool::{
-    UpstreamCachedSummary, UpstreamPool, in_process_upstream_name, upstream_discovery_concurrency,
+    UpstreamCachedSummary, UpstreamPool, in_process_upstream_name,
 };
 use crate::dispatch::upstream::types::{UpstreamRuntimeOwner, UpstreamTool};
 use crate::oauth::upstream::cache::OauthClientCache;
@@ -33,7 +30,6 @@ use super::config::{
     validate_code_mode, validate_tool_search, write_gateway_config,
 };
 use super::config_mutation::{read_env_values, values_to_service_creds};
-use super::index::{SearchHit, ToolIndex};
 use super::params::GatewayUpdatePatch;
 use super::projection::*;
 use super::protected_routes::ProtectedRouteIndex;
@@ -236,9 +232,6 @@ impl VirtualServerMigration {
     }
 }
 
-/// Minimum wall-clock age between consecutive live reprobes on the search
-/// hot path. Per-upstream; fresher indexes skip reprobe entirely.
-const TOOL_SEARCH_REPROBE_TTL: Duration = Duration::from_secs(30);
 const WARNING_UNKNOWN_SERVICE: &str = "unknown_service";
 
 fn ensure_stdio_admin_ack(
@@ -287,35 +280,6 @@ fn pending_import_view(upstream: &UpstreamConfig) -> PendingImportView {
     }
 }
 
-#[derive(Clone)]
-struct GatewayToolIndexState {
-    index: Arc<ArcSwapOption<ToolIndex>>,
-    warming: Arc<AtomicBool>,
-    /// Monotonically increases on every spawned rebuild. Tasks that finish
-    /// with a stale generation are dropped instead of publishing, preventing
-    /// a last-writer-wins race where an earlier rebuild clobbers a later one.
-    generation: Arc<AtomicU64>,
-    /// Handle for the most recent spawned rebuild, aborted when a new
-    /// rebuild is scheduled so rapid config churn doesn't leak tasks.
-    in_flight: Arc<StdMutex<Option<AbortHandle>>>,
-    /// Timestamp of the last scheduled live reprobe attempt. Search-path
-    /// refresh short-circuits when younger than `TOOL_SEARCH_REPROBE_TTL`,
-    /// even if the previous attempt failed before rebuilding the index.
-    last_reprobe_attempt_at: Arc<StdMutex<Option<Instant>>>,
-}
-
-impl Default for GatewayToolIndexState {
-    fn default() -> Self {
-        Self {
-            index: Arc::new(ArcSwapOption::from(None)),
-            warming: Arc::new(AtomicBool::new(false)),
-            generation: Arc::new(AtomicU64::new(0)),
-            in_flight: Arc::new(StdMutex::new(None)),
-            last_reprobe_attempt_at: Arc::new(StdMutex::new(None)),
-        }
-    }
-}
-
 /// Outcome of a `batch_add` call.
 ///
 /// `views` contains one [`GatewayView`] for each spec that was successfully
@@ -325,16 +289,6 @@ impl Default for GatewayToolIndexState {
 pub struct BatchAddOutcome {
     pub views: Vec<GatewayView>,
     pub errors: Vec<(String, ToolError)>,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct GatewayToolSearchResult {
-    pub name: String,
-    pub description: String,
-    pub upstream: String,
-    pub score: f32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub input_schema: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -358,10 +312,7 @@ pub struct GatewayManager {
     pub(super) oauth_sqlite: Option<lab_auth::sqlite::SqliteStore>,
     pub(super) oauth_key: Option<EncryptionKey>,
     pub(super) oauth_redirect_uri: Option<Arc<String>>,
-    tool_indexes: Arc<dashmap::DashMap<String, GatewayToolIndexState>>,
     protected_route_index: Arc<RwLock<ProtectedRouteIndex>>,
-    /// Cached TypeScript declaration preambles keyed on (aggregate_catalog_hash, ScopeTier).
-    pub(super) preamble_cache: Arc<crate::dispatch::gateway::code_mode_preamble::PreambleCache>,
 }
 
 impl GatewayManager {
@@ -382,11 +333,7 @@ impl GatewayManager {
             oauth_sqlite: None,
             oauth_key: None,
             oauth_redirect_uri: None,
-            tool_indexes: Arc::new(dashmap::DashMap::new()),
             protected_route_index: Arc::new(RwLock::new(ProtectedRouteIndex::default())),
-            preamble_cache: Arc::new(
-                crate::dispatch::gateway::code_mode_preamble::PreambleCache::new(),
-            ),
         }
     }
 
@@ -2059,7 +2006,6 @@ impl GatewayManager {
         *self.config.write().await = cfg;
         let current_cfg = self.config.read().await.clone();
         let current_pool = self.runtime.current_pool().await;
-        self.schedule_tool_search_rebuilds(&current_cfg, current_pool.clone());
         self.reconcile_runtime_state(&current_cfg, current_pool.as_deref())
             .await?;
         let diff = diff_catalogs(&before, &after);
@@ -2169,170 +2115,15 @@ impl GatewayManager {
         self.config.read().await.tool_search.enabled
     }
 
-    pub async fn code_mode_enabled(&self) -> bool {
-        self.config.read().await.code_mode.enabled
-    }
-
     pub async fn code_mode_config(&self) -> crate::config::CodeModeConfig {
         self.config.read().await.code_mode.clone()
     }
 
-    pub async fn tool_search_warming(&self) -> bool {
-        self.tool_indexes
-            .iter()
-            .any(|entry| entry.value().warming.load(Ordering::Relaxed))
-    }
-
-    pub async fn search_tools(
-        &self,
-        query: &str,
-        top_k: usize,
-        include_schema: bool,
-        owner: Option<&UpstreamRuntimeOwner>,
-        oauth_subject: Option<&str>,
-    ) -> Result<Vec<GatewayToolSearchResult>, ToolError> {
-        let cfg = self.config.read().await;
-        let tool_search_cfg = cfg.tool_search.clone();
-        let upstream_priority: HashMap<String, f32> = cfg
-            .upstream
-            .iter()
-            .map(|upstream| (upstream.name.clone(), upstream.priority.max(0.0)))
-            .collect();
-        drop(cfg);
-
-        if !tool_search_cfg.enabled {
-            return Err(ToolError::Sdk {
-                sdk_kind: "unknown_tool".to_string(),
-                message: "tool search is not enabled".to_string(),
-            });
-        }
-        let trimmed = query.trim();
-        if trimmed.is_empty() {
-            return Err(ToolError::Sdk {
-                sdk_kind: "invalid_param".to_string(),
-                message: "query must not be empty".to_string(),
-            });
-        }
-        if trimmed.len() > 500 {
-            return Err(ToolError::Sdk {
-                sdk_kind: "invalid_param".to_string(),
-                message: "query exceeds max length 500".to_string(),
-            });
-        }
-
-        let has_cached_index = self.has_cached_tool_search_index();
-        self.ensure_search_runtime_ready(!has_cached_index, owner, oauth_subject)
-            .await?;
-
-        let requested = top_k.max(1).min(50);
-        let semantic_urls = match (
-            tool_search_cfg.resolved_qdrant_url(),
-            tool_search_cfg.resolved_tei_url(),
-        ) {
-            (Some(qdrant_url), Some(tei_url)) => Some((
-                qdrant_url,
-                tei_url,
-                tool_search_cfg.resolved_qdrant_api_key(),
-                tool_search_cfg.resolved_tei_api_key(),
-            )),
-            _ => None,
-        };
-        let semantic_enabled = semantic_urls.is_some();
-        // When semantic search is enabled, skip the lexical score-floor: the
-        // floor would otherwise drop low-lexical-score tools BEFORE semantic
-        // could rescue them via RRF. The post-fusion top_k truncation handles
-        // the floor naturally. Lexical-only mode keeps the original behavior.
-        let effective_floor = if semantic_enabled {
-            0.0
-        } else {
-            tool_search_cfg.score_floor_fraction
-        };
-
-        // When semantic is enabled, widen the lexical candidate window so RRF
-        // fusion has a richer set to draw from. The final truncation to
-        // `requested` happens after fusion.
-        let lexical_window = if semantic_enabled {
-            requested * 3
-        } else {
-            requested
-        };
-
-        let mut hits: Vec<SearchHit> = self
-            .tool_indexes
-            .iter()
-            .filter_map(|entry| entry.value().index.load_full())
-            .flat_map(|index| index.search(trimmed, lexical_window, effective_floor))
-            .collect();
-
-        hits.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.tool.name.cmp(&b.tool.name))
-                .then_with(|| a.tool.upstream_name.cmp(&b.tool.upstream_name))
-        });
-        hits.truncate(lexical_window);
-
-        // Semantic hybrid search via Qdrant + TEI — fused with lexical hits via RRF.
-        // Graceful degradation: if Qdrant/TEI are unavailable, log a WARN and return
-        // lexical results unchanged. Every return path truncates to `requested` —
-        // the wider `lexical_window` is only a fusion-input convenience.
-        let mut hits =
-            if let Some((qdrant_url, tei_url, qdrant_api_key, tei_api_key)) = semantic_urls {
-                match crate::dispatch::gateway::semantic::search_semantic(
-                    &qdrant_url,
-                    &tei_url,
-                    qdrant_api_key.as_deref(),
-                    tei_api_key.as_deref(),
-                    trimmed,
-                    requested * 3,
-                )
-                .await
-                {
-                    Ok(semantic_hits) => crate::dispatch::gateway::semantic::rrf_fuse(
-                        &hits,
-                        &semantic_hits,
-                        &upstream_priority,
-                        requested,
-                    ),
-                    Err(e) => {
-                        tracing::warn!(
-                            service = "tool_search",
-                            action = "semantic_search",
-                            error = %e,
-                            "semantic search unavailable, falling back to lexical results"
-                        );
-                        hits
-                    }
-                }
-            } else {
-                hits
-            };
-        hits.truncate(requested);
-
-        if hits.is_empty() && self.tool_search_warming().await {
-            return Err(ToolError::Sdk {
-                sdk_kind: "index_warming".to_string(),
-                message: "tool index is being built, retry shortly".to_string(),
-            });
-        }
-
-        Ok(hits
-            .into_iter()
-            .map(|hit| GatewayToolSearchResult {
-                name: sanitize_tool_text(&hit.tool.name, 256),
-                description: sanitize_tool_text(&hit.tool.description, 2048),
-                upstream: hit.tool.upstream_name,
-                score: hit.score,
-                input_schema: if include_schema {
-                    sanitize_schema(hit.tool.input_schema)
-                } else {
-                    None
-                },
-            })
-            .collect())
-    }
-
+    /// Ensure the upstream pool is warm and every enabled upstream has its tool
+    /// list connected. Cloudflare-parity: there is no vector/lexical tool-search
+    /// index to build — the `search` tool runs the caller's JS over the live
+    /// catalog. When `wait_for_refresh` is set, connect upstreams synchronously
+    /// so the first cold call sees a populated catalog; otherwise fire-and-forget.
     pub async fn ensure_search_runtime_ready(
         &self,
         wait_for_refresh: bool,
@@ -2344,20 +2135,34 @@ impl GatewayManager {
             return Ok(());
         }
 
-        self.ensure_lazy_upstream_pool(&cfg, owner).await;
-        let failures = self
-            .refresh_tool_search_indexes_if_stale(wait_for_refresh, owner, oauth_subject)
-            .await;
-        if wait_for_refresh && !failures.is_empty() && !self.has_cached_tool_search_index() {
-            let details = failures
-                .iter()
-                .map(|failure| format!("{}: {}", failure.upstream, failure.message))
-                .collect::<Vec<_>>()
-                .join("; ");
-            return Err(ToolError::Sdk {
-                sdk_kind: "upstream_connect_error".to_string(),
-                message: format!("failed to build tool search index: {details}"),
-            });
+        let pool = self.ensure_lazy_upstream_pool(&cfg, owner).await;
+        if wait_for_refresh {
+            let mut failures = Vec::new();
+            for upstream in cfg.upstream.iter().filter(|u| u.enabled) {
+                let subject = upstream.oauth.as_ref().and(oauth_subject);
+                if let Err(err) = pool
+                    .ensure_tools_for_upstream(upstream, subject, owner)
+                    .await
+                {
+                    failures.push(ToolSearchReprobeFailure {
+                        upstream: upstream.name.clone(),
+                        message: err.to_string(),
+                    });
+                }
+            }
+            if !failures.is_empty() && pool.healthy_tools().await.is_empty() {
+                let details = failures
+                    .iter()
+                    .map(|failure| format!("{}: {}", failure.upstream, failure.message))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                return Err(ToolError::Sdk {
+                    sdk_kind: "upstream_connect_error".to_string(),
+                    message: format!("failed to connect upstreams for tool search: {details}"),
+                });
+            }
+        } else {
+            self.spawn_code_mode_upstream_connections(pool, &cfg, owner, oauth_subject);
         }
         Ok(())
     }
@@ -2515,121 +2320,6 @@ impl GatewayManager {
         }
     }
 
-    /// Access the shared preamble cache for TypeScript declaration generation.
-    pub fn preamble_cache(&self) -> &crate::dispatch::gateway::code_mode_preamble::PreambleCache {
-        &self.preamble_cache
-    }
-
-    /// Cheaply read per-upstream catalog hashes from the cached tool indexes.
-    ///
-    /// Returns a vec of `UpstreamCatalogHash` for each upstream that has a
-    /// loaded index.  Used to compute an aggregate hash for the preamble cache
-    /// key before touching the upstream pool.
-    ///
-    /// On a cold pool with no loaded indexes this returns an empty vec, which
-    /// produces aggregate hash 0 and a guaranteed cache miss — callers fall
-    /// through to the normal catalog-fetch path.
-    pub fn per_upstream_catalog_hashes(
-        &self,
-    ) -> Vec<crate::dispatch::gateway::code_mode_preamble::UpstreamCatalogHash> {
-        self.tool_indexes
-            .iter()
-            .filter_map(|entry| {
-                let index = entry.value().index.load();
-                index.as_ref().map(|idx| {
-                    crate::dispatch::gateway::code_mode_preamble::UpstreamCatalogHash {
-                        upstream: entry.key().clone(),
-                        hash: idx.metadata.catalog_hash,
-                    }
-                })
-            })
-            .collect()
-    }
-
-    pub async fn resolve_tool_execute_with_upstream(
-        &self,
-        name: &str,
-        upstream: Option<&str>,
-        owner: Option<&UpstreamRuntimeOwner>,
-        oauth_subject: Option<&str>,
-    ) -> Result<(String, UpstreamTool), ToolError> {
-        if !self.config.read().await.tool_search.enabled {
-            return Err(ToolError::Sdk {
-                sdk_kind: "unknown_tool".to_string(),
-                message: "tool search is not enabled; tool_execute requires tool_search mode"
-                    .to_string(),
-            });
-        }
-        let selector = ToolExecuteSelector::parse(name, upstream)?;
-        let priority_by_upstream: HashMap<String, f32> = self
-            .config
-            .read()
-            .await
-            .upstream
-            .iter()
-            .map(|upstream| (upstream.name.clone(), upstream.priority.max(0.0)))
-            .collect();
-        if let Some(upstream_name) = selector.upstream.as_deref() {
-            if priority_by_upstream
-                .get(upstream_name)
-                .copied()
-                .unwrap_or(1.0)
-                <= 0.0
-            {
-                return Err(ToolError::Sdk {
-                    sdk_kind: "unknown_tool".to_string(),
-                    message: format!("unknown tool `{}`", selector.display_name()),
-                });
-            }
-            self.ensure_upstream_tool_runtime_ready(upstream_name, owner, oauth_subject)
-                .await?;
-        } else {
-            self.ensure_search_runtime_ready(true, owner, oauth_subject)
-                .await?;
-        }
-
-        let pool = self.current_pool().await.ok_or_else(|| ToolError::Sdk {
-            sdk_kind: "unknown_tool".to_string(),
-            message: format!("tool `{name}` is not available"),
-        })?;
-        let matches: Vec<_> = if let Some(upstream_name) = selector.upstream.as_deref() {
-            pool.healthy_tools_for_upstream(upstream_name)
-                .await
-                .into_iter()
-                .filter(|tool| tool.tool.name.as_ref() == selector.tool_name)
-                .map(|tool| (upstream_name.to_string(), tool))
-                .collect()
-        } else {
-            pool.find_tool_candidates(&selector.tool_name)
-                .await
-                .into_iter()
-                .filter(|(upstream, _)| {
-                    priority_by_upstream.get(upstream).copied().unwrap_or(1.0) > 0.0
-                })
-                .collect()
-        };
-        if matches.is_empty() {
-            return Err(ToolError::Sdk {
-                sdk_kind: "unknown_tool".to_string(),
-                message: format!("unknown tool `{}`", selector.display_name()),
-            });
-        }
-        if matches.len() > 1 {
-            let valid = matches
-                .iter()
-                .map(|(upstream, tool)| format!("{upstream}::{}", tool.tool.name))
-                .collect::<Vec<_>>();
-            return Err(ToolError::AmbiguousTool {
-                message: format!(
-                    "tool `{}` matched multiple upstream tools",
-                    selector.tool_name
-                ),
-                valid,
-            });
-        }
-        Ok(matches.into_iter().next().expect("checked len"))
-    }
-
     pub async fn resolve_code_mode_upstream_tool(
         &self,
         upstream: &str,
@@ -2767,563 +2457,6 @@ impl GatewayManager {
             });
         }
         Ok(matches.into_iter().next().expect("checked len"))
-    }
-
-    fn has_cached_tool_search_index(&self) -> bool {
-        self.tool_indexes
-            .iter()
-            .any(|entry| entry.value().index.load_full().is_some())
-    }
-
-    fn schedule_tool_search_rebuilds(&self, cfg: &LabConfig, pool: Option<Arc<UpstreamPool>>) {
-        if !cfg.tool_search.enabled {
-            tracing::info!(
-                surface = "dispatch",
-                service = "gateway",
-                action = "tool_search.rebuild",
-                event = "disabled",
-                "gateway tool index rebuild disabled"
-            );
-            for entry in self.tool_indexes.iter() {
-                if let Ok(mut guard) = entry.in_flight.lock()
-                    && let Some(handle) = guard.take()
-                {
-                    tracing::info!(
-                        surface = "dispatch",
-                        service = "gateway",
-                        action = "tool_search.rebuild",
-                        event = "abort",
-                        upstream = %entry.key(),
-                        reason = "disabled",
-                        "gateway tool index rebuild aborted"
-                    );
-                    handle.abort();
-                }
-            }
-            self.tool_indexes.clear();
-            return;
-        }
-
-        let enabled = cfg
-            .upstream
-            .iter()
-            .map(|upstream| upstream.name.clone())
-            .collect::<HashSet<_>>();
-        self.tool_indexes.retain(|name, state| {
-            if !enabled.contains(name) {
-                if let Ok(mut guard) = state.in_flight.lock()
-                    && let Some(handle) = guard.take()
-                {
-                    tracing::info!(
-                        surface = "dispatch",
-                        service = "gateway",
-                        action = "tool_search.rebuild",
-                        event = "abort",
-                        upstream = %name,
-                        reason = "upstream_removed",
-                        "gateway tool index rebuild aborted"
-                    );
-                    handle.abort();
-                }
-            }
-            enabled.contains(name)
-        });
-
-        let Some(pool) = pool else {
-            tracing::warn!(
-                surface = "dispatch",
-                service = "gateway",
-                action = "tool_search.rebuild",
-                event = "skipped",
-                kind = "upstream_pool_empty",
-                "gateway tool index rebuild skipped without pool"
-            );
-            self.tool_indexes.clear();
-            return;
-        };
-
-        for upstream in &cfg.upstream {
-            let state = self
-                .tool_indexes
-                .entry(upstream.name.clone())
-                .or_default()
-                .clone();
-            // Abort the previous rebuild for this upstream before starting a
-            // new one, and bump the generation so any in-flight older task
-            // refuses to publish its result.
-            if let Ok(mut guard) = state.in_flight.lock()
-                && let Some(handle) = guard.take()
-            {
-                tracing::info!(
-                    surface = "dispatch",
-                    service = "gateway",
-                    action = "tool_search.rebuild",
-                    event = "abort",
-                    upstream = %upstream.name,
-                    reason = "superseded",
-                    "gateway tool index rebuild aborted"
-                );
-                handle.abort();
-            }
-            let my_generation = state.generation.fetch_add(1, Ordering::Relaxed) + 1;
-            let upstream = upstream.clone();
-            let upstream_name = upstream.name.clone();
-            let pool = pool.clone();
-            let max_tools = cfg.tool_search.max_tools;
-            let semantic_cfg = cfg.tool_search.clone();
-            let semantic_urls = match (
-                semantic_cfg.resolved_qdrant_url(),
-                semantic_cfg.resolved_tei_url(),
-            ) {
-                (Some(qdrant_url), Some(tei_url)) => Some((
-                    qdrant_url,
-                    tei_url,
-                    semantic_cfg.resolved_qdrant_api_key(),
-                    semantic_cfg.resolved_tei_api_key(),
-                )),
-                _ => None,
-            };
-            state.warming.store(true, Ordering::Relaxed);
-            let state_for_task = state.clone();
-            tracing::info!(
-                surface = "dispatch",
-                service = "gateway",
-                action = "tool_search.rebuild",
-                event = "scheduled",
-                upstream = %upstream.name,
-                generation = my_generation,
-                max_tools,
-                "gateway tool index rebuild scheduled"
-            );
-            let handle = tokio::spawn(async move {
-                let started = Instant::now();
-                tracing::debug!(
-                    surface = "dispatch",
-                    service = "gateway",
-                    action = "tool_search.rebuild",
-                    event = "start",
-                    upstream = %upstream_name,
-                    generation = my_generation,
-                    "gateway tool index rebuild start"
-                );
-                let healthy_tools = pool.healthy_tools_for_upstream(&upstream_name).await;
-                let tool_count = healthy_tools.len();
-                let built = tokio::task::spawn_blocking(move || {
-                    ToolIndex::build_from_tools(&upstream, healthy_tools, max_tools)
-                })
-                .await;
-                if state_for_task.generation.load(Ordering::Relaxed) == my_generation
-                    && let Ok(index) = built
-                {
-                    if index.metadata.truncated {
-                        tracing::warn!(
-                            surface = "dispatch",
-                            service = "gateway",
-                            action = "tool_search.rebuild",
-                            upstream = %upstream_name,
-                            total_discovered = index.metadata.total_discovered,
-                            indexed_count = index.metadata.indexed_count,
-                            max_tools,
-                            "gateway tool index truncated — increase [tool_search] max_tools to index all tools"
-                        );
-                    }
-                    // Async-index into Qdrant if semantic search is configured.
-                    // Fire-and-forget: failures are logged but do not block the lexical index.
-                    if let Some((qdrant_url, tei_url, qdrant_api_key, tei_api_key)) =
-                        semantic_urls.clone()
-                    {
-                        let tools_to_index: Vec<_> = index
-                            .tools
-                            .iter()
-                            .filter(|tool| tool.priority > 0.0)
-                            .cloned()
-                            .collect();
-                        let upstream_for_sem = upstream_name.clone();
-                        tokio::spawn(async move {
-                            if let Err(e) =
-                                crate::dispatch::gateway::semantic::ensure_tools_collection(
-                                    &qdrant_url,
-                                    qdrant_api_key.as_deref(),
-                                )
-                                .await
-                            {
-                                tracing::warn!(service = "tool_search", action = "semantic.ensure_collection", error = %e, "semantic index: collection init failed");
-                                return;
-                            }
-                            match crate::dispatch::gateway::semantic::index_tools(
-                                &qdrant_url,
-                                &tei_url,
-                                qdrant_api_key.as_deref(),
-                                tei_api_key.as_deref(),
-                                &upstream_for_sem,
-                                &tools_to_index,
-                            )
-                            .await
-                            {
-                                Ok(()) => {
-                                    tracing::info!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, count = tools_to_index.len(), "semantic tool index updated")
-                                }
-                                Err(e) => {
-                                    tracing::warn!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, error = %e, "semantic index failed — lexical search unaffected")
-                                }
-                            }
-                        });
-                    }
-
-                    state_for_task.index.store(Some(Arc::new(index)));
-                    tracing::info!(
-                        surface = "dispatch",
-                        service = "gateway",
-                        action = "tool_search.rebuild",
-                        event = "finish",
-                        upstream = %upstream_name,
-                        generation = my_generation,
-                        tool_count,
-                        elapsed_ms = started.elapsed().as_millis(),
-                        "gateway tool index rebuild finish"
-                    );
-                } else {
-                    tracing::warn!(
-                        surface = "dispatch",
-                        service = "gateway",
-                        action = "tool_search.rebuild",
-                        event = "skipped",
-                        upstream = %upstream_name,
-                        generation = my_generation,
-                        kind = "stale_generation",
-                        elapsed_ms = started.elapsed().as_millis(),
-                        "gateway tool index rebuild skipped"
-                    );
-                    // Qdrant cleanup is idempotent and does not depend on
-                    // generation freshness. Run it anyway so that disabled or
-                    // empty upstreams don't leave stale semantic entries that
-                    // poison future searches.
-                    if tool_count == 0 {
-                        if let Some((qdrant_url, tei_url, qdrant_api_key, tei_api_key)) =
-                            semantic_urls.clone()
-                        {
-                            let upstream_for_sem = upstream_name.clone();
-                            tokio::spawn(async move {
-                                if let Err(e) =
-                                    crate::dispatch::gateway::semantic::ensure_tools_collection(
-                                        &qdrant_url,
-                                        qdrant_api_key.as_deref(),
-                                    )
-                                    .await
-                                {
-                                    tracing::warn!(service = "scout", action = "semantic.ensure_collection", error = %e, "stale-gen sweep: collection init failed");
-                                    return;
-                                }
-                                match crate::dispatch::gateway::semantic::index_tools(
-                                    &qdrant_url,
-                                    &tei_url,
-                                    qdrant_api_key.as_deref(),
-                                    tei_api_key.as_deref(),
-                                    &upstream_for_sem,
-                                    &[],
-                                )
-                                .await
-                                {
-                                    Ok(()) => {
-                                        tracing::info!(service = "scout", action = "semantic.sweep", upstream = %upstream_for_sem, "stale Qdrant entries purged for empty upstream")
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!(service = "scout", action = "semantic.sweep", upstream = %upstream_for_sem, error = %e, "stale-gen Qdrant sweep failed")
-                                    }
-                                }
-                            });
-                        }
-                    }
-                }
-                state_for_task.warming.store(false, Ordering::Relaxed);
-            });
-            if let Ok(mut guard) = state.in_flight.lock() {
-                *guard = Some(handle.abort_handle());
-            }
-        }
-    }
-
-    /// Refresh per-upstream tool-search indexes on the search hot path.
-    ///
-    /// TTL-gated on `TOOL_SEARCH_REPROBE_TTL`: if the last attempted reprobe
-    /// is younger than the TTL, skip the live probe and keep the cached
-    /// index. Remaining stale upstreams are reprobed concurrently.
-    async fn refresh_tool_search_indexes_if_stale(
-        &self,
-        wait_for_refresh: bool,
-        owner: Option<&UpstreamRuntimeOwner>,
-        oauth_subject: Option<&str>,
-    ) -> Vec<ToolSearchReprobeFailure> {
-        let cfg = self.config.read().await.clone();
-        if !cfg.tool_search.enabled {
-            return Vec::new();
-        }
-        let Some(pool) = self.current_pool().await else {
-            tracing::warn!(
-                surface = "dispatch",
-                service = "gateway",
-                action = "tool_search.reprobe",
-                event = "skipped",
-                operation = "health",
-                kind = "upstream_pool_empty",
-                "gateway tool index reprobe skipped without pool"
-            );
-            return Vec::new();
-        };
-
-        let now = Instant::now();
-        let max_tools = cfg.tool_search.max_tools;
-        let owner = owner.cloned();
-        let oauth_subject = oauth_subject.map(ToOwned::to_owned);
-        let semantic_urls = match (
-            cfg.tool_search.resolved_qdrant_url(),
-            cfg.tool_search.resolved_tei_url(),
-        ) {
-            (Some(qdrant_url), Some(tei_url)) => Some((
-                qdrant_url,
-                tei_url,
-                cfg.tool_search.resolved_qdrant_api_key(),
-                cfg.tool_search.resolved_tei_api_key(),
-            )),
-            _ => None,
-        };
-        let mut pending = Vec::new();
-        for upstream in cfg.upstream {
-            if !upstream.enabled {
-                tracing::debug!(
-                    surface = "dispatch",
-                    service = "gateway",
-                    action = "tool_search.reprobe",
-                    event = "skipped",
-                    operation = "health",
-                    upstream = %upstream.name,
-                    reason = "disabled",
-                    "gateway tool index reprobe skipped"
-                );
-                continue;
-            }
-            let state = self
-                .tool_indexes
-                .entry(upstream.name.clone())
-                .or_default()
-                .clone();
-            let has_tools = state
-                .index
-                .load_full()
-                .as_ref()
-                .is_some_and(|idx| !idx.tools.is_empty());
-            let fresh = state
-                .last_reprobe_attempt_at
-                .lock()
-                .ok()
-                .and_then(|guard| *guard)
-                .is_some_and(|t| now.duration_since(t) < TOOL_SEARCH_REPROBE_TTL);
-            // Only skip when the index already has tools — always retry when empty so
-            // a post-restart/reload cold index does not stay cold indefinitely.
-            if fresh && has_tools {
-                tracing::debug!(
-                    surface = "dispatch",
-                    service = "gateway",
-                    action = "tool_search.reprobe",
-                    event = "skipped",
-                    operation = "health",
-                    upstream = %upstream.name,
-                    reason = "fresh",
-                    "gateway tool index reprobe skipped"
-                );
-                continue;
-            }
-            if state.warming.swap(true, Ordering::Relaxed) {
-                tracing::debug!(
-                    surface = "dispatch",
-                    service = "gateway",
-                    action = "tool_search.reprobe",
-                    event = "skipped",
-                    operation = "health",
-                    upstream = %upstream.name,
-                    reason = "already_warming",
-                    "gateway tool index reprobe skipped"
-                );
-                continue;
-            }
-            if let Ok(mut guard) = state.last_reprobe_attempt_at.lock() {
-                *guard = Some(now);
-            }
-            tracing::info!(
-                surface = "dispatch",
-                service = "gateway",
-                action = "tool_search.reprobe",
-                event = "scheduled",
-                operation = "health",
-                upstream = %upstream.name,
-                "gateway tool index reprobe scheduled"
-            );
-            pending.push((upstream, state));
-        }
-
-        let tasks = pending.into_iter().map(move |(upstream, state)| {
-            let pool = Arc::clone(&pool);
-            let semantic_urls = semantic_urls.clone();
-            let owner = owner.clone();
-            let oauth_subject = oauth_subject.clone();
-            async move {
-                let reprobe_started = Instant::now();
-                tracing::debug!(
-                    surface = "dispatch",
-                    service = "gateway",
-                    action = "tool_search.reprobe",
-                    event = "start",
-                    operation = "health",
-                    upstream = %upstream.name,
-                    "gateway tool index reprobe start"
-                );
-                let subject = upstream.oauth.as_ref().and(oauth_subject.as_deref());
-                if let Err(err) = pool
-                    .ensure_tools_for_upstream(&upstream, subject, owner.as_ref())
-                    .await
-                {
-                    let message = err.to_string();
-                    tracing::warn!(
-                        surface = "dispatch",
-                        service = "gateway",
-                        action = "tool_search.reprobe",
-                        event = "error",
-                        operation = "health",
-                        elapsed_ms = reprobe_started.elapsed().as_millis(),
-                        kind = "upstream_reprobe_failed",
-                        error = %message,
-                        upstream = %upstream.name,
-                        "gateway tool index reprobe failed"
-                    );
-                    state.warming.store(false, Ordering::Relaxed);
-                    return Some(ToolSearchReprobeFailure {
-                        upstream: upstream.name,
-                        message,
-                    });
-                }
-                let healthy_tools = pool.healthy_tools_for_upstream(&upstream.name).await;
-                let upstream_clone = upstream.clone();
-                let built = tokio::task::spawn_blocking(move || {
-                    ToolIndex::build_from_tools(&upstream_clone, healthy_tools, max_tools)
-                })
-                .await;
-                if let Ok(index) = built {
-                    let should_publish = state.index.load_full().as_ref().is_none_or(|current| {
-                        current.metadata.catalog_hash != index.metadata.catalog_hash
-                    });
-                    if index.metadata.truncated {
-                        tracing::warn!(
-                            surface = "dispatch",
-                            service = "gateway",
-                            action = "tool_search.reprobe",
-                            upstream = %upstream.name,
-                            total_discovered = index.metadata.total_discovered,
-                            indexed_count = index.metadata.indexed_count,
-                            max_tools,
-                            "gateway tool index truncated — increase [tool_search] max_tools to index all tools"
-                        );
-                    }
-                    if should_publish
-                        && let Some((qdrant_url, tei_url, qdrant_api_key, tei_api_key)) =
-                            semantic_urls.clone()
-                    {
-                        let tools_to_index: Vec<_> = index
-                            .tools
-                            .iter()
-                            .filter(|tool| tool.priority > 0.0)
-                            .cloned()
-                            .collect();
-                        let upstream_for_sem = upstream.name.clone();
-                        tokio::spawn(async move {
-                            if let Err(e) =
-                                crate::dispatch::gateway::semantic::ensure_tools_collection(
-                                    &qdrant_url,
-                                    qdrant_api_key.as_deref(),
-                                )
-                                .await
-                            {
-                                tracing::warn!(service = "tool_search", action = "semantic.ensure_collection", error = %e, "semantic index: collection init failed");
-                                return;
-                            }
-                            match crate::dispatch::gateway::semantic::index_tools(
-                                &qdrant_url,
-                                &tei_url,
-                                qdrant_api_key.as_deref(),
-                                tei_api_key.as_deref(),
-                                &upstream_for_sem,
-                                &tools_to_index,
-                            )
-                            .await
-                            {
-                                Ok(()) => {
-                                    tracing::info!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, count = tools_to_index.len(), "semantic tool index updated")
-                                }
-                                Err(e) => {
-                                    tracing::warn!(service = "tool_search", action = "semantic.index", upstream = %upstream_for_sem, error = %e, "semantic index failed — lexical search unaffected")
-                                }
-                            }
-                        });
-                    }
-                    if should_publish {
-                        state.index.store(Some(Arc::new(index)));
-                    }
-                    tracing::info!(
-                        surface = "dispatch",
-                        service = "gateway",
-                        action = "tool_search.reprobe",
-                        event = "finish",
-                        operation = "health",
-                        elapsed_ms = reprobe_started.elapsed().as_millis(),
-                        upstream = %upstream.name,
-                        published = should_publish,
-                        "gateway tool index reprobe finish"
-                    );
-                } else {
-                    let message = match built {
-                        Err(err) => err.to_string(),
-                        Ok(_) => "tool index build failed".to_string(),
-                    };
-                    tracing::warn!(
-                        surface = "dispatch",
-                        service = "gateway",
-                        action = "tool_search.reprobe",
-                        event = "error",
-                        operation = "health",
-                        elapsed_ms = reprobe_started.elapsed().as_millis(),
-                        kind = "tool_index_build_join_error",
-                        error = %message,
-                        upstream = %upstream.name,
-                        "gateway tool index reprobe build failed"
-                    );
-                    state.warming.store(false, Ordering::Relaxed);
-                    return Some(ToolSearchReprobeFailure {
-                        upstream: upstream.name,
-                        message,
-                    });
-                }
-                state.warming.store(false, Ordering::Relaxed);
-                None
-            }
-        });
-
-        let concurrency = upstream_discovery_concurrency();
-        if wait_for_refresh {
-            futures::stream::iter(tasks)
-                .buffer_unordered(concurrency)
-                .collect::<Vec<_>>()
-                .await
-                .into_iter()
-                .flatten()
-                .collect()
-        } else {
-            tokio::spawn(async move {
-                futures::stream::iter(tasks)
-                    .buffer_unordered(concurrency)
-                    .collect::<Vec<_>>()
-                    .await;
-            });
-            Vec::new()
-        }
     }
 
     #[cfg(test)]
@@ -3966,45 +3099,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tool_search_empty_index_always_retries_regardless_of_ttl() {
-        // Empty indexes bypass the TTL so a post-restart cold index does not
-        // stay cold indefinitely.
-        let upstream = fixture_http_upstream("downstream");
-        let (manager, _pool) = tool_search_manager_with_pool(upstream).await;
-
-        let _first_err = manager
-            .search_tools("missing tool", 5, false, None, None)
-            .await
-            .expect_err("cold failed reprobe returns an actionable error");
-        let state = manager
-            .tool_indexes
-            .get("downstream")
-            .expect("tool index state")
-            .clone();
-        let first_attempt = *state
-            .last_reprobe_attempt_at
-            .lock()
-            .expect("attempt timestamp lock");
-        assert!(first_attempt.is_some(), "failed reprobe records attempt");
-
-        let _second_err = manager
-            .search_tools("missing tool", 5, false, None, None)
-            .await
-            .expect_err("empty failed index retries on every call");
-        let second_attempt = *state
-            .last_reprobe_attempt_at
-            .lock()
-            .expect("attempt timestamp lock");
-
-        // With an empty index the TTL is bypassed — the second attempt stamp
-        // is updated (≥ first) rather than staying equal.
-        assert!(
-            second_attempt >= first_attempt,
-            "empty-index reprobe must update the attempt timestamp on each search"
-        );
-    }
-
-    #[tokio::test]
     async fn search_tools_seeds_cold_lazy_runtime_before_searching() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("config.toml");
@@ -4062,64 +3156,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_tool_execute_hides_priority_zero_upstreams() {
-        let mut upstream = fixture_http_upstream("suppressed");
-        upstream.priority = 0.0;
-        let (manager, pool) = tool_search_manager_with_pool(upstream).await;
-        pool.insert_entry_for_tests(
-            "suppressed",
-            healthy_entry_with_tool("suppressed", "secret-tool"),
-        )
-        .await;
-
-        let err = manager
-            .resolve_tool_execute_with_upstream("secret-tool", None, None, None)
-            .await
-            .expect_err("priority=0 upstream tools must not be invokable by known name");
-
-        match err {
-            ToolError::Sdk { sdk_kind, .. } => assert_eq!(sdk_kind, "unknown_tool"),
-            other => panic!("expected unknown_tool sdk error, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn resolve_tool_execute_explicit_priority_zero_does_not_warm_upstream() {
-        let mut upstream = fixture_http_upstream("suppressed");
-        upstream.priority = 0.0;
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("config.toml");
-        let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
-        manager
-            .seed_config(LabConfig {
-                tool_search: ToolSearchConfig {
-                    enabled: true,
-                    ..ToolSearchConfig::default()
-                },
-                upstream: vec![upstream],
-                ..LabConfig::default()
-            })
-            .await;
-        let err = manager
-            .resolve_tool_execute_with_upstream("secret-tool", Some("suppressed"), None, None)
-            .await
-            .expect_err("priority=0 upstream must not be warmed or invoked explicitly");
-
-        match err {
-            ToolError::Sdk { sdk_kind, .. } => assert_eq!(sdk_kind, "unknown_tool"),
-            other => panic!("expected unknown_tool sdk error, got {other:?}"),
-        }
-        if let Some(pool) = manager.current_pool().await {
-            assert!(
-                pool.healthy_tools_for_upstream("suppressed")
-                    .await
-                    .is_empty(),
-                "priority=0 explicit invoke must not warm suppressed upstream tools"
-            );
-        }
-    }
-
-    #[tokio::test]
     async fn resolve_code_mode_upstream_tool_hides_priority_zero_upstreams() {
         let mut upstream = fixture_http_upstream("suppressed");
         upstream.priority = 0.0;
@@ -4139,98 +3175,6 @@ mod tests {
             ToolError::Sdk { sdk_kind, .. } => assert_eq!(sdk_kind, "unknown_tool"),
             other => panic!("expected unknown_tool sdk error, got {other:?}"),
         }
-    }
-
-    #[tokio::test]
-    async fn resolve_tool_execute_accepts_qualified_upstream_tool_names() {
-        let (manager, pool) = tool_search_manager_with_upstreams(vec![
-            fixture_http_upstream("agent-os_windows-mcp"),
-            fixture_http_upstream("steamy-windows-mcp"),
-        ])
-        .await;
-        pool.insert_entry_for_tests(
-            "agent-os_windows-mcp",
-            healthy_entry_with_tool("agent-os_windows-mcp", "PowerShell"),
-        )
-        .await;
-        pool.insert_entry_for_tests(
-            "steamy-windows-mcp",
-            healthy_entry_with_tool("steamy-windows-mcp", "PowerShell"),
-        )
-        .await;
-
-        let ambiguous = manager
-            .resolve_tool_execute_with_upstream("PowerShell", None, None, None)
-            .await
-            .expect_err("bare duplicate tool name should stay ambiguous");
-        match ambiguous {
-            ToolError::AmbiguousTool { valid, .. } => {
-                assert!(valid.contains(&"agent-os_windows-mcp::PowerShell".to_string()));
-                assert!(valid.contains(&"steamy-windows-mcp::PowerShell".to_string()));
-            }
-            other => panic!("expected ambiguous_tool, got {other:?}"),
-        }
-
-        let (upstream, tool) = manager
-            .resolve_tool_execute_with_upstream("steamy-windows-mcp::PowerShell", None, None, None)
-            .await
-            .expect("qualified selector should route to one upstream");
-
-        assert_eq!(upstream, "steamy-windows-mcp");
-        assert_eq!(tool.tool.name.as_ref(), "PowerShell");
-    }
-
-    #[tokio::test]
-    async fn resolve_tool_execute_accepts_explicit_upstream_param() {
-        let (manager, pool) = tool_search_manager_with_upstreams(vec![
-            fixture_http_upstream("agent-os_windows-mcp"),
-            fixture_http_upstream("steamy-windows-mcp"),
-        ])
-        .await;
-        pool.insert_entry_for_tests(
-            "agent-os_windows-mcp",
-            healthy_entry_with_tool("agent-os_windows-mcp", "PowerShell"),
-        )
-        .await;
-        pool.insert_entry_for_tests(
-            "steamy-windows-mcp",
-            healthy_entry_with_tool("steamy-windows-mcp", "PowerShell"),
-        )
-        .await;
-
-        let (upstream, tool) = manager
-            .resolve_tool_execute_with_upstream(
-                "PowerShell",
-                Some("agent-os_windows-mcp"),
-                None,
-                None,
-            )
-            .await
-            .expect("explicit upstream should disambiguate duplicate tool names");
-
-        assert_eq!(upstream, "agent-os_windows-mcp");
-        assert_eq!(tool.tool.name.as_ref(), "PowerShell");
-    }
-
-    #[tokio::test]
-    async fn resolve_tool_execute_with_upstream_resolves_requested_upstream() {
-        let (manager, pool) = tool_search_manager_with_upstreams(vec![
-            fixture_http_upstream("alpha"),
-            fixture_http_upstream("beta"),
-        ])
-        .await;
-        pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
-            .await;
-
-        let (upstream, tool) = manager
-            .resolve_tool_execute_with_upstream("ping", Some("alpha"), None, None)
-            .await
-            .expect("explicit upstream should resolve requested upstream");
-
-        assert_eq!(upstream, "alpha");
-        assert_eq!(tool.tool.name.as_ref(), "ping");
-        assert_eq!(pool.healthy_tools_for_upstream("alpha").await.len(), 1);
-        assert!(pool.healthy_tools_for_upstream("beta").await.is_empty());
     }
 
     #[tokio::test]
@@ -4316,56 +3260,6 @@ mod tests {
 
         assert_eq!(upstream, "beta");
         assert_eq!(tool.tool.name.as_ref(), "ping");
-    }
-
-    #[tokio::test]
-    async fn tool_search_returns_cached_results_while_stale_refresh_runs() {
-        let upstream = fixture_http_upstream("cached-upstream");
-        let (manager, _pool) = tool_search_manager_with_pool(upstream.clone()).await;
-        let schema = Arc::new(serde_json::Map::new());
-        let upstream_name: Arc<str> = Arc::from(upstream.name.as_str());
-        let tool = rmcp::model::Tool::new(
-            "cached_lookup",
-            "Cached marker search tool",
-            Arc::clone(&schema),
-        );
-        let index = ToolIndex::build_from_tools(
-            &upstream,
-            vec![UpstreamTool {
-                tool,
-                input_schema: None,
-                upstream_name,
-                destructive: false,
-            }],
-            10,
-        );
-        let state = manager
-            .tool_indexes
-            .entry(upstream.name.clone())
-            .or_default()
-            .clone();
-        state.index.store(Some(Arc::new(index)));
-
-        let results = tokio::time::timeout(
-            Duration::from_millis(100),
-            manager.search_tools("cached marker", 5, false, None, None),
-        )
-        .await
-        .expect("cached search must not wait for live stale refresh")
-        .expect("cached search succeeds");
-
-        assert!(
-            results.iter().any(|result| result.name == "cached_lookup"),
-            "cached index result should be returned"
-        );
-        assert!(
-            state
-                .last_reprobe_attempt_at
-                .lock()
-                .expect("attempt timestamp lock")
-                .is_some(),
-            "stale refresh should still be scheduled in the background"
-        );
     }
 
     fn fixture_protected_route(name: &str) -> ProtectedMcpRouteConfig {
@@ -5696,42 +4590,6 @@ mod tests {
         assert_eq!(view.exposed_prompt_count, 4);
     }
 
-    // ── gateway_code_mode_enabled delegation regression (#2) ─────────────────
-
-    #[tokio::test]
-    async fn code_mode_enabled_reads_code_mode_config_not_tool_search() {
-        use crate::config::CodeModeConfig;
-
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("config.toml");
-        let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
-
-        manager
-            .seed_config(LabConfig {
-                code_mode: CodeModeConfig {
-                    enabled: true,
-                    ..CodeModeConfig::default()
-                },
-                tool_search: ToolSearchConfig {
-                    enabled: false,
-                    ..ToolSearchConfig::default()
-                },
-                ..LabConfig::default()
-            })
-            .await;
-
-        // PRESENCE: code_mode_enabled() reflects code_mode.enabled = true
-        assert!(
-            manager.code_mode_enabled().await,
-            "code_mode_enabled() must return true when code_mode.enabled = true"
-        );
-        // ABSENCE: does NOT read from tool_search.enabled
-        assert!(
-            !manager.tool_search_enabled().await,
-            "tool_search_enabled() must return false when tool_search.enabled = false"
-        );
-    }
-
     #[tokio::test]
     async fn tool_search_enabled_reads_tool_search_config_not_code_mode() {
         use crate::config::CodeModeConfig;
@@ -5759,11 +4617,6 @@ mod tests {
             manager.tool_search_enabled().await,
             "tool_search_enabled() must return true when tool_search.enabled = true"
         );
-        // ABSENCE: does NOT read from code_mode.enabled
-        assert!(
-            !manager.code_mode_enabled().await,
-            "code_mode_enabled() must return false when code_mode.enabled = false"
-        );
     }
 
     #[test]
@@ -5776,11 +4629,8 @@ mod tests {
             "before_tool_count",
             "after_tool_count",
             "event = \"old_pool.drain.start\"",
-            "action = \"tool_search.rebuild\"",
-            "action = \"tool_search.reprobe\"",
             "event = \"pool.seed.start\"",
             "operation = \"lazy_runtime_seed\"",
-            "kind = \"upstream_reprobe_failed\"",
         ] {
             assert!(
                 source.contains(expected),
