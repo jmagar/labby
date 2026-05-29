@@ -1,0 +1,7 @@
+# Pin pnpm to match CI (.github/actions/build-gateway-admin uses pnpm 9) and the
+# committed apps/gateway-admin/pnpm-lock.yaml (pnpm-9 lockfile format).
+# Without this, a globally-newer pnpm (e.g. 11.x) rewrites the lockfile and
+# trips `pnpm install --frozen-lockfile` in CI, and pnpm 10+ also hard-errors on
+# unapproved esbuild/sharp build scripts during local `just dev`.
+[tools]
+pnpm = "9.15.9"

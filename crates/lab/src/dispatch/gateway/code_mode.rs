@@ -1165,7 +1165,7 @@ fn evaluate_code_search(code: &str, catalog: &[CodeModeCatalogEntry]) -> Result<
 
     for _ in 0..CODE_MODE_LOOP_ITERATION_LIMIT {
         context.run_jobs().map_err(|err| ToolError::Sdk {
-            sdk_kind: "code_execution_failed".to_string(),
+            sdk_kind: "server_error".to_string(),
             message: err.to_string(),
         })?;
         match promise.state() {
@@ -1173,17 +1173,17 @@ fn evaluate_code_search(code: &str, catalog: &[CodeModeCatalogEntry]) -> Result<
                 return value
                     .to_json(&mut context)
                     .map_err(|err| ToolError::Sdk {
-                        sdk_kind: "code_execution_failed".to_string(),
+                        sdk_kind: "server_error".to_string(),
                         message: format!("failed to serialize Code Mode search result: {err}"),
                     })?
                     .ok_or_else(|| ToolError::Sdk {
-                        sdk_kind: "code_execution_failed".to_string(),
+                        sdk_kind: "server_error".to_string(),
                         message: "Code Mode search result is not JSON-serializable".to_string(),
                     });
             }
             PromiseState::Rejected(reason) => {
                 return Err(ToolError::Sdk {
-                    sdk_kind: "code_execution_failed".to_string(),
+                    sdk_kind: "server_error".to_string(),
                     message: js_value_message(&reason, &mut context),
                 });
             }
@@ -1192,7 +1192,7 @@ fn evaluate_code_search(code: &str, catalog: &[CodeModeCatalogEntry]) -> Result<
     }
 
     Err(ToolError::Sdk {
-        sdk_kind: "code_execution_failed".to_string(),
+        sdk_kind: "server_error".to_string(),
         message: "Code Mode search script did not settle before the iteration limit".to_string(),
     })
 }
@@ -2009,7 +2009,7 @@ mod tests {
         let err = super::evaluate_code_search("42", &[]).expect_err("non-function must error");
         match err {
             super::ToolError::Sdk { sdk_kind, .. } => {
-                assert_eq!(sdk_kind, "code_execution_failed");
+                assert_eq!(sdk_kind, "server_error");
             }
             other => panic!("unexpected error: {other:?}"),
         }
