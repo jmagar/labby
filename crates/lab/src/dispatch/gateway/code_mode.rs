@@ -818,12 +818,16 @@ impl<'a> CodeModeBroker<'a> {
                             };
                             // The ToolError settles this seq's promise in-sandbox; do NOT
                             // also send a ToolResult for the same seq.
+                            // Use user_message() (the human text), NOT to_string()
+                            // (which emits the full JSON envelope) — otherwise the
+                            // runner re-wraps it and the in-sandbox rejection message
+                            // becomes double-JSON-encoded.
                             write_runner_input(
                                 &mut stdin,
                                 &CodeModeRunnerInput::ToolError {
                                     seq,
                                     kind: kind.clone(),
-                                    message: err.to_string(),
+                                    message: err.user_message().to_string(),
                                 },
                             )
                             .await?;
