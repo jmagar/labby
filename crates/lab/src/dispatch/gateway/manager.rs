@@ -2328,10 +2328,17 @@ impl GatewayManager {
         oauth_subject: Option<&str>,
     ) -> Result<UpstreamTool, ToolError> {
         let cfg = self.config.read().await;
-        if !cfg.code_mode.enabled {
+        // The gateway search/execute surface is enabled by EITHER flag:
+        // `tool_search.enabled` (the canonical toggle that also exposes the tools)
+        // or the legacy `code_mode.enabled` (exclusive-mode CLI path). `execute` is
+        // only reachable when the surface is exposed, so reject only when both are
+        // off. This is the single-surface (Cloudflare-parity) model: when search +
+        // execute are on, callTool resolution works.
+        if !cfg.tool_search.enabled && !cfg.code_mode.enabled {
             return Err(ToolError::Sdk {
                 sdk_kind: "unknown_tool".to_string(),
-                message: "code_mode is not enabled; set [code_mode] enabled = true in config"
+                message: "the gateway search/execute surface is not enabled; \
+                    set [tool_search] enabled = true in config"
                     .to_string(),
             });
         }
@@ -3205,6 +3212,43 @@ mod tests {
             .resolve_code_mode_upstream_tool("alpha", "ping", None, None)
             .await
             .expect("code mode should resolve requested upstream");
+
+        assert_eq!(tool.tool.name.as_ref(), "ping");
+    }
+
+    // Regression: the Cloudflare-parity surface exposes search+execute under
+    // `tool_search.enabled` (RootSynthetic). `execute`'s callTool must resolve
+    // upstream tools when `tool_search.enabled` is the active flag — WITHOUT
+    // requiring the separate `code_mode.enabled`. A prior merge gated resolution
+    // on `code_mode.enabled` only, so execute could never call a tool when the
+    // surface was exposed via tool_search (the only way it is exposed). The
+    // test suite did not cover this path, so it passed while the live server
+    // returned "code_mode is not enabled".
+    #[tokio::test]
+    async fn resolve_upstream_tool_works_with_tool_search_enabled_and_code_mode_disabled() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        let runtime = GatewayRuntimeHandle::default();
+        let pool = Arc::new(UpstreamPool::new());
+        runtime.swap(Some(Arc::clone(&pool))).await;
+        let manager = GatewayManager::new(path, runtime);
+        manager
+            .seed_config(LabConfig {
+                tool_search: ToolSearchConfig {
+                    enabled: true,
+                    ..ToolSearchConfig::default()
+                },
+                upstream: vec![fixture_http_upstream("alpha")],
+                ..LabConfig::default()
+            })
+            .await;
+        pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
+            .await;
+
+        let tool = manager
+            .resolve_code_mode_upstream_tool("alpha", "ping", None, None)
+            .await
+            .expect("execute callTool must resolve when tool_search surface is enabled");
 
         assert_eq!(tool.tool.name.as_ref(), "ping");
     }
