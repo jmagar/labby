@@ -6,18 +6,18 @@ use std::process::ExitCode;
 use std::process::Stdio;
 use std::time::Duration;
 
-#[cfg(any(not(feature = "code_mode_wasm"), test))]
+// `search` runs a Boa in-process JS filter over the catalog in BOTH the Boa and
+// wasm execute builds, so these symbols are unconditional. Execute-only Boa
+// symbols stay gated behind `not(code_mode_wasm)`.
 use boa_engine::Context;
-#[cfg(not(feature = "code_mode_wasm"))]
+use boa_engine::JsValue;
 use boa_engine::Source;
-#[cfg(not(feature = "code_mode_wasm"))]
 use boa_engine::builtins::promise::PromiseState;
 #[cfg(not(feature = "code_mode_wasm"))]
 use boa_engine::builtins::promise::ResolvingFunctions;
-#[cfg(not(feature = "code_mode_wasm"))]
 use boa_engine::object::builtins::JsPromise;
 #[cfg(not(feature = "code_mode_wasm"))]
-use boa_engine::{JsArgs, JsError, JsNativeError, JsResult, JsValue, NativeFunction, js_string};
+use boa_engine::{JsArgs, JsError, JsNativeError, JsResult, NativeFunction, js_string};
 #[cfg(not(feature = "code_mode_wasm"))]
 use boa_gc::{Finalize, Trace};
 #[cfg(not(feature = "code_mode_wasm"))]
@@ -954,10 +954,8 @@ struct CodeModeRunnerState {
     pending_calls: HashMap<u64, ResolvingFunctions>,
 }
 
-#[cfg(any(not(feature = "code_mode_wasm"), test))]
 const CODE_MODE_LOOP_ITERATION_LIMIT: u64 = 1_000_000;
 const CODE_MODE_STACK_SIZE_LIMIT: usize = 16 * 1024;
-#[cfg(any(not(feature = "code_mode_wasm"), test))]
 const CODE_MODE_RECURSION_LIMIT: usize = 256;
 
 /// Backstop applied in the runner itself to prevent OOM before the parent's
@@ -1135,7 +1133,6 @@ fn serialized_catalog_size_with_sentinel(
 /// Run the caller's JavaScript search function against the inline catalog using
 /// Boa, in-process. The script is wrapped so that `const tools = [...]` is in
 /// scope and the caller's arrow function is invoked and awaited.
-#[cfg(not(feature = "code_mode_wasm"))]
 fn evaluate_code_search(code: &str, catalog: &[CodeModeCatalogEntry]) -> Result<Value, ToolError> {
     let catalog_json = serde_json::to_string(catalog).map_err(|err| ToolError::Sdk {
         sdk_kind: "internal_error".to_string(),
@@ -1200,18 +1197,6 @@ fn evaluate_code_search(code: &str, catalog: &[CodeModeCatalogEntry]) -> Result<
     Err(ToolError::Sdk {
         sdk_kind: "code_execution_failed".to_string(),
         message: "Code Mode search script did not settle before the iteration limit".to_string(),
-    })
-}
-
-/// WASM builds do not bundle the Boa engine; `search` is unavailable there.
-#[cfg(feature = "code_mode_wasm")]
-fn evaluate_code_search(
-    _code: &str,
-    _catalog: &[CodeModeCatalogEntry],
-) -> Result<Value, ToolError> {
-    Err(ToolError::Sdk {
-        sdk_kind: "internal_error".to_string(),
-        message: "code search is not available in the wasm Code Mode build".to_string(),
     })
 }
 
@@ -1742,7 +1727,6 @@ fn javy_error_message(error: javy::quickjs::Error) -> String {
     error.to_string()
 }
 
-#[cfg(any(not(feature = "code_mode_wasm"), test))]
 fn configure_code_mode_runtime_limits(context: &mut Context) {
     let limits = context.runtime_limits_mut();
     limits.set_loop_iteration_limit(CODE_MODE_LOOP_ITERATION_LIMIT);
@@ -1897,7 +1881,6 @@ fn js_error_message(error: JsError) -> String {
     error.to_string()
 }
 
-#[cfg(not(feature = "code_mode_wasm"))]
 fn js_value_message(value: &JsValue, context: &mut Context) -> String {
     value
         .to_string(context)
