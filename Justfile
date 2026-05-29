@@ -166,3 +166,55 @@ mcp-token:
 smoke-setup:
     rm -rf /tmp/lab-smoke-home
     LAB_HOME=/tmp/lab-smoke-home cargo run --all-features -- setup --no-browser --smoke
+
+# Diagnose the sccache build cache. Reports daemon health (systemd-owned),
+# binary-vs-daemon version skew, cache stats, distributed-build config, and the
+# tail of the error log. Run this FIRST when builds behave oddly (stale/wrong
+# artifacts) before reaching for a wipe. See docs/RUST.md §sccache troubleshooting.
+sccache-doctor:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    # MUST match the systemd unit's socket, or sccache spawns an unmanaged
+    # ephemeral server and reports misleading zero stats.
+    export SCCACHE_SERVER_UDS=/tmp/sccache-jmagar.sock
+    echo "── daemon (systemd --user) ─────────────────────────"
+    systemctl --user is-active sccache.service 2>/dev/null && \
+      systemctl --user show sccache.service -p MainPID -p ActiveEnterTimestamp -p NRestarts 2>/dev/null
+    echo "── version skew (binary vs running daemon) ─────────"
+    bin_ver=$(/home/jmagar/.local/sccache --version 2>/dev/null)
+    echo "binary:  $bin_ver"
+    echo "  (daemon is long-lived; if the mise-pinned binary changed, restart with 'just sccache-restart')"
+    echo "── distributed build config ────────────────────────"
+    if grep -qs '^\[dist\]' ~/.config/sccache/config; then
+      echo "DIST ENABLED — scheduler: $(grep -soE 'https?://[^\"]+' ~/.config/sccache/config | head -1)"
+      echo "  ⚠ remote builds can cache cross-machine artifacts; mismatched toolchains poison the cache."
+    else
+      echo "dist disabled (local-only) ✓"
+    fi
+    echo "── cache stats ─────────────────────────────────────"
+    /home/jmagar/.local/sccache --show-stats 2>/dev/null | grep -iE "compile requests|cache hits|cache misses|errors|cache location|cache size" || true
+    echo "── error log tail (real errors only) ───────────────"
+    log=/home/jmagar/.local/state/sccache/error.log
+    if [ -f "$log" ]; then
+      sz=$(du -h "$log" | cut -f1); echo "log: $log ($sz)"
+      grep -aE "ERROR|WARN|panic|corrupt|CacheReadError|CacheWriteError" "$log" 2>/dev/null | grep -avE "DEBUG|CannotCache" | tail -15 || echo "(no error/warn lines)"
+    else
+      echo "(no error log)"
+    fi
+
+# Cleanly restart the sccache daemon via systemd (NEVER use bare
+# 'sccache --start-server' — Restart=always means systemd owns it and a manual
+# start races the unit). Use after the mise-pinned sccache binary changes, or as
+# the FIRST recovery step for suspected cache poisoning (fixes daemon-state
+# causes without wiping on-disk artifacts). Only wipe the cache if this fails.
+sccache-restart:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export SCCACHE_SERVER_UDS=/tmp/sccache-jmagar.sock
+    echo "restarting sccache.service (systemd --user)…"
+    systemctl --user restart sccache.service
+    sleep 1
+    systemctl --user is-active sccache.service
+    /home/jmagar/.local/sccache --show-stats 2>/dev/null | grep -iE "compile requests|cache location" || true
+    echo "✓ restarted. If poisoning persists, wipe on-disk cache:"
+    echo "    systemctl --user stop sccache.service && rm -rf ~/.cache/sccache && systemctl --user start sccache.service"
