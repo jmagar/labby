@@ -132,8 +132,17 @@ pub fn generate_js_proxy(tools: &[UpstreamTool], upstreams: &[String]) -> String
 
     let mut parts = String::new();
 
-    // Emit per-upstream namespace objects.
+    // Accumulate method definitions keyed by the snake_cased UPSTREAM name so the
+    // namespace is reachable via dot notation (`codemode.arcane_mcp.tool(...)`),
+    // not just bracket access. Hyphenated upstreams (arcane-mcp, github-chat, …)
+    // would otherwise be unreachable as `codemode.arcane-mcp` (parses as
+    // subtraction). The `callTool` id keeps the RAW upstream name. Two raw
+    // upstreams that snake-collide merge into one namespace object (tools are not
+    // dropped); a per-tool snake collision is last-wins inside the object literal.
+    let mut by_snake_upstream: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (upstream_name, upstream_tools) in &by_upstream {
+        let upstream_snake = tool_name_to_snake(upstream_name);
+
         // Build snake_case → dotted name mapping, last registration wins on collision.
         let mut snake_to_dotted: BTreeMap<String, String> = BTreeMap::new();
         let mut sorted_tools = upstream_tools.to_vec();
@@ -151,12 +160,9 @@ pub fn generate_js_proxy(tools: &[UpstreamTool], upstreams: &[String]) -> String
             snake_to_dotted.insert(snake, tool.tool.name.to_string());
         }
 
-        // Serialize the upstream name safely.
-        let upstream_json =
-            serde_json::to_string(upstream_name).unwrap_or_else(|_| "\"unknown\"".to_string());
-
-        let mut method_defs = Vec::new();
+        let method_defs = by_snake_upstream.entry(upstream_snake).or_default();
         for (snake, dotted) in &snake_to_dotted {
+            // callTool id uses the RAW upstream + RAW tool name.
             let tool_id = format!("upstream::{upstream_name}::{dotted}");
             let tool_id_json =
                 serde_json::to_string(&tool_id).unwrap_or_else(|_| "\"unknown\"".to_string());
@@ -171,9 +177,16 @@ pub fn generate_js_proxy(tools: &[UpstreamTool], upstreams: &[String]) -> String
                 "    {snake_json}: function(p) {{ return callTool({tool_id_json}, p == null ? {{}} : p); }}"
             ));
         }
+    }
 
+    for (upstream_snake, method_defs) in &by_snake_upstream {
+        let upstream_snake_json =
+            serde_json::to_string(upstream_snake).unwrap_or_else(|_| "\"unknown\"".to_string());
         let methods = method_defs.join(",\n");
-        let _ = write!(parts, "codemode[{upstream_json}] = {{\n{methods}\n}};\n");
+        let _ = write!(
+            parts,
+            "codemode[{upstream_snake_json}] = {{\n{methods}\n}};\n"
+        );
     }
 
     // Emit __meta__.upstreams value.
@@ -302,5 +315,37 @@ mod tests {
         );
         // ABSENCE: must not use nullish-coalescing (engine-portability)
         assert!(!js.contains("?? {}"), "must not depend on ?? operator");
+    }
+
+    #[test]
+    fn generate_js_proxy_snake_cases_hyphenated_upstream_keys() {
+        // Hyphenated upstreams (arcane-mcp, github-chat, …) must be reachable via
+        // dot notation `codemode.arcane_mcp.tool(...)`, not just bracket access —
+        // `codemode.arcane-mcp` parses as subtraction. The callTool id must keep
+        // the RAW upstream name so the gateway routes to the real server.
+        let schema = Arc::new(serde_json::Map::new());
+        let tool = UpstreamTool {
+            upstream_name: Arc::from("arcane-mcp"),
+            tool: Tool::new("arcane", "Docker management", Arc::clone(&schema)),
+            destructive: false,
+            input_schema: None,
+        };
+        let js = generate_js_proxy(&[tool], &["arcane-mcp".to_string()]);
+
+        // PRESENCE: namespace key is snake_cased (dot-accessible)
+        assert!(
+            js.contains("codemode[\"arcane_mcp\"]"),
+            "hyphenated upstream key must be snake_cased: {js}"
+        );
+        // ABSENCE: the raw hyphenated key must NOT be the namespace key
+        assert!(
+            !js.contains("codemode[\"arcane-mcp\"]"),
+            "raw hyphenated key would only be bracket-accessible"
+        );
+        // PRESENCE: callTool id keeps the RAW upstream name (routing correctness)
+        assert!(
+            js.contains("upstream::arcane-mcp::arcane"),
+            "callTool id must keep the raw upstream name: {js}"
+        );
     }
 }
