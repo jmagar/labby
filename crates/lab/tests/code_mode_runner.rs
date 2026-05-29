@@ -454,6 +454,73 @@ fn normalized_function_main_form_executes_end_to_end() {
     assert_single_call_round_trip(&normalized, json!({"pong": true}));
 }
 
+/// lab-12fm5: the runtime `codemode.*` proxy travels through the Start protocol
+/// and routes `codemode.demo.ping(...)` to `callTool("upstream::demo::ping", ...)`
+/// end-to-end. The proxy here is the exact shape `generate_js_proxy` emits.
+/// Non-vacuous: with no proxy, `codemode` is undefined and the code would throw.
+#[test]
+fn codemode_proxy_routes_through_call_tool() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+
+    // Minimal proxy mirroring generate_js_proxy's output shape (var codemode = {};
+    // codemode["demo"] = { ping: function(p) { return callTool(...); } };).
+    let proxy = "var codemode = {};\n\
+        codemode[\"demo\"] = {\n\
+          \"ping\": function(p) { return callTool(\"upstream::demo::ping\", p == null ? {} : p); }\n\
+        };\n";
+    // Guard the in-sandbox `codemode` type, then route through the proxy.
+    let code = "async () => { \
+        if (typeof codemode !== \"object\") { throw new Error(\"codemode not object\"); } \
+        return await codemode.demo.ping({x: 1}); \
+    }";
+
+    writeln!(
+        stdin,
+        "{}",
+        json!({"type": "start", "code": code, "proxy": proxy})
+    )
+    .expect("write start");
+
+    // The proxy must have emitted a callTool to the dotted upstream id.
+    let call = read_protocol_line(&mut stdout);
+    assert_eq!(
+        call["type"], "tool_call",
+        "expected a tool_call, got: {call}"
+    );
+    assert_eq!(
+        call["id"], "upstream::demo::ping",
+        "proxy must route to the dotted upstream tool id"
+    );
+    assert_eq!(call["params"], json!({"x": 1}), "proxy must forward params");
+    let seq = call["seq"].as_u64().expect("seq");
+    writeln!(
+        stdin,
+        "{}",
+        json!({"type": "tool_result", "seq": seq, "result": {"pong": true}})
+    )
+    .expect("write tool result");
+
+    let done = read_protocol_line(&mut stdout);
+    assert_eq!(done["type"], "done", "expected done, got: {done}");
+    assert_eq!(
+        done["result"],
+        json!({"pong": true}),
+        "codemode.demo.ping must resolve to the tool result"
+    );
+    let status = child.wait().expect("wait for runner");
+    assert!(status.success(), "runner exited with {status}");
+}
+
 /// FIX 1 (bead lab-vkwfa): an `export default async function` form, after
 /// `normalize_user_code`, must execute end-to-end. Non-vacuous: the raw form
 /// would be an IIFE (a Promise, not a function) and fail the wrapper's typeof

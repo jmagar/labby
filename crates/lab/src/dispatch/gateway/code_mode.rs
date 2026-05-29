@@ -551,6 +551,36 @@ impl<'a> CodeModeBroker<'a> {
         Ok((entries, serialized_size, truncated))
     }
 
+    /// Build the runtime `codemode.*` proxy JS from the live upstream catalog.
+    ///
+    /// Resolves the catalog with the caller's owner/oauth subject exactly like
+    /// `search` does. Returns `None` when no gateway manager is wired or the
+    /// catalog fetch fails, so callers can fall back to an empty proxy.
+    async fn build_code_mode_proxy(
+        &self,
+        caller: &CodeModeCaller,
+        surface: CodeModeSurface,
+    ) -> Option<String> {
+        let manager = self.gateway_manager?;
+        let allow_cold_connect = caller.can_execute();
+        let owner = caller.runtime_owner(surface);
+        let oauth_subject = caller.oauth_subject();
+        let tools = manager
+            .code_mode_catalog_tools(allow_cold_connect, Some(&owner), oauth_subject)
+            .await
+            .ok()?;
+        if tools.is_empty() {
+            return None;
+        }
+        let mut upstreams: Vec<String> =
+            tools.iter().map(|t| t.upstream_name.to_string()).collect();
+        upstreams.sort();
+        upstreams.dedup();
+        Some(super::code_mode_preamble::generate_js_proxy(
+            &tools, &upstreams,
+        ))
+    }
+
     async fn execute_sandboxed(
         &self,
         code: &str,
@@ -641,9 +671,22 @@ impl<'a> CodeModeBroker<'a> {
             stderr_buf
         };
 
+        // Build the runtime `codemode.*` proxy from the live upstream catalog
+        // (same source `search` uses). On any failure, fall back to an empty
+        // proxy rather than aborting execute — `callTool` is always available as
+        // the documented escape hatch, so the run can still proceed without the
+        // typed namespace.
+        let proxy = self
+            .build_code_mode_proxy(&caller, surface)
+            .await
+            .unwrap_or_default();
+
         write_runner_input(
             &mut stdin,
-            &CodeModeRunnerInput::Start { code: code_to_run },
+            &CodeModeRunnerInput::Start {
+                code: code_to_run,
+                proxy,
+            },
         )
         .await?;
 
@@ -981,6 +1024,16 @@ impl<'a> CodeModeBroker<'a> {
 pub enum CodeModeRunnerInput {
     Start {
         code: String,
+        /// Auto-generated `var codemode = {...}` proxy JS (see
+        /// `code_mode_preamble::generate_js_proxy`). Injected into the sandbox
+        /// after `callTool` is defined so the user code can call
+        /// `codemode.<upstream>.<tool>(params)`.
+        ///
+        /// `#[serde(default)]` keeps the search path and older Start messages
+        /// (which carry only `code`) forward-compatible — they deserialize to
+        /// an empty proxy, leaving `codemode` undefined exactly as before.
+        #[serde(default)]
+        proxy: String,
     },
     ToolResult {
         seq: u64,
@@ -1558,7 +1611,7 @@ pub fn run_code_mode_runner_stdio() -> ExitCode {
 
 #[cfg(feature = "code_mode_wasm")]
 fn run_code_mode_runner() -> Result<(), String> {
-    let CodeModeRunnerInput::Start { code } = runner_read_input()? else {
+    let CodeModeRunnerInput::Start { code, proxy } = runner_read_input()? else {
         return Err("runner expected start message".to_string());
     };
 
@@ -1626,6 +1679,7 @@ globalThis.__labSettleToolCall = (message) => {{
   }}
   throw new Error("runner received unexpected protocol message");
 }};
+{proxy}
 globalThis.__labMainPromise = (async () => {{
 {invoker}}})();
 "#
@@ -1659,7 +1713,7 @@ globalThis.__labMainPromise = (async () => {{
 
 #[cfg(not(feature = "code_mode_wasm"))]
 fn run_code_mode_runner() -> Result<(), String> {
-    let CodeModeRunnerInput::Start { code } = runner_read_input()? else {
+    let CodeModeRunnerInput::Start { code, proxy } = runner_read_input()? else {
         return Err("runner expected start message".to_string());
     };
 
@@ -1686,7 +1740,12 @@ fn run_code_mode_runner() -> Result<(), String> {
     // the Javy path via `code_mode_main_invoker`. Interpolated as a named arg so
     // its literal JS braces are not re-scanned by `format!`.
     let invoker = code_mode_main_invoker(&code);
-    let wrapped = format!("(async () => {{\n{invoker}}})()");
+    // `callTool` is already registered as a native builtin above, so the proxy
+    // (which calls `callTool`) is simply prepended in front of the IIFE. The
+    // proxy ends with `var` declarations (no completion value), so the trailing
+    // IIFE remains the `eval` completion value (the awaited promise). An empty
+    // proxy (search path / legacy Start) leaves `codemode` undefined as before.
+    let wrapped = format!("{proxy}\n(async () => {{\n{invoker}}})()");
     let value = context
         .eval(Source::from_bytes(wrapped.as_bytes()))
         .map_err(js_error_message)?;
