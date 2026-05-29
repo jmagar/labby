@@ -51,11 +51,26 @@ const CODE_SEARCH_CATALOG_SOFT_CAP_BYTES: usize = 256 * 1024;
 const CODE_SEARCH_CATALOG_HARD_CAP_BYTES: usize = 512 * 1024;
 
 /// Normalize user-submitted code before sandbox execution.
-/// Mirrors the 3 transforms in Cloudflare's normalize.ts:
-/// 1. Strip markdown fences (```javascript/typescript/``` wrappers)
-/// 2. Wrap bare function declarations (async function main() → add main(); call)
-/// 3. Unwrap export default (export default async function → anonymous IIFE)
-fn normalize_user_code(code: &str) -> String {
+///
+/// The execute wrapper evaluates `code` as a FUNCTION EXPRESSION
+/// (`const __codeModeMain = ({code}); ... return await __codeModeMain();`), so
+/// every tolerated input shape must reduce to a *bare parenthesized function
+/// expression with no trailing invocation*. A self-invoking IIFE or a trailing
+/// `main();` call would break the wrapper (the grouping would contain a Promise
+/// or two statements). Transforms:
+/// 1. Strip markdown fences (```javascript/typescript/``` wrappers).
+/// 2. Bare `function main` / `async function main` declarations → parenthesize
+///    into an expression `(async function main() {...})` — NO trailing `main();`.
+/// 3. `export default [async] function` → strip `export default ` and
+///    parenthesize the function expression — NO trailing IIFE `()`.
+/// 4. A bare arrow `async () => {...}` passes through unchanged (it is already a
+///    function expression).
+///
+/// `evaluate_code_search` does NOT call this — search receives raw `code`.
+///
+/// Exposed (`pub`) so integration tests can normalize a body form and pipe the
+/// exact post-normalize string through the runner end to end.
+pub fn normalize_user_code(code: &str) -> String {
     // 1. Strip markdown fences
     let code = {
         let trimmed = code.trim();
@@ -72,20 +87,55 @@ fn normalize_user_code(code: &str) -> String {
         }
     };
 
-    // 2. Wrap bare async function main / function main
+    // 2. Parenthesize bare `async function main` / `function main` declarations
+    //    into a function EXPRESSION. The wrapper awaits it, so sync `function`
+    //    is fine without forcing `async`.
     if code.starts_with("async function main(") || code.starts_with("function main(") {
-        return format!("{code}\nmain();");
+        return format!("({})", code.trim_end_matches(';'));
     }
 
-    // 3. Unwrap export default async/sync function → anonymous IIFE
+    // 3. Strip `export default ` and parenthesize the remaining function
+    //    expression. No IIFE invocation — the wrapper invokes it.
     if let Some(inner) = code.strip_prefix("export default async function") {
-        return format!("(async function{})()", inner.trim_end_matches(';'));
+        return format!("(async function{})", inner.trim_end_matches(';'));
     }
     if let Some(inner) = code.strip_prefix("export default function") {
-        return format!("(function{})()", inner.trim_end_matches(';'));
+        return format!("(function{})", inner.trim_end_matches(';'));
     }
 
     code.to_string()
+}
+
+/// The single contract error message for the execute wrapper, shared by both
+/// runner engines (Javy and Boa) so it cannot diverge between them.
+const CODE_MODE_MAIN_SHAPE_ERROR: &str =
+    "code_execute code must evaluate to an async arrow function: async () => { ... }";
+
+/// Build the shared inner body of the execute wrapper for `code`.
+///
+/// Both runner engines invoke the result identically: assign the user code to
+/// `__codeModeMain`, verify it is a function (throwing the shared contract error
+/// otherwise), then `return await __codeModeMain();`. Built by concatenation
+/// (not a brace-laden `format!`) so the literal JS braces need no escaping and
+/// the snippet stays identical across engines.
+fn code_mode_main_invoker(code: &str) -> String {
+    let mut body = String::new();
+    body.push_str("  const __codeModeMain = (");
+    body.push_str(code);
+    body.push_str(");\n");
+    body.push_str("  if (typeof __codeModeMain !== \"function\") {\n");
+    body.push_str("    throw new TypeError(");
+    // Embed the shared message as a JSON string literal — valid JS and safely
+    // quoted regardless of its contents.
+    body.push_str(
+        &serde_json::to_string(CODE_MODE_MAIN_SHAPE_ERROR).unwrap_or_else(|_| {
+            "\"code_execute code must be an async arrow function\"".to_string()
+        }),
+    );
+    body.push_str(");\n");
+    body.push_str("  }\n");
+    body.push_str("  return await __codeModeMain();\n");
+    body
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1235,11 +1285,65 @@ fn truncate_execution_response(
     }
 
     // calls[] carries lightweight metadata only (no result payloads), so there
-    // is nothing per-call to truncate. Cap only the FINAL result against the
-    // envelope budget, replacing it with a truncation marker when oversized.
+    // is nothing per-call to truncate. Cap the FINAL result first — but only
+    // when doing so actually shrinks the envelope. The marker has a ~1 KB
+    // preview floor, so markering an already-small result (e.g. `{"ok":true}`)
+    // would *grow* it; in a logs-dominant response the result is innocent and
+    // must be left intact so log trimming can do the work.
     if let Some(result) = response.result.as_ref() {
+        let original_len = serde_json::to_string(result).map(|s| s.len()).unwrap_or(0);
         let marker = truncation_marker(result, token_estimate_divisor);
-        response.result = Some(marker);
+        let marker_len = serde_json::to_string(&marker).map(|s| s.len()).unwrap_or(0);
+        if marker_len < original_len {
+            response.result = Some(marker);
+        }
+    }
+
+    // The result marker has a fixed ~1 KB preview floor, so a logs-dominant
+    // response can still exceed budget after capping the result. Trim `logs`
+    // oldest-first until within budget, keeping the newest lines that fit and
+    // prepending a sentinel that records how many were dropped. Best-effort:
+    // `calls[]` metadata alone can dominate a high fan-out run and is not
+    // trimmed here, so the loop terminates on logs-exhaustion rather than
+    // guaranteeing budget (see report — residual is a follow-up).
+    if !response.logs.is_empty()
+        && !response_within_budget(
+            &response,
+            max_response_bytes,
+            max_response_tokens,
+            token_estimate_divisor,
+        )
+    {
+        let original_len = response.logs.len();
+        let mut dropped = 0usize;
+        // Drop oldest lines one at a time, replacing the dropped prefix with a
+        // single sentinel, until within budget or all original lines are gone.
+        // Terminates: each iteration removes one line; the sentinel is a short
+        // fixed string, so logs collapse to at most one entry.
+        loop {
+            let sentinel =
+                format!("[logs truncated to fit response budget — {dropped} line(s) dropped]");
+            let mut candidate = Vec::with_capacity(response.logs.len() + 1);
+            if dropped > 0 {
+                candidate.push(sentinel);
+            }
+            candidate.extend(response.logs.iter().cloned());
+            let mut trial = response.clone();
+            trial.logs = candidate;
+            if response_within_budget(
+                &trial,
+                max_response_bytes,
+                max_response_tokens,
+                token_estimate_divisor,
+            ) || response.logs.is_empty()
+            {
+                response.logs = trial.logs;
+                break;
+            }
+            response.logs.remove(0);
+            dropped += 1;
+        }
+        debug_assert!(dropped <= original_len);
     }
 
     response
@@ -1478,6 +1582,11 @@ fn run_code_mode_runner() -> Result<(), String> {
         })
         .map_err(javy_error_message)?;
 
+    // The execute wrapper body (assign → typeof check → invoke) is shared with
+    // the Boa path via `code_mode_main_invoker` so the contract cannot diverge.
+    // It is interpolated as a named arg (`{invoker}`) so its literal JS braces
+    // are substituted verbatim and need no `{{`/`}}` escaping.
+    let invoker = code_mode_main_invoker(&code);
     let wrapped = format!(
         r#"
 globalThis.__labPendingToolCalls = new Map();
@@ -1514,12 +1623,7 @@ globalThis.__labSettleToolCall = (message) => {{
   throw new Error("runner received unexpected protocol message");
 }};
 globalThis.__labMainPromise = (async () => {{
-  const __codeModeMain = ({code});
-  if (typeof __codeModeMain !== "function") {{
-    throw new TypeError("code_execute code must evaluate to an async arrow function: async () => {{ ... }}");
-  }}
-  return await __codeModeMain();
-}})();
+{invoker}}})();
 "#
     );
 
@@ -1574,15 +1678,11 @@ fn run_code_mode_runner() -> Result<(), String> {
         )
         .map_err(js_error_message)?;
 
-    let wrapped = format!(
-        "(async () => {{\n\
-           const __codeModeMain = ({code});\n\
-           if (typeof __codeModeMain !== 'function') {{\n\
-             throw new TypeError('code_execute code must evaluate to an async arrow function: async () => {{ ... }}');\n\
-           }}\n\
-           return await __codeModeMain();\n\
-         }})()"
-    );
+    // Shared execute wrapper body (assign → typeof check → invoke), identical to
+    // the Javy path via `code_mode_main_invoker`. Interpolated as a named arg so
+    // its literal JS braces are not re-scanned by `format!`.
+    let invoker = code_mode_main_invoker(&code);
+    let wrapped = format!("(async () => {{\n{invoker}}})()");
     let value = context
         .eval(Source::from_bytes(wrapped.as_bytes()))
         .map_err(js_error_message)?;
@@ -2230,6 +2330,80 @@ mod tests {
     }
 
     #[test]
+    fn truncates_oversized_logs_after_result() {
+        // Logs-dominant response: small result, small calls[], but many large log
+        // lines push the envelope over budget. After capping the (small) result,
+        // logs must be trimmed until within budget, leaving a sentinel.
+        let response = CodeModeExecutionResponse {
+            result: Some(json!({"ok": true})),
+            calls: vec![CodeModeExecutedCall {
+                id: "upstream::test::ping".to_string(),
+                ok: true,
+                elapsed_ms: 2,
+                error_kind: None,
+            }],
+            logs: (0..50)
+                .map(|i| format!("log line {i}: {}", "y".repeat(200)))
+                .collect(),
+        };
+
+        // ~10 KB of logs against a 2 KB byte budget.
+        let truncated = truncate_execution_response(response, 2048, 100_000, 4);
+
+        // Within byte budget after trimming.
+        assert!(
+            serde_json::to_vec(&truncated).unwrap().len() <= 2048,
+            "logs-dominant response must be trimmed within the byte budget"
+        );
+        // A sentinel records that logs were dropped.
+        assert!(
+            truncated
+                .logs
+                .iter()
+                .any(|l| l.contains("logs truncated to fit response budget")),
+            "a logs-truncation sentinel must be present, got: {:?}",
+            truncated.logs
+        );
+        // Small result is preserved untouched (it was within budget on its own).
+        assert_eq!(truncated.result, Some(json!({"ok": true})));
+    }
+
+    #[test]
+    fn log_trimming_terminates_when_budget_unreachable() {
+        // calls[] metadata can dominate and is NOT trimmed, so the budget may be
+        // unreachable. The log-trimming loop must still terminate (best-effort),
+        // collapsing logs to a single sentinel rather than looping forever.
+        let response = CodeModeExecutionResponse {
+            result: Some(json!({"ok": true})),
+            calls: (0..200)
+                .map(|i| CodeModeExecutedCall {
+                    id: format!("upstream::test::tool_{i}"),
+                    ok: true,
+                    elapsed_ms: 1,
+                    error_kind: None,
+                })
+                .collect(),
+            logs: (0..20).map(|i| format!("line {i}")).collect(),
+        };
+
+        // Tiny budget that calls[] alone exceeds — unreachable by log trimming.
+        let truncated = truncate_execution_response(response, 64, 100_000, 4);
+
+        // Terminated: logs collapsed to a single sentinel entry.
+        assert_eq!(
+            truncated.logs.len(),
+            1,
+            "logs must collapse to a single sentinel when budget is unreachable, got: {:?}",
+            truncated.logs
+        );
+        assert!(
+            truncated.logs[0].contains("logs truncated to fit response budget"),
+            "the remaining entry must be the sentinel, got: {:?}",
+            truncated.logs
+        );
+    }
+
+    #[test]
     fn configured_runtime_limits_reject_unbounded_loops() {
         let mut context = Context::default();
         configure_code_mode_runtime_limits(&mut context);
@@ -2312,48 +2486,58 @@ mod tests {
     }
 
     #[test]
-    fn normalize_user_code_wraps_bare_async_main_function() {
+    fn normalize_user_code_parenthesizes_bare_async_main_into_expression() {
         let bare = "async function main() { return 42; }";
         let result = super::normalize_user_code(bare);
 
-        // PRESENCE: original declaration preserved
+        // PRESENCE: wrapped as a parenthesized function EXPRESSION
         assert!(
-            result.starts_with("async function main()"),
-            "original decl must be preserved"
+            result.starts_with("(async function main()"),
+            "must parenthesize into a function expression, got: {result}"
         );
-        // PRESENCE: main() call appended
         assert!(
-            result.contains("main();"),
-            "main() invocation must be appended, got: {result}"
+            result.ends_with("})"),
+            "expression must be closed, got: {result}"
+        );
+        // ABSENCE: no trailing self-invocation (the execute wrapper invokes it)
+        assert!(
+            !result.contains("main();"),
+            "must NOT append a main() call — wrapper invokes the expression, got: {result}"
         );
     }
 
     #[test]
-    fn normalize_user_code_wraps_bare_sync_main_function() {
+    fn normalize_user_code_parenthesizes_bare_sync_main_into_expression() {
         let bare = "function main() { return 42; }";
         let result = super::normalize_user_code(bare);
-        assert!(result.starts_with("function main()"));
-        assert!(result.contains("main();"));
-    }
-
-    #[test]
-    fn normalize_user_code_does_not_double_wrap_when_main_already_called() {
-        // Code that already has main() after the function should NOT get a second
-        // invocation. (The normalizer only checks starts_with, so two function decls
-        // that start the string would each add main(); — but a plain string with
-        // main() appended manually must be left alone if it doesn't start with main decl.)
-        let already_called = "const x = 1;\nmain();";
-        let result = super::normalize_user_code(already_called);
-        // ABSENCE: no spurious main() added to non-main-decl code
-        assert_eq!(
-            result.matches("main()").count(),
-            1,
-            "non-main-decl code must not get main() injected, got: {result}"
+        assert!(
+            result.starts_with("(function main()"),
+            "must parenthesize sync main into an expression, got: {result}"
+        );
+        assert!(
+            result.ends_with("})"),
+            "expression must be closed, got: {result}"
+        );
+        assert!(
+            !result.contains("main();"),
+            "must NOT append a main() call, got: {result}"
         );
     }
 
     #[test]
-    fn normalize_user_code_unwraps_export_default_async() {
+    fn normalize_user_code_does_not_touch_non_main_decl_code() {
+        // Code that does not start with a main declaration must pass through
+        // unchanged — no main() injected, no parenthesization.
+        let already_called = "const x = 1;\nmain();";
+        let result = super::normalize_user_code(already_called);
+        assert_eq!(
+            result, already_called,
+            "non-main-decl code must pass through unchanged, got: {result}"
+        );
+    }
+
+    #[test]
+    fn normalize_user_code_unwraps_export_default_async_into_expression() {
         let exported = "export default async function() { return 42; }";
         let result = super::normalize_user_code(exported);
 
@@ -2362,23 +2546,28 @@ mod tests {
             !result.contains("export default"),
             "export default must be removed, got: {result}"
         );
-        // PRESENCE: wrapped as async IIFE
+        // PRESENCE: parenthesized async function EXPRESSION
         assert!(
             result.starts_with("(async function"),
-            "must wrap as async IIFE, got: {result}"
+            "must wrap as a parenthesized function expression, got: {result}"
         );
+        // ABSENCE: no IIFE self-invocation (the execute wrapper invokes it)
         assert!(
-            result.contains("()()") || result.ends_with("()"),
-            "IIFE must be immediately invoked, got: {result}"
+            result.ends_with("})") && !result.ends_with("()"),
+            "must NOT be a self-invoking IIFE, got: {result}"
         );
     }
 
     #[test]
-    fn normalize_user_code_unwraps_export_default_sync() {
+    fn normalize_user_code_unwraps_export_default_sync_into_expression() {
         let exported = "export default function() { return 42; }";
         let result = super::normalize_user_code(exported);
         assert!(!result.contains("export default"));
         assert!(result.starts_with("(function"));
+        assert!(
+            result.ends_with("})") && !result.ends_with("()"),
+            "must NOT be a self-invoking IIFE, got: {result}"
+        );
     }
 
     #[test]

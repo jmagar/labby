@@ -394,3 +394,80 @@ fn code_mode_runner_tool_error_does_not_abort_fan_out() {
     let status = child.wait().expect("wait for runner");
     assert!(status.success(), "runner exited with {status}");
 }
+
+/// Drive the runner with `code` that makes exactly one `callTool` and returns
+/// its result. Answers the single tool call with `tool_result`, then asserts
+/// Done carries the returned value. Used to prove a given code shape executes
+/// end-to-end through the runner's arrow-function wrapper (bead lab-vkwfa).
+fn assert_single_call_round_trip(code: &str, expected_result: Value) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+
+    writeln!(stdin, "{}", json!({"type": "start", "code": code})).expect("write start");
+
+    let call = read_protocol_line(&mut stdout);
+    assert_eq!(
+        call["type"], "tool_call",
+        "expected a tool_call, got: {call}"
+    );
+    let seq = call["seq"].as_u64().expect("seq");
+    writeln!(
+        stdin,
+        "{}",
+        json!({"type": "tool_result", "seq": seq, "result": {"pong": true}})
+    )
+    .expect("write tool result");
+
+    let done = read_protocol_line(&mut stdout);
+    assert_eq!(done["type"], "done", "expected done, got: {done}");
+    assert_eq!(
+        done["result"], expected_result,
+        "done.result must carry the function return value"
+    );
+    let status = child.wait().expect("wait for runner");
+    assert!(status.success(), "runner exited with {status}");
+}
+
+/// FIX 1 (bead lab-vkwfa): a `function main` BODY form, after `normalize_user_code`,
+/// must execute end-to-end through the runner's arrow-function wrapper. This is
+/// non-vacuous: the raw body form is normalized to a parenthesized function
+/// EXPRESSION before being piped to the runner, exactly as the broker does.
+#[test]
+fn normalized_function_main_form_executes_end_to_end() {
+    let body = "async function main() { return await callTool(\"upstream::test::ping\", {}); }";
+    let normalized = labby::dispatch::gateway::code_mode::normalize_user_code(body);
+    // Guard: normalize must produce a parenthesized expression with no self-call,
+    // otherwise this test would be vacuous (the raw form happens to wrap too).
+    assert!(
+        normalized.starts_with("(async function main()") && !normalized.contains("main();"),
+        "normalize must emit a bare function expression, got: {normalized}"
+    );
+    assert_single_call_round_trip(&normalized, json!({"pong": true}));
+}
+
+/// FIX 1 (bead lab-vkwfa): an `export default async function` form, after
+/// `normalize_user_code`, must execute end-to-end. Non-vacuous: the raw form
+/// would be an IIFE (a Promise, not a function) and fail the wrapper's typeof
+/// check; normalize now emits a bare function expression instead.
+#[test]
+fn normalized_export_default_form_executes_end_to_end() {
+    let body =
+        "export default async function() { return await callTool(\"upstream::test::ping\", {}); }";
+    let normalized = labby::dispatch::gateway::code_mode::normalize_user_code(body);
+    assert!(
+        normalized.starts_with("(async function")
+            && normalized.ends_with("})")
+            && !normalized.ends_with("()"),
+        "normalize must emit a bare function expression (no IIFE), got: {normalized}"
+    );
+    assert_single_call_round_trip(&normalized, json!({"pong": true}));
+}

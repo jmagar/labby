@@ -230,7 +230,7 @@ works. It must read `cfg.code_mode.enabled`.
 [code_mode]
 enabled = false              # mutually exclusive with [tool_search].enabled = true
 timeout_ms = 30000           # valid: 1..=60000 (Cloudflare-parity default)
-max_tool_calls = 1000        # valid: 1..=100000 (high safety ceiling; the 30s timeout is the real bound)
+max_tool_calls = 1000        # valid: 1..=10000 (high safety ceiling; the 30s timeout is the real bound)
 max_response_bytes = 24576   # valid: 1024..=1048576 (24KB default)
 max_response_tokens = 6000   # valid: 256..=256000
 ```

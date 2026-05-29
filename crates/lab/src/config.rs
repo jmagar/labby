@@ -541,7 +541,7 @@ impl CodeModeConfig {
                 value: self.timeout_ms,
             });
         }
-        if !(1..=100_000).contains(&self.max_tool_calls) {
+        if !(1..=10_000).contains(&self.max_tool_calls) {
             return Err(ConfigError::InvalidCodeModeMaxToolCalls {
                 value: self.max_tool_calls,
             });
@@ -934,7 +934,7 @@ pub enum ConfigError {
     InvalidToolSearchScoreFloor { value: f32 },
     #[error("gateway code_mode.timeout_ms={value} is invalid — expected 1..=60000")]
     InvalidCodeModeTimeout { value: u64 },
-    #[error("gateway code_mode.max_tool_calls={value} is invalid — expected 1..=100000")]
+    #[error("gateway code_mode.max_tool_calls={value} is invalid — expected 1..=10000")]
     InvalidCodeModeMaxToolCalls { value: usize },
     #[error("gateway code_mode.max_response_bytes={value} is invalid — expected 1024..=1048576")]
     InvalidCodeModeMaxResponseBytes { value: usize },
@@ -3043,7 +3043,7 @@ service_scope = "user"
         assert!(config.timeout_ms <= 60_000);
         // High safety ceiling — the 30s wall-clock timeout is the meaningful
         // bound, not a small per-run call cap (Cloudflare Code Mode parity).
-        assert!(config.max_tool_calls <= 100_000);
+        assert!(config.max_tool_calls <= 10_000);
     }
 
     // ── Process-wide atomic flags ─────────────────────────────────────────────
