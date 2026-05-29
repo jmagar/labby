@@ -269,7 +269,6 @@ export interface ToolSearchConfigInput {
 }
 
 export interface CodeModeConfig {
-  enabled: boolean
   timeout_ms: number
   max_tool_calls: number
   max_response_bytes: number
@@ -277,7 +276,6 @@ export interface CodeModeConfig {
 }
 
 export interface CodeModeConfigInput {
-  enabled: boolean
   timeout_ms?: number
   max_tool_calls?: number
   max_response_bytes?: number

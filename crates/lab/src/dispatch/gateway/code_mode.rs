@@ -2041,23 +2041,19 @@ mod tests {
         }
     }
 
-    /// In exclusive code mode (`code_mode.enabled=true`, `tool_search.enabled=false`),
-    /// `resolve_code_mode_upstream_tool` must NOT reject calls with "tool search is not enabled".
+    /// When the search/execute surface is enabled (`tool_search.enabled=true`),
+    /// `resolve_code_mode_upstream_tool` must NOT reject calls with a surface guard.
     /// It should attempt to resolve from the upstream pool and return `unknown_tool`
-    /// only if the tool is genuinely absent, not because of a mode guard.
+    /// only if the tool is genuinely absent, not because of a surface guard.
     #[tokio::test]
-    async fn resolve_code_mode_upstream_tool_does_not_require_tool_search_mode() {
+    async fn resolve_upstream_tool_returns_unknown_tool_for_absent_tool() {
         let dir = tempfile::tempdir().expect("tempdir");
         let runtime = super::super::runtime::GatewayRuntimeHandle::default();
         let manager = super::GatewayManager::new(dir.path().join("config.toml"), runtime);
         manager
             .seed_config(crate::config::LabConfig {
-                code_mode: crate::config::CodeModeConfig {
-                    enabled: true,
-                    ..crate::config::CodeModeConfig::default()
-                },
                 tool_search: crate::config::ToolSearchConfig {
-                    enabled: false,
+                    enabled: true,
                     ..crate::config::ToolSearchConfig::default()
                 },
                 upstream: vec![crate::config::UpstreamConfig {

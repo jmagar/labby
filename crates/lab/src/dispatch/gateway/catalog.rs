@@ -76,16 +76,10 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "gateway.code_mode.set",
-        description: "Enable or disable gateway-wide Code Mode execution",
+        description: "Configure gateway code execution limits",
         destructive: true,
         returns: "CodeModeConfig",
         params: &[
-            ParamSpec {
-                name: "enabled",
-                ty: "boolean",
-                required: true,
-                description: "Whether Code Mode execution is enabled for the gateway",
-            },
             ParamSpec {
                 name: "timeout_ms",
                 ty: "integer",

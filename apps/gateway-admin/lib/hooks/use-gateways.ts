@@ -48,7 +48,6 @@ const DEFAULT_TOOL_SEARCH_CONFIG: ToolSearchConfig = {
   max_tools: 5000,
 }
 const DEFAULT_CODE_MODE_CONFIG: CodeModeConfig = {
-  enabled: false,
   timeout_ms: 5000,
   max_tool_calls: 8,
   max_response_bytes: 24 * 1024,

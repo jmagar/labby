@@ -253,7 +253,6 @@ pub struct ToolSearchSetParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodeModeSetParams {
-    pub enabled: bool,
     #[serde(default)]
     pub timeout_ms: Option<u64>,
     #[serde(default)]

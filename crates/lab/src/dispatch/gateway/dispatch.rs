@@ -360,7 +360,6 @@ async fn handle_tool_actions(
         "gateway.code_mode.set" => {
             let params: CodeModeSetParams = parse_params(params_value)?;
             let mut next = manager.code_mode_config().await;
-            next.enabled = params.enabled;
             if let Some(timeout_ms) = params.timeout_ms {
                 next.timeout_ms = timeout_ms;
             }
