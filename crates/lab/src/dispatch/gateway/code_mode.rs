@@ -1497,7 +1497,11 @@ globalThis.__labSettleToolCall = (message) => {{
   throw new Error("runner received unexpected protocol message");
 }};
 globalThis.__labMainPromise = (async () => {{
-{code}
+  const __codeModeMain = ({code});
+  if (typeof __codeModeMain !== "function") {{
+    throw new TypeError("code_execute code must evaluate to an async arrow function: async () => {{ ... }}");
+  }}
+  return await __codeModeMain();
 }})();
 "#
     );
@@ -1553,7 +1557,15 @@ fn run_code_mode_runner() -> Result<(), String> {
         )
         .map_err(js_error_message)?;
 
-    let wrapped = format!("(async () => {{\n{code}\n}})()");
+    let wrapped = format!(
+        "(async () => {{\n\
+           const __codeModeMain = ({code});\n\
+           if (typeof __codeModeMain !== 'function') {{\n\
+             throw new TypeError('code_execute code must evaluate to an async arrow function: async () => {{ ... }}');\n\
+           }}\n\
+           return await __codeModeMain();\n\
+         }})()"
+    );
     let value = context
         .eval(Source::from_bytes(wrapped.as_bytes()))
         .map_err(js_error_message)?;

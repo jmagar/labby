@@ -41,9 +41,18 @@ const CODE_MODE_MAX_CODE_BYTES: usize = 20_000;
 ///
 /// This description is what the model receives. Keep it under 8192 bytes.
 const CODE_EXECUTE_DESCRIPTION: &str = "\
-Execute JavaScript in the Code Mode sandbox. Every upstream MCP tool is pre-declared \
-as a typed TypeScript helper in the `codemode` namespace — read the types, call the \
-functions. No separate discovery step required.
+Execute a JavaScript async arrow function in the Code Mode sandbox. Pass `code` as \
+`async () => { ... }` — the sandbox awaits its return value (same shape as search). \
+Every upstream MCP tool is pre-declared as a typed TypeScript helper in the `codemode` \
+namespace — read the types, call the functions. No separate discovery step required.
+
+```ts
+// code is an async arrow function; whatever it returns becomes `result`.
+async () => {
+  const issues = await callTool('upstream::github::search_issues', { q: 'bug' });
+  return issues.items.length;
+}
+```
 
 `Promise.all([...])` dispatches `callTool` requests in parallel — batch independent \
 reads instead of awaiting serially.
@@ -75,11 +84,13 @@ Oversized results are replaced with a truncation marker containing `truncated`, 
 `original_size`, `original_tokens`, `preview`, and `next_action`. Reduce data inside \
 the sandbox before returning — that is the point of Code Mode.
 
-Fuel budget:
-- Base overhead: ~100K fuel for the JS runtime.
-- Per callTool boundary: ~2K fuel.
-- Default 50M fuel supports heavy fan-out plus moderate result processing.
-- `code_mode_fuel_exhausted`: split the work across calls or reduce local processing.
+Budget:
+- Time: a 30s wall-clock timeout bounds the whole run (the meaningful limit). \
+There is no small per-run call cap — fan out freely with `Promise.all`.
+- Fuel: default 50M fuel supports heavy fan-out plus moderate result processing; \
+base overhead ~100K, ~2K per callTool boundary.
+- `code_mode_fuel_exhausted` or `timeout`: split the work across calls or reduce \
+local processing.
 
 Lab actions (`lab::*` tool IDs) are not available in Code Mode. For Lab built-in \
 actions use the `execute` tool in Tool Search mode.";

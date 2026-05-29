@@ -24,7 +24,7 @@ fn code_mode_runner_evaluates_js_in_a_minimal_host_environment() {
     let stdout = child.stdout.take().expect("runner stdout");
     let mut stderr = child.stderr.take().expect("runner stderr");
     let mut stdout = BufReader::new(stdout);
-    let code = r#"
+    let code = r#"async () => {
         if (typeof process !== "undefined" || typeof require !== "undefined" ||
             typeof fetch !== "undefined" || typeof Deno !== "undefined" ||
             typeof Bun !== "undefined") {
@@ -38,7 +38,7 @@ fn code_mode_runner_evaluates_js_in_a_minimal_host_environment() {
         if (false) {
           await callTool("lab::gateway.never", {});
         }
-    "#;
+    }"#;
 
     writeln!(
         stdin,
@@ -122,13 +122,13 @@ fn code_mode_runner_fans_out_promise_all_tool_calls() {
     let mut stdin = child.stdin.take().expect("runner stdin");
     let stdout = child.stdout.take().expect("runner stdout");
     let mut stdout = BufReader::new(stdout);
-    let code = r#"
+    let code = r#"async () => {
         const [first, second] = await Promise.all([
           callTool("lab::gateway.first", {"x": 1}),
           callTool("lab::gateway.second", {"x": 2})
         ]);
         await callTool("lab::gateway.after", {"sum": first.value + second.value});
-    "#;
+    }"#;
 
     writeln!(
         stdin,
@@ -228,10 +228,10 @@ fn code_mode_runner_done_carries_return_value() {
     let mut stdout = BufReader::new(stdout);
 
     // The function fetches one tool result and returns it directly.
-    let code = r#"
+    let code = r#"async () => {
         const result = await callTool("upstream::test::ping", {"msg": "hello"});
         return result;
-    "#;
+    }"#;
 
     writeln!(stdin, "{}", json!({"type": "start", "code": code})).expect("write start");
 
@@ -283,14 +283,14 @@ fn code_mode_runner_tool_error_produces_json_encoded_error() {
     // The function catches the error and returns the parsed CodeModeError shape.
     // If the rejection is plain text, JSON.parse will throw SyntaxError and
     // the function itself will error, causing Done to never appear.
-    let code = r#"
+    let code = r#"async () => {
         try {
             await callTool("upstream::test::fail", {});
         } catch (e) {
             const parsed = JSON.parse(String(e.message));
             return {caught: true, kind: parsed.kind, msg: parsed.message};
         }
-    "#;
+    }"#;
 
     writeln!(stdin, "{}", json!({"type": "start", "code": code})).expect("write start");
 
