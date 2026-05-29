@@ -362,14 +362,11 @@ impl<'a> CodeModeBroker<'a> {
         surface: CodeModeSurface,
         config: crate::config::CodeModeConfig,
     ) -> Result<CodeModeExecutionResponse, ToolError> {
-        if !config.enabled {
-            return Err(ToolError::Sdk {
-                sdk_kind: "internal_error".to_string(),
-                message:
-                    "Code Mode execution is disabled; set [code_mode].enabled = true to enable it"
-                        .to_string(),
-            });
-        }
+        // `execute` is exposed only when the gateway search/execute surface is
+        // enabled (tool_search.enabled → RootSynthetic), and the MCP handler
+        // gates on `exposes_synthetic_tools()` before reaching here. There is no
+        // separate per-tool enable: when the surface is on, both `search` and
+        // `execute` work (subject to scope), exactly like the Cloudflare blog.
         if !caller.can_execute() {
             return Err(ToolError::Sdk {
                 sdk_kind: "forbidden".to_string(),
