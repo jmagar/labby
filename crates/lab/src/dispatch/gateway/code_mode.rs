@@ -205,10 +205,17 @@ pub struct CodeModeExecutionResponse {
     pub logs: Vec<String>,
 }
 
+/// Lightweight metadata for one host-brokered tool call. Cloudflare parity:
+/// the per-call result payload is NOT carried here — only the model needs the
+/// final `result`. Recording full per-call results bloated context and risked
+/// leaking secrets through the truncation preview.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CodeModeExecutedCall {
     pub id: String,
-    pub result: Value,
+    pub ok: bool,
+    pub elapsed_ms: u128,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -646,12 +653,14 @@ impl<'a> CodeModeBroker<'a> {
                             let caller = caller.clone();
                             pending_tool_calls.push(
                                 async move {
+                                    let call_start = std::time::Instant::now();
                                     let result = self
                                         .call_tool_id_before_deadline(
                                             &id, params, deadline, caller, surface,
                                         )
                                         .await;
-                                    (seq, call_id, result)
+                                    let elapsed_ms = call_start.elapsed().as_millis();
+                                    (seq, call_id, result, elapsed_ms)
                                 }
                                 .boxed(),
                             );
@@ -725,44 +734,57 @@ impl<'a> CodeModeBroker<'a> {
                     }
                 }
                 completed = pending_tool_calls.next(), if !pending_tool_calls.is_empty() => {
-                    let Some((seq, id, result)): Option<(u64, String, Result<Value, ToolError>)> =
-                        completed
+                    let Some((seq, id, result, elapsed_ms)):
+                        Option<(u64, String, Result<Value, ToolError>, u128)> = completed
                     else {
                         continue;
                     };
-                    let result = match result {
-                        Ok(result) => result,
-                        Err(err) => {
-                            drop(
-                                write_runner_input(
-                                    &mut stdin,
-                                    &CodeModeRunnerInput::ToolError {
-                                        seq,
-                                        kind: match &err {
-                                            ToolError::Sdk { sdk_kind, .. } => {
-                                                sdk_kind.as_str()
-                                            }
-                                            other => other.kind(),
-                                        }
-                                        .to_string(),
-                                        message: err.to_string(),
-                                    },
-                                )
-                                .await,
-                            );
-                            terminate_code_mode_runner(&mut child, child_pid).await;
-                            return Err(err);
+                    match result {
+                        Ok(result) => {
+                            calls.push((seq, CodeModeExecutedCall {
+                                id,
+                                ok: true,
+                                elapsed_ms,
+                                error_kind: None,
+                            }));
+                            write_runner_input(
+                                &mut stdin,
+                                &CodeModeRunnerInput::ToolResult { seq, result },
+                            )
+                            .await?;
                         }
-                    };
-                    calls.push((seq, CodeModeExecutedCall {
-                        id: id.clone(),
-                        result: result.clone(),
-                    }));
-                    write_runner_input(
-                        &mut stdin,
-                        &CodeModeRunnerInput::ToolResult { seq, result },
-                    )
-                    .await?;
+                        Err(err) => {
+                            // Catchable tool errors (Cloudflare parity): a single failed
+                            // callTool must NOT abort the run. Reject the in-sandbox promise
+                            // with the structured {kind,message} so the user's JS try/catch
+                            // can handle it and continue (e.g. partial fan-out). If the
+                            // rejection is uncaught, the main promise rejects and the
+                            // existing Rejected/Error runner-output path surfaces it as the
+                            // final error. Limit/timeout paths still terminate (handled
+                            // elsewhere) — only per-call tool errors are caught here.
+                            let kind = match &err {
+                                ToolError::Sdk { sdk_kind, .. } => sdk_kind.clone(),
+                                other => other.kind().to_string(),
+                            };
+                            // The ToolError settles this seq's promise in-sandbox; do NOT
+                            // also send a ToolResult for the same seq.
+                            write_runner_input(
+                                &mut stdin,
+                                &CodeModeRunnerInput::ToolError {
+                                    seq,
+                                    kind: kind.clone(),
+                                    message: err.to_string(),
+                                },
+                            )
+                            .await?;
+                            calls.push((seq, CodeModeExecutedCall {
+                                id,
+                                ok: false,
+                                elapsed_ms,
+                                error_kind: Some(kind),
+                            }));
+                        }
+                    }
                 }
             }
         }
@@ -1212,17 +1234,12 @@ fn truncate_execution_response(
         return response;
     }
 
-    for idx in (0..response.calls.len()).rev() {
-        if response_within_budget(
-            &response,
-            max_response_bytes,
-            max_response_tokens,
-            token_estimate_divisor,
-        ) {
-            break;
-        }
-        let marker = truncation_marker(&response.calls[idx].result, token_estimate_divisor);
-        response.calls[idx].result = marker;
+    // calls[] carries lightweight metadata only (no result payloads), so there
+    // is nothing per-call to truncate. Cap only the FINAL result against the
+    // envelope budget, replacing it with a truncation marker when oversized.
+    if let Some(result) = response.result.as_ref() {
+        let marker = truncation_marker(result, token_estimate_divisor);
+        response.result = Some(marker);
     }
 
     response
@@ -2153,17 +2170,24 @@ mod tests {
     }
 
     #[test]
-    fn truncates_code_execute_response_with_per_call_marker() {
+    fn truncates_code_execute_final_result_when_oversized() {
+        // calls[] carry lightweight metadata only — truncation caps the FINAL
+        // result. An oversized final result is replaced with a truncation marker;
+        // the calls metadata is preserved untouched.
         let response = CodeModeExecutionResponse {
-            result: None,
+            result: Some(json!({"payload": "x".repeat(5000)})),
             calls: vec![
                 CodeModeExecutedCall {
                     id: "upstream::github::search_issues".to_string(),
-                    result: json!({"items": ["small"]}),
+                    ok: true,
+                    elapsed_ms: 12,
+                    error_kind: None,
                 },
                 CodeModeExecutedCall {
                     id: "upstream::github::list_issues".to_string(),
-                    result: json!({"payload": "x".repeat(5000)}),
+                    ok: false,
+                    elapsed_ms: 7,
+                    error_kind: Some("rate_limited".to_string()),
                 },
             ],
             logs: Vec::new(),
@@ -2171,16 +2195,38 @@ mod tests {
 
         let truncated = truncate_execution_response(response, 1400, 6000, 4);
 
-        assert_eq!(truncated.calls[0].result, json!({"items": ["small"]}));
-        assert_eq!(truncated.calls[1].result["truncated"], json!(true));
-        assert!(truncated.calls[1].result["original_size"].as_u64().unwrap() > 5000);
-        assert!(
-            truncated.calls[1].result["next_action"]
-                .as_str()
-                .unwrap()
-                .contains("narrower")
+        // Final result replaced with truncation marker.
+        let result = truncated.result.as_ref().expect("result present");
+        assert_eq!(result["truncated"], json!(true));
+        assert!(result["original_size"].as_u64().unwrap() > 5000);
+        assert!(result["next_action"].as_str().unwrap().contains("narrower"));
+        // Calls metadata preserved unchanged (no result payloads to truncate).
+        assert_eq!(truncated.calls.len(), 2);
+        assert!(truncated.calls[0].ok);
+        assert_eq!(
+            truncated.calls[1].error_kind.as_deref(),
+            Some("rate_limited")
         );
-        assert!(serde_json::to_vec(&truncated).unwrap().len() <= 1400);
+        // The marker replaces the multi-KB payload with a bounded preview, so the
+        // serialized response is far smaller than the original (~5 KB) result.
+        assert!(serde_json::to_vec(&truncated).unwrap().len() < 5000);
+    }
+
+    #[test]
+    fn does_not_truncate_when_final_result_within_budget() {
+        let response = CodeModeExecutionResponse {
+            result: Some(json!({"items": ["small"]})),
+            calls: vec![CodeModeExecutedCall {
+                id: "upstream::github::search_issues".to_string(),
+                ok: true,
+                elapsed_ms: 3,
+                error_kind: None,
+            }],
+            logs: Vec::new(),
+        };
+
+        let out = truncate_execution_response(response, 1400, 6000, 4);
+        assert_eq!(out.result, Some(json!({"items": ["small"]})));
     }
 
     #[test]
@@ -2464,38 +2510,42 @@ mod tests {
         // max_response_tokens=2000).  With divisor=1 → ~4000 tokens (exceeds 2000).
         let payload = "x".repeat(4000);
         let make_response = || CodeModeExecutionResponse {
-            result: None,
+            result: Some(json!({"payload": payload.clone()})),
             calls: vec![CodeModeExecutedCall {
                 id: "upstream::test::large".to_string(),
-                result: json!({"payload": payload.clone()}),
+                ok: true,
+                elapsed_ms: 1,
+                error_kind: None,
             }],
             logs: Vec::new(),
         };
 
         // divisor=4: 4000 bytes / 4 = 1000 estimated tokens → within 2000 → NOT truncated
         let fits = truncate_execution_response(make_response(), usize::MAX, 2000, 4);
-        // PRESENCE: result is the original object, not a truncation marker
+        // PRESENCE: final result is the original object, not a truncation marker
+        let fits_result = fits.result.as_ref().expect("result present");
         assert!(
-            fits.calls[0].result.get("payload").is_some(),
+            fits_result.get("payload").is_some(),
             "divisor=4 must not truncate 4 kB payload against 2000-token limit"
         );
         // ABSENCE: no truncation marker
         assert!(
-            fits.calls[0].result.get("truncated").is_none(),
+            fits_result.get("truncated").is_none(),
             "divisor=4 result must not carry a truncated flag"
         );
 
         // divisor=1: 4000 bytes / 1 = 4000 estimated tokens → exceeds 2000 → TRUNCATED
         let truncated = truncate_execution_response(make_response(), usize::MAX, 2000, 1);
-        // PRESENCE: truncation marker is injected
+        // PRESENCE: truncation marker is injected on the final result
+        let truncated_result = truncated.result.as_ref().expect("result present");
         assert_eq!(
-            truncated.calls[0].result.get("truncated"),
+            truncated_result.get("truncated"),
             Some(&json!(true)),
             "divisor=1 must truncate 4 kB payload against 2000-token limit"
         );
         // ABSENCE: original payload content not preserved in the marker
         assert!(
-            truncated.calls[0].result.get("payload").is_none(),
+            truncated_result.get("payload").is_none(),
             "truncation marker must not keep original payload key"
         );
     }
