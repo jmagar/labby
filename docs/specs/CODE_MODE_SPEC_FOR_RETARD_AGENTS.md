@@ -164,8 +164,8 @@ Advertised **only** when `code_mode.enabled = true` in config.
 
 ```typescript
 {
-  code: string;          // async arrow function body, or full async function expression
-  max_tool_calls?: number; // default: config.max_tool_calls (default 8), max 50
+  code: string;          // JavaScript async arrow function: async () => { ... }
+  max_tool_calls?: number; // default: config.max_tool_calls (default 1000, high safety ceiling); the 30s timeout is the meaningful bound
 }
 ```
 
@@ -230,7 +230,7 @@ works. It must read `cfg.code_mode.enabled`.
 [code_mode]
 enabled = false              # mutually exclusive with [tool_search].enabled = true
 timeout_ms = 30000           # valid: 1..=60000 (Cloudflare-parity default)
-max_tool_calls = 8           # valid: 1..=50
+max_tool_calls = 1000        # valid: 1..=100000 (high safety ceiling; the 30s timeout is the real bound)
 max_response_bytes = 24576   # valid: 1024..=1048576 (24KB default)
 max_response_tokens = 6000   # valid: 256..=256000
 ```

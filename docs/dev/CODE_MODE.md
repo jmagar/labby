@@ -39,9 +39,11 @@ not listed in the catalog due to overflow.
 - `max_response_bytes = 24576`
 - `max_response_tokens = 6000`
 
-When the envelope is too large, oversized per-call results are replaced with a
-truncation marker containing `truncated`, `original_size`, `original_tokens`,
-`preview`, and `next_action`.
+`calls[]` carries lightweight per-call metadata only (`id`, `ok`, `elapsed_ms`,
+and `error_kind` on failure) — never the per-call result payload. When the
+envelope is too large, the final `result` is replaced with a truncation marker
+containing `truncated`, `original_size`, `original_tokens`, `preview`, and
+`next_action`.
 
 ## Runner Architecture
 

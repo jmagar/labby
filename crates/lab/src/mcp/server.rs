@@ -76,6 +76,9 @@ Error handling:
 // Fix-and-retry: missing_param, invalid_param, validation_failed, confirmation_required
 // Terminal:      unknown_tool, unknown_action, auth_failed, server_error, internal_error
 ```
+A failed callTool rejects only its own promise — the run continues, so catch it and \
+proceed. For catch-and-continue fan-out, prefer `Promise.allSettled` so every call \
+settles before you return.
 
 Scope: `lab:read` — catalog read only. `lab` / `lab:admin` — callTool execution.
 
