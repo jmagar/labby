@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "gotify": {
-      "command": "lab",
-      "args": ["mcp", "--services", "gotify"]
-    }
-  }
-}

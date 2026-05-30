@@ -1,57 +1,48 @@
 ---
 name: adguard
-description: Lab's Adguard integration — DNS-level ad blocking and network filtering. Use when the user wants to manage their Adguard instance, or invokes `lab adguard` / `mcp__lab__adguard`. Calls the MCP tool first, falls back to the CLI if MCP is unavailable.
+description: AdGuard Home — DNS-level ad blocking and network filtering. Use when the user wants to check their AdGuard instance status, query stats, search the DNS query log, or check filtering. Talks directly to the AdGuard Home control API.
 ---
 
-# Adguard
+# AdGuard
 
-Dns-level ad blocking and network filtering. Exposes **6 actions** via the `lab` homelab control plane.
+DNS-level ad blocking and network filtering. Talk to it directly over the AdGuard Home control API (served under `/control`, HTTP Basic auth).
 
 ## How to call it
 
-**Prefer the MCP tool. Fall back to the CLI only when MCP is unavailable.**
-
-### MCP (preferred)
-
-One tool: `mcp__lab__adguard`. Dispatch shape: `{ "action": "<name>", "params": {...} }`.
-
-Discover actions live:
-```json
-{ "action": "help" }
-{ "action": "schema", "params": { "action": "<name>" } }
-```
-
-Full action catalog: [`references/mcp.md`](references/mcp.md).
-
-### CLI fallback
+Read the base URL and credentials from `~/.lab/.env`:
 
 ```bash
-lab adguard --help
-lab adguard <action> --help
-labby --json adguard <action> ...
+ADGUARD_URL=$(grep -E '^ADGUARD_URL='      ~/.lab/.env | cut -d= -f2-)
+ADGUARD_USERNAME=$(grep -E '^ADGUARD_USERNAME=' ~/.lab/.env | cut -d= -f2-)
+ADGUARD_PASSWORD=$(grep -E '^ADGUARD_PASSWORD=' ~/.lab/.env | cut -d= -f2-)
+AUTH=(-u "$ADGUARD_USERNAME:$ADGUARD_PASSWORD")
 ```
 
-CLI mirrors MCP actions; dots become dashes (`server.health` → `server-health`). Full CLI surface: [`references/cli.md`](references/cli.md).
+Auth is HTTP Basic (`-u user:pass`). Never echo the password.
 
-## Highlights
+> `ADGUARD_*` may be unset in `~/.lab/.env` — populate them before use.
 
-- `server.status` — Get AdGuard Home server status and running state
-- `server.version` — Get AdGuard Home version info
-- `stats.summary` — Get DNS query statistics summary
-- `querylog.search` — Search the DNS query log
-- `filtering.status` — Get filtering rules status and stats
-- `filtering.check-host` — Check whether a host is blocked
+## Common operations
+
+| Intent | Request |
+|---|---|
+| Server status + version + running state | `curl -sS "${AUTH[@]}" "$ADGUARD_URL/control/status"` |
+| DNS query statistics | `curl -sS "${AUTH[@]}" "$ADGUARD_URL/control/stats"` |
+| Search the query log | `curl -sS "${AUTH[@]}" "$ADGUARD_URL/control/querylog?search=<term>&limit=50"` |
+| Filtering status / rule lists | `curl -sS "${AUTH[@]}" "$ADGUARD_URL/control/filtering/status"` |
+| Check whether a host is blocked | `curl -sS "${AUTH[@]}" "$ADGUARD_URL/control/filtering/check_host?name=<host>"` |
+
+The version string and running state are fields inside `GET /control/status` (there is no separate version endpoint). Full API reference: <https://github.com/AdguardTeam/AdGuardHome/blob/master/openapi/openapi.yaml>.
 
 ## Configuration
 
-Credentials and base URLs live in `~/.lab/.env`. Onboard / re-extract with
-`labby extract scan` and `labby extract apply`. Verify connectivity:
+`ADGUARD_URL`, `ADGUARD_USERNAME`, and `ADGUARD_PASSWORD` live in `~/.lab/.env`. Verify connectivity:
 
 ```bash
-labby doctor service adguard
+curl -sS -o /dev/null -w 'HTTP %{http_code}\n' "${AUTH[@]}" "$ADGUARD_URL/control/status"
 ```
 
 ## When NOT to use this skill
 
-- The user is asking about a different lab service — load that service's skill instead.
-- The user is asking about `lab` itself (CLI internals, install, gateway, doctor across all services) — that's operator-tier, not `adguard`-specific.
+- The user is asking about a different homelab service — load that service's skill instead.
+- The user wants to change filtering rules or protection settings — those are mutating `POST /control/*` endpoints; confirm intent first and consult the OpenAPI reference for the exact body.

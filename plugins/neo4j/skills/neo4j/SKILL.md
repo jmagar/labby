@@ -1,65 +1,66 @@
 ---
 name: neo4j
-description: Lab's Neo4J integration — Graph database — nodes, relationships, Cypher queries. Use when the user wants to manage their Neo4J instance, or invokes `lab neo4j` / `mcp__lab__neo4j`. Calls the MCP tool first, falls back to the CLI if MCP is unavailable.
+description: Neo4j — graph database (nodes, relationships, Cypher queries). Use when the user wants to run Cypher, inspect the schema, or check their Neo4j instance. Talks to Neo4j over its HTTP transactional Cypher API.
 ---
 
-# Neo4J
+# Neo4j
 
-Graph database — nodes, relationships, cypher queries. Exposes **10 actions** via the `lab` homelab control plane.
+Graph database — nodes, relationships, Cypher queries. Drive it with Cypher over Neo4j's **HTTP transactional API**.
 
 ## How to call it
 
-**Prefer the MCP tool. Fall back to the CLI only when MCP is unavailable.**
-
-### MCP (preferred)
-
-One tool: `mcp__lab__neo4j`. Dispatch shape: `{ "action": "<name>", "params": {...} }`.
-
-Discover actions live:
-```json
-{ "action": "help" }
-{ "action": "schema", "params": { "action": "<name>" } }
+```bash
+NEO4J_USER=$(grep -E '^NEO4J_USER='     ~/.lab/.env | cut -d= -f2-)
+NEO4J_PASSWORD=$(grep -E '^NEO4J_PASSWORD=' ~/.lab/.env | cut -d= -f2-)
+NEO4J_DB=$(grep -E '^NEO4J_DB='         ~/.lab/.env | cut -d= -f2-); NEO4J_DB=${NEO4J_DB:-neo4j}
+# NOTE: ~/.lab/.env stores NEO4J_URL as a bolt:// endpoint, which curl cannot speak.
+# The HTTP API listens separately (default port 7474). Set NEO4J_HTTP_URL to it:
+NEO4J_HTTP_URL="http://tootie:7474"        # adjust host/port to your HTTP listener
+AUTH=(-u "$NEO4J_USER:$NEO4J_PASSWORD")
 ```
 
-Full action catalog: [`references/mcp.md`](references/mcp.md).
+Auth is HTTP Basic. The `bolt://` URL in `~/.lab/.env` is for binary Bolt clients (`cypher-shell`, drivers) — for curl you need the HTTP listener URL. Never echo the password.
 
-### CLI fallback
+## Running Cypher
+
+All queries go through `POST /db/<database>/tx/commit` with a `statements` array:
 
 ```bash
-lab neo4j --help
-lab neo4j <action> --help
-labby --json neo4j <action> ...
+cypher() {
+  curl -sS "${AUTH[@]}" -H 'Content-Type: application/json' \
+    "$NEO4J_HTTP_URL/db/$NEO4J_DB/tx/commit" \
+    -d "{\"statements\":[{\"statement\":\"$1\"}]}"
+}
 ```
 
-CLI mirrors MCP actions; dots become dashes (`server.health` → `server-health`). Full CLI surface: [`references/cli.md`](references/cli.md).
+| Intent | Cypher (pass to `cypher`) |
+|---|---|
+| Read query | `MATCH (n) RETURN n LIMIT 25` |
+| Write query (**destructive**) | `CREATE (n:Person {name:'Ada'}) RETURN n` |
+| List node labels | `CALL db.labels()` |
+| List relationship types | `CALL db.relationshipTypes()` |
+| List constraints | `SHOW CONSTRAINTS` |
+| List indexes | `SHOW INDEXES` |
+| List databases | `SHOW DATABASES` |
+| Server / components info | `CALL dbms.components()` |
 
-## Highlights
-
-- `cypher.read` — Execute a read-only Cypher query
-- `cypher.write` — Execute a write Cypher query
-- `schema.labels` — List all node labels in the database
-- `schema.relationships` — List all relationship types
-- `schema.constraints` — List all schema constraints
-- `schema.indexes` — List all indexes
-- `db.list` — List available databases
-- `db.info` — Get info about a specific database
-- `server.status` — Get Neo4j server status
-- `txn.run` — Execute a multi-statement transaction
+Multi-statement transaction: pass several objects in the `statements` array of a single `tx/commit` call. Server discovery (available endpoints) is `GET $NEO4J_HTTP_URL/`.
 
 ## Destructive actions
 
-neo4j exposes 2 destructive action(s): `cypher.write`, `txn.run`. These mutate state — confirm with the user before invoking. The full `Destructive` column is in `references/mcp.md`.
+Any write Cypher (`CREATE`, `MERGE`, `SET`, `DELETE`, `DROP`, etc.) mutates the graph. Confirm with the user before running writes or multi-statement transactions that include them.
 
 ## Configuration
 
-Credentials and base URLs live in `~/.lab/.env`. Onboard / re-extract with
-`labby extract scan` and `labby extract apply`. Verify connectivity:
+`NEO4J_USER`, `NEO4J_PASSWORD`, `NEO4J_DB`, and `NEO4J_URL` (bolt) live in `~/.lab/.env`. For curl you additionally need the HTTP listener URL (`NEO4J_HTTP_URL`), which is not stored there by default. Verify connectivity:
 
 ```bash
-labby doctor service neo4j
+curl -sS "${AUTH[@]}" "$NEO4J_HTTP_URL/" -w '\nHTTP %{http_code}\n'
 ```
+
+If only Bolt is exposed, use `cypher-shell -a "$NEO4J_URL" -u "$NEO4J_USER" -p "$NEO4J_PASSWORD"` instead of curl.
 
 ## When NOT to use this skill
 
-- The user is asking about a different lab service — load that service's skill instead.
-- The user is asking about `lab` itself (CLI internals, install, gateway, doctor across all services) — that's operator-tier, not `neo4j`-specific.
+- The user is asking about a different homelab service — load that service's skill instead.
+- The user wants vector search — that's the `qdrant` skill.

@@ -25,14 +25,7 @@ skills/unraid/
 
 ## Installation
 
-This skill is part of the Unraid MCP plugin. Install via the Claude Code marketplace:
-
-```bash
-/plugin marketplace add jmagar/unraid-mcp
-/plugin install unraid @unraid-mcp
-```
-
-The plugin includes both the MCP server and this skill at `skills/unraid/`.
+This is a standalone skill that talks to the Unraid GraphQL API directly with `curl`. It needs no MCP server — credentials are read from `~/.lab/.env` (`UNRAID_URL`, `UNRAID_API_KEY`). See [`SKILL.md`](SKILL.md) for the calling convention.
 
 ## Quick Start
 

@@ -248,17 +248,11 @@ Memos support full Markdown syntax:
 
 ---
 
-## 🔧 Agent Tool Usage Requirements
+## 🔧 Agent Tool Usage
 
-**CRITICAL:** When invoking scripts from this skill via the zsh-tool, **ALWAYS use `pty: true`**.
+Run this skill's scripts with the **Bash** tool directly:
 
-Without PTY mode, command output will not be visible even though commands execute successfully.
-
-**Correct invocation pattern:**
-```typescript
-<invoke name="mcp__plugin_zsh-tool_zsh-tool__zsh">
-<parameter name="command">./skills/memos/scripts/memo-api.sh [args]</parameter>
-<parameter name="pty">true</parameter>
-</invoke>
+```bash
+./skills/memos/scripts/memo-api.sh [args]
 ```
 - **Troubleshooting:** `skills/memos/references/troubleshooting.md`

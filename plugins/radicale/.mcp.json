@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "radicale": {
-      "command": "lab",
-      "args": ["mcp", "--services", "radicale"]
-    }
-  }
-}

@@ -1,62 +1,51 @@
 ---
 name: qdrant
-description: Lab's Qdrant integration — Vector database for semantic search and embeddings. Use when the user wants to manage their Qdrant instance, or invokes `lab qdrant` / `mcp__lab__qdrant`. Calls the MCP tool first, falls back to the CLI if MCP is unavailable.
+description: Qdrant — vector database for semantic search and embeddings. Use when the user wants to manage their Qdrant instance, inspect collections, upsert points, or run vector similarity search. Talks directly to the Qdrant REST API.
 ---
 
 # Qdrant
 
-Vector database for semantic search and embeddings. Exposes **7 actions** via the `lab` homelab control plane.
+Vector database for semantic search and embeddings. Talk to it directly over its HTTP REST API.
 
 ## How to call it
 
-**Prefer the MCP tool. Fall back to the CLI only when MCP is unavailable.**
-
-### MCP (preferred)
-
-One tool: `mcp__lab__qdrant`. Dispatch shape: `{ "action": "<name>", "params": {...} }`.
-
-Discover actions live:
-```json
-{ "action": "help" }
-{ "action": "schema", "params": { "action": "<name>" } }
-```
-
-Full action catalog: [`references/mcp.md`](references/mcp.md).
-
-### CLI fallback
+Read the base URL (and optional API key) from `~/.lab/.env`, then curl the Qdrant REST API:
 
 ```bash
-lab qdrant --help
-lab qdrant <action> --help
-labby --json qdrant <action> ...
+QDRANT_URL=$(grep -E '^QDRANT_URL='     ~/.lab/.env | cut -d= -f2-)
+QDRANT_API_KEY=$(grep -E '^QDRANT_API_KEY=' ~/.lab/.env | cut -d= -f2-)
+AUTH=(); [ -n "$QDRANT_API_KEY" ] && AUTH=(-H "api-key: $QDRANT_API_KEY")
 ```
 
-CLI mirrors MCP actions; dots become dashes (`server.health` → `server-health`). Full CLI surface: [`references/cli.md`](references/cli.md).
+`QDRANT_API_KEY` is optional — include the `api-key` header only when it is set. Never echo the key.
 
-## Highlights
+## Common operations
 
-- `server.health` — Check Qdrant server health
-- `collections.list` — List all collections
-- `collections.get` — Get info about a specific collection
-- `collection.create` — Create a new collection
-- `collection.delete` — Delete a collection and all its data
-- `point.upsert` — Insert or update points in a collection
-- `point.search` — Search points by vector similarity
+| Intent | Request |
+|---|---|
+| Server health / version | `curl -sS "${AUTH[@]}" "$QDRANT_URL/"` |
+| List collections | `curl -sS "${AUTH[@]}" "$QDRANT_URL/collections"` |
+| Collection info | `curl -sS "${AUTH[@]}" "$QDRANT_URL/collections/<name>"` |
+| Create collection | `curl -sS -X PUT "${AUTH[@]}" -H 'Content-Type: application/json' "$QDRANT_URL/collections/<name>" -d '{"vectors":{"size":<dim>,"distance":"Cosine"}}'` |
+| Delete collection (**destructive**) | `curl -sS -X DELETE "${AUTH[@]}" "$QDRANT_URL/collections/<name>"` |
+| Upsert points | `curl -sS -X PUT "${AUTH[@]}" -H 'Content-Type: application/json' "$QDRANT_URL/collections/<name>/points?wait=true" -d '{"points":[{"id":1,"vector":[...],"payload":{}}]}'` |
+| Search by vector | `curl -sS -X POST "${AUTH[@]}" -H 'Content-Type: application/json' "$QDRANT_URL/collections/<name>/points/search" -d '{"vector":[...],"limit":10,"with_payload":true}'` |
+
+Full REST reference: <https://api.qdrant.tech/>
 
 ## Destructive actions
 
-qdrant exposes 1 destructive action(s): `collection.delete`. These mutate state — confirm with the user before invoking. The full `Destructive` column is in `references/mcp.md`.
+Deleting a collection (`DELETE /collections/<name>`) removes all of its data and is irreversible. Confirm with the user before running it.
 
 ## Configuration
 
-Credentials and base URLs live in `~/.lab/.env`. Onboard / re-extract with
-`labby extract scan` and `labby extract apply`. Verify connectivity:
+`QDRANT_URL` (required) and `QDRANT_API_KEY` (optional) live in `~/.lab/.env`. Verify connectivity:
 
 ```bash
-labby doctor service qdrant
+curl -sS "$QDRANT_URL/" -w '\nHTTP %{http_code}\n'
 ```
 
 ## When NOT to use this skill
 
-- The user is asking about a different lab service — load that service's skill instead.
-- The user is asking about `lab` itself (CLI internals, install, gateway, doctor across all services) — that's operator-tier, not `qdrant`-specific.
+- The user is asking about a different homelab service — load that service's skill instead.
+- The user wants to *generate* embeddings (not store/search them) — that's the `tei` skill.

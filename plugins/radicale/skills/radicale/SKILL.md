@@ -378,17 +378,11 @@ All operations return JSON with status. Check for:
 
 ---
 
-## 🔧 Agent Tool Usage Requirements
+## 🔧 Agent Tool Usage
 
-**CRITICAL:** When invoking scripts from this skill via the zsh-tool, **ALWAYS use `pty: true`**.
+Run this skill's scripts with the **Bash** tool directly:
 
-Without PTY mode, command output will not be visible even though commands execute successfully.
-
-**Correct invocation pattern:**
-```typescript
-<invoke name="mcp__plugin_zsh-tool_zsh-tool__zsh">
-<parameter name="command">python ./skills/radicale/scripts/radicale-api.py [args]</parameter>
-<parameter name="pty">true</parameter>
-</invoke>
+```bash
+python ./skills/radicale/scripts/radicale-api.py [args]
 ```
 

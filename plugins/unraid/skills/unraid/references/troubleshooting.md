@@ -1,109 +1,66 @@
-# Unraid MCP — Troubleshooting Guide
+# Unraid GraphQL — Troubleshooting Guide
 
 ## Credentials Not Configured
 
-**Error:** `CredentialsNotConfiguredError` or message containing `~/.unraid-mcp/.env`
+**Symptom:** `gql` returns an auth error, or `UNRAID_URL` / `UNRAID_API_KEY` are empty.
 
-**Fix:** Run setup to configure credentials interactively:
+**Fix:** Set them in `~/.lab/.env`:
 
-```python
-unraid(action="health", subaction="setup")
+```bash
+UNRAID_URL=https://your-unraid-host:port      # base host; the helper appends /graphql
+UNRAID_API_KEY=your-api-key
 ```
 
-This writes `UNRAID_API_URL` and `UNRAID_API_KEY` to `~/.unraid-mcp/.env`. Re-run at any time to update or rotate credentials.
+Re-read them in your shell as shown in [`SKILL.md`](../SKILL.md). A second instance can be targeted via `UNRAID_SHART_URL` / `UNRAID_SHART_API_KEY`.
 
 ---
 
 ## Connection Failed / API Unreachable
 
-**Symptoms:** Timeout, connection refused, network error
+**Symptoms:** timeout, connection refused, TLS error.
 
-**Diagnostic steps:**
+1. Confirm the endpoint responds (note `-k` — Unraid uses a self-signed `*.myunraid.net` cert):
 
-1. Test basic connectivity:
+   ```bash
+   curl -sSk "$UNRAID_URL/graphql" -H "x-api-key: $UNRAID_API_KEY" \
+     -H 'Content-Type: application/json' -d '{"query":"{ info { os { hostname } } }"}' \
+     -w '\nHTTP %{http_code}\n'
+   ```
 
-```python
-unraid(action="health", subaction="test_connection")
-```
-
-1. Full diagnostic report:
-
-```python
-unraid(action="health", subaction="diagnose")
-```
-
-1. Check that `UNRAID_API_URL` in `~/.unraid-mcp/.env` points to the correct Unraid GraphQL endpoint.
-
-1. Verify the API key has the required roles. Get a new key: **Unraid UI → Settings → Management Access → API Keys → Create** (select "Viewer" role for read-only, or appropriate roles for mutations).
+2. Check that `UNRAID_URL` points at the GraphQL host:port (the helper appends `/graphql`).
+3. Verify the API key has the required roles: **Unraid UI → Settings → Management Access → API Keys → Create** ("Viewer" for read-only, broader roles for mutations).
 
 ---
 
-## Invalid Action / Subaction
+## GraphQL Errors
 
-**Error:** `Invalid action 'X'` or `Invalid subaction 'X' for action 'Y'`
+**Symptom:** response contains an `errors` array instead of (or alongside) `data`.
 
-**Fix:** Check the domain table in `SKILL.md` for the exact `action=` and `subaction=` strings. Common mistakes:
-
-| Wrong | Correct |
-|-------|---------|
-| `action="info"` | `action="system"` |
-| `action="notifications"` | `action="notification"` |
-| `action="keys"` | `action="key"` |
-| `action="plugins"` | `action="plugin"` |
-| `action="settings"` | `action="setting"` |
-| `subaction="unread"` | `subaction="mark_unread"` |
+- **Unknown field / type:** verify field names against [`introspection-schema.md`](introspection-schema.md) or live introspection: `gql '{ __schema { queryType { fields { name } } } }'`.
+- **Permission denied:** the API key lacks the role for that query/mutation — issue a key with the needed roles.
 
 ---
 
-## Destructive Action Blocked
+## Destructive Mutations
 
-**Error:** `Action 'X' was not confirmed. Re-run with confirm=True to bypass elicitation.`
-
-**Fix:** Add `confirm=True` to the call:
-
-```python
-unraid(action="array", subaction="stop_array", confirm=True)
-unraid(action="vm",    subaction="force_stop", vm_id="<id>", confirm=True)
-```
-
-See the Destructive Actions table in `SKILL.md` for the full list.
-
----
-
-## Live Subscription Returns "Connecting"
-
-**Symptoms:** `unraid(action="live", ...)` returns `{"status": "connecting"}`
-
-**Explanation:** The persistent WebSocket subscription has not yet received its first event. Retry in a moment.
-
-**Known issue:** `live/array_state` uses `arraySubscription` which has a known Unraid API bug (returns null for a non-nullable field). This subscription may show "connecting" indefinitely.
-
-**Event-driven subscriptions** (`live/parity_progress`, `live/notifications_overview`, `live/owner`, `live/server_status`, `live/ups_status`) only populate when the server emits a change event. If the server is idle, these may never populate during a session.
-
-**Workaround for array state:** Use `unraid(action="system", subaction="array")` for a synchronous snapshot instead.
+Raw GraphQL executes mutations immediately — there is no confirmation gate. Confirm intent with the user **before** sending any mutation that stops the array, removes/clears disks, force-stops/resets VMs, or deletes notifications/keys/plugins/remotes. Read queries are always safe.
 
 ---
 
 ## Rate Limit Exceeded
 
-**Limit:** 100 requests / 10 seconds
+**Limit:** ~100 requests / 10 seconds. **Symptoms:** HTTP 429.
 
-**Symptoms:** HTTP 429 or rate limit error
-
-**Fix:** Space out requests. Avoid polling in tight loops. Use `live/` subscriptions for real-time data instead of polling `system/metrics` repeatedly.
+**Fix:** space out requests; avoid tight polling loops. Poll no faster than every ~5 seconds.
 
 ---
 
 ## Log Path Rejected
 
-**Error:** `Invalid log path`
-
-**Valid log path prefixes:** `/var/log/`, `/boot/logs/`, `/mnt/`
-
-Use `unraid(action="disk", subaction="log_files")` to list available logs before reading.
+**Valid log path prefixes:** `/var/log/`, `/boot/logs/`, `/mnt/`. Query the schema's log-file fields to list available logs before reading one.
 
 ---
 
 ## Container Logs Not Available
 
-Docker container stdout/stderr are **not accessible via the Unraid API**. SSH to the Unraid server and use `docker logs <container>` directly.
+Docker container stdout/stderr are **not accessible via the Unraid GraphQL API**. SSH to the Unraid server and use `docker logs <container>` directly.

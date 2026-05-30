@@ -1,54 +1,93 @@
 ---
 name: loggifly
-description: Lab's Loggifly integration — Docker container log alerting via keyword/regex patterns. Use when the user wants to manage their Loggifly instance, or invokes `lab loggifly` / `mcp__lab__loggifly`. Calls the MCP tool first, falls back to the CLI if MCP is unavailable.
+description: LoggiFly — Docker container log alerting via keyword/regex patterns. Use when the user wants to set up or edit log-based alerts, monitor container logs for keywords, or configure LoggiFly notifications. LoggiFly is operated through its config.yaml, not a query API.
 ---
 
-# Loggifly
+# LoggiFly
 
-Docker container log alerting via keyword/regex patterns. Exposes **3 actions** via the `lab` homelab control plane.
+[LoggiFly](https://github.com/clemcer/loggifly) watches Docker container (and Swarm service) logs and fires notifications or container actions when log lines match keywords/regex. It is **not** a queryable REST service — you operate it by editing its `config.yaml`, which it hot-reloads.
 
-## How to call it
+## How it's operated
 
-**Prefer the MCP tool. Fall back to the CLI only when MCP is unavailable.**
+LoggiFly runs as a container with `config.yaml` mounted at `/config/config.yaml`. Edit that file and save — with `settings.reload_config: true` (default) LoggiFly reloads automatically. A few global settings can also come from environment variables (see the [env-vars reference](https://clemcer.github.io/loggifly/guide/environment-variables)).
 
-### MCP (preferred)
-
-One tool: `mcp__lab__loggifly`. Dispatch shape: `{ "action": "<name>", "params": {...} }`.
-
-Discover actions live:
-```json
-{ "action": "help" }
-{ "action": "schema", "params": { "action": "<name>" } }
-```
-
-Full action catalog: [`references/mcp.md`](references/mcp.md).
-
-### CLI fallback
+Find the config on the host (it's the bind-mount behind `/config`):
 
 ```bash
-lab loggifly --help
-lab loggifly <action> --help
-labby --json loggifly <action> ...
+# inspect the running container's mounts to locate config.yaml on the host
+docker inspect loggifly --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'
+docker logs --tail 50 loggifly        # LoggiFly logs config-reload + match events here
 ```
 
-CLI mirrors MCP actions; dots become dashes (`server.health` → `server-health`). Full CLI surface: [`references/cli.md`](references/cli.md).
+## config.yaml structure (v2)
 
-## Highlights
+```yaml
+version: 2
 
-- `contract.status` — Get LoggiFly contract/API status
-- `health.status` — Check LoggiFly health
-- `config.summary` — Get active configuration summary
+global:
+  keywords:                 # applied to EVERY matched target
+    - critical
+    - keyword: "out of memory"
+  defaults:                 # inheritable defaults (overridable per source/rule/keyword)
+    trigger_cooldown: 0
+    attach_logfile: false
+    title_template: "{{ container_name }}: {{ keywords }}"
 
-## Configuration
+settings:                   # global-only, non-inheritable
+  log_level: INFO
+  reload_config: true       # auto-reload config.yaml on change
+  system_notifications: true
 
-Credentials and base URLs live in `~/.lab/.env`. Onboard / re-extract with
-`labby extract scan` and `labby extract apply`. Verify connectivity:
+notifications:              # configure at least one
+  ntfy:
+    url: "http://your-ntfy-server"
+    topic: "loggifly"
+    token: "ntfy-token"
+  apprise:
+    url: "discord://webhook-id/token"   # any Apprise-compatible URL
+  webhook:
+    url: "https://webhook.example.com/endpoint"
+
+containers:                 # source config for Docker containers
+  rules:                    # a container is monitored if it matches >=1 rule
+    - container_name: nginx           # shorthand match (glob ok)
+      keywords:
+        - error
+        - regex: "upstream.*failed"
+    - match:                          # full match syntax
+        include: { container_names: ["web-*", "*-api"] }
+        exclude: { container_names: ["*-test"] }
+      keywords:
+        - keyword: panic
+          ntfy_priority: 5
+          attach_logfile: true
+          container_action: restart   # restart/stop/start on match (restart@other-container also works)
+      container_events:               # lifecycle events: start|stop|die|crash|oom|unhealthy|...
+        - event: crash
+          container_action: restart
+
+swarm:                      # optional: same shape, uses service_name/stack_name; actions need @target
+  rules:
+    - service_name: my-service
+      keywords: [timeout]
+```
+
+Key concepts:
+- **keywords** can be plain strings, `{ keyword: ... }`, or `{ regex: ... }`; settings cascade global → source → rule → keyword.
+- **container_action** (`restart`/`stop`/`start`, or `restart@other`) acts on the container on match.
+- **trigger_on** (`count` + `timeframe`) delays a trigger until N matches in a window; **all_of** requires all members to match the same line.
+- **templates** (`title_template`, `message_template`) are Jinja2 with vars like `{{ container_name }}`, `{{ keywords }}`, `{{ log_entry }}`.
+
+Authoritative references: [full config reference](https://github.com/clemcer/loggifly/blob/main/docs/configs/config_reference.yaml) · [config guide](https://clemcer.github.io/loggifly/guide/config/).
+
+## Verify it's running
 
 ```bash
-labby doctor service loggifly
+docker ps --filter name=loggifly
+docker logs --tail 30 loggifly      # look for "config reloaded" and match/notification events
 ```
 
 ## When NOT to use this skill
 
-- The user is asking about a different lab service — load that service's skill instead.
-- The user is asking about `lab` itself (CLI internals, install, gateway, doctor across all services) — that's operator-tier, not `loggifly`-specific.
+- The user is asking about a different homelab service — load that service's skill instead.
+- The user wants ad-hoc log search across containers (not standing alerts) — use Docker/`docker logs` or a log-aggregation tool, not LoggiFly config.

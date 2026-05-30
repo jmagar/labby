@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "linkding": {
-      "command": "lab",
-      "args": ["mcp", "--services", "linkding"]
-    }
-  }
-}

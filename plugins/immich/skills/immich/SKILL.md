@@ -1,57 +1,49 @@
 ---
 name: immich
-description: Lab's Immich integration — Self-hosted photo and video management. Use when the user wants to manage their Immich instance, or invokes `lab immich` / `mcp__lab__immich`. Calls the MCP tool first, falls back to the CLI if MCP is unavailable.
+description: Immich — self-hosted photo and video management. Use when the user wants to check their Immich server, look up their profile, or search photos and videos. Talks directly to the Immich REST API.
 ---
 
 # Immich
 
-Self-hosted photo and video management. Exposes **6 actions** via the `lab` homelab control plane.
+Self-hosted photo and video management. Talk to it directly over the Immich REST API (served under `/api`).
 
 ## How to call it
 
-**Prefer the MCP tool. Fall back to the CLI only when MCP is unavailable.**
-
-### MCP (preferred)
-
-One tool: `mcp__lab__immich`. Dispatch shape: `{ "action": "<name>", "params": {...} }`.
-
-Discover actions live:
-```json
-{ "action": "help" }
-{ "action": "schema", "params": { "action": "<name>" } }
-```
-
-Full action catalog: [`references/mcp.md`](references/mcp.md).
-
-### CLI fallback
+Read the base URL and API key from `~/.lab/.env`:
 
 ```bash
-lab immich --help
-lab immich <action> --help
-labby --json immich <action> ...
+IMMICH_URL=$(grep -E '^IMMICH_URL='     ~/.lab/.env | cut -d= -f2-)
+IMMICH_API_KEY=$(grep -E '^IMMICH_API_KEY=' ~/.lab/.env | cut -d= -f2-)
+API=("$IMMICH_URL/api" -H "x-api-key: $IMMICH_API_KEY")
 ```
 
-CLI mirrors MCP actions; dots become dashes (`server.health` → `server-health`). Full CLI surface: [`references/cli.md`](references/cli.md).
+Authentication is the `x-api-key: <key>` header on every request. Never echo the key.
 
-## Highlights
+> `IMMICH_URL` / `IMMICH_API_KEY` may be unset in `~/.lab/.env` — populate them before use.
 
-- `server.health` — Check Immich server health
-- `server.info` — Get Immich server info and stats
-- `server.version` — Get Immich version
-- `user.me` — Get current user profile
-- `asset.search` — Search photos and videos
-- `asset.get` — Get details for a specific asset
+## Common operations
+
+| Intent | Request |
+|---|---|
+| Health | `curl -sS -H "x-api-key: $IMMICH_API_KEY" "$IMMICH_URL/api/server/ping"` → `{"res":"pong"}` |
+| Version | `curl -sS -H "x-api-key: $IMMICH_API_KEY" "$IMMICH_URL/api/server/version"` |
+| Server about / info | `curl -sS -H "x-api-key: $IMMICH_API_KEY" "$IMMICH_URL/api/server/about"` |
+| Server statistics | `curl -sS -H "x-api-key: $IMMICH_API_KEY" "$IMMICH_URL/api/server/statistics"` |
+| Current user (me) | `curl -sS -H "x-api-key: $IMMICH_API_KEY" "$IMMICH_URL/api/users/me"` |
+| Search assets (metadata) | `curl -sS -X POST -H "x-api-key: $IMMICH_API_KEY" -H 'Content-Type: application/json' "$IMMICH_URL/api/search/metadata" -d '{"query":"beach"}'` |
+| Get one asset | `curl -sS -H "x-api-key: $IMMICH_API_KEY" "$IMMICH_URL/api/assets/<id>"` |
+
+Full API reference: <https://api.immich.app/> (OpenAPI). The `/api/search/metadata` body accepts the full Immich search filter (album, person, type, date ranges, etc.).
 
 ## Configuration
 
-Credentials and base URLs live in `~/.lab/.env`. Onboard / re-extract with
-`labby extract scan` and `labby extract apply`. Verify connectivity:
+`IMMICH_URL` and `IMMICH_API_KEY` live in `~/.lab/.env`. Verify connectivity:
 
 ```bash
-labby doctor service immich
+curl -sS -H "x-api-key: $IMMICH_API_KEY" "$IMMICH_URL/api/server/ping" -w '\nHTTP %{http_code}\n'
 ```
 
 ## When NOT to use this skill
 
-- The user is asking about a different lab service — load that service's skill instead.
-- The user is asking about `lab` itself (CLI internals, install, gateway, doctor across all services) — that's operator-tier, not `immich`-specific.
+- The user is asking about a different homelab service — load that service's skill instead.
+- The user wants to bulk-upload or sync photos — use the official `immich` CLI, not ad-hoc curl.

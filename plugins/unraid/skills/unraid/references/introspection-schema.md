@@ -1,4 +1,4 @@
-> **⚠️ DEVELOPER REFERENCE ONLY** — Full GraphQL SDL from live API introspection. Use this to verify field names and types when adding new queries/mutations to the MCP server. Not for runtime agent usage.
+> **GraphQL SDL** — full schema from live API introspection. Use it to verify field names and types when composing `gql` queries (see [`SKILL.md`](../SKILL.md)).
 
 """
 Indicates exactly one field must be supplied and this field must not be `null`.

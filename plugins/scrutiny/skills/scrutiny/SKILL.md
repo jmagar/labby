@@ -1,54 +1,45 @@
 ---
 name: scrutiny
-description: Lab's Scrutiny integration — SMART hard drive health monitoring. Use when the user wants to manage their Scrutiny instance, or invokes `lab scrutiny` / `mcp__lab__scrutiny`. Calls the MCP tool first, falls back to the CLI if MCP is unavailable.
+description: Scrutiny — SMART hard-drive health monitoring. Use when the user wants to check drive health, view the dashboard summary, or inspect a device's SMART details on their Scrutiny instance. Talks directly to the Scrutiny web API.
 ---
 
 # Scrutiny
 
-Smart hard drive health monitoring. Exposes **3 actions** via the `lab` homelab control plane.
+SMART hard-drive health monitoring. Talk to it directly over the Scrutiny web API (served under `/api`).
 
 ## How to call it
 
-**Prefer the MCP tool. Fall back to the CLI only when MCP is unavailable.**
-
-### MCP (preferred)
-
-One tool: `mcp__lab__scrutiny`. Dispatch shape: `{ "action": "<name>", "params": {...} }`.
-
-Discover actions live:
-```json
-{ "action": "help" }
-{ "action": "schema", "params": { "action": "<name>" } }
-```
-
-Full action catalog: [`references/mcp.md`](references/mcp.md).
-
-### CLI fallback
+Read the base URL from `~/.lab/.env`:
 
 ```bash
-lab scrutiny --help
-lab scrutiny <action> --help
-labby --json scrutiny <action> ...
+SCRUTINY_URL=$(grep -E '^SCRUTINY_URL=' ~/.lab/.env | cut -d= -f2-)
 ```
 
-CLI mirrors MCP actions; dots become dashes (`server.health` → `server-health`). Full CLI surface: [`references/cli.md`](references/cli.md).
+Scrutiny's web API is unauthenticated by default.
 
-## Highlights
+> `SCRUTINY_URL` may be unset in `~/.lab/.env` — populate it before use.
 
-- `server.health` — Check Scrutiny server health
-- `dashboard.summary` — Get drive health dashboard summary
-- `device.list` — List all monitored devices
+## Common operations
+
+| Intent | Request |
+|---|---|
+| Health | `curl -sS "$SCRUTINY_URL/api/health" -w '\nHTTP %{http_code}\n'` |
+| Dashboard summary (all devices) | `curl -sS "$SCRUTINY_URL/api/summary"` |
+| List monitored devices | `curl -sS "$SCRUTINY_URL/api/summary" \| python3 -c 'import sys,json;print(*json.load(sys.stdin)["data"]["summary"].keys(),sep="\n")'` |
+| Device SMART details | `curl -sS "$SCRUTINY_URL/api/device/<wwn>/details"` |
+| Temperature history | `curl -sS "$SCRUTINY_URL/api/summary/temp"` |
+
+The device list comes from the `summary` payload — `GET /api/summary` returns `data.summary` keyed by device WWN, each with its latest SMART status. Use a WWN from there for the `device/<wwn>/details` call.
 
 ## Configuration
 
-Credentials and base URLs live in `~/.lab/.env`. Onboard / re-extract with
-`labby extract scan` and `labby extract apply`. Verify connectivity:
+`SCRUTINY_URL` lives in `~/.lab/.env`. Verify connectivity:
 
 ```bash
-labby doctor service scrutiny
+curl -sS "$SCRUTINY_URL/api/health" -w '\nHTTP %{http_code}\n'
 ```
 
 ## When NOT to use this skill
 
-- The user is asking about a different lab service — load that service's skill instead.
-- The user is asking about `lab` itself (CLI internals, install, gateway, doctor across all services) — that's operator-tier, not `scrutiny`-specific.
+- The user is asking about a different homelab service — load that service's skill instead.
+- The user wants raw `smartctl` output on a specific host — that's an SSH/shell task, not Scrutiny.

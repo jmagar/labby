@@ -216,16 +216,10 @@ tailscale ping my-server
 
 ---
 
-## 🔧 Agent Tool Usage Requirements
+## 🔧 Agent Tool Usage
 
-**CRITICAL:** When invoking scripts from this skill via the zsh-tool, **ALWAYS use `pty: true`**.
+Run this skill's scripts with the **Bash** tool directly:
 
-Without PTY mode, command output will not be visible even though commands execute successfully.
-
-**Correct invocation pattern:**
-```typescript
-<invoke name="mcp__plugin_zsh-tool_zsh-tool__zsh">
-<parameter name="command">./skills/SKILL_NAME/scripts/SCRIPT.sh [args]</parameter>
-<parameter name="pty">true</parameter>
-</invoke>
+```bash
+./skills/tailscale/scripts/ts-api.sh [args]
 ```

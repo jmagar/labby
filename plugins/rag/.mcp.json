@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "rag": {
-      "command": "lab",
-      "args": ["mcp", "--services", "qdrant,tei"]
-    }
-  }
-}

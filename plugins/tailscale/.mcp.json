@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "tailscale": {
-      "command": "lab",
-      "args": ["mcp", "--services", "tailscale"]
-    }
-  }
-}

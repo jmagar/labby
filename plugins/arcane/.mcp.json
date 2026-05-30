@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "arcane": {
-      "command": "lab",
-      "args": ["mcp", "--services", "arcane"]
-    }
-  }
-}
