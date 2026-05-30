@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
-  "name": "lab",
+  "name": "labby",
   "description": "Skills and MCP configuration for the Lab homelab control plane.",
   "author": {
     "name": "Jacob Magar",
