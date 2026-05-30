@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Broadcastr event",
+  "type": "object",
+  "required": ["ts", "id", "tier", "category", "source", "emitter", "repo", "summary"],
+  "properties": {
+    "ts": { "type": "string", "format": "date-time", "description": "ISO-8601 UTC with millisecond precision" },
+    "id": { "type": "string", "pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$", "description": "ULID with evt_ prefix" },
+    "tier": { "type": "string", "enum": ["info", "alert"] },
+    "category": {
+      "type": "string",
+      "enum": [
+        "agent-presence", "commit", "pre-commit", "push", "plan",
+        "bead", "session-doc", "plan-exec", "branch", "stash",
+        "pr", "cargo", "container", "ci"
+      ]
+    },
+    "source": { "type": "string", "enum": ["claude-hook", "git-hook", "inotify", "poll", "cli"] },
+    "emitter": {
+      "type": "object",
+      "required": ["agent", "host", "user"],
+      "properties": {
+        "session_id": { "type": ["string", "null"] },
+        "agent": { "type": "string", "enum": ["claude-code", "user"] },
+        "host": { "type": "string" },
+        "user": { "type": "string" }
+      }
+    },
+    "repo": { "type": "string" },
+    "branch": { "type": "string" },
+    "summary": { "type": "string", "maxLength": 500 },
+    "data": { "type": "object" }
+  },
+  "additionalProperties": false
+}

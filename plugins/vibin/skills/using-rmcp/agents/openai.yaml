@@ -1,0 +1,4 @@
+interface:
+  display_name: "Using RMCP"
+  short_description: "This skill covers building, modifying, and debugging MCP..."
+  default_prompt: "Use $using-rmcp for this skill covers building, modifying, and debugging MCP."

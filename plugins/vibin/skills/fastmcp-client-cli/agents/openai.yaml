@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fastmcp Client CLI"
+  short_description: "Query MCP servers from the shell using fastmcp discover..."
+  default_prompt: "Use $fastmcp-client-cli to query MCP servers from the shell using fastmcp discover."

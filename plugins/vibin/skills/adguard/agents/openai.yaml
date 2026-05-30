@@ -1,0 +1,4 @@
+interface:
+  display_name: "Adguard"
+  short_description: "Lab's Adguard integration — DNS-level ad blocking and network..."
+  default_prompt: "Use $adguard for lab's Adguard integration — DNS-level ad blocking and network."

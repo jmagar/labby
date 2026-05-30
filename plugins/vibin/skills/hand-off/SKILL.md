@@ -16,7 +16,7 @@ argument-hint: [path-to-session-md]
 - Active PR: !`gh pr view --json number,title,url 2>/dev/null || echo "none"`
 - Working directory: !`pwd`
 - Argument: $ARGUMENTS
-- Latest session files: !`ls -t "$(git rev-parse --show-toplevel 2>/dev/null)/docs/sessions"/*.md 2>/dev/null | head -5`
+- Latest session files: !`ls -t "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/docs/sessions"/*.md 2>/dev/null | head -5`
 
 # Hand-Off: Resume Prior Session
 
@@ -26,6 +26,7 @@ Your job is to load the prior session's `save-to-md` log and brief the user on w
 
 - If `$ARGUMENTS` is non-empty, treat it as the path (resolve relative paths from the repo root).
 - Otherwise, use the most recent file from `docs/sessions/` (first entry in the "Latest session files" list above).
+- To pick an older log, the user can invoke this skill with the file path as `$ARGUMENTS`.
 - If no session file is found, stop and tell the user — suggest running `save-to-md` next time they want a hand-off to work.
 
 ## Step 2: Read the session file

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dozzle"
+  short_description: "Direct Dozzle API, auth, and MCP workflow"
+  default_prompt: "Use $dozzle to inspect Dozzle health, logs, auth setup, or MCP through the direct HTTP API."

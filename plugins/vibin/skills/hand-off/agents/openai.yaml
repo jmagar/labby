@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hand Off"
+  short_description: "Load the most recent save-to-md session log into a fresh..."
+  default_prompt: "Use $hand-off to load the most recent save-to-md session log into a fresh."

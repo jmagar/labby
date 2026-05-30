@@ -2760,7 +2760,9 @@ mod tests {
         // TrustedLocal is execute-capable too.
         assert!(
             super::destructive_permitted(
-                super::CodeModeSurface::Mcp { allow_destructive_actions: false },
+                super::CodeModeSurface::Mcp {
+                    allow_destructive_actions: false
+                },
                 &super::CodeModeCaller::TrustedLocal,
             ),
             "TrustedLocal caller must be permitted destructive actions"

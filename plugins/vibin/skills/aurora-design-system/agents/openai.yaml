@@ -1,0 +1,4 @@
+interface:
+  display_name: "Aurora Design System"
+  short_description: "Building, modifying, or styling React/Next"
+  default_prompt: "Use $aurora-design-system for building, modifying, or styling React/Next."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Screenshots"
+  short_description: "Bridge for viewing the user's own desktop when they're SSH'd..."
+  default_prompt: "Use $screenshots for bridge for viewing the user's own desktop when they're SSH'd."

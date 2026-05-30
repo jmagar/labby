@@ -43,8 +43,11 @@ const CODE_MODE_MAX_CODE_BYTES: usize = 20_000;
 const CODE_EXECUTE_DESCRIPTION: &str = "\
 Execute a JavaScript async arrow function in the Code Mode sandbox. Pass `code` as \
 `async () => { ... }` — the sandbox awaits its return value (same shape as search). \
-Every upstream MCP tool is pre-declared as a typed TypeScript helper in the `codemode` \
-namespace — read the types, call the functions. No separate discovery step required.
+Discover tool ids and their parameter schemas with `search` FIRST — schemas are not \
+injected into this sandbox, so `search` is how you learn what arguments a tool takes. \
+Every upstream MCP tool is then callable two ways: `callTool(id, params)`, or the \
+auto-generated `codemode.<upstream>.<tool>(params)` helper (a thin wrapper over the \
+same callTool, named from the live catalog — handy once `search` has told you the id).
 
 ```ts
 // code is an async arrow function; whatever it returns becomes `result`.
@@ -58,8 +61,10 @@ async () => {
 reads instead of awaiting serially.
 
 ```ts
-// codemode.<upstream>.<tool>() helpers are auto-generated from the live catalog.
-// Use them. callTool is the escape hatch for dynamic IDs or truncated catalogs.
+// codemode.<upstream>.<tool>() helpers are auto-generated from the live catalog and
+// are callable, but UNTYPED — there is no schema in this sandbox to introspect. Run
+// `search` first to learn each tool's params. callTool is the direct form and the
+// escape hatch for dynamic ids or truncated catalogs.
 declare function callTool<T = unknown>(
   id: `upstream::${string}::${string}`,
   params: Record<string, unknown>

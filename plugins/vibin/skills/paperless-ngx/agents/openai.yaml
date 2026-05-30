@@ -1,0 +1,4 @@
+interface:
+  display_name: "Paperless NGX"
+  short_description: "Manage documents in Paperless-ngx document management system"
+  default_prompt: "Use $paperless-ngx to manage documents in Paperless-ngx document management system."

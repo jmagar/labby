@@ -1,0 +1,4 @@
+interface:
+  display_name: "Homelab Map"
+  short_description: "This skill should be used whenever a prompt mentions any of..."
+  default_prompt: "Use $homelab-map for this skill should be used whenever a prompt mentions any of."

@@ -1,0 +1,36 @@
+{
+  "name": "plexus",
+  "version": "0.1.0",
+  "description": "Remote-device memory and live operating context for host-specific work.",
+  "author": {
+    "name": "Jacob Magar",
+    "email": "jmagar@gmail.com"
+  },
+  "license": "MIT",
+  "keywords": [
+    "remote-ops",
+    "homelab",
+    "context",
+    "syslog",
+    "ssh"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Plexus",
+    "shortDescription": "Host-specific REMOTE.md memory with live probes",
+    "longDescription": "Plexus gives agents a CLAUDE.md-style memory file for each remote host, then combines it with live SSH, Tailscale, Docker, systemd, and syslog-mcp context before operating.",
+    "developerName": "Jacob Magar",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Automation"
+    ],
+    "defaultPrompt": [
+      "Use Plexus to inspect squirts before changing it.",
+      "Load live remote context for dookie.",
+      "Summarize recent syslog activity for a host."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Fix CI"
+  short_description: "Debug or fix failing GitHub PR checks / GitHub Actions runs"
+  default_prompt: "Use $gh-fix-ci to debug or fix failing GitHub PR checks / GitHub Actions runs."

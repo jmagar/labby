@@ -1,7 +1,0 @@
-{
-  "name": "rust-bin-tools",
-  "description": "Rust project workflow tools: spec enforcement, domain scaffolding, release, security review, MCP tooling, and Aurora design compliance",
-  "author": {
-    "name": "Jacob Magar"
-  }
-}

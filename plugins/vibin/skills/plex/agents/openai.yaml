@@ -1,0 +1,4 @@
+interface:
+  display_name: "Plex"
+  short_description: "Control Plex Media Server - browse libraries, search media..."
+  default_prompt: "Use $plex to control Plex Media Server - browse libraries, search media."

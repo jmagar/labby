@@ -1,0 +1,947 @@
+<!--
+  Aurora-styled session log template — used by save-to-md when output is .html
+  Replace every {{TOKEN}} placeholder. Drop entire <section> blocks for any
+  "omit if none" content that has no data, matching the markdown skill's rules.
+
+  Design intent:
+  - Scan first, read second. Hero + at-a-glance stat row up top.
+  - Sticky ToC sidebar with section icons.
+  - Tier 2 panels with gradient accent rail + Lucide icon header.
+  - Collapsible <details> for long lists (commands, beads, sequence).
+  - Status badges everywhere, icon + label, semantic Aurora tokens.
+  - No emoji. Lucide-style inline SVG (stroke 1.75, currentColor) only.
+-->
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{TITLE}} — Session log</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Inter:wght@400;480;560;650&family=JetBrains+Mono:wght@400;520;600&display=swap" />
+  <style>
+    /* Aurora token subset — derived from registry/aurora/styles/aurora.css.
+       Only what this artifact actually uses; do not expand without reason. */
+    :root, .dark {
+      --aurora-page-bg:        #07131c;
+      --aurora-nav-bg:         #07111a;
+      --aurora-panel-medium:   #102330;
+      --aurora-panel-strong:   #13293a;
+      --aurora-control-surface:#0c1a24;
+      --aurora-hover-bg:       #17364b;
+
+      --aurora-border-default: #1d3d4e;
+      --aurora-border-strong:  #24536c;
+
+      --aurora-text-primary:   #e6f4fb;
+      --aurora-text-muted:     #a7bcc9;
+
+      --aurora-accent-primary: #29b6f6;
+      --aurora-accent-strong:  #67cbfa;
+      --aurora-accent-deep:    #1c7fac;
+      --aurora-accent-violet:  #a78bfa;
+      --aurora-accent-pink:    #f9a8c4;
+
+      --aurora-success: #7dd3c7;
+      --aurora-warn:    #c6a36b;
+      --aurora-error:   #c78490;
+      --aurora-info:    #72c8f5;
+      --aurora-neutral: #91a8b6;
+
+      --aurora-success-surface:    color-mix(in srgb, var(--aurora-success) 12%, var(--aurora-panel-medium));
+      --aurora-success-border:     color-mix(in srgb, var(--aurora-success) 34%, transparent);
+      --aurora-success-foreground: #dcfbf6;
+      --aurora-warn-surface:       color-mix(in srgb, var(--aurora-warn) 12%, var(--aurora-panel-medium));
+      --aurora-warn-border:        color-mix(in srgb, var(--aurora-warn) 34%, transparent);
+      --aurora-warn-foreground:    #f8ead0;
+      --aurora-error-surface:      color-mix(in srgb, var(--aurora-error) 12%, var(--aurora-panel-medium));
+      --aurora-error-border:       color-mix(in srgb, var(--aurora-error) 34%, transparent);
+      --aurora-error-foreground:   #fde6eb;
+      --aurora-info-surface:       color-mix(in srgb, var(--aurora-info) 12%, var(--aurora-panel-medium));
+      --aurora-info-border:        color-mix(in srgb, var(--aurora-info) 34%, transparent);
+      --aurora-info-foreground:    #dff5ff;
+      --aurora-neutral-surface:    color-mix(in srgb, var(--aurora-neutral) 10%, var(--aurora-panel-medium));
+      --aurora-neutral-border:     color-mix(in srgb, var(--aurora-neutral) 28%, transparent);
+      --aurora-neutral-foreground: #d7e3ea;
+      --aurora-violet-surface:     color-mix(in srgb, var(--aurora-accent-violet) 14%, var(--aurora-panel-medium));
+      --aurora-violet-border:      color-mix(in srgb, var(--aurora-accent-violet) 36%, transparent);
+
+      --aurora-shadow-medium: 0 12px 24px rgba(0, 0, 0, 0.18);
+      --aurora-shadow-strong: 0 20px 38px rgba(0, 0, 0, 0.26);
+      --aurora-highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.055);
+
+      --aurora-radius-1: 14px;
+      --aurora-radius-2: 18px;
+      --aurora-radius-3: 22px;
+
+      --aurora-font-display: 'Manrope', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --aurora-font-sans:    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      --aurora-font-mono:    'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+
+      --aurora-shell-bg:
+        radial-gradient(circle at 12% 0%, rgba(41, 182, 246, 0.10), transparent 32%),
+        radial-gradient(circle at 88% 4%, rgba(167, 139, 250, 0.07), transparent 28%),
+        radial-gradient(circle at 50% 92%, rgba(28, 127, 172, 0.08), transparent 36%),
+        var(--aurora-page-bg);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+
+    body {
+      min-height: 100vh;
+      background: var(--aurora-shell-bg);
+      background-attachment: fixed;
+      color: var(--aurora-text-primary);
+      font-family: var(--aurora-font-sans);
+      font-size: 14px;
+      line-height: 1.62;
+      font-weight: 480;
+      font-feature-settings: "kern" 1, "liga" 1, "cv05" 1, "cv10" 1, "tnum" 0;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: geometricPrecision;
+    }
+
+    ::selection { background: color-mix(in srgb, var(--aurora-accent-primary) 38%, transparent); color: var(--aurora-text-primary); }
+
+    /* ───────── Layout ───────── */
+    .shell {
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr);
+      gap: 36px;
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 40px 32px 96px;
+    }
+
+    @media (max-width: 960px) {
+      .shell { grid-template-columns: 1fr; padding: 24px 18px 64px; gap: 24px; }
+      .toc { position: static !important; }
+    }
+
+    /* ───────── Sticky ToC ───────── */
+    aside.toc {
+      position: sticky;
+      top: 24px;
+      align-self: start;
+      max-height: calc(100vh - 48px);
+      overflow-y: auto;
+      border-radius: var(--aurora-radius-2);
+      background: var(--aurora-nav-bg);
+      border: 1px solid var(--aurora-border-default);
+      padding: 16px 12px;
+    }
+    .toc .toc-label {
+      font-size: 10.5px;
+      font-weight: 650;
+      letter-spacing: 0.095em;
+      text-transform: uppercase;
+      color: var(--aurora-text-muted);
+      padding: 4px 10px 10px;
+    }
+    .toc a {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      border-radius: 10px;
+      color: var(--aurora-text-muted);
+      text-decoration: none;
+      font-size: 12.5px;
+      font-weight: 560;
+      letter-spacing: 0.005em;
+      line-height: 1.3;
+      transition: background 120ms ease, color 120ms ease;
+    }
+    .toc a:hover {
+      background: color-mix(in srgb, var(--aurora-hover-bg) 60%, transparent);
+      color: var(--aurora-text-primary);
+    }
+    .toc a.active {
+      color: var(--aurora-text-primary);
+      background: color-mix(in srgb, var(--aurora-accent-primary) 14%, transparent);
+      box-shadow: inset 2px 0 0 var(--aurora-accent-primary);
+    }
+    .toc svg { width: 14px; height: 14px; flex: 0 0 14px; color: var(--aurora-accent-strong); }
+
+    /* ───────── Hero ───────── */
+    .hero {
+      border-radius: var(--aurora-radius-3);
+      background:
+        linear-gradient(135deg, color-mix(in srgb, var(--aurora-accent-primary) 12%, var(--aurora-panel-strong)) 0%, var(--aurora-panel-strong) 60%),
+        var(--aurora-panel-strong);
+      border: 1px solid var(--aurora-border-strong);
+      box-shadow: var(--aurora-shadow-strong), var(--aurora-highlight-strong);
+      padding: 28px 30px;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 95% 0%, color-mix(in srgb, var(--aurora-accent-violet) 14%, transparent), transparent 40%);
+      pointer-events: none;
+    }
+    .hero > * { position: relative; }
+    .hero .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 10.5px; font-weight: 650; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--aurora-text-muted);
+      margin: 0 0 12px;
+    }
+    .hero .eyebrow svg { width: 13px; height: 13px; color: var(--aurora-accent-strong); }
+    h1.title {
+      font-family: var(--aurora-font-display);
+      font-size: clamp(28px, 4.6vw, 42px);
+      font-weight: 800;
+      letter-spacing: -0.038em;
+      line-height: 1.05;
+      margin: 0 0 6px;
+      background: linear-gradient(180deg, var(--aurora-text-primary) 0%, color-mix(in srgb, var(--aurora-text-primary) 78%, var(--aurora-accent-strong)) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .hero .summary {
+      font-family: var(--aurora-font-sans);
+      font-size: 15px;
+      line-height: 1.55;
+      color: var(--aurora-text-muted);
+      max-width: 72ch;
+      margin: 10px 0 0;
+    }
+    .hero .summary strong { color: var(--aurora-text-primary); font-weight: 560; }
+
+    /* ───────── Stat row ───────── */
+    .stat-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+    .stat {
+      border-radius: var(--aurora-radius-1);
+      background: color-mix(in srgb, var(--aurora-control-surface) 88%, transparent);
+      border: 1px solid var(--aurora-border-default);
+      padding: 12px 14px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .stat-head { display: flex; align-items: center; gap: 6px; color: var(--aurora-text-muted); font-size: 10.5px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
+    .stat-head svg { width: 13px; height: 13px; color: var(--aurora-accent-strong); }
+    .stat-value { font-family: var(--aurora-font-display); font-size: 24px; font-weight: 800; letter-spacing: -0.02em; line-height: 1; color: var(--aurora-text-primary); }
+    .stat-sub { font-size: 11px; color: var(--aurora-text-muted); font-variant-numeric: tabular-nums; }
+
+    /* ───────── Metadata strip ───────── */
+    .meta {
+      margin-top: 20px;
+      border-radius: var(--aurora-radius-2);
+      background: var(--aurora-panel-medium);
+      border: 1px solid var(--aurora-border-default);
+      box-shadow: var(--aurora-shadow-medium), inset 0 1px 0 rgba(255,255,255,0.035);
+      padding: 16px 20px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px 28px;
+    }
+    .meta .item { min-width: 0; }
+    .meta dt {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 10px; font-weight: 650; letter-spacing: 0.085em; text-transform: uppercase;
+      color: var(--aurora-text-muted);
+      margin: 0 0 3px;
+    }
+    .meta dt svg { width: 11px; height: 11px; color: var(--aurora-accent-deep); }
+    .meta dd {
+      margin: 0;
+      font-family: var(--aurora-font-mono);
+      font-size: 12px;
+      font-weight: 520;
+      color: var(--aurora-text-primary);
+      overflow-wrap: anywhere;
+    }
+    .meta dd.plain { font-family: var(--aurora-font-sans); font-weight: 480; }
+    .meta a { color: var(--aurora-accent-strong); text-decoration: none; border-bottom: 1px dashed color-mix(in srgb, var(--aurora-accent-strong) 50%, transparent); }
+    .meta a:hover { color: var(--aurora-accent-primary); }
+
+    /* ───────── Panels (Tier 2) ───────── */
+    section.panel {
+      position: relative;
+      border-radius: var(--aurora-radius-3);
+      background: var(--aurora-panel-strong);
+      border: 1px solid var(--aurora-border-strong);
+      box-shadow: var(--aurora-shadow-strong), var(--aurora-highlight-strong);
+      padding: 24px 28px;
+      margin-top: 18px;
+      scroll-margin-top: 24px;
+    }
+    section.panel > header.panel-head {
+      display: flex; align-items: center; gap: 12px;
+      margin: -4px 0 16px;
+    }
+    .panel-head .icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 32px; height: 32px;
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--aurora-accent-primary) 14%, var(--aurora-control-surface));
+      border: 1px solid color-mix(in srgb, var(--aurora-accent-primary) 32%, transparent);
+      color: var(--aurora-accent-strong);
+      box-shadow: 0 0 18px color-mix(in srgb, var(--aurora-accent-primary) 18%, transparent);
+    }
+    .panel-head .icon svg { width: 16px; height: 16px; }
+    .panel-head h2 {
+      font-family: var(--aurora-font-display);
+      font-size: 19px;
+      font-weight: 760;
+      letter-spacing: -0.018em;
+      line-height: 1.15;
+      margin: 0;
+      color: var(--aurora-text-primary);
+    }
+    .panel-head .anchor {
+      margin-left: auto;
+      color: var(--aurora-text-muted);
+      opacity: 0;
+      transition: opacity 120ms ease, color 120ms ease;
+      text-decoration: none;
+      padding: 4px;
+      border-radius: 6px;
+    }
+    .panel-head .anchor svg { width: 14px; height: 14px; }
+    section.panel:hover .panel-head .anchor { opacity: 1; }
+    .panel-head .anchor:hover { color: var(--aurora-accent-primary); background: color-mix(in srgb, var(--aurora-hover-bg) 50%, transparent); }
+
+    /* Variant-color panel rails (subtle) */
+    section.panel.tone-violet .panel-head .icon { background: var(--aurora-violet-surface); border-color: var(--aurora-violet-border); color: var(--aurora-accent-violet); box-shadow: 0 0 18px color-mix(in srgb, var(--aurora-accent-violet) 22%, transparent); }
+    section.panel.tone-warn   .panel-head .icon { background: var(--aurora-warn-surface);   border-color: var(--aurora-warn-border);   color: var(--aurora-warn);    box-shadow: 0 0 18px color-mix(in srgb, var(--aurora-warn) 22%, transparent); }
+    section.panel.tone-success .panel-head .icon { background: var(--aurora-success-surface); border-color: var(--aurora-success-border); color: var(--aurora-success); box-shadow: 0 0 18px color-mix(in srgb, var(--aurora-success) 22%, transparent); }
+    section.panel.tone-error  .panel-head .icon { background: var(--aurora-error-surface);  border-color: var(--aurora-error-border);  color: var(--aurora-error);   box-shadow: 0 0 18px color-mix(in srgb, var(--aurora-error) 22%, transparent); }
+
+    /* ───────── Prose ───────── */
+    section.panel p { margin: 0 0 10px; max-width: 78ch; }
+    section.panel p:last-child { margin-bottom: 0; }
+    section.panel ul, section.panel ol { margin: 0 0 10px; padding-left: 22px; max-width: 78ch; }
+    section.panel li { margin: 4px 0; }
+    section.panel li::marker { color: var(--aurora-accent-deep); }
+    section.panel strong { color: var(--aurora-text-primary); font-weight: 650; }
+    section.panel em { color: var(--aurora-text-muted); font-style: italic; }
+    section.panel a { color: var(--aurora-accent-strong); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--aurora-accent-strong) 30%, transparent); }
+    section.panel a:hover { color: var(--aurora-accent-primary); border-bottom-color: var(--aurora-accent-primary); }
+
+    h3.sub {
+      font-family: var(--aurora-font-display);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.012em;
+      text-transform: uppercase;
+      color: var(--aurora-text-muted);
+      margin: 18px 0 8px;
+    }
+
+    /* ───────── Code ───────── */
+    code, kbd, .mono {
+      font-family: var(--aurora-font-mono);
+      font-size: 0.92em;
+      font-weight: 520;
+      font-feature-settings: "calt" 1, "ss01" 1;
+    }
+    code:not(pre code) {
+      background: color-mix(in srgb, var(--aurora-control-surface) 88%, transparent);
+      border: 1px solid var(--aurora-border-default);
+      border-radius: 6px;
+      padding: 1.5px 6px;
+      color: var(--aurora-text-primary);
+    }
+    pre {
+      background: var(--aurora-control-surface);
+      border: 1px solid var(--aurora-border-default);
+      border-radius: var(--aurora-radius-1);
+      padding: 14px 16px;
+      overflow-x: auto;
+      margin: 10px 0;
+      font-size: 12.5px;
+      line-height: 1.55;
+    }
+    pre code { background: transparent; border: none; padding: 0; color: var(--aurora-text-primary); }
+
+    /* ───────── Tables ───────── */
+    .table-wrap {
+      overflow-x: auto;
+      border-radius: var(--aurora-radius-1);
+      border: 1px solid var(--aurora-border-default);
+      background: color-mix(in srgb, var(--aurora-control-surface) 50%, transparent);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: var(--aurora-font-sans);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--aurora-border-default);
+      vertical-align: top;
+    }
+    th {
+      font-size: 10.5px;
+      font-weight: 650;
+      letter-spacing: 0.085em;
+      text-transform: uppercase;
+      color: var(--aurora-text-muted);
+      background: color-mix(in srgb, var(--aurora-nav-bg) 70%, transparent);
+      border-bottom: 1px solid var(--aurora-border-strong);
+      position: sticky; top: 0;
+    }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr { transition: background 100ms ease; }
+    tbody tr:hover td { background: color-mix(in srgb, var(--aurora-hover-bg) 38%, transparent); }
+    td code { word-break: break-word; }
+
+    /* ───────── Badges ───────── */
+    .badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-family: var(--aurora-font-sans);
+      font-size: 11px; font-weight: 560; letter-spacing: 0.012em;
+      padding: 3px 9px;
+      border-radius: 999px;
+      border: 1px solid var(--aurora-neutral-border);
+      background: var(--aurora-neutral-surface);
+      color: var(--aurora-neutral-foreground);
+      white-space: nowrap;
+      line-height: 1.2;
+    }
+    .badge svg { width: 11px; height: 11px; }
+    .badge.pass, .badge.created  { background: var(--aurora-success-surface); border-color: var(--aurora-success-border); color: var(--aurora-success-foreground); }
+    .badge.fail, .badge.deleted  { background: var(--aurora-error-surface);   border-color: var(--aurora-error-border);   color: var(--aurora-error-foreground); }
+    .badge.warn, .badge.renamed  { background: var(--aurora-warn-surface);    border-color: var(--aurora-warn-border);    color: var(--aurora-warn-foreground); }
+    .badge.info, .badge.modified { background: var(--aurora-info-surface);    border-color: var(--aurora-info-border);    color: var(--aurora-info-foreground); }
+    .badge.ai    { background: var(--aurora-violet-surface); border-color: var(--aurora-violet-border); color: #ecdfff; }
+
+    /* ───────── Callouts ───────── */
+    .request-quote {
+      border-left: 3px solid var(--aurora-accent-primary);
+      background: color-mix(in srgb, var(--aurora-accent-primary) 9%, transparent);
+      padding: 14px 16px 14px 18px;
+      border-radius: 10px;
+      font-family: var(--aurora-font-display);
+      font-size: 16px;
+      font-weight: 500;
+      font-style: italic;
+      line-height: 1.5;
+      color: var(--aurora-text-primary);
+      margin: 0;
+      position: relative;
+    }
+    .request-quote::before {
+      content: "“";
+      position: absolute;
+      top: -8px; left: 8px;
+      font-family: var(--aurora-font-display);
+      font-size: 42px;
+      font-style: normal;
+      color: color-mix(in srgb, var(--aurora-accent-primary) 60%, transparent);
+      line-height: 1;
+    }
+    .request-quote p { margin: 0 0 0 14px; }
+
+    /* ───────── Collapsibles ───────── */
+    details.collapsible {
+      border: 1px solid var(--aurora-border-default);
+      border-radius: var(--aurora-radius-1);
+      background: color-mix(in srgb, var(--aurora-control-surface) 55%, transparent);
+      margin: 8px 0;
+    }
+    details.collapsible > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 10px 14px;
+      display: flex; align-items: center; gap: 10px;
+      font-size: 12.5px;
+      font-weight: 560;
+      color: var(--aurora-text-primary);
+      border-radius: var(--aurora-radius-1);
+      user-select: none;
+    }
+    details.collapsible > summary::-webkit-details-marker { display: none; }
+    details.collapsible > summary .chev { transition: transform 160ms ease; color: var(--aurora-accent-strong); }
+    details.collapsible[open] > summary .chev { transform: rotate(90deg); }
+    details.collapsible > summary:hover { background: color-mix(in srgb, var(--aurora-hover-bg) 35%, transparent); }
+    details.collapsible[open] > summary { border-bottom: 1px solid var(--aurora-border-default); border-radius: var(--aurora-radius-1) var(--aurora-radius-1) 0 0; }
+    details.collapsible .collapse-body { padding: 12px 14px; }
+    details.collapsible .collapse-body > :first-child { margin-top: 0; }
+    details.collapsible .collapse-body > :last-child  { margin-bottom: 0; }
+    details.collapsible .count {
+      margin-left: auto;
+      font-family: var(--aurora-font-mono); font-size: 11px;
+      color: var(--aurora-text-muted);
+      background: color-mix(in srgb, var(--aurora-border-default) 60%, transparent);
+      padding: 1px 8px; border-radius: 999px;
+    }
+
+    /* ───────── Timeline (sequence of events) ───────── */
+    ol.timeline { list-style: none; padding: 0; margin: 0; }
+    ol.timeline li {
+      position: relative;
+      padding: 6px 0 14px 28px;
+      border-left: 1px solid var(--aurora-border-default);
+      margin-left: 8px;
+    }
+    ol.timeline li::before {
+      counter-increment: step;
+      content: counter(step);
+      position: absolute;
+      left: -12px; top: 4px;
+      width: 22px; height: 22px;
+      border-radius: 999px;
+      background: var(--aurora-control-surface);
+      border: 1px solid var(--aurora-border-strong);
+      color: var(--aurora-accent-strong);
+      font-family: var(--aurora-font-mono);
+      font-size: 11px; font-weight: 600;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 0 3px var(--aurora-panel-strong);
+    }
+    ol.timeline { counter-reset: step; }
+    ol.timeline li:last-child { border-left-color: transparent; }
+
+    /* ───────── Footer ───────── */
+    footer.foot {
+      grid-column: 1 / -1;
+      color: var(--aurora-text-muted);
+      font-size: 11px;
+      letter-spacing: 0.018em;
+      text-align: center;
+      padding-top: 20px;
+      margin-top: 8px;
+      border-top: 1px solid var(--aurora-border-default);
+    }
+    footer.foot svg { width: 11px; height: 11px; vertical-align: -1px; color: var(--aurora-accent-deep); }
+
+    /* ───────── Scrollbars ───────── */
+    *::-webkit-scrollbar { width: 10px; height: 10px; }
+    *::-webkit-scrollbar-track { background: color-mix(in srgb, var(--aurora-control-surface) 72%, transparent); border-radius: 999px; }
+    *::-webkit-scrollbar-thumb {
+      background: linear-gradient(180deg,
+        color-mix(in srgb, var(--aurora-border-strong) 82%, var(--aurora-accent-primary)) 0%,
+        color-mix(in srgb, var(--aurora-border-strong) 70%, var(--aurora-accent-deep)) 100%);
+      border: 2px solid color-mix(in srgb, var(--aurora-control-surface) 80%, transparent);
+      border-radius: 999px;
+    }
+
+    /* ───────── Print ───────── */
+    @media print {
+      body { background: white; color: #0b1620; }
+      .toc, .panel-head .anchor { display: none; }
+      .shell { grid-template-columns: 1fr; padding: 0; max-width: 100%; }
+      section.panel, .hero, .meta { box-shadow: none; border-color: #ccd; background: white; color: #0b1620; }
+      a { color: #06529a; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ============================================================
+       SVG icon symbol library (Lucide line, stroke 1.75, 24x24)
+       Referenced via <svg><use href="#icon-name"/></svg>
+       ============================================================ -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+      <symbol id="i-git-branch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+      <symbol id="i-git-commit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><line x1="3" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="21" y2="12"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+      <symbol id="i-tree" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h7"/><path d="M3 12h11"/><path d="M3 18h7"/></symbol>
+      <symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+      <symbol id="i-file-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></symbol>
+      <symbol id="i-pull-request" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></symbol>
+      <symbol id="i-fingerprint" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12C2 6 6 2 12 2s10 4 10 10c0 2-1 4-2 5"/><path d="M5 19c2-2 3-4 3-7a4 4 0 0 1 8 0c0 4-2 7-5 9"/><path d="M9 14c0-1 1-2 3-2s3 1 3 2"/></symbol>
+      <symbol id="i-bead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="6" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="12" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M12 8.5v3M12 15.5v-3M8.5 12h3M15.5 12h-3"/></symbol>
+      <symbol id="i-quote" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c0-6 5-9 7-9V6H3v9h4M14 21c0-6 5-9 7-9V6h-7v9h4"/></symbol>
+      <symbol id="i-compass" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></symbol>
+      <symbol id="i-list-ordered" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h2v4"/><path d="M4 10h3"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></symbol>
+      <symbol id="i-lightbulb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12c1 1 2 2 2 4h4c0-2 1-3 2-4a7 7 0 0 0-4-12z"/></symbol>
+      <symbol id="i-scale" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M3 7h18"/><path d="M5 7l-2 6a4 4 0 0 0 8 0L9 7"/><path d="M19 7l-2 6a4 4 0 0 0 8 0l-2-6"/></symbol>
+      <symbol id="i-files" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><polyline points="15 2 15 7 20 7"/></symbol>
+      <symbol id="i-wrench" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 1 1 5 5L18 13l-7 7-3-3 7-7z"/></symbol>
+      <symbol id="i-broom" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4l6 6"/><path d="M11 7l6 6-7 7-4-2-2-4z"/><path d="M3 21l4-4"/></symbol>
+      <symbol id="i-toolbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="2"/><path d="M8 9V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3"/><line x1="3" y1="14" x2="21" y2="14"/></symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></symbol>
+      <symbol id="i-alert-triangle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
+      <symbol id="i-arrows-right-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/></symbol>
+      <symbol id="i-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></symbol>
+      <symbol id="i-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+      <symbol id="i-bookmark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></symbol>
+      <symbol id="i-help-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
+      <symbol id="i-arrow-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></symbol>
+      <symbol id="i-hash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></symbol>
+      <symbol id="i-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></symbol>
+      <symbol id="i-sparkles" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z"/><path d="M19 14l1 2 2 1-2 1-1 2-1-2-2-1 2-1z"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+      <symbol id="i-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></symbol>
+    </defs>
+  </svg>
+
+  <div class="shell">
+
+    <!-- ───────── Sticky ToC ───────── -->
+    <aside class="toc">
+      <div class="toc-label">On this page</div>
+      <nav>
+        <a href="#sec-request"><svg><use href="#i-quote"/></svg>Request</a>
+        <a href="#sec-overview"><svg><use href="#i-compass"/></svg>Overview</a>
+        <a href="#sec-sequence"><svg><use href="#i-list-ordered"/></svg>Sequence</a>
+        <a href="#sec-findings"><svg><use href="#i-lightbulb"/></svg>Findings</a>
+        <a href="#sec-decisions"><svg><use href="#i-scale"/></svg>Decisions</a>
+        <a href="#sec-files"><svg><use href="#i-files"/></svg>Files changed</a>
+        <a href="#sec-beads"><svg><use href="#i-bead"/></svg>Beads</a>
+        <a href="#sec-maint"><svg><use href="#i-broom"/></svg>Maintenance</a>
+        <a href="#sec-tools"><svg><use href="#i-toolbox"/></svg>Tools &amp; skills</a>
+        <a href="#sec-commands"><svg><use href="#i-terminal"/></svg>Commands</a>
+        <a href="#sec-errors"><svg><use href="#i-alert-triangle"/></svg>Errors</a>
+        <a href="#sec-behavior"><svg><use href="#i-arrows-right-left"/></svg>Behavior changes</a>
+        <a href="#sec-verify"><svg><use href="#i-check-circle"/></svg>Verification</a>
+        <a href="#sec-risks"><svg><use href="#i-shield"/></svg>Risks &amp; rollback</a>
+        <a href="#sec-nottaken"><svg><use href="#i-x"/></svg>Not taken</a>
+        <a href="#sec-refs"><svg><use href="#i-bookmark"/></svg>References</a>
+        <a href="#sec-questions"><svg><use href="#i-help-circle"/></svg>Open questions</a>
+        <a href="#sec-next"><svg><use href="#i-arrow-right"/></svg>Next steps</a>
+      </nav>
+    </aside>
+
+    <!-- ───────── Main column ───────── -->
+    <div>
+
+      <!-- ───── Hero ───── -->
+      <header class="hero">
+        <div class="eyebrow"><svg><use href="#i-clock"/></svg>Session log · {{DATE}}</div>
+        <h1 class="title">{{TITLE}}</h1>
+        <p class="summary">{{HERO_SUMMARY_HTML}}</p>
+
+        <!-- At-a-glance stat tiles. Drop any that don't apply. -->
+        <div class="stat-row">
+          <div class="stat">
+            <div class="stat-head"><svg><use href="#i-files"/></svg>Files changed</div>
+            <div class="stat-value">{{STAT_FILES}}</div>
+            <div class="stat-sub">{{STAT_FILES_SUB}}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-head"><svg><use href="#i-git-commit"/></svg>Commits</div>
+            <div class="stat-value">{{STAT_COMMITS}}</div>
+            <div class="stat-sub">{{STAT_COMMITS_SUB}}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-head"><svg><use href="#i-terminal"/></svg>Commands</div>
+            <div class="stat-value">{{STAT_COMMANDS}}</div>
+            <div class="stat-sub">{{STAT_COMMANDS_SUB}}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-head"><svg><use href="#i-bead"/></svg>Beads touched</div>
+            <div class="stat-value">{{STAT_BEADS}}</div>
+            <div class="stat-sub">{{STAT_BEADS_SUB}}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-head"><svg><use href="#i-check-circle"/></svg>Verifications</div>
+            <div class="stat-value">{{STAT_VERIFY}}</div>
+            <div class="stat-sub">{{STAT_VERIFY_SUB}}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-head"><svg><use href="#i-alert-triangle"/></svg>Errors</div>
+            <div class="stat-value">{{STAT_ERRORS}}</div>
+            <div class="stat-sub">{{STAT_ERRORS_SUB}}</div>
+          </div>
+        </div>
+
+        <!-- Metadata strip. Drop any .item whose value is unknown. -->
+        <dl class="meta" aria-label="Session metadata">
+          <div class="item"><dt><svg><use href="#i-clock"/></svg>Date</dt><dd>{{DATE}}</dd></div>
+          <div class="item"><dt><svg><use href="#i-link"/></svg>Repo</dt><dd><a href="{{REPO_URL}}">{{REPO_URL}}</a></dd></div>
+          <div class="item"><dt><svg><use href="#i-git-branch"/></svg>Branch</dt><dd>{{BRANCH}}</dd></div>
+          <div class="item"><dt><svg><use href="#i-git-commit"/></svg>HEAD</dt><dd>{{HEAD_SHA}}</dd></div>
+          <div class="item"><dt><svg><use href="#i-folder"/></svg>Working dir</dt><dd>{{WORKING_DIR}}</dd></div>
+          <div class="item"><dt><svg><use href="#i-tree"/></svg>Worktree</dt><dd>{{WORKTREE}}</dd></div>
+          <div class="item"><dt><svg><use href="#i-file-text"/></svg>Plan</dt><dd>{{PLAN_PATH}}</dd></div>
+          <div class="item"><dt><svg><use href="#i-pull-request"/></svg>PR</dt><dd class="plain">{{PR}}</dd></div>
+          <div class="item"><dt><svg><use href="#i-fingerprint"/></svg>Session id</dt><dd>{{SESSION_ID}}</dd></div>
+          <div class="item"><dt><svg><use href="#i-file-text"/></svg>Transcript</dt><dd>{{TRANSCRIPT_PATH}}</dd></div>
+          <div class="item"><dt><svg><use href="#i-bead"/></svg>Beads</dt><dd>{{BEADS_IDS}}</dd></div>
+        </dl>
+      </header>
+
+      <!-- ───── 1. User Request ───── -->
+      <section class="panel" id="sec-request">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-quote"/></svg></span>
+          <h2>User request</h2>
+          <a class="anchor" href="#sec-request" aria-label="Anchor"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        <blockquote class="request-quote"><p>{{USER_REQUEST}}</p></blockquote>
+      </section>
+
+      <!-- ───── 2. Session Overview ───── -->
+      <section class="panel" id="sec-overview">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-compass"/></svg></span>
+          <h2>Session overview</h2>
+          <a class="anchor" href="#sec-overview"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        {{SESSION_OVERVIEW_HTML}}
+      </section>
+
+      <!-- ───── 3. Sequence of Events ───── -->
+      <section class="panel" id="sec-sequence">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-list-ordered"/></svg></span>
+          <h2>Sequence of events</h2>
+          <a class="anchor" href="#sec-sequence"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        <ol class="timeline">
+          {{SEQUENCE_OF_EVENTS_LIST}}
+          <!-- Item template: <li><strong>Step title.</strong> Detail.</li> -->
+        </ol>
+      </section>
+
+      <!-- ───── 4. Key Findings ───── -->
+      <section class="panel" id="sec-findings">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-lightbulb"/></svg></span>
+          <h2>Key findings</h2>
+          <a class="anchor" href="#sec-findings"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        <ul>{{KEY_FINDINGS_LIST}}</ul>
+      </section>
+
+      <!-- ───── 5. Technical Decisions ───── -->
+      <section class="panel" id="sec-decisions">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-scale"/></svg></span>
+          <h2>Technical decisions</h2>
+          <a class="anchor" href="#sec-decisions"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        <ul>{{TECHNICAL_DECISIONS_LIST}}</ul>
+      </section>
+
+      <!-- ───── 6. Files Changed ───── -->
+      <section class="panel" id="sec-files">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-files"/></svg></span>
+          <h2>Files changed</h2>
+          <a class="anchor" href="#sec-files"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Status</th><th>Path</th><th>Previous path</th><th>Purpose</th><th>Evidence</th></tr>
+            </thead>
+            <tbody>
+              {{FILES_CHANGED_ROWS}}
+              <!--
+                Row template (pick one status badge per row — use the matching SVG):
+                <tr>
+                  <td><span class="badge created"><svg><use href="#i-plus"/></svg>created</span></td>
+                  <td><code>path/to/file</code></td>
+                  <td>—</td>
+                  <td>purpose text</td>
+                  <td><code>evidence</code></td>
+                </tr>
+                Badge classes: created (i-plus) | modified (i-pencil) | renamed (i-arrows-right-left) | deleted (i-trash)
+              -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ───── 7. Beads Activity ───── -->
+      <section class="panel tone-violet" id="sec-beads">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-bead"/></svg></span>
+          <h2>Beads activity</h2>
+          <a class="anchor" href="#sec-beads"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        {{BEADS_ACTIVITY_HTML}}
+        <!-- Render either a table of bead rows or "No bead activity observed." as a <p>. -->
+      </section>
+
+      <!-- ───── 8. Repository Maintenance ───── -->
+      <section class="panel" id="sec-maint">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-broom"/></svg></span>
+          <h2>Repository maintenance</h2>
+          <a class="anchor" href="#sec-maint"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        {{REPO_MAINTENANCE_HTML}}
+      </section>
+
+      <!-- ───── 9. Tools and Skills Used ───── -->
+      <section class="panel" id="sec-tools">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-toolbox"/></svg></span>
+          <h2>Tools and skills used</h2>
+          <a class="anchor" href="#sec-tools"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        <ul>{{TOOLS_AND_SKILLS_LIST}}</ul>
+      </section>
+
+      <!-- ───── 10. Commands Executed (collapsible if long) ───── -->
+      <section class="panel" id="sec-commands">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-terminal"/></svg></span>
+          <h2>Commands executed</h2>
+          <a class="anchor" href="#sec-commands"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        <details class="collapsible" open>
+          <summary>
+            <svg class="chev" width="14" height="14"><use href="#i-chevron-right"/></svg>
+            Command transcript
+            <span class="count">{{STAT_COMMANDS}}</span>
+          </summary>
+          <div class="collapse-body">
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Command</th><th>Result</th></tr></thead>
+                <tbody>
+                  {{COMMANDS_EXECUTED_ROWS}}
+                  <!-- Row: <tr><td><code>cmd</code></td><td>result text</td></tr> -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <!-- ───── 11. Errors (omit if none) ───── -->
+      <section class="panel tone-error" id="sec-errors">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-alert-triangle"/></svg></span>
+          <h2>Errors encountered</h2>
+          <a class="anchor" href="#sec-errors"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        <ul>{{ERRORS_ENCOUNTERED_LIST}}</ul>
+      </section>
+
+      <!-- ───── 12. Behavior Changes ───── -->
+      <section class="panel" id="sec-behavior">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-arrows-right-left"/></svg></span>
+          <h2>Behavior changes</h2>
+          <a class="anchor" href="#sec-behavior"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Area</th><th>Before</th><th>After</th></tr></thead>
+            <tbody>{{BEHAVIOR_CHANGES_ROWS}}</tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ───── 13. Verification (omit if none) ───── -->
+      <section class="panel tone-success" id="sec-verify">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-check-circle"/></svg></span>
+          <h2>Verification evidence</h2>
+          <a class="anchor" href="#sec-verify"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Command</th><th>Expected</th><th>Actual</th><th>Status</th></tr></thead>
+            <tbody>
+              {{VERIFICATION_ROWS}}
+              <!--
+                Status cell uses semantic badge with icon:
+                  pass: <span class="badge pass"><svg><use href="#i-check-circle"/></svg>pass</span>
+                  fail: <span class="badge fail"><svg><use href="#i-x-circle"/></svg>fail</span>
+                  warn: <span class="badge warn"><svg><use href="#i-alert-triangle"/></svg>warn</span>
+              -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ───── 14. Risks and Rollback (omit if none) ───── -->
+      <section class="panel tone-warn" id="sec-risks">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-shield"/></svg></span>
+          <h2>Risks and rollback</h2>
+          <a class="anchor" href="#sec-risks"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        {{RISKS_AND_ROLLBACK_HTML}}
+      </section>
+
+      <!-- ───── 15. Decisions Not Taken (omit if none) ───── -->
+      <section class="panel" id="sec-nottaken">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-x"/></svg></span>
+          <h2>Decisions not taken</h2>
+          <a class="anchor" href="#sec-nottaken"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        <ul>{{DECISIONS_NOT_TAKEN_LIST}}</ul>
+      </section>
+
+      <!-- ───── 16. References (omit if none) ───── -->
+      <section class="panel" id="sec-refs">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-bookmark"/></svg></span>
+          <h2>References</h2>
+          <a class="anchor" href="#sec-refs"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        <ul>{{REFERENCES_LIST}}</ul>
+      </section>
+
+      <!-- ───── 17. Open Questions (omit if none) ───── -->
+      <section class="panel" id="sec-questions">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-help-circle"/></svg></span>
+          <h2>Open questions</h2>
+          <a class="anchor" href="#sec-questions"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        <ul>{{OPEN_QUESTIONS_LIST}}</ul>
+      </section>
+
+      <!-- ───── 18. Next Steps ───── -->
+      <section class="panel" id="sec-next">
+        <header class="panel-head">
+          <span class="icon"><svg><use href="#i-arrow-right"/></svg></span>
+          <h2>Next steps</h2>
+          <a class="anchor" href="#sec-next"><svg><use href="#i-hash"/></svg></a>
+        </header>
+        {{NEXT_STEPS_HTML}}
+      </section>
+    </div>
+
+    <footer class="foot">
+      <svg><use href="#i-sparkles"/></svg>
+      Aurora session log · generated by <code>save-to-md</code>
+    </footer>
+  </div>
+
+  <!-- Scroll-spy: highlight the current section in the ToC -->
+  <script>
+    (function () {
+      var links = document.querySelectorAll('aside.toc a');
+      var byId = {};
+      links.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (!e.isIntersecting) return;
+          links.forEach(function (a) { a.classList.remove('active'); });
+          var a = byId[e.target.id];
+          if (a) a.classList.add('active');
+        });
+      }, { rootMargin: '-30% 0px -60% 0px', threshold: 0 });
+      document.querySelectorAll('section.panel[id]').forEach(function (s) { io.observe(s); });
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Validate Skill"
+  short_description: "Validate a Claude Code skill's SKILL"
+  default_prompt: "Use $validate-skill to validate a Claude Code skill's SKILL."

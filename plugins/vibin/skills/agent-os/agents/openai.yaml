@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent OS"
+  short_description: "Use to drive Claude's sandboxed Windows 11 VM, the `agent-os`..."
+  default_prompt: "Use $agent-os for use to drive Claude's sandboxed Windows 11 VM, the `agent-os`."

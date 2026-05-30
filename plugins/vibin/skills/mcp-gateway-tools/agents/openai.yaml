@@ -1,0 +1,4 @@
+interface:
+  display_name: "MCP Gateway Tools"
+  short_description: "Invoking MCP tools through the Lab gateway in tool-search mode —"
+  default_prompt: "Use $mcp-gateway-tools for invoking MCP tools through the Lab gateway in tool-search mode —."
