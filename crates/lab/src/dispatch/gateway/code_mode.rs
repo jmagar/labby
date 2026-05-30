@@ -303,6 +303,23 @@ impl CodeModeSurface {
     }
 }
 
+/// Whether a destructive upstream tool call is permitted for this `surface` and
+/// `caller`.
+///
+/// Permitted when EITHER the surface explicitly allows destructive actions (the
+/// CLI, or MCP with `confirm:true`) OR the caller carries an execute-capable
+/// scope (`lab` / `lab:admin`).
+///
+/// Allowlisted operators are auto-elevated to `lab:admin` at auth time (see
+/// lab-auth `elevate_scope_for_allowed_user`) precisely so MCP clients can drive
+/// destructive gateway actions without a separate confirmation flow. Honoring
+/// `can_execute()` here realigns the gate with that intent instead of ignoring
+/// the granted scope — a `lab:read` caller is still denied.
+#[must_use]
+fn destructive_permitted(surface: CodeModeSurface, caller: &CodeModeCaller) -> bool {
+    surface.allow_destructive_actions() || caller.can_execute()
+}
+
 impl CodeModeCaller {
     #[must_use]
     pub fn can_read(&self) -> bool {
@@ -932,6 +949,7 @@ impl<'a> CodeModeBroker<'a> {
                     &owner,
                     oauth_subject,
                     surface,
+                    &caller,
                 )
                 .await
             }
@@ -947,14 +965,15 @@ impl<'a> CodeModeBroker<'a> {
         owner: &UpstreamRuntimeOwner,
         oauth_subject: Option<&str>,
         surface: CodeModeSurface,
+        caller: &CodeModeCaller,
     ) -> Result<Value, ToolError> {
         let upstream_tool = manager
             .resolve_code_mode_upstream_tool(upstream, tool, Some(owner), oauth_subject)
             .await?;
 
         // Host-side destructive action gate: block tools with destructive=true
-        // unless the surface explicitly allows them.
-        if upstream_tool.destructive && !surface.allow_destructive_actions() {
+        // unless the action is permitted (see `destructive_permitted`).
+        if upstream_tool.destructive && !destructive_permitted(surface, caller) {
             return Err(ToolError::Sdk {
                 sdk_kind: "confirmation_required".to_string(),
                 message: format!(
@@ -2680,6 +2699,71 @@ mod tests {
         assert!(
             cli.allow_destructive_actions(),
             "CLI surface must always allow destructive actions"
+        );
+    }
+
+    // ── destructive_permitted: surface flag OR execute-capable scope ──────────
+
+    fn scoped(scopes: &[&str]) -> super::CodeModeCaller {
+        super::CodeModeCaller::Scoped {
+            scopes: scopes.iter().map(ToString::to_string).collect(),
+            sub: None,
+        }
+    }
+
+    #[test]
+    fn destructive_permitted_for_admin_scope_on_mcp_deny_surface() {
+        // REGRESSION: an allowlisted operator is auto-elevated to `lab:admin`;
+        // that scope must satisfy the destructive gate even when the MCP surface
+        // did not pass `confirm:true`. Previously denied — the gate ignored scope.
+        let surface = super::CodeModeSurface::Mcp {
+            allow_destructive_actions: false,
+        };
+        assert!(
+            super::destructive_permitted(surface, &scoped(&["lab:admin"])),
+            "lab:admin caller must be permitted destructive actions on the MCP surface"
+        );
+        // `lab` (full, non-admin) is also execute-capable.
+        assert!(
+            super::destructive_permitted(surface, &scoped(&["lab"])),
+            "lab caller must be permitted destructive actions on the MCP surface"
+        );
+    }
+
+    #[test]
+    fn destructive_denied_for_read_scope_on_mcp_deny_surface() {
+        // PRESENCE: a read-only caller without confirm stays denied.
+        let surface = super::CodeModeSurface::Mcp {
+            allow_destructive_actions: false,
+        };
+        assert!(
+            !super::destructive_permitted(surface, &scoped(&["lab:read"])),
+            "lab:read caller must NOT be permitted destructive actions without confirm"
+        );
+    }
+
+    #[test]
+    fn destructive_permitted_via_surface_flag_regardless_of_scope() {
+        // PRESENCE: confirm:true (or CLI) permits even a read-only caller —
+        // the surface flag is an independent allow path.
+        let mcp_allow = super::CodeModeSurface::Mcp {
+            allow_destructive_actions: true,
+        };
+        assert!(
+            super::destructive_permitted(mcp_allow, &scoped(&["lab:read"])),
+            "confirm:true surface must permit destructive actions for any caller"
+        );
+        assert!(
+            super::destructive_permitted(super::CodeModeSurface::Cli, &scoped(&["lab:read"])),
+            "CLI surface must permit destructive actions for any caller"
+        );
+        // TrustedLocal is execute-capable too.
+        assert!(
+            super::destructive_permitted(
+                super::CodeModeSurface::Mcp { allow_destructive_actions: false },
+                &super::CodeModeCaller::TrustedLocal,
+            ),
+            "TrustedLocal caller must be permitted destructive actions"
         );
     }
 
