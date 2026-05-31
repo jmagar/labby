@@ -1,26 +1,26 @@
 ---
 name: agent-os
-description: 'Use to drive Claude''s sandboxed Windows 11 VM, the `agent-os` VM, container `agent-os-win11` (`dockur/windows`) on host `dookie`, historically nicknamed "winbox", via the Windows-MCP server installed inside it. Triggers: "agent-os", "the agent-os VM", "winbox", "the windows sandbox", "the dookie windows", "drive the windows VM", "spin up agent-os", "run X on agent-os", "screenshot agent-os", "PowerShell on agent-os", or explicit noVNC at http://dookie:8006. For web-dev/browser verification prefer: CDP on agent-os, agent-browser, claude-in-chrome on agent-os, agent-os Windows-MCP, then claude-in-chrome on steamy. Prefer `mcp__windows-mcp__*` for desktop/OS work. Does NOT fire on the user''s personal Windows on steamy-wsl; that target uses the `nircmd` skill. The sandbox is Claude''s alone: install software, change settings, run shells freely without confirmation.'
+description: 'Use to drive Claude''s sandboxed Windows 11 VM, the `agent-os` VM, container `agent-os-win11` (`dockur/windows`) on host `tootie`, historically nicknamed "winbox", via the Windows-MCP server installed inside it. Triggers: "agent-os", "the agent-os VM", "winbox", "the windows sandbox", "the tootie windows", "drive the windows VM", "spin up agent-os", "run X on agent-os", "screenshot agent-os", "PowerShell on agent-os", or explicit noVNC at http://tootie:8006. For web-dev/browser verification prefer: CDP on agent-os, agent-browser, claude-in-chrome on agent-os, agent-os Windows-MCP, then claude-in-chrome on steamy. Prefer `mcp__windows-mcp__*` for desktop/OS work. Does NOT fire on the user''s personal Windows on steamy-wsl; that target uses the `nircmd` skill. The sandbox is Claude''s alone: install software, change settings, run shells freely without confirmation.'
 ---
 
 # agent-os (Windows sandbox VM)
 
-A real Windows 11 desktop reserved for Claude, running on host `dookie` as the **`agent-os`** VM (container name `agent-os-win11`, image `dockur/windows`). "Winbox" is only the historical nickname; the skill name and official name are **agent-os**. Both `agent-os` and `winbox` remain trigger phrases for compatibility.
+A real Windows 11 desktop reserved for Claude, running on host `tootie` as the **`agent-os`** VM (container name `agent-os-win11`, image `dockur/windows`). "Winbox" is only the historical nickname; the skill name and official name are **agent-os**. Both `agent-os` and `winbox` remain trigger phrases for compatibility.
 
 Drive it through **Windows-MCP** ([CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP)) — an MCP server installed inside the VM that exposes native click/type/shell/clipboard/filesystem/registry tools as `mcp__windows-mcp__*`.
 
-The sandbox is Claude's. Install software, write to the registry, kill processes — don't ask first. Only think twice about actions that escape into host `dookie` (Docker daemon, mounted volumes, host network).
+The sandbox is Claude's. Install software, write to the registry, kill processes — don't ask first. Only think twice about actions that escape into host `tootie` (Docker daemon, mounted volumes, host network).
 
 ## Why Windows-MCP, not noVNC
 
-The previous version of this skill drove the VM through `agent-browser` against `http://dookie:8006`'s noVNC canvas. That path still works as a visual fallback, but Windows-MCP is the new primary surface because:
+The previous version of this skill drove the VM through `agent-browser` against `http://tootie:8006`'s noVNC canvas. That path still works as a visual fallback, but Windows-MCP is the new primary surface because:
 
 - **Real keyboard.** `Type` reliably handles full strings including shifted symbols (`!@#$%^&*()`, `:`, `"`, etc.). The noVNC `Shift+<digit>` bug is gone.
 - **Real accessibility tree.** `Snapshot` returns interactive elements with ids — Claude can target controls by name, not by reasoning about pixels.
 - **Native shell.** `Shell` runs PowerShell directly; no `Win+R`, no canvas focus juggling.
 - **Faster.** No browser, no canvas event dispatch, no per-character `press` loop.
 
-Reach for noVNC at `http://dookie:8006` only when you need to *see* the desktop visually for debugging (e.g. confirming a screenshot that Windows-MCP returned), or if Windows-MCP is unreachable.
+Reach for noVNC at `http://tootie:8006` only when you need to *see* the desktop visually for debugging (e.g. confirming a screenshot that Windows-MCP returned), or if Windows-MCP is unreachable.
 
 ## Browser/web-dev priority
 
@@ -38,7 +38,7 @@ Do not use Windows-MCP just because it is available when `agent-browser` can do 
 
 Windows-MCP is exposed inside agent-os over HTTP + Bearer token and registered in `~/.claude.json` as the `windows-mcp` server (Tailscale address; the bearer token lives in that config, not in this skill). Claude Code reaches it automatically — there is nothing to start.
 
-If the server is unreachable: SSH into `dookie`, confirm the VM container is up (`docker ps --format '{{.Names}}' | grep agent-os`; the container name is `agent-os-win11`), and that the MCP service inside is listening. The container persists `/storage` across restarts so installed software survives.
+If the server is unreachable: SSH into `tootie`, confirm the VM container is up (`docker ps --format '{{.Names}}' | grep agent-os`; the container name is `agent-os-win11`), and that the MCP service inside is listening. The container persists `/storage` across restarts so installed software survives.
 
 ## Tool surface
 
@@ -167,7 +167,7 @@ Registry {"action": "write", "path": "HKCU\\Software\\YourApp", "name": "Setting
 
 When something looks wrong and you need eyeballs, the old path still works:
 
-- URL: `http://dookie:8006/vnc.html?autoconnect=1&resize=remote`
+- URL: `http://tootie:8006/vnc.html?autoconnect=1&resize=remote`
 - Drive with `agent-browser` (see git history of this file for the canvas/dispatch helpers).
 
 Treat this strictly as a visual debugger. Once you've identified the problem, fix it through Windows-MCP — don't fall back into the per-char `press` loop just because noVNC is open.
@@ -177,8 +177,8 @@ Treat this strictly as a visual debugger. Once you've identified the problem, fi
 These predate Windows-MCP but remain useful where the MCP path is awkward:
 
 - **`/oem` install-time drop folder.** Host path `/home/jmagar/compose/windows/oem` is mounted as `\\host.lan\Data` *only during initial Windows install/OOBE*. Once setup completes, the SMB share is gone. Use only for first-boot provisioning.
-- **RDP on `dookie:33890`.** Exposed by the `agent-os-win11` container in addition to noVNC. No agent-side RDP client installed today; install `freerdp` if a real interactive session is ever needed (now that Windows-MCP exists, the case for this is weaker).
-- **SSH to the guest on `dookie:2222`.** The container forwards host port `2222` → guest port `22`. Confirmed exposed on the running container; whether sshd is actually running and configured inside the guest depends on first-boot provisioning. If it answers, this is the cleanest scripted side-channel — no `Shell` round-trip through the MCP server.
+- **RDP on `tootie:33890`.** Exposed by the `agent-os-win11` container in addition to noVNC. No agent-side RDP client installed today; install `freerdp` if a real interactive session is ever needed (now that Windows-MCP exists, the case for this is weaker).
+- **SSH to the guest on `tootie:2222`.** The container forwards host port `2222` → guest port `22`. Confirmed exposed on the running container; whether sshd is actually running and configured inside the guest depends on first-boot provisioning. If it answers, this is the cleanest scripted side-channel — no `Shell` round-trip through the MCP server.
 
 ## Operating notes
 

@@ -12,7 +12,7 @@ Quick map of Jacob's homelab. **Full runtime inventory lives at `~/.homelab/home
 | Name | Role | LAN IP | OS | Notes |
 |---|---|---|---|---|
 | **tootie** | Primary NAS / app server | 10.1.0.2 | Unraid 7.2.4 (i7-13700K, 128GB) | 49 containers. Web: `:6969`. SSH port `29229`. Also runs dookie as a KVM guest. **⚠ no parity disk currently.** |
-| **dookie** | Dev / AI / MCP hub | 10.1.0.6 | Linux KVM guest on tootie | Axon RAG stack, syslog-mcp (1514/3100), arcane-mcp (44332), unraid-mcp (40010), Lab (8765), MCP bridge containers (40020-40060). The Windows 11 sandbox container (`agent-os-win11`) at `:8006` also lives here. |
+| **dookie** | Dev / AI / MCP hub | 10.1.0.6 | Linux KVM guest on tootie | Axon RAG stack, syslog-mcp (1514/3100), arcane-mcp (44332), unraid-mcp (40010), Lab (8765), MCP bridge containers (40020-40060). |
 | **squirts** | Edge services | 10.1.0.8 | Ubuntu (4 cores, 15GB) | SWAG (149 active configs), Authelia, AdGuard, Gotify, MCP gateway, Vaultwarden, Paperless, etc. RAM sample 10GiB/14GiB used. |
 | **shart** | ZFS backup target | 10.1.0.3 | Unraid | ZFS `backup` pool 7.27TB / 1.80TB used. Also has old link-local `169.254.80.235` on `shim-br0`. Receives Syncoid streams from tootie + squirts. |
 | **steamy** | GPU workloads (RTX 4070) | 10.1.0.65 | Win11 + WSL2 | `crawl4r-qdrant` (GPU qdrant). Arcane marks this env disabled/offline, but `ssh steamy-wsl` works and remains the default target for the `screenshots`, `clipboard`, `nircmd` skills. |
@@ -31,7 +31,7 @@ All nodes joined to **Tailscale** mesh (`100.x.y.z`). Router is a UniFi UCG-Max 
 | Sanoid / Syncoid backups, ZFS receive | shart |
 | Portainer, Glances, Scrutiny, Vnstat, MinIO, Loggifly, Notifiarr, Apprise API, Olivetin, Crontab UI, Zipline | tootie |
 | **MCP servers** — syslog, arcane, unraid, swag, unifi, gotify, tailscale, apprise, rmcp-template/example | mostly **dookie + squirts** — see `~/.homelab/homelab.md` §"MCP Server Ecosystem" for exact host |
-| Windows sandbox (dookie:8006 noVNC), agent-os skill target | dookie (`agent-os-win11` / dockurr/windows container) |
+| Windows sandbox (tootie:8006 noVNC), agent-os skill target | tootie (`agent-os-win11` / dockurr/windows container) |
 
 ## Conventions
 

@@ -83,12 +83,12 @@ SERVICE_HINTS = {
     "tootie": [
         "plex", "sonarr", "radarr", "bazarr", "prowlarr", "qbittorrent", "sabnzbd",
         "tautulli", "immich", "audiobookshelf", "kavita", "navidrome", "minio",
-        "loggifly", "notifiarr", "apprise-api", "olivetin", "zipline",
+        "loggifly", "notifiarr", "apprise-api", "olivetin", "zipline", "agent-os-win11",
     ],
     "dookie": [
         "axon", "axon-qdrant", "axon-tei", "axon-chrome", "syslog-mcp",
         "arcane-mcp", "unraid-mcp", "gotify-mcp", "unifi-mcp", "tailscale-mcp",
-        "apprise-mcp", "labby", "agent-os-win11",
+        "apprise-mcp", "labby",
     ],
     "squirts": [
         "swag", "authelia", "adguard", "gotify", "vaultwarden", "paperless",
@@ -398,8 +398,8 @@ def report_payload(snapshots: dict[str, HostSnapshot], generated_at: dt.datetime
             {"service": "Arcane MCP", "url": "http://dookie:44332"},
             {"service": "Unraid MCP", "url": "http://dookie:40010"},
             {"service": "Plex", "url": "http://10.1.0.2:32400"},
-            {"service": "Windows sandbox noVNC", "url": "http://dookie:8006"},
-            {"service": "Windows sandbox RDP", "url": "dookie:33890"},
+            {"service": "Windows sandbox noVNC", "url": "http://tootie:8006"},
+            {"service": "Windows sandbox RDP", "url": "tootie:33890"},
         ],
     }
 
@@ -592,8 +592,8 @@ SWAG is expected on `squirts`. Active proxy config count is generated from `/mnt
     ["Arcane MCP", "http://dookie:44332"],
     ["Unraid MCP", "http://dookie:40010"],
     ["Plex", "http://10.1.0.2:32400"],
-    ["Windows sandbox noVNC", "http://dookie:8006"],
-    ["Windows sandbox RDP", "dookie:33890"],
+    ["Windows sandbox noVNC", "http://tootie:8006"],
+    ["Windows sandbox RDP", "tootie:33890"],
 ])}
 """
 
