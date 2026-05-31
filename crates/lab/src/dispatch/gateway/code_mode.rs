@@ -503,7 +503,7 @@ impl CodeModeCatalogEntry {
             signature: String::new(),
             dts: String::new(),
             note: Some(
-                "Some entries were dropped to fit the 256KB inline catalog cap. Use scout for full RRF discovery.".to_string(),
+                "Some entries were dropped to fit the 256KB inline catalog cap. Narrow the Code Mode search filter to inspect fewer tools.".to_string(),
             ),
             dropped_count: Some(dropped_count),
         }
@@ -702,11 +702,11 @@ impl<'a> CodeModeBroker<'a> {
             return Ok(Value::Array(Vec::new()));
         };
 
-        let allow_cold_connect = caller.can_execute();
+        let require_fresh_catalog = true;
         let owner = caller.runtime_owner(surface);
         let oauth_subject = caller.oauth_subject();
         let (catalog, serialized_size, truncated) = self
-            .code_search_catalog(manager, allow_cold_connect, &owner, oauth_subject)
+            .code_search_catalog(manager, require_fresh_catalog, &owner, oauth_subject)
             .await?;
         tracing::info!(
             surface = "dispatch",
@@ -824,7 +824,7 @@ impl<'a> CodeModeBroker<'a> {
             return Err(ToolError::Sdk {
                 sdk_kind: "invalid_param".to_string(),
                 message: format!(
-                    "Code Mode inline catalog is {serialized_size} bytes, above the 512KB hard cap; use scout for full RRF discovery"
+                    "Code Mode inline catalog is {serialized_size} bytes, above the 512KB hard cap; narrow the search filter to inspect fewer tools"
                 ),
             });
         }
@@ -2904,6 +2904,24 @@ mod tests {
         }
     }
 
+    fn fixture_catalog_tool(
+        upstream: &str,
+        tool_name: &str,
+    ) -> crate::dispatch::upstream::types::UpstreamTool {
+        let upstream_name: Arc<str> = Arc::from(upstream);
+        crate::dispatch::upstream::types::UpstreamTool {
+            tool: rmcp::model::Tool::new(
+                tool_name.to_string(),
+                format!("{tool_name} description"),
+                Arc::new(serde_json::Map::new()),
+            ),
+            input_schema: None,
+            output_schema: None,
+            upstream_name,
+            destructive: false,
+        }
+    }
+
     #[test]
     fn parse_rejects_lab_id() {
         let err =
@@ -3280,6 +3298,97 @@ mod tests {
                 .as_str()
                 .is_some_and(|dts| dts.contains("interface Codemode"))
         );
+    }
+
+    #[tokio::test]
+    async fn broker_search_refreshes_read_only_catalog_after_upstream_tool_expansion() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let runtime = super::super::runtime::GatewayRuntimeHandle::default();
+        let pool = Arc::new(crate::dispatch::upstream::pool::UpstreamPool::new());
+        runtime.swap(Some(Arc::clone(&pool))).await;
+        let manager = super::GatewayManager::new(dir.path().join("config.toml"), runtime);
+        manager
+            .seed_config(crate::config::LabConfig {
+                tool_search: crate::config::ToolSearchConfig {
+                    enabled: true,
+                    ..crate::config::ToolSearchConfig::default()
+                },
+                upstream: vec![crate::config::UpstreamConfig {
+                    enabled: true,
+                    name: "agent-os_windows-mcp".to_string(),
+                    url: Some("http://127.0.0.1:9/mcp".to_string()),
+                    bearer_token_env: None,
+                    command: None,
+                    args: Vec::new(),
+                    env: std::collections::BTreeMap::new(),
+                    proxy_resources: false,
+                    proxy_prompts: false,
+                    expose_tools: None,
+                    expose_resources: None,
+                    expose_prompts: None,
+                    oauth: None,
+                    imported_from: None,
+                    priority: 1.0,
+                    tool_search: crate::config::ToolSearchConfig::default(),
+                }],
+                ..crate::config::LabConfig::default()
+            })
+            .await;
+
+        pool.insert_entry_for_tests(
+            "agent-os_windows-mcp",
+            fixture_upstream_entry(
+                "agent-os_windows-mcp",
+                HashMap::from([(
+                    "Wait".to_string(),
+                    fixture_catalog_tool("agent-os_windows-mcp", "Wait"),
+                )]),
+            ),
+        )
+        .await;
+
+        let live_tools = Arc::new(tokio::sync::RwLock::new(vec!["Wait".to_string()]));
+        pool.insert_live_tool_server_for_tests("agent-os_windows-mcp", Arc::clone(&live_tools))
+            .await;
+
+        let registry = super::ToolRegistry::new();
+        let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+        let read_only = super::CodeModeCaller::Scoped {
+            scopes: vec!["lab:read".to_string()],
+            sub: None,
+        };
+        let surface = super::CodeModeSurface::Mcp {
+            allow_destructive_actions: false,
+        };
+        let list_agent_os_tools = "async () => tools.filter(t => t.upstream === 'agent-os_windows-mcp').map(t => t.name).sort()";
+
+        let initial = broker
+            .search(list_agent_os_tools, read_only.clone(), surface)
+            .await
+            .expect("initial read-only search evaluates over partial catalog");
+        assert_eq!(initial, json!(["Wait"]));
+
+        *live_tools.write().await = vec![
+            "FileSystem".to_string(),
+            "PowerShell".to_string(),
+            "Snapshot".to_string(),
+            "Wait".to_string(),
+        ];
+
+        let refreshed = broker
+            .search(list_agent_os_tools, read_only, surface)
+            .await
+            .expect("read-only search refreshes expanded live catalog");
+        assert_eq!(
+            refreshed,
+            json!(["FileSystem", "PowerShell", "Snapshot", "Wait"])
+        );
+
+        let tool = manager
+            .resolve_code_mode_upstream_tool("agent-os_windows-mcp", "PowerShell", None, None)
+            .await
+            .expect("execute resolution sees the same refreshed live catalog");
+        assert_eq!(tool.tool.name.as_ref(), "PowerShell");
     }
 
     #[tokio::test]

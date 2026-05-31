@@ -2176,13 +2176,61 @@ impl GatewayManager {
         oauth_subject: Option<&str>,
     ) -> Result<Vec<UpstreamTool>, ToolError> {
         if allow_cold_connect {
-            self.ensure_search_runtime_ready(true, owner, oauth_subject)
+            self.refresh_code_mode_catalog(owner, oauth_subject).await?;
+        } else {
+            self.ensure_search_runtime_ready(false, owner, oauth_subject)
                 .await?;
         }
         let Some(pool) = self.current_pool().await else {
             return Ok(Vec::new());
         };
         Ok(pool.healthy_tools().await)
+    }
+
+    /// Refresh the transient Code Mode catalog from live upstream metadata.
+    ///
+    /// This is intentionally a manager-level policy: Code Mode needs a fresh
+    /// per-call catalog, while `UpstreamPool` only owns the connect/reprobe
+    /// mechanics. Reprobe uses existing live peers when possible and reconnects
+    /// when needed, so partial-but-healthy catalogs do not mask tool-list growth.
+    pub async fn refresh_code_mode_catalog(
+        &self,
+        owner: Option<&UpstreamRuntimeOwner>,
+        oauth_subject: Option<&str>,
+    ) -> Result<(), ToolError> {
+        let cfg = self.config.read().await.clone();
+        if !cfg.tool_search.enabled {
+            return Ok(());
+        }
+
+        let pool = self.ensure_lazy_upstream_pool(&cfg, owner).await;
+        let mut failures = Vec::new();
+        for upstream in cfg.upstream.iter().filter(|u| u.enabled) {
+            let subject = upstream.oauth.as_ref().and(oauth_subject);
+            if let Err(err) = pool
+                .reprobe_tools_for_upstream_as(upstream, subject, owner)
+                .await
+            {
+                failures.push(ToolSearchReprobeFailure {
+                    upstream: upstream.name.clone(),
+                    message: err.to_string(),
+                });
+            }
+        }
+
+        if !failures.is_empty() && pool.healthy_tools().await.is_empty() {
+            let details = failures
+                .iter()
+                .map(|failure| format!("{}: {}", failure.upstream, failure.message))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(ToolError::Sdk {
+                sdk_kind: "upstream_connect_error".to_string(),
+                message: format!("failed to refresh Code Mode catalog: {details}"),
+            });
+        }
+
+        Ok(())
     }
 
     /// Fire-and-forget: spawn per-upstream connection tasks for exclusive code mode.
