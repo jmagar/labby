@@ -2569,7 +2569,7 @@ dependencies = [
 
 [[package]]
 name = "lab-apis"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "base64",
  "futures",
@@ -2589,7 +2589,7 @@ dependencies = [
 
 [[package]]
 name = "lab-auth"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "axum",
  "base64",
@@ -2617,14 +2617,17 @@ dependencies = [
 
 [[package]]
 name = "labby"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
  "arc-swap",
  "axum",
  "base64",
+ "boa_ast",
  "boa_engine",
+ "boa_interner",
+ "boa_parser",
  "boa_runtime",
  "bytes",
  "chacha20poly1305",

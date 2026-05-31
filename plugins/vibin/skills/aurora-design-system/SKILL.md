@@ -89,6 +89,8 @@ For slides, mocks, throwaway prototypes, design reviews, and other non-productio
 
 Reach for semantic Aurora vars, or `color-mix(in srgb, var(--aurora-accent-primary) 14%, transparent)` for tinted fills. Full list and light/dark values in `references/tokens.md`; headline shape:
 
+> For non-web surfaces (Zed, Claude Code CLI, terminals, shell tools) the cyan/rose diverge into separate brighter tiers — see `references/editor-cli-tokens.md`. The values below are the **web canonical** palette; don't paste them into a `.tmTheme`/Zed theme or vice-versa.
+
 ### Surfaces
 
 | Token | Purpose |
@@ -298,6 +300,7 @@ Install URL for end users: `https://aurora.tootie.tv` (root) or `https://aurora.
 ## Reference files
 
 - `references/tokens.md` — full token list with values for both dark and light modes, plus the shadcn token bridge.
+- `references/editor-cli-tokens.md` — non-web palettes: Zed "Aurora Neon", Claude Code CLI, shell tools, and the terminal ANSI foundation. Read this before touching `editors/` or `shell/` themes — it maps the three diverging cyan/rose tiers so you don't cross-contaminate.
 - `references/components.md` — every UI primitive and block with import path and the props that matter.
 - `references/recipes.md` — copy-pasteable patterns: page shell, two-pane layout, stat grid, command palette trigger, prompt input with model selector, data table with filter bar.
 

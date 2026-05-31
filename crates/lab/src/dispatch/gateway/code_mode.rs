@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 #[cfg(not(feature = "code_mode_wasm"))]
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
@@ -20,10 +21,13 @@ use boa_engine::object::builtins::JsPromise;
 use boa_engine::{JsArgs, JsError, JsNativeError, JsResult, NativeFunction, js_string};
 #[cfg(not(feature = "code_mode_wasm"))]
 use boa_gc::{Finalize, Trace};
+use boa_interner::{Interner, ToIndentedString, ToInternedString};
+use boa_parser::{Parser, Source as ParserSource};
 #[cfg(not(feature = "code_mode_wasm"))]
 use boa_runtime::console::{ConsoleState, Logger};
 use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
 use rmcp::model::CallToolRequestParams;
+use rmcp::model::CallToolResult;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tempfile::TempDir;
@@ -65,51 +69,289 @@ const CODE_SEARCH_CATALOG_HARD_CAP_BYTES: usize = 512 * 1024;
 ///    parenthesize the function expression — NO trailing IIFE `()`.
 /// 4. A bare arrow `async () => {...}` passes through unchanged (it is already a
 ///    function expression).
+/// 5. Loose statements / trailing expressions are wrapped in `async () => { ... }`;
+///    if the trailing statement looks like an expression, it is returned.
 ///
 /// `evaluate_code_search` does NOT call this — search receives raw `code`.
 ///
 /// Exposed (`pub`) so integration tests can normalize a body form and pipe the
 /// exact post-normalize string through the runner end to end.
 pub fn normalize_user_code(code: &str) -> String {
-    // 1. Strip markdown fences
-    let code = {
-        let trimmed = code.trim();
-        if let Some(stripped) = trimmed
-            .strip_prefix("```javascript\n")
-            .or_else(|| trimmed.strip_prefix("```typescript\n"))
-            .or_else(|| trimmed.strip_prefix("```js\n"))
-            .or_else(|| trimmed.strip_prefix("```ts\n"))
-            .or_else(|| trimmed.strip_prefix("```\n"))
-        {
-            stripped.trim_end_matches("```").trim_end()
-        } else {
-            trimmed
+    let code = strip_code_fences(code.trim()).trim();
+    if code.is_empty() {
+        return "async () => {}".to_string();
+    }
+    if let Some(inner) = code.strip_prefix("export default ") {
+        let inner = inner.trim().trim_end_matches(';').trim();
+        if inner.starts_with("async function") || inner.starts_with("function") {
+            return format!("async () => {{\nreturn ({inner})();\n}}");
         }
+        if inner.starts_with("class") {
+            return format!("async () => {{\nreturn ({inner});\n}}");
+        }
+        return normalize_user_code(inner);
+    }
+    normalize_user_code_parsed(code).unwrap_or_else(|| wrap_loose_code_as_async_arrow(code))
+}
+
+fn wrap_loose_code_as_async_arrow(code: &str) -> String {
+    let code = code.trim().trim_end_matches(';').trim();
+    if code.is_empty() {
+        return "async () => {}".to_string();
+    }
+    if let Some((before, after)) = code.rsplit_once(';') {
+        let trailing = after.trim();
+        if !trailing.is_empty() && looks_like_returnable_expression(trailing) {
+            return format!("async () => {{\n{before};\nreturn ({trailing})\n}}");
+        }
+    } else if looks_like_returnable_expression(code) && !code.trim_start().starts_with("return ") {
+        return format!("async () => {{\nreturn ({code})\n}}");
+    }
+
+    format!("async () => {{\n{code}\n}}")
+}
+
+fn strip_code_fences(code: &str) -> &str {
+    let trimmed = code.trim();
+    for lang in ["javascript", "typescript", "tsx", "jsx", "js", "ts", ""] {
+        let prefix = if lang.is_empty() {
+            "```\n".to_string()
+        } else {
+            format!("```{lang}\n")
+        };
+        if let Some(stripped) = trimmed.strip_prefix(&prefix)
+            && let Some(inner) = stripped.strip_suffix("```")
+        {
+            return inner.trim();
+        }
+    }
+    trimmed
+}
+
+fn normalize_user_code_parsed(source: &str) -> Option<String> {
+    normalize_module_code(source).or_else(|| normalize_script_code(source))
+}
+
+fn normalize_module_code(source: &str) -> Option<String> {
+    let mut interner = Interner::default();
+    let mut parser = Parser::new(ParserSource::from_bytes(source.as_bytes()));
+    let module = parser
+        .parse_module(&boa_ast::scope::Scope::new_global(), &mut interner)
+        .ok()?;
+    let items = module.items().items();
+    let [item] = items else {
+        return None;
     };
+    let boa_ast::ModuleItem::ExportDeclaration(export) = item else {
+        return None;
+    };
+    match export.as_ref() {
+        boa_ast::declaration::ExportDeclaration::DefaultAssignmentExpression(expr) => {
+            Some(normalize_user_code(&expr.to_interned_string(&interner)))
+        }
+        boa_ast::declaration::ExportDeclaration::DefaultFunctionDeclaration(function) => Some(
+            format!(
+                "async () => {{\nreturn ({} )();\n}}",
+                function.to_indented_string(&interner, 0)
+            )
+            .replace("} )", "})"),
+        ),
+        boa_ast::declaration::ExportDeclaration::DefaultAsyncFunctionDeclaration(function) => Some(
+            format!(
+                "async () => {{\nreturn ({} )();\n}}",
+                function.to_indented_string(&interner, 0)
+            )
+            .replace("} )", "})"),
+        ),
+        boa_ast::declaration::ExportDeclaration::DefaultClassDeclaration(class) => Some(format!(
+            "async () => {{\nreturn ({});\n}}",
+            class.to_indented_string(&interner, 0)
+        )),
+        _ => None,
+    }
+}
 
-    // 2. Parenthesize bare `async function main` / `function main` declarations
-    //    into a function EXPRESSION. The wrapper awaits it, so sync `function`
-    //    is fine without forcing `async`.
-    if code.starts_with("async function main(") || code.starts_with("function main(") {
-        return format!("({})", code.trim_end_matches(';'));
+fn normalize_script_code(source: &str) -> Option<String> {
+    let mut interner = Interner::default();
+    let mut parser = Parser::new(ParserSource::from_bytes(source.as_bytes()));
+    let script = parser
+        .parse_script(&boa_ast::scope::Scope::new_global(), &mut interner)
+        .ok()?;
+    let statements = script.statements().statements();
+    if statements.is_empty() {
+        return Some("async () => {}".to_string());
     }
 
-    // 3. Strip `export default ` and parenthesize the remaining function
-    //    expression. No IIFE invocation — the wrapper invokes it.
-    if let Some(inner) = code.strip_prefix("export default async function") {
-        return format!("(async function{})", inner.trim_end_matches(';'));
-    }
-    if let Some(inner) = code.strip_prefix("export default function") {
-        return format!("(function{})", inner.trim_end_matches(';'));
+    if let [item] = statements {
+        match item {
+            boa_ast::StatementListItem::Statement(statement) => {
+                if let boa_ast::Statement::Expression(expr) = statement.as_ref() {
+                    if matches!(
+                        expr.flatten(),
+                        boa_ast::Expression::ArrowFunction(_)
+                            | boa_ast::Expression::AsyncArrowFunction(_)
+                    ) {
+                        return Some(source.to_string());
+                    }
+                    return Some(format!(
+                        "async () => {{\nreturn ({})\n}}",
+                        expr.to_interned_string(&interner)
+                    ));
+                }
+            }
+            boa_ast::StatementListItem::Declaration(declaration) => {
+                if let Some(name) = function_declaration_name(declaration.as_ref(), &interner) {
+                    return Some(format!(
+                        "async () => {{\n{}\nreturn {name}();\n}}",
+                        declaration.to_indented_string(&interner, 0)
+                    ));
+                }
+            }
+        }
     }
 
-    code.to_string()
+    if let Some((last, before)) = statements.split_last()
+        && let boa_ast::StatementListItem::Statement(statement) = last
+        && let boa_ast::Statement::Expression(expr) = statement.as_ref()
+    {
+        let before = before
+            .iter()
+            .map(|item| item.to_indented_string(&interner, 0))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let expr = expr.to_interned_string(&interner);
+        return Some(if before.trim().is_empty() {
+            format!("async () => {{\nreturn ({expr})\n}}")
+        } else {
+            format!("async () => {{\n{before}\nreturn ({expr})\n}}")
+        });
+    }
+
+    let body = statements
+        .iter()
+        .map(|item| item.to_indented_string(&interner, 0))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(format!("async () => {{\n{body}\n}}"))
+}
+
+fn function_declaration_name(
+    declaration: &boa_ast::Declaration,
+    interner: &Interner,
+) -> Option<String> {
+    match declaration {
+        boa_ast::Declaration::FunctionDeclaration(function) => {
+            Some(function.name().to_interned_string(interner))
+        }
+        boa_ast::Declaration::AsyncFunctionDeclaration(function) => {
+            Some(function.name().to_interned_string(interner))
+        }
+        boa_ast::Declaration::GeneratorDeclaration(function) => {
+            Some(function.name().to_interned_string(interner))
+        }
+        boa_ast::Declaration::AsyncGeneratorDeclaration(function) => {
+            Some(function.name().to_interned_string(interner))
+        }
+        _ => None,
+    }
+}
+
+fn looks_like_returnable_expression(statement: &str) -> bool {
+    let statement = statement.trim();
+    !statement.is_empty()
+        && !matches!(
+            statement.split_whitespace().next(),
+            Some(
+                "const"
+                    | "let"
+                    | "var"
+                    | "return"
+                    | "if"
+                    | "for"
+                    | "while"
+                    | "switch"
+                    | "try"
+                    | "catch"
+                    | "function"
+                    | "class"
+                    | "throw"
+            )
+        )
 }
 
 /// The single contract error message for the execute wrapper, shared by both
 /// runner engines (Javy and Boa) so it cannot diverge between them.
 const CODE_MODE_MAIN_SHAPE_ERROR: &str =
     "code_execute code must evaluate to an async arrow function: async () => { ... }";
+
+const CODE_MODE_VALUE_CODEC_JS: &str = r#"
+function __labBase64FromBytes(bytes) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i];
+    const b = i + 1 < bytes.length ? bytes[i + 1] : 0;
+    const c = i + 2 < bytes.length ? bytes[i + 2] : 0;
+    const triple = (a << 16) | (b << 8) | c;
+    out += alphabet[(triple >> 18) & 63];
+    out += alphabet[(triple >> 12) & 63];
+    out += i + 1 < bytes.length ? alphabet[(triple >> 6) & 63] : "=";
+    out += i + 2 < bytes.length ? alphabet[triple & 63] : "=";
+  }
+  return out;
+}
+function __labBytesFromBase64(data) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let clean = String(data || "").replace(/=+$/, "");
+  let buffer = 0;
+  let bits = 0;
+  const out = [];
+  for (let i = 0; i < clean.length; i++) {
+    const value = alphabet.indexOf(clean[i]);
+    if (value < 0) continue;
+    buffer = (buffer << 6) | value;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push((buffer >> bits) & 255);
+    }
+  }
+  return new Uint8Array(out);
+}
+function __labEncodeResult(value) {
+  if (value == null) return value;
+  if (typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer) {
+    return { __labBinary: "base64", type: "ArrayBuffer", data: __labBase64FromBytes(new Uint8Array(value)) };
+  }
+  if (typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView && ArrayBuffer.isView(value)) {
+    return { __labBinary: "base64", type: value.constructor && value.constructor.name || "TypedArray", data: __labBase64FromBytes(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)) };
+  }
+  if (Array.isArray(value)) return value.map(__labEncodeResult);
+  if (typeof value === "object") {
+    const out = {};
+    for (const key of Object.keys(value)) out[key] = __labEncodeResult(value[key]);
+    return out;
+  }
+  return value;
+}
+function __labDecodeResult(value) {
+  if (value == null) return value;
+  if (typeof value === "object" && value.__labBinary === "base64" && typeof value.data === "string") {
+    const bytes = __labBytesFromBase64(value.data);
+    if (value.type === "ArrayBuffer") {
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    }
+    return bytes;
+  }
+  if (Array.isArray(value)) return value.map(__labDecodeResult);
+  if (typeof value === "object") {
+    const out = {};
+    for (const key of Object.keys(value)) out[key] = __labDecodeResult(value[key]);
+    return out;
+  }
+  return value;
+}
+"#;
 
 /// Build the shared inner body of the execute wrapper for `code`.
 ///
@@ -134,7 +376,7 @@ fn code_mode_main_invoker(code: &str) -> String {
     );
     body.push_str(");\n");
     body.push_str("  }\n");
-    body.push_str("  return await __codeModeMain();\n");
+    body.push_str("  return __labEncodeResult(await __codeModeMain());\n");
     body
 }
 
@@ -203,6 +445,10 @@ pub struct CodeModeCatalogEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<Value>,
+    pub signature: String,
+    pub dts: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dropped_count: Option<usize>,
@@ -215,13 +461,24 @@ impl CodeModeCatalogEntry {
         tool: &str,
         description: &str,
         schema: Option<Value>,
+        output_schema: Option<Value>,
     ) -> Self {
+        let types = super::code_mode_types::generate_tool_types(
+            upstream,
+            tool,
+            description,
+            schema.as_ref(),
+            output_schema.as_ref(),
+        );
         Self {
             id: upstream_tool_id(upstream, tool),
             name: tool.to_string(),
             upstream: upstream.to_string(),
             description: description.to_string(),
             schema,
+            output_schema,
+            signature: types.signature,
+            dts: types.dts,
             note: None,
             dropped_count: None,
         }
@@ -236,6 +493,9 @@ impl CodeModeCatalogEntry {
             description: "Catalog entries were dropped to fit the Code Mode inline catalog budget"
                 .to_string(),
             schema: None,
+            output_schema: None,
+            signature: String::new(),
+            dts: String::new(),
             note: Some(
                 "Some entries were dropped to fit the 256KB inline catalog cap. Use scout for full RRF discovery.".to_string(),
             ),
@@ -382,6 +642,38 @@ pub struct CodeModeBroker<'a> {
     gateway_manager: Option<&'a GatewayManager>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CodeModeCapabilityFilter {
+    upstreams: BTreeSet<String>,
+    tools: BTreeSet<String>,
+}
+
+impl CodeModeCapabilityFilter {
+    #[must_use]
+    pub fn new(upstreams: Vec<String>, tools: Vec<String>) -> Self {
+        Self {
+            upstreams: upstreams
+                .into_iter()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .collect(),
+            tools: tools
+                .into_iter()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .collect(),
+        }
+    }
+
+    #[must_use]
+    pub fn allows(&self, upstream: &str, tool: &str) -> bool {
+        (self.upstreams.is_empty() || self.upstreams.contains(upstream))
+            && (self.tools.is_empty()
+                || self.tools.contains(tool)
+                || self.tools.contains(&upstream_tool_id(upstream, tool)))
+    }
+}
+
 impl<'a> CodeModeBroker<'a> {
     #[must_use]
     pub fn new(_registry: &'a ToolRegistry, gateway_manager: Option<&'a GatewayManager>) -> Self {
@@ -435,6 +727,7 @@ impl<'a> CodeModeBroker<'a> {
         caller: CodeModeCaller,
         surface: CodeModeSurface,
         config: crate::config::CodeModeConfig,
+        capability_filter: CodeModeCapabilityFilter,
     ) -> Result<CodeModeExecutionResponse, ToolError> {
         // `execute` is exposed only when the gateway search/execute surface is
         // enabled (tool_search.enabled → RootSynthetic), and the MCP handler
@@ -457,6 +750,7 @@ impl<'a> CodeModeBroker<'a> {
                 surface,
                 config.max_log_entries,
                 config.max_log_bytes,
+                capability_filter,
             )
             .await?;
         let was_truncated = !response_within_budget(
@@ -514,6 +808,7 @@ impl<'a> CodeModeBroker<'a> {
                     &name,
                     &super::projection::sanitize_tool_text(&description, 2048),
                     sanitize_code_mode_schema(tool.input_schema),
+                    sanitize_code_mode_schema(tool.output_schema),
                 )
             })
             .collect::<Vec<_>>();
@@ -577,25 +872,40 @@ impl<'a> CodeModeBroker<'a> {
         &self,
         caller: &CodeModeCaller,
         surface: CodeModeSurface,
-    ) -> Option<String> {
-        let manager = self.gateway_manager?;
+        capability_filter: &CodeModeCapabilityFilter,
+    ) -> Result<String, ToolError> {
+        let Some(manager) = self.gateway_manager else {
+            return Ok(String::new());
+        };
         let allow_cold_connect = caller.can_execute();
         let owner = caller.runtime_owner(surface);
         let oauth_subject = caller.oauth_subject();
         let tools = manager
             .code_mode_catalog_tools(allow_cold_connect, Some(&owner), oauth_subject)
             .await
-            .ok()?;
+            .map_err(|err| ToolError::Sdk {
+                sdk_kind: err.kind().to_string(),
+                message: err.user_message().to_string(),
+            })?;
+        let tools = tools
+            .into_iter()
+            .filter(|tool| {
+                capability_filter.allows(tool.upstream_name.as_ref(), tool.tool.name.as_ref())
+            })
+            .collect::<Vec<_>>();
         if tools.is_empty() {
-            return None;
+            return Ok(String::new());
         }
         let mut upstreams: Vec<String> =
             tools.iter().map(|t| t.upstream_name.to_string()).collect();
         upstreams.sort();
         upstreams.dedup();
-        Some(super::code_mode_preamble::generate_js_proxy(
-            &tools, &upstreams,
-        ))
+        super::code_mode_preamble::generate_js_proxy(&tools, &upstreams).map_err(|message| {
+            ToolError::Sdk {
+                sdk_kind: "invalid_param".to_string(),
+                message,
+            }
+        })
     }
 
     async fn execute_sandboxed(
@@ -607,6 +917,7 @@ impl<'a> CodeModeBroker<'a> {
         surface: CodeModeSurface,
         max_log_entries: usize,
         max_log_bytes: usize,
+        capability_filter: CodeModeCapabilityFilter,
     ) -> Result<CodeModeExecutionResponse, ToolError> {
         // Cloudflare-parity: no typed TypeScript preamble is injected. The
         // sandbox exposes only `callTool(id, params)`; the agent uses tool ids
@@ -694,9 +1005,8 @@ impl<'a> CodeModeBroker<'a> {
         // the documented escape hatch, so the run can still proceed without the
         // typed namespace.
         let proxy = self
-            .build_code_mode_proxy(&caller, surface)
-            .await
-            .unwrap_or_default();
+            .build_code_mode_proxy(&caller, surface, &capability_filter)
+            .await?;
 
         write_runner_input(
             &mut stdin,
@@ -761,12 +1071,14 @@ impl<'a> CodeModeBroker<'a> {
                             started_tool_calls += 1;
                             let call_id = id.clone();
                             let caller = caller.clone();
+                            let capability_filter = capability_filter.clone();
                             pending_tool_calls.push(
                                 async move {
                                     let call_start = std::time::Instant::now();
                                     let result = self
                                         .call_tool_id_before_deadline(
                                             &id, params, deadline, caller, surface,
+                                            &capability_filter,
                                         )
                                         .await;
                                     let elapsed_ms = call_start.elapsed().as_millis();
@@ -911,9 +1223,13 @@ impl<'a> CodeModeBroker<'a> {
         deadline: tokio::time::Instant,
         caller: CodeModeCaller,
         surface: CodeModeSurface,
+        capability_filter: &CodeModeCapabilityFilter,
     ) -> Result<Value, ToolError> {
-        match tokio::time::timeout_at(deadline, self.call_tool_id(id, params, caller, surface))
-            .await
+        match tokio::time::timeout_at(
+            deadline,
+            self.call_tool_id(id, params, caller, surface, capability_filter),
+        )
+        .await
         {
             Ok(result) => result,
             Err(_) => Err(ToolError::Sdk {
@@ -929,6 +1245,7 @@ impl<'a> CodeModeBroker<'a> {
         params: Value,
         caller: CodeModeCaller,
         surface: CodeModeSurface,
+        capability_filter: &CodeModeCapabilityFilter,
     ) -> Result<Value, ToolError> {
         let parsed = CodeModeToolId::parse(id)?;
         let Some(manager) = self.gateway_manager else {
@@ -939,6 +1256,15 @@ impl<'a> CodeModeBroker<'a> {
         };
         match parsed.reference {
             CodeModeToolRef::UpstreamTool { upstream, tool } => {
+                if !capability_filter.allows(&upstream, &tool) {
+                    return Err(ToolError::Sdk {
+                        sdk_kind: "unknown_tool".to_string(),
+                        message: format!(
+                            "upstream tool `{}` is outside this Code Mode execution capability set",
+                            parsed.raw
+                        ),
+                    });
+                }
                 let owner = caller.runtime_owner(surface);
                 let oauth_subject = caller.oauth_subject();
                 self.call_upstream_tool(
@@ -982,6 +1308,7 @@ impl<'a> CodeModeBroker<'a> {
                 ),
             });
         }
+        validate_code_mode_params_against_schema(&params, upstream_tool.input_schema.as_ref())?;
         let Some(pool) = manager.current_pool().await else {
             return Err(ToolError::Sdk {
                 sdk_kind: "upstream_error".to_string(),
@@ -1014,10 +1341,7 @@ impl<'a> CodeModeBroker<'a> {
                     });
                 }
                 pool.record_success(upstream).await;
-                serde_json::to_value(result).map_err(|err| ToolError::Sdk {
-                    sdk_kind: "internal_error".to_string(),
-                    message: format!("failed to serialize upstream tool result: {err}"),
-                })
+                Ok(unwrap_code_mode_upstream_result(result))
             }
             Some(Err(err)) => {
                 pool.record_failure(upstream, err.clone()).await;
@@ -1035,6 +1359,195 @@ impl<'a> CodeModeBroker<'a> {
                 })
             }
         }
+    }
+}
+
+fn validate_code_mode_params_against_schema(
+    params: &Value,
+    schema: Option<&Value>,
+) -> Result<(), ToolError> {
+    if let Some(schema) = schema {
+        validate_json_schema_value(params, schema, "params", true)?;
+    }
+    Ok(())
+}
+
+fn json_value_matches_schema_type(value: &Value, expected: &str) -> bool {
+    match expected {
+        "string" => value.is_string(),
+        "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
+        "number" => value.is_number(),
+        "boolean" => value.is_boolean(),
+        "object" => value.is_object(),
+        "array" => value.is_array(),
+        "null" => value.is_null(),
+        _ => true,
+    }
+}
+
+fn validate_json_schema_value(
+    value: &Value,
+    schema: &Value,
+    path: &str,
+    required_missing_is_missing_param: bool,
+) -> Result<(), ToolError> {
+    let Some(schema_object) = schema.as_object() else {
+        return Ok(());
+    };
+
+    if let Some(values) = schema_object.get("enum").and_then(Value::as_array)
+        && !values.iter().any(|candidate| candidate == value)
+    {
+        return Err(invalid_schema_param(path, "must match enum"));
+    }
+    if let Some(const_value) = schema_object.get("const")
+        && const_value != value
+    {
+        return Err(invalid_schema_param(path, "must match const"));
+    }
+
+    for keyword in ["anyOf", "oneOf"] {
+        if let Some(variants) = schema_object.get(keyword).and_then(Value::as_array) {
+            if variants.iter().any(|variant| {
+                validate_json_schema_value(value, variant, path, required_missing_is_missing_param)
+                    .is_ok()
+            }) {
+                return Ok(());
+            }
+            return Err(invalid_schema_param(path, "must match at least one schema"));
+        }
+    }
+    if let Some(variants) = schema_object.get("allOf").and_then(Value::as_array) {
+        for variant in variants {
+            validate_json_schema_value(value, variant, path, required_missing_is_missing_param)?;
+        }
+    }
+
+    if let Some(type_value) = schema_object.get("type") {
+        let matches_type = match type_value {
+            Value::String(expected) => json_value_matches_schema_type(value, expected),
+            Value::Array(types) => types
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|expected| json_value_matches_schema_type(value, expected)),
+            _ => true,
+        };
+        if !matches_type {
+            return Err(invalid_schema_param(path, "has wrong type"));
+        }
+    }
+
+    if let Some(minimum) = schema_object.get("minimum").and_then(Value::as_f64)
+        && value.as_f64().is_some_and(|actual| actual < minimum)
+    {
+        return Err(invalid_schema_param(path, "is below minimum"));
+    }
+    if let Some(maximum) = schema_object.get("maximum").and_then(Value::as_f64)
+        && value.as_f64().is_some_and(|actual| actual > maximum)
+    {
+        return Err(invalid_schema_param(path, "is above maximum"));
+    }
+
+    if let Some(object) = value.as_object() {
+        if let Some(required) = schema_object.get("required").and_then(Value::as_array) {
+            for key in required.iter().filter_map(Value::as_str) {
+                if !object.contains_key(key) {
+                    return Err(if required_missing_is_missing_param && path == "params" {
+                        ToolError::Sdk {
+                            sdk_kind: "missing_param".to_string(),
+                            message: format!("callTool params missing required field `{key}`"),
+                        }
+                    } else {
+                        invalid_schema_param(&format!("{path}.{key}"), "is required")
+                    });
+                }
+            }
+        }
+        let properties = schema_object.get("properties").and_then(Value::as_object);
+        if schema_object
+            .get("additionalProperties")
+            .and_then(Value::as_bool)
+            == Some(false)
+        {
+            for key in object.keys() {
+                if properties.is_none_or(|properties| !properties.contains_key(key)) {
+                    return Err(invalid_schema_param(
+                        &format!("{path}.{key}"),
+                        "is not allowed by inputSchema",
+                    ));
+                }
+            }
+        }
+        if let Some(properties) = properties {
+            for (key, property_schema) in properties {
+                if let Some(property_value) = object.get(key) {
+                    validate_json_schema_value(
+                        property_value,
+                        property_schema,
+                        &format!("{path}.{key}"),
+                        false,
+                    )?;
+                }
+            }
+        }
+    }
+
+    if let Some(array) = value.as_array()
+        && let Some(items) = schema_object.get("items")
+    {
+        if let Some(tuple_items) = items.as_array() {
+            for (index, item_schema) in tuple_items.iter().enumerate() {
+                if let Some(item_value) = array.get(index) {
+                    validate_json_schema_value(
+                        item_value,
+                        item_schema,
+                        &format!("{path}[{index}]"),
+                        false,
+                    )?;
+                }
+            }
+        } else {
+            for (index, item_value) in array.iter().enumerate() {
+                validate_json_schema_value(item_value, items, &format!("{path}[{index}]"), false)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn invalid_schema_param(path: &str, detail: &str) -> ToolError {
+    ToolError::Sdk {
+        sdk_kind: "invalid_param".to_string(),
+        message: format!("callTool params `{path}` {detail}"),
+    }
+}
+
+fn unwrap_code_mode_upstream_result(result: CallToolResult) -> Value {
+    if let Some(value) = result.structured_content {
+        return value;
+    }
+
+    let all_text = !result.content.is_empty()
+        && result
+            .content
+            .iter()
+            .all(|content| content.as_text().is_some());
+    if all_text {
+        let text = result
+            .content
+            .iter()
+            .filter_map(|content| content.as_text())
+            .map(|content| content.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        return serde_json::from_str(&text).unwrap_or_else(|_| Value::String(text));
+    }
+
+    if result.content.is_empty() {
+        Value::Null
+    } else {
+        json!(result)
     }
 }
 
@@ -1200,16 +1713,39 @@ fn drain_runner_logs() -> Vec<String> {
 #[cfg(feature = "code_mode_wasm")]
 #[allow(dead_code)]
 mod wasm_runner {
+    use std::collections::HashMap;
+    use std::sync::{Arc, LazyLock, Mutex};
+
     use wasmtime::{Config, Engine, Instance, Module, Store, Trap};
 
     pub const DEFAULT_SEARCH_FUEL: u64 = 10_000_000;
     pub const DEFAULT_EXECUTE_FUEL: u64 = 50_000_000;
-
-    pub fn engine() -> Result<Engine, wasmtime::Error> {
+    static ENGINE: LazyLock<Result<Engine, String>> = LazyLock::new(|| {
         let mut config = Config::new();
         config.consume_fuel(true);
         config.epoch_interruption(true);
-        Engine::new(&config)
+        Engine::new(&config).map_err(|err| err.to_string())
+    });
+    static MODULE_CACHE: LazyLock<Mutex<HashMap<String, Arc<Module>>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    pub fn engine() -> Result<Engine, wasmtime::Error> {
+        match ENGINE.as_ref() {
+            Ok(engine) => Ok(engine.clone()),
+            Err(message) => Err(wasmtime::Error::msg(message.clone())),
+        }
+    }
+
+    fn cached_module(engine: &Engine, wat: &str) -> Result<Arc<Module>, wasmtime::Error> {
+        let mut cache = MODULE_CACHE
+            .lock()
+            .map_err(|_| wasmtime::Error::msg("wasm module cache lock poisoned"))?;
+        if let Some(module) = cache.get(wat) {
+            return Ok(Arc::clone(module));
+        }
+        let module = Arc::new(Module::new(engine, wat)?);
+        cache.insert(wat.to_string(), Arc::clone(&module));
+        Ok(module)
     }
 
     pub fn run_wasm_i32_export_for_smoke(
@@ -1218,13 +1754,18 @@ mod wasm_runner {
         fuel: u64,
     ) -> Result<i32, wasmtime::Error> {
         let engine = engine()?;
-        let module = Module::new(&engine, wat)?;
+        let module = cached_module(&engine, wat)?;
         let mut store = Store::new(&engine, ());
         store.set_fuel(fuel)?;
         store.set_epoch_deadline(u64::MAX);
-        let instance = Instance::new(&mut store, &module, &[])?;
+        let instance = Instance::new(&mut store, module.as_ref(), &[])?;
         let func = instance.get_typed_func::<(), i32>(&mut store, export_name)?;
         func.call(&mut store, ())
+    }
+
+    #[cfg(test)]
+    pub fn cached_module_count_for_tests() -> usize {
+        MODULE_CACHE.lock().map(|cache| cache.len()).unwrap_or(0)
     }
 
     pub fn trap_kind(error: &wasmtime::Error) -> Option<&'static str> {
@@ -1672,6 +2213,7 @@ fn run_code_mode_runner() -> Result<(), String> {
     let wrapped = format!(
         r#"
 globalThis.__labPendingToolCalls = new Map();
+{codec}
 globalThis.callTool = (id, params = {{}}) => {{
   if (typeof id !== "string" || id.trim() === "") {{
     throw new TypeError("callTool id must be a non-empty string");
@@ -1680,7 +2222,7 @@ globalThis.callTool = (id, params = {{}}) => {{
     throw new TypeError("callTool params must be a JSON object");
   }}
   return new Promise((resolve, reject) => {{
-    const seq = globalThis.__labEmitToolCall(id, params);
+    const seq = globalThis.__labEmitToolCall(id, __labEncodeResult(params));
     globalThis.__labPendingToolCalls.set(seq, {{ resolve, reject }});
   }});
 }};
@@ -1692,7 +2234,7 @@ globalThis.__labSettleToolCall = (message) => {{
   }}
   globalThis.__labPendingToolCalls.delete(input.seq);
   if (input.type === "tool_result") {{
-    pending.resolve(input.result);
+    pending.resolve(__labDecodeResult(input.result));
     return;
   }}
   if (input.type === "tool_error") {{
@@ -1707,7 +2249,10 @@ globalThis.__labSettleToolCall = (message) => {{
 {proxy}
 globalThis.__labMainPromise = (async () => {{
 {invoker}}})();
-"#
+"#,
+        codec = CODE_MODE_VALUE_CODEC_JS,
+        invoker = invoker,
+        proxy = proxy,
     );
 
     runtime
@@ -1770,7 +2315,7 @@ fn run_code_mode_runner() -> Result<(), String> {
     // proxy ends with `var` declarations (no completion value), so the trailing
     // IIFE remains the `eval` completion value (the awaited promise). An empty
     // proxy (search path / legacy Start) leaves `codemode` undefined as before.
-    let wrapped = format!("{proxy}\n(async () => {{\n{invoker}}})()");
+    let wrapped = format!("{CODE_MODE_VALUE_CODEC_JS}\n{proxy}\n(async () => {{\n{invoker}}})()");
     let value = context
         .eval(Source::from_bytes(wrapped.as_bytes()))
         .map_err(js_error_message)?;
@@ -2105,6 +2650,7 @@ fn js_value_message(value: &JsValue, context: &mut Context) -> String {
 #[cfg(test)]
 mod tests {
     use boa_engine::{Context, Source};
+    use rmcp::model::{CallToolResult, Content};
     use serde_json::json;
 
     use super::{
@@ -2159,6 +2705,18 @@ mod tests {
     }
 
     #[test]
+    fn capability_filter_allows_only_selected_upstreams_and_tools() {
+        let filter = super::CodeModeCapabilityFilter::new(
+            vec!["github".to_string()],
+            vec!["upstream::github::search_issues".to_string()],
+        );
+
+        assert!(filter.allows("github", "search_issues"));
+        assert!(!filter.allows("github", "delete_repo"));
+        assert!(!filter.allows("docker", "search_issues"));
+    }
+
+    #[test]
     fn upstream_error_info_preserves_user_error_kinds() {
         let text = json!({
             "error": {
@@ -2174,6 +2732,128 @@ mod tests {
         assert_eq!(kind, "missing_param");
         assert_eq!(message, "query is required");
         assert!(!counts_as_failure);
+    }
+
+    #[test]
+    fn unwrap_upstream_tool_result_prefers_structured_content() {
+        let result = CallToolResult::structured(json!({
+            "items": [{"id": 1}],
+            "total": 1
+        }));
+
+        let unwrapped = super::unwrap_code_mode_upstream_result(result);
+
+        assert_eq!(
+            unwrapped,
+            json!({
+                "items": [{"id": 1}],
+                "total": 1
+            })
+        );
+        assert!(unwrapped.get("content").is_none());
+        assert!(unwrapped.get("structuredContent").is_none());
+        assert!(unwrapped.get("isError").is_none());
+    }
+
+    #[test]
+    fn unwrap_upstream_tool_result_parses_or_returns_text_content() {
+        let parsed =
+            super::unwrap_code_mode_upstream_result(CallToolResult::success(vec![Content::text(
+                r#"{"ok":true}"#,
+            )]));
+        assert_eq!(parsed, json!({"ok": true}));
+
+        let raw =
+            super::unwrap_code_mode_upstream_result(CallToolResult::success(vec![Content::text(
+                "plain text",
+            )]));
+        assert_eq!(raw, json!("plain text"));
+    }
+
+    #[test]
+    fn unwrap_upstream_tool_result_joins_all_text_and_preserves_mixed_content() {
+        let joined = super::unwrap_code_mode_upstream_result(CallToolResult::success(vec![
+            Content::text("{\"a\":"),
+            Content::text("1}"),
+        ]));
+        assert_eq!(joined, json!({"a": 1}));
+
+        let mixed = super::unwrap_code_mode_upstream_result(CallToolResult::success(vec![
+            Content::text("caption"),
+            Content::image("AQID", "image/png"),
+        ]));
+        assert!(mixed.get("content").is_some(), "{mixed}");
+    }
+
+    #[test]
+    fn validates_code_mode_params_against_input_schema() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string" },
+                "limit": { "type": "integer" }
+            },
+            "required": ["query"]
+        });
+
+        super::validate_code_mode_params_against_schema(
+            &json!({"query": "rust", "limit": 10}),
+            Some(&schema),
+        )
+        .expect("valid params pass");
+
+        let missing = super::validate_code_mode_params_against_schema(&json!({}), Some(&schema))
+            .expect_err("missing required field fails");
+        assert_eq!(missing.kind(), "missing_param");
+
+        let invalid =
+            super::validate_code_mode_params_against_schema(&json!({"query": 42}), Some(&schema))
+                .expect_err("wrong field type fails");
+        assert_eq!(invalid.kind(), "invalid_param");
+    }
+
+    #[test]
+    fn validates_code_mode_params_recursively_against_schema() {
+        let schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "state": { "enum": ["open", "closed"] },
+                "limit": { "type": ["integer", "null"], "minimum": 1, "maximum": 100 },
+                "labels": { "type": "array", "items": { "type": "string" } },
+                "owner": {
+                    "type": "object",
+                    "properties": { "login": { "type": "string" } },
+                    "required": ["login"],
+                    "additionalProperties": false
+                }
+            },
+            "required": ["state", "owner"]
+        });
+
+        super::validate_code_mode_params_against_schema(
+            &json!({
+                "state": "open",
+                "limit": null,
+                "labels": ["bug"],
+                "owner": {"login": "octo"}
+            }),
+            Some(&schema),
+        )
+        .expect("valid nested params pass");
+
+        for params in [
+            json!({"state": "merged", "owner": {"login": "octo"}}),
+            json!({"state": "open", "owner": {"login": "octo", "extra": true}}),
+            json!({"state": "open", "owner": {}, "labels": ["bug"]}),
+            json!({"state": "open", "owner": {"login": "octo"}, "labels": [1]}),
+            json!({"state": "open", "owner": {"login": "octo"}, "limit": 0}),
+            json!({"state": "open", "owner": {"login": "octo"}, "extra": true}),
+        ] {
+            let err = super::validate_code_mode_params_against_schema(&params, Some(&schema))
+                .expect_err("invalid nested params fail");
+            assert_eq!(err.kind(), "invalid_param", "{params}");
+        }
     }
 
     #[tokio::test]
@@ -2204,11 +2884,13 @@ mod tests {
                 "search_issues",
                 "search issues",
                 None,
+                None,
             ),
             super::CodeModeCatalogEntry::upstream_tool(
                 "docker",
                 "container_logs",
                 "tail container logs",
+                None,
                 None,
             ),
         ];
@@ -2243,6 +2925,7 @@ mod tests {
                 json!({"query": "Matrix"}),
                 super::CodeModeCaller::TrustedLocal,
                 super::CodeModeSurface::Cli,
+                &super::CodeModeCapabilityFilter::default(),
             )
             .await
             .expect_err("lab:: callTool id should return unknown_tool");
@@ -2326,12 +3009,67 @@ mod tests {
             "github",
             "search_issues",
             "Search issues",
-            Some(json!({"type": "object"})),
+            Some(json!({
+                "type": "object",
+                "properties": {
+                    "q": {
+                        "type": "string",
+                        "description": "Search query"
+                    }
+                },
+                "required": ["q"]
+            })),
+            Some(json!({
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": { "type": "string" }
+                            }
+                        }
+                    }
+                }
+            })),
         );
         assert_eq!(candidate.id, "upstream::github::search_issues");
         assert_eq!(candidate.upstream, "github");
         assert_eq!(candidate.name, "search_issues");
-        assert_eq!(candidate.schema, Some(json!({"type": "object"})));
+        assert_eq!(
+            candidate.output_schema,
+            Some(json!({
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": { "type": "string" }
+                            }
+                        }
+                    }
+                }
+            }))
+        );
+        assert!(
+            candidate
+                .signature
+                .contains("codemode.github.search_issues")
+        );
+        assert!(candidate.signature.contains("GithubSearchIssuesInput"));
+        assert!(candidate.signature.contains("GithubSearchIssuesOutput"));
+        assert!(candidate.dts.contains("type GithubSearchIssuesInput"));
+        assert!(candidate.dts.contains("/** Search query */"));
+        assert!(candidate.dts.contains("q: string;"));
+        assert!(candidate.dts.contains("title?: string;"));
+        assert!(
+            candidate
+                .dts
+                .contains("declare function callTool(id: \"upstream::github::search_issues\"")
+        );
     }
 
     #[test]
@@ -2522,6 +3260,35 @@ mod tests {
 
     #[cfg(feature = "code_mode_wasm")]
     #[test]
+    fn wasm_runner_reuses_cached_modules() {
+        let wat = r#"
+            (module
+              (func (export "run") (result i32)
+                i32.const 7))
+            "#;
+        super::wasm_runner::run_wasm_i32_export_for_smoke(
+            wat,
+            "run",
+            super::wasm_runner::DEFAULT_SEARCH_FUEL,
+        )
+        .expect("first wasm smoke runs");
+        let after_first = super::wasm_runner::cached_module_count_for_tests();
+        super::wasm_runner::run_wasm_i32_export_for_smoke(
+            wat,
+            "run",
+            super::wasm_runner::DEFAULT_SEARCH_FUEL,
+        )
+        .expect("second wasm smoke runs");
+        let after_second = super::wasm_runner::cached_module_count_for_tests();
+
+        assert_eq!(
+            after_second, after_first,
+            "same WAT should reuse cached module"
+        );
+    }
+
+    #[cfg(feature = "code_mode_wasm")]
+    #[test]
     fn wasm_runner_reports_fuel_exhaustion_kind() {
         let err = super::wasm_runner::run_wasm_i32_export_for_smoke(
             r#"
@@ -2550,7 +3317,7 @@ mod tests {
 
         // PRESENCE: inner code preserved
         assert!(
-            result.contains("console.log('hi');"),
+            result.contains("console.log"),
             "inner code must survive fence stripping"
         );
         // ABSENCE: fences removed
@@ -2568,104 +3335,99 @@ mod tests {
     fn normalize_user_code_strips_typescript_fences() {
         let fenced = "```typescript\nconst x: number = 1;\n```";
         let result = super::normalize_user_code(fenced);
-        assert!(result.contains("const x: number = 1;"));
+        assert!(result.contains("const x: number = 1"));
         assert!(!result.contains("```"));
         assert!(!result.contains("typescript"));
     }
 
     #[test]
-    fn normalize_user_code_parenthesizes_bare_async_main_into_expression() {
+    fn normalize_user_code_wraps_and_calls_bare_async_main() {
         let bare = "async function main() { return 42; }";
         let result = super::normalize_user_code(bare);
 
-        // PRESENCE: wrapped as a parenthesized function EXPRESSION
-        assert!(
-            result.starts_with("(async function main()"),
-            "must parenthesize into a function expression, got: {result}"
-        );
-        assert!(
-            result.ends_with("})"),
-            "expression must be closed, got: {result}"
-        );
-        // ABSENCE: no trailing self-invocation (the execute wrapper invokes it)
-        assert!(
-            !result.contains("main();"),
-            "must NOT append a main() call — wrapper invokes the expression, got: {result}"
-        );
+        assert!(result.starts_with("async () => {"), "got: {result}");
+        assert!(result.contains("async function main()"), "got: {result}");
+        assert!(result.contains("return main();"), "got: {result}");
     }
 
     #[test]
-    fn normalize_user_code_parenthesizes_bare_sync_main_into_expression() {
+    fn normalize_user_code_wraps_and_calls_bare_sync_main() {
         let bare = "function main() { return 42; }";
         let result = super::normalize_user_code(bare);
-        assert!(
-            result.starts_with("(function main()"),
-            "must parenthesize sync main into an expression, got: {result}"
-        );
-        assert!(
-            result.ends_with("})"),
-            "expression must be closed, got: {result}"
-        );
-        assert!(
-            !result.contains("main();"),
-            "must NOT append a main() call, got: {result}"
-        );
+        assert!(result.starts_with("async () => {"), "got: {result}");
+        assert!(result.contains("function main()"), "got: {result}");
+        assert!(result.contains("return main();"), "got: {result}");
     }
 
     #[test]
-    fn normalize_user_code_does_not_touch_non_main_decl_code() {
-        // Code that does not start with a main declaration must pass through
-        // unchanged — no main() injected, no parenthesization.
+    fn normalize_user_code_wraps_loose_statement_block() {
         let already_called = "const x = 1;\nmain();";
         let result = super::normalize_user_code(already_called);
-        assert_eq!(
-            result, already_called,
-            "non-main-decl code must pass through unchanged, got: {result}"
+        assert!(result.starts_with("async () => {"), "got: {result}");
+        assert!(result.contains("const x = 1;"));
+        assert!(result.contains("return (main())"));
+    }
+
+    #[test]
+    fn normalize_user_code_returns_trailing_expression() {
+        let loose = "const x = await callTool('upstream::github::search_issues', {});\nx.items";
+        let result = super::normalize_user_code(loose);
+        assert!(result.starts_with("async () => {"), "got: {result}");
+        assert!(result.contains("const x = await callTool"));
+        assert!(result.contains("return (x.items)"), "got: {result}");
+    }
+
+    #[test]
+    fn normalize_user_code_handles_cloudflare_ast_cases() {
+        let assigned_arrow = super::normalize_user_code("const f = () => 1; f()");
+        assert!(
+            assigned_arrow.starts_with("async () => {"),
+            "{assigned_arrow}"
+        );
+        assert!(assigned_arrow.contains("return (f())"), "{assigned_arrow}");
+
+        let export_arrow = super::normalize_user_code("export default async () => 42");
+        assert_eq!(export_arrow, "async () => 42");
+
+        let named = super::normalize_user_code("async function doStuff() { return 42; }");
+        assert!(named.contains("return doStuff();"), "{named}");
+
+        let iife = super::normalize_user_code("(async () => 42)()");
+        assert!(
+            iife.contains("return ((") && iife.contains(")())"),
+            "{iife}"
         );
     }
 
     #[test]
-    fn normalize_user_code_unwraps_export_default_async_into_expression() {
+    fn normalize_user_code_wraps_export_default_async_function_as_iife() {
         let exported = "export default async function() { return 42; }";
         let result = super::normalize_user_code(exported);
 
-        // ABSENCE: export default removed
-        assert!(
-            !result.contains("export default"),
-            "export default must be removed, got: {result}"
-        );
-        // PRESENCE: parenthesized async function EXPRESSION
-        assert!(
-            result.starts_with("(async function"),
-            "must wrap as a parenthesized function expression, got: {result}"
-        );
-        // ABSENCE: no IIFE self-invocation (the execute wrapper invokes it)
-        assert!(
-            result.ends_with("})") && !result.ends_with("()"),
-            "must NOT be a self-invoking IIFE, got: {result}"
-        );
+        assert!(!result.contains("export default"));
+        assert!(result.starts_with("async () => {"), "got: {result}");
+        assert!(result.contains("return (async function"), "got: {result}");
+        assert!(result.contains("})();"), "got: {result}");
     }
 
     #[test]
-    fn normalize_user_code_unwraps_export_default_sync_into_expression() {
+    fn normalize_user_code_wraps_export_default_sync_function_as_iife() {
         let exported = "export default function() { return 42; }";
         let result = super::normalize_user_code(exported);
         assert!(!result.contains("export default"));
-        assert!(result.starts_with("(function"));
-        assert!(
-            result.ends_with("})") && !result.ends_with("()"),
-            "must NOT be a self-invoking IIFE, got: {result}"
-        );
+        assert!(result.starts_with("async () => {"), "got: {result}");
+        assert!(result.contains("return (function"), "got: {result}");
+        assert!(result.contains("})();"), "got: {result}");
     }
 
     #[test]
     fn normalize_user_code_passthrough_for_plain_expressions() {
-        let plain = "const result = await callTool('lab::test', {});";
+        let plain = "async () => callTool('lab::test', {})";
         let result = super::normalize_user_code(plain);
         // PRESENCE: no transformation applied
         assert_eq!(
             result, plain,
-            "plain expressions must pass through unchanged"
+            "async arrow expressions must pass through unchanged"
         );
     }
 

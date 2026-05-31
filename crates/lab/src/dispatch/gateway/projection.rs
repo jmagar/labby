@@ -247,9 +247,22 @@ pub(super) async fn server_view_from_upstream(
         Some(pool) => pool.upstream_last_error(&upstream.name).await,
         None => None,
     });
-    let connected = summary.exposed_tool_count > 0
+    let health = match pool {
+        Some(pool) => pool.upstream_tool_health(&upstream.name).await,
+        None => None,
+    };
+    // Health-aware connectivity (mirrors `server_view_from_virtual_server`): an
+    // upstream counts as connected when it is actively exposing capabilities OR
+    // it is healthy with no recorded error. The health term keeps lazily
+    // discovered upstreams — whose catalog stays empty until their first use —
+    // from rendering as "Disconnected" at rest, while upstreams with a recorded
+    // error or an open circuit breaker still surface as down.
+    let exposing_capabilities = summary.exposed_tool_count > 0
         || summary.exposed_resource_count > 0
         || summary.exposed_prompt_count > 0;
+    let health_ok =
+        last_error.is_none() && health.map(|health| health.is_routable()).unwrap_or(false);
+    let connected = exposing_capabilities || health_ok;
     let enabled = upstream.enabled;
     let pid = match pool {
         Some(pool) => pool
