@@ -150,18 +150,10 @@ fn normalize_module_code(source: &str) -> Option<String> {
             Some(normalize_user_code(&expr.to_interned_string(&interner)))
         }
         boa_ast::declaration::ExportDeclaration::DefaultFunctionDeclaration(function) => Some(
-            format!(
-                "async () => {{\nreturn ({} )();\n}}",
-                function.to_indented_string(&interner, 0)
-            )
-            .replace("} )", "})"),
+            wrap_default_fn_as_iife(&function.to_indented_string(&interner, 0)),
         ),
         boa_ast::declaration::ExportDeclaration::DefaultAsyncFunctionDeclaration(function) => Some(
-            format!(
-                "async () => {{\nreturn ({} )();\n}}",
-                function.to_indented_string(&interner, 0)
-            )
-            .replace("} )", "})"),
+            wrap_default_fn_as_iife(&function.to_indented_string(&interner, 0)),
         ),
         boa_ast::declaration::ExportDeclaration::DefaultClassDeclaration(class) => Some(format!(
             "async () => {{\nreturn ({});\n}}",
@@ -169,6 +161,12 @@ fn normalize_module_code(source: &str) -> Option<String> {
         )),
         _ => None,
     }
+}
+
+/// Wrap a rendered `export default` function declaration as an immediately
+/// invoked expression inside an async arrow wrapper.
+fn wrap_default_fn_as_iife(rendered: &str) -> String {
+    format!("async () => {{\nreturn ({rendered})();\n}}")
 }
 
 fn normalize_script_code(source: &str) -> Option<String> {
@@ -563,21 +561,16 @@ impl CodeModeSurface {
     }
 }
 
-/// Whether a destructive upstream tool call is permitted for this `surface` and
-/// `caller`.
+/// Whether a destructive upstream tool call is explicitly permitted for this
+/// `surface`.
 ///
-/// Permitted when EITHER the surface explicitly allows destructive actions (the
-/// CLI, or MCP with `confirm:true`) OR the caller carries an execute-capable
-/// scope (`lab` / `lab:admin`).
-///
-/// Allowlisted operators are auto-elevated to `lab:admin` at auth time (see
-/// lab-auth `elevate_scope_for_allowed_user`) precisely so MCP clients can drive
-/// destructive gateway actions without a separate confirmation flow. Honoring
-/// `can_execute()` here realigns the gate with that intent instead of ignoring
-/// the granted scope — a `lab:read` caller is still denied.
+/// Execute-capable scopes (`lab` / `lab:admin`) authorize running Code Mode, but
+/// they do not confirm destructive upstream effects. MCP callers must pass
+/// `confirm:true`; CLI is operator-driven and always permits destructive tools.
 #[must_use]
 fn destructive_permitted(surface: CodeModeSurface, caller: &CodeModeCaller) -> bool {
-    surface.allow_destructive_actions() || caller.can_execute()
+    let _ = caller;
+    surface.allow_destructive_actions()
 }
 
 impl CodeModeCaller {
@@ -651,17 +644,16 @@ pub struct CodeModeCapabilityFilter {
 impl CodeModeCapabilityFilter {
     #[must_use]
     pub fn new(upstreams: Vec<String>, tools: Vec<String>) -> Self {
+        fn clean_set(values: Vec<String>) -> BTreeSet<String> {
+            values
+                .into_iter()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .collect()
+        }
         Self {
-            upstreams: upstreams
-                .into_iter()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-                .collect(),
-            tools: tools
-                .into_iter()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-                .collect(),
+            upstreams: clean_set(upstreams),
+            tools: clean_set(tools),
         }
     }
 
@@ -1367,7 +1359,7 @@ fn validate_code_mode_params_against_schema(
     schema: Option<&Value>,
 ) -> Result<(), ToolError> {
     if let Some(schema) = schema {
-        validate_json_schema_value(params, schema, "params", true)?;
+        validate_json_schema_value(params, schema, "params")?;
     }
     Ok(())
 }
@@ -1385,15 +1377,38 @@ fn json_value_matches_schema_type(value: &Value, expected: &str) -> bool {
     }
 }
 
-fn validate_json_schema_value(
+fn validate_json_schema_value(value: &Value, schema: &Value, path: &str) -> Result<(), ToolError> {
+    let mut seen_refs = BTreeSet::new();
+    validate_json_schema_value_inner(value, schema, schema, path, &mut seen_refs)
+}
+
+fn validate_json_schema_value_inner(
     value: &Value,
     schema: &Value,
+    root_schema: &Value,
     path: &str,
-    required_missing_is_missing_param: bool,
+    seen_refs: &mut BTreeSet<String>,
 ) -> Result<(), ToolError> {
     let Some(schema_object) = schema.as_object() else {
         return Ok(());
     };
+
+    if let Some(reference) = schema_object.get("$ref").and_then(Value::as_str) {
+        let pointer = reference.strip_prefix('#').ok_or_else(|| {
+            invalid_schema_param(path, "uses an unsupported non-local $ref in inputSchema")
+        })?;
+        if !seen_refs.insert(reference.to_string()) {
+            return Err(invalid_schema_param(
+                path,
+                "contains a cyclic $ref in inputSchema",
+            ));
+        }
+        let referenced_schema = root_schema.pointer(pointer).ok_or_else(|| {
+            invalid_schema_param(path, "uses an unresolved local $ref in inputSchema")
+        })?;
+        validate_json_schema_value_inner(value, referenced_schema, root_schema, path, seen_refs)?;
+        seen_refs.remove(reference);
+    }
 
     if let Some(values) = schema_object.get("enum").and_then(Value::as_array)
         && !values.iter().any(|candidate| candidate == value)
@@ -1406,30 +1421,54 @@ fn validate_json_schema_value(
         return Err(invalid_schema_param(path, "must match const"));
     }
 
-    for keyword in ["anyOf", "oneOf"] {
-        if let Some(variants) = schema_object.get(keyword).and_then(Value::as_array) {
-            if variants.iter().any(|variant| {
-                validate_json_schema_value(value, variant, path, required_missing_is_missing_param)
-                    .is_ok()
-            }) {
-                return Ok(());
-            }
+    if let Some(variants) = schema_object.get("anyOf").and_then(Value::as_array) {
+        if !variants.iter().any(|variant| {
+            validate_json_schema_value_inner(
+                value,
+                variant,
+                root_schema,
+                path,
+                &mut seen_refs.clone(),
+            )
+            .is_ok()
+        }) {
             return Err(invalid_schema_param(path, "must match at least one schema"));
+        }
+    }
+    if let Some(variants) = schema_object.get("oneOf").and_then(Value::as_array) {
+        let matches = variants
+            .iter()
+            .filter(|variant| {
+                validate_json_schema_value_inner(
+                    value,
+                    variant,
+                    root_schema,
+                    path,
+                    &mut seen_refs.clone(),
+                )
+                .is_ok()
+            })
+            .count();
+        if matches != 1 {
+            return Err(invalid_schema_param(path, "must match exactly one schema"));
         }
     }
     if let Some(variants) = schema_object.get("allOf").and_then(Value::as_array) {
         for variant in variants {
-            validate_json_schema_value(value, variant, path, required_missing_is_missing_param)?;
+            validate_json_schema_value_inner(value, variant, root_schema, path, seen_refs)?;
         }
     }
 
     if let Some(type_value) = schema_object.get("type") {
         let matches_type = match type_value {
-            Value::String(expected) => json_value_matches_schema_type(value, expected),
-            Value::Array(types) => types
-                .iter()
-                .filter_map(Value::as_str)
-                .any(|expected| json_value_matches_schema_type(value, expected)),
+            Value::String(expected) => {
+                json_value_matches_schema_type(value, expected)
+                    || schema_accepts_binary_sentinel(value, schema_object, expected)
+            }
+            Value::Array(types) => types.iter().filter_map(Value::as_str).any(|expected| {
+                json_value_matches_schema_type(value, expected)
+                    || schema_accepts_binary_sentinel(value, schema_object, expected)
+            }),
             _ => true,
         };
         if !matches_type {
@@ -1448,11 +1487,31 @@ fn validate_json_schema_value(
         return Err(invalid_schema_param(path, "is above maximum"));
     }
 
+    if let Some(actual) = value.as_str() {
+        if let Some(min_length) = schema_object.get("minLength").and_then(Value::as_u64)
+            && actual.chars().count() < min_length as usize
+        {
+            return Err(invalid_schema_param(path, "is shorter than minLength"));
+        }
+        if let Some(max_length) = schema_object.get("maxLength").and_then(Value::as_u64)
+            && actual.chars().count() > max_length as usize
+        {
+            return Err(invalid_schema_param(path, "is longer than maxLength"));
+        }
+        if let Some(pattern) = schema_object.get("pattern").and_then(Value::as_str) {
+            let regex = regex::Regex::new(pattern)
+                .map_err(|_| invalid_schema_param(path, "has an invalid pattern in inputSchema"))?;
+            if !regex.is_match(actual) {
+                return Err(invalid_schema_param(path, "does not match pattern"));
+            }
+        }
+    }
+
     if let Some(object) = value.as_object() {
         if let Some(required) = schema_object.get("required").and_then(Value::as_array) {
             for key in required.iter().filter_map(Value::as_str) {
                 if !object.contains_key(key) {
-                    return Err(if required_missing_is_missing_param && path == "params" {
+                    return Err(if path == "params" {
                         ToolError::Sdk {
                             sdk_kind: "missing_param".to_string(),
                             message: format!("callTool params missing required field `{key}`"),
@@ -1464,13 +1523,38 @@ fn validate_json_schema_value(
             }
         }
         let properties = schema_object.get("properties").and_then(Value::as_object);
-        if schema_object
-            .get("additionalProperties")
-            .and_then(Value::as_bool)
-            == Some(false)
-        {
+        let pattern_properties = schema_object
+            .get("patternProperties")
+            .and_then(Value::as_object);
+        let mut matched_pattern_keys = BTreeSet::new();
+        if let Some(pattern_properties) = pattern_properties {
+            for (pattern, pattern_schema) in pattern_properties {
+                let regex = regex::Regex::new(pattern).map_err(|_| {
+                    invalid_schema_param(
+                        path,
+                        "has an invalid patternProperties key in inputSchema",
+                    )
+                })?;
+                for (key, property_value) in object {
+                    if regex.is_match(key) {
+                        matched_pattern_keys.insert(key.clone());
+                        validate_json_schema_value_inner(
+                            property_value,
+                            pattern_schema,
+                            root_schema,
+                            &format!("{path}.{key}"),
+                            seen_refs,
+                        )?;
+                    }
+                }
+            }
+        }
+        let additional_properties = schema_object.get("additionalProperties");
+        if additional_properties.and_then(Value::as_bool) == Some(false) {
             for key in object.keys() {
-                if properties.is_none_or(|properties| !properties.contains_key(key)) {
+                if properties.is_none_or(|properties| !properties.contains_key(key))
+                    && !matched_pattern_keys.contains(key)
+                {
                     return Err(invalid_schema_param(
                         &format!("{path}.{key}"),
                         "is not allowed by inputSchema",
@@ -1481,39 +1565,106 @@ fn validate_json_schema_value(
         if let Some(properties) = properties {
             for (key, property_schema) in properties {
                 if let Some(property_value) = object.get(key) {
-                    validate_json_schema_value(
+                    validate_json_schema_value_inner(
                         property_value,
                         property_schema,
+                        root_schema,
                         &format!("{path}.{key}"),
-                        false,
+                        seen_refs,
                     )?;
                 }
             }
         }
+        if let Some(additional_schema) = additional_properties.filter(|value| value.is_object()) {
+            for (key, property_value) in object {
+                if properties.is_some_and(|properties| properties.contains_key(key))
+                    || matched_pattern_keys.contains(key)
+                {
+                    continue;
+                }
+                validate_json_schema_value_inner(
+                    property_value,
+                    additional_schema,
+                    root_schema,
+                    &format!("{path}.{key}"),
+                    seen_refs,
+                )?;
+            }
+        }
     }
 
-    if let Some(array) = value.as_array()
-        && let Some(items) = schema_object.get("items")
-    {
-        if let Some(tuple_items) = items.as_array() {
-            for (index, item_schema) in tuple_items.iter().enumerate() {
-                if let Some(item_value) = array.get(index) {
-                    validate_json_schema_value(
-                        item_value,
-                        item_schema,
-                        &format!("{path}[{index}]"),
-                        false,
-                    )?;
+    if let Some(array) = value.as_array() {
+        if let Some(min_items) = schema_object.get("minItems").and_then(Value::as_u64)
+            && array.len() < min_items as usize
+        {
+            return Err(invalid_schema_param(path, "has fewer items than minItems"));
+        }
+        if let Some(max_items) = schema_object.get("maxItems").and_then(Value::as_u64)
+            && array.len() > max_items as usize
+        {
+            return Err(invalid_schema_param(path, "has more items than maxItems"));
+        }
+        if schema_object
+            .get("uniqueItems")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            for (left_index, left) in array.iter().enumerate() {
+                if array.iter().skip(left_index + 1).any(|right| right == left) {
+                    return Err(invalid_schema_param(path, "must contain unique items"));
                 }
             }
-        } else {
-            for (index, item_value) in array.iter().enumerate() {
-                validate_json_schema_value(item_value, items, &format!("{path}[{index}]"), false)?;
+        }
+        if let Some(items) = schema_object.get("items") {
+            if let Some(tuple_items) = items.as_array() {
+                for (index, item_schema) in tuple_items.iter().enumerate() {
+                    if let Some(item_value) = array.get(index) {
+                        validate_json_schema_value_inner(
+                            item_value,
+                            item_schema,
+                            root_schema,
+                            &format!("{path}[{index}]"),
+                            seen_refs,
+                        )?;
+                    }
+                }
+            } else {
+                for (index, item_value) in array.iter().enumerate() {
+                    validate_json_schema_value_inner(
+                        item_value,
+                        items,
+                        root_schema,
+                        &format!("{path}[{index}]"),
+                        seen_refs,
+                    )?;
+                }
             }
         }
     }
 
     Ok(())
+}
+
+fn schema_accepts_binary_sentinel(
+    value: &Value,
+    schema_object: &Map<String, Value>,
+    expected_type: &str,
+) -> bool {
+    expected_type == "string"
+        && schema_object.get("format").and_then(Value::as_str) == Some("binary")
+        && is_lab_binary_sentinel(value)
+}
+
+fn is_lab_binary_sentinel(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object.get("__labBinary").and_then(Value::as_str) == Some("base64")
+        && object.get("data").and_then(Value::as_str).is_some()
+        && matches!(
+            object.get("type").and_then(Value::as_str),
+            Some("Uint8Array" | "ArrayBuffer")
+        )
 }
 
 fn invalid_schema_param(path: &str, detail: &str) -> ToolError {
@@ -2167,7 +2318,12 @@ pub fn run_code_mode_runner_stdio() -> ExitCode {
     let result = run_code_mode_runner();
     if let Err(err) = result {
         drop(runner_emit(CodeModeRunnerOutput::Error {
-            kind: "server_error".to_string(),
+            kind: if err.contains("JSON-serializable") {
+                "invalid_param"
+            } else {
+                "server_error"
+            }
+            .to_string(),
             message: err,
         }));
         return ExitCode::from(1);
@@ -2330,17 +2486,22 @@ fn run_code_mode_runner() -> Result<(), String> {
 
         match promise.state() {
             PromiseState::Fulfilled(value) => {
-                // JsValue::to_json returns None for undefined/null — both map to
-                // Option::None per the contract (result field is None when function
-                // returns undefined or has no explicit return).
-                resolved_result = match value.to_json(&mut context) {
-                    Ok(v) => v,
-                    Err(err) => {
-                        let msg = js_error_message(&err);
-                        eprintln!("WARNING: failed to serialize Code Mode result to JSON: {msg}");
-                        None
-                    }
-                };
+                if value.is_undefined() || value.is_null() {
+                    resolved_result = None;
+                } else {
+                    resolved_result = match value.to_json(&mut context) {
+                        Ok(Some(value)) if !value.is_null() => Some(value),
+                        Ok(_) => {
+                            return Err("Code Mode result must be JSON-serializable".to_string());
+                        }
+                        Err(err) => {
+                            return Err(format!(
+                                "Code Mode result must be JSON-serializable: {}",
+                                js_error_message(&err)
+                            ));
+                        }
+                    };
+                }
                 break;
             }
             PromiseState::Rejected(reason) => return Err(js_value_message(&reason, &mut context)),
@@ -2456,10 +2617,34 @@ fn javy_main_promise_state(runtime: &javy::Runtime) -> Result<JavyMainPromiseSta
                         None
                     } else {
                         match cx.json_stringify(val) {
-                            Ok(Some(json_str)) => serde_json::from_str(&json_str.to_string()?)
-                                .ok()
-                                .and_then(|v: Value| if v.is_null() { None } else { Some(v) }),
-                            _ => None,
+                            Ok(Some(json_str)) => {
+                                let json_text = json_str.to_string()?;
+                                let value: Value = match serde_json::from_str(&json_text) {
+                                    Ok(value) => value,
+                                    Err(err) => {
+                                        return Ok(JavyMainPromiseState::Rejected(format!(
+                                            "Code Mode result must be JSON-serializable: {err}"
+                                        )));
+                                    }
+                                };
+                                if value.is_null() {
+                                    return Ok(JavyMainPromiseState::Rejected(
+                                        "Code Mode result must be JSON-serializable".to_string(),
+                                    ));
+                                }
+                                Some(value)
+                            }
+                            Ok(None) => {
+                                return Ok(JavyMainPromiseState::Rejected(
+                                    "Code Mode result must be JSON-serializable".to_string(),
+                                ));
+                            }
+                            Err(err) => {
+                                return Ok(JavyMainPromiseState::Rejected(format!(
+                                    "Code Mode result must be JSON-serializable: {}",
+                                    javy::from_js_error(cx.clone(), err)
+                                )));
+                            }
                         }
                     };
                     Ok(JavyMainPromiseState::Resolved(result))
@@ -2652,12 +2837,38 @@ mod tests {
     use boa_engine::{Context, Source};
     use rmcp::model::{CallToolResult, Content};
     use serde_json::json;
+    use std::collections::HashMap;
+    use std::sync::Arc;
 
     use super::{
         CodeModeCatalogEntry, CodeModeExecutedCall, CodeModeExecutionResponse, CodeModeToolId,
         CodeModeToolRef, code_mode_upstream_error_info, configure_code_mode_runtime_limits,
         sanitize_code_mode_schema, truncate_execution_response,
     };
+
+    fn fixture_upstream_entry(
+        upstream: &str,
+        tools: HashMap<String, crate::dispatch::upstream::types::UpstreamTool>,
+    ) -> crate::dispatch::upstream::types::UpstreamEntry {
+        crate::dispatch::upstream::types::UpstreamEntry {
+            name: Arc::from(upstream),
+            tools,
+            exposure_policy: crate::dispatch::upstream::types::ToolExposurePolicy::All,
+            prompt_count: 0,
+            resource_count: 0,
+            prompt_names: Vec::new(),
+            resource_uris: Vec::new(),
+            tool_health: crate::dispatch::upstream::types::UpstreamHealth::Healthy,
+            prompt_health: crate::dispatch::upstream::types::UpstreamHealth::Healthy,
+            resource_health: crate::dispatch::upstream::types::UpstreamHealth::Healthy,
+            tool_unhealthy_since: None,
+            prompt_unhealthy_since: None,
+            resource_unhealthy_since: None,
+            tool_last_error: None,
+            prompt_last_error: None,
+            resource_last_error: None,
+        }
+    }
 
     #[test]
     fn parse_rejects_lab_id() {
@@ -2856,6 +3067,86 @@ mod tests {
         }
     }
 
+    #[test]
+    fn validates_code_mode_params_through_local_refs_and_constraints() {
+        let schema = json!({
+            "$ref": "#/$defs/Params",
+            "$defs": {
+                "Params": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "minLength": 2,
+                            "maxLength": 5,
+                            "pattern": "^[a-z]+$"
+                        },
+                        "tags": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 2,
+                            "uniqueItems": true,
+                            "items": { "type": "string" }
+                        },
+                        "meta": {
+                            "type": "object",
+                            "properties": {
+                                "known": { "type": "string" }
+                            },
+                            "additionalProperties": { "type": "integer" }
+                        },
+                        "flag": {
+                            "oneOf": [
+                                { "type": "string", "const": "on" },
+                                { "type": "boolean" }
+                            ]
+                        },
+                        "labels": {
+                            "type": "object",
+                            "patternProperties": {
+                                "^x-": { "type": "string" }
+                            },
+                            "additionalProperties": false
+                        }
+                    },
+                    "required": ["query", "tags", "flag"]
+                }
+            }
+        });
+
+        super::validate_code_mode_params_against_schema(
+            &json!({
+                "query": "abc",
+                "tags": ["one", "two"],
+                "meta": {"known": "ok", "count": 1},
+                "flag": true,
+                "labels": {"x-owner": "me"}
+            }),
+            Some(&schema),
+        )
+        .expect("valid params through local ref pass");
+
+        for params in [
+            json!({"tags": ["one"], "flag": true}),
+            json!({"query": "a", "tags": ["one"], "flag": true}),
+            json!({"query": "abcdef", "tags": ["one"], "flag": true}),
+            json!({"query": "ABC", "tags": ["one"], "flag": true}),
+            json!({"query": "abc", "tags": [], "flag": true}),
+            json!({"query": "abc", "tags": ["one", "two", "three"], "flag": true}),
+            json!({"query": "abc", "tags": ["one", "one"], "flag": true}),
+            json!({"query": "abc", "tags": ["one"], "flag": 1}),
+            json!({"query": "abc", "tags": ["one"], "flag": true, "meta": {"count": "one"}}),
+            json!({"query": "abc", "tags": ["one"], "flag": true, "labels": {"owner": "me"}}),
+        ] {
+            let err = super::validate_code_mode_params_against_schema(&params, Some(&schema))
+                .expect_err("invalid params fail through local ref");
+            assert!(
+                matches!(err.kind(), "missing_param" | "invalid_param"),
+                "{params}: {err}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn search_without_manager_returns_empty_array() {
         // No gateway manager → no upstream catalog → search returns an empty
@@ -2873,6 +3164,165 @@ mod tests {
             .expect("search ok without manager");
 
         assert_eq!(result, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn broker_search_exposes_typed_schema_metadata_from_live_catalog() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let runtime = super::super::runtime::GatewayRuntimeHandle::default();
+        let pool = Arc::new(crate::dispatch::upstream::pool::UpstreamPool::new());
+        runtime.swap(Some(Arc::clone(&pool))).await;
+        let manager = super::GatewayManager::new(dir.path().join("config.toml"), runtime);
+        manager
+            .seed_config(crate::config::LabConfig {
+                tool_search: crate::config::ToolSearchConfig {
+                    enabled: true,
+                    ..crate::config::ToolSearchConfig::default()
+                },
+                ..crate::config::LabConfig::default()
+            })
+            .await;
+        let upstream_name: Arc<str> = Arc::from("typed");
+        let upstream_tool = crate::dispatch::upstream::types::UpstreamTool {
+            tool: rmcp::model::Tool::new(
+                "lookup".to_string(),
+                "Lookup typed data",
+                Arc::new(serde_json::Map::new()),
+            ),
+            input_schema: Some(json!({
+                "type": "object",
+                "properties": {"q": {"type": "string"}},
+                "required": ["q"]
+            })),
+            output_schema: Some(json!({
+                "type": "object",
+                "properties": {"answer": {"type": "integer"}}
+            })),
+            upstream_name: Arc::clone(&upstream_name),
+            destructive: false,
+        };
+        pool.insert_entry_for_tests(
+            "typed",
+            fixture_upstream_entry(
+                "typed",
+                HashMap::from([("lookup".to_string(), upstream_tool)]),
+            ),
+        )
+        .await;
+
+        let registry = super::ToolRegistry::new();
+        let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+        let result = broker
+            .search(
+                "async () => tools.map(t => ({id: t.id, schema: t.schema, output_schema: t.output_schema, signature: t.signature, dts: t.dts}))",
+                super::CodeModeCaller::Scoped {
+                    scopes: vec!["lab:read".to_string()],
+                    sub: None,
+                },
+                super::CodeModeSurface::Mcp {
+                    allow_destructive_actions: false,
+                },
+            )
+            .await
+            .expect("search evaluates over live catalog");
+
+        let entries = result.as_array().expect("array");
+        let entry = entries
+            .iter()
+            .find(|entry| entry["id"] == "upstream::typed::lookup")
+            .expect("typed lookup entry");
+        assert_eq!(entry["schema"]["required"], json!(["q"]));
+        assert_eq!(
+            entry["output_schema"]["properties"]["answer"]["type"],
+            "integer"
+        );
+        assert!(
+            entry["signature"]
+                .as_str()
+                .is_some_and(|signature| signature.contains("Promise<"))
+        );
+        assert!(
+            entry["dts"]
+                .as_str()
+                .is_some_and(|dts| dts.contains("interface Codemode"))
+        );
+    }
+
+    #[tokio::test]
+    async fn broker_call_tool_validates_schema_before_upstream_dispatch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let runtime = super::super::runtime::GatewayRuntimeHandle::default();
+        let pool = Arc::new(crate::dispatch::upstream::pool::UpstreamPool::new());
+        runtime.swap(Some(Arc::clone(&pool))).await;
+        let manager = super::GatewayManager::new(dir.path().join("config.toml"), runtime);
+        manager
+            .seed_config(crate::config::LabConfig {
+                tool_search: crate::config::ToolSearchConfig {
+                    enabled: true,
+                    ..crate::config::ToolSearchConfig::default()
+                },
+                upstream: vec![crate::config::UpstreamConfig {
+                    enabled: true,
+                    name: "fixture".to_string(),
+                    url: Some("http://127.0.0.1:9/mcp".to_string()),
+                    bearer_token_env: None,
+                    command: None,
+                    args: Vec::new(),
+                    env: std::collections::BTreeMap::new(),
+                    proxy_resources: false,
+                    proxy_prompts: false,
+                    expose_tools: None,
+                    expose_resources: None,
+                    expose_prompts: None,
+                    oauth: None,
+                    imported_from: None,
+                    priority: 1.0,
+                    tool_search: crate::config::ToolSearchConfig::default(),
+                }],
+                ..crate::config::LabConfig::default()
+            })
+            .await;
+        let upstream_name: Arc<str> = Arc::from("fixture");
+        let upstream_tool = crate::dispatch::upstream::types::UpstreamTool {
+            tool: rmcp::model::Tool::new(
+                "needs_action".to_string(),
+                "Needs action",
+                Arc::new(serde_json::Map::new()),
+            ),
+            input_schema: Some(json!({
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                    "action": {"type": "string"}
+                }
+            })),
+            output_schema: None,
+            upstream_name: Arc::clone(&upstream_name),
+            destructive: false,
+        };
+        pool.insert_entry_for_tests(
+            "fixture",
+            fixture_upstream_entry(
+                "fixture",
+                HashMap::from([("needs_action".to_string(), upstream_tool)]),
+            ),
+        )
+        .await;
+        let registry = super::ToolRegistry::new();
+        let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+        let tool_id = "upstream::fixture::needs_action";
+
+        let err = broker
+            .call_tool_id(
+                tool_id,
+                json!({}),
+                super::CodeModeCaller::TrustedLocal,
+                super::CodeModeSurface::Cli,
+                &super::CodeModeCapabilityFilter::default(),
+            )
+            .await
+            .expect_err("missing action must fail before dispatch");
+        assert_eq!(err.kind(), "missing_param");
     }
 
     #[cfg(not(feature = "code_mode_wasm"))]
@@ -3464,7 +3914,7 @@ mod tests {
         );
     }
 
-    // ── destructive_permitted: surface flag OR execute-capable scope ──────────
+    // ── destructive_permitted: surface confirmation gate ─────────────────────
 
     fn scoped(scopes: &[&str]) -> super::CodeModeCaller {
         super::CodeModeCaller::Scoped {
@@ -3474,21 +3924,17 @@ mod tests {
     }
 
     #[test]
-    fn destructive_permitted_for_admin_scope_on_mcp_deny_surface() {
-        // REGRESSION: an allowlisted operator is auto-elevated to `lab:admin`;
-        // that scope must satisfy the destructive gate even when the MCP surface
-        // did not pass `confirm:true`. Previously denied — the gate ignored scope.
+    fn destructive_denied_for_execute_scope_on_mcp_deny_surface() {
         let surface = super::CodeModeSurface::Mcp {
             allow_destructive_actions: false,
         };
         assert!(
-            super::destructive_permitted(surface, &scoped(&["lab:admin"])),
-            "lab:admin caller must be permitted destructive actions on the MCP surface"
+            !super::destructive_permitted(surface, &scoped(&["lab:admin"])),
+            "lab:admin caller still needs explicit confirm for destructive MCP Code Mode calls"
         );
-        // `lab` (full, non-admin) is also execute-capable.
         assert!(
-            super::destructive_permitted(surface, &scoped(&["lab"])),
-            "lab caller must be permitted destructive actions on the MCP surface"
+            !super::destructive_permitted(surface, &scoped(&["lab"])),
+            "lab caller still needs explicit confirm for destructive MCP Code Mode calls"
         );
     }
 
@@ -3519,15 +3965,14 @@ mod tests {
             super::destructive_permitted(super::CodeModeSurface::Cli, &scoped(&["lab:read"])),
             "CLI surface must permit destructive actions for any caller"
         );
-        // TrustedLocal is execute-capable too.
         assert!(
-            super::destructive_permitted(
+            !super::destructive_permitted(
                 super::CodeModeSurface::Mcp {
                     allow_destructive_actions: false
                 },
                 &super::CodeModeCaller::TrustedLocal,
             ),
-            "TrustedLocal caller must be permitted destructive actions"
+            "TrustedLocal MCP caller must still provide destructive confirmation"
         );
     }
 

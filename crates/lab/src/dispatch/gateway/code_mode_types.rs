@@ -25,6 +25,7 @@ pub fn generate_tool_types(
     );
     let input_name = format!("{base}Input");
     let output_name = format!("{base}Output");
+    let upstream_interface = format!("Codemode{}Tools", to_pascal_identifier(upstream));
     let upstream_method = tool_name_to_snake(upstream);
     let tool_method = tool_name_to_snake(tool);
     let tool_id = upstream_tool_id(upstream, tool);
@@ -38,16 +39,18 @@ pub fn generate_tool_types(
     let mut dts = String::new();
     dts.push_str(&format!("type {input_name} = {input_type};\n"));
     dts.push_str(&format!("type {output_name} = {output_type};\n"));
-    dts.push_str("declare const codemode: {\n");
-    dts.push_str(&format!("  {upstream_method}: {{\n"));
+    dts.push_str(&format!("interface {upstream_interface} {{\n"));
     if let Some(comment) = jsdoc_block(description, 4) {
         dts.push_str(&comment);
     }
     dts.push_str(&format!(
-        "    {tool_method}(params: {input_name}): Promise<{output_name}>;\n"
+        "  {tool_method}(params: {input_name}): Promise<{output_name}>;\n"
     ));
-    dts.push_str("  };\n");
-    dts.push_str("};\n");
+    dts.push_str("}\n");
+    dts.push_str("interface CodemodeTools {\n");
+    dts.push_str(&format!("  {upstream_method}: {upstream_interface};\n"));
+    dts.push_str("}\n");
+    dts.push_str("declare var codemode: CodemodeTools;\n");
     dts.push_str(&format!(
         "declare function callTool(id: {tool_id_literal}, params: {input_name}): Promise<{output_name}>;\n"
     ));
@@ -158,6 +161,9 @@ fn schema_type_to_type(
     match kind {
         "object" => object_type(schema, root, depth, seen_refs),
         "array" => array_type(schema, root, depth, seen_refs),
+        "string" if schema.get("format").and_then(Value::as_str) == Some("binary") => {
+            "Uint8Array | ArrayBuffer".to_string()
+        }
         "string" => "string".to_string(),
         "integer" | "number" => "number".to_string(),
         "boolean" => "boolean".to_string(),
@@ -188,31 +194,48 @@ fn object_type(
         .unwrap_or_default();
 
     let mut lines = Vec::new();
+    let mut property_index_types = Vec::new();
     if let Some(properties) = object.get("properties").and_then(Value::as_object) {
         for key in properties.keys() {
             let property = &properties[key];
             if let Some(comment) = property_jsdoc(property, 2) {
                 lines.push(comment.trim_end().to_string());
             }
-            let optional = if required.contains(key.as_str()) {
-                ""
-            } else {
-                "?"
-            };
+            let property_type = schema_to_type(property, root, depth + 1, seen_refs);
+            let is_required = required.contains(key.as_str());
+            let optional = if is_required { "" } else { "?" };
+            push_union_parts(&mut property_index_types, &property_type);
+            if !is_required {
+                property_index_types.push("undefined".to_string());
+            }
             lines.push(format!(
                 "  {}{}: {};",
                 quote_prop(key),
                 optional,
-                schema_to_type(property, root, depth + 1, seen_refs)
+                property_type
             ));
         }
     }
 
     match object.get("additionalProperties") {
-        Some(Value::Object(_)) => lines.push(format!(
-            "  [key: string]: {};",
-            schema_to_type(&object["additionalProperties"], root, depth + 1, seen_refs)
-        )),
+        Some(Value::Object(_)) => {
+            let additional_type =
+                schema_to_type(&object["additionalProperties"], root, depth + 1, seen_refs);
+            if property_index_types.is_empty() {
+                lines.push(format!("  [key: string]: {additional_type};"));
+            } else {
+                lines.push(format!(
+                    "  /** Additional properties match: {additional_type} */"
+                ));
+                let mut index_types = Vec::new();
+                push_union_parts(&mut index_types, &additional_type);
+                index_types.extend(property_index_types);
+                lines.push(format!(
+                    "  [key: string]: {};",
+                    union(index_types.into_iter())
+                ));
+            }
+        }
         Some(Value::Bool(true)) => lines.push("  [key: string]: unknown;".to_string()),
         Some(Value::Bool(false)) => {}
         _ => {}
@@ -220,7 +243,7 @@ fn object_type(
 
     if lines.is_empty() {
         if object.get("additionalProperties").and_then(Value::as_bool) == Some(false) {
-            return "{}".to_string();
+            return "Record<string, never>".to_string();
         }
         return "Record<string, unknown>".to_string();
     }
@@ -238,17 +261,13 @@ fn array_type(
         return "unknown[]".to_string();
     };
 
-    if let Some(items) = object.get("prefixItems").and_then(Value::as_array) {
-        let items = items
-            .iter()
-            .map(|item| schema_to_type(item, root, depth + 1, seen_refs))
-            .collect::<Vec<_>>()
-            .join(", ");
-        return format!("[{items}]");
-    }
-
-    if let Some(items) = object.get("items").and_then(Value::as_array) {
-        let items = items
+    // Tuple form: `prefixItems` (draft 2020-12) or a legacy array-valued `items`.
+    if let Some(tuple) = object
+        .get("prefixItems")
+        .or_else(|| object.get("items"))
+        .and_then(Value::as_array)
+    {
+        let items = tuple
             .iter()
             .map(|item| schema_to_type(item, root, depth + 1, seen_refs))
             .collect::<Vec<_>>()
@@ -288,6 +307,15 @@ fn intersection(types: impl Iterator<Item = String>) -> String {
     } else {
         types.join(" & ")
     }
+}
+
+fn push_union_parts(types: &mut Vec<String>, ty: &str) {
+    types.extend(
+        ty.split('|')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(ToString::to_string),
+    );
 }
 
 fn literal_type(value: &Value) -> String {
@@ -444,11 +472,81 @@ mod tests {
         let ts = super::json_schema_to_type(Some(&schema));
 
         assert!(ts.contains("tuple?: [string, number];"), "{ts}");
-        assert!(ts.contains("exact?: {};"), "{ts}");
+        assert!(ts.contains("exact?: Record<string, never>;"), "{ts}");
         assert!(ts.contains("* Timestamp"), "{ts}");
         assert!(ts.contains("* @format date-time"), "{ts}");
         assert!(ts.contains("anything?: unknown;"), "{ts}");
         assert!(ts.contains("nothing?: never;"), "{ts}");
+    }
+
+    #[test]
+    fn json_schema_to_type_maps_binary_strings_to_runtime_buffer_types() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "payload": {
+                    "type": "string",
+                    "format": "binary"
+                }
+            },
+            "required": ["payload"]
+        });
+
+        let ts = super::json_schema_to_type(Some(&schema));
+
+        assert!(ts.contains("payload: Uint8Array | ArrayBuffer;"), "{ts}");
+    }
+
+    #[test]
+    fn json_schema_to_type_does_not_emit_conflicting_index_signatures() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "id": { "type": "string" },
+                "count": { "type": "integer" }
+            },
+            "required": ["id"],
+            "additionalProperties": { "type": "number" }
+        });
+
+        let ts = super::json_schema_to_type(Some(&schema));
+
+        assert!(ts.contains("id: string;"), "{ts}");
+        assert!(ts.contains("count?: number;"), "{ts}");
+        assert!(
+            ts.contains("* Additional properties match: number"),
+            "additional properties should preserve the schema type in documentation: {ts}"
+        );
+        assert!(
+            ts.contains("[key: string]: number | string | undefined;"),
+            "additional properties should be widened to avoid conflicting with explicit properties: {ts}"
+        );
+        assert!(!ts.contains("[key: string]: number;"), "{ts}");
+    }
+
+    #[test]
+    fn generate_tool_types_emits_composable_codemode_declarations() {
+        let first = super::generate_tool_types(
+            "github",
+            "list_tags",
+            "List tags",
+            Some(&json!({"type": "object"})),
+            None,
+        );
+        let second = super::generate_tool_types(
+            "github",
+            "create_issue",
+            "Create issue",
+            Some(&json!({"type": "object"})),
+            None,
+        );
+        let combined = format!("{}\n{}", first.dts, second.dts);
+
+        assert!(!combined.contains("declare const codemode"), "{combined}");
+        assert_eq!(combined.matches("declare var codemode").count(), 2);
+        assert!(combined.contains("interface CodemodeGithubTools"));
+        assert!(combined.contains("list_tags(params:"), "{combined}");
+        assert!(combined.contains("create_issue(params:"), "{combined}");
     }
 
     #[test]
@@ -469,5 +567,44 @@ mod tests {
         assert!(types.dts.contains("list_tags(params:"), "{types:?}");
         assert!(!types.dts.contains("github chat: {"), "{types:?}");
         assert!(!types.dts.contains("list tags(params:"), "{types:?}");
+    }
+
+    #[test]
+    fn generate_tool_types_sanitizes_reserved_digits_empty_dollar_and_collision_adjacent_names() {
+        let cases = [
+            ("await", "delete", "codemode.await_.delete_"),
+            ("9lives", "2fa setup", "codemode._9lives._2fa_setup"),
+            ("", "", "codemode._._"),
+            ("cash$box", "$charge", "codemode.cash$box.$charge"),
+            (
+                "movie.search",
+                "list-tags",
+                "codemode.movie_search.list_tags",
+            ),
+            (
+                "movie_search",
+                "list.tags",
+                "codemode.movie_search.list_tags",
+            ),
+        ];
+
+        for (upstream, tool, expected) in cases {
+            let types = super::generate_tool_types(
+                upstream,
+                tool,
+                "Description",
+                Some(&json!({"type": "object"})),
+                None,
+            );
+
+            assert!(
+                types.signature.contains(expected),
+                "expected {expected} in {:?}",
+                types.signature
+            );
+            assert!(!types.dts.contains(".."), "{types:?}");
+            assert!(!types.dts.contains("  : {"), "{types:?}");
+            assert!(!types.dts.contains(" (params:"), "{types:?}");
+        }
     }
 }

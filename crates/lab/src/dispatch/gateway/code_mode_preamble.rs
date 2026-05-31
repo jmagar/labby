@@ -187,6 +187,7 @@ pub fn generate_js_proxy(tools: &[UpstreamTool], upstreams: &[String]) -> Result
     // upstreams that snake-collide merge into one namespace object (tools are not
     // dropped); a per-tool snake collision is last-wins inside the object literal.
     let mut by_snake_upstream: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut final_proxy_keys: BTreeMap<(String, String), (String, String)> = BTreeMap::new();
     for (upstream_name, upstream_tools) in &by_upstream {
         let upstream_snake = tool_name_to_snake(upstream_name);
 
@@ -209,8 +210,16 @@ pub fn generate_js_proxy(tools: &[UpstreamTool], upstreams: &[String]) -> Result
             snake_to_dotted.insert(snake, tool.tool.name.to_string());
         }
 
-        let method_defs = by_snake_upstream.entry(upstream_snake).or_default();
+        let method_defs = by_snake_upstream.entry(upstream_snake.clone()).or_default();
         for (snake, dotted) in &snake_to_dotted {
+            if let Some((existing_upstream, existing_tool)) = final_proxy_keys.insert(
+                (upstream_snake.clone(), snake.clone()),
+                (upstream_name.to_string(), dotted.clone()),
+            ) {
+                return Err(format!(
+                    "Tools \"{existing_upstream}::{existing_tool}\" and \"{upstream_name}::{dotted}\" both sanitize to \"{upstream_snake}.{snake}\""
+                ));
+            }
             // callTool id uses the RAW upstream + RAW tool name.
             let tool_id = format!("upstream::{upstream_name}::{dotted}");
             let tool_id_json =
@@ -431,5 +440,34 @@ mod tests {
             .expect_err("sanitized collisions must not be last-wins");
 
         assert!(err.contains("both sanitize to"));
+    }
+
+    #[test]
+    fn generate_js_proxy_rejects_final_proxy_collisions_across_raw_upstreams() {
+        let schema = Arc::new(serde_json::Map::new());
+        let hyphenated = UpstreamTool {
+            upstream_name: Arc::from("foo-bar"),
+            tool: Tool::new("ping", "Ping", Arc::clone(&schema)),
+            destructive: false,
+            input_schema: None,
+            output_schema: None,
+        };
+        let dotted = UpstreamTool {
+            upstream_name: Arc::from("foo.bar"),
+            tool: Tool::new("ping", "Ping", Arc::clone(&schema)),
+            destructive: false,
+            input_schema: None,
+            output_schema: None,
+        };
+
+        let err = generate_js_proxy(
+            &[hyphenated, dotted],
+            &["foo-bar".to_string(), "foo.bar".to_string()],
+        )
+        .expect_err("final proxy collisions must not generate duplicate keys");
+
+        assert!(err.contains("both sanitize to"));
+        assert!(err.contains("foo_bar"));
+        assert!(err.contains("ping"));
     }
 }

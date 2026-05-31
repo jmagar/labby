@@ -129,17 +129,29 @@ fn action_schema() -> serde_json::Map<String, Value> {
         .expect("schema literal is always an object")
 }
 
-fn string_array_arg(args: &serde_json::Map<String, Value>, key: &str) -> Vec<String> {
-    args.get(key)
-        .and_then(Value::as_array)
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(Value::as_str)
+fn string_array_arg(
+    args: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Vec<String>, DispatchToolError> {
+    let Some(value) = args.get(key) else {
+        return Ok(Vec::new());
+    };
+    let values = value.as_array().ok_or_else(|| DispatchToolError::Sdk {
+        sdk_kind: "invalid_param".to_string(),
+        message: format!("`{key}` must be an array of strings when provided"),
+    })?;
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
                 .map(ToOwned::to_owned)
-                .collect()
+                .ok_or_else(|| DispatchToolError::Sdk {
+                    sdk_kind: "invalid_param".to_string(),
+                    message: format!("`{key}` entries must be strings"),
+                })
         })
-        .unwrap_or_default()
+        .collect()
 }
 
 fn completion_info(values: Vec<String>) -> CompletionInfo {
@@ -1507,10 +1519,16 @@ impl ServerHandler for LabMcpServer {
                 .min(config.max_tool_calls.max(1));
             let allow_destructive_actions =
                 args.get("confirm").and_then(Value::as_bool) == Some(true);
-            let capability_filter = CodeModeCapabilityFilter::new(
+            let capability_filter = match (
                 string_array_arg(&args, "upstreams"),
                 string_array_arg(&args, "tools"),
-            );
+            ) {
+                (Ok(upstreams), Ok(tools)) => CodeModeCapabilityFilter::new(upstreams, tools),
+                (Err(err), _) | (_, Err(err)) => {
+                    let env = tool_error_envelope(&service, "call_tool", &err);
+                    return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+                }
+            };
             let code_hash = hash_arguments(&Value::String(code.to_string()));
             tracing::info!(
                 surface = "mcp",
@@ -2794,6 +2812,40 @@ mod tests {
         assert_eq!(
             envelope.pointer("/error/param"),
             Some(&Value::from("query"))
+        );
+    }
+
+    #[test]
+    fn code_mode_filter_arg_rejects_malformed_values() {
+        let mut args = serde_json::Map::new();
+        args.insert(
+            "tools".to_string(),
+            Value::String("upstream::github::search_issues".to_string()),
+        );
+        let err = super::string_array_arg(&args, "tools")
+            .expect_err("string filter must not be treated as allow-all");
+        assert_eq!(err.kind(), "invalid_param");
+
+        let mut args = serde_json::Map::new();
+        args.insert("upstreams".to_string(), serde_json::json!(["github", 42]));
+        let err = super::string_array_arg(&args, "upstreams")
+            .expect_err("non-string filter entries must not be dropped");
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[test]
+    fn code_mode_filter_arg_accepts_absent_and_string_arrays() {
+        let args = serde_json::Map::new();
+        assert_eq!(
+            super::string_array_arg(&args, "tools").expect("absent ok"),
+            Vec::<String>::new()
+        );
+
+        let mut args = serde_json::Map::new();
+        args.insert("tools".to_string(), serde_json::json!(["a", "b"]));
+        assert_eq!(
+            super::string_array_arg(&args, "tools").expect("array ok"),
+            vec!["a".to_string(), "b".to_string()]
         );
     }
 

@@ -157,6 +157,44 @@ fn code_mode_runner_tags_typed_array_results_as_base64() {
 }
 
 #[test]
+fn code_mode_runner_rejects_non_json_serializable_results() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "start",
+            "code": "async () => BigInt(1)"
+        })
+    )
+    .expect("write start");
+
+    let error = read_protocol_line(&mut stdout);
+    assert_eq!(error["type"], "error", "expected error, got: {error}");
+    assert_eq!(error["kind"], "invalid_param");
+    assert!(
+        error["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("JSON-serializable")),
+        "unexpected error message: {error}"
+    );
+
+    let status = child.wait().expect("wait for runner");
+    assert!(!status.success(), "runner must exit non-zero after error");
+}
+
+#[test]
 fn code_mode_runner_preserves_binary_tool_args_and_results() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
         .args(["internal", "code-mode-runner"])
@@ -630,18 +668,18 @@ fn codemode_proxy_routes_through_call_tool() {
 
 /// FIX 1 (bead lab-vkwfa): an `export default async function` form, after
 /// `normalize_user_code`, must execute end-to-end. Non-vacuous: the raw form
-/// would be an IIFE (a Promise, not a function) and fail the wrapper's typeof
-/// check; normalize now emits a bare function expression instead.
+/// would fail because `export default` is not valid in a script wrapper;
+/// normalize now emits an async wrapper that invokes the exported function.
 #[test]
 fn normalized_export_default_form_executes_end_to_end() {
     let body =
         "export default async function() { return await callTool(\"upstream::test::ping\", {}); }";
     let normalized = labby::dispatch::gateway::code_mode::normalize_user_code(body);
     assert!(
-        normalized.starts_with("(async function")
-            && normalized.ends_with("})")
-            && !normalized.ends_with("()"),
-        "normalize must emit a bare function expression (no IIFE), got: {normalized}"
+        normalized.starts_with("async () =>")
+            && normalized.contains("async function")
+            && !normalized.contains("export default"),
+        "normalize must emit executable script code without export syntax, got: {normalized}"
     );
     assert_single_call_round_trip(&normalized, json!({"pong": true}));
 }

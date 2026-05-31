@@ -64,11 +64,15 @@ Search entries include both raw JSON Schemas and generated TypeScript:
 
 The execute proxy is runtime JavaScript; the TypeScript surface is delivered by
 `search` so agents can request only the declarations they need instead of loading
-the entire upstream catalog into one tool description.
+the entire upstream catalog into one tool description. When a schema is missing or
+too complex for the TypeScript emitter, the generated declaration falls back to
+`unknown`.
 
 `execute` accepts optional `upstreams` and `tools` arrays to narrow the per-run
-capability set. The injected proxy only includes allowed tools, and direct
-`callTool` IDs outside the allowlist reject as `unknown_tool`.
+capability set. When present, each filter must be a JSON array of strings; other
+shapes reject with `invalid_param`. Empty strings are ignored. The injected proxy only
+includes allowed tools, and direct `callTool` IDs outside the allowlist reject as
+`unknown_tool`.
 
 ## Result Contract
 
@@ -86,12 +90,18 @@ Successful upstream tool calls resolve to the payload, never the raw MCP
   `error_kind` on failure.
 - `logs[]` — sandbox console output when available.
 
-Binary-like JavaScript return values (`ArrayBuffer` and typed-array views) are
-encoded as tagged base64 JSON:
+Binary-like JavaScript values crossing the runner boundary use a tagged base64
+codec. JavaScript return values (`ArrayBuffer` and typed-array views) are encoded
+as JSON:
 
 ```json
 { "__labBinary": "base64", "type": "Uint8Array", "data": "AQL/" }
 ```
+
+Tagged binary values received from the parent bridge are decoded back to
+`ArrayBuffer` or `Uint8Array` inside the sandbox. Mixed or binary MCP content
+blocks that are not unwrapped as `structuredContent` or all-text content remain in
+their JSON MCP representation.
 
 Defaults:
 
@@ -123,8 +133,13 @@ Canonical recovery buckets:
 - Terminal: `unknown_tool`, `unknown_action`, `auth_failed`, `server_error`,
   `internal_error`
 
-Destructive upstream tools are blocked unless the surface or caller scope permits
-destructive actions.
+Destructive upstream tools are gated by host-side metadata before dispatch. In
+the MCP `execute` surface, callers can explicitly confirm the whole Code Mode run
+with top-level `confirm: true`. Execute-capable scopes (`lab` or `lab:admin`)
+authorize Code Mode execution, but do not implicitly confirm destructive upstream
+effects. Unconfirmed MCP destructive calls fail as `confirmation_required`. CLI
+Code Mode execution permits destructive upstream calls because it is
+operator-driven.
 
 ## Scope
 
