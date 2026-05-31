@@ -284,12 +284,16 @@ Every mutating action follows the same sequence:
 2. write `~/.config/lab/config.toml` with temp-file-in-same-dir plus rename
 3. build and lazy-seed a fresh upstream pool outside the config mutation lock
 4. atomically swap the runtime handle
-5. schedule search-index rebuilds when needed
+5. leave Code Mode catalog refresh to the next `search` or `execute` call, which
+   reprobes live upstream metadata through the gateway manager
 6. notify connected MCP peers when visible tool/resource/prompt catalogs changed
 
 Reload does not live-connect every configured upstream. It records enabled
 upstream names in the new shared pool and defers live discovery until a search,
-exact tool execution, Code Mode call, or explicit gateway test needs one.
+exact tool execution, Code Mode call, or explicit gateway test needs one. Code
+Mode search has no durable vector or lexical index to reindex; a stale search
+catalog with successful direct execute is catalog freshness/session drift, not
+upstream callability failure.
 
 Observability requirements for that reconcile:
 
