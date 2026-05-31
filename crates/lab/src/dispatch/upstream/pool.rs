@@ -1287,7 +1287,7 @@ impl UpstreamPool {
                 }
 
                 let reprobe_started = Instant::now();
-                match pool.reprobe_upstream(&config).await {
+                match pool.reprobe_upstream(&config, None, None).await {
                     Ok(true) => {
                         tracing::info!(
                             surface = "dispatch",
@@ -1345,7 +1345,12 @@ impl UpstreamPool {
         });
     }
 
-    async fn reprobe_upstream(&self, config: &UpstreamConfig) -> anyhow::Result<bool> {
+    async fn reprobe_upstream(
+        &self,
+        config: &UpstreamConfig,
+        oauth_subject: Option<&str>,
+        runtime_owner: Option<&UpstreamRuntimeOwner>,
+    ) -> anyhow::Result<bool> {
         let started = Instant::now();
         tracing::debug!(
             surface = "dispatch",
@@ -1451,12 +1456,14 @@ impl UpstreamPool {
                 .await;
         }
 
+        let subject = config.oauth.as_ref().and(oauth_subject);
+        let runtime_owner = runtime_owner.or(self.runtime_owner.as_ref());
         let (conn, tools) = connect_upstream(
             config,
-            None,
+            subject,
             self.oauth_client_cache.as_ref(),
             self.runtime_origin.as_deref(),
-            self.runtime_owner.as_ref(),
+            runtime_owner,
         )
         .await?;
         {
@@ -1728,6 +1735,15 @@ impl UpstreamPool {
         &self,
         config: &UpstreamConfig,
     ) -> anyhow::Result<bool> {
+        self.reprobe_tools_for_upstream_as(config, None, None).await
+    }
+
+    pub async fn reprobe_tools_for_upstream_as(
+        &self,
+        config: &UpstreamConfig,
+        oauth_subject: Option<&str>,
+        runtime_owner: Option<&UpstreamRuntimeOwner>,
+    ) -> anyhow::Result<bool> {
         if !config.enabled {
             tracing::debug!(
                 surface = "dispatch",
@@ -1741,7 +1757,10 @@ impl UpstreamPool {
             );
             return Ok(false);
         }
-        self.reprobe_upstream(config).await
+        let connect_lock = self.lazy_connect_lock(&config.name).await;
+        let _connect_guard = connect_lock.lock().await;
+        self.reprobe_upstream(config, oauth_subject, runtime_owner)
+            .await
     }
 
     async fn replace_catalog_tools(&self, config: &UpstreamConfig, tools: Vec<rmcp::model::Tool>) {
@@ -2487,6 +2506,81 @@ impl UpstreamPool {
     #[cfg(test)]
     pub async fn insert_entry_for_tests(&self, name: &str, entry: UpstreamEntry) {
         self.catalog.write().await.insert(name.to_string(), entry);
+    }
+
+    #[cfg(test)]
+    pub async fn insert_live_tool_server_for_tests(
+        &self,
+        upstream_name: &str,
+        tools: Arc<RwLock<Vec<String>>>,
+    ) {
+        struct MutableToolCatalogServer {
+            tools: Arc<RwLock<Vec<String>>>,
+        }
+
+        impl rmcp::ServerHandler for MutableToolCatalogServer {
+            fn get_info(&self) -> rmcp::model::ServerInfo {
+                rmcp::model::ServerInfo::new(
+                    rmcp::model::ServerCapabilities::builder()
+                        .enable_tools()
+                        .build(),
+                )
+            }
+
+            async fn list_tools(
+                &self,
+                _request: Option<rmcp::model::PaginatedRequestParams>,
+                _context: rmcp::service::RequestContext<rmcp::RoleServer>,
+            ) -> Result<rmcp::model::ListToolsResult, rmcp::model::ErrorData> {
+                let tools = self
+                    .tools
+                    .read()
+                    .await
+                    .iter()
+                    .map(|name| {
+                        rmcp::model::Tool::new(
+                            name.to_string(),
+                            format!("{name} description"),
+                            Arc::new(serde_json::Map::new()),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                Ok(rmcp::model::ListToolsResult::with_all_items(tools))
+            }
+        }
+
+        let (server_transport, client_transport) = tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
+        let server = MutableToolCatalogServer { tools };
+        let server_task = tokio::spawn(async move {
+            let running = server
+                .serve(server_transport)
+                .await
+                .expect("mutable tool catalog server starts");
+            running
+                .waiting()
+                .await
+                .expect("mutable tool catalog server runs");
+        });
+        let client_service: rmcp::service::RunningService<RoleClient, ()> = ()
+            .serve(client_transport)
+            .await
+            .expect("mutable tool catalog client starts");
+        let peer = client_service.peer().clone();
+
+        self.catalog
+            .write()
+            .await
+            .entry(upstream_name.to_string())
+            .or_insert_with(|| healthy_in_process_entry(Arc::from(upstream_name), HashMap::new()));
+        self.connections.write().await.insert(
+            upstream_name.to_string(),
+            UpstreamConnection {
+                _client_service: client_service,
+                _server_task: Some(server_task),
+                peer,
+                runtime: UpstreamRuntimeMetadata::default(),
+            },
+        );
     }
 
     /// Test-only: insert a fully-formed `UpstreamEntry` into the catalog.
