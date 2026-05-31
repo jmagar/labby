@@ -25,7 +25,9 @@ use tokio::sync::RwLock;
 use crate::config::NodeRole;
 use crate::dispatch::error::ToolError as DispatchToolError;
 use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
-use crate::dispatch::gateway::code_mode::{CodeModeBroker, CodeModeCaller, CodeModeSurface};
+use crate::dispatch::gateway::code_mode::{
+    CodeModeBroker, CodeModeCaller, CodeModeCapabilityFilter, CodeModeSurface,
+};
 use crate::dispatch::gateway::manager::GatewayManager;
 use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
 use crate::mcp::catalog::{TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME};
@@ -43,8 +45,8 @@ const CODE_MODE_MAX_CODE_BYTES: usize = 20_000;
 const CODE_EXECUTE_DESCRIPTION: &str = "\
 Execute a JavaScript async arrow function in the Code Mode sandbox. Pass `code` as \
 `async () => { ... }` — the sandbox awaits its return value (same shape as search). \
-Discover tool ids and their parameter schemas with `search` FIRST — schemas are not \
-injected into this sandbox, so `search` is how you learn what arguments a tool takes. \
+Discover tool ids and TypeScript signatures with `search` FIRST — search entries include \
+`schema`, `output_schema`, `signature`, and `dts`. \
 Every upstream MCP tool is then callable two ways: `callTool(id, params)`, or the \
 auto-generated `codemode.<upstream>.<tool>(params)` helper (a thin wrapper over the \
 same callTool, named from the live catalog — handy once `search` has told you the id).
@@ -62,9 +64,8 @@ reads instead of awaiting serially.
 
 ```ts
 // codemode.<upstream>.<tool>() helpers are auto-generated from the live catalog and
-// are callable, but UNTYPED — there is no schema in this sandbox to introspect. Run
-// `search` first to learn each tool's params. callTool is the direct form and the
-// escape hatch for dynamic ids or truncated catalogs.
+// match the signatures returned by search.dts. callTool is the direct form and the
+// escape hatch for dynamic ids.
 declare function callTool<T = unknown>(
   id: `upstream::${string}::${string}`,
   params: Record<string, unknown>
@@ -125,7 +126,32 @@ fn action_schema() -> serde_json::Map<String, Value> {
     })
     .as_object()
     .cloned()
-    .expect("schema literal is always an object")
+        .expect("schema literal is always an object")
+}
+
+fn string_array_arg(
+    args: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Vec<String>, DispatchToolError> {
+    let Some(value) = args.get(key) else {
+        return Ok(Vec::new());
+    };
+    let values = value.as_array().ok_or_else(|| DispatchToolError::Sdk {
+        sdk_kind: "invalid_param".to_string(),
+        message: format!("`{key}` must be an array of strings when provided"),
+    })?;
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| DispatchToolError::Sdk {
+                    sdk_kind: "invalid_param".to_string(),
+                    message: format!("`{key}` entries must be strings"),
+                })
+        })
+        .collect()
 }
 
 fn completion_info(values: Vec<String>) -> CompletionInfo {
@@ -1160,9 +1186,9 @@ impl ServerHandler for LabMcpServer {
                         "type": "string",
                         "description": "JavaScript async arrow function to search the upstream MCP tool catalog. \
                             The sandbox injects `const tools = [...]` where each entry has id, upstream, \
-                            name, description, and schema. Return JSON-serializable results. \
+                            name, description, schema, output_schema, signature, and dts. Return JSON-serializable results. \
                             Examples: \
-                            `async () => tools.filter(t => /container.*log/i.test(t.description)).map(t => ({id:t.id, schema:t.schema}))`; \
+                            `async () => tools.filter(t => /container.*log/i.test(t.description)).map(t => ({id:t.id, signature:t.signature, dts:t.dts}))`; \
                             `async () => tools.find(t => t.id === \"upstream::github::search_issues\")`; \
                             `async () => tools.filter(t => t.upstream === \"github\").slice(0, 20)`."
                     }
@@ -1175,7 +1201,7 @@ impl ServerHandler for LabMcpServer {
             tools.push(Tool::new(
                 TOOL_SEARCH_TOOL_NAME,
                 "Filter the upstream MCP tool catalog with JavaScript. Write an async arrow function \
-                that filters `const tools = [...]` (each entry: id, upstream, name, description, schema) \
+                that filters `const tools = [...]` (each entry: id, upstream, name, description, schema, output_schema, signature, dts) \
                 and returns what you need. No embedding model, no vector DB — the agent writes the filter. \
                 Use before execute() to discover the right tool id.",
                 search_schema,
@@ -1187,6 +1213,16 @@ impl ServerHandler for LabMcpServer {
                     "code": {
                         "type": "string",
                         "description": "JavaScript async arrow function to execute. Use await callTool(id, params) with JSON-serializable params."
+                    },
+                    "upstreams": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional upstream allowlist for this execution."
+                    },
+                    "tools": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional tool allowlist for this execution. Accepts raw tool names or upstream::<name>::<tool> ids."
                     }
                 },
                 "required": ["code"]
@@ -1483,6 +1519,16 @@ impl ServerHandler for LabMcpServer {
                 .min(config.max_tool_calls.max(1));
             let allow_destructive_actions =
                 args.get("confirm").and_then(Value::as_bool) == Some(true);
+            let capability_filter = match (
+                string_array_arg(&args, "upstreams"),
+                string_array_arg(&args, "tools"),
+            ) {
+                (Ok(upstreams), Ok(tools)) => CodeModeCapabilityFilter::new(upstreams, tools),
+                (Err(err), _) | (_, Err(err)) => {
+                    let env = tool_error_envelope(&service, "call_tool", &err);
+                    return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+                }
+            };
             let code_hash = hash_arguments(&Value::String(code.to_string()));
             tracing::info!(
                 surface = "mcp",
@@ -1509,6 +1555,7 @@ impl ServerHandler for LabMcpServer {
                     caller,
                     self.code_mode_surface(allow_destructive_actions),
                     config,
+                    capability_filter,
                 )
                 .await
             {
@@ -2769,6 +2816,40 @@ mod tests {
     }
 
     #[test]
+    fn code_mode_filter_arg_rejects_malformed_values() {
+        let mut args = serde_json::Map::new();
+        args.insert(
+            "tools".to_string(),
+            Value::String("upstream::github::search_issues".to_string()),
+        );
+        let err = super::string_array_arg(&args, "tools")
+            .expect_err("string filter must not be treated as allow-all");
+        assert_eq!(err.kind(), "invalid_param");
+
+        let mut args = serde_json::Map::new();
+        args.insert("upstreams".to_string(), serde_json::json!(["github", 42]));
+        let err = super::string_array_arg(&args, "upstreams")
+            .expect_err("non-string filter entries must not be dropped");
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    #[test]
+    fn code_mode_filter_arg_accepts_absent_and_string_arrays() {
+        let args = serde_json::Map::new();
+        assert_eq!(
+            super::string_array_arg(&args, "tools").expect("absent ok"),
+            Vec::<String>::new()
+        );
+
+        let mut args = serde_json::Map::new();
+        args.insert("tools".to_string(), serde_json::json!(["a", "b"]));
+        assert_eq!(
+            super::string_array_arg(&args, "tools").expect("array ok"),
+            vec!["a".to_string(), "b".to_string()]
+        );
+    }
+
+    #[test]
     fn server_capabilities_advertise_list_changed_support() {
         let server = super::LabMcpServer {
             registry: std::sync::Arc::new(ToolRegistry::new()),
@@ -3397,8 +3478,7 @@ mod tests {
     }
 
     #[test]
-    fn gateway_search_and_execute_input_schemas_are_code_only() {
-        // Cloudflare-parity: both gateway meta-tools take exactly { code: string }.
+    fn gateway_search_input_schema_is_code_only() {
         for schema in [serde_json::json!({
             "type": "object",
             "properties": { "code": { "type": "string" } },

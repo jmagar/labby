@@ -18,6 +18,7 @@ fn make_tool(name: &'static str, upstream: &str) -> UpstreamTool {
     UpstreamTool {
         tool: rmcp::model::Tool::new(name, "desc", Arc::new(serde_json::Map::new())),
         input_schema: Some(json!({"type": "object", "properties": {}})),
+        output_schema: None,
         upstream_name: Arc::from(upstream),
         destructive: false,
     }

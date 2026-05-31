@@ -563,6 +563,11 @@ fn cached_upstream_tool(
         UpstreamTool {
             input_schema: (!tool.input_schema.is_empty())
                 .then(|| Value::Object((*tool.input_schema).clone())),
+            output_schema: tool
+                .output_schema
+                .as_ref()
+                .filter(|schema| !schema.is_empty())
+                .map(|schema| Value::Object((**schema).clone())),
             tool,
             upstream_name: Arc::clone(upstream_name),
             destructive,
@@ -4060,6 +4065,7 @@ mod tests {
         UpstreamTool {
             tool,
             input_schema: None,
+            output_schema: None,
             upstream_name: Arc::clone(upstream_name),
             destructive: false,
         }
@@ -5402,6 +5408,7 @@ mod tests {
                     Arc::new(serde_json::Map::new()),
                 ),
                 input_schema: Some(serde_json::json!({"type": "object"})),
+                output_schema: None,
                 upstream_name: Arc::from("alpha"),
                 destructive: false,
             },
@@ -5434,6 +5441,7 @@ mod tests {
         let make_tool = |name: &'static str| UpstreamTool {
             tool: rmcp::model::Tool::new(name, "desc", Arc::new(serde_json::Map::new())),
             input_schema: Some(serde_json::json!({"type": "object"})),
+            output_schema: None,
             upstream_name: Arc::from("alpha"),
             destructive: false,
         };

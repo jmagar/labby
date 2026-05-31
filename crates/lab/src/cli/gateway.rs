@@ -734,7 +734,14 @@ async fn run_gateway_code(
             let config = manager.code_mode_config().await;
             let max_tool_calls = config.max_tool_calls;
             let response = broker
-                .execute(&code, max_tool_calls, caller, surface, config)
+                .execute(
+                    &code,
+                    max_tool_calls,
+                    caller,
+                    surface,
+                    config,
+                    crate::dispatch::gateway::code_mode::CodeModeCapabilityFilter::default(),
+                )
                 .await?;
             crate::output::print(&response, format)?;
         }

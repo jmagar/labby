@@ -20,6 +20,8 @@ pub struct UpstreamTool {
     pub tool: Tool,
     /// Cached input schema as a JSON value for `schema` action proxying.
     pub input_schema: Option<Value>,
+    /// Cached output schema as a JSON value for typed Code Mode returns.
+    pub output_schema: Option<Value>,
     /// Name of the upstream server this tool belongs to.
     pub upstream_name: Arc<str>,
     /// Whether this tool has been marked as destructive via MCP annotations.destructiveHint.

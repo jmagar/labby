@@ -1,7 +1,7 @@
 # Windows-MCP call patterns (agent-os VM via the Lab gateway)
 
 Verified live 2026-05-29 after the destructive-gate fix. The desktop target is the **agent-os**
-Windows 11 VM (container `agent-os-win11`, `dockur/windows` on host `dookie`), driven through the
+Windows 11 VM (container `agent-os-win11`, `dockur/windows` on host `tootie`), driven through the
 `agent-os_windows-mcp` upstream on the Lab gateway.
 
 ## Invocation surface

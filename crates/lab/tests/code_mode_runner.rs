@@ -27,8 +27,17 @@ fn code_mode_runner_evaluates_js_in_a_minimal_host_environment() {
     let code = r#"async () => {
         if (typeof process !== "undefined" || typeof require !== "undefined" ||
             typeof fetch !== "undefined" || typeof Deno !== "undefined" ||
-            typeof Bun !== "undefined") {
+            typeof Bun !== "undefined" || typeof XMLHttpRequest !== "undefined" ||
+            typeof connect !== "undefined") {
           throw new Error("ambient host API exposed");
+        }
+        let dynamicImportWorked = false;
+        try {
+          await Function("return import('fs')")();
+          dynamicImportWorked = true;
+        } catch (_e) {}
+        if (dynamicImportWorked) {
+          throw new Error("dynamic import exposed host modules");
         }
         console.log("runner console check");
         const first = await callTool("lab::gateway.first", {"x": 1});
@@ -107,6 +116,142 @@ fn code_mode_runner_evaluates_js_in_a_minimal_host_environment() {
     // Boa path defers console capture to Bead 3 (boa_runtime integration).
     #[cfg(feature = "code_mode_wasm")]
     assert!(stderr_text.contains("runner console check"));
+}
+
+#[test]
+fn code_mode_runner_tags_typed_array_results_as_base64() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "start",
+            "code": "async () => ({ bytes: new Uint8Array([1, 2, 255]) })"
+        })
+    )
+    .expect("write start");
+
+    let done = read_protocol_line(&mut stdout);
+    assert_eq!(done["type"], "done");
+    assert_eq!(
+        done["result"]["bytes"],
+        json!({
+            "__labBinary": "base64",
+            "type": "Uint8Array",
+            "data": "AQL/"
+        })
+    );
+    let status = child.wait().expect("wait for runner");
+    assert!(status.success(), "runner exited with {status}");
+}
+
+#[test]
+fn code_mode_runner_rejects_non_json_serializable_results() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "start",
+            "code": "async () => BigInt(1)"
+        })
+    )
+    .expect("write start");
+
+    let error = read_protocol_line(&mut stdout);
+    assert_eq!(error["type"], "error", "expected error, got: {error}");
+    assert_eq!(error["kind"], "invalid_param");
+    assert!(
+        error["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("JSON-serializable")),
+        "unexpected error message: {error}"
+    );
+
+    let status = child.wait().expect("wait for runner");
+    assert!(!status.success(), "runner must exit non-zero after error");
+}
+
+#[test]
+fn code_mode_runner_preserves_binary_tool_args_and_results() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "start",
+            "code": "async () => { const bytes = await callTool('upstream::test::echo', { bytes: new Uint8Array([1, 2, 3]) }); return { isBytes: bytes instanceof Uint8Array, values: Array.from(bytes) }; }"
+        })
+    )
+    .expect("write start");
+
+    let call = read_protocol_line(&mut stdout);
+    assert_eq!(call["type"], "tool_call");
+    assert_eq!(
+        call["params"]["bytes"],
+        json!({
+            "__labBinary": "base64",
+            "type": "Uint8Array",
+            "data": "AQID"
+        })
+    );
+    let seq = call["seq"].as_u64().expect("seq");
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "tool_result",
+            "seq": seq,
+            "result": {
+                "__labBinary": "base64",
+                "type": "Uint8Array",
+                "data": "BAUG"
+            }
+        })
+    )
+    .expect("write result");
+
+    let done = read_protocol_line(&mut stdout);
+    assert_eq!(done["type"], "done");
+    assert_eq!(
+        done["result"],
+        json!({"isBytes": true, "values": [4, 5, 6]})
+    );
+    let status = child.wait().expect("wait for runner");
+    assert!(status.success(), "runner exited with {status}");
 }
 
 #[test]
@@ -439,17 +584,17 @@ fn assert_single_call_round_trip(code: &str, expected_result: Value) {
 
 /// FIX 1 (bead lab-vkwfa): a `function main` BODY form, after `normalize_user_code`,
 /// must execute end-to-end through the runner's arrow-function wrapper. This is
-/// non-vacuous: the raw body form is normalized to a parenthesized function
-/// EXPRESSION before being piped to the runner, exactly as the broker does.
+/// non-vacuous: the raw body form is normalized to a wrapper that calls the
+/// named function before being piped to the runner, exactly as the broker does.
 #[test]
 fn normalized_function_main_form_executes_end_to_end() {
     let body = "async function main() { return await callTool(\"upstream::test::ping\", {}); }";
     let normalized = labby::dispatch::gateway::code_mode::normalize_user_code(body);
-    // Guard: normalize must produce a parenthesized expression with no self-call,
+    // Guard: normalize must produce a wrapper that invokes the named function,
     // otherwise this test would be vacuous (the raw form happens to wrap too).
     assert!(
-        normalized.starts_with("(async function main()") && !normalized.contains("main();"),
-        "normalize must emit a bare function expression, got: {normalized}"
+        normalized.starts_with("async () => {") && normalized.contains("return main();"),
+        "normalize must emit a named-function wrapper, got: {normalized}"
     );
     assert_single_call_round_trip(&normalized, json!({"pong": true}));
 }
@@ -523,18 +668,18 @@ fn codemode_proxy_routes_through_call_tool() {
 
 /// FIX 1 (bead lab-vkwfa): an `export default async function` form, after
 /// `normalize_user_code`, must execute end-to-end. Non-vacuous: the raw form
-/// would be an IIFE (a Promise, not a function) and fail the wrapper's typeof
-/// check; normalize now emits a bare function expression instead.
+/// would fail because `export default` is not valid in a script wrapper;
+/// normalize now emits an async wrapper that invokes the exported function.
 #[test]
 fn normalized_export_default_form_executes_end_to_end() {
     let body =
         "export default async function() { return await callTool(\"upstream::test::ping\", {}); }";
     let normalized = labby::dispatch::gateway::code_mode::normalize_user_code(body);
     assert!(
-        normalized.starts_with("(async function")
-            && normalized.ends_with("})")
-            && !normalized.ends_with("()"),
-        "normalize must emit a bare function expression (no IIFE), got: {normalized}"
+        normalized.starts_with("async () =>")
+            && normalized.contains("async function")
+            && !normalized.contains("export default"),
+        "normalize must emit executable script code without export syntax, got: {normalized}"
     );
     assert_single_call_round_trip(&normalized, json!({"pong": true}));
 }

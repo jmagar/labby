@@ -44,7 +44,7 @@ gateway predates the fix; rebuild + redeploy (see `references/windows-mcp-calls.
      gate is open; if `confirmation_required`, fix the gateway first.
    - Create run dir `~/.agents/docs/sessions/<app>-desktop-test/run_<id>/`.
 2. **Transfer the build** into the VM (see `references/windows-mcp-calls.md`): HTTP-pull via
-   PowerShell `Invoke-WebRequest` (verified reachable) or SCP to `dookie:2222`. `Unblock-File` the
+   PowerShell `Invoke-WebRequest` (verified reachable) or SCP to the agent-os guest (`scp ... agent-os:` / host forward `tootie:2222`). `Unblock-File` the
    copied binary; pre-create a firewall allow rule if it binds a port.
 3. **Launch.** Prefer `PowerShell {command:"Start-Process 'C:\\...\\app.exe'; ...return PID"}`
    (Start-menu `App {name}` is unreliable for arbitrary binaries). Confirm a PID came back.

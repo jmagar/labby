@@ -2983,6 +2983,7 @@ mod tests {
         let upstream_tool = UpstreamTool {
             tool,
             input_schema: None,
+            output_schema: None,
             upstream_name: Arc::clone(&upstream_name),
             destructive: false,
         };
@@ -4541,6 +4542,48 @@ mod tests {
         assert!(view.warnings.is_empty());
         assert_eq!(view.exposed_resource_count, 2);
         assert_eq!(view.exposed_prompt_count, 4);
+    }
+
+    #[tokio::test]
+    async fn lazily_seeded_healthy_upstream_reports_connected_before_first_use() {
+        // Regression: with lazy discovery the catalog is empty (0 tools) until an
+        // upstream's first use. A seeded-but-healthy upstream must not render as
+        // "Disconnected" just because no tools are exposed yet.
+        let pool = UpstreamPool::new();
+        let upstream = fixture_http_upstream("lazy-upstream");
+        pool.seed_lazy_upstreams(std::slice::from_ref(&upstream))
+            .await;
+
+        let view = server_view_from_upstream(Some(&pool), &upstream).await;
+        assert!(
+            view.connected,
+            "seeded healthy upstream should be connected"
+        );
+        assert!(view.surfaces.mcp.connected);
+        assert_eq!(view.discovered_tool_count, 0);
+        assert!(view.warnings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn errored_upstream_reports_disconnected_even_when_circuit_closed() {
+        // An upstream with a recorded operator-visible error must surface as down
+        // regardless of the optimistic seeded health default.
+        let pool = UpstreamPool::new();
+        let mut entry = fixture_upstream_entry("broken-upstream", HashMap::new());
+        entry.tool_health = UpstreamHealth::Unhealthy {
+            consecutive_failures: 1,
+        };
+        entry.tool_last_error = Some("auth required: 401 Unauthorized".to_string());
+        pool.insert_entry_for_tests("broken-upstream", entry).await;
+
+        let upstream = fixture_http_upstream("broken-upstream");
+        let view = server_view_from_upstream(Some(&pool), &upstream).await;
+        assert!(!view.connected, "errored upstream should be disconnected");
+        assert!(!view.surfaces.mcp.connected);
+        assert_eq!(
+            view.warnings.first().map(|warning| warning.code.as_str()),
+            Some("auth_failed")
+        );
     }
 
     #[tokio::test]

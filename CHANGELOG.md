@@ -8,6 +8,33 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.21.0] - 2026-05-31
+
+### Highlights
+
+- **Code Mode normalization now follows Cloudflare's AST behavior** — snippets are
+  parsed structurally so trailing expressions, named functions, export defaults,
+  arrows, classes, and parse fallback cases are wrapped consistently before
+  sandbox execution.
+- **Typed Code Mode parity tightened** — generated TypeScript now handles
+  boolean schemas, tuple arrays, exact empty objects, format JSDoc, stable
+  property order, safer identifier sanitization, and sanitized method collision
+  rejection.
+- **Runtime parity gaps closed** — MCP tool results now unwrap text and mixed
+  content like Cloudflare, recursive JSON Schema validation runs before dispatch,
+  and binary values are preserved across sandbox results and tool calls.
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | feat: close Code Mode Cloudflare parity gaps |
+
+### Version bumps
+
+- Rust workspace: `0.20.0 -> 0.21.0`
+- Gateway admin package: `0.20.0 -> 0.21.0`
+
+---
+
 ## [0.20.0] - 2026-05-27
 
 ### Highlights

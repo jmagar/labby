@@ -1,10 +1,10 @@
 # agent-os (Windows sandbox VM)
 
-Drive Claude's dedicated sandboxed Windows 11 VM, the **`agent-os`** VM (container name `agent-os-win11`, image `dockur/windows`) on host `dookie`, historically nicknamed "winbox", through the **Windows-MCP** server installed inside it. The skill name is now `agent-os`; both `agent-os` and legacy `winbox` work as trigger phrases.
+Drive Claude's dedicated sandboxed Windows 11 VM, the **`agent-os`** VM (container name `agent-os-win11`, image `dockur/windows`) on host `tootie`, historically nicknamed "winbox", through the **Windows-MCP** server installed inside it. The skill name is now `agent-os`; both `agent-os` and legacy `winbox` work as trigger phrases.
 
 ## What changed
 
-This skill used to drive the VM over noVNC at `http://dookie:8006` via `agent-browser`, dispatching `MouseEvent`s on the canvas and typing one keystroke at a time. That path worked but was slow and had a known `Shift+<digit>` bug.
+This skill used to drive the VM over noVNC at `http://tootie:8006` via `agent-browser`, dispatching `MouseEvent`s on the canvas and typing one keystroke at a time. That path worked but was slow and had a known `Shift+<digit>` bug.
 
 Windows-MCP ([CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP)) replaces it. The MCP server runs inside the agent-os VM and exposes native Windows automation as `mcp__windows-mcp__*` tools. You get a real keyboard, a real accessibility tree (`Snapshot`), and direct PowerShell (`Shell`).
 
@@ -18,7 +18,7 @@ Windows-MCP ([CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MC
 
 ## When to invoke
 
-Sandbox-specific triggers only: `agent-os`, `the agent-os VM`, `winbox`, `the windows sandbox`, `the dookie windows`, `drive the windows VM`, `spin up agent-os`, `open the noVNC`, or any "run X / screenshot agent-os" prompt. Does **not** fire on the user's personal Windows machine (steamy-wsl) - that target uses the `nircmd` skill.
+Sandbox-specific triggers only: `agent-os`, `the agent-os VM`, `winbox`, `the windows sandbox`, `the tootie windows`, `drive the windows VM`, `spin up agent-os`, `open the noVNC`, or any "run X / screenshot agent-os" prompt. Does **not** fire on the user's personal Windows machine (steamy-wsl) - that target uses the `nircmd` skill.
 
 ## Web-dev browser priority
 
@@ -36,12 +36,12 @@ Use Windows-MCP for desktop/OS state, native dialogs, installed Windows software
 
 Configured as an HTTP MCP server in `~/.claude.json` under `mcpServers.windows-mcp` (Tailscale address + Bearer token). Claude Code reaches it automatically. Nothing to start.
 
-If unreachable: `ssh dookie "docker ps --format '{{.Names}}' | grep agent-os"` to confirm the container (`agent-os-win11`) is up.
+If unreachable: `ssh tootie "docker ps --format '{{.Names}}' | grep agent-os"` to confirm the container (`agent-os-win11`) is up.
 
 Side-channels exposed by the container, in case Windows-MCP is wedged:
-- noVNC at `http://dookie:8006` (visual debug)
-- RDP at `dookie:33890` (needs an agent-side RDP client)
-- SSH at `dookie:2222` → guest port 22 (sshd inside the guest must be running; if it is, this is the cleanest scripted bypass)
+- noVNC at `http://tootie:8006` (visual debug)
+- RDP at `tootie:33890` (needs an agent-side RDP client)
+- SSH at `tootie:2222` → guest port 22 (sshd inside the guest must be running; if it is, this is the cleanest scripted bypass)
 
 ## Key advantages over the legacy noVNC path
 
@@ -52,7 +52,7 @@ Side-channels exposed by the container, in case Windows-MCP is wedged:
 
 ## Visual debugging fallback
 
-noVNC at `http://dookie:8006/vnc.html?autoconnect=1&resize=remote` still works for eyeballing the desktop visually, but isn't the primary interaction surface anymore. See git history of `SKILL.md` for the legacy `agent-browser` helpers if you ever need them.
+noVNC at `http://tootie:8006/vnc.html?autoconnect=1&resize=remote` still works for eyeballing the desktop visually, but isn't the primary interaction surface anymore. See git history of `SKILL.md` for the legacy `agent-browser` helpers if you ever need them.
 
 ## Files
 

@@ -2,6 +2,7 @@ mod catalog;
 mod client;
 pub mod code_mode;
 mod code_mode_preamble;
+mod code_mode_types;
 pub(crate) mod config;
 mod config_mutation;
 pub mod discovery;
