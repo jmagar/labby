@@ -68,6 +68,67 @@ the entire upstream catalog into one tool description. When a schema is missing 
 too complex for the TypeScript emitter, the generated declaration falls back to
 `unknown`.
 
+## Catalog Freshness
+
+Code Mode does not build or read a durable vector, lexical, or RRF index. Each
+`search` call projects a transient catalog from the gateway runtime and refreshes
+enabled upstream tool metadata through the gateway manager before evaluating the
+caller JavaScript. The `execute` proxy is generated from the same refreshed
+catalog source, so helper visibility and direct `callTool` routing stay aligned.
+
+`gateway.reload` swaps in a freshly seeded lazy upstream pool. The next Code Mode
+`search` or `execute` call reprobes the relevant live upstreams and should see
+tool-list changes such as the agent-os Windows-MCP `PowerShell`, `FileSystem`,
+`Snapshot`, and `Wait` tools without requiring a process restart.
+
+## Catalog Drift Diagnostics
+
+When search results do not match live execution, check the layers in order:
+
+1. Gateway runtime:
+
+   ```bash
+   labby gateway list --json
+   ```
+
+   Confirm the upstream reports the expected discovered tool count and is not
+   carrying a tools-capability error.
+
+2. Code Mode execute proxy:
+
+   ```ts
+   async () => Object.keys(codemode.agent_os_windows_mcp).sort()
+   ```
+
+   For agent-os, the list should include `PowerShell`, `FileSystem`, `Snapshot`,
+   and `Wait`.
+
+3. Direct callability:
+
+   ```ts
+   async () => callTool("upstream::agent-os_windows-mcp::PowerShell", {
+     command: "Write-Output MCP_OK"
+   })
+   ```
+
+   If this succeeds while search is stale, the upstream is callable and the
+   issue is catalog visibility rather than tool execution.
+
+4. MCP search injected catalog:
+
+   ```ts
+   async () => tools
+     .filter(t => t.upstream === "agent-os_windows-mcp")
+     .map(t => t.name)
+     .sort()
+   ```
+
+   Missing `PowerShell`, `FileSystem`, or `Snapshot` here after layers 1-3 are
+   fresh indicates Code Mode catalog freshness drift in the active MCP session.
+   Run `gateway.reload` once to swap the runtime pool; if the same MCP session
+   still sees stale search results while execute is fresh, reconnect that MCP
+   client session so it receives the current gateway manager state.
+
 `execute` accepts optional `upstreams` and `tools` arrays to narrow the per-run
 capability set. When present, each filter must be a JSON array of strings; other
 shapes reject with `invalid_param`. Empty strings are ignored. The injected proxy only
