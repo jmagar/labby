@@ -189,7 +189,7 @@ fn normalize_script_code(source: &str) -> Option<String> {
                         boa_ast::Expression::ArrowFunction(_)
                             | boa_ast::Expression::AsyncArrowFunction(_)
                     ) {
-                        return Some(source.to_string());
+                        return Some(strip_trailing_statement_semicolon(source));
                     }
                     return Some(format!(
                         "async () => {{\nreturn ({})\n}}",
@@ -231,6 +231,14 @@ fn normalize_script_code(source: &str) -> Option<String> {
         .collect::<Vec<_>>()
         .join("\n");
     Some(format!("async () => {{\n{body}\n}}"))
+}
+
+fn strip_trailing_statement_semicolon(source: &str) -> String {
+    let trimmed = source.trim();
+    trimmed.strip_suffix(';').map_or_else(
+        || source.to_string(),
+        |without| without.trim_end().to_string(),
+    )
 }
 
 fn function_declaration_name(
@@ -996,9 +1004,19 @@ impl<'a> CodeModeBroker<'a> {
         // proxy rather than aborting execute — `callTool` is always available as
         // the documented escape hatch, so the run can still proceed without the
         // typed namespace.
-        let proxy = self
+        let proxy = match self
             .build_code_mode_proxy(&caller, surface, &capability_filter)
-            .await?;
+            .await
+        {
+            Ok(proxy) => proxy,
+            Err(err) => {
+                tracing::warn!(
+                    kind = err.kind(),
+                    "code_mode.proxy_generation_failed; continuing with callTool only"
+                );
+                String::new()
+            }
+        };
 
         write_runner_input(
             &mut stdin,
@@ -2456,7 +2474,7 @@ fn run_code_mode_runner() -> Result<(), String> {
 
     context
         .register_global_builtin_callable(
-            js_string!("callTool"),
+            js_string!("__labCallToolNative"),
             2,
             NativeFunction::from_copy_closure(code_mode_call_tool_native),
         )
@@ -2471,7 +2489,23 @@ fn run_code_mode_runner() -> Result<(), String> {
     // proxy ends with `var` declarations (no completion value), so the trailing
     // IIFE remains the `eval` completion value (the awaited promise). An empty
     // proxy (search path / legacy Start) leaves `codemode` undefined as before.
-    let wrapped = format!("{CODE_MODE_VALUE_CODEC_JS}\n{proxy}\n(async () => {{\n{invoker}}})()");
+    let wrapped = format!(
+        r#"
+{CODE_MODE_VALUE_CODEC_JS}
+globalThis.callTool = (id, params = {{}}) => {{
+  if (typeof id !== "string" || id.trim() === "") {{
+    throw new TypeError("callTool id must be a non-empty string");
+  }}
+  if (params === null || typeof params !== "object" || Array.isArray(params)) {{
+    throw new TypeError("callTool params must be a JSON object");
+  }}
+  return globalThis.__labCallToolNative(id, __labEncodeResult(params));
+}};
+{proxy}
+(async () => {{
+{invoker}}})()
+"#
+    );
     let value = context
         .eval(Source::from_bytes(wrapped.as_bytes()))
         .map_err(js_error_message)?;
@@ -3878,6 +3912,16 @@ mod tests {
         assert_eq!(
             result, plain,
             "async arrow expressions must pass through unchanged"
+        );
+    }
+
+    #[test]
+    fn normalize_user_code_strips_arrow_expression_trailing_semicolon() {
+        let result = super::normalize_user_code("async () => 42;");
+        assert!(result.starts_with("async () =>"), "got: {result}");
+        assert!(
+            !result.trim_end().ends_with(';'),
+            "normalized arrow must not keep the source trailing semicolon: {result}"
         );
     }
 
