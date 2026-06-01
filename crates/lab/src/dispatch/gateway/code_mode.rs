@@ -51,8 +51,6 @@ fn lab_action_unknown_tool_hint() -> String {
          Example: {TOOL_EXECUTE_TOOL_NAME}(name=\"radarr\", arguments={{action:\"movie.search\", params:{{query:\"Matrix\"}}}})."
     )
 }
-const CODE_SEARCH_CATALOG_SOFT_CAP_BYTES: usize = 256 * 1024;
-const CODE_SEARCH_CATALOG_HARD_CAP_BYTES: usize = 512 * 1024;
 
 /// Normalize user-submitted code before sandbox execution.
 ///
@@ -454,10 +452,6 @@ pub struct CodeModeCatalogEntry {
     pub output_schema: Option<Value>,
     pub signature: String,
     pub dts: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dropped_count: Option<usize>,
 }
 
 impl CodeModeCatalogEntry {
@@ -485,27 +479,6 @@ impl CodeModeCatalogEntry {
             output_schema,
             signature: types.signature,
             dts: types.dts,
-            note: None,
-            dropped_count: None,
-        }
-    }
-
-    #[must_use]
-    pub fn truncation_sentinel(dropped_count: usize) -> Self {
-        Self {
-            id: "__truncated__".to_string(),
-            name: "__truncated__".to_string(),
-            upstream: "__catalog__".to_string(),
-            description: "Catalog entries were dropped to fit the Code Mode inline catalog budget"
-                .to_string(),
-            schema: None,
-            output_schema: None,
-            signature: String::new(),
-            dts: String::new(),
-            note: Some(
-                "Some entries were dropped to fit the 256KB inline catalog cap. Use scout for full RRF discovery.".to_string(),
-            ),
-            dropped_count: Some(dropped_count),
         }
     }
 }
@@ -640,9 +613,7 @@ impl CodeModeCaller {
             // reached and OAuth upstreams (e.g. axon) get stranded with an expired
             // token. Non-admin callers keep their own `sub` so a personal upstream
             // grant is used; a `sub`-less caller falls back to the shared subject.
-            Self::Scoped { scopes, .. }
-                if scopes.iter().any(|scope| scope == "lab:admin") =>
-            {
+            Self::Scoped { scopes, .. } if scopes.iter().any(|scope| scope == "lab:admin") => {
                 Some(SHARED_GATEWAY_OAUTH_SUBJECT)
             }
             Self::Scoped { sub: Some(s), .. } => Some(s.as_str()),
@@ -716,7 +687,7 @@ impl<'a> CodeModeBroker<'a> {
         let allow_cold_connect = caller.can_execute();
         let owner = caller.runtime_owner(surface);
         let oauth_subject = caller.oauth_subject();
-        let (catalog, serialized_size, truncated) = self
+        let (catalog, serialized_size) = self
             .code_search_catalog(manager, allow_cold_connect, &owner, oauth_subject)
             .await?;
         tracing::info!(
@@ -725,7 +696,6 @@ impl<'a> CodeModeBroker<'a> {
             action = "catalog.build",
             catalog_size_bytes = serialized_size,
             entry_count = catalog.len(),
-            truncated,
             "Code Mode search catalog ready"
         );
         evaluate_code_search(code, &catalog)
@@ -800,7 +770,7 @@ impl<'a> CodeModeBroker<'a> {
         allow_cold_connect: bool,
         owner: &UpstreamRuntimeOwner,
         oauth_subject: Option<&str>,
-    ) -> Result<(Vec<CodeModeCatalogEntry>, usize, bool), ToolError> {
+    ) -> Result<(Vec<CodeModeCatalogEntry>, usize), ToolError> {
         let mut entries = manager
             .code_mode_catalog_tools(allow_cold_connect, Some(owner), oauth_subject)
             .await?
@@ -830,48 +800,12 @@ impl<'a> CodeModeBroker<'a> {
                 .then_with(|| a.name.cmp(&b.name))
         });
 
-        let mut serialized_size = serialized_catalog_size(&entries)?;
-        if serialized_size > CODE_SEARCH_CATALOG_HARD_CAP_BYTES {
-            return Err(ToolError::Sdk {
-                sdk_kind: "invalid_param".to_string(),
-                message: format!(
-                    "Code Mode inline catalog is {serialized_size} bytes, above the 512KB hard cap; use scout for full RRF discovery"
-                ),
-            });
-        }
+        // The catalog is injected as `const tools` into the Boa sandbox and never
+        // enters the model context (only the caller's filtered result does), so it
+        // is served complete and uncapped — matching Cloudflare's Code Mode design.
+        let serialized_size = serialized_catalog_size(&entries)?;
 
-        let mut truncated = false;
-        if serialized_size > CODE_SEARCH_CATALOG_SOFT_CAP_BYTES {
-            truncated = true;
-            entries.sort_by(|a, b| {
-                (a.description.len() + a.name.len())
-                    .cmp(&(b.description.len() + b.name.len()))
-                    .then_with(|| a.upstream.cmp(&b.upstream))
-                    .then_with(|| a.name.cmp(&b.name))
-            });
-            let original_len = entries.len();
-            while !entries.is_empty()
-                && serialized_catalog_size_with_sentinel(&entries, original_len - entries.len())?
-                    > CODE_SEARCH_CATALOG_SOFT_CAP_BYTES
-            {
-                entries.pop();
-            }
-            let dropped = original_len - entries.len();
-            if dropped > 0 {
-                entries.push(CodeModeCatalogEntry::truncation_sentinel(dropped));
-                tracing::warn!(
-                    surface = "dispatch",
-                    service = "code_mode",
-                    action = "code_search.catalog",
-                    tools_omitted = dropped,
-                    catalog_bytes = serialized_size,
-                    "catalog truncated for code mode"
-                );
-            }
-            serialized_size = serialized_catalog_size(&entries)?;
-        }
-
-        Ok((entries, serialized_size, truncated))
+        Ok((entries, serialized_size))
     }
 
     /// Build the runtime `codemode.*` proxy JS from the live upstream catalog.
@@ -1989,17 +1923,6 @@ fn serialized_catalog_size(entries: &[CodeModeCatalogEntry]) -> Result<usize, To
             sdk_kind: "internal_error".to_string(),
             message: format!("failed to serialize Code Mode catalog: {err}"),
         })
-}
-
-fn serialized_catalog_size_with_sentinel(
-    entries: &[CodeModeCatalogEntry],
-    dropped_count: usize,
-) -> Result<usize, ToolError> {
-    let mut candidate = entries.to_vec();
-    if dropped_count > 0 {
-        candidate.push(CodeModeCatalogEntry::truncation_sentinel(dropped_count));
-    }
-    serialized_catalog_size(&candidate)
 }
 
 /// Run the caller's JavaScript search function against the inline catalog using

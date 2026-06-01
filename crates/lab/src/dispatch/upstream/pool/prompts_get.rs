@@ -18,7 +18,10 @@ use crate::config::UpstreamConfig;
 use super::super::types::UpstreamCapability;
 use super::UpstreamPool;
 use super::connect::connect_upstream;
-use super::helpers::{merge_upstream_prompts, upstream_transport};
+use super::helpers::{
+    bare_upstream_prompt_name, merge_upstream_prompts, prefixed_upstream_prompt_name,
+    upstream_transport,
+};
 use super::logging::{
     UpstreamRequestLog, log_upstream_request_error, log_upstream_request_finish,
     log_upstream_request_start,
@@ -104,10 +107,12 @@ impl UpstreamPool {
                 continue;
             };
             if let Ok(result) = conn.peer.list_prompts(None).await
-                && result
-                    .prompts
-                    .iter()
-                    .any(|prompt| prompt.name == target_prompt)
+                && result.prompts.iter().any(|prompt| {
+                    // The requested name is namespaced as `{upstream}/{name}`;
+                    // the upstream advertises the bare name, so compare against
+                    // the prefixed form.
+                    prefixed_upstream_prompt_name(&name, &prompt.name) == target_prompt
+                })
             {
                 return Some(name);
             }
@@ -119,9 +124,13 @@ impl UpstreamPool {
     pub async fn get_prompt(
         &self,
         upstream_name: &str,
-        params: GetPromptRequestParams,
+        mut params: GetPromptRequestParams,
     ) -> Option<Result<GetPromptResult, String>> {
         let start = Instant::now();
+        // The gateway namespaces upstream prompt names as `{upstream}/{name}`,
+        // but the upstream only knows the bare name — strip the prefix before
+        // forwarding (mirrors `read_upstream_resource` stripping the URI prefix).
+        params.name = bare_upstream_prompt_name(upstream_name, &params.name).to_string();
         let prompt_name = params.name.to_string();
         let event = UpstreamRequestLog::prompt(upstream_name, &prompt_name, false);
         let peer = self
@@ -182,9 +191,11 @@ impl UpstreamPool {
         &self,
         config: &UpstreamConfig,
         subject: &str,
-        params: GetPromptRequestParams,
+        mut params: GetPromptRequestParams,
     ) -> Result<GetPromptResult, String> {
         let start = Instant::now();
+        // Strip the `{upstream}/` namespace before forwarding the bare name.
+        params.name = bare_upstream_prompt_name(&config.name, &params.name).to_string();
         let prompt_name = params.name.to_string();
         let event = UpstreamRequestLog::prompt(&config.name, &prompt_name, true)
             .with_transport(upstream_transport(config));

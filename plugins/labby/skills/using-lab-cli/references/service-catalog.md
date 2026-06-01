@@ -85,7 +85,7 @@ The action-dispatch mirrors are:
 { "action": "gateway.schema", "params": { "name": "<upstream>" } }
 ```
 
-Use `scout`/`invoke` for intent-based search across the gateway. Use the
+Use Code Mode `search`/`execute` for intent-based discovery across the gateway. Use the
 `lab://gateway/*` resources or `gateway.servers`/`gateway.schema` actions when
 the caller needs a complete schema for a known connected server.
 
@@ -93,7 +93,7 @@ Discovery chooser:
 
 | Need | Use |
 | --- | --- |
-| Unknown intent across all servers | `scout` then `invoke` |
+| Unknown intent across all servers | Code Mode `search` then `execute` |
 | Connected upstream inventory | MCP `list_resources` + `read_resource lab://gateway/servers`, or `gateway.servers` |
 | Full schema for one known upstream | MCP `read_resource lab://gateway/<name>/schema`, or `gateway.schema` |
 | Runtime gateway health/status | `labby gateway mcp list --json` or `gateway.mcp.list` |

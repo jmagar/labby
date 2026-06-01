@@ -11,6 +11,15 @@
 use super::super::types::UpstreamCapability;
 
 pub(super) fn is_capability_unsupported(error: &rmcp::ServiceError) -> bool {
+    // Prefer the structured JSON-RPC code: a `-32601 Method not found` reply
+    // means the upstream simply doesn't implement that capability.
+    if let rmcp::ServiceError::McpError(data) = error
+        && data.code == rmcp::model::ErrorCode::METHOD_NOT_FOUND
+    {
+        return true;
+    }
+    // Fallback to message matching for transports/servers that surface the
+    // same condition without a clean structured code.
     let msg = error.to_string();
     msg.contains("Method not found")
         || msg.contains("method_not_found")

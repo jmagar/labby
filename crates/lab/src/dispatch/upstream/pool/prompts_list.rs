@@ -16,6 +16,7 @@ use super::super::types::UpstreamCapability;
 use super::UpstreamPool;
 use super::discover::routable_upstream_peers;
 use super::helpers::merge_upstream_prompts;
+use super::logging::is_capability_unsupported;
 
 impl UpstreamPool {
     /// Fetch prompts from all healthy upstreams and merge them, returning both the
@@ -53,6 +54,26 @@ impl UpstreamPool {
                         }
                     }
                     upstream_prompts.push((name, result.prompts));
+                }
+                Err(e) if is_capability_unsupported(&e) => {
+                    // The upstream simply doesn't implement `prompts/list`
+                    // (JSON-RPC -32601). This is expected capability negotiation,
+                    // not a failure: treat it like an empty, successful listing so
+                    // the upstream stays routable and accrues no phantom failures.
+                    self.record_success_for(&name, UpstreamCapability::Prompts)
+                        .await;
+                    prompt_name_updates.insert(name.clone(), Vec::new());
+                    {
+                        let mut catalog = self.catalog.write().await;
+                        if let Some(entry) = catalog.get_mut(&name) {
+                            entry.prompt_count = 0;
+                        }
+                    }
+                    tracing::debug!(
+                        upstream = %name,
+                        error = %e,
+                        "upstream does not implement prompts/list — capability absent"
+                    );
                 }
                 Err(e) => {
                     self.record_failure_for(
@@ -191,11 +212,32 @@ mod tests {
             ],
         );
 
+        // Every prompt is namespaced by its owning upstream, so the two `shared`
+        // prompts no longer collide — both survive with distinct names. Ordering
+        // is deterministic: upstreams sorted (alpha < zeta), prompts in order.
         let names: Vec<_> = prompts.iter().map(|prompt| prompt.name.as_str()).collect();
-        assert_eq!(names, vec!["shared", "left-only", "right-only"]);
-        assert_eq!(owners.get("shared").map(String::as_str), Some("alpha"));
-        assert_eq!(owners.get("left-only").map(String::as_str), Some("alpha"));
-        assert_eq!(owners.get("right-only").map(String::as_str), Some("zeta"));
+        assert_eq!(
+            names,
+            vec![
+                "alpha/shared",
+                "alpha/left-only",
+                "zeta/shared",
+                "zeta/right-only",
+            ]
+        );
+        assert_eq!(
+            owners.get("alpha/shared").map(String::as_str),
+            Some("alpha")
+        );
+        assert_eq!(owners.get("zeta/shared").map(String::as_str), Some("zeta"));
+        assert_eq!(
+            owners.get("alpha/left-only").map(String::as_str),
+            Some("alpha")
+        );
+        assert_eq!(
+            owners.get("zeta/right-only").map(String::as_str),
+            Some("zeta")
+        );
     }
 
     #[tokio::test]
@@ -204,15 +246,16 @@ mod tests {
 
         let prompts = pool.list_upstream_prompts(&[]).await;
         let prompt_names: Vec<&str> = prompts.iter().map(|prompt| prompt.name.as_str()).collect();
+        // Prompt names are namespaced by their owning upstream.
         assert_eq!(
             prompt_names,
-            vec!["upstream.prompt.one", "upstream.prompt.two"]
+            vec!["static/upstream.prompt.one", "static/upstream.prompt.two"]
         );
         assert_eq!(
             pool.cached_upstream_prompt_names(&[]).await,
             vec![
-                "upstream.prompt.one".to_string(),
-                "upstream.prompt.two".to_string()
+                "static/upstream.prompt.one".to_string(),
+                "static/upstream.prompt.two".to_string()
             ]
         );
 
@@ -231,8 +274,8 @@ mod tests {
         };
 
         let snapshot = server.snapshot_catalog().await;
-        assert!(snapshot.prompts.contains("upstream.prompt.one"));
-        assert!(snapshot.prompts.contains("upstream.prompt.two"));
+        assert!(snapshot.prompts.contains("static/upstream.prompt.one"));
+        assert!(snapshot.prompts.contains("static/upstream.prompt.two"));
     }
 
     #[tokio::test]
@@ -246,12 +289,17 @@ mod tests {
         assert_eq!(prompts.len(), 2);
         assert_eq!(list_prompts_count.load(Ordering::SeqCst), 1);
 
-        let owner = pool.find_prompt_owner("upstream.prompt.one").await;
+        let owner = pool.find_prompt_owner("static/upstream.prompt.one").await;
         assert_eq!(owner.as_deref(), Some("static"));
         assert_eq!(list_prompts_count.load(Ordering::SeqCst), 1);
 
+        // The gateway-facing name is namespaced; `get_prompt` strips the
+        // `{upstream}/` prefix before forwarding the bare name to the upstream.
         let result = pool
-            .get_prompt("static", GetPromptRequestParams::new("upstream.prompt.one"))
+            .get_prompt(
+                "static",
+                GetPromptRequestParams::new("static/upstream.prompt.one"),
+            )
             .await
             .expect("upstream remains connected")
             .expect("prompt get succeeds");
@@ -281,14 +329,14 @@ mod tests {
         }
         fail_list_prompts.store(true, Ordering::SeqCst);
 
-        let owner = pool.find_prompt_owner("upstream.prompt.one").await;
+        let owner = pool.find_prompt_owner("static/upstream.prompt.one").await;
         assert_eq!(owner.as_deref(), Some("static"));
         assert_eq!(list_prompts_count.load(Ordering::SeqCst), 1);
         assert_eq!(
             pool.cached_upstream_prompt_names(&[]).await,
             vec![
-                "upstream.prompt.one".to_string(),
-                "upstream.prompt.two".to_string()
+                "static/upstream.prompt.one".to_string(),
+                "static/upstream.prompt.two".to_string()
             ]
         );
     }

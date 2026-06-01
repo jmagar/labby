@@ -8,6 +8,56 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.21.3] - 2026-06-01
+
+### Highlights
+
+- **Stopped `-32601` capability-absence noise from poisoning health state** —
+  upstreams that don't implement `prompts/list` or `resources/list` return
+  JSON-RPC `-32601 Method not found`. The gateway was logging that at WARN once
+  per upstream on every catalog refresh *and* recording a circuit-breaker
+  failure each time. Now `is_capability_unsupported` matches the structured
+  `ErrorCode::METHOD_NOT_FOUND` (string fallback retained), logs at DEBUG, and
+  records success — so a server merely lacking a capability no longer accrues
+  phantom failures. Other errors still WARN + count as failures.
+- **Namespaced upstream prompts to end silent collisions** — two upstreams both
+  exposing a `quick_start` prompt previously dropped one. Upstream prompts now
+  carry an `{upstream}/{name}` prefix (mirroring the resource-URI convention),
+  with a symmetric strip on `prompts/get` (standard + OAuth subject-scoped
+  paths) so upstreams still receive bare names. The collision now surfaces as
+  e.g. `rustarr/quick_start` and `sonarr/quick_start`.
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | fix(gateway): demote -32601 capability-absence to debug + fix breaker accounting; namespace upstream prompts |
+
+---
+
+## [0.21.2] - 2026-06-01
+
+### Highlights
+
+- **Code Mode serves the full upstream catalog (no truncation)** — removed the
+  256 KB soft-cap drop loop and 512 KB hard-cap error that silently dropped
+  tools from the Code Mode `search` inline catalog. Healthy, callable upstreams
+  (e.g. `cortex`) were being dropped from discovery purely because the serialized
+  catalog exceeded the cap. The catalog is injected into the Boa sandbox and
+  never enters model context, so it is now served complete and uncapped —
+  matching Cloudflare's Code Mode design.
+- **Removed dead `scout` vocabulary** — deleted the `gateway.scout.get/set`
+  action aliases (exact duplicates of `gateway.tool_search.*`), the stale
+  `[scout]` config-key allowlist entry, the dead truncation hint strings, and
+  `scout` mentions in live docs (`GATEWAY.md`, `CONFIG.md`, the using-lab-cli
+  catalog). No behavior change — the CLI now emits `gateway.tool_search.*`.
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | fix(gateway): serve full Code Mode catalog; drop truncation + dead scout vocabulary |
+| 72c420b6 | fix(plugin): deliver the labby binary in plugins/labby + add 'setup install' |
+| cb636bad | docs: save session log |
+
+---
+
 ## [0.21.1] - 2026-06-01
 
 ### Highlights

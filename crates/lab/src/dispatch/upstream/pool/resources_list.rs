@@ -18,6 +18,7 @@ use super::connect::connect_upstream;
 use super::discover::routable_upstream_peers;
 use super::entries::health_str;
 use super::helpers::{bare_upstream_resource_uri, rewrite_resource_uri};
+use super::logging::is_capability_unsupported;
 
 impl UpstreamPool {
     /// Return cached resource URIs keyed by upstream name (used in catalog snapshots).
@@ -162,6 +163,26 @@ impl UpstreamPool {
                         rewrite_resource_uri(&mut resource, &name);
                         resources.push(resource);
                     }
+                }
+                Err(e) if is_capability_unsupported(&e) => {
+                    // The upstream simply doesn't implement `resources/list`
+                    // (JSON-RPC -32601). This is expected capability negotiation,
+                    // not a failure: treat it like an empty, successful listing so
+                    // the upstream stays routable and accrues no phantom failures.
+                    self.record_success_for(&name, UpstreamCapability::Resources)
+                        .await;
+                    {
+                        let mut catalog = self.catalog.write().await;
+                        if let Some(entry) = catalog.get_mut(&name) {
+                            entry.resource_count = 0;
+                            entry.resource_uris.clear();
+                        }
+                    }
+                    tracing::debug!(
+                        upstream = %name,
+                        error = %e,
+                        "upstream does not implement resources/list — capability absent"
+                    );
                 }
                 Err(e) => {
                     self.record_failure_for(

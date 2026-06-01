@@ -95,7 +95,7 @@ When enabled, Lab hides raw proxied upstream tools from MCP `list_tools()` and e
 
 | Tool | Purpose | Legacy aliases (callable, hidden from `list_tools`) |
 |------|---------|------|
-| `search` | Search healthy discovered Lab and upstream tools across the gateway. | `tool_search`, `scout` |
+| `search` | Search healthy discovered Lab and upstream tools across the gateway. | `tool_search` |
 | `execute` | Invoke one tool returned by `search`. | `tool_execute`, `invoke`, `tool_invoke` |
 
 This keeps the MCP catalog small while still allowing clients to reach every exposed upstream tool.
@@ -228,7 +228,7 @@ invocation. Use canonical names in new clients:
 
 | Canonical | Legacy aliases |
 |-----------|---------------|
-| `search` | `tool_search`, `scout` |
+| `search` | `tool_search` |
 | `execute` | `tool_execute`, `invoke`, `tool_invoke` |
 | `code` (search subaction) | `code_search` |
 | `code` (execute subaction) | `code_execute` |

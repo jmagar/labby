@@ -146,6 +146,30 @@ pub(super) fn upstream_target_redacted(config: &UpstreamConfig) -> String {
     }
 }
 
+/// Namespace an upstream prompt name with its owning upstream, mirroring how
+/// `rewrite_resource_uri` prefixes resources. This keeps prompts with the same
+/// bare name from different upstreams distinct (e.g. two `quick_start` prompts
+/// become `rustarr/quick_start` and `sonarr/quick_start`).
+pub(super) fn prefixed_upstream_prompt_name(upstream_name: &str, prompt_name: &str) -> String {
+    format!("{upstream_name}/{prompt_name}")
+}
+
+/// Reverse `prefixed_upstream_prompt_name` for forwarding a `prompts/get` to the
+/// upstream, which only knows the bare prompt name. The owning `upstream_name`
+/// is already resolved by the caller, so strip exactly that prefix; fall back to
+/// the input unchanged if it isn't prefixed (e.g. legacy/unprefixed callers).
+pub(super) fn bare_upstream_prompt_name<'a>(upstream_name: &str, prompt_name: &'a str) -> &'a str {
+    prompt_name
+        .strip_prefix(&format!("{upstream_name}/"))
+        .unwrap_or(prompt_name)
+}
+
+/// Merge upstream prompts deterministically and return the winning owner for each prompt.
+///
+/// Every prompt is namespaced by its owning upstream (see
+/// `prefixed_upstream_prompt_name`), so cross-upstream name collisions cannot
+/// occur. The `seen_names` guard below now only catches the degenerate case of a
+/// single upstream advertising the same prompt name twice.
 pub(super) fn merge_upstream_prompts(
     builtin_names: &[&str],
     mut upstream_prompts: Vec<(String, Vec<Prompt>)>,
@@ -160,15 +184,16 @@ pub(super) fn merge_upstream_prompts(
         .collect();
 
     for (upstream_name, upstream_prompts) in upstream_prompts {
-        for prompt in upstream_prompts {
-            let prompt_name = prompt.name.to_string();
+        for mut prompt in upstream_prompts {
+            let prompt_name = prefixed_upstream_prompt_name(&upstream_name, &prompt.name);
             if seen_names.insert(prompt_name.clone()) {
+                prompt.name = prompt_name.clone();
                 owners.insert(prompt_name, upstream_name.clone());
                 prompts.push(prompt);
             } else {
                 tracing::warn!(
                     upstream = %upstream_name,
-                    prompt = %prompt.name,
+                    prompt = %prompt_name,
                     "duplicate prompt name encountered while merging upstream prompts"
                 );
             }
