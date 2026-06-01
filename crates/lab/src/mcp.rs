@@ -8,6 +8,7 @@ pub mod context;
 pub mod elicitation;
 pub mod envelope;
 pub mod error;
+pub mod handlers_prompts;
 pub mod logging;
 pub mod meta;
 pub mod peers;
