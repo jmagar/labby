@@ -539,10 +539,11 @@ pub enum CodeModeCaller {
     TrustedLocal,
     Scoped {
         scopes: Vec<String>,
-        /// JWT `sub` claim for the caller, when available. When present, this is
-        /// used for upstream OAuth attribution even for `lab:admin` scoped callers
-        /// (overrides the shared gateway subject). When None, falls back to
-        /// `SHARED_GATEWAY_OAUTH_SUBJECT`.
+        /// JWT `sub` claim for the caller, when available. Used as the upstream
+        /// OAuth subject only for *non-admin* callers, so a user with their own
+        /// upstream grant authenticates as themselves. `lab:admin` callers (and
+        /// callers with no `sub`) collapse to `SHARED_GATEWAY_OAUTH_SUBJECT` —
+        /// see [`CodeModeCaller::oauth_subject`] for the rationale.
         sub: Option<String>,
     },
 }
@@ -630,9 +631,20 @@ impl CodeModeCaller {
     pub fn oauth_subject(&self) -> Option<&str> {
         match self {
             Self::TrustedLocal => Some(SHARED_GATEWAY_OAUTH_SUBJECT),
-            // When the caller has a real JWT sub, use it for attribution even on
-            // lab:admin scope. When sub is None (static bearer token), fall back
-            // to the shared gateway subject — unchanged behavior.
+            // Parity with `oauth_upstream_subject_for_request` (the direct
+            // upstream-tool-call path): admin/operator callers share the single
+            // gateway-owned upstream credential rather than a per-user grant that
+            // was never provisioned. Without this collapse, an admin caller's raw
+            // `sub` misses the credential store (`initialize_from_store` → false),
+            // so the proactive token refresh in `build_auth_client` is never
+            // reached and OAuth upstreams (e.g. axon) get stranded with an expired
+            // token. Non-admin callers keep their own `sub` so a personal upstream
+            // grant is used; a `sub`-less caller falls back to the shared subject.
+            Self::Scoped { scopes, .. }
+                if scopes.iter().any(|scope| scope == "lab:admin") =>
+            {
+                Some(SHARED_GATEWAY_OAUTH_SUBJECT)
+            }
             Self::Scoped { sub: Some(s), .. } => Some(s.as_str()),
             Self::Scoped { sub: None, .. } => Some(SHARED_GATEWAY_OAUTH_SUBJECT),
         }
@@ -4023,20 +4035,37 @@ mod tests {
     // ── CodeModeCaller oauth_subject ──────────────────────────────────────────
 
     #[test]
-    fn oauth_subject_uses_sub_when_present() {
+    fn oauth_subject_uses_sub_for_non_admin_caller() {
+        // A non-admin caller with its own sub authenticates as itself so a
+        // personal upstream grant is used.
         let caller = super::CodeModeCaller::Scoped {
-            scopes: vec!["lab:admin".to_string()],
+            scopes: vec!["lab".to_string()],
             sub: Some("user@example.com".to_string()),
         };
 
-        // PRESENCE: explicit sub is returned
         assert_eq!(
             caller.oauth_subject(),
             Some("user@example.com"),
-            "oauth_subject must return the JWT sub when present"
+            "non-admin oauth_subject must return the caller's JWT sub"
         );
-        // ABSENCE: not None
-        assert!(caller.oauth_subject().is_some());
+    }
+
+    #[test]
+    fn oauth_subject_collapses_admin_to_shared_gateway_subject() {
+        // Regression (lab-om1ou): admin callers must collapse to the shared
+        // gateway subject — parity with `oauth_upstream_subject_for_request` —
+        // so they reuse the gateway-owned upstream credential and the proactive
+        // refresh path is reached. Otherwise OAuth upstreams (axon) get stranded.
+        let caller = super::CodeModeCaller::Scoped {
+            scopes: vec!["lab".to_string(), "lab:admin".to_string()],
+            sub: Some("115693937070075916387".to_string()),
+        };
+
+        assert_eq!(
+            caller.oauth_subject(),
+            Some(super::SHARED_GATEWAY_OAUTH_SUBJECT),
+            "lab:admin callers must collapse to the shared gateway subject, not their raw sub"
+        );
     }
 
     #[test]
