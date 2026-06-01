@@ -373,3 +373,6 @@ impl LabMcpServer {
         Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 }
+
+#[cfg(test)]
+mod tests;

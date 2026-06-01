@@ -62,3 +62,6 @@ pub(crate) fn service_name_completions(registry: &ToolRegistry, prefix: &str) ->
         .map(str::to_string)
         .collect()
 }
+
+#[cfg(test)]
+mod tests;

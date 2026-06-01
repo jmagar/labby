@@ -180,3 +180,6 @@ pub(crate) fn extract_error_info(e: &anyhow::Error) -> (&'static str, String, Op
     // 3. Generic fallback
     ("internal_error", msg, None)
 }
+
+#[cfg(test)]
+mod tests;

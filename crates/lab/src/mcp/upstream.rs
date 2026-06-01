@@ -96,3 +96,6 @@ pub(crate) fn normalize_upstream_result(
         ),
     )
 }
+
+#[cfg(test)]
+mod tests;

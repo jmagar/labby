@@ -212,3 +212,6 @@ impl LabMcpServer {
         Ok(ListToolsResult::with_all_items(tools))
     }
 }
+
+#[cfg(test)]
+mod tests;

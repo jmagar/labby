@@ -165,3 +165,6 @@ pub(crate) fn builtin_action_requires_admin(
             .iter()
             .any(|spec| spec.name == action && spec.destructive)
 }
+
+#[cfg(test)]
+mod tests;
