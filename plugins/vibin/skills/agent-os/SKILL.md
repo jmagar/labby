@@ -17,7 +17,7 @@ The previous version of this skill drove the VM through `agent-browser` against 
 
 - **Real keyboard.** `Type` reliably handles full strings including shifted symbols (`!@#$%^&*()`, `:`, `"`, etc.). The noVNC `Shift+<digit>` bug is gone.
 - **Real accessibility tree.** `Snapshot` returns interactive elements with ids — Claude can target controls by name, not by reasoning about pixels.
-- **Native shell.** `Shell` runs PowerShell directly; no `Win+R`, no canvas focus juggling.
+- **Native shell.** `PowerShell` runs commands directly; no `Win+R`, no canvas focus juggling.
 - **Faster.** No browser, no canvas event dispatch, no per-character `press` loop.
 
 Reach for noVNC at `http://tootie:8006` only when you need to *see* the desktop visually for debugging (e.g. confirming a screenshot that Windows-MCP returned), or if Windows-MCP is unreachable.
@@ -67,11 +67,11 @@ All tools are namespaced `mcp__windows-mcp__<Name>`. Use them directly — they'
 - **`App`** — launch an app from the Start menu, then optionally resize/move its window or switch between open apps. The fastest way to "open Edge" / "open Notepad".
 - **`Process`** — list running processes or terminate by PID/name. Use to clean up runaways or check whether a service is alive.
 
-### Shell, clipboard, filesystem
+### PowerShell, clipboard, filesystem
 
-- **`Shell`** — execute PowerShell. The single biggest speedup over the old GUI flow. Use this whenever the task can be expressed as a command: file ops, package installs (`winget`/`choco`), service queries, registry tweaks, network introspection.
+- **`PowerShell`** — execute PowerShell. The single biggest speedup over the old GUI flow. Use this whenever the task can be expressed as a command: file ops, package installs (`winget`/`choco`), service queries, registry tweaks, network introspection.
 - **`Clipboard`** — read or set Windows clipboard. Cleaner than typing for long/sensitive strings, and round-trips paste targets that don't accept `Type`.
-- **`FileSystem`** — read/write/list files on the guest filesystem directly. Skip `Shell` for plain CRUD on files.
+- **`FileSystem`** — read/write/list files on the guest filesystem directly. Skip `PowerShell` for plain CRUD on files.
 
 ### Registry and notifications
 
@@ -98,10 +98,10 @@ Shortcut {"keys": "Ctrl+s"}
 ### Run PowerShell directly (preferred for headless work)
 
 ```
-Shell {"command": "Get-Process | Where-Object {$_.CPU -gt 10} | Select-Object Name,CPU,Id -First 10 | ConvertTo-Json"}
+PowerShell {"command": "Get-Process | Where-Object {$_.CPU -gt 10} | Select-Object Name,CPU,Id -First 10 | ConvertTo-Json"}
 ```
 
-You get stdout back as text. JSON-out makes the result trivial to parse. Use `Shell` for anything that's expressible as a command — it sidesteps every GUI hazard.
+You get stdout back as text. JSON-out makes the result trivial to parse. Use `PowerShell` for anything that's expressible as a command — it sidesteps every GUI hazard.
 
 ### Script and capture a desktop GUI app
 
@@ -140,7 +140,7 @@ Snapshot beats Screenshot whenever you need to *interact* — element coordinate
 ### Install software via winget
 
 ```
-Shell {"command": "winget install --id Microsoft.PowerToys --silent --accept-package-agreements --accept-source-agreements"}
+PowerShell {"command": "winget install --id Microsoft.PowerToys --silent --accept-package-agreements --accept-source-agreements"}
 ```
 
 ### Push and paste a long string (bypass typing)
@@ -178,11 +178,11 @@ These predate Windows-MCP but remain useful where the MCP path is awkward:
 
 - **`/oem` install-time drop folder.** Host path `/home/jmagar/compose/windows/oem` is mounted as `\\host.lan\Data` *only during initial Windows install/OOBE*. Once setup completes, the SMB share is gone. Use only for first-boot provisioning.
 - **RDP on `tootie:33890`.** Exposed by the `agent-os-win11` container in addition to noVNC. No agent-side RDP client installed today; install `freerdp` if a real interactive session is ever needed (now that Windows-MCP exists, the case for this is weaker).
-- **SSH to the guest on `tootie:2222`.** The container forwards host port `2222` → guest port `22`. Confirmed exposed on the running container; whether sshd is actually running and configured inside the guest depends on first-boot provisioning. If it answers, this is the cleanest scripted side-channel — no `Shell` round-trip through the MCP server.
+- **SSH to the guest on `tootie:2222`.** The container forwards host port `2222` → guest port `22`. Confirmed exposed on the running container; whether sshd is actually running and configured inside the guest depends on first-boot provisioning. If it answers, this is the cleanest scripted side-channel — no `PowerShell` round-trip through the MCP server.
 
 ## Operating notes
 
 - The `agent-os-win11` container persists `/storage` across restarts. Installed software, registry edits, and most filesystem state survive reboots.
-- If a task is GUI-bound and slow, kick it off through `App`/`Shell`, then `ScheduleWakeup` or move on. Come back with a `Screenshot` to check progress.
-- For *anything* expressible as PowerShell, prefer `Shell` over clicking. It's faster, more reliable, and leaves a paper trail in the command rather than in pixel coordinates.
+- If a task is GUI-bound and slow, kick it off through `App`/`PowerShell`, then `ScheduleWakeup` or move on. Come back with a `Screenshot` to check progress.
+- For *anything* expressible as PowerShell, prefer `PowerShell` over clicking. It's faster, more reliable, and leaves a paper trail in the command rather than in pixel coordinates.
 - Don't paste credentials via `Type` — round-trip through `Clipboard` so they don't end up in screenshots or logs of the typing stream.

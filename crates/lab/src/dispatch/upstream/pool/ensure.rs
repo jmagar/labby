@@ -275,6 +275,15 @@ impl UpstreamPool {
         &self,
         config: &UpstreamConfig,
     ) -> anyhow::Result<bool> {
+        self.reprobe_tools_for_upstream_as(config, None, None).await
+    }
+
+    pub async fn reprobe_tools_for_upstream_as(
+        &self,
+        config: &UpstreamConfig,
+        oauth_subject: Option<&str>,
+        runtime_owner: Option<&UpstreamRuntimeOwner>,
+    ) -> anyhow::Result<bool> {
         if !config.enabled {
             tracing::debug!(
                 surface = "dispatch",
@@ -288,7 +297,10 @@ impl UpstreamPool {
             );
             return Ok(false);
         }
-        self.reprobe_upstream(config).await
+        let connect_lock = self.lazy_connect_lock(&config.name).await;
+        let _connect_guard = connect_lock.lock().await;
+        self.reprobe_upstream(config, oauth_subject, runtime_owner)
+            .await
     }
 
     pub(super) async fn replace_catalog_tools(

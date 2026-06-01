@@ -15,6 +15,7 @@ use crate::config::UpstreamConfig;
 use super::super::transport::websocket::{jitter_delay, reprobe_backoff};
 use super::super::types;
 use super::super::types::UpstreamCapability;
+use super::super::types::UpstreamRuntimeOwner;
 use super::UpstreamPool;
 use super::connect::connect_upstream;
 use super::connect::stable_jitter_seed;
@@ -88,7 +89,7 @@ impl UpstreamPool {
                 }
 
                 let reprobe_started = Instant::now();
-                match pool.reprobe_upstream(&config).await {
+                match pool.reprobe_upstream(&config, None, None).await {
                     Ok(true) => {
                         tracing::info!(
                             surface = "dispatch",
@@ -146,7 +147,12 @@ impl UpstreamPool {
         });
     }
 
-    pub(super) async fn reprobe_upstream(&self, config: &UpstreamConfig) -> anyhow::Result<bool> {
+    pub(super) async fn reprobe_upstream(
+        &self,
+        config: &UpstreamConfig,
+        oauth_subject: Option<&str>,
+        runtime_owner: Option<&UpstreamRuntimeOwner>,
+    ) -> anyhow::Result<bool> {
         let started = Instant::now();
         tracing::debug!(
             surface = "dispatch",
@@ -252,12 +258,14 @@ impl UpstreamPool {
                 .await;
         }
 
+        let subject = config.oauth.as_ref().and(oauth_subject);
+        let runtime_owner = runtime_owner.or(self.runtime_owner.as_ref());
         let (conn, tools) = connect_upstream(
             config,
-            None,
+            subject,
             self.oauth_client_cache.as_ref(),
             self.runtime_origin.as_deref(),
-            self.runtime_owner.as_ref(),
+            runtime_owner,
         )
         .await?;
         {

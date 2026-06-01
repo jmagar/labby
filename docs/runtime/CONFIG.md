@@ -171,9 +171,9 @@ Gateway-wide MCP tool-search mode.
 
 | Key | Env override | Default | Description |
 |-----|-------------|---------|-------------|
-| `enabled` | — | `false` | Replace raw proxied upstream tools with the synthetic Code Mode `search` and `execute` tools for the gateway. |
+| `enabled` | — | `false` | Replace raw proxied upstream tools with the synthetic Code Mode `search` and `execute` tools for the gateway. `search`/`execute` build over a transient live catalog refreshed from gateway metadata on each call. |
 | `top_k_default` | — | `10` | Default number of search results when a `tool_search` call omits `top_k`. Valid range: 1-50. |
-| `max_tools` | — | `5000` | Maximum number of healthy discovered tools to index per rebuild. Valid range: 1-10000. |
+| `max_tools` | — | `5000` | Maximum number of healthy discovered tools considered by gateway tool-search projections. Valid range: 1-10000. |
 
 Example:
 
