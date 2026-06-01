@@ -137,6 +137,7 @@ pub(super) fn resolve_exposure_policy(
 
 #[cfg(test)]
 mod tests {
+    use super::super::testsupport::test_upstream_tools;
     use super::*;
 
     #[test]
@@ -146,9 +147,51 @@ mod tests {
         assert!(!policy.matches("search_repos"));
     }
 
-    // `failed_in_process_entry_from_existing_preserves_last_known_good_catalog`
-    // is relocated here in the testsupport step (lab-kvji.12.5 / step 8): it
-    // depends on the `test_upstream_tools` fixture which does not exist as a
-    // shared module until then. Kept in the pool.rs test mod until that step to
-    // keep every intermediate build green without duplicating the fixture.
+    #[test]
+    fn failed_in_process_entry_from_existing_preserves_last_known_good_catalog() {
+        let upstream_name: Arc<str> = Arc::from("labby::github-chat");
+        let tools = test_upstream_tools(&upstream_name, &["query_repository"]);
+        let mut existing = healthy_in_process_entry(Arc::clone(&upstream_name), tools);
+        existing.exposure_policy =
+            ToolExposurePolicy::from_patterns(vec!["query_repository".to_string()])
+                .expect("policy");
+        existing.prompt_count = 2;
+        existing.resource_count = 3;
+        existing.prompt_names = vec!["prompt.one".into(), "prompt.two".into()];
+        existing.resource_uris = vec!["lab://resource/one".into(), "lab://resource/two".into()];
+
+        let failed = failed_in_process_entry_from_existing(
+            existing,
+            "in-process peer registration timed out after 5s".to_string(),
+        );
+
+        assert_eq!(failed.tools.len(), 1);
+        assert!(failed.tools.contains_key("query_repository"));
+        assert_eq!(failed.prompt_count, 2);
+        assert_eq!(failed.resource_count, 3);
+        assert_eq!(failed.prompt_names.len(), 2);
+        assert_eq!(failed.resource_uris.len(), 2);
+        assert!(matches!(
+            failed.exposure_policy,
+            ToolExposurePolicy::AllowList(_)
+        ));
+        assert!(matches!(
+            failed.tool_health,
+            UpstreamHealth::Unhealthy {
+                consecutive_failures: 1
+            }
+        ));
+        assert_eq!(
+            failed.tool_last_error.as_deref(),
+            Some("in-process peer registration timed out after 5s")
+        );
+        assert_eq!(
+            failed.prompt_last_error.as_deref(),
+            Some("in-process peer registration timed out after 5s")
+        );
+        assert_eq!(
+            failed.resource_last_error.as_deref(),
+            Some("in-process peer registration timed out after 5s")
+        );
+    }
 }

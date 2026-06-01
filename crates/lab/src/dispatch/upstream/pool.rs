@@ -37,6 +37,8 @@ mod entries;
 mod helpers;
 mod lifecycle;
 mod logging;
+#[cfg(test)]
+mod testsupport;
 mod validate;
 
 pub use helpers::{UpstreamCachedSummary, in_process_upstream_name};
@@ -330,7 +332,7 @@ impl UpstreamPool {
     }
 
     #[cfg(test)]
-    fn with_request_timeout(mut self, timeout: Duration) -> Self {
+    pub(super) fn with_request_timeout(mut self, timeout: Duration) -> Self {
         self.request_timeout = timeout;
         self
     }
@@ -2786,79 +2788,12 @@ impl Default for UpstreamPool {
 
 #[cfg(test)]
 mod tests {
+    use super::testsupport::*;
     use super::*;
     use crate::mcp::logging::logging_level_rank;
     use crate::mcp::server::LabMcpServer;
-    use rmcp::model::{
-        AnnotateAble, ErrorData, ListPromptsResult, ListResourcesResult, ListToolsResult,
-        LoggingLevel, PaginatedRequestParams, PromptMessage, PromptMessageRole, RawResource,
-        ReadResourceRequestParams, ResourceContents, ServerCapabilities, ServerInfo,
-    };
-    use rmcp::service::RequestContext;
-    use rmcp::{RoleServer, ServerHandler, ServiceExt};
+    use rmcp::model::{LoggingLevel, ResourceContents};
     use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
-
-    fn test_upstream_config() -> UpstreamConfig {
-        UpstreamConfig {
-            enabled: true,
-            name: "test".into(),
-            url: None,
-            bearer_token_env: None,
-            command: None,
-            args: vec![],
-            env: std::collections::BTreeMap::new(),
-            proxy_resources: false,
-            proxy_prompts: false,
-            expose_tools: None,
-            expose_resources: None,
-            expose_prompts: None,
-            oauth: None,
-            imported_from: None,
-            priority: 1.0,
-            tool_search: crate::config::ToolSearchConfig::default(),
-        }
-    }
-
-    fn named_test_upstream_config(name: &str) -> UpstreamConfig {
-        UpstreamConfig {
-            name: name.to_string(),
-            command: Some("true".to_string()),
-            ..test_upstream_config()
-        }
-    }
-
-    fn named_disabled_test_upstream_config(name: &str) -> UpstreamConfig {
-        UpstreamConfig {
-            enabled: false,
-            ..named_test_upstream_config(name)
-        }
-    }
-
-    fn test_tool(name: &str) -> rmcp::model::Tool {
-        rmcp::model::Tool::new(name.to_string(), "", Arc::new(serde_json::Map::new()))
-    }
-
-    fn test_upstream_tool(upstream_name: &Arc<str>, name: &str) -> UpstreamTool {
-        let schema = Arc::new(serde_json::Map::new());
-        let tool = rmcp::model::Tool::new(name.to_string(), format!("{name} description"), schema);
-        UpstreamTool {
-            tool,
-            input_schema: None,
-            output_schema: None,
-            upstream_name: Arc::clone(upstream_name),
-            destructive: false,
-        }
-    }
-
-    fn test_upstream_tools(
-        upstream_name: &Arc<str>,
-        names: &[&str],
-    ) -> HashMap<String, UpstreamTool> {
-        names
-            .iter()
-            .map(|name| (name.to_string(), test_upstream_tool(upstream_name, name)))
-            .collect()
-    }
 
     #[tokio::test]
     async fn seed_lazy_upstreams_records_enabled_names_without_connections() {
@@ -3079,207 +3014,6 @@ mod tests {
         let pool = UpstreamPool::new();
         assert!(pool.healthy_tools().await.is_empty());
         assert_eq!(pool.upstream_count().await, 0);
-    }
-
-    #[derive(Clone, Default)]
-    struct StaticCatalogServer {
-        list_prompts_count: Arc<AtomicUsize>,
-        get_prompt_count: Arc<AtomicUsize>,
-        fail_list_prompts: Arc<AtomicBool>,
-    }
-
-    impl ServerHandler for StaticCatalogServer {
-        fn get_info(&self) -> ServerInfo {
-            ServerInfo::new(
-                ServerCapabilities::builder()
-                    .enable_resources()
-                    .enable_prompts()
-                    .build(),
-            )
-        }
-
-        async fn list_resources(
-            &self,
-            _request: Option<PaginatedRequestParams>,
-            _context: RequestContext<RoleServer>,
-        ) -> Result<ListResourcesResult, ErrorData> {
-            Ok(ListResourcesResult::with_all_items(vec![
-                RawResource::new("file:///tmp/upstream-one", "upstream-one").no_annotation(),
-                RawResource::new(
-                    "lab://upstream/old-name/file:///tmp/upstream-two",
-                    "upstream-two",
-                )
-                .no_annotation(),
-            ]))
-        }
-
-        async fn list_prompts(
-            &self,
-            _request: Option<PaginatedRequestParams>,
-            _context: RequestContext<RoleServer>,
-        ) -> Result<ListPromptsResult, ErrorData> {
-            self.list_prompts_count.fetch_add(1, Ordering::SeqCst);
-            if self.fail_list_prompts.load(Ordering::SeqCst) {
-                return Err(ErrorData::internal_error(
-                    "prompt listing failed for test",
-                    None,
-                ));
-            }
-
-            Ok(ListPromptsResult::with_all_items(vec![
-                Prompt::new("upstream.prompt.one", Some("first prompt"), None),
-                Prompt::new("upstream.prompt.two", Some("second prompt"), None),
-            ]))
-        }
-
-        async fn get_prompt(
-            &self,
-            request: GetPromptRequestParams,
-            _context: RequestContext<RoleServer>,
-        ) -> Result<GetPromptResult, ErrorData> {
-            self.get_prompt_count.fetch_add(1, Ordering::SeqCst);
-            Ok(GetPromptResult::new(vec![PromptMessage::new_text(
-                PromptMessageRole::User,
-                format!("proxied {}", request.name),
-            )]))
-        }
-    }
-
-    async fn static_catalog_pool(upstream_name: &str) -> Arc<UpstreamPool> {
-        static_catalog_pool_with_server(upstream_name, StaticCatalogServer::default()).await
-    }
-
-    async fn static_catalog_pool_with_server(
-        upstream_name: &str,
-        server: StaticCatalogServer,
-    ) -> Arc<UpstreamPool> {
-        let (server_transport, client_transport) = tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
-        let server_task = tokio::spawn(async move {
-            let running = server
-                .serve(server_transport)
-                .await
-                .expect("static catalog server starts");
-            running.waiting().await.expect("static catalog server runs");
-        });
-        let client_service: rmcp::service::RunningService<RoleClient, ()> = ()
-            .serve(client_transport)
-            .await
-            .expect("static catalog client starts");
-        let peer = client_service.peer().clone();
-
-        let pool = Arc::new(UpstreamPool::new());
-        let upstream_name_arc: Arc<str> = Arc::from(upstream_name);
-        pool.catalog.write().await.insert(
-            upstream_name.to_string(),
-            healthy_in_process_entry(Arc::clone(&upstream_name_arc), HashMap::new()),
-        );
-        pool.connections.write().await.insert(
-            upstream_name.to_string(),
-            UpstreamConnection {
-                _client_service: client_service,
-                _server_task: Some(server_task),
-                peer,
-                runtime: UpstreamRuntimeMetadata::default(),
-            },
-        );
-        pool.resource_upstreams
-            .write()
-            .await
-            .push(upstream_name.to_string());
-
-        pool
-    }
-
-    struct SlowResponseServer;
-
-    impl ServerHandler for SlowResponseServer {
-        fn get_info(&self) -> ServerInfo {
-            ServerInfo::new(
-                ServerCapabilities::builder()
-                    .enable_tools()
-                    .enable_resources()
-                    .enable_prompts()
-                    .build(),
-            )
-        }
-
-        async fn list_tools(
-            &self,
-            _request: Option<PaginatedRequestParams>,
-            _context: RequestContext<RoleServer>,
-        ) -> Result<ListToolsResult, ErrorData> {
-            Ok(ListToolsResult::with_all_items(Vec::new()))
-        }
-
-        async fn call_tool(
-            &self,
-            _request: CallToolRequestParams,
-            _context: RequestContext<RoleServer>,
-        ) -> Result<CallToolResult, ErrorData> {
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            Ok(CallToolResult::success(Vec::new()))
-        }
-
-        async fn read_resource(
-            &self,
-            _request: ReadResourceRequestParams,
-            _context: RequestContext<RoleServer>,
-        ) -> Result<ReadResourceResult, ErrorData> {
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            Ok(ReadResourceResult::new(Vec::new()))
-        }
-
-        async fn get_prompt(
-            &self,
-            _request: GetPromptRequestParams,
-            _context: RequestContext<RoleServer>,
-        ) -> Result<GetPromptResult, ErrorData> {
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            Ok(GetPromptResult::new(Vec::new()))
-        }
-    }
-
-    async fn slow_response_pool(upstream_name: &str) -> Arc<UpstreamPool> {
-        let (server_transport, client_transport) = tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
-        let server_task = tokio::spawn(async move {
-            let running = SlowResponseServer
-                .serve(server_transport)
-                .await
-                .expect("slow response server starts");
-            running.waiting().await.expect("slow response server runs");
-        });
-        let client_service: rmcp::service::RunningService<RoleClient, ()> = ()
-            .serve(client_transport)
-            .await
-            .expect("slow response client starts");
-        let peer = client_service.peer().clone();
-
-        let pool = Arc::new(UpstreamPool::new().with_request_timeout(Duration::from_millis(25)));
-        let upstream_name_arc: Arc<str> = Arc::from(upstream_name);
-        let mut entry = healthy_in_process_entry(Arc::clone(&upstream_name_arc), HashMap::new());
-        entry.prompt_count = 1;
-        entry.resource_count = 1;
-        entry.prompt_names = vec!["slow.prompt".to_string()];
-        entry.resource_uris = vec!["file:///tmp/slow".to_string()];
-        pool.catalog
-            .write()
-            .await
-            .insert(upstream_name.to_string(), entry);
-        pool.connections.write().await.insert(
-            upstream_name.to_string(),
-            UpstreamConnection {
-                _client_service: client_service,
-                _server_task: Some(server_task),
-                peer,
-                runtime: UpstreamRuntimeMetadata::default(),
-            },
-        );
-        pool.resource_upstreams
-            .write()
-            .await
-            .push(upstream_name.to_string());
-
-        pool
     }
 
     #[tokio::test]
@@ -3583,54 +3317,6 @@ mod tests {
         assert_eq!(
             pool.upstream_tool_last_error("github").await.as_deref(),
             Some("tool listing returned 500 internal error")
-        );
-    }
-
-    #[test]
-    fn failed_in_process_entry_from_existing_preserves_last_known_good_catalog() {
-        let upstream_name: Arc<str> = Arc::from("labby::github-chat");
-        let tools = test_upstream_tools(&upstream_name, &["query_repository"]);
-        let mut existing = healthy_in_process_entry(Arc::clone(&upstream_name), tools);
-        existing.exposure_policy =
-            ToolExposurePolicy::from_patterns(vec!["query_repository".to_string()])
-                .expect("policy");
-        existing.prompt_count = 2;
-        existing.resource_count = 3;
-        existing.prompt_names = vec!["prompt.one".into(), "prompt.two".into()];
-        existing.resource_uris = vec!["lab://resource/one".into(), "lab://resource/two".into()];
-
-        let failed = failed_in_process_entry_from_existing(
-            existing,
-            "in-process peer registration timed out after 5s".to_string(),
-        );
-
-        assert_eq!(failed.tools.len(), 1);
-        assert!(failed.tools.contains_key("query_repository"));
-        assert_eq!(failed.prompt_count, 2);
-        assert_eq!(failed.resource_count, 3);
-        assert_eq!(failed.prompt_names.len(), 2);
-        assert_eq!(failed.resource_uris.len(), 2);
-        assert!(matches!(
-            failed.exposure_policy,
-            ToolExposurePolicy::AllowList(_)
-        ));
-        assert!(matches!(
-            failed.tool_health,
-            UpstreamHealth::Unhealthy {
-                consecutive_failures: 1
-            }
-        ));
-        assert_eq!(
-            failed.tool_last_error.as_deref(),
-            Some("in-process peer registration timed out after 5s")
-        );
-        assert_eq!(
-            failed.prompt_last_error.as_deref(),
-            Some("in-process peer registration timed out after 5s")
-        );
-        assert_eq!(
-            failed.resource_last_error.as_deref(),
-            Some("in-process peer registration timed out after 5s")
         );
     }
 
