@@ -19,7 +19,6 @@
     "automation",
     "homelab"
   ],
-  "hooks": "./hooks/hooks.json",
   "userConfig": {
     "agent_os_mcp_url": {
       "type": "string",
