@@ -271,6 +271,13 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn empty_pool_has_no_tools() {
+        let pool = UpstreamPool::new();
+        assert!(pool.healthy_tools().await.is_empty());
+        assert_eq!(pool.upstream_count().await, 0);
+    }
+
+    #[tokio::test]
     async fn hidden_upstream_tools_do_not_appear_in_listings() {
         let pool = UpstreamPool::new();
         let upstream_name: Arc<str> = Arc::from("github");
