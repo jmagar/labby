@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "navidrome",
+  "version": "0.1.0",
+  "description": "Operate a self-hosted Navidrome music server through its Subsonic API with direct HTTP calls — ping, browse artists/albums, search, and list playlists.",
+  "author": {
+    "name": "Jacob Magar",
+    "email": "jmagar@users.noreply.github.com"
+  },
+  "repository": "https://github.com/jmagar/lab",
+  "homepage": "https://github.com/jmagar/lab",
+  "license": "MIT",
+  "keywords": [
+    "navidrome",
+    "subsonic",
+    "music",
+    "streaming",
+    "homelab"
+  ],
+  "userConfig": {
+    "navidrome_url": {
+      "type": "string",
+      "title": "Navidrome URL",
+      "description": "Base URL of your Navidrome server, including scheme and (if non-default) port. Example: https://music.example.com or http://localhost:4533. Do NOT include a trailing /rest path — the skill appends Subsonic endpoints.",
+      "required": true,
+      "default": "http://localhost:4533"
+    },
+    "navidrome_username": {
+      "type": "string",
+      "title": "Username",
+      "description": "Navidrome account username used for Subsonic API authentication.",
+      "required": true
+    },
+    "navidrome_password": {
+      "type": "string",
+      "title": "Password",
+      "description": "Navidrome account password. Used only to derive the per-request Subsonic token = md5(password + salt); the raw password is never sent over the wire. Stored in secure OS storage, not settings.json.",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}

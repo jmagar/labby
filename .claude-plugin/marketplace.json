@@ -10,72 +10,57 @@
         {
             "name": "adguard",
             "source": "./plugins/adguard",
-            "description": "AdGuard Home DNS ad blocking and network filtering via the lab MCP server / CLI."
+            "description": "AdGuard Home DNS-level ad blocking and network filtering via direct calls to the AdGuard Home control API."
         },
         {
             "name": "dozzle",
             "source": "./plugins/dozzle",
-            "description": "Real-time Docker container log viewer via the lab MCP server / CLI."
-        },
-        {
-            "name": "freshrss",
-            "source": "./plugins/freshrss",
-            "description": "Self-hosted RSS feed aggregator via the lab MCP server / CLI."
-        },
-        {
-            "name": "glances",
-            "source": "./plugins/glances",
-            "description": "Cross-platform system monitoring via the lab MCP server / CLI."
+            "description": "Real-time Docker container log viewer via the direct Dozzle API and native Dozzle MCP server."
         },
         {
             "name": "immich",
             "source": "./plugins/immich",
-            "description": "Self-hosted photo and video management via the lab MCP server / CLI."
+            "description": "Self-hosted photo and video management via direct calls to the Immich REST API."
         },
         {
             "name": "loggifly",
             "source": "./plugins/loggifly",
-            "description": "Docker container log alerting via the lab MCP server / CLI."
+            "description": "Docker container log alerting via keyword/regex patterns, configured through LoggiFly's config.yaml."
         },
         {
             "name": "navidrome",
             "source": "./plugins/navidrome",
-            "description": "Self-hosted music streaming via the lab MCP server / CLI."
+            "description": "Self-hosted Navidrome music server via its Subsonic API with direct HTTP calls."
         },
         {
             "name": "neo4j",
             "source": "./plugins/neo4j",
-            "description": "Graph database Cypher queries and schema inspection via the lab MCP server / CLI."
+            "description": "Graph database Cypher queries and schema inspection via Neo4j's HTTP transactional Cypher API."
         },
         {
             "name": "qdrant",
             "source": "./plugins/qdrant",
-            "description": "Vector database collections and semantic search via the lab MCP server / CLI."
+            "description": "Vector database collections and semantic search via direct calls to the Qdrant REST API."
         },
         {
             "name": "scrutiny",
             "source": "./plugins/scrutiny",
-            "description": "SMART hard drive health monitoring via the lab MCP server / CLI."
+            "description": "SMART hard-drive health monitoring via direct calls to the Scrutiny web API."
         },
         {
             "name": "tei",
             "source": "./plugins/tei",
-            "description": "HuggingFace Text Embeddings Inference server via the lab MCP server / CLI."
+            "description": "HuggingFace Text Embeddings Inference (embed, rerank, tokenize) via direct calls to the TEI HTTP API."
         },
         {
             "name": "uptime-kuma",
             "source": "./plugins/uptime-kuma",
-            "description": "Self-hosted uptime and status page monitoring via the lab MCP server / CLI."
+            "description": "Read-only Uptime Kuma monitoring via direct HTTP (Prometheus /metrics + status-page JSON)."
         },
         {
             "name": "acp",
             "source": "./plugins/acp",
             "description": "Agent Client Protocol skills for Rust, Python, and TypeScript implementations."
-        },
-        {
-            "name": "ai-sdk",
-            "source": "./plugins/ai-sdk",
-            "description": "Skills for working with the AI SDK and AI Elements."
         },
         {
             "name": "agent-browser",
@@ -88,10 +73,65 @@
         {
             "name": "axon",
             "source": {
-                "source": "github",
-                "repo": "jmagar/axon"
+                "source": "git-subdir",
+                "url": "https://github.com/jmagar/axon.git",
+                "path": "plugins/axon"
             },
             "description": "Skills and MCP configuration for the Axon crawl, ingest, embed, query, and RAG engine."
+        },
+        {
+            "name": "cortex",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/jmagar/cortex.git",
+                "path": "plugins/cortex"
+            },
+            "description": "Homelab syslog receiver plus MCP server for searching, tailing, and correlating logs across hosts."
+        },
+        {
+            "name": "unraid",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/jmagar/unrust.git",
+                "path": "plugins/unraid"
+            },
+            "description": "Unraid NAS/homelab monitoring via the unrust MCP server."
+        },
+        {
+            "name": "tailscale",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/jmagar/rustscale.git",
+                "path": "plugins/tailscale"
+            },
+            "description": "Tailscale network management via the rustscale MCP server — query devices, ACL, DNS, users, and API keys."
+        },
+        {
+            "name": "gotify",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/jmagar/rustify.git",
+                "path": "plugins/gotify"
+            },
+            "description": "Gotify push notification server via the rustify MCP server."
+        },
+        {
+            "name": "unifi",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/jmagar/rustifi.git",
+                "path": "plugins/unifi"
+            },
+            "description": "UniFi network management via the rustifi MCP server — monitor devices, clients, health, alarms, events, and WLANs."
+        },
+        {
+            "name": "apprise",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/jmagar/apprise-mcp.git",
+                "path": "plugins/apprise"
+            },
+            "description": "Send push notifications via apprise-mcp — a Rust MCP bridge to the Apprise universal notification library."
         },
         {
             "name": "bitwarden",
@@ -104,22 +144,12 @@
             "description": "Skills for operating a ByteStash snippet manager."
         },
         {
-            "name": "claude-in-mobile",
-            "source": "./plugins/claude-in-mobile",
-            "description": "Claude Mobile MCP workflows for Android, iOS Simulator, macOS desktop apps, Aurora OS, browser, and app-store automation."
-        },
-        {
             "name": "codex-plugin-cc",
             "source": {
                 "source": "github",
                 "repo": "openai/codex-plugin-cc"
             },
             "description": "OpenAI Codex plugin for Claude Code interoperability."
-        },
-        {
-            "name": "jellyfin",
-            "source": "./plugins/jellyfin",
-            "description": "Jellyfin media server workflows for homelab operations."
         },
         {
             "name": "labby",
@@ -155,6 +185,16 @@
             "name": "vibin",
             "source": "./plugins/vibin",
             "description": "Session, GitHub review, and CI workflow skills for quick push, session documentation, PR comments, and CI debugging."
+        },
+        {
+            "name": "arrs",
+            "source": "./plugins/arrs",
+            "description": "The *arr / media-automation stack — Radarr, Sonarr, Prowlarr, Overseerr, SABnzbd, qBittorrent, Plex, Jellyfin, Tautulli, and Tracearr — each via its own REST API."
+        },
+        {
+            "name": "testing",
+            "source": "./plugins/testing",
+            "description": "App-testing and MCP-tooling skills: live web/Android/desktop app QA, MCP server smoke-testing (mcporter), MCP-UI validation (mcpjam), and claude-in-mobile device automation."
         },
         {
             "name": "agent-sdk-dev",
@@ -422,11 +462,6 @@
                 "repo": "ArkTechNWA/zsh-tool"
             },
             "description": "Zsh shell for Claude Code - full terminal control, live output, PTY mode for interactive commands"
-        },
-        {
-            "name": "agentmemory",
-            "source": "./plugins/agentmemory",
-            "description": "Persistent memory for AI coding agents \u2014 captures tool usage, compresses via LLM, injects context. 12 hooks, 51 MCP tools, 8 skills, real-time viewer at :3113."
         }
     ]
 }

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Bytestash"
-  short_description: "Manage code snippets in ByteStash snippet storage service"
-  default_prompt: "Use $bytestash to manage code snippets in ByteStash snippet storage service."

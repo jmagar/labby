@@ -1,4 +1,0 @@
-interface:
-  display_name: "Radicale"
-  short_description: "Managing calendars and contacts on a self-hosted Radicale..."
-  default_prompt: "Use $radicale for managing calendars and contacts on a self-hosted Radicale."
