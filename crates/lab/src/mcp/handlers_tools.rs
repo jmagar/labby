@@ -17,11 +17,12 @@ use rmcp::model::{ListToolsResult, PaginatedRequestParams, Tool};
 use rmcp::service::RequestContext;
 use serde_json::Value;
 
+use crate::mcp::call_tool_codemode::CODE_EXECUTE_DESCRIPTION;
 use crate::mcp::catalog::{TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME};
 use crate::mcp::completion::action_schema;
 use crate::mcp::context::{auth_context_from_extensions, oauth_upstream_subject_for_request};
 use crate::mcp::logging::DispatchLogOutcome;
-use crate::mcp::server::{CODE_EXECUTE_DESCRIPTION, LabMcpServer};
+use crate::mcp::server::LabMcpServer;
 
 impl LabMcpServer {
     pub(crate) async fn list_tools_impl(

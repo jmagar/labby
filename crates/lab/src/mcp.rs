@@ -2,6 +2,9 @@
 //! the Model Context Protocol. See `crates/lab/src/mcp/CLAUDE.md` for
 //! the full rulebook on dispatch, envelopes, and the shared catalog.
 
+pub mod call_tool;
+pub mod call_tool_codemode;
+pub mod call_tool_upstream;
 pub mod catalog;
 pub mod completion;
 pub mod context;
