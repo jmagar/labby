@@ -291,3 +291,82 @@ pub(super) async fn slow_response_pool(upstream_name: &str) -> Arc<UpstreamPool>
 
     pool
 }
+
+impl UpstreamPool {
+    /// Register an in-process upstream whose advertised tool list is backed by a
+    /// shared `Arc<RwLock<Vec<String>>>`, so a test can mutate the live tool set
+    /// after connection and exercise live-catalog refresh.
+    pub async fn insert_live_tool_server_for_tests(
+        &self,
+        upstream_name: &str,
+        tools: Arc<tokio::sync::RwLock<Vec<String>>>,
+    ) {
+        struct MutableToolCatalogServer {
+            tools: Arc<tokio::sync::RwLock<Vec<String>>>,
+        }
+
+        impl rmcp::ServerHandler for MutableToolCatalogServer {
+            fn get_info(&self) -> rmcp::model::ServerInfo {
+                rmcp::model::ServerInfo::new(
+                    rmcp::model::ServerCapabilities::builder()
+                        .enable_tools()
+                        .build(),
+                )
+            }
+
+            async fn list_tools(
+                &self,
+                _request: Option<rmcp::model::PaginatedRequestParams>,
+                _context: rmcp::service::RequestContext<rmcp::RoleServer>,
+            ) -> Result<rmcp::model::ListToolsResult, rmcp::model::ErrorData> {
+                let tools = self
+                    .tools
+                    .read()
+                    .await
+                    .iter()
+                    .map(|name| {
+                        rmcp::model::Tool::new(
+                            name.to_string(),
+                            format!("{name} description"),
+                            Arc::new(serde_json::Map::new()),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                Ok(rmcp::model::ListToolsResult::with_all_items(tools))
+            }
+        }
+
+        let (server_transport, client_transport) = tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
+        let server = MutableToolCatalogServer { tools };
+        let server_task = tokio::spawn(async move {
+            let running = server
+                .serve(server_transport)
+                .await
+                .expect("mutable tool catalog server starts");
+            running
+                .waiting()
+                .await
+                .expect("mutable tool catalog server runs");
+        });
+        let client_service: rmcp::service::RunningService<RoleClient, ()> = ()
+            .serve(client_transport)
+            .await
+            .expect("mutable tool catalog client starts");
+        let peer = client_service.peer().clone();
+
+        self.catalog
+            .write()
+            .await
+            .entry(upstream_name.to_string())
+            .or_insert_with(|| healthy_in_process_entry(Arc::from(upstream_name), HashMap::new()));
+        self.connections.write().await.insert(
+            upstream_name.to_string(),
+            UpstreamConnection {
+                _client_service: client_service,
+                _server_task: Some(server_task),
+                peer,
+                runtime: UpstreamRuntimeMetadata::default(),
+            },
+        );
+    }
+}
