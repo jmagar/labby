@@ -91,6 +91,8 @@ pub enum SetupCommand {
     Check,
     /// Repair missing local setup prerequisites without contacting external services.
     Repair,
+    /// Copy the labby binary into ~/.local/bin so it is callable in your own terminal.
+    Install,
     /// Install the Claude Code plugin for a configured service.
     InstallPlugin(PluginMutationArgs),
     /// Uninstall the Claude Code plugin for a service.
@@ -121,6 +123,35 @@ pub struct PluginMutationArgs {
 
 /// Default URL for the embedded web UI (per Q1: 127.0.0.1:8765).
 const DEFAULT_LAB_URL: &str = "http://127.0.0.1:8765";
+
+fn install_self() -> Result<std::path::PathBuf> {
+    let exe = std::env::current_exe()?;
+    let name = exe
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("cannot determine binary name"))?;
+    let home = std::env::var_os("HOME").ok_or_else(|| anyhow::anyhow!("HOME is not set"))?;
+    let bin_dir = std::path::PathBuf::from(home).join(".local").join("bin");
+    std::fs::create_dir_all(&bin_dir)?;
+    let dest = bin_dir.join(name);
+    if dest == exe {
+        return Ok(dest);
+    }
+    let tmp = bin_dir.join(format!(".{}.tmp", name.to_string_lossy()));
+    std::fs::copy(&exe, &tmp)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
+    }
+    std::fs::rename(&tmp, &dest)?;
+    let on_path = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).any(|d| d == bin_dir))
+        .unwrap_or(false);
+    if !on_path {
+        eprintln!("note: {} is not on your PATH; add:  export PATH=\"$HOME/.local/bin:$PATH\"", bin_dir.display());
+    }
+    Ok(dest)
+}
 
 pub async fn run(args: SetupArgs, format: OutputFormat) -> Result<ExitCode> {
     if let Some(command) = args.command {
@@ -194,6 +225,8 @@ async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<Exit
             print(&value, format)?;
         }
         SetupCommand::PluginHook { no_repair } => {
+            // Keep the user's terminal copy in ~/.local/bin fresh each session.
+            let _ = install_self();
             let value =
                 crate::dispatch::setup::dispatch("plugin_hook", json!({ "repair": !no_repair }))
                     .await?;
@@ -240,6 +273,10 @@ async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<Exit
         SetupCommand::Repair => {
             let value = crate::dispatch::setup::dispatch("repair", json!({})).await?;
             print(&value, format)?;
+        }
+        SetupCommand::Install => {
+            let dest = install_self()?;
+            println!("installed -> {}", dest.display());
         }
         SetupCommand::InstallPlugin(args) => {
             run_plugin_mutation("install_plugin", args, format).await?;
