@@ -47,6 +47,7 @@ use super::types::{
 mod entries;
 mod helpers;
 mod logging;
+mod validate;
 
 pub use helpers::{UpstreamCachedSummary, in_process_upstream_name};
 pub(crate) use helpers::{redact_resource_uri_for_logging, upstream_discovery_concurrency};
@@ -56,6 +57,7 @@ pub(crate) use helpers::{redact_resource_uri_for_logging, upstream_discovery_con
 use entries::*;
 use helpers::*;
 use logging::*;
+use validate::*;
 
 /// Collect upstream peers for a capability in deterministic name order.
 async fn routable_upstream_peers(
@@ -3041,55 +3043,6 @@ impl Default for UpstreamPool {
     }
 }
 
-/// Estimate the serialized size of a `CallToolResult`.
-///
-/// Uses `serde_json::to_string` as a reasonable approximation. Not exact
-/// (ignores transport framing) but sufficient for the size cap guard.
-fn estimate_response_size(result: &CallToolResult) -> usize {
-    serde_json::to_string(result).map_or(0, |s| s.len())
-}
-
-/// Validate an upstream config entry.
-fn validate_upstream_config(config: &UpstreamConfig) -> Result<(), String> {
-    if config.name.is_empty() {
-        return Err("upstream name cannot be empty".into());
-    }
-
-    if config.url.is_some() && config.command.is_some() {
-        return Err("upstream must not set both 'url' and 'command'".into());
-    }
-
-    // Must have either a URL or a command
-    if config.url.is_none() && config.command.is_none() {
-        return Err("upstream must have either 'url' or 'command'".into());
-    }
-
-    if let Some(ref url_str) = config.url {
-        // Reject schemes outside the supported HTTP and WebSocket transports.
-        if !url_str.starts_with("http://")
-            && !url_str.starts_with("https://")
-            && !url_str.starts_with("ws://")
-            && !url_str.starts_with("wss://")
-        {
-            return Err(format!(
-                "upstream URL must use http://, https://, ws://, or wss:// scheme, got: {url_str}"
-            ));
-        }
-        // Parse with url::Url to reliably check the host.
-        let parsed = url::Url::parse(url_str)
-            .map_err(|e| format!("invalid upstream URL `{url_str}`: {e}"))?;
-        if let Some(host) = parsed.host_str() {
-            // Reject bind-all addresses (0.0.0.0 or ::).
-            let normalized = host.trim_start_matches('[').trim_end_matches(']');
-            if normalized == "0.0.0.0" || normalized == "::" {
-                return Err("upstream URL must not use 0.0.0.0 or :: (bind-all addresses)".into());
-            }
-        }
-    }
-
-    Ok(())
-}
-
 /// Connect to a single upstream MCP server and discover its tools.
 async fn connect_upstream(
     config: &UpstreamConfig,
@@ -3785,200 +3738,6 @@ mod tests {
 
         assert!(!result);
         assert!(pool.find_tool("anything").await.is_none());
-    }
-
-    #[test]
-    fn validate_rejects_empty_name() {
-        let config = UpstreamConfig {
-            enabled: true,
-            name: String::new(),
-            url: Some("http://localhost:8080".into()),
-            bearer_token_env: None,
-            command: None,
-            args: vec![],
-            env: std::collections::BTreeMap::new(),
-            proxy_resources: false,
-            proxy_prompts: false,
-            expose_tools: None,
-            expose_resources: None,
-            expose_prompts: None,
-            oauth: None,
-            imported_from: None,
-            priority: 1.0,
-            tool_search: crate::config::ToolSearchConfig::default(),
-        };
-        assert!(validate_upstream_config(&config).is_err());
-    }
-
-    #[test]
-    fn validate_rejects_non_http_scheme() {
-        let config = UpstreamConfig {
-            enabled: true,
-            name: "test".into(),
-            url: Some("ftp://example.com".into()),
-            bearer_token_env: None,
-            command: None,
-            args: vec![],
-            env: std::collections::BTreeMap::new(),
-            proxy_resources: false,
-            proxy_prompts: false,
-            expose_tools: None,
-            expose_resources: None,
-            expose_prompts: None,
-            oauth: None,
-            imported_from: None,
-            priority: 1.0,
-            tool_search: crate::config::ToolSearchConfig::default(),
-        };
-        assert!(validate_upstream_config(&config).is_err());
-    }
-
-    #[test]
-    fn validate_rejects_bind_all_addresses() {
-        for url in &["http://0.0.0.0:8080", "http://[::]/mcp", "http://[::]:8080"] {
-            let config = UpstreamConfig {
-                enabled: true,
-                name: "test".into(),
-                url: Some((*url).into()),
-                bearer_token_env: None,
-                command: None,
-                args: vec![],
-                env: std::collections::BTreeMap::new(),
-                proxy_resources: false,
-                proxy_prompts: false,
-                expose_tools: None,
-                expose_resources: None,
-                expose_prompts: None,
-                oauth: None,
-                imported_from: None,
-                priority: 1.0,
-                tool_search: crate::config::ToolSearchConfig::default(),
-            };
-            assert!(
-                validate_upstream_config(&config).is_err(),
-                "should reject {url}"
-            );
-        }
-    }
-
-    #[test]
-    fn validate_accepts_valid_http_url() {
-        let config = UpstreamConfig {
-            enabled: true,
-            name: "test".into(),
-            url: Some("http://localhost:8080/mcp".into()),
-            bearer_token_env: None,
-            command: None,
-            args: vec![],
-            env: std::collections::BTreeMap::new(),
-            proxy_resources: false,
-            proxy_prompts: false,
-            expose_tools: None,
-            expose_resources: None,
-            expose_prompts: None,
-            oauth: None,
-            imported_from: None,
-            priority: 1.0,
-            tool_search: crate::config::ToolSearchConfig::default(),
-        };
-        assert!(validate_upstream_config(&config).is_ok());
-    }
-
-    #[test]
-    fn validate_accepts_valid_websocket_urls() {
-        for url in ["ws://localhost:8080/mcp", "wss://example.com/socket"] {
-            let config = UpstreamConfig {
-                enabled: true,
-                name: "test".into(),
-                url: Some(url.into()),
-                bearer_token_env: None,
-                command: None,
-                args: vec![],
-                env: std::collections::BTreeMap::new(),
-                proxy_resources: false,
-                proxy_prompts: false,
-                expose_tools: None,
-                expose_resources: None,
-                expose_prompts: None,
-                oauth: None,
-                imported_from: None,
-                priority: 1.0,
-                tool_search: crate::config::ToolSearchConfig::default(),
-            };
-            assert!(
-                validate_upstream_config(&config).is_ok(),
-                "{url} should validate"
-            );
-        }
-    }
-
-    #[test]
-    fn validate_accepts_stdio_command() {
-        let config = UpstreamConfig {
-            enabled: true,
-            name: "test".into(),
-            url: None,
-            bearer_token_env: None,
-            command: Some("my-mcp-server".into()),
-            args: vec!["--port".into(), "8080".into()],
-            env: std::collections::BTreeMap::new(),
-            proxy_resources: false,
-            proxy_prompts: false,
-            expose_tools: None,
-            expose_resources: None,
-            expose_prompts: None,
-            oauth: None,
-            imported_from: None,
-            priority: 1.0,
-            tool_search: crate::config::ToolSearchConfig::default(),
-        };
-        assert!(validate_upstream_config(&config).is_ok());
-    }
-
-    #[test]
-    fn validate_rejects_both_url_and_command() {
-        let config = UpstreamConfig {
-            enabled: true,
-            name: "test".into(),
-            url: Some("http://localhost:8080".into()),
-            bearer_token_env: None,
-            command: Some("my-mcp-server".into()),
-            args: vec![],
-            env: std::collections::BTreeMap::new(),
-            proxy_resources: false,
-            proxy_prompts: false,
-            expose_tools: None,
-            expose_resources: None,
-            expose_prompts: None,
-            oauth: None,
-            imported_from: None,
-            priority: 1.0,
-            tool_search: crate::config::ToolSearchConfig::default(),
-        };
-        assert!(validate_upstream_config(&config).is_err());
-    }
-
-    #[test]
-    fn validate_rejects_no_url_or_command() {
-        let config = UpstreamConfig {
-            enabled: true,
-            name: "test".into(),
-            url: None,
-            bearer_token_env: None,
-            command: None,
-            args: vec![],
-            env: std::collections::BTreeMap::new(),
-            proxy_resources: false,
-            proxy_prompts: false,
-            expose_tools: None,
-            expose_resources: None,
-            expose_prompts: None,
-            oauth: None,
-            imported_from: None,
-            priority: 1.0,
-            tool_search: crate::config::ToolSearchConfig::default(),
-        };
-        assert!(validate_upstream_config(&config).is_err());
     }
 
     fn oauth_http_config() -> UpstreamConfig {

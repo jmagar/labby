@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rmcp::model::{Prompt, ReadResourceResult, Resource, ResourceContents};
+use rmcp::model::{CallToolResult, Prompt, ReadResourceResult, Resource, ResourceContents};
 use serde_json::Value;
 
 use crate::config::UpstreamConfig;
@@ -48,6 +48,14 @@ pub(super) const AUTH_FAILURE_REPROBE_ATTEMPT_FLOOR: u32 = 5;
 
 pub fn in_process_upstream_name(service_name: &str) -> String {
     format!("__in_process__{service_name}")
+}
+
+/// Estimate the serialized size of a `CallToolResult`.
+///
+/// Uses `serde_json::to_string` as a reasonable approximation. Not exact
+/// (ignores transport framing) but sufficient for the size cap guard.
+pub(super) fn estimate_response_size(result: &CallToolResult) -> usize {
+    serde_json::to_string(result).map_or(0, |s| s.len())
 }
 
 /// Read the max response size from env or use the default.
