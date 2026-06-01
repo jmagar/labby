@@ -3,19 +3,17 @@
 //! Extracted from `cli/serve.rs` so that both the stdio and HTTP transports
 //! can share the same handler logic.
 
-use sha2::{Digest, Sha256};
-use std::borrow::Cow;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Instant;
 
-use axum::http::{self, request::Parts};
+use axum::http;
 use rmcp::model::{
     AnnotateAble, CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult,
-    CompletionInfo, Content, GetPromptRequestParams, GetPromptResult, ListPromptsResult,
-    ListResourcesResult, ListToolsResult, LoggingLevel, PaginatedRequestParams, RawResource,
-    ReadResourceRequestParams, ReadResourceResult, ResourceContents, ServerCapabilities,
-    ServerInfo, SetLevelRequestParams, Tool,
+    Content, GetPromptRequestParams, GetPromptResult, ListPromptsResult, ListResourcesResult,
+    ListToolsResult, LoggingLevel, PaginatedRequestParams, RawResource, ReadResourceRequestParams,
+    ReadResourceResult, ResourceContents, ServerCapabilities, ServerInfo, SetLevelRequestParams,
+    Tool,
 };
 use rmcp::service::{NotificationContext, Peer, RequestContext};
 use rmcp::{ErrorData, RoleServer, ServerHandler};
@@ -24,18 +22,25 @@ use tokio::sync::RwLock;
 
 use crate::config::NodeRole;
 use crate::dispatch::error::ToolError as DispatchToolError;
-use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
 use crate::dispatch::gateway::code_mode::{
-    CodeModeBroker, CodeModeCaller, CodeModeCapabilityFilter, CodeModeSurface,
+    CodeModeBroker, CodeModeCaller, CodeModeCapabilityFilter,
 };
 use crate::dispatch::gateway::manager::GatewayManager;
-use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
 use crate::mcp::catalog::{TOOL_EXECUTE_TOOL_NAME, TOOL_SEARCH_TOOL_NAME};
+use crate::mcp::completion::{action_schema, complete_prompt_arg, completion_info};
+use crate::mcp::context::{
+    auth_context_from_extensions, oauth_upstream_subject_for_request, subject_from_extensions,
+    tool_execute_builtin_action_allowed, tool_execute_scope_allowed, tool_search_scope_allowed,
+};
 use crate::mcp::elicitation::{ElicitResult, elicit_confirm};
-use crate::mcp::envelope::{build_error, build_error_extra, build_success};
+use crate::mcp::envelope::{build_error, build_error_extra};
 use crate::mcp::error::DispatchError;
 use crate::mcp::error::canonical_kind;
 use crate::mcp::logging::{DispatchLogOutcome, logging_level_rank};
+use crate::mcp::result_format::{
+    estimate_tokens, estimate_tokens_args, format_dispatch_result, hash_arguments,
+    tool_error_envelope,
+};
 use crate::registry::ToolRegistry;
 
 const CODE_MODE_MAX_CODE_BYTES: usize = 20_000;
@@ -107,28 +112,6 @@ actions use the `execute` tool in Tool Search mode.";
 #[cfg(test)]
 use crate::mcp::peers::PeerNotifier;
 
-/// JSON Schema for every service tool's input: `action` (required) + `params` (optional object).
-#[allow(clippy::expect_used)]
-fn action_schema() -> serde_json::Map<String, Value> {
-    serde_json::json!({
-        "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "description": "Action to perform (e.g. \"movie.search\"). Use \"help\" to list all actions."
-            },
-            "params": {
-                "type": "object",
-                "description": "Action-specific parameters (varies per action)"
-            }
-        },
-        "required": ["action"]
-    })
-    .as_object()
-    .cloned()
-        .expect("schema literal is always an object")
-}
-
 fn string_array_arg(
     args: &serde_json::Map<String, Value>,
     key: &str,
@@ -151,39 +134,6 @@ fn string_array_arg(
                     message: format!("`{key}` entries must be strings"),
                 })
         })
-        .collect()
-}
-
-fn completion_info(values: Vec<String>) -> CompletionInfo {
-    CompletionInfo {
-        total: Some(values.len() as u32),
-        has_more: Some(false),
-        values,
-    }
-}
-
-fn complete_prompt_arg(
-    registry: &ToolRegistry,
-    prompt_name: &str,
-    argument_name: &str,
-    prefix: &str,
-) -> CompletionInfo {
-    match (prompt_name, argument_name) {
-        ("run-action", "action") => completion_info(registry.action_name_completions(prefix)),
-        ("run-action" | "service-discover", "service") => {
-            completion_info(service_name_completions(registry, prefix))
-        }
-        _ => completion_info(Vec::new()),
-    }
-}
-
-fn service_name_completions(registry: &ToolRegistry, prefix: &str) -> Vec<String> {
-    registry
-        .services()
-        .iter()
-        .map(|service| service.name)
-        .filter(|name| name.starts_with(prefix))
-        .map(str::to_string)
         .collect()
 }
 
@@ -2157,65 +2107,7 @@ fn inject_gateway_origin_param(params: Value, subject: Option<&str>) -> Value {
     Value::Object(object)
 }
 
-fn redact_subject_for_logging(subject: &str) -> String {
-    let digest = Sha256::digest(subject.as_bytes());
-    format!("sub:{}", hex::encode(digest))[..16].to_string()
-}
-
 impl LabMcpServer {
-    fn code_mode_surface(&self, allow_destructive_actions: bool) -> CodeModeSurface {
-        CodeModeSurface::Mcp {
-            allow_destructive_actions,
-        }
-    }
-
-    fn request_subject<'a>(&self, context: &'a RequestContext<RoleServer>) -> Option<&'a str> {
-        subject_from_extensions(&context.extensions)
-    }
-
-    fn request_subject_log_tag(&self, context: &RequestContext<RoleServer>) -> String {
-        self.request_subject(context)
-            .map(redact_subject_for_logging)
-            .unwrap_or_default()
-    }
-
-    fn request_actor_key<'a>(&self, context: &'a RequestContext<RoleServer>) -> Option<&'a str> {
-        actor_key_from_extensions(&context.extensions)
-    }
-
-    fn request_runtime_owner(&self, context: &RequestContext<RoleServer>) -> UpstreamRuntimeOwner {
-        let subject = self.request_subject(context).map(ToOwned::to_owned);
-        let raw = subject
-            .as_ref()
-            .map(|subject| format!("mcp:{subject}"))
-            .unwrap_or_else(|| "mcp:anonymous".to_string());
-        UpstreamRuntimeOwner {
-            surface: "mcp".to_string(),
-            subject,
-            request_id: None,
-            session_id: None,
-            client_name: None,
-            raw: Some(raw),
-        }
-    }
-
-    async fn oauth_upstream_configs(&self) -> Vec<crate::config::UpstreamConfig> {
-        match &self.gateway_manager {
-            Some(manager) => manager.oauth_upstream_configs().await,
-            None => Vec::new(),
-        }
-    }
-
-    async fn oauth_upstream_config(
-        &self,
-        upstream_name: &str,
-    ) -> Option<crate::config::UpstreamConfig> {
-        match &self.gateway_manager {
-            Some(manager) => manager.oauth_upstream_config(upstream_name).await,
-            None => None,
-        }
-    }
-
     async fn notify_catalog_changes(&self, before: &CatalogSnapshot, after: &CatalogSnapshot) {
         if before == after {
             return;
@@ -2299,197 +2191,6 @@ impl LabMcpServer {
             active_count = guard.len(),
             "MCP peer catalog-change notification complete"
         );
-    }
-}
-
-fn tool_error_envelope(service: &str, action: &str, err: &DispatchToolError) -> Value {
-    let Ok(Value::Object(mut serialized)) = serde_json::to_value(err) else {
-        return build_error(service, action, err.kind(), &err.to_string());
-    };
-    let kind = serialized
-        .remove("kind")
-        .and_then(|value| value.as_str().map(ToOwned::to_owned))
-        .unwrap_or_else(|| err.kind().to_string());
-    let message = serialized
-        .remove("message")
-        .and_then(|value| value.as_str().map(ToOwned::to_owned))
-        .unwrap_or_else(|| err.to_string());
-    if serialized.is_empty() {
-        build_error(service, action, &kind, &message)
-    } else {
-        build_error_extra(service, action, &kind, &message, &Value::Object(serialized))
-    }
-}
-
-fn subject_from_extensions(extensions: &rmcp::model::Extensions) -> Option<&str> {
-    auth_context_from_extensions(extensions).map(|auth| auth.sub.as_str())
-}
-
-pub(crate) fn actor_key_from_extensions(extensions: &rmcp::model::Extensions) -> Option<&str> {
-    auth_context_from_extensions(extensions).and_then(|auth| auth.actor_key.as_deref())
-}
-
-fn auth_context_from_extensions(
-    extensions: &rmcp::model::Extensions,
-) -> Option<&crate::api::oauth::AuthContext> {
-    let parts = extensions.get::<Parts>()?;
-    parts.extensions.get::<crate::api::oauth::AuthContext>()
-}
-
-fn oauth_upstream_subject_for_request<'a>(
-    auth: Option<&crate::api::oauth::AuthContext>,
-    request_subject: Option<&'a str>,
-) -> Option<Cow<'a, str>> {
-    match auth {
-        None => Some(Cow::Borrowed(SHARED_GATEWAY_OAUTH_SUBJECT)),
-        Some(ctx) if ctx.scopes.iter().any(|scope| scope == "lab:admin") => {
-            Some(Cow::Borrowed(SHARED_GATEWAY_OAUTH_SUBJECT))
-        }
-        Some(_) => request_subject.map(Cow::Borrowed),
-    }
-}
-
-fn tool_execute_scope_allowed(auth: Option<&crate::api::oauth::AuthContext>) -> bool {
-    auth.is_none_or(|auth| {
-        auth.scopes
-            .iter()
-            .any(|scope| matches!(scope.as_str(), "lab" | "lab:admin"))
-    })
-}
-
-/// Returns `true` when the caller is allowed to invoke the tool_search tool.
-///
-/// tool_search requires at least `lab:read`; tool_execute requires the stronger `lab` or `lab:admin`.
-/// `None` auth means stdio transport — trusted by design (no per-request AuthContext).
-fn tool_search_scope_allowed(auth: Option<&crate::api::oauth::AuthContext>) -> bool {
-    auth.is_none_or(|auth| {
-        auth.scopes
-            .iter()
-            .any(|scope| matches!(scope.as_str(), "lab:read" | "lab" | "lab:admin"))
-    })
-}
-
-fn tool_execute_builtin_action_allowed(
-    entry: &crate::registry::RegisteredService,
-    action: &str,
-    auth: Option<&crate::api::oauth::AuthContext>,
-) -> bool {
-    if !builtin_action_requires_admin(entry, action) {
-        return true;
-    }
-    auth.is_none_or(|auth| auth.scopes.iter().any(|scope| scope == "lab:admin"))
-}
-
-fn builtin_action_requires_admin(entry: &crate::registry::RegisteredService, action: &str) -> bool {
-    if entry.name == "gateway" {
-        return !matches!(
-            action,
-            "help" | "schema" | "gateway.help" | "gateway.schema"
-        );
-    }
-    entry.name == "setup"
-        && entry
-            .actions
-            .iter()
-            .any(|spec| spec.name == action && spec.destructive)
-}
-
-fn hash_arguments(arguments: &Value) -> String {
-    let bytes = serde_json::to_vec(arguments).unwrap_or_default();
-    hex::encode(Sha256::digest(bytes))
-}
-
-/// Rough char-based token estimator for gateway telemetry logs.
-///
-/// Uses the conventional ~4 chars-per-token heuristic. Cheap, dependency-free,
-/// and accurate enough for capacity tracking; do NOT use for LLM budget
-/// enforcement — pull in `tiktoken-rs` if exact counts are required.
-fn estimate_tokens(s: &str) -> usize {
-    s.len().div_ceil(4)
-}
-
-/// Token count of a JSON value, computed against its serialized form.
-#[cfg(test)]
-fn estimate_tokens_value(value: &Value) -> usize {
-    estimate_tokens(&serde_json::to_string(value).unwrap_or_default())
-}
-
-/// Token count of an MCP arguments map (`request.arguments.unwrap_or_default()`).
-fn estimate_tokens_args(arguments: &serde_json::Map<String, Value>) -> usize {
-    estimate_tokens(&serde_json::to_string(arguments).unwrap_or_default())
-}
-
-/// Format the result of a dispatch operation into an MCP `CallToolResult`.
-fn format_dispatch_result(
-    result: Result<Value, anyhow::Error>,
-    service: &str,
-    action: &str,
-    elapsed_ms: u128,
-    subject: &str,
-    actor_key: Option<&str>,
-) -> (CallToolResult, DispatchLogOutcome) {
-    match result {
-        Ok(v) => {
-            tracing::info!(
-                surface = "mcp",
-                service,
-                action,
-                subject,
-                actor_key,
-                tool = %service,
-                elapsed_ms,
-                "dispatch ok"
-            );
-            let envelope = build_success(service, action, &v);
-            (
-                CallToolResult::success(vec![Content::text(envelope.to_string())]),
-                DispatchLogOutcome::Success,
-            )
-        }
-        Err(e) => {
-            let (kind, message, extra) = extract_error_info(&e);
-            let is_fatal = matches!(kind, "internal_error" | "server_error" | "decode_error");
-            if is_fatal {
-                tracing::error!(
-                    surface = "mcp",
-                    service,
-                    action,
-                    subject,
-                    actor_key,
-                    tool = %service,
-                    elapsed_ms,
-                    kind,
-                    "dispatch error"
-                );
-            } else {
-                tracing::warn!(
-                    surface = "mcp",
-                    service,
-                    action,
-                    subject,
-                    actor_key,
-                    tool = %service,
-                    elapsed_ms,
-                    kind,
-                    "dispatch error"
-                );
-            }
-            let envelope = extra.map_or_else(
-                || build_error(service, action, kind, &message),
-                |ref extra| build_error_extra(service, action, kind, &message, extra),
-            );
-            (
-                CallToolResult::error(vec![Content::text(envelope.to_string())]),
-                DispatchLogOutcome::Failure {
-                    level: if is_fatal {
-                        LoggingLevel::Error
-                    } else {
-                        LoggingLevel::Warning
-                    },
-                    kind,
-                },
-            )
-        }
     }
 }
 
@@ -2577,62 +2278,21 @@ fn normalize_upstream_result(
     )
 }
 
-/// Recover a stable kind tag and message from an `anyhow::Error`.
-///
-/// Priority:
-/// 1. Downcast to [`DispatchError`] — gives structured kind + optional extras.
-/// 2. Parse `e.to_string()` as JSON `{ "kind": "…" }` — covers `ToolError`
-///    errors that were serialized to string before entering anyhow (radarr).
-/// 3. Fall back to `"internal_error"`.
-pub fn extract_error_info(e: &anyhow::Error) -> (&'static str, String, Option<Value>) {
-    // 1. Structured DispatchError
-    if let Some(de) = e.downcast_ref::<DispatchError>() {
-        let extra = if de.valid.is_some() || de.param.is_some() || de.hint.is_some() {
-            Some(serde_json::json!({
-                "valid": de.valid,
-                "param": de.param,
-                "hint":  de.hint,
-            }))
-        } else {
-            None
-        };
-        return (de.kind, de.message.clone(), extra);
-    }
-    // 2. ToolError serialized as JSON string (legacy radarr path)
-    let msg = e.to_string();
-    if let Ok(v) = serde_json::from_str::<Value>(&msg)
-        && let Some(kind_str) = v.get("kind").and_then(|k| k.as_str())
-    {
-        let kind: &'static str = canonical_kind(kind_str);
-        let message = v["message"].as_str().unwrap_or(&msg).to_string();
-        // Preserve structured extras (valid list, param name, hint) if present.
-        let has_valid = v.get("valid").is_some_and(|v| !v.is_null());
-        let has_param = v.get("param").is_some_and(|v| !v.is_null());
-        let has_hint = v.get("hint").is_some_and(|v| !v.is_null());
-        let extra = if has_valid || has_param || has_hint {
-            Some(serde_json::json!({
-                "valid": v.get("valid"),
-                "param": v.get("param"),
-                "hint":  v.get("hint"),
-            }))
-        } else {
-            None
-        };
-        return (kind, message, extra);
-    }
-    // 3. Generic fallback
-    ("internal_error", msg, None)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        estimate_tokens, estimate_tokens_args, estimate_tokens_value, extract_error_info,
-        logging_level_rank, normalize_upstream_result,
-    };
+    use super::{logging_level_rank, normalize_upstream_result};
     use crate::dispatch::error::ToolError;
+    use crate::mcp::completion::complete_prompt_arg;
+    use crate::mcp::context::{
+        actor_key_from_extensions, oauth_upstream_subject_for_request, subject_from_extensions,
+        tool_execute_builtin_action_allowed, tool_execute_scope_allowed, tool_search_scope_allowed,
+    };
     use crate::mcp::envelope::build_error;
     use crate::mcp::error::{DispatchError, canonical_kind};
+    use crate::mcp::result_format::{
+        estimate_tokens, estimate_tokens_args, estimate_tokens_value, extract_error_info,
+        tool_error_envelope,
+    };
     use crate::registry::{RegisteredService, ToolRegistry};
     use lab_apis::core::action::ActionSpec;
     use rmcp::ServerHandler;
@@ -2802,7 +2462,7 @@ mod tests {
             param: "query".to_string(),
         };
 
-        let envelope = super::tool_error_envelope("code_search", "call_tool", &err);
+        let envelope = tool_error_envelope("code_search", "call_tool", &err);
 
         assert_eq!(
             envelope.pointer("/error/kind"),
@@ -2951,7 +2611,7 @@ mod tests {
     fn completion_run_action_empty_action_prefix_uses_cached_action_names() {
         let registry = completion_test_registry();
 
-        let completion = super::complete_prompt_arg(&registry, "run-action", "action", "");
+        let completion = complete_prompt_arg(&registry, "run-action", "action", "");
 
         assert_eq!(completion.values, registry.action_name_completions(""));
         assert_eq!(completion.total, Some(registry.action_names().len() as u32));
@@ -2962,7 +2622,7 @@ mod tests {
     fn completion_run_action_action_prefix_filters_cached_action_names() {
         let registry = completion_test_registry();
 
-        let completion = super::complete_prompt_arg(&registry, "run-action", "action", "movie.");
+        let completion = complete_prompt_arg(&registry, "run-action", "action", "movie.");
 
         assert_eq!(
             completion.values,
@@ -2974,8 +2634,8 @@ mod tests {
     fn completion_prompt_service_arguments_filter_service_names() {
         let registry = completion_test_registry();
 
-        let run_action = super::complete_prompt_arg(&registry, "run-action", "service", "ra");
-        let discover = super::complete_prompt_arg(&registry, "service-discover", "service", "so");
+        let run_action = complete_prompt_arg(&registry, "run-action", "service", "ra");
+        let discover = complete_prompt_arg(&registry, "service-discover", "service", "so");
 
         assert_eq!(run_action.values, vec!["radarr".to_string()]);
         assert_eq!(discover.values, vec!["sonarr".to_string()]);
@@ -2985,7 +2645,7 @@ mod tests {
     fn completion_unknown_prompt_argument_returns_empty_result() {
         let registry = completion_test_registry();
 
-        let completion = super::complete_prompt_arg(&registry, "run-action", "params", "{");
+        let completion = complete_prompt_arg(&registry, "run-action", "params", "{");
 
         assert!(completion.values.is_empty());
         assert_eq!(completion.total, Some(0));
@@ -3239,11 +2899,8 @@ mod tests {
         let mut extensions = rmcp::model::Extensions::new();
         extensions.insert(parts);
 
-        assert_eq!(super::subject_from_extensions(&extensions), Some("alice"));
-        assert_eq!(
-            super::actor_key_from_extensions(&extensions),
-            Some("actor-alice")
-        );
+        assert_eq!(subject_from_extensions(&extensions), Some("alice"));
+        assert_eq!(actor_key_from_extensions(&extensions), Some("actor-alice"));
     }
 
     #[test]
@@ -3276,22 +2933,22 @@ mod tests {
             ..read_only.clone()
         };
 
-        assert!(super::tool_execute_builtin_action_allowed(
+        assert!(tool_execute_builtin_action_allowed(
             &entry,
             "gateway.help",
             Some(&read_only)
         ));
-        assert!(!super::tool_execute_builtin_action_allowed(
+        assert!(!tool_execute_builtin_action_allowed(
             &entry,
             "gateway.import",
             Some(&read_only)
         ));
-        assert!(super::tool_execute_builtin_action_allowed(
+        assert!(tool_execute_builtin_action_allowed(
             &entry,
             "gateway.import",
             Some(&admin)
         ));
-        assert!(super::tool_execute_builtin_action_allowed(
+        assert!(tool_execute_builtin_action_allowed(
             &entry,
             "gateway.import",
             None
@@ -3326,15 +2983,15 @@ mod tests {
             ..base.clone()
         };
 
-        assert!(super::tool_search_scope_allowed(None));
-        assert!(super::tool_search_scope_allowed(Some(&base)));
-        assert!(super::tool_search_scope_allowed(Some(&lab)));
-        assert!(super::tool_search_scope_allowed(Some(&admin)));
-        assert!(!super::tool_search_scope_allowed(Some(&empty)));
-        assert!(!super::tool_search_scope_allowed(Some(&unrelated)));
+        assert!(tool_search_scope_allowed(None));
+        assert!(tool_search_scope_allowed(Some(&base)));
+        assert!(tool_search_scope_allowed(Some(&lab)));
+        assert!(tool_search_scope_allowed(Some(&admin)));
+        assert!(!tool_search_scope_allowed(Some(&empty)));
+        assert!(!tool_search_scope_allowed(Some(&unrelated)));
 
         assert!(
-            !super::tool_execute_scope_allowed(Some(&base)),
+            !tool_execute_scope_allowed(Some(&base)),
             "lab:read can search but cannot execute"
         );
     }
@@ -3361,17 +3018,17 @@ mod tests {
             ..read_only.clone()
         };
 
-        assert!(super::tool_execute_builtin_action_allowed(
+        assert!(tool_execute_builtin_action_allowed(
             entry,
             "state",
             Some(&read_only)
         ));
-        assert!(!super::tool_execute_builtin_action_allowed(
+        assert!(!tool_execute_builtin_action_allowed(
             entry,
             "repair",
             Some(&read_only)
         ));
-        assert!(super::tool_execute_builtin_action_allowed(
+        assert!(tool_execute_builtin_action_allowed(
             entry,
             "repair",
             Some(&admin)
@@ -3393,18 +3050,17 @@ mod tests {
     #[test]
     fn oauth_upstream_subject_uses_shared_gateway_for_admin_and_trusted_callers() {
         assert_eq!(
-            super::oauth_upstream_subject_for_request(None, None).as_deref(),
+            oauth_upstream_subject_for_request(None, None).as_deref(),
             Some(crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT)
         );
         assert_eq!(
-            super::oauth_upstream_subject_for_request(None, Some("stdio-subject")).as_deref(),
+            oauth_upstream_subject_for_request(None, Some("stdio-subject")).as_deref(),
             Some(crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT)
         );
 
         let admin = make_auth(&["lab:admin"]);
         assert_eq!(
-            super::oauth_upstream_subject_for_request(Some(&admin), Some("google-subject"))
-                .as_deref(),
+            oauth_upstream_subject_for_request(Some(&admin), Some("google-subject")).as_deref(),
             Some(crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT)
         );
     }
@@ -3413,18 +3069,17 @@ mod tests {
     fn oauth_upstream_subject_preserves_non_admin_request_subjects() {
         let lab = make_auth(&["lab"]);
         assert_eq!(
-            super::oauth_upstream_subject_for_request(Some(&lab), Some("user-subject")).as_deref(),
+            oauth_upstream_subject_for_request(Some(&lab), Some("user-subject")).as_deref(),
             Some("user-subject")
         );
 
         let read_only = make_auth(&["lab:read"]);
         assert_eq!(
-            super::oauth_upstream_subject_for_request(Some(&read_only), Some("reader-subject"))
-                .as_deref(),
+            oauth_upstream_subject_for_request(Some(&read_only), Some("reader-subject")).as_deref(),
             Some("reader-subject")
         );
         assert!(
-            super::oauth_upstream_subject_for_request(Some(&read_only), None).is_none(),
+            oauth_upstream_subject_for_request(Some(&read_only), None).is_none(),
             "non-admin HTTP callers must not fall back to shared gateway credentials without a subject"
         );
     }
@@ -3432,27 +3087,27 @@ mod tests {
     #[test]
     fn tool_search_scope_allowed_permits_all_expected_scopes() {
         // None = stdio transport → trusted (always permitted)
-        assert!(super::tool_search_scope_allowed(None));
+        assert!(tool_search_scope_allowed(None));
 
         // lab:read is the minimum acceptable scope for tool_search
         let read_only = make_auth(&["lab:read"]);
-        assert!(super::tool_search_scope_allowed(Some(&read_only)));
+        assert!(tool_search_scope_allowed(Some(&read_only)));
 
         // bare lab must also pass tool_search
         let lab = make_auth(&["lab"]);
-        assert!(super::tool_search_scope_allowed(Some(&lab)));
+        assert!(tool_search_scope_allowed(Some(&lab)));
 
         // lab:admin must pass tool_search (identified as a gap in the original review)
         let admin = make_auth(&["lab:admin"]);
-        assert!(super::tool_search_scope_allowed(Some(&admin)));
+        assert!(tool_search_scope_allowed(Some(&admin)));
 
         // empty scopes → denied
         let no_scopes = make_auth(&[]);
-        assert!(!super::tool_search_scope_allowed(Some(&no_scopes)));
+        assert!(!tool_search_scope_allowed(Some(&no_scopes)));
 
         // unrelated scope → denied
         let unrelated = make_auth(&["mcp:read"]);
-        assert!(!super::tool_search_scope_allowed(Some(&unrelated)));
+        assert!(!tool_search_scope_allowed(Some(&unrelated)));
     }
 
     #[test]
@@ -3465,13 +3120,13 @@ mod tests {
 
         // tool_search: lab:read is permitted
         assert!(
-            super::tool_search_scope_allowed(Some(&read_only)),
+            tool_search_scope_allowed(Some(&read_only)),
             "tool_search should accept lab:read"
         );
 
         // tool_execute: lab:read must NOT be sufficient
         assert!(
-            !super::tool_execute_scope_allowed(Some(&read_only)),
+            !tool_execute_scope_allowed(Some(&read_only)),
             "tool_execute must reject lab:read — requires lab or lab:admin"
         );
     }

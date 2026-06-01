@@ -3,6 +3,8 @@
 //! the full rulebook on dispatch, envelopes, and the shared catalog.
 
 pub mod catalog;
+pub mod completion;
+pub mod context;
 pub mod elicitation;
 pub mod envelope;
 pub mod error;
@@ -12,6 +14,7 @@ pub mod peers;
 pub mod prompts;
 pub mod registry;
 pub mod resources;
+pub mod result_format;
 pub mod server;
 pub mod services;
 pub mod upstream;

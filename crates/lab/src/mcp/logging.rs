@@ -86,7 +86,7 @@ impl LabMcpServer {
         elapsed_ms: u128,
         outcome: DispatchLogOutcome,
     ) {
-        let actor_key = super::server::actor_key_from_extensions(&context.extensions);
+        let actor_key = super::context::actor_key_from_extensions(&context.extensions);
         let (level, payload) =
             notification_payload(service, action, elapsed_ms, outcome, actor_key);
 
