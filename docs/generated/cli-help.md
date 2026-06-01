@@ -593,6 +593,7 @@ Commands:
   plugin-connectivity  Validate connectivity to the lab MCP server
   check                Check local setup prerequisites without mutating the filesystem
   repair               Repair missing local setup prerequisites without contacting external services
+  install              Copy the labby binary into ~/.local/bin so it is callable in your own terminal
   install-plugin       Install the Claude Code plugin for a configured service
   uninstall-plugin     Uninstall the Claude Code plugin for a service
 
@@ -793,6 +794,27 @@ Options:
 Repair missing local setup prerequisites without contacting external services
 
 Usage: repair [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup install`
+
+```text
+Copy the labby binary into ~/.local/bin so it is callable in your own terminal
+
+Usage: install [OPTIONS]
 
 Options:
       --json
