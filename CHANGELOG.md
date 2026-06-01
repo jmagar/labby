@@ -8,6 +8,35 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.21.1] - 2026-06-01
+
+### Highlights
+
+- **Trimmed gateway `search` tool description** — dropped the "No embedding
+  model, no vector DB" marketing filler from the `tool_search` description in
+  `mcp/server.rs` and the matching `code_mode.rs` doc comment.
+- **Code Mode admin callers share one gateway OAuth subject** — admin Code Mode
+  callers collapse to a single shared gateway OAuth subject.
+- **Plugin/marketplace housekeeping** — vibin skills reorganized into top-level
+  plugins, redundant manifest `hooks` field dropped, broadcastr binary tracked
+  via Git LFS.
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | chore: trim gateway search tool description |
+| 9da2c310 | chore(plugin): track broadcastr binary via Git LFS |
+| 3b567e06 | chore(plugin): drop redundant hooks field from manifest |
+| 14b1fadf | chore(plugins): reorganize vibin skills into top-level plugins; update marketplace |
+| 9a6fbf59 | fix(gateway): collapse admin Code Mode callers to shared gateway OAuth subject |
+| 8e4333de | docs: save session log |
+
+### Version bumps
+
+- Rust workspace: `0.21.0 -> 0.21.1`
+- Gateway admin package: `0.21.0 -> 0.21.1`
+
+---
+
 ## [0.21.0] - 2026-05-31
 
 ### Highlights

@@ -1202,8 +1202,7 @@ impl ServerHandler for LabMcpServer {
                 TOOL_SEARCH_TOOL_NAME,
                 "Filter the upstream MCP tool catalog with JavaScript. Write an async arrow function \
                 that filters `const tools = [...]` (each entry: id, upstream, name, description, schema, output_schema, signature, dts) \
-                and returns what you need. No embedding model, no vector DB — the agent writes the filter. \
-                Use before execute() to discover the right tool id.",
+                and returns what you need. Use before execute() to discover the right tool id.",
                 search_schema,
             ));
             gateway_tool_count += 1;

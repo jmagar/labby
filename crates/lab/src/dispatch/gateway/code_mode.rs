@@ -695,8 +695,7 @@ impl<'a> CodeModeBroker<'a> {
     /// Run the caller's JavaScript arrow function over the upstream MCP tool
     /// catalog (Cloudflare-parity `search`). The sandbox injects
     /// `const tools = [ {id, upstream, name, description, schema}, ... ]` and
-    /// returns whatever the function returns. No vector DB, no embeddings —
-    /// the agent writes the filter.
+    /// returns whatever the function returns. The agent writes the filter.
     pub async fn search(
         &self,
         code: &str,
