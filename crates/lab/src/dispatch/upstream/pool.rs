@@ -4701,7 +4701,10 @@ mod tests {
                 "zeta/right-only",
             ]
         );
-        assert_eq!(owners.get("alpha/shared").map(String::as_str), Some("alpha"));
+        assert_eq!(
+            owners.get("alpha/shared").map(String::as_str),
+            Some("alpha")
+        );
         assert_eq!(owners.get("zeta/shared").map(String::as_str), Some("zeta"));
         assert_eq!(
             owners.get("alpha/left-only").map(String::as_str),

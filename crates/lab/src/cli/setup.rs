@@ -148,7 +148,10 @@ fn install_self() -> Result<std::path::PathBuf> {
         .map(|p| std::env::split_paths(&p).any(|d| d == bin_dir))
         .unwrap_or(false);
     if !on_path {
-        eprintln!("note: {} is not on your PATH; add:  export PATH=\"$HOME/.local/bin:$PATH\"", bin_dir.display());
+        eprintln!(
+            "note: {} is not on your PATH; add:  export PATH=\"$HOME/.local/bin:$PATH\"",
+            bin_dir.display()
+        );
     }
     Ok(dest)
 }
@@ -226,7 +229,10 @@ async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<Exit
         }
         SetupCommand::PluginHook { no_repair } => {
             // Keep the user's terminal copy in ~/.local/bin fresh each session.
-            let _ = install_self();
+            // Best-effort: a stale or unwritable copy must not block the hook.
+            if let Err(err) = install_self() {
+                tracing::debug!(?err, "failed to refresh ~/.local/bin copy of labby");
+            }
             let value =
                 crate::dispatch::setup::dispatch("plugin_hook", json!({ "repair": !no_repair }))
                     .await?;
