@@ -13,7 +13,7 @@ use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use rmcp::model::{
     AnnotateAble, CallToolRequestParams, CallToolResult, GetPromptRequestParams, GetPromptResult,
-    LoggingLevel, Prompt, RawResource, ReadResourceResult, Resource, ResourceContents,
+    LoggingLevel, Prompt, RawResource, ReadResourceResult, Resource,
 };
 use rmcp::transport::streamable_http_client::{
     StreamableHttpClientTransportConfig, StreamableHttpClientWorker,
@@ -24,7 +24,6 @@ use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::UpstreamConfig;
-use crate::dispatch::redact::{redact_stdio_value, redact_url};
 use crate::mcp::logging::logging_level_rank;
 use crate::mcp::server::LabMcpServer;
 use crate::oauth::upstream::cache::OauthClientCache;
@@ -45,125 +44,14 @@ use super::types::{
     UpstreamRuntimeOwner, UpstreamTool, UpstreamToolExposureRow,
 };
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct UpstreamCachedSummary {
-    pub discovered_tool_count: usize,
-    pub exposed_tool_count: usize,
-    pub discovered_resource_count: usize,
-    pub exposed_resource_count: usize,
-    pub discovered_prompt_count: usize,
-    pub exposed_prompt_count: usize,
-}
+mod helpers;
 
-/// Per-upstream timeout for initial discovery (`list_tools`).
-const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
-/// Per-service timeout for in-process peer registration and capability probing.
-const IN_PROCESS_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
-/// Default cap for bulk discovery and concurrent lazy reprobes. Stdio upstreams
-/// can fan out into several child processes, so unbounded connection attempts
-/// can exhaust the container PID limit before any single upstream is unhealthy.
-const DEFAULT_UPSTREAM_DISCOVERY_CONCURRENCY: usize = 3;
-/// Per-request timeout for upstream tool/resource/prompt RPCs.
-const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const STDIO_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
-
-/// Default maximum response size from upstream servers (10 MB).
-const DEFAULT_MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
-
-const IN_PROCESS_PEER_BUFFER_BYTES: usize = 256 * 1024;
-const AUTH_FAILURE_REPROBE_ATTEMPT_FLOOR: u32 = 5;
-
-pub fn in_process_upstream_name(service_name: &str) -> String {
-    format!("__in_process__{service_name}")
-}
-
-/// Read the max response size from env or use the default.
-fn max_response_bytes() -> usize {
-    std::env::var("LAB_UPSTREAM_MAX_RESPONSE_BYTES")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(DEFAULT_MAX_RESPONSE_BYTES)
-}
-
-fn classify_upstream_error(error: &str) -> &'static str {
-    let lower = error.to_ascii_lowercase();
-    if lower.contains("auth required")
-        || lower.contains("unauthorized")
-        || lower.contains("forbidden")
-        || lower.contains("invalid_token")
-        || lower.contains("oauth")
-    {
-        "auth_failed"
-    } else if lower.contains("bearer")
-        || lower.contains("token")
-        || lower.contains("api key")
-        || lower.contains("api_key")
-    {
-        "auth_required"
-    } else if lower.contains("timed out") || lower.contains("timeout") {
-        "timeout"
-    } else if lower.contains("dns") || lower.contains("name or service not known") {
-        "dns_error"
-    } else if lower.contains("connection refused") {
-        "connection_refused"
-    } else {
-        "connection_error"
-    }
-}
-
-fn auth_error_should_backoff_aggressively(kind: &str) -> bool {
-    matches!(kind, "auth_failed" | "auth_required")
-}
-
-fn upstream_transport(config: &UpstreamConfig) -> &'static str {
-    if config.url.as_deref().is_some_and(is_websocket_url) {
-        "websocket"
-    } else if config.url.is_some() {
-        "http"
-    } else {
-        "stdio"
-    }
-}
-
-pub(crate) fn upstream_discovery_concurrency() -> usize {
-    std::env::var("LAB_UPSTREAM_DISCOVERY_CONCURRENCY")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(DEFAULT_UPSTREAM_DISCOVERY_CONCURRENCY)
-}
-
-fn is_websocket_url(url: &str) -> bool {
-    matches!(
-        url::Url::parse(url)
-            .ok()
-            .map(|parsed| parsed.scheme().to_string())
-            .as_deref(),
-        Some("ws" | "wss")
-    )
-}
-
-fn upstream_name_is_uri_safe(name: &str) -> bool {
-    !name.contains('/') && !name.contains('?') && !name.contains('#')
-}
-
-pub(crate) fn redact_resource_uri_for_logging(uri: &str) -> &str {
-    let cut = uri.find('?').or_else(|| uri.find('#')).unwrap_or(uri.len());
-    &uri[..cut]
-}
-
-fn upstream_target_redacted(config: &UpstreamConfig) -> String {
-    // SECURITY: Never log raw URLs or command fragments without central redaction.
-    match &config.url {
-        Some(url_str) => redact_url(url_str),
-        None => config
-            .command
-            .as_deref()
-            .map(redact_stdio_value)
-            .or_else(|| Some("<missing>".to_string()))
-            .expect("static fallback is present"),
-    }
-}
+pub use helpers::{UpstreamCachedSummary, in_process_upstream_name};
+pub(crate) use helpers::{redact_resource_uri_for_logging, upstream_discovery_concurrency};
+// Leaf helpers used unqualified throughout the residual pool module and its
+// descendants. Glob-importing the child's `pub(super)` items keeps existing
+// call sites unchanged while the bodies live in `pool/helpers.rs`.
+use helpers::*;
 
 /// Collect upstream peers for a capability in deterministic name order.
 async fn routable_upstream_peers(
@@ -482,99 +370,6 @@ async fn discover_capability_counts(
 }
 
 /// Merge upstream prompts deterministically and return the winning owner for each prompt.
-fn merge_upstream_prompts(
-    builtin_names: &[&str],
-    mut upstream_prompts: Vec<(String, Vec<Prompt>)>,
-) -> (Vec<Prompt>, HashMap<String, String>) {
-    upstream_prompts.sort_unstable_by(|left, right| left.0.cmp(&right.0));
-
-    let mut prompts = Vec::new();
-    let mut owners = HashMap::new();
-    let mut seen_names: std::collections::HashSet<String> = builtin_names
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect();
-
-    for (upstream_name, upstream_prompts) in upstream_prompts {
-        for prompt in upstream_prompts {
-            let prompt_name = prompt.name.to_string();
-            if seen_names.insert(prompt_name.clone()) {
-                owners.insert(prompt_name, upstream_name.clone());
-                prompts.push(prompt);
-            } else {
-                tracing::warn!(
-                    upstream = %upstream_name,
-                    prompt = %prompt.name,
-                    "duplicate prompt name encountered while merging upstream prompts"
-                );
-            }
-        }
-    }
-
-    (prompts, owners)
-}
-
-/// Normalize a proxied resource read so its contents use the gateway URI.
-fn normalize_resource_result_uri(
-    mut result: ReadResourceResult,
-    gateway_uri: &str,
-) -> ReadResourceResult {
-    for content in &mut result.contents {
-        match content {
-            ResourceContents::TextResourceContents { uri, .. }
-            | ResourceContents::BlobResourceContents { uri, .. } => {
-                *uri = gateway_uri.to_string();
-            }
-        }
-    }
-
-    result
-}
-
-/// Rewrite an upstream resource's URI to the gateway-prefixed form.
-///
-/// Strips any embedded upstream name from existing `lab://upstream/…` URIs
-/// and re-prefixes with the caller's `upstream_name`.
-fn rewrite_resource_uri(resource: &mut Resource, upstream_name: &str) {
-    let bare_uri = bare_upstream_resource_uri(&resource.uri);
-    resource.uri = format!("lab://upstream/{upstream_name}/{bare_uri}");
-}
-
-fn bare_upstream_resource_uri(uri: &str) -> &str {
-    uri.strip_prefix("lab://upstream/")
-        .and_then(|rest| rest.split_once('/').map(|x| x.1).or(Some(rest)))
-        .unwrap_or(uri)
-}
-
-fn cached_upstream_tool(
-    tool: rmcp::model::Tool,
-    upstream_name: &Arc<str>,
-) -> (String, UpstreamTool) {
-    let name = tool.name.to_string();
-    // Absent or null annotations.destructiveHint → false (conservative: only
-    // treat as destructive when explicitly set to true by the upstream server).
-    let destructive = tool
-        .annotations
-        .as_ref()
-        .and_then(|a| a.destructive_hint)
-        .unwrap_or(false);
-    (
-        name,
-        UpstreamTool {
-            input_schema: (!tool.input_schema.is_empty())
-                .then(|| Value::Object((*tool.input_schema).clone())),
-            output_schema: tool
-                .output_schema
-                .as_ref()
-                .filter(|schema| !schema.is_empty())
-                .map(|schema| Value::Object((**schema).clone())),
-            tool,
-            upstream_name: Arc::clone(upstream_name),
-            destructive,
-        },
-    )
-}
-
 /// Upstream connection pool — holds live connections and discovered tool catalogs.
 #[derive(Clone)]
 pub struct UpstreamPool {
@@ -4012,7 +3807,7 @@ mod tests {
     use rmcp::model::{
         AnnotateAble, ErrorData, ListPromptsResult, ListResourcesResult, ListToolsResult,
         PaginatedRequestParams, PromptMessage, PromptMessageRole, RawResource,
-        ReadResourceRequestParams, ServerCapabilities, ServerInfo,
+        ReadResourceRequestParams, ResourceContents, ServerCapabilities, ServerInfo,
     };
     use rmcp::service::RequestContext;
     use rmcp::{RoleServer, ServerHandler};
@@ -4227,25 +4022,6 @@ mod tests {
             *pool.resource_upstreams.read().await,
             vec!["alpha".to_string(), "beta".to_string()]
         );
-    }
-
-    #[test]
-    fn upstream_target_redacts_url_credentials_and_sensitive_query_values() {
-        let mut config = test_upstream_config();
-        config.url = Some("https://user:pass@example.com/mcp?token=secret&mode=1#frag".into());
-
-        assert_eq!(
-            upstream_target_redacted(&config),
-            "https://example.com/mcp?token=[redacted]&mode=1"
-        );
-    }
-
-    #[test]
-    fn upstream_target_redacts_stdio_secret_flags() {
-        let mut config = test_upstream_config();
-        config.command = Some("--api-key=secret".into());
-
-        assert_eq!(upstream_target_redacted(&config), "--api-key=[redacted]");
     }
 
     #[tokio::test]
