@@ -10,6 +10,7 @@ pub mod envelope;
 pub mod error;
 pub mod handlers_prompts;
 pub mod handlers_resources;
+pub mod handlers_tools;
 pub mod logging;
 pub mod meta;
 pub mod peers;
