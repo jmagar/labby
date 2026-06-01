@@ -613,9 +613,7 @@ impl CodeModeCaller {
             // reached and OAuth upstreams (e.g. axon) get stranded with an expired
             // token. Non-admin callers keep their own `sub` so a personal upstream
             // grant is used; a `sub`-less caller falls back to the shared subject.
-            Self::Scoped { scopes, .. }
-                if scopes.iter().any(|scope| scope == "lab:admin") =>
-            {
+            Self::Scoped { scopes, .. } if scopes.iter().any(|scope| scope == "lab:admin") => {
                 Some(SHARED_GATEWAY_OAUTH_SUBJECT)
             }
             Self::Scoped { sub: Some(s), .. } => Some(s.as_str()),

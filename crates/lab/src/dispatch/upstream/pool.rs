@@ -255,6 +255,15 @@ async fn routable_upstream_peers(
 /// (method not found / not implemented). These are healthy — the upstream just doesn't
 /// expose that capability, which is fine.
 fn is_capability_unsupported(error: &rmcp::ServiceError) -> bool {
+    // Prefer the structured JSON-RPC code: a `-32601 Method not found` reply
+    // means the upstream simply doesn't implement that capability.
+    if let rmcp::ServiceError::McpError(data) = error
+        && data.code == rmcp::model::ErrorCode::METHOD_NOT_FOUND
+    {
+        return true;
+    }
+    // Fallback to message matching for transports/servers that surface the
+    // same condition without a clean structured code.
     let msg = error.to_string();
     msg.contains("Method not found")
         || msg.contains("method_not_found")
@@ -481,7 +490,30 @@ async fn discover_capability_counts(
     )
 }
 
+/// Namespace an upstream prompt name with its owning upstream, mirroring how
+/// `rewrite_resource_uri` prefixes resources. This keeps prompts with the same
+/// bare name from different upstreams distinct (e.g. two `quick_start` prompts
+/// become `rustarr/quick_start` and `sonarr/quick_start`).
+fn prefixed_upstream_prompt_name(upstream_name: &str, prompt_name: &str) -> String {
+    format!("{upstream_name}/{prompt_name}")
+}
+
+/// Reverse `prefixed_upstream_prompt_name` for forwarding a `prompts/get` to the
+/// upstream, which only knows the bare prompt name. The owning `upstream_name`
+/// is already resolved by the caller, so strip exactly that prefix; fall back to
+/// the input unchanged if it isn't prefixed (e.g. legacy/unprefixed callers).
+fn bare_upstream_prompt_name<'a>(upstream_name: &str, prompt_name: &'a str) -> &'a str {
+    prompt_name
+        .strip_prefix(&format!("{upstream_name}/"))
+        .unwrap_or(prompt_name)
+}
+
 /// Merge upstream prompts deterministically and return the winning owner for each prompt.
+///
+/// Every prompt is namespaced by its owning upstream (see
+/// `prefixed_upstream_prompt_name`), so cross-upstream name collisions cannot
+/// occur. The `seen_names` guard below now only catches the degenerate case of a
+/// single upstream advertising the same prompt name twice.
 fn merge_upstream_prompts(
     builtin_names: &[&str],
     mut upstream_prompts: Vec<(String, Vec<Prompt>)>,
@@ -496,15 +528,16 @@ fn merge_upstream_prompts(
         .collect();
 
     for (upstream_name, upstream_prompts) in upstream_prompts {
-        for prompt in upstream_prompts {
-            let prompt_name = prompt.name.to_string();
+        for mut prompt in upstream_prompts {
+            let prompt_name = prefixed_upstream_prompt_name(&upstream_name, &prompt.name);
             if seen_names.insert(prompt_name.clone()) {
+                prompt.name = prompt_name.clone();
                 owners.insert(prompt_name, upstream_name.clone());
                 prompts.push(prompt);
             } else {
                 tracing::warn!(
                     upstream = %upstream_name,
-                    prompt = %prompt.name,
+                    prompt = %prompt_name,
                     "duplicate prompt name encountered while merging upstream prompts"
                 );
             }
@@ -2694,6 +2727,26 @@ impl UpstreamPool {
                         resources.push(resource);
                     }
                 }
+                Err(e) if is_capability_unsupported(&e) => {
+                    // The upstream simply doesn't implement `resources/list`
+                    // (JSON-RPC -32601). This is expected capability negotiation,
+                    // not a failure: treat it like an empty, successful listing so
+                    // the upstream stays routable and accrues no phantom failures.
+                    self.record_success_for(&name, UpstreamCapability::Resources)
+                        .await;
+                    {
+                        let mut catalog = self.catalog.write().await;
+                        if let Some(entry) = catalog.get_mut(&name) {
+                            entry.resource_count = 0;
+                            entry.resource_uris.clear();
+                        }
+                    }
+                    tracing::debug!(
+                        upstream = %name,
+                        error = %e,
+                        "upstream does not implement resources/list — capability absent"
+                    );
+                }
                 Err(e) => {
                     self.record_failure_for(
                         &name,
@@ -3064,6 +3117,26 @@ impl UpstreamPool {
                     }
                     upstream_prompts.push((name, result.prompts));
                 }
+                Err(e) if is_capability_unsupported(&e) => {
+                    // The upstream simply doesn't implement `prompts/list`
+                    // (JSON-RPC -32601). This is expected capability negotiation,
+                    // not a failure: treat it like an empty, successful listing so
+                    // the upstream stays routable and accrues no phantom failures.
+                    self.record_success_for(&name, UpstreamCapability::Prompts)
+                        .await;
+                    prompt_name_updates.insert(name.clone(), Vec::new());
+                    {
+                        let mut catalog = self.catalog.write().await;
+                        if let Some(entry) = catalog.get_mut(&name) {
+                            entry.prompt_count = 0;
+                        }
+                    }
+                    tracing::debug!(
+                        upstream = %name,
+                        error = %e,
+                        "upstream does not implement prompts/list — capability absent"
+                    );
+                }
                 Err(e) => {
                     self.record_failure_for(
                         &name,
@@ -3217,10 +3290,12 @@ impl UpstreamPool {
                 continue;
             };
             if let Ok(result) = conn.peer.list_prompts(None).await
-                && result
-                    .prompts
-                    .iter()
-                    .any(|prompt| prompt.name == target_prompt)
+                && result.prompts.iter().any(|prompt| {
+                    // The requested name is namespaced as `{upstream}/{name}`;
+                    // the upstream advertises the bare name, so compare against
+                    // the prefixed form.
+                    prefixed_upstream_prompt_name(&name, &prompt.name) == target_prompt
+                })
             {
                 return Some(name);
             }
@@ -3232,9 +3307,13 @@ impl UpstreamPool {
     pub async fn get_prompt(
         &self,
         upstream_name: &str,
-        params: GetPromptRequestParams,
+        mut params: GetPromptRequestParams,
     ) -> Option<Result<GetPromptResult, String>> {
         let start = Instant::now();
+        // The gateway namespaces upstream prompt names as `{upstream}/{name}`,
+        // but the upstream only knows the bare name — strip the prefix before
+        // forwarding (mirrors `read_upstream_resource` stripping the URI prefix).
+        params.name = bare_upstream_prompt_name(upstream_name, &params.name).to_string();
         let prompt_name = params.name.to_string();
         let event = UpstreamRequestLog::prompt(upstream_name, &prompt_name, false);
         let peer = self
@@ -3295,9 +3374,11 @@ impl UpstreamPool {
         &self,
         config: &UpstreamConfig,
         subject: &str,
-        params: GetPromptRequestParams,
+        mut params: GetPromptRequestParams,
     ) -> Result<GetPromptResult, String> {
         let start = Instant::now();
+        // Strip the `{upstream}/` namespace before forwarding the bare name.
+        params.name = bare_upstream_prompt_name(&config.name, &params.name).to_string();
         let prompt_name = params.name.to_string();
         let event = UpstreamRequestLog::prompt(&config.name, &prompt_name, true)
             .with_transport(upstream_transport(config));
@@ -4607,11 +4688,29 @@ mod tests {
             ],
         );
 
+        // Every prompt is namespaced by its owning upstream, so the two `shared`
+        // prompts no longer collide — both survive with distinct names. Ordering
+        // is deterministic: upstreams sorted (alpha < zeta), prompts in order.
         let names: Vec<_> = prompts.iter().map(|prompt| prompt.name.as_str()).collect();
-        assert_eq!(names, vec!["shared", "left-only", "right-only"]);
-        assert_eq!(owners.get("shared").map(String::as_str), Some("alpha"));
-        assert_eq!(owners.get("left-only").map(String::as_str), Some("alpha"));
-        assert_eq!(owners.get("right-only").map(String::as_str), Some("zeta"));
+        assert_eq!(
+            names,
+            vec![
+                "alpha/shared",
+                "alpha/left-only",
+                "zeta/shared",
+                "zeta/right-only",
+            ]
+        );
+        assert_eq!(owners.get("alpha/shared").map(String::as_str), Some("alpha"));
+        assert_eq!(owners.get("zeta/shared").map(String::as_str), Some("zeta"));
+        assert_eq!(
+            owners.get("alpha/left-only").map(String::as_str),
+            Some("alpha")
+        );
+        assert_eq!(
+            owners.get("zeta/right-only").map(String::as_str),
+            Some("zeta")
+        );
     }
 
     #[test]
@@ -4951,15 +5050,16 @@ mod tests {
 
         let prompts = pool.list_upstream_prompts(&[]).await;
         let prompt_names: Vec<&str> = prompts.iter().map(|prompt| prompt.name.as_str()).collect();
+        // Prompt names are namespaced by their owning upstream.
         assert_eq!(
             prompt_names,
-            vec!["upstream.prompt.one", "upstream.prompt.two"]
+            vec!["static/upstream.prompt.one", "static/upstream.prompt.two"]
         );
         assert_eq!(
             pool.cached_upstream_prompt_names(&[]).await,
             vec![
-                "upstream.prompt.one".to_string(),
-                "upstream.prompt.two".to_string()
+                "static/upstream.prompt.one".to_string(),
+                "static/upstream.prompt.two".to_string()
             ]
         );
 
@@ -4978,8 +5078,8 @@ mod tests {
         };
 
         let snapshot = server.snapshot_catalog().await;
-        assert!(snapshot.prompts.contains("upstream.prompt.one"));
-        assert!(snapshot.prompts.contains("upstream.prompt.two"));
+        assert!(snapshot.prompts.contains("static/upstream.prompt.one"));
+        assert!(snapshot.prompts.contains("static/upstream.prompt.two"));
     }
 
     #[tokio::test]
@@ -4993,12 +5093,17 @@ mod tests {
         assert_eq!(prompts.len(), 2);
         assert_eq!(list_prompts_count.load(Ordering::SeqCst), 1);
 
-        let owner = pool.find_prompt_owner("upstream.prompt.one").await;
+        let owner = pool.find_prompt_owner("static/upstream.prompt.one").await;
         assert_eq!(owner.as_deref(), Some("static"));
         assert_eq!(list_prompts_count.load(Ordering::SeqCst), 1);
 
+        // The gateway-facing name is namespaced; `get_prompt` strips the
+        // `{upstream}/` prefix before forwarding the bare name to the upstream.
         let result = pool
-            .get_prompt("static", GetPromptRequestParams::new("upstream.prompt.one"))
+            .get_prompt(
+                "static",
+                GetPromptRequestParams::new("static/upstream.prompt.one"),
+            )
             .await
             .expect("upstream remains connected")
             .expect("prompt get succeeds");
@@ -5028,14 +5133,14 @@ mod tests {
         }
         fail_list_prompts.store(true, Ordering::SeqCst);
 
-        let owner = pool.find_prompt_owner("upstream.prompt.one").await;
+        let owner = pool.find_prompt_owner("static/upstream.prompt.one").await;
         assert_eq!(owner.as_deref(), Some("static"));
         assert_eq!(list_prompts_count.load(Ordering::SeqCst), 1);
         assert_eq!(
             pool.cached_upstream_prompt_names(&[]).await,
             vec![
-                "upstream.prompt.one".to_string(),
-                "upstream.prompt.two".to_string()
+                "static/upstream.prompt.one".to_string(),
+                "static/upstream.prompt.two".to_string()
             ]
         );
     }
