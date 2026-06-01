@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "arrs",
+  "version": "0.2.0",
+  "description": "The *arr / media-automation stack in one plugin: Radarr, Sonarr, Prowlarr, Overseerr, SABnzbd, qBittorrent, Plex, Jellyfin, Tautulli, and Tracearr — each operated via its own REST API. Credentials are configured here and bridged to the skills via a generated env file.",
+  "author": {
+    "name": "Jacob Magar",
+    "email": "jmagar@users.noreply.github.com"
+  },
+  "repository": "https://github.com/jmagar/lab",
+  "homepage": "https://github.com/jmagar/lab",
+  "license": "MIT",
+  "keywords": [
+    "arr", "radarr", "sonarr", "prowlarr", "overseerr", "sabnzbd",
+    "qbittorrent", "plex", "jellyfin", "tautulli", "tracearr", "media", "homelab"
+  ],
+  "userConfig": {
+    "radarr_url": { "type": "string", "title": "Radarr URL", "description": "Radarr base URL, e.g. http://localhost:7878 (no trailing slash).", "required": false },
+    "radarr_api_key": { "type": "string", "title": "Radarr API key", "description": "Radarr API key (Settings → General).", "sensitive": true, "required": false },
+    "radarr_default_quality_profile": { "type": "string", "title": "Radarr default quality profile", "description": "Quality profile id used when adding movies.", "required": false, "default": "1" },
+
+    "sonarr_url": { "type": "string", "title": "Sonarr URL", "description": "Sonarr base URL, e.g. http://localhost:8989 (no trailing slash).", "required": false },
+    "sonarr_api_key": { "type": "string", "title": "Sonarr API key", "description": "Sonarr API key (Settings → General).", "sensitive": true, "required": false },
+    "sonarr_default_quality_profile": { "type": "string", "title": "Sonarr default quality profile", "description": "Quality profile id used when adding series.", "required": false, "default": "1" },
+
+    "prowlarr_url": { "type": "string", "title": "Prowlarr URL", "description": "Prowlarr base URL, e.g. http://localhost:9696 (no trailing slash).", "required": false },
+    "prowlarr_api_key": { "type": "string", "title": "Prowlarr API key", "description": "Prowlarr API key (Settings → General).", "sensitive": true, "required": false },
+
+    "overseerr_url": { "type": "string", "title": "Overseerr URL", "description": "Overseerr base URL, e.g. http://localhost:5055 (no trailing slash).", "required": false },
+    "overseerr_api_key": { "type": "string", "title": "Overseerr API key", "description": "Overseerr API key (Settings → General).", "sensitive": true, "required": false },
+
+    "sabnzbd_url": { "type": "string", "title": "SABnzbd URL", "description": "SABnzbd base URL, e.g. http://localhost:8080 (no trailing slash).", "required": false },
+    "sabnzbd_api_key": { "type": "string", "title": "SABnzbd API key", "description": "SABnzbd API key (Config → General).", "sensitive": true, "required": false },
+
+    "qbittorrent_url": { "type": "string", "title": "qBittorrent URL", "description": "qBittorrent WebUI base URL, e.g. http://localhost:8080 (no trailing slash).", "required": false },
+    "qbittorrent_username": { "type": "string", "title": "qBittorrent username", "description": "qBittorrent WebUI username.", "required": false },
+    "qbittorrent_password": { "type": "string", "title": "qBittorrent password", "description": "qBittorrent WebUI password.", "sensitive": true, "required": false },
+
+    "plex_url": { "type": "string", "title": "Plex URL", "description": "Plex Media Server base URL incl. port, e.g. http://localhost:32400.", "required": false },
+    "plex_token": { "type": "string", "title": "Plex token", "description": "Plex X-Plex-Token.", "sensitive": true, "required": false },
+
+    "jellyfin_url": { "type": "string", "title": "Jellyfin URL", "description": "Jellyfin base URL, e.g. http://localhost:8096 (no trailing slash).", "required": false },
+    "jellyfin_api_key": { "type": "string", "title": "Jellyfin API key", "description": "Jellyfin API key (Dashboard → API Keys), sent as X-Emby-Token.", "sensitive": true, "required": false },
+
+    "tautulli_url": { "type": "string", "title": "Tautulli URL", "description": "Tautulli base URL incl. port, e.g. http://localhost:8181.", "required": false },
+    "tautulli_api_key": { "type": "string", "title": "Tautulli API key", "description": "Tautulli API key (Settings → Web Interface).", "sensitive": true, "required": false },
+
+    "tracearr_url": { "type": "string", "title": "Tracearr URL", "description": "Tracearr base URL for its public API, e.g. http://localhost:3000 (no trailing slash).", "required": false }
+  }
+}

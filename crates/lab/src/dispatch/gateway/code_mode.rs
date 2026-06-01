@@ -51,8 +51,6 @@ fn lab_action_unknown_tool_hint() -> String {
          Example: {TOOL_EXECUTE_TOOL_NAME}(name=\"radarr\", arguments={{action:\"movie.search\", params:{{query:\"Matrix\"}}}})."
     )
 }
-const CODE_SEARCH_CATALOG_SOFT_CAP_BYTES: usize = 256 * 1024;
-const CODE_SEARCH_CATALOG_HARD_CAP_BYTES: usize = 512 * 1024;
 
 /// Normalize user-submitted code before sandbox execution.
 ///
@@ -454,10 +452,6 @@ pub struct CodeModeCatalogEntry {
     pub output_schema: Option<Value>,
     pub signature: String,
     pub dts: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dropped_count: Option<usize>,
 }
 
 impl CodeModeCatalogEntry {
@@ -485,27 +479,6 @@ impl CodeModeCatalogEntry {
             output_schema,
             signature: types.signature,
             dts: types.dts,
-            note: None,
-            dropped_count: None,
-        }
-    }
-
-    #[must_use]
-    pub fn truncation_sentinel(dropped_count: usize) -> Self {
-        Self {
-            id: "__truncated__".to_string(),
-            name: "__truncated__".to_string(),
-            upstream: "__catalog__".to_string(),
-            description: "Catalog entries were dropped to fit the Code Mode inline catalog budget"
-                .to_string(),
-            schema: None,
-            output_schema: None,
-            signature: String::new(),
-            dts: String::new(),
-            note: Some(
-                "Some entries were dropped to fit the 256KB inline catalog cap. Narrow the Code Mode search filter to inspect fewer tools.".to_string(),
-            ),
-            dropped_count: Some(dropped_count),
         }
     }
 }
@@ -539,10 +512,11 @@ pub enum CodeModeCaller {
     TrustedLocal,
     Scoped {
         scopes: Vec<String>,
-        /// JWT `sub` claim for the caller, when available. When present, this is
-        /// used for upstream OAuth attribution even for `lab:admin` scoped callers
-        /// (overrides the shared gateway subject). When None, falls back to
-        /// `SHARED_GATEWAY_OAUTH_SUBJECT`.
+        /// JWT `sub` claim for the caller, when available. Used as the upstream
+        /// OAuth subject only for *non-admin* callers, so a user with their own
+        /// upstream grant authenticates as themselves. `lab:admin` callers (and
+        /// callers with no `sub`) collapse to `SHARED_GATEWAY_OAUTH_SUBJECT` —
+        /// see [`CodeModeCaller::oauth_subject`] for the rationale.
         sub: Option<String>,
     },
 }
@@ -630,9 +604,18 @@ impl CodeModeCaller {
     pub fn oauth_subject(&self) -> Option<&str> {
         match self {
             Self::TrustedLocal => Some(SHARED_GATEWAY_OAUTH_SUBJECT),
-            // When the caller has a real JWT sub, use it for attribution even on
-            // lab:admin scope. When sub is None (static bearer token), fall back
-            // to the shared gateway subject — unchanged behavior.
+            // Parity with `oauth_upstream_subject_for_request` (the direct
+            // upstream-tool-call path): admin/operator callers share the single
+            // gateway-owned upstream credential rather than a per-user grant that
+            // was never provisioned. Without this collapse, an admin caller's raw
+            // `sub` misses the credential store (`initialize_from_store` → false),
+            // so the proactive token refresh in `build_auth_client` is never
+            // reached and OAuth upstreams (e.g. axon) get stranded with an expired
+            // token. Non-admin callers keep their own `sub` so a personal upstream
+            // grant is used; a `sub`-less caller falls back to the shared subject.
+            Self::Scoped { scopes, .. } if scopes.iter().any(|scope| scope == "lab:admin") => {
+                Some(SHARED_GATEWAY_OAUTH_SUBJECT)
+            }
             Self::Scoped { sub: Some(s), .. } => Some(s.as_str()),
             Self::Scoped { sub: None, .. } => Some(SHARED_GATEWAY_OAUTH_SUBJECT),
         }
@@ -683,8 +666,7 @@ impl<'a> CodeModeBroker<'a> {
     /// Run the caller's JavaScript arrow function over the upstream MCP tool
     /// catalog (Cloudflare-parity `search`). The sandbox injects
     /// `const tools = [ {id, upstream, name, description, schema}, ... ]` and
-    /// returns whatever the function returns. No vector DB, no embeddings —
-    /// the agent writes the filter.
+    /// returns whatever the function returns. The agent writes the filter.
     pub async fn search(
         &self,
         code: &str,
@@ -705,7 +687,7 @@ impl<'a> CodeModeBroker<'a> {
         let require_fresh_catalog = true;
         let owner = caller.runtime_owner(surface);
         let oauth_subject = caller.oauth_subject();
-        let (catalog, serialized_size, truncated) = self
+        let (catalog, serialized_size) = self
             .code_search_catalog(manager, require_fresh_catalog, &owner, oauth_subject)
             .await?;
         tracing::info!(
@@ -714,7 +696,6 @@ impl<'a> CodeModeBroker<'a> {
             action = "catalog.build",
             catalog_size_bytes = serialized_size,
             entry_count = catalog.len(),
-            truncated,
             "Code Mode search catalog ready"
         );
         evaluate_code_search(code, &catalog)
@@ -789,7 +770,7 @@ impl<'a> CodeModeBroker<'a> {
         allow_cold_connect: bool,
         owner: &UpstreamRuntimeOwner,
         oauth_subject: Option<&str>,
-    ) -> Result<(Vec<CodeModeCatalogEntry>, usize, bool), ToolError> {
+    ) -> Result<(Vec<CodeModeCatalogEntry>, usize), ToolError> {
         let mut entries = manager
             .code_mode_catalog_tools(allow_cold_connect, Some(owner), oauth_subject)
             .await?
@@ -819,48 +800,12 @@ impl<'a> CodeModeBroker<'a> {
                 .then_with(|| a.name.cmp(&b.name))
         });
 
-        let mut serialized_size = serialized_catalog_size(&entries)?;
-        if serialized_size > CODE_SEARCH_CATALOG_HARD_CAP_BYTES {
-            return Err(ToolError::Sdk {
-                sdk_kind: "invalid_param".to_string(),
-                message: format!(
-                    "Code Mode inline catalog is {serialized_size} bytes, above the 512KB hard cap; narrow the search filter to inspect fewer tools"
-                ),
-            });
-        }
+        // The catalog is injected as `const tools` into the Boa sandbox and never
+        // enters the model context (only the caller's filtered result does), so it
+        // is served complete and uncapped — matching Cloudflare's Code Mode design.
+        let serialized_size = serialized_catalog_size(&entries)?;
 
-        let mut truncated = false;
-        if serialized_size > CODE_SEARCH_CATALOG_SOFT_CAP_BYTES {
-            truncated = true;
-            entries.sort_by(|a, b| {
-                (a.description.len() + a.name.len())
-                    .cmp(&(b.description.len() + b.name.len()))
-                    .then_with(|| a.upstream.cmp(&b.upstream))
-                    .then_with(|| a.name.cmp(&b.name))
-            });
-            let original_len = entries.len();
-            while !entries.is_empty()
-                && serialized_catalog_size_with_sentinel(&entries, original_len - entries.len())?
-                    > CODE_SEARCH_CATALOG_SOFT_CAP_BYTES
-            {
-                entries.pop();
-            }
-            let dropped = original_len - entries.len();
-            if dropped > 0 {
-                entries.push(CodeModeCatalogEntry::truncation_sentinel(dropped));
-                tracing::warn!(
-                    surface = "dispatch",
-                    service = "code_mode",
-                    action = "code_search.catalog",
-                    tools_omitted = dropped,
-                    catalog_bytes = serialized_size,
-                    "catalog truncated for code mode"
-                );
-            }
-            serialized_size = serialized_catalog_size(&entries)?;
-        }
-
-        Ok((entries, serialized_size, truncated))
+        Ok((entries, serialized_size))
     }
 
     /// Build the runtime `codemode.*` proxy JS from the live upstream catalog.
@@ -1978,17 +1923,6 @@ fn serialized_catalog_size(entries: &[CodeModeCatalogEntry]) -> Result<usize, To
             sdk_kind: "internal_error".to_string(),
             message: format!("failed to serialize Code Mode catalog: {err}"),
         })
-}
-
-fn serialized_catalog_size_with_sentinel(
-    entries: &[CodeModeCatalogEntry],
-    dropped_count: usize,
-) -> Result<usize, ToolError> {
-    let mut candidate = entries.to_vec();
-    if dropped_count > 0 {
-        candidate.push(CodeModeCatalogEntry::truncation_sentinel(dropped_count));
-    }
-    serialized_catalog_size(&candidate)
 }
 
 /// Run the caller's JavaScript search function against the inline catalog using
@@ -4132,20 +4066,37 @@ mod tests {
     // ── CodeModeCaller oauth_subject ──────────────────────────────────────────
 
     #[test]
-    fn oauth_subject_uses_sub_when_present() {
+    fn oauth_subject_uses_sub_for_non_admin_caller() {
+        // A non-admin caller with its own sub authenticates as itself so a
+        // personal upstream grant is used.
         let caller = super::CodeModeCaller::Scoped {
-            scopes: vec!["lab:admin".to_string()],
+            scopes: vec!["lab".to_string()],
             sub: Some("user@example.com".to_string()),
         };
 
-        // PRESENCE: explicit sub is returned
         assert_eq!(
             caller.oauth_subject(),
             Some("user@example.com"),
-            "oauth_subject must return the JWT sub when present"
+            "non-admin oauth_subject must return the caller's JWT sub"
         );
-        // ABSENCE: not None
-        assert!(caller.oauth_subject().is_some());
+    }
+
+    #[test]
+    fn oauth_subject_collapses_admin_to_shared_gateway_subject() {
+        // Regression (lab-om1ou): admin callers must collapse to the shared
+        // gateway subject — parity with `oauth_upstream_subject_for_request` —
+        // so they reuse the gateway-owned upstream credential and the proactive
+        // refresh path is reached. Otherwise OAuth upstreams (axon) get stranded.
+        let caller = super::CodeModeCaller::Scoped {
+            scopes: vec!["lab".to_string(), "lab:admin".to_string()],
+            sub: Some("115693937070075916387".to_string()),
+        };
+
+        assert_eq!(
+            caller.oauth_subject(),
+            Some(super::SHARED_GATEWAY_OAUTH_SUBJECT),
+            "lab:admin callers must collapse to the shared gateway subject, not their raw sub"
+        );
     }
 
     #[test]

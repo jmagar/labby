@@ -633,19 +633,20 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                 },
                 GatewayCommand::ToolSearch(args) => match args.command {
                     GatewayToolSearchCommand::Status => {
-                        ("gateway.scout.get".to_string(), json!({}))
+                        ("gateway.tool_search.get".to_string(), json!({}))
                     }
                     GatewayToolSearchCommand::Enable(args) => (
-                        "gateway.scout.set".to_string(),
+                        "gateway.tool_search.set".to_string(),
                         json!({
                             "enabled": true,
                             "top_k_default": args.top_k_default,
                             "max_tools": args.max_tools,
                         }),
                     ),
-                    GatewayToolSearchCommand::Disable => {
-                        ("gateway.scout.set".to_string(), json!({ "enabled": false }))
-                    }
+                    GatewayToolSearchCommand::Disable => (
+                        "gateway.tool_search.set".to_string(),
+                        json!({ "enabled": false }),
+                    ),
                 },
                 GatewayCommand::Reload => (
                     "gateway.reload".to_string(),

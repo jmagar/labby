@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "agent-os",
+  "version": "0.1.0",
+  "description": "Drive the agent-os Windows 11 sandbox VM through its Windows-MCP server. Self-registers the windows-mcp MCP from your configured URL + bearer token, ships the agent-os skill, a /agent-os status command, and a SessionStart health check.",
+  "author": {
+    "name": "Jacob Magar",
+    "email": "jmagar@users.noreply.github.com"
+  },
+  "repository": "https://github.com/jmagar/lab",
+  "homepage": "https://github.com/jmagar/lab",
+  "license": "MIT",
+  "keywords": [
+    "agent-os",
+    "windows",
+    "windows-mcp",
+    "sandbox",
+    "vm",
+    "automation",
+    "homelab"
+  ],
+  "userConfig": {
+    "agent_os_mcp_url": {
+      "type": "string",
+      "title": "Windows-MCP URL",
+      "description": "Full HTTP(S) URL of the Windows-MCP endpoint inside the agent-os VM, including the /mcp path. This is what the plugin registers as the windows-mcp MCP server. Example: https://agent-os.example.ts.net/mcp. Prefer the VM's own stable Tailscale/MagicDNS name so it follows the VM across Docker hosts.",
+      "required": true,
+      "default": "https://agent-os.manatee-triceratops.ts.net/mcp"
+    },
+    "agent_os_mcp_token": {
+      "type": "string",
+      "title": "Windows-MCP bearer token",
+      "description": "Bearer token the Windows-MCP server expects (sent as 'Authorization: Bearer <token>'). Stored in secure OS storage, not settings.json. Without it the windows-mcp server will return 401 and no tools will load.",
+      "sensitive": true,
+      "required": true
+    },
+    "agent_os_vm_tailscale_ip": {
+      "type": "string",
+      "title": "VM Tailscale IP / SSH host",
+      "description": "The agent-os guest's own Tailscale IP (or MagicDNS name) used by `ssh agent-os` for in-guest commands on port 22. Example: 100.109.125.128.",
+      "required": false,
+      "default": "100.109.125.128"
+    },
+    "agent_os_vm_host": {
+      "type": "string",
+      "title": "Docker host running the VM",
+      "description": "SSH alias/host of the Docker host that runs the agent-os-win11 container (for `docker ps`, compose up, etc.). Example: tootie.",
+      "required": false,
+      "default": "tootie"
+    },
+    "agent_os_host_forward_ssh": {
+      "type": "string",
+      "title": "Host-forward SSH target",
+      "description": "SSH user@host of the Docker host's port-forward into the guest (user@<docker-host-tailscale-ip>). Use this path — NOT `ssh agent-os` — for Tailscale maintenance inside the guest, since it survives `tailscale down`. Example: docker@100.120.242.29.",
+      "required": false,
+      "default": "docker@100.120.242.29"
+    },
+    "agent_os_host_forward_port": {
+      "type": "string",
+      "title": "Host-forward SSH port",
+      "description": "Port the Docker host forwards to the guest's sshd (host:PORT -> guest:22). Example: 2222.",
+      "required": false,
+      "default": "2222"
+    },
+    "agent_os_compose_file": {
+      "type": "string",
+      "title": "docker-compose.yml path",
+      "description": "Absolute path to the agent-os compose file ON the Docker host, used to bring the VM back up. Example: /mnt/cache/compose/windows/docker-compose.yml.",
+      "required": false,
+      "default": "/mnt/cache/compose/windows/docker-compose.yml"
+    },
+    "agent_os_container_name": {
+      "type": "string",
+      "title": "Container name",
+      "description": "Name of the dockur/windows container running the VM. Example: agent-os-win11.",
+      "required": false,
+      "default": "agent-os-win11"
+    },
+    "agent_os_novnc_url": {
+      "type": "string",
+      "title": "noVNC URL",
+      "description": "Base URL of the dockur/windows web (noVNC) UI on the Docker host, for visual debugging. Example: http://tootie:8006.",
+      "required": false,
+      "default": "http://tootie:8006"
+    },
+    "agent_os_autostart": {
+      "type": "string",
+      "title": "Auto-start the VM if down",
+      "description": "Set to \"true\" to let the SessionStart hook SSH to the Docker host and `docker compose up -d` the VM when the Windows-MCP endpoint is unreachable. Requires agent_os_vm_host + agent_os_compose_file. It only starts (never stops) the VM and does not block on the multi-minute Windows boot. Leave \"false\" to only warn. Note: this starts an already-provisioned server; it does not install Windows-MCP from scratch.",
+      "required": false,
+      "default": "false"
+    }
+  }
+}

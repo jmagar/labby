@@ -1,30 +1,18 @@
+//! Upstream-proxy result normalization shared by the `call_tool` upstream
+//! tail (`call_tool_upstream.rs`).
+//!
+//! `normalize_upstream_result` was consolidated here from `server.rs`
+//! (bead `lab-kvji.24.1.5`, Revision 2 #2): the live `canonical_kind`-based
+//! body is the single source of truth; the dead `pub(crate)` duplicate and
+//! the dead `static_kind` helper were deleted. Zero behavior change — the
+//! live path already used `canonical_kind`.
+
 use rmcp::model::{CallToolResult, Content};
 use serde_json::Value;
 
 use crate::mcp::envelope::{build_error, build_error_extra};
+use crate::mcp::error::canonical_kind;
 
-#[allow(dead_code)]
-pub(crate) fn static_kind(s: &str) -> &'static str {
-    match s {
-        "unknown_action" => "unknown_action",
-        "unknown_subaction" => "unknown_subaction",
-        "missing_param" => "missing_param",
-        "invalid_param" => "invalid_param",
-        "unknown_instance" => "unknown_instance",
-        "auth_failed" => "auth_failed",
-        "not_found" => "not_found",
-        "rate_limited" => "rate_limited",
-        "validation_failed" => "validation_failed",
-        "network_error" => "network_error",
-        "server_error" => "server_error",
-        "decode_error" => "decode_error",
-        "confirmation_required" => "confirmation_required",
-        "upstream_error" => "upstream_error",
-        _ => "internal_error",
-    }
-}
-
-#[allow(dead_code)]
 pub(crate) fn normalize_upstream_result(
     service: &str,
     action: &str,
@@ -79,7 +67,7 @@ pub(crate) fn normalize_upstream_result(
     let kind = error_obj
         .get("kind")
         .and_then(Value::as_str)
-        .map(static_kind)
+        .map(canonical_kind)
         .unwrap_or("upstream_error");
     let message = error_obj
         .get("message")
@@ -108,3 +96,6 @@ pub(crate) fn normalize_upstream_result(
         ),
     )
 }
+
+#[cfg(test)]
+mod tests;

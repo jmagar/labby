@@ -1,4 +1,0 @@
-interface:
-  display_name: "Navidrome"
-  short_description: "Lab's Navidrome integration — Self-hosted music streaming server"
-  default_prompt: "Use $navidrome for lab's Navidrome integration — Self-hosted music streaming server."

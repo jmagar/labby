@@ -1,4 +1,0 @@
-interface:
-  display_name: "Uptime Kuma"
-  short_description: "Lab's Uptime Kuma integration — Self-hosted uptime and status..."
-  default_prompt: "Use $uptime-kuma for lab's Uptime Kuma integration — Self-hosted uptime and status."
