@@ -5,27 +5,21 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU8;
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
+use rmcp::RoleClient;
 use rmcp::model::{
     AnnotateAble, CallToolRequestParams, CallToolResult, GetPromptRequestParams, GetPromptResult,
-    LoggingLevel, Prompt, RawResource, ReadResourceResult, Resource,
+    Prompt, RawResource, ReadResourceResult, Resource,
 };
-use rmcp::transport::streamable_http_client::{
-    StreamableHttpClientTransportConfig, StreamableHttpClientWorker,
-};
-use rmcp::{RoleClient, ServiceExt};
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::UpstreamConfig;
-use crate::mcp::logging::logging_level_rank;
-use crate::mcp::server::LabMcpServer;
 use crate::oauth::upstream::cache::OauthClientCache;
 #[cfg(unix)]
 use crate::process::unix::{
@@ -33,17 +27,15 @@ use crate::process::unix::{
 };
 use crate::registry::{RegisteredService, ToolRegistry};
 
-use super::auth::{configured_bearer_token, websocket_authorization_header};
-use super::transport::websocket::{
-    WebSocketTransportConfig, connect as connect_websocket_transport, jitter_delay, parse_ws_url,
-    reprobe_backoff,
-};
+use super::transport::websocket::{jitter_delay, reprobe_backoff};
 use super::types;
 use super::types::{
     ToolExposurePolicy, UpstreamCapability, UpstreamEntry, UpstreamHealth, UpstreamRuntimeMetadata,
     UpstreamRuntimeOwner, UpstreamTool, UpstreamToolExposureRow,
 };
 
+mod connect;
+mod connect_stdio;
 mod entries;
 mod helpers;
 mod logging;
@@ -54,6 +46,8 @@ pub(crate) use helpers::{redact_resource_uri_for_logging, upstream_discovery_con
 // Leaf helpers used unqualified throughout the residual pool module and its
 // descendants. Glob-importing the child's `pub(super)` items keeps existing
 // call sites unchanged while the bodies live in the child modules.
+use connect::*;
+use connect_stdio::*;
 use entries::*;
 use helpers::*;
 use logging::*;
@@ -3043,476 +3037,19 @@ impl Default for UpstreamPool {
     }
 }
 
-/// Connect to a single upstream MCP server and discover its tools.
-async fn connect_upstream(
-    config: &UpstreamConfig,
-    subject: Option<&str>,
-    oauth_client_cache: Option<&OauthClientCache>,
-    runtime_origin: Option<&str>,
-    runtime_owner: Option<&UpstreamRuntimeOwner>,
-) -> anyhow::Result<(UpstreamConnection, Vec<rmcp::model::Tool>)> {
-    let started = Instant::now();
-    tracing::debug!(
-        surface = "dispatch",
-        service = "upstream.pool",
-        action = "upstream.connect",
-        event = "attempt",
-        operation = "connection.acquire",
-        upstream = %config.name,
-        transport = upstream_transport(config),
-        target = %upstream_target_redacted(config),
-        subject_scoped = subject.is_some(),
-        "upstream connection acquire attempt"
-    );
-    let result = if let Some(ref url) = config.url {
-        if is_websocket_url(url) {
-            connect_websocket_upstream(url, config).await
-        } else {
-            connect_http_upstream(url, config, subject, oauth_client_cache).await
-        }
-    } else if let Some(ref command) = config.command {
-        connect_stdio_upstream(command, &config.args, config, runtime_origin, runtime_owner).await
-    } else {
-        Err(anyhow::anyhow!(
-            "upstream {} has neither url nor command",
-            config.name
-        ))
-    };
-    match &result {
-        Ok((_, tools)) => tracing::info!(
-            surface = "dispatch",
-            service = "upstream.pool",
-            action = "upstream.connect",
-            event = "finish",
-            operation = "connection.acquire",
-            upstream = %config.name,
-            transport = upstream_transport(config),
-            target = %upstream_target_redacted(config),
-            subject_scoped = subject.is_some(),
-            tool_count = tools.len(),
-            elapsed_ms = started.elapsed().as_millis(),
-            "upstream connection acquire finish"
-        ),
-        Err(error) => tracing::warn!(
-            surface = "dispatch",
-            service = "upstream.pool",
-            action = "upstream.connect",
-            event = "error",
-            operation = "connection.acquire",
-            upstream = %config.name,
-            transport = upstream_transport(config),
-            target = %upstream_target_redacted(config),
-            subject_scoped = subject.is_some(),
-            kind = "upstream_connect_error",
-            error = %error,
-            elapsed_ms = started.elapsed().as_millis(),
-            "upstream connection acquire error"
-        ),
-    }
-    result
-}
-
-async fn connect_websocket_upstream(
-    url: &str,
-    config: &UpstreamConfig,
-) -> anyhow::Result<(UpstreamConnection, Vec<rmcp::model::Tool>)> {
-    tracing::info!(
-        surface = "dispatch", service = "upstream.pool",
-        upstream = %config.name, transport = "websocket",
-        action = "upstream.connect.start", target = %upstream_target_redacted(config),
-        "upstream connect start",
-    );
-    if config.oauth.is_some() {
-        anyhow::bail!(
-            "upstream {} declares oauth, but websocket upstream oauth is not yet supported",
-            config.name
-        );
-    }
-
-    let parsed = parse_ws_url(url).map_err(|error| anyhow::anyhow!(error.to_string()))?;
-    let authorization = websocket_authorization_header(config);
-    let transport = connect_websocket_transport(
-        WebSocketTransportConfig::new(parsed.to_string()).with_authorization(authorization),
-    );
-    let service: rmcp::service::RunningService<RoleClient, ()> = ().serve(transport).await?;
-    let peer = service.peer().clone();
-    let tools = peer.list_all_tools().await?;
-    tracing::info!(
-        surface = "dispatch", service = "upstream.pool",
-        upstream = %config.name, transport = "websocket",
-        action = "upstream.connect.finish", tool_count = tools.len(),
-        "upstream connect finish",
-    );
-    Ok((
-        UpstreamConnection {
-            _client_service: service,
-            _server_task: None,
-            peer,
-            runtime: UpstreamRuntimeMetadata::default(),
-        },
-        tools,
-    ))
-}
-
-fn stable_jitter_seed(name: &str, attempt: u32) -> u64 {
-    let mut hash = 1_469_598_103_934_665_603_u64;
-    for byte in name.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(1_099_511_628_211);
-    }
-    hash ^ u64::from(attempt)
-}
-
-/// Log the "OAuth upstream not yet capped" warning at most once per
-/// upstream name per process. The OAuth path runs on every reprobe/
-/// reconnect, so an unconditional WARN floods logs at REPROBE_INTERVAL
-/// (30s) × N upstreams cadence. This dedup keeps the gap visible without
-/// drowning out real warnings.
-fn log_oauth_uncapped_once(upstream_name: &str) {
-    use std::sync::Mutex;
-    use std::sync::OnceLock;
-    static LOGGED: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
-    let set = LOGGED.get_or_init(|| Mutex::new(std::collections::HashSet::new()));
-    let mut guard = match set.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    if guard.insert(upstream_name.to_string()) {
-        tracing::warn!(
-            surface = "dispatch",
-            service = "upstream.pool",
-            upstream = %upstream_name,
-            "oauth http upstream: response body cap not yet applied (follow-up to lab-4z8sx.2)"
-        );
-    }
-}
-
-/// Connect to an HTTP upstream MCP server.
-async fn connect_http_upstream(
-    url: &str,
-    config: &UpstreamConfig,
-    subject: Option<&str>,
-    oauth_client_cache: Option<&OauthClientCache>,
-) -> anyhow::Result<(UpstreamConnection, Vec<rmcp::model::Tool>)> {
-    tracing::info!(
-        surface = "dispatch", service = "upstream.pool",
-        upstream = %config.name, transport = "http",
-        action = "upstream.connect.start", target = %upstream_target_redacted(config),
-        "upstream connect start",
-    );
-    let transport_config = StreamableHttpClientTransportConfig::with_uri(url);
-
-    // OAuth path: when the upstream declares oauth config, build an AuthClient.
-    if config.oauth.is_some() {
-        let subject = subject.ok_or_else(|| {
-            anyhow::anyhow!(
-                "upstream {} requires an authenticated subject; discovery must be request-scoped",
-                config.name
-            )
-        })?;
-        let cache = oauth_client_cache.ok_or_else(|| {
-            anyhow::anyhow!(
-                "upstream {} requires OAuth but no auth client cache is registered",
-                config.name
-            )
-        })?;
-
-        let auth_client = cache
-            .get_or_build(config, subject)
-            .await
-            .map_err(|e| anyhow::anyhow!("oauth_required: {e}"))?;
-
-        // TODO(follow-up to lab-4z8sx.2): the OAuth path does NOT get the
-        // BodyCappedHttpClient cap because `OauthClientCache` returns a
-        // concrete `AuthClient<reqwest::Client>` and AuthClient is
-        // `#[non_exhaustive]` (no way to swap its inner http_client type).
-        // Threading `BodyCappedHttpClient` through the cache requires
-        // changing the cache to build `AuthClient<BodyCappedHttpClient>` end
-        // to end. The non-OAuth path (below) is capped.
-        log_oauth_uncapped_once(&config.name);
-        let worker = StreamableHttpClientWorker::new((*auth_client).clone(), transport_config);
-        let service: rmcp::service::RunningService<RoleClient, ()> = ().serve(worker).await?;
-        let peer = service.peer().clone();
-        let tools = peer.list_all_tools().await?;
-        return Ok((
-            UpstreamConnection {
-                _client_service: service,
-                _server_task: None,
-                peer,
-                runtime: UpstreamRuntimeMetadata::default(),
-            },
-            tools,
-        ));
-    }
-
-    // Non-OAuth path: optionally inject a static bearer token from env.
-    let mut transport_config = transport_config;
-    if let Some(ref env_name) = config.bearer_token_env {
-        if let Some(token) = configured_bearer_token(env_name) {
-            transport_config.auth_header = Some(token);
-        } else {
-            tracing::warn!(
-                upstream = %config.name,
-                env_var = %env_name,
-                "bearer_token_env configured but env var not set"
-            );
-        }
-    }
-
-    let client = reqwest::Client::builder()
-        .timeout(DEFAULT_REQUEST_TIMEOUT)
-        .build()?;
-    // Wrap reqwest::Client in BodyCappedHttpClient so a hostile upstream
-    // cannot OOM the gateway via an oversized response. Cap is enforced
-    // during streaming (Content-Length + bytes_stream count). For SSE, the
-    // cap is per-event so legitimate long-lived subscriptions are not
-    // disconnected.
-    let capped = super::http_client::BodyCappedHttpClient::new(client, max_response_bytes());
-    let worker = StreamableHttpClientWorker::new(capped, transport_config);
-    let service: rmcp::service::RunningService<RoleClient, ()> = ().serve(worker).await?;
-    let peer = service.peer().clone();
-    let tools = peer.list_all_tools().await?;
-    tracing::info!(
-        surface = "dispatch", service = "upstream.pool",
-        upstream = %config.name, transport = "http",
-        action = "upstream.connect.finish", tool_count = tools.len(),
-        "upstream connect finish",
-    );
-
-    Ok((
-        UpstreamConnection {
-            _client_service: service,
-            _server_task: None,
-            peer,
-            runtime: UpstreamRuntimeMetadata::default(),
-        },
-        tools,
-    ))
-}
-
-/// Connect to a stdio upstream MCP server (child process).
-async fn connect_stdio_upstream(
-    command: &str,
-    args: &[String],
-    config: &UpstreamConfig,
-    runtime_origin: Option<&str>,
-    runtime_owner: Option<&UpstreamRuntimeOwner>,
-) -> anyhow::Result<(UpstreamConnection, Vec<rmcp::model::Tool>)> {
-    #[cfg(unix)]
-    use process_wrap::tokio::{CommandWrap, ProcessGroup};
-    use rmcp::transport::child_process::TokioChildProcess;
-    use std::process::Stdio;
-    use tokio::process::Command;
-
-    let mut cmd = Command::new(command);
-    cmd.args(args);
-    cmd.envs(config.env.iter());
-
-    // Set bearer token env var on the child if configured
-    if let Some(ref env_name) = config.bearer_token_env
-        && let Some(token) = configured_bearer_token(env_name)
-    {
-        cmd.env(env_name, &token);
-    }
-
-    #[cfg(unix)]
-    let (process, _stderr) = {
-        let mut wrapped = CommandWrap::from(cmd);
-        wrapped.wrap(ProcessGroup::leader());
-        TokioChildProcess::builder(wrapped)
-            .stderr(Stdio::null())
-            .spawn()?
-    };
-    #[cfg(not(unix))]
-    let (process, _stderr) = TokioChildProcess::builder(cmd)
-        .stderr(Stdio::null())
-        .spawn()?;
-
-    let pid = process.id();
-    tracing::info!(
-        surface = "dispatch", service = "upstream.pool",
-        upstream = %config.name, transport = "stdio",
-        action = "upstream.connect.start", command = %command, pid = ?pid,
-        "upstream connect start",
-    );
-
-    // INVARIANT: arm the process-group guard immediately after spawn. If any
-    // subsequent `?` propagates (serve fails, list_all_tools fails, the outer
-    // future is dropped on timeout), `Drop` on this guard SIGTERM+SIGKILLs
-    // the process group via `killpg`, reaping grandchildren (npx → node,
-    // sh -c → python) that rmcp's per-PID TokioChildProcess Drop would
-    // otherwise miss. With `ProcessGroup::leader()` the child is its own
-    // group leader, so pgid == pid.
-    #[cfg(unix)]
-    let pg_guard = pid.map(super::process_guard::ProcessGroupGuard::arm);
-
-    let service: rmcp::service::RunningService<RoleClient, ()> = ().serve(process).await?;
-    let peer = service.peer().clone();
-
-    // Discover tools
-    let tools = peer.list_all_tools().await?;
-    tracing::info!(
-        surface = "dispatch", service = "upstream.pool",
-        upstream = %config.name, transport = "stdio",
-        action = "upstream.connect.finish", pid = ?pid, tool_count = tools.len(),
-        "upstream connect finish",
-    );
-
-    // INVARIANT: disarm the guard right before successful construction. The
-    // pgid is transferred to UpstreamConnection.runtime.pgid; its own Drop
-    // now owns cleanup. `shutdown()` will zero runtime.pgid before any
-    // `.await` so its Drop no-ops on the graceful path.
-    #[cfg(unix)]
-    let pgid_for_runtime = pg_guard.and_then(super::process_guard::ProcessGroupGuard::disarm);
-    #[cfg(not(unix))]
-    let pgid_for_runtime: Option<u32> = pid;
-
-    let conn = UpstreamConnection {
-        _client_service: service,
-        _server_task: None,
-        peer,
-        runtime: UpstreamRuntimeMetadata {
-            pid,
-            pgid: pgid_for_runtime,
-            started_at: Some(std::time::SystemTime::now()),
-            origin: runtime_origin_label(runtime_origin, runtime_owner),
-            owner: runtime_owner.cloned(),
-        },
-    };
-
-    Ok((conn, tools))
-}
-
-fn runtime_origin_label(
-    runtime_origin: Option<&str>,
-    runtime_owner: Option<&UpstreamRuntimeOwner>,
-) -> Option<String> {
-    if let Some(raw) = runtime_owner
-        .and_then(|owner| owner.raw.as_deref())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        return Some(raw.to_string());
-    }
-
-    if let Some(origin) = runtime_origin
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        return Some(origin.to_string());
-    }
-
-    for (prefix, session_key) in [
-        ("claude-code", "CLAUDE_SESSION_ID"),
-        ("codex", "CODEX_SESSION_ID"),
-    ] {
-        if let Ok(session) = std::env::var(session_key) {
-            let trimmed = session.trim();
-            if !trimmed.is_empty() {
-                return Some(format!("{prefix}:{trimmed}"));
-            }
-        }
-    }
-
-    if let Ok(term_program) = std::env::var("TERM_PROGRAM") {
-        let trimmed = term_program.trim();
-        if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
-        }
-    }
-
-    Some("gateway-managed".to_string())
-}
-
-async fn connect_in_process_service_peer(
-    service: &RegisteredService,
-) -> anyhow::Result<(UpstreamConnection, Vec<rmcp::model::Tool>)> {
-    tracing::info!(
-        service = service.name,
-        phase = "in_process.connect.start",
-        "connecting in-process peer"
-    );
-    let (server_transport, client_transport) = tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
-    let mut registry = ToolRegistry::new();
-    registry.register(service.clone());
-    let server = LabMcpServer {
-        registry: Arc::new(registry),
-        gateway_manager: None,
-        node_role: None,
-        peers: Arc::new(RwLock::new(Vec::new())),
-        logging_level: Arc::new(AtomicU8::new(logging_level_rank(LoggingLevel::Emergency))),
-    };
-    let service_name = service.name;
-    let server_task = tokio::spawn(async move {
-        tracing::info!(
-            service = service_name,
-            phase = "in_process.server.spawned",
-            "starting in-process server task"
-        );
-        match server.serve(server_transport).await {
-            Ok(running) => {
-                tracing::info!(
-                    service = service_name,
-                    phase = "in_process.server.ready",
-                    "in-process server transport ready"
-                );
-                if let Err(error) = running.waiting().await {
-                    tracing::warn!(service = service_name, phase = "in_process.server.waiting.error", error = %error, "in-process server exited with error");
-                }
-            }
-            Err(error) => {
-                tracing::warn!(service = service_name, phase = "in_process.server.serve.error", error = %error, "failed to start in-process server");
-            }
-        }
-    });
-    let client_service: rmcp::service::RunningService<RoleClient, ()> =
-        ().serve(client_transport).await?;
-    tracing::info!(
-        service = service.name,
-        phase = "in_process.client.ready",
-        "in-process client transport ready"
-    );
-    let peer = client_service.peer().clone();
-    tracing::info!(
-        service = service.name,
-        phase = "in_process.list_tools.start",
-        process_tool_search_enabled = crate::config::process_tool_search_enabled(),
-        "requesting in-process tool list"
-    );
-    let tools = peer.list_all_tools().await?;
-    tracing::info!(
-        service = service.name,
-        phase = "in_process.list_tools.finish",
-        tool_count = tools.len(),
-        process_tool_search_enabled = crate::config::process_tool_search_enabled(),
-        "in-process tool list received"
-    );
-
-    Ok((
-        UpstreamConnection {
-            _client_service: client_service,
-            _server_task: Some(server_task),
-            peer,
-            runtime: UpstreamRuntimeMetadata::default(),
-        },
-        tools,
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{UpstreamOauthConfig, UpstreamOauthMode, UpstreamOauthRegistration};
+    use crate::mcp::logging::logging_level_rank;
     use crate::mcp::server::LabMcpServer;
     use rmcp::model::{
         AnnotateAble, ErrorData, ListPromptsResult, ListResourcesResult, ListToolsResult,
-        PaginatedRequestParams, PromptMessage, PromptMessageRole, RawResource,
+        LoggingLevel, PaginatedRequestParams, PromptMessage, PromptMessageRole, RawResource,
         ReadResourceRequestParams, ResourceContents, ServerCapabilities, ServerInfo,
     };
     use rmcp::service::RequestContext;
-    use rmcp::{RoleServer, ServerHandler};
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use tracing_subscriber::layer::SubscriberExt;
+    use rmcp::{RoleServer, ServerHandler, ServiceExt};
+    use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 
     fn test_upstream_config() -> UpstreamConfig {
         UpstreamConfig {
@@ -3738,82 +3275,6 @@ mod tests {
 
         assert!(!result);
         assert!(pool.find_tool("anything").await.is_none());
-    }
-
-    fn oauth_http_config() -> UpstreamConfig {
-        UpstreamConfig {
-            enabled: true,
-            name: "oauth-upstream".into(),
-            url: Some("http://127.0.0.1:8080/mcp".into()),
-            bearer_token_env: None,
-            command: None,
-            args: vec![],
-            env: std::collections::BTreeMap::new(),
-            proxy_resources: false,
-            proxy_prompts: false,
-            expose_tools: None,
-            expose_resources: None,
-            expose_prompts: None,
-            oauth: Some(UpstreamOauthConfig {
-                mode: UpstreamOauthMode::AuthorizationCodePkce,
-                registration: UpstreamOauthRegistration::Preregistered {
-                    client_id: "client-id".into(),
-                    client_secret_env: None,
-                },
-                scopes: None,
-            }),
-            imported_from: None,
-            priority: 1.0,
-            tool_search: crate::config::ToolSearchConfig::default(),
-        }
-    }
-
-    #[tokio::test]
-    async fn subject_scoped_upstream_requires_authenticated_subject_for_oauth_http_connect() {
-        let config = oauth_http_config();
-        let error = connect_http_upstream(
-            config.url.as_deref().expect("url"),
-            &config,
-            None,
-            Some(&OauthClientCache::new(Arc::new(dashmap::DashMap::new()))),
-        )
-        .await
-        .expect_err("missing subject should fail");
-
-        assert!(
-            error
-                .to_string()
-                .contains("requires an authenticated subject")
-        );
-    }
-
-    #[tokio::test]
-    async fn subject_scoped_upstream_requires_registered_cache_for_oauth_http_connect() {
-        let config = oauth_http_config();
-        let error = connect_http_upstream(
-            config.url.as_deref().expect("url"),
-            &config,
-            Some("alice"),
-            None,
-        )
-        .await
-        .expect_err("missing cache should fail");
-
-        assert!(
-            error
-                .to_string()
-                .contains("no auth client cache is registered")
-        );
-    }
-
-    #[tokio::test]
-    async fn shared_discovery_skips_oauth_http_upstreams() {
-        let pool = UpstreamPool::new()
-            .with_oauth_client_cache(OauthClientCache::new(Arc::new(dashmap::DashMap::new())));
-        pool.discover_all(&[oauth_http_config()]).await;
-
-        assert_eq!(pool.upstream_count().await, 0);
-        assert!(pool.upstream_status().await.is_empty());
     }
 
     #[test]
