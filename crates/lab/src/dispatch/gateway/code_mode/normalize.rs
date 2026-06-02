@@ -22,6 +22,11 @@ use boa_parser::{Parser, Source as ParserSource};
 ///    function expression).
 /// 5. Loose statements / trailing expressions are wrapped in `async () => { ... }`;
 ///    if the trailing statement looks like an expression, it is returned.
+/// 6. `export default <X>` preceded by prologue statements
+///    (`const x = 1; export default async () => x`) keeps the prologue and
+///    invokes the default-export entry so it closes over those bindings —
+///    handled via the AST when Boa can parse it, and via a textual fallback for
+///    the one form it cannot (an arrow in default-export position).
 ///
 /// Only `execute` normalizes the caller's code through this before handing it to
 /// the Javy runner. `search` passes its code to the runner *raw* (no

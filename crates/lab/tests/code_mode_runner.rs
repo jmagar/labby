@@ -903,3 +903,22 @@ fn normalized_export_default_arrow_with_prologue_executes_end_to_end() {
     );
     assert_single_call_round_trip(&normalized, json!({"pong": true}));
 }
+
+/// The same prologue-preservation must hold for the *AST* path (a plain — non
+/// async — arrow in `export default` position parses as a DefaultAssignmentExpression,
+/// so it goes through `normalize_module_code`, not the textual fallback). Boa
+/// re-renders the arrow on round-trip, so string assertions can't prove the
+/// prologue binding is actually in runtime scope — this runs it. Non-vacuous: the
+/// arrow references the prologue `const tool`, so a dropped prologue would leave
+/// `tool` undefined and emit no tool_call.
+#[test]
+fn normalized_export_default_plain_arrow_with_prologue_executes_end_to_end() {
+    let body = "const tool = \"upstream::test::ping\";\n\
+                export default () => callTool(tool, {});";
+    let normalized = labby::dispatch::gateway::code_mode::normalize_user_code(body);
+    assert!(
+        normalized.starts_with("async () =>") && !normalized.contains("export default"),
+        "normalize must emit executable script code without export syntax, got: {normalized}"
+    );
+    assert_single_call_round_trip(&normalized, json!({"pong": true}));
+}
