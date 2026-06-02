@@ -203,8 +203,14 @@ const fn color_choice_for(policy: ColorPolicy) -> ColorChoice {
 ///
 /// Returns `Some` only when, after skipping leading global flags, the first
 /// positional token is:
-/// - bare `help` (optionally followed by exactly `--all`), or
+/// - bare `help`, optionally followed by any mix of global flags (`--json`,
+///   `--color`) and `--all`, or
 /// - `-h` / `--help` at the root (no preceding subcommand).
+///
+/// Global flags are accepted on *both* sides of the trigger because they are
+/// `global = true` on [`Cli`] — `labby help --json` and `labby --json help` must
+/// both reach the catalog (scripts consume `help --json`). Their values are
+/// folded into the returned flags regardless of position.
 ///
 /// `help <subcommand>` (e.g. `help gateway`) returns `None` and falls through to
 /// clap's native, now-themed `help` subcommand.
@@ -247,24 +253,57 @@ where
     let first = first.as_ref().to_string_lossy().into_owned();
     match first.as_str() {
         "-h" | "--help" => {
-            // Root `-h`/`--help` with no preceding subcommand → catalog.
+            // Root `-h`/`--help` with no preceding subcommand → catalog. Fold any
+            // trailing global flags (`-h --json`) into the captured flags; a
+            // foreign token after a terminal help flag is ignored, mirroring
+            // clap's treatment of `--help` as short-circuiting.
+            trailing_globals_only(&mut iter, &mut flags);
             Some(flags)
         }
         "help" => {
-            // Only bare `help` or `help --all` is the catalog; `help <cmd>`
-            // falls through to clap's native help subcommand.
-            match iter.next() {
-                None => Some(flags),
-                Some(next)
-                    if next.as_ref().to_string_lossy() == "--all" && iter.next().is_none() =>
-                {
-                    Some(flags)
-                }
-                _ => None,
+            // Bare `help` plus any trailing global flags / `--all` is the root
+            // catalog; `help <subcommand>` (a foreign trailing token) falls
+            // through to clap's native help subcommand.
+            if trailing_globals_only(&mut iter, &mut flags) {
+                Some(flags)
+            } else {
+                None
             }
         }
         _ => None,
     }
+}
+
+/// Consume the tokens trailing a root help trigger, folding recognized global
+/// flag values (`--json`, `--color VALUE`, `--color=VALUE`) into `flags` and
+/// tolerating `--all`. Returns `true` if every remaining token was a global
+/// flag or `--all`, or `false` on the first foreign token (e.g. a subcommand
+/// name) — which marks the invocation as `help <subcommand>`.
+fn trailing_globals_only<I, T>(iter: &mut I, flags: &mut GlobalFlags) -> bool
+where
+    I: Iterator<Item = T>,
+    T: AsRef<OsStr>,
+{
+    while let Some(arg) = iter.next() {
+        let arg = arg.as_ref().to_string_lossy().into_owned();
+        if arg == "--all" || global_flags::BOOLEAN.contains(&arg.as_str()) {
+            if arg == "--json" {
+                flags.json = true;
+            }
+        } else if let Some(rest) = arg.strip_prefix("--color=") {
+            flags.color = Some(parse_color_value(rest));
+        } else if global_flags::VALUED.contains(&arg.as_str()) {
+            // `--color VALUE` — the value (if present) is the next token.
+            if let Some(value) = iter.next() {
+                if arg == "--color" {
+                    flags.color = Some(parse_color_value(&value.as_ref().to_string_lossy()));
+                }
+            }
+        } else {
+            return false;
+        }
+    }
+    true
 }
 
 /// Whether the (already-skipped) help invocation requested `--all`.
@@ -312,7 +351,11 @@ fn run_root_catalog(flags: &GlobalFlags) -> ExitCode {
     match cli::help::run(cli::help::HelpArgs { all }, format) {
         Ok(code) => code,
         Err(err) => {
-            tracing::error!("{err:#}");
+            // This runs before `init_tracing`, so `tracing::error!` would have no
+            // subscriber and the failure (e.g. a malformed config.toml) would be
+            // invisible. Use stderr directly, matching the pre-tracing error path
+            // in `main`. (`clippy::print_stderr` is `allow` workspace-wide.)
+            eprintln!("error: {err:#}");
             ExitCode::from(1)
         }
     }
