@@ -269,14 +269,17 @@ fn strip_prologue_exports(prologue: &str) -> String {
     else {
         return prologue.to_string();
     };
-    // Only rewrite when the prologue actually carries a named export; otherwise
-    // keep the verbatim text so re-rendering never perturbs the common case.
-    let has_named_export = module
+    // Only rewrite when the prologue carries a non-statement item — a named
+    // export whose `export` keyword must be stripped, or an `import` that must be
+    // dropped (no loader in the sandbox; left verbatim it is a syntax error inside
+    // the wrapper). A pure-statement prologue is kept verbatim so re-rendering
+    // never perturbs the common case.
+    let needs_rewrite = module
         .items()
         .items()
         .iter()
-        .any(|item| matches!(item, boa_ast::ModuleItem::ExportDeclaration(_)));
-    if !has_named_export {
+        .any(|item| !matches!(item, boa_ast::ModuleItem::StatementListItem(_)));
+    if !needs_rewrite {
         return prologue.to_string();
     }
     module

@@ -267,6 +267,23 @@ fn normalize_user_code_keeps_export_var_and_export_function_bindings() {
 }
 
 #[test]
+fn normalize_user_code_drops_import_in_async_arrow_default_prologue() {
+    // Regression (cubic, follow-up): a textual-fallback prologue containing only
+    // an `import` (no named export) must still be rewritten — the sandbox has no
+    // module loader, and a verbatim `import` inside the wrapper is a syntax error.
+    // Drop it (matching the module path), leaving at most a runtime ReferenceError
+    // rather than a parse failure that kills the whole script.
+    let result =
+        super::normalize_user_code("import { x } from \"y\";\nexport default async () => 1");
+    assert!(
+        !result.contains("import"),
+        "import must be dropped: {result}"
+    );
+    assert!(!result.contains("export default"), "got: {result}");
+    assert!(result.starts_with("async () => {"), "got: {result}");
+}
+
+#[test]
 fn normalize_user_code_export_default_class_with_prologue() {
     // The DefaultClassDeclaration AST arm is only reachable with a prologue (a
     // bare class default is caught by the start-anchored strip). Prologue kept.
