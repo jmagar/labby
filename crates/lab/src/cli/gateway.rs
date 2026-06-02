@@ -132,8 +132,6 @@ pub struct GatewayGetArgs {
 pub struct GatewayTestArgs {
     #[arg(long)]
     pub name: Option<String>,
-    #[arg(long, default_value_t = false)]
-    pub allow_stdio: bool,
 }
 
 #[derive(Debug, Args)]
@@ -150,8 +148,6 @@ pub struct GatewayAddArgs {
     pub bearer_token_env: Option<String>,
     #[arg(long, default_value_t = false)]
     pub proxy_resources: bool,
-    #[arg(long, default_value_t = false)]
-    pub allow_stdio: bool,
 }
 
 #[derive(Debug, Args)]
@@ -169,8 +165,6 @@ pub struct GatewayUpdateArgs {
     pub bearer_token_env: Option<String>,
     #[arg(long)]
     pub proxy_resources: Option<bool>,
-    #[arg(long, default_value_t = false)]
-    pub allow_stdio: bool,
 }
 
 #[derive(Debug, Args)]
@@ -328,8 +322,6 @@ pub struct GatewayOauthUpstreamArgs {
 pub struct GatewayMcpLifecycleArgs {
     pub name: String,
     #[arg(long, default_value_t = false)]
-    pub allow_stdio: bool,
-    #[arg(long, default_value_t = false)]
     pub cleanup: bool,
     #[arg(long, default_value_t = false)]
     pub aggressive: bool,
@@ -478,7 +470,6 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                     "gateway.mcp.enable".to_string(),
                     json!({
                         "name": args.name,
-                        "allow_stdio": args.allow_stdio,
                         "origin": cli_origin,
                         "owner": cli_owner,
                     }),
@@ -496,7 +487,6 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                     "gateway.mcp.disable".to_string(),
                     json!({
                         "name": args.name,
-                        "allow_stdio": args.allow_stdio,
                         "cleanup": args.cleanup,
                         "aggressive": args.aggressive,
                         "origin": cli_origin,
@@ -542,16 +532,14 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                 GatewayCommand::Get(args) => {
                     ("gateway.get".to_string(), json!({ "name": args.name }))
                 }
-                GatewayCommand::Test(args) => (
-                    "gateway.test".to_string(),
-                    json!({ "name": args.name, "allow_stdio": args.allow_stdio }),
-                ),
+                GatewayCommand::Test(args) => {
+                    ("gateway.test".to_string(), json!({ "name": args.name }))
+                }
                 GatewayCommand::Add(args) => (
                     "gateway.add".to_string(),
                     json!({
                         "origin": cli_origin,
                         "owner": cli_owner,
-                        "allow_stdio": args.allow_stdio,
                         "spec": {
                             "name": args.name,
                             "url": args.url,
@@ -568,7 +556,6 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                         "name": args.name,
                         "origin": cli_origin,
                         "owner": cli_owner,
-                        "allow_stdio": args.allow_stdio,
                         "patch": {
                             "name": args.new_name,
                             "url": args.url.map(Some),

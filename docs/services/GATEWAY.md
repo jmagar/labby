@@ -28,30 +28,23 @@ The complete gateway action inventory is generated from `ActionSpec`:
 - [generated action catalog](../generated/action-catalog.md)
 - [generated action catalog JSON](../generated/action-catalog.json)
 
-`gateway.add`, `gateway.update`, `gateway.remove`, and `gateway.reload` are
-destructive actions in shared action metadata. HTTP callers must send
-`params.confirm = true`, CLI callers must confirm interactively or use `--yes` / `-y`, and MCP callers
-must go through elicitation when supported.
+`gateway.test`, `gateway.add`, `gateway.update`, `gateway.remove`, and
+`gateway.reload` are destructive actions in shared action metadata. HTTP callers
+must send `params.confirm = true`, CLI callers must confirm interactively or use
+`--yes` / `-y`, and MCP callers must go through elicitation when supported.
 
-### Stdio Gateway Safety
+### Stdio Gateways
 
-Stdio upstreams are privileged because testing or reconciling them starts the
-configured command on the local host running `lab`. The gateway admin surface
-therefore requires an additional explicit acknowledgement before any stdio
-definition is probed or reconciled:
+Stdio upstreams run a configured command on the local host running `lab` when
+they are tested or reconciled. There is no separate stdio acknowledgement — they
+are gated only by the normal destructive confirmation (`confirm: true` /
+`--yes` / elicitation).
 
-- `gateway.test` with a `spec.command`, or with `name` pointing at a configured
-  stdio gateway, requires `params.allow_stdio = true`
-- `gateway.add` with `spec.command` requires `params.allow_stdio = true`
-- `gateway.update` requires `params.allow_stdio = true` whenever the resulting
-  enabled gateway config uses `command`, even if the patch only changes
-  unrelated fields
-
-This acknowledgement is separate from destructive confirmation. `confirm: true`
-authorizes config mutation; `allow_stdio: true` acknowledges local command
-execution. HTTP and MCP callers should only send it after operator approval.
-
-CLI commands expose the same guard as `--allow-stdio`.
+`gateway.test` is marked destructive specifically because probing a stdio
+gateway spawns its local command. Unlike `add`/`update`, a test performs no
+config mutation, but it can still execute a local process — so the confirmation
+gate is what keeps a read-only-looking call from running arbitrary commands on
+behalf of a remote HTTP/MCP caller.
 
 ## Tool Exposure
 
@@ -269,12 +262,11 @@ Tool-search observability:
 - `url` must use `http://` or `https://`
 - bind-all addresses (`0.0.0.0`, `::`) are rejected
 - RFC1918 and other private-network URLs are allowed
-- stdio gateways are allowed only as an explicit privileged operator action.
-  Proposed or persisted enabled stdio specs can execute local commands during
-  `gateway.test`, `gateway.add`, and `gateway.update`. Machine callers must
-  pass `allow_stdio: true` in addition to normal destructive confirmation where
-  applicable; without that acknowledgement the request fails with
-  `kind: "invalid_param"` on `allow_stdio`.
+- stdio gateways are allowed. Proposed or persisted enabled stdio specs can
+  execute local commands during `gateway.test`, `gateway.add`, and
+  `gateway.update`; all three are marked destructive and gated by the normal
+  destructive confirmation. `gateway.test` is destructive even though it never
+  mutates config, because probing a stdio gateway spawns its local command.
 
 ## Reconcile Model
 
@@ -312,7 +304,7 @@ labby gateway list
 labby gateway get remote-lab
 labby gateway test --name remote-lab
 labby gateway add --name remote-lab --url https://lab2.example.com/mcp --bearer-token-env REMOTE_LAB_TOKEN
-labby gateway add --name local-tools --command local-mcp-server --allow-stdio
+labby gateway add --name local-tools --command local-mcp-server
 labby gateway update remote-lab --proxy-resources true
 labby gateway remove remote-lab
 labby gateway reload
@@ -323,7 +315,7 @@ labby gateway reload
 ```json
 { "tool": "gateway", "input": { "action": "gateway.list", "params": {} } }
 { "tool": "gateway", "input": { "action": "gateway.add", "params": { "confirm": true, "spec": { "name": "remote-lab", "url": "https://lab2.example.com/mcp", "bearer_token_env": "REMOTE_LAB_TOKEN" } } } }
-{ "tool": "gateway", "input": { "action": "gateway.add", "params": { "confirm": true, "allow_stdio": true, "spec": { "name": "local-tools", "command": "local-mcp-server" } } } }
+{ "tool": "gateway", "input": { "action": "gateway.add", "params": { "confirm": true, "spec": { "name": "local-tools", "command": "local-mcp-server" } } } }
 { "tool": "gateway", "input": { "action": "gateway.reload", "params": { "confirm": true } } }
 ```
 

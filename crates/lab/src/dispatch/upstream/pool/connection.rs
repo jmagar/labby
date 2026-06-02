@@ -11,9 +11,6 @@
 use std::time::Instant;
 
 #[cfg(unix)]
-use std::time::Duration;
-
-#[cfg(unix)]
 use crate::process::unix::{
     pid_is_alive, terminate_process_group_sigkill, terminate_process_group_sigterm,
 };
@@ -103,7 +100,7 @@ impl UpstreamConnection {
             && pid_is_alive(pid)
         {
             let _ = terminate_process_group_sigterm(pgid);
-            tokio::time::sleep(Duration::from_millis(150)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
             if pid_is_alive(pid) {
                 let _ = terminate_process_group_sigkill(pgid);
             }
