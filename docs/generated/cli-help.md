@@ -1036,9 +1036,6 @@ Options:
       --name <NAME>
 
 
-      --allow-stdio
-
-
       --color <COLOR>
           Control human-readable CLI styling
 
@@ -1082,9 +1079,6 @@ Options:
       --proxy-resources
 
 
-      --allow-stdio
-
-
   -h, --help
           Print help
 ```
@@ -1125,9 +1119,6 @@ Options:
 
       --proxy-resources <PROXY_RESOURCES>
           [possible values: true, false]
-
-      --allow-stdio
-
 
   -h, --help
           Print help
@@ -1772,13 +1763,13 @@ Arguments:
 
 
 Options:
-      --allow-stdio
+      --cleanup
 
 
       --json
           Emit JSON instead of human-readable tables
 
-      --cleanup
+      --aggressive
 
 
       --color <COLOR>
@@ -1786,9 +1777,6 @@ Options:
 
           [default: auto]
           [possible values: auto, plain, color]
-
-      --aggressive
-
 
   -h, --help
           Print help
@@ -1804,13 +1792,13 @@ Arguments:
 
 
 Options:
-      --allow-stdio
+      --cleanup
 
 
       --json
           Emit JSON instead of human-readable tables
 
-      --cleanup
+      --aggressive
 
 
       --color <COLOR>
@@ -1818,9 +1806,6 @@ Options:
 
           [default: auto]
           [possible values: auto, plain, color]
-
-      --aggressive
-
 
   -h, --help
           Print help

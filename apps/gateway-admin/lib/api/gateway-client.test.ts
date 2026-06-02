@@ -131,7 +131,7 @@ test('gatewayApi discovery and import actions use gateway dispatch payloads', as
   )
 })
 
-test('gatewayApi.create sends allow_stdio for stdio gateway adds', async () => {
+test('gatewayApi.create adds a stdio gateway without any ack flag', async () => {
   await withGatewayFetch(
     {
       'gateway.add': () => ({
@@ -160,8 +160,9 @@ test('gatewayApi.create sends allow_stdio for stdio gateway adds', async () => {
       } as never)
 
       assert.equal(
-        requests.find((request) => request.action === 'gateway.add')?.params.allow_stdio,
-        true,
+        'allow_stdio' in
+          (requests.find((request) => request.action === 'gateway.add')?.params ?? {}),
+        false,
       )
     },
   )
@@ -240,7 +241,7 @@ test('gatewayApi.update sends confirm=true with destructive gateway updates', as
   )
 })
 
-test('gatewayApi.update sends allow_stdio for stdio gateway updates', async () => {
+test('gatewayApi.update updates a stdio gateway without any ack flag', async () => {
   await withGatewayFetch(
     {
       'gateway.update': () => ({
@@ -272,8 +273,9 @@ test('gatewayApi.update sends allow_stdio for stdio gateway updates', async () =
       )
 
       assert.equal(
-        requests.find((request) => request.action === 'gateway.update')?.params.allow_stdio,
-        true,
+        'allow_stdio' in
+          (requests.find((request) => request.action === 'gateway.update')?.params ?? {}),
+        false,
       )
     },
   )
