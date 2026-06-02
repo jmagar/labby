@@ -144,6 +144,21 @@ fn normalize_user_code_parsed(source: &str) -> Option<String> {
     normalize_module_code(source).or_else(|| normalize_script_code(source))
 }
 
+/// Whether an export declaration is an `export default ...` form (vs a named
+/// export, `export { ... }`, or a re-export).
+fn is_default_export(decl: &boa_ast::declaration::ExportDeclaration) -> bool {
+    use boa_ast::declaration::ExportDeclaration as E;
+    matches!(
+        decl,
+        E::DefaultFunctionDeclaration(_)
+            | E::DefaultGeneratorDeclaration(_)
+            | E::DefaultAsyncFunctionDeclaration(_)
+            | E::DefaultAsyncGeneratorDeclaration(_)
+            | E::DefaultClassDeclaration(_)
+            | E::DefaultAssignmentExpression(_)
+    )
+}
+
 fn normalize_module_code(source: &str) -> Option<String> {
     let mut interner = Interner::default();
     let mut parser = Parser::new(ParserSource::from_bytes(source.as_bytes()));
@@ -158,11 +173,19 @@ fn normalize_module_code(source: &str) -> Option<String> {
     let mut export = None;
     for item in module.items().items() {
         match item {
-            boa_ast::ModuleItem::ExportDeclaration(decl) => export = Some(decl),
-            boa_ast::ModuleItem::ImportDeclaration(_) => {}
+            // Capture the `export default` declaration specifically — not just any
+            // export. A *named* export (`export const y = 1`, `export { ... }`, a
+            // re-export) after `export default` must not shadow the default and
+            // cause normalization to bail. Named exports have no entry/runtime
+            // role in the sandbox, so they (and imports) are skipped.
+            boa_ast::ModuleItem::ExportDeclaration(decl) if is_default_export(decl) => {
+                export = Some(decl);
+            }
             boa_ast::ModuleItem::StatementListItem(stmt) => {
                 prologue.push(stmt.to_indented_string(&interner, 0));
             }
+            boa_ast::ModuleItem::ExportDeclaration(_)
+            | boa_ast::ModuleItem::ImportDeclaration(_) => {}
         }
     }
     let entry = match export?.as_ref() {

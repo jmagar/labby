@@ -220,6 +220,26 @@ fn normalize_user_code_export_default_class_with_prologue() {
 }
 
 #[test]
+fn normalize_user_code_export_default_with_trailing_named_export() {
+    // A named export *after* `export default` must not shadow the default in the
+    // module-item scan. This needs a prologue so the input does not start with
+    // `export default` (which would take the start-anchored strip) and instead
+    // goes through normalize_module_code. Pre-fix the scan captured the trailing
+    // `export const y` and bailed to an invalid loose-wrap.
+    let result = super::normalize_user_code("const x = 1;\nexport default x;\nexport const y = 2;");
+    assert!(!result.contains("export default"), "got: {result}");
+    assert!(
+        !result.contains("export const"),
+        "the trailing named export must not leak into the wrapper: {result}"
+    );
+    assert!(result.starts_with("async () => {"), "got: {result}");
+    assert!(
+        result.contains("const x = 1"),
+        "prologue must be kept: {result}"
+    );
+}
+
+#[test]
 fn normalize_user_code_passthrough_for_plain_expressions() {
     let plain = "async () => callTool('lab::test', {})";
     let result = super::normalize_user_code(plain);
