@@ -95,6 +95,7 @@ node_modules/
 # ── Repo-specific ────────────────────────────────────────────────────────────
 data/
 proxies/
+outputs/
 config.local.toml
 *.key
 *.pem
