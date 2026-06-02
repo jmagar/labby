@@ -29,27 +29,43 @@ ByteStash is a self-hosted code snippet management service with multi-file suppo
 - **Share Management**: Create, view, and delete share links (public/protected/expiring)
 - **Organization**: Categorize and organize snippets with tags
 
-**Authentication:** API key via `x-api-key` header (recommended for CLI/automation)
+**Authentication:** JWT via the `bytestashauth: bearer <token>` header.
+
+> ⚠️ **API keys do NOT work for snippet writes on ByteStash ≤ 1.0.0.** Its
+> `authenticateToken` middleware ignores `req.apiKey` and still demands a JWT, so
+> `x-api-key` returns `401 Authentication required` on `/api/snippets`. The wrapper
+> therefore authenticates with a JWT (login or a pre-minted token). API keys only
+> work on the read-only public endpoints (`/api/public/snippets`). This is fixed on
+> ByteStash `main` (the `if (req.apiKey) return next()` bypass) — once released,
+> `x-api-key` will work for writes again.
 
 ## Setup
 
-**Required credentials in `~/.claude-homelab/.env`:**
+**Required credentials in `~/.lab/.env`:**
 
 ```bash
 BYTESTASH_URL="https://bytestash.example.com"
-BYTESTASH_API_KEY="<your_api_key>"
+BYTESTASH_USERNAME="<your_username>"
+BYTESTASH_PASSWORD="<your_password>"     # recommended: wrapper logs in each run, never expires
+# --- or, instead of username/password: ---
+BYTESTASH_TOKEN="<a_jwt>"                 # pre-minted JWT (expires; login is more durable)
+BYTESTASH_API_KEY="<your_api_key>"        # optional; only useful for /api/public reads (and future versions)
 ```
 
-**How to get your API key:**
-1. Log in to ByteStash web interface
-2. Navigate to Settings → API Keys
-3. Create new API key with a descriptive name
-4. Copy the generated key to `.env` file
+The wrapper resolves auth in this order: `BYTESTASH_TOKEN` → `BYTESTASH_USERNAME`+`BYTESTASH_PASSWORD`
+(via `POST /api/auth/login`). Override the env file path with `BYTESTASH_ENV_FILE`.
+
+**How to get credentials:**
+- **Username/password** (recommended): your normal ByteStash login. The wrapper
+  exchanges it for a fresh 24h JWT on every run, so nothing expires.
+- **Token**: mint a JWT (`jwt.sign({id,username}, JWT_SECRET)`) or copy `bytestash_token`
+  from your browser's cookies/localStorage. Note JWTs expire (default 24h).
 
 **Security:**
-- Set permissions: `chmod 600 ~/.claude-homelab/.env`
-- API keys are scoped to your user account
+- Set permissions: `chmod 600 ~/.lab/.env`
 - NEVER commit `.env` to version control
+- A stored `BYTESTASH_TOKEN` is a standing credential — revoke by rotating the
+  server's `JWT_SECRET`. Prefer username/password where possible.
 
 ## Commands
 
@@ -202,9 +218,11 @@ ByteStash supports snippets with multiple code fragments (files). Each fragment 
 ```
 
 **Authentication:**
-- Uses `x-api-key` header with API key from `.env`
-- API keys are managed in ByteStash web UI (Settings → API Keys)
-- Preferable to JWT tokens for automation
+- Uses `bytestashauth: bearer <jwt>` header. The wrapper obtains the JWT from
+  `BYTESTASH_TOKEN`, or by logging in with `BYTESTASH_USERNAME`/`BYTESTASH_PASSWORD`.
+- Snippet endpoints (`/api/snippets*`) are JWT-gated on ByteStash ≤ 1.0.0; the
+  `x-api-key` header is rejected there (see the warning at the top of this skill).
+- API keys still authenticate the read-only public endpoints (`/api/public/snippets`).
 
 **Share Links:**
 - Public shares: Anyone with link can view
@@ -223,7 +241,8 @@ ByteStash supports snippets with multiple code fragments (files). Each fragment 
 - Errors return HTTP status codes with JSON error messages
 
 **Limitations:**
-- API key required for all operations (no anonymous access via API)
+- JWT required for all snippet operations (API keys rejected on v1.0.0; see top warning)
+- List endpoint returns `{data:[...], pagination}` — the wrapper unwraps `.data` for you
 - Categories are tags (no hierarchical structure)
 - No bulk operations (must process snippets individually)
 - Share links cannot be updated (must delete and recreate)

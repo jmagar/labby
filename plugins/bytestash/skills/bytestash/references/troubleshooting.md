@@ -2,6 +2,32 @@
 
 Common issues and fixes for `skills/bytestash/scripts/bytestash-api.sh`.
 
+## 401 "Authentication required" with a VALID API key (ByteStash ≤ 1.0.0)
+
+### Symptom
+`x-api-key` requests to `/api/snippets` return `401 {"error":"Authentication required"}`,
+while a *garbage* key returns `401 {"error":"Invalid API key"}` (proving the key is
+actually valid — it's just not being honored).
+
+### Cause
+ByteStash v1.0.0's route chain is `authenticateApiKey → authenticateToken`. A valid
+API key sets `req.apiKey`, but v1.0.0's `authenticateToken` **does not** check
+`req.apiKey` and still demands a JWT, so it falls through to "Authentication required".
+(`main` adds `if (req.apiKey) return next()`, which fixes this — but it isn't in the
+v1.0.0 release image.)
+
+### Fix
+Authenticate with a **JWT** via the `bytestashauth: bearer <token>` header (this is what
+the wrapper now does). Provide it in `~/.lab/.env` as either:
+- `BYTESTASH_USERNAME` + `BYTESTASH_PASSWORD` (wrapper calls `POST /api/auth/login` → fresh 24h JWT), or
+- `BYTESTASH_TOKEN` (a pre-minted JWT; expires).
+
+API keys still work on the **read-only** public endpoints (`GET /api/public/snippets`).
+
+### Endpoint gotcha
+The authed snippet routes are under `/api/snippets` (not `/api/v1/snippets`). `GET
+/api/snippets` returns `{data:[...], pagination}`; the wrapper unwraps `.data`.
+
 ## DNS/Connectivity Errors
 
 ### Symptom

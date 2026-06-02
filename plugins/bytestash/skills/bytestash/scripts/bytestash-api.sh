@@ -17,8 +17,47 @@ source "$_LOAD_ENV" || { echo "ERROR: load-env.sh not found. Run /homelab-core:s
 # === Functions ===
 
 init_config() {
-    load_service_credentials "bytestash" "BYTESTASH_URL" "BYTESTASH_API_KEY"
+    # Primary credentials live in ~/.lab/.env (override with BYTESTASH_ENV_FILE).
+    # Falls back to the homelab loader (~/.claude-homelab/.env) if URL is unset.
+    local envf="${BYTESTASH_ENV_FILE:-$HOME/.lab/.env}"
+    if [[ -f "$envf" ]]; then set -a; source "$envf"; set +a; fi
+    if [[ -z "${BYTESTASH_URL:-}" ]]; then
+        load_service_credentials "bytestash" "BYTESTASH_URL" "BYTESTASH_URL" 2>/dev/null || true
+    fi
+    : "${BYTESTASH_URL:?ERROR: BYTESTASH_URL not set in $envf}"
     BYTESTASH_URL="${BYTESTASH_URL%/}"
+    bytestash_get_jwt || exit 1
+}
+
+# ByteStash auth: snippet CRUD requires a JWT via the `bytestashauth` header.
+# NOTE: ByteStash <= 1.0.0 does NOT accept API keys for writes — its
+# authenticateToken middleware ignores req.apiKey and still demands a JWT — so
+# username/password login is the reliable path. (API keys do still work for the
+# read-only public endpoints under /api/public/snippets.)
+BYTESTASH_JWT=""
+bytestash_get_jwt() {
+    # 1) Pre-minted token wins (e.g. BYTESTASH_TOKEN="<jwt>")
+    if [[ -n "${BYTESTASH_TOKEN:-}" ]]; then
+        BYTESTASH_JWT="$BYTESTASH_TOKEN"; return 0
+    fi
+    # 2) Username/password → POST /api/auth/login → { token }
+    if [[ -n "${BYTESTASH_USERNAME:-}" && -n "${BYTESTASH_PASSWORD:-}" ]]; then
+        local resp token
+        resp=$(curl -sS -X POST "${BYTESTASH_URL}/api/auth/login" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg u "$BYTESTASH_USERNAME" --arg p "$BYTESTASH_PASSWORD" \
+                  '{username:$u,password:$p}')") || return 1
+        token=$(printf '%s' "$resp" | jq -r '.token // empty')
+        if [[ -n "$token" ]]; then BYTESTASH_JWT="$token"; return 0; fi
+        echo "ERROR: ByteStash login failed: $(printf '%s' "$resp" | jq -r '.error // .')" >&2
+        return 1
+    fi
+    echo "ERROR: No ByteStash credentials found." >&2
+    echo "Set in ~/.lab/.env (either):" >&2
+    echo "  BYTESTASH_USERNAME=\"...\"  and  BYTESTASH_PASSWORD=\"...\"   (recommended)" >&2
+    echo "  BYTESTASH_TOKEN=\"<jwt>\"                                     (pre-minted)" >&2
+    echo "Note: ByteStash <= 1.0.0 rejects API keys for snippet writes; JWT is required." >&2
+    return 1
 }
 
 usage() {
@@ -106,12 +145,12 @@ api_request() {
 
     if [[ -n "$data" ]]; then
         response=$(curl -sS -w '\n%{http_code}' -X "$method" "$url" \
-            -H "x-api-key: $BYTESTASH_API_KEY" \
+            -H "bytestashauth: bearer $BYTESTASH_JWT" \
             -H "Content-Type: application/json" \
             -d "$data")
     else
         response=$(curl -sS -w '\n%{http_code}' -X "$method" "$url" \
-            -H "x-api-key: $BYTESTASH_API_KEY")
+            -H "bytestashauth: bearer $BYTESTASH_JWT")
     fi
 
     body="$(printf '%s' "$response" | sed '$d')"
@@ -126,9 +165,10 @@ api_request() {
     echo "$body"
 }
 
-# List all snippets
+# List all snippets. GET /api/snippets returns {data:[...], pagination}; unwrap to
+# the array so search/jq consumers (and humans) get a plain list.
 list_snippets() {
-    api_request "GET" "/api/v1/snippets"
+    api_request "GET" "/api/snippets" | jq '.data'
 }
 
 # Search snippets
@@ -151,7 +191,7 @@ search_snippets() {
 # Get snippet by ID
 get_snippet() {
     local id="$1"
-    api_request "GET" "/api/v1/snippets/$id"
+    api_request "GET" "/api/snippets/$id"
 }
 
 # Create snippet

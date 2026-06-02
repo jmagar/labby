@@ -26,8 +26,8 @@ Used for web UI sessions. Tokens obtained from `/api/auth/login` endpoint.
 
 ### List All Snippets
 
-**Endpoint:** `GET /api/v1/snippets`
-**Auth:** API Key required
+**Endpoint:** `GET /api/snippets`
+**Auth:** JWT required (API keys rejected on v1.0.0; use bytestashauth: bearer <jwt>)
 
 **Response:**
 ```json
@@ -54,7 +54,7 @@ Used for web UI sessions. Tokens obtained from `/api/auth/login` endpoint.
 
 ### Get Snippet by ID
 
-**Endpoint:** `GET /api/v1/snippets/{id}`
+**Endpoint:** `GET /api/snippets/{id}`
 **Auth:** API Key or JWT required
 
 **Parameters:**
@@ -115,8 +115,8 @@ Used for web UI sessions. Tokens obtained from `/api/auth/login` endpoint.
 
 ### Push Snippet with Files
 
-**Endpoint:** `POST /api/v1/snippets/push`
-**Auth:** API Key required
+**Endpoint:** `POST /api/snippets`
+**Auth:** JWT required (API keys rejected on v1.0.0; use bytestashauth: bearer <jwt>)
 **Content-Type:** `multipart/form-data`
 
 **Form Data:**

@@ -295,7 +295,7 @@ echo "Link: https://bytestash.example.com/s/$share_id"
 
 ```bash
 # Test connection
-curl -H "x-api-key: $BYTESTASH_API_KEY" \
+curl -H "bytestashauth: bearer $BYTESTASH_TOKEN" \
   "$BYTESTASH_URL/api/v1/snippets" | jq .
 
 # Verify credentials
@@ -310,7 +310,7 @@ fi
 
 ```bash
 # Add verbose output to script
-curl -v -H "x-api-key: $BYTESTASH_API_KEY" \
+curl -v -H "bytestashauth: bearer $BYTESTASH_TOKEN" \
   "$BYTESTASH_URL/api/v1/snippets"
 
 # Check environment variables
