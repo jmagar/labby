@@ -1,30 +1,14 @@
 use std::cell::RefCell;
 use std::collections::BTreeSet;
-#[cfg(not(feature = "code_mode_wasm"))]
-use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::process::ExitCode;
 use std::process::Stdio;
 use std::time::Duration;
 
-// `search` runs a Boa in-process JS filter over the catalog in BOTH the Boa and
-// wasm execute builds, so these symbols are unconditional. Execute-only Boa
-// symbols stay gated behind `not(code_mode_wasm)`.
-use boa_engine::Context;
-use boa_engine::JsValue;
-use boa_engine::Source;
-use boa_engine::builtins::promise::PromiseState;
-#[cfg(not(feature = "code_mode_wasm"))]
-use boa_engine::builtins::promise::ResolvingFunctions;
-use boa_engine::object::builtins::JsPromise;
-#[cfg(not(feature = "code_mode_wasm"))]
-use boa_engine::{JsArgs, JsError, JsNativeError, JsResult, NativeFunction, js_string};
-#[cfg(not(feature = "code_mode_wasm"))]
-use boa_gc::{Finalize, Trace};
+// Code Mode normalizes user code via the Boa parser/interner (rlib-only). The JS
+// engine that actually runs code (both `execute` and `search`) is Javy/QuickJS.
 use boa_interner::{Interner, ToIndentedString, ToInternedString};
 use boa_parser::{Parser, Source as ParserSource};
-#[cfg(not(feature = "code_mode_wasm"))]
-use boa_runtime::console::{ConsoleState, Logger};
 use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
 use rmcp::model::CallToolRequestParams;
 use rmcp::model::CallToolResult;
@@ -70,7 +54,8 @@ fn lab_action_unknown_tool_hint() -> String {
 /// 5. Loose statements / trailing expressions are wrapped in `async () => { ... }`;
 ///    if the trailing statement looks like an expression, it is returned.
 ///
-/// `evaluate_code_search` does NOT call this — search receives raw `code`.
+/// Both `execute` and `search` normalize the caller's code through this before
+/// handing it to the Javy runner.
 ///
 /// Exposed (`pub`) so integration tests can normalize a body form and pipe the
 /// exact post-normalize string through the runner end to end.
@@ -698,7 +683,38 @@ impl<'a> CodeModeBroker<'a> {
             entry_count = catalog.len(),
             "Code Mode search catalog ready"
         );
-        evaluate_code_search(code, &catalog)
+
+        // Run the caller's JS filter over the catalog inside the Javy runner. The
+        // catalog is injected as a global `const tools = [...]`, mirroring the
+        // typed proxy `execute` injects. `max_tool_calls = 0` means any stray
+        // `callTool` in the search filter errors out — search must not call tools.
+        let catalog_json = serde_json::to_string(&catalog).map_err(|err| ToolError::Sdk {
+            sdk_kind: "internal_error".to_string(),
+            message: format!("failed to serialize Code Mode search catalog: {err}"),
+        })?;
+        let proxy = format!("const tools = {catalog_json};\n");
+        // Search passes the caller's code to the runner *raw* (no
+        // `normalize_user_code`). The runner's invoker requires the code to
+        // evaluate to a function and throws otherwise, so a non-function search
+        // input still surfaces as `server_error` — preserving the contract the
+        // old in-process `evaluate_code_search` enforced. Normalizing here would
+        // wrap a bare expression like `42` into `async () => 42`, silently
+        // turning a contract violation into a successful run.
+        let response = self
+            .run_in_runner(
+                code.to_string(),
+                proxy,
+                0,
+                CODE_MODE_SEARCH_TIMEOUT,
+                caller,
+                surface,
+                0,
+                0,
+                CodeModeCapabilityFilter::default(),
+            )
+            .await?;
+        // search must return an array/Value; undefined/None → [].
+        Ok(response.result.unwrap_or_else(|| Value::Array(Vec::new())))
     }
 
     pub async fn execute(
@@ -869,6 +885,56 @@ impl<'a> CodeModeBroker<'a> {
         // discovered via `search`. Normalize the user code and run it directly.
         let code_to_run = normalize_user_code(code);
 
+        // Build the runtime `codemode.*` proxy from the live upstream catalog
+        // (same source `search` uses). On any failure, fall back to an empty
+        // proxy rather than aborting execute — `callTool` is always available as
+        // the documented escape hatch, so the run can still proceed without the
+        // typed namespace.
+        let proxy = match self
+            .build_code_mode_proxy(&caller, surface, &capability_filter)
+            .await
+        {
+            Ok(proxy) => proxy,
+            Err(err) => {
+                tracing::warn!(
+                    kind = err.kind(),
+                    "code_mode.proxy_generation_failed; continuing with callTool only"
+                );
+                String::new()
+            }
+        };
+
+        self.run_in_runner(
+            code_to_run,
+            proxy,
+            max_tool_calls,
+            timeout,
+            caller,
+            surface,
+            max_log_entries,
+            max_log_bytes,
+            capability_filter,
+        )
+        .await
+    }
+
+    /// Spawn the Code Mode runner subprocess, feed it `proxy` + `code_to_run`,
+    /// and drive the protocol loop (tool calls, logs, completion) to a
+    /// `CodeModeExecutionResponse`. Shared by `execute` (live proxy, real tool
+    /// calls) and `search` (catalog-only proxy, `max_tool_calls = 0`).
+    #[allow(clippy::too_many_arguments)]
+    async fn run_in_runner(
+        &self,
+        code_to_run: String,
+        proxy: String,
+        max_tool_calls: usize,
+        timeout: Duration,
+        caller: CodeModeCaller,
+        surface: CodeModeSurface,
+        max_log_entries: usize,
+        max_log_bytes: usize,
+        capability_filter: CodeModeCapabilityFilter,
+    ) -> Result<CodeModeExecutionResponse, ToolError> {
         let exe = std::env::current_exe().map_err(|err| ToolError::Sdk {
             sdk_kind: "internal_error".to_string(),
             message: format!("failed to locate current executable for Code Mode runner: {err}"),
@@ -942,25 +1008,6 @@ impl<'a> CodeModeBroker<'a> {
                 }
             });
             stderr_buf
-        };
-
-        // Build the runtime `codemode.*` proxy from the live upstream catalog
-        // (same source `search` uses). On any failure, fall back to an empty
-        // proxy rather than aborting execute — `callTool` is always available as
-        // the documented escape hatch, so the run can still proceed without the
-        // typed namespace.
-        let proxy = match self
-            .build_code_mode_proxy(&caller, surface, &capability_filter)
-            .await
-        {
-            Ok(proxy) => proxy,
-            Err(err) => {
-                tracing::warn!(
-                    kind = err.kind(),
-                    "code_mode.proxy_generation_failed; continuing with callTool only"
-                );
-                String::new()
-            }
         };
 
         write_runner_input(
@@ -1722,109 +1769,23 @@ struct CodeModeRunnerState {
     reader: BufReader<io::Stdin>,
     writer: BufWriter<io::Stdout>,
     next_seq: u64,
-    #[cfg(not(feature = "code_mode_wasm"))]
-    pending_calls: HashMap<u64, ResolvingFunctions>,
 }
-
-const CODE_MODE_LOOP_ITERATION_LIMIT: u64 = 1_000_000;
-// Boa interprets this as the max operand-stack value count (default 10_240);
-// the Javy path interprets it as the native stack size in bytes. 16 KiB was far
-// too small once the runtime `codemode.*` proxy preamble (one method per upstream
-// tool, ~140+ across the gateway) is injected — even a single callTool overflowed
-// the operand stack. 256 KiB gives ample headroom for the preamble + await/Promise
-// machinery; the separate recursion limit still bounds genuine runaway recursion.
-const CODE_MODE_STACK_SIZE_LIMIT: usize = 256 * 1024;
-const CODE_MODE_RECURSION_LIMIT: usize = 256;
-
-/// Backstop applied in the runner itself to prevent OOM before the parent's
-/// log caps are enforced. Parent enforces the config-driven caps afterward.
-#[cfg(not(feature = "code_mode_wasm"))]
-const RUNNER_LOG_HARD_CAP_ENTRIES: usize = 10_000;
-#[cfg(not(feature = "code_mode_wasm"))]
-const RUNNER_LOG_HARD_CAP_BYTES: usize = 1024 * 1024; // 1 MB
 
 thread_local! {
     static RUNNER_STATE: RefCell<Option<CodeModeRunnerState>> = const { RefCell::new(None) };
-    /// Captured console output lines for the current runner execution.
-    #[cfg(not(feature = "code_mode_wasm"))]
-    static RUNNER_LOGS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
-/// A `boa_runtime` console logger that accumulates lines into `RUNNER_LOGS`.
-///
-/// Uses a unit struct + thread-local so that no GC-traced heap types are needed.
-/// Safety: `CapturingLogger` holds no Boa GC-managed pointers, so the empty
-/// `Trace` and `Finalize` implementations are correct.
-#[cfg(not(feature = "code_mode_wasm"))]
-#[derive(Debug)]
-struct CapturingLogger;
+// Javy interprets this as the native stack size in bytes. The runtime
+// `codemode.*` proxy preamble (one method per upstream tool, ~140+ across the
+// gateway) plus await/Promise machinery needs ample headroom; 256 KiB avoids
+// operand-stack overflow on a single callTool.
+const CODE_MODE_STACK_SIZE_LIMIT: usize = 256 * 1024;
 
-#[cfg(not(feature = "code_mode_wasm"))]
-// SAFETY: CapturingLogger holds no Boa GC-managed pointers.
-unsafe impl Trace for CapturingLogger {
-    boa_gc::empty_trace!();
-}
+/// Wall-clock budget for a `search` filter run in the Javy runner. Search does
+/// pure computation over the catalog (no tool calls), so this is shorter than
+/// the configurable `execute` timeout.
+const CODE_MODE_SEARCH_TIMEOUT: Duration = Duration::from_secs(15);
 
-#[cfg(not(feature = "code_mode_wasm"))]
-impl Finalize for CapturingLogger {}
-
-#[cfg(not(feature = "code_mode_wasm"))]
-impl Logger for CapturingLogger {
-    fn log(
-        &self,
-        msg: String,
-        _state: &ConsoleState,
-        _context: &mut Context,
-    ) -> boa_engine::JsResult<()> {
-        append_runner_log(msg);
-        Ok(())
-    }
-    fn info(
-        &self,
-        msg: String,
-        state: &ConsoleState,
-        context: &mut Context,
-    ) -> boa_engine::JsResult<()> {
-        self.log(msg, state, context)
-    }
-    fn warn(
-        &self,
-        msg: String,
-        state: &ConsoleState,
-        context: &mut Context,
-    ) -> boa_engine::JsResult<()> {
-        self.log(msg, state, context)
-    }
-    fn error(
-        &self,
-        msg: String,
-        state: &ConsoleState,
-        context: &mut Context,
-    ) -> boa_engine::JsResult<()> {
-        self.log(msg, state, context)
-    }
-}
-
-/// Append a log line to the runner log buffer, respecting the hard backstop.
-#[cfg(not(feature = "code_mode_wasm"))]
-fn append_runner_log(line: String) {
-    RUNNER_LOGS.with(|logs| {
-        let mut logs = logs.borrow_mut();
-        let current_bytes: usize = logs.iter().map(|l| l.len()).sum();
-        if logs.len() >= RUNNER_LOG_HARD_CAP_ENTRIES || current_bytes >= RUNNER_LOG_HARD_CAP_BYTES {
-            return; // backstop reached — drop silently; parent will add sentinel
-        }
-        logs.push(line);
-    });
-}
-
-/// Drain the runner log buffer and return all accumulated lines.
-#[cfg(not(feature = "code_mode_wasm"))]
-fn drain_runner_logs() -> Vec<String> {
-    RUNNER_LOGS.with(|logs| std::mem::take(&mut *logs.borrow_mut()))
-}
-
-#[cfg(feature = "code_mode_wasm")]
 #[allow(dead_code)]
 mod wasm_runner {
     use std::collections::HashMap;
@@ -1923,76 +1884,6 @@ fn serialized_catalog_size(entries: &[CodeModeCatalogEntry]) -> Result<usize, To
             sdk_kind: "internal_error".to_string(),
             message: format!("failed to serialize Code Mode catalog: {err}"),
         })
-}
-
-/// Run the caller's JavaScript search function against the inline catalog using
-/// Boa, in-process. The script is wrapped so that `const tools = [...]` is in
-/// scope and the caller's arrow function is invoked and awaited.
-fn evaluate_code_search(code: &str, catalog: &[CodeModeCatalogEntry]) -> Result<Value, ToolError> {
-    let catalog_json = serde_json::to_string(catalog).map_err(|err| ToolError::Sdk {
-        sdk_kind: "internal_error".to_string(),
-        message: format!("failed to encode Code Mode catalog: {err}"),
-    })?;
-    let wrapped = format!(
-        "const tools = {catalog_json};\n\
-         (async () => {{\n\
-           const __codeModeSearch = ({code});\n\
-           if (typeof __codeModeSearch !== 'function') {{\n\
-             throw new TypeError('code_search code must evaluate to a function');\n\
-           }}\n\
-           return await __codeModeSearch();\n\
-         }})()"
-    );
-
-    let mut context = Context::default();
-    configure_code_mode_runtime_limits(&mut context);
-    let value = context
-        .eval(Source::from_bytes(wrapped.as_bytes()))
-        .map_err(|err| ToolError::Sdk {
-            sdk_kind: "invalid_param".to_string(),
-            message: format!("Code Mode search JavaScript failed to evaluate: {err}"),
-        })?;
-    let object = value.as_object().ok_or_else(|| ToolError::Sdk {
-        sdk_kind: "invalid_param".to_string(),
-        message: "Code Mode search script did not return a promise".to_string(),
-    })?;
-    let promise = JsPromise::from_object(object.clone()).map_err(|err| ToolError::Sdk {
-        sdk_kind: "invalid_param".to_string(),
-        message: format!("Code Mode search script did not return a promise: {err}"),
-    })?;
-
-    for _ in 0..CODE_MODE_LOOP_ITERATION_LIMIT {
-        context.run_jobs().map_err(|err| ToolError::Sdk {
-            sdk_kind: "server_error".to_string(),
-            message: err.to_string(),
-        })?;
-        match promise.state() {
-            PromiseState::Fulfilled(value) => {
-                return value
-                    .to_json(&mut context)
-                    .map_err(|err| ToolError::Sdk {
-                        sdk_kind: "server_error".to_string(),
-                        message: format!("failed to serialize Code Mode search result: {err}"),
-                    })?
-                    .ok_or_else(|| ToolError::Sdk {
-                        sdk_kind: "server_error".to_string(),
-                        message: "Code Mode search result is not JSON-serializable".to_string(),
-                    });
-            }
-            PromiseState::Rejected(reason) => {
-                return Err(ToolError::Sdk {
-                    sdk_kind: "server_error".to_string(),
-                    message: js_value_message(&reason, &mut context),
-                });
-            }
-            PromiseState::Pending => {}
-        }
-    }
-
-    Err(ToolError::Sdk {
-        sdk_kind: "server_error".to_string(),
-        message: "Code Mode search script did not settle before the iteration limit".to_string(),
-    })
 }
 
 fn truncate_execution_response(
@@ -2262,8 +2153,6 @@ pub fn run_code_mode_runner_stdio() -> ExitCode {
             reader: BufReader::new(io::stdin()),
             writer: BufWriter::new(io::stdout()),
             next_seq: 0,
-            #[cfg(not(feature = "code_mode_wasm"))]
-            pending_calls: HashMap::new(),
         });
     });
 
@@ -2283,7 +2172,6 @@ pub fn run_code_mode_runner_stdio() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-#[cfg(feature = "code_mode_wasm")]
 fn run_code_mode_runner() -> Result<(), String> {
     let CodeModeRunnerInput::Start { code, proxy } = runner_read_input()? else {
         return Err("runner expected start message".to_string());
@@ -2389,105 +2277,6 @@ globalThis.__labMainPromise = (async () => {{
     })
 }
 
-#[cfg(not(feature = "code_mode_wasm"))]
-fn run_code_mode_runner() -> Result<(), String> {
-    let CodeModeRunnerInput::Start { code, proxy } = runner_read_input()? else {
-        return Err("runner expected start message".to_string());
-    };
-
-    // Reset the log buffer for this execution.
-    RUNNER_LOGS.with(|logs| logs.borrow_mut().clear());
-
-    let mut context = Context::default();
-    configure_code_mode_runtime_limits(&mut context);
-
-    // Install the capturing console logger so console.log/warn/error lines are
-    // accumulated in RUNNER_LOGS and returned in the Done message.
-    boa_runtime::console::Console::register_with_logger(CapturingLogger, &mut context)
-        .map_err(js_error_message)?;
-
-    context
-        .register_global_builtin_callable(
-            js_string!("__labCallToolNative"),
-            2,
-            NativeFunction::from_copy_closure(code_mode_call_tool_native),
-        )
-        .map_err(js_error_message)?;
-
-    // Shared execute wrapper body (assign → typeof check → invoke), identical to
-    // the Javy path via `code_mode_main_invoker`. Interpolated as a named arg so
-    // its literal JS braces are not re-scanned by `format!`.
-    let invoker = code_mode_main_invoker(&code);
-    // `callTool` is already registered as a native builtin above, so the proxy
-    // (which calls `callTool`) is simply prepended in front of the IIFE. The
-    // proxy ends with `var` declarations (no completion value), so the trailing
-    // IIFE remains the `eval` completion value (the awaited promise). An empty
-    // proxy (search path / legacy Start) leaves `codemode` undefined as before.
-    let wrapped = format!(
-        r#"
-{CODE_MODE_VALUE_CODEC_JS}
-globalThis.callTool = (id, params = {{}}) => {{
-  if (typeof id !== "string" || id.trim() === "") {{
-    throw new TypeError("callTool id must be a non-empty string");
-  }}
-  if (params === null || typeof params !== "object" || Array.isArray(params)) {{
-    throw new TypeError("callTool params must be a JSON object");
-  }}
-  return globalThis.__labCallToolNative(id, __labEncodeResult(params));
-}};
-{proxy}
-(async () => {{
-{invoker}}})()
-"#
-    );
-    let value = context
-        .eval(Source::from_bytes(wrapped.as_bytes()))
-        .map_err(js_error_message)?;
-    let object = value
-        .as_object()
-        .ok_or_else(|| "Code Mode script did not return a promise".to_string())?;
-    let promise = JsPromise::from_object(object.clone()).map_err(js_error_message)?;
-
-    let mut resolved_result: Option<Value> = None;
-    loop {
-        context.run_jobs().map_err(js_error_message)?;
-
-        match promise.state() {
-            PromiseState::Fulfilled(value) => {
-                if value.is_undefined() || value.is_null() {
-                    resolved_result = None;
-                } else {
-                    resolved_result = match value.to_json(&mut context) {
-                        Ok(Some(value)) if !value.is_null() => Some(value),
-                        Ok(_) => {
-                            return Err("Code Mode result must be JSON-serializable".to_string());
-                        }
-                        Err(err) => {
-                            return Err(format!(
-                                "Code Mode result must be JSON-serializable: {}",
-                                js_error_message(&err)
-                            ));
-                        }
-                    };
-                }
-                break;
-            }
-            PromiseState::Rejected(reason) => return Err(js_value_message(&reason, &mut context)),
-            PromiseState::Pending => {
-                let input = runner_read_input()?;
-                settle_code_mode_tool_promise(input, &mut context)?;
-            }
-        }
-    }
-
-    let logs = drain_runner_logs();
-    runner_emit(CodeModeRunnerOutput::Done {
-        result: resolved_result,
-        logs,
-    })
-}
-
-#[cfg(feature = "code_mode_wasm")]
 enum JavyMainPromiseState {
     Pending,
     /// The async function returned. `result` is the JSON-serialized return value,
@@ -2496,7 +2285,6 @@ enum JavyMainPromiseState {
     Rejected(String),
 }
 
-#[cfg(feature = "code_mode_wasm")]
 fn javy_emit_tool_call(args: javy::Args<'_>) -> javy::quickjs::Result<u64> {
     let (cx, args) = args.release();
     let id_value = args
@@ -2551,7 +2339,6 @@ fn javy_emit_tool_call(args: javy::Args<'_>) -> javy::quickjs::Result<u64> {
     Ok(seq)
 }
 
-#[cfg(feature = "code_mode_wasm")]
 fn javy_settle_tool_promise(
     runtime: &javy::Runtime,
     input: &CodeModeRunnerInput,
@@ -2570,7 +2357,6 @@ fn javy_settle_tool_promise(
         .map_err(|err| err.to_string())
 }
 
-#[cfg(feature = "code_mode_wasm")]
 fn javy_main_promise_state(runtime: &javy::Runtime) -> Result<JavyMainPromiseState, String> {
     runtime
         .context()
@@ -2626,7 +2412,6 @@ fn javy_main_promise_state(runtime: &javy::Runtime) -> Result<JavyMainPromiseSta
         .map_err(javy_error_message)
 }
 
-#[cfg(feature = "code_mode_wasm")]
 fn javy_type_error(
     message_context: javy::quickjs::Ctx<'_>,
     message: impl Into<String>,
@@ -2634,120 +2419,8 @@ fn javy_type_error(
     javy::to_js_error(message_context, anyhow::anyhow!(message.into()))
 }
 
-#[cfg(feature = "code_mode_wasm")]
 fn javy_error_message(error: javy::quickjs::Error) -> String {
     error.to_string()
-}
-
-fn configure_code_mode_runtime_limits(context: &mut Context) {
-    let limits = context.runtime_limits_mut();
-    limits.set_loop_iteration_limit(CODE_MODE_LOOP_ITERATION_LIMIT);
-    limits.set_stack_size_limit(CODE_MODE_STACK_SIZE_LIMIT);
-    limits.set_recursion_limit(CODE_MODE_RECURSION_LIMIT);
-}
-
-#[cfg(not(feature = "code_mode_wasm"))]
-fn code_mode_call_tool_native(
-    _this: &JsValue,
-    args: &[JsValue],
-    context: &mut Context,
-) -> JsResult<JsValue> {
-    let id = args
-        .get_or_undefined(0)
-        .to_string(context)?
-        .to_std_string_escaped();
-    if id.trim().is_empty() {
-        return Err(js_type_error("callTool id must be a non-empty string"));
-    }
-
-    let params = args
-        .get(1)
-        .map(|value| value.to_json(context))
-        .transpose()?
-        .flatten()
-        .unwrap_or_else(|| json!({}));
-    if !params.is_object() {
-        return Err(js_type_error("callTool params must be a JSON object"));
-    }
-
-    let (promise, resolvers) = JsPromise::new_pending(context);
-    let seq = RUNNER_STATE
-        .with(|state| {
-            let mut state = state.borrow_mut();
-            let state = state
-                .as_mut()
-                .ok_or_else(|| "runner state is not initialized".to_string())?;
-            let seq = state.next_seq;
-            state.next_seq += 1;
-            state.pending_calls.insert(seq, resolvers);
-            Ok::<_, String>(seq)
-        })
-        .map_err(js_type_error)?;
-
-    runner_emit(CodeModeRunnerOutput::ToolCall { seq, id, params }).map_err(js_type_error)?;
-    Ok(promise.into())
-}
-
-#[cfg(not(feature = "code_mode_wasm"))]
-fn settle_code_mode_tool_promise(
-    input: CodeModeRunnerInput,
-    context: &mut Context,
-) -> Result<(), String> {
-    // FINDING: Both the Boa (native) path and the Javy (wasm) path had the same
-    // bug — tool errors were rejected with a plain "kind: message" string instead
-    // of a JSON-encoded CodeModeError object. The contract specifies:
-    //   JSON.parse(String(e.message))
-    // so the rejection reason must be a JS string whose content is valid JSON.
-    // Fixed here (Boa) and in globalThis.__labSettleToolCall (Javy wrapper below).
-    let (seq, result) = match input {
-        CodeModeRunnerInput::ToolResult { seq, result } => (seq, Ok(result)),
-        CodeModeRunnerInput::ToolError { seq, kind, message } => {
-            // Produce a JSON string matching CodeModeError so that
-            // JSON.parse(String(e.message)) succeeds in the sandbox.
-            let json = serde_json::to_string(&json!({"kind": kind, "message": message}))
-                // Fallback must NOT interpolate runtime-controlled values: kind/message could
-                // contain quotes or backslashes that would produce invalid JSON.
-                .unwrap_or_else(|_| {
-                    r#"{"kind":"internal_error","message":"failed to serialize tool error"}"#
-                        .to_string()
-                });
-            (seq, Err(json))
-        }
-        CodeModeRunnerInput::Start { .. } => {
-            return Err("runner received unexpected start message".to_string());
-        }
-    };
-
-    let resolvers = RUNNER_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        let state = state
-            .as_mut()
-            .ok_or_else(|| "runner state is not initialized".to_string())?;
-        state
-            .pending_calls
-            .remove(&seq)
-            .ok_or_else(|| "runner received a response for an unknown tool call".to_string())
-    })?;
-
-    match result {
-        Ok(result) => {
-            let value = JsValue::from_json(&result, context).map_err(js_error_message)?;
-            resolvers
-                .resolve
-                .call(&JsValue::undefined(), &[value], context)
-                .map_err(js_error_message)?;
-        }
-        Err(json_message) => {
-            // Reject with a JS string containing JSON — the sandbox catches this
-            // and the agent calls JSON.parse(String(e.message)) to decode it.
-            let reason = JsValue::from(js_string!(json_message.as_str()));
-            resolvers
-                .reject
-                .call(&JsValue::undefined(), &[reason], context)
-                .map_err(js_error_message)?;
-        }
-    }
-    Ok(())
 }
 
 fn runner_emit(output: CodeModeRunnerOutput) -> Result<(), String> {
@@ -2783,26 +2456,8 @@ fn runner_read_input() -> Result<CodeModeRunnerInput, String> {
     })
 }
 
-#[cfg(not(feature = "code_mode_wasm"))]
-fn js_type_error(message: impl Into<String>) -> JsError {
-    JsNativeError::typ().with_message(message.into()).into()
-}
-
-#[cfg(not(feature = "code_mode_wasm"))]
-fn js_error_message(error: JsError) -> String {
-    error.to_string()
-}
-
-fn js_value_message(value: &JsValue, context: &mut Context) -> String {
-    value
-        .to_string(context)
-        .map(|value| value.to_std_string_escaped())
-        .unwrap_or_else(|_| "promise rejected".to_string())
-}
-
 #[cfg(test)]
 mod tests {
-    use boa_engine::{Context, Source};
     use rmcp::model::{CallToolResult, Content};
     use serde_json::json;
     use std::collections::HashMap;
@@ -2810,8 +2465,8 @@ mod tests {
 
     use super::{
         CodeModeCatalogEntry, CodeModeExecutedCall, CodeModeExecutionResponse, CodeModeToolId,
-        CodeModeToolRef, code_mode_upstream_error_info, configure_code_mode_runtime_limits,
-        sanitize_code_mode_schema, truncate_execution_response,
+        CodeModeToolRef, code_mode_upstream_error_info, sanitize_code_mode_schema,
+        truncate_execution_response,
     };
 
     fn fixture_upstream_entry(
@@ -3198,19 +2853,25 @@ mod tests {
 
         let registry = super::ToolRegistry::new();
         let broker = super::CodeModeBroker::new(&registry, Some(&manager));
-        let result = broker
-            .search(
-                "async () => tools.map(t => ({id: t.id, schema: t.schema, output_schema: t.output_schema, signature: t.signature, dts: t.dts}))",
-                super::CodeModeCaller::Scoped {
-                    scopes: vec!["lab:read".to_string()],
-                    sub: None,
-                },
-                super::CodeModeSurface::Mcp {
-                    allow_destructive_actions: false,
-                },
-            )
+        // The JS evaluation step now runs in a subprocess (Javy runner) that lib
+        // unit tests cannot spawn (`current_exe()` is the test harness, not
+        // labby). The catalog projection (`schema`/`signature`/`dts`) is what this
+        // test actually covers, so assert directly on `code_search_catalog` — the
+        // same source `search` serializes into the runner as `const tools`.
+        let caller = super::CodeModeCaller::Scoped {
+            scopes: vec!["lab:read".to_string()],
+            sub: None,
+        };
+        let surface = super::CodeModeSurface::Mcp {
+            allow_destructive_actions: false,
+        };
+        let owner = caller.runtime_owner(surface);
+        let oauth_subject = caller.oauth_subject();
+        let (entries, _size) = broker
+            .code_search_catalog(&manager, true, &owner, oauth_subject)
             .await
-            .expect("search evaluates over live catalog");
+            .expect("catalog builds over live catalog");
+        let result = serde_json::to_value(&entries).expect("serialize catalog");
 
         let entries = result.as_array().expect("array");
         let entry = entries
@@ -3294,13 +2955,28 @@ mod tests {
         let surface = super::CodeModeSurface::Mcp {
             allow_destructive_actions: false,
         };
-        let list_agent_os_tools = "async () => tools.filter(t => t.upstream === 'agent-os_windows-mcp').map(t => t.name).sort()";
+        // The catalog-refresh behavior under test is in-process (`code_search_catalog`
+        // re-resolves the live catalog on each call). The JS name-filter `search`
+        // previously applied is now an in-test projection: collect agent-os tool
+        // names from the freshly built catalog. (The runner that runs the JS filter
+        // cannot be spawned from lib unit tests; see the sibling test.)
+        let owner = read_only.runtime_owner(surface);
+        let oauth_subject = read_only.oauth_subject();
+        let agent_os_names = |entries: &[super::CodeModeCatalogEntry]| -> Vec<String> {
+            let mut names: Vec<String> = entries
+                .iter()
+                .filter(|entry| entry.upstream == "agent-os_windows-mcp")
+                .map(|entry| entry.name.clone())
+                .collect();
+            names.sort();
+            names
+        };
 
-        let initial = broker
-            .search(list_agent_os_tools, read_only.clone(), surface)
+        let (initial, _size) = broker
+            .code_search_catalog(&manager, true, &owner, oauth_subject)
             .await
-            .expect("initial read-only search evaluates over partial catalog");
-        assert_eq!(initial, json!(["Wait"]));
+            .expect("initial read-only catalog builds over partial catalog");
+        assert_eq!(agent_os_names(&initial), vec!["Wait".to_string()]);
 
         *live_tools.write().await = vec![
             "FileSystem".to_string(),
@@ -3309,13 +2985,18 @@ mod tests {
             "Wait".to_string(),
         ];
 
-        let refreshed = broker
-            .search(list_agent_os_tools, read_only, surface)
+        let (refreshed, _size) = broker
+            .code_search_catalog(&manager, true, &owner, oauth_subject)
             .await
-            .expect("read-only search refreshes expanded live catalog");
+            .expect("read-only catalog refreshes expanded live catalog");
         assert_eq!(
-            refreshed,
-            json!(["FileSystem", "PowerShell", "Snapshot", "Wait"])
+            agent_os_names(&refreshed),
+            vec![
+                "FileSystem".to_string(),
+                "PowerShell".to_string(),
+                "Snapshot".to_string(),
+                "Wait".to_string(),
+            ]
         );
 
         let tool = manager
@@ -3400,45 +3081,6 @@ mod tests {
             .await
             .expect_err("missing action must fail before dispatch");
         assert_eq!(err.kind(), "missing_param");
-    }
-
-    #[cfg(not(feature = "code_mode_wasm"))]
-    #[test]
-    fn evaluate_code_search_runs_js_over_catalog() {
-        let catalog = vec![
-            super::CodeModeCatalogEntry::upstream_tool(
-                "github",
-                "search_issues",
-                "search issues",
-                None,
-                None,
-            ),
-            super::CodeModeCatalogEntry::upstream_tool(
-                "docker",
-                "container_logs",
-                "tail container logs",
-                None,
-                None,
-            ),
-        ];
-        let result = super::evaluate_code_search(
-            "async () => tools.filter(t => t.upstream === 'github').map(t => t.name)",
-            &catalog,
-        )
-        .expect("search evaluates");
-        assert_eq!(result, serde_json::json!(["search_issues"]));
-    }
-
-    #[cfg(not(feature = "code_mode_wasm"))]
-    #[test]
-    fn evaluate_code_search_rejects_non_function() {
-        let err = super::evaluate_code_search("42", &[]).expect_err("non-function must error");
-        match err {
-            super::ToolError::Sdk { sdk_kind, .. } => {
-                assert_eq!(sdk_kind, "server_error");
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
     }
 
     #[tokio::test]
@@ -3757,19 +3399,6 @@ mod tests {
     }
 
     #[test]
-    fn configured_runtime_limits_reject_unbounded_loops() {
-        let mut context = Context::default();
-        configure_code_mode_runtime_limits(&mut context);
-
-        let error = context
-            .eval(Source::from_bytes(b"while (true) {}"))
-            .expect_err("loop limit should stop unbounded scripts");
-
-        assert!(error.to_string().contains("iteration limit"));
-    }
-
-    #[cfg(feature = "code_mode_wasm")]
-    #[test]
     fn wasm_runner_returns_42() {
         let result = super::wasm_runner::run_wasm_i32_export_for_smoke(
             r#"
@@ -3785,7 +3414,6 @@ mod tests {
         assert_eq!(result, 42);
     }
 
-    #[cfg(feature = "code_mode_wasm")]
     #[test]
     fn wasm_runner_reuses_cached_modules() {
         let wat = r#"
@@ -3814,7 +3442,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "code_mode_wasm")]
     #[test]
     fn wasm_runner_reports_fuel_exhaustion_kind() {
         let err = super::wasm_runner::run_wasm_i32_export_for_smoke(
