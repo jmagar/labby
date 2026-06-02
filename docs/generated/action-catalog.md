@@ -45,7 +45,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `fs` | `fs.preview` | false | false | `path*: string`<br>`max_bytes: integer` | `binary (streamed); mime from safe-MIME whitelist or application/octet-stream` | api, web |
 | `fs` | `help` | true | false |  | `HelpPayload` | mcp, api, web |
 | `fs` | `schema` | true | false | `action*: string` | `ActionSpec` | mcp, api, web |
-| `gateway` | `gateway.add` | false | true | `spec*: json`<br>`bearer_token_value: string`<br>`allow_stdio: boolean` | `GatewayView` | cli, mcp, api, web |
+| `gateway` | `gateway.add` | false | true | `spec*: json`<br>`bearer_token_value: string` | `GatewayView` | cli, mcp, api, web |
 | `gateway` | `gateway.client_config.get` | false | false | `name*: string` | `McpClientConfigView` | cli, mcp, api, web |
 | `gateway` | `gateway.code_mode.get` | false | false |  | `CodeModeConfig` | cli, mcp, api, web |
 | `gateway` | `gateway.code_mode.set` | false | true | `timeout_ms: integer`<br>`max_tool_calls: integer`<br>`max_response_bytes: integer`<br>`max_response_tokens: integer` | `CodeModeConfig` | cli, mcp, api, web |
@@ -87,10 +87,10 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `gateway` | `gateway.service_config.set` | false | true | `service*: string`<br>`values*: json` | `ServiceConfigView` | cli, mcp, api, web |
 | `gateway` | `gateway.status` | false | false | `name: string` | `GatewayRuntimeView[]` | cli, mcp, api, web |
 | `gateway` | `gateway.supported_services` | false | false |  | `SupportedServiceView[]` | cli, mcp, api, web |
-| `gateway` | `gateway.test` | false | false | `name: string`<br>`spec: json`<br>`allow_stdio: boolean` | `GatewayTestResult` | cli, mcp, api, web |
+| `gateway` | `gateway.test` | false | false | `name: string`<br>`spec: json` | `GatewayTestResult` | cli, mcp, api, web |
 | `gateway` | `gateway.tool_search.get` | false | false |  | `ToolSearchConfig` | cli, mcp, api, web |
 | `gateway` | `gateway.tool_search.set` | false | true | `enabled*: boolean`<br>`top_k_default: integer`<br>`max_tools: integer` | `ToolSearchConfig` | cli, mcp, api, web |
-| `gateway` | `gateway.update` | false | true | `name*: string`<br>`patch*: json`<br>`bearer_token_value: string`<br>`allow_stdio: boolean` | `GatewayView` | cli, mcp, api, web |
+| `gateway` | `gateway.update` | false | true | `name*: string`<br>`patch*: json`<br>`bearer_token_value: string` | `GatewayView` | cli, mcp, api, web |
 | `gateway` | `gateway.virtual_server.disable` | false | true | `id*: string` | `ServerView` | cli, mcp, api, web |
 | `gateway` | `gateway.virtual_server.enable` | false | true | `id*: string` | `ServerView` | cli, mcp, api, web |
 | `gateway` | `gateway.virtual_server.get_mcp_policy` | false | false | `id*: string` | `VirtualServerMcpPolicyView` | cli, mcp, api, web |

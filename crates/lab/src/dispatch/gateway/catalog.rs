@@ -374,12 +374,6 @@ pub const ACTIONS: &[ActionSpec] = &[
                 required: false,
                 description: "Proposed gateway config payload to test without saving",
             },
-            ParamSpec {
-                name: "allow_stdio",
-                ty: "boolean",
-                required: false,
-                description: "Required when testing a stdio gateway because probing can execute a local command",
-            },
         ],
     },
     ActionSpec {
@@ -550,12 +544,6 @@ pub const ACTIONS: &[ActionSpec] = &[
                 required: false,
                 description: "Write-only: raw bearer token to store securely. Never returned on reads. If bearer_token_env is omitted from the spec, a default env var name is derived from the gateway name.",
             },
-            ParamSpec {
-                name: "allow_stdio",
-                ty: "boolean",
-                required: false,
-                description: "Required when spec.command is set because adding an enabled stdio gateway can execute a local command during reconcile",
-            },
         ],
     },
     ActionSpec {
@@ -576,12 +564,6 @@ pub const ACTIONS: &[ActionSpec] = &[
                 ty: "string",
                 required: false,
                 description: "Write-only: raw bearer token to store securely. Never returned on reads. Requires bearer_token_env in patch or existing config.",
-            },
-            ParamSpec {
-                name: "allow_stdio",
-                ty: "boolean",
-                required: false,
-                description: "Required when the resulting enabled gateway uses stdio because reconcile can execute a local command",
             },
         ],
     },

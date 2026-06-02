@@ -525,8 +525,8 @@ async fn handle_gateway_actions(
         "gateway.test" => {
             let params: GatewayTestParams = parse_params(params_value)?;
             match (params.name.as_deref(), params.spec.as_ref()) {
-                (Some(name), None) => to_json(manager.test(Err(name), params.allow_stdio).await?),
-                (None, Some(spec)) => to_json(manager.test(Ok(spec), params.allow_stdio).await?),
+                (Some(name), None) => to_json(manager.test(Err(name)).await?),
+                (None, Some(spec)) => to_json(manager.test(Ok(spec)).await?),
                 (Some(_), Some(_)) => Err(ToolError::InvalidParam {
                     message: "gateway.test accepts either `name` or `spec`, not both".to_string(),
                     param: "name".to_string(),
@@ -544,7 +544,6 @@ async fn handle_gateway_actions(
                     .add(
                         params.spec,
                         params.bearer_token_value,
-                        params.allow_stdio,
                         params.origin.as_deref(),
                         params.owner.map(Into::into),
                     )
@@ -559,7 +558,6 @@ async fn handle_gateway_actions(
                         &params.name,
                         params.patch,
                         params.bearer_token_value,
-                        params.allow_stdio,
                         params.origin.as_deref(),
                         params.owner.map(Into::into),
                     )
@@ -684,7 +682,6 @@ async fn handle_mcp_actions(
                             ..GatewayUpdatePatch::default()
                         },
                         None,
-                        params.allow_stdio,
                         params.origin.as_deref(),
                         params.owner.clone().map(Into::into),
                     )
@@ -702,7 +699,6 @@ async fn handle_mcp_actions(
                         ..GatewayUpdatePatch::default()
                     },
                     None,
-                    params.allow_stdio,
                     params.origin.as_deref(),
                     params.owner.clone().map(Into::into),
                 )
@@ -1660,38 +1656,18 @@ mod tests {
             dispatch_with_manager(&manager, "gateway.test", json!({"name": "fixture-http"}))
                 .await
                 .expect("named test");
-        let named_stdio_error = dispatch_with_manager(
+        // Stdio gateways test freely — no ack required.
+        let named_stdio = dispatch_with_manager(
             &manager,
             "gateway.test",
             json!({"name": "configured-stdio"}),
         )
         .await
-        .expect_err("configured stdio test requires allow_stdio");
-        assert_eq!(named_stdio_error.kind(), "invalid_param");
-        let named_stdio = dispatch_with_manager(
-            &manager,
-            "gateway.test",
-            json!({"name": "configured-stdio", "allow_stdio": true}),
-        )
-        .await
-        .expect("configured stdio test with allow_stdio");
-        let proposed_without_ack_error = dispatch_with_manager(
-            &manager,
-            "gateway.test",
-            json!({"spec": {
-                "name": "fixture-stdio",
-                "command": "echo",
-                "args": ["hello"]
-            }}),
-        )
-        .await
-        .expect_err("stdio spec test requires allow_stdio");
-        assert_eq!(proposed_without_ack_error.kind(), "invalid_param");
-
+        .expect("configured stdio test");
         let proposed = dispatch_with_manager(
             &manager,
             "gateway.test",
-            json!({"allow_stdio": true, "spec": {
+            json!({"spec": {
                 "name": "fixture-stdio",
                 "command": "echo",
                 "args": ["hello"]
@@ -1750,10 +1726,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gateway_add_requires_stdio_ack() {
+    async fn gateway_add_stdio_needs_no_ack() {
         let manager = test_manager();
 
-        let err = dispatch_with_manager(
+        let added = dispatch_with_manager(
             &manager,
             "gateway.add",
             json!({"spec": {
@@ -1763,31 +1739,18 @@ mod tests {
             }}),
         )
         .await
-        .expect_err("stdio add requires allow_stdio");
-        assert_eq!(err.kind(), "invalid_param");
-
-        let added = dispatch_with_manager(
-            &manager,
-            "gateway.add",
-            json!({"allow_stdio": true, "spec": {
-                "name": "fixture-stdio",
-                "command": "echo",
-                "args": ["hello"]
-            }}),
-        )
-        .await
-        .expect("stdio add with allow_stdio");
+        .expect("stdio add without ack");
 
         assert_eq!(added["config"]["name"], "fixture-stdio");
     }
 
     #[tokio::test]
-    async fn gateway_update_requires_stdio_ack_for_enabled_stdio() {
+    async fn gateway_update_stdio_needs_no_ack() {
         let manager = test_manager();
         dispatch_with_manager(
             &manager,
             "gateway.add",
-            json!({"allow_stdio": true, "spec": {
+            json!({"spec": {
                 "name": "fixture-stdio",
                 "command": "echo",
                 "args": ["hello"]
@@ -1796,22 +1759,13 @@ mod tests {
         .await
         .expect("add stdio");
 
-        let err = dispatch_with_manager(
+        let updated = dispatch_with_manager(
             &manager,
             "gateway.update",
             json!({"name": "fixture-stdio", "patch": {"proxy_resources": true}}),
         )
         .await
-        .expect_err("stdio update requires allow_stdio");
-        assert_eq!(err.kind(), "invalid_param");
-
-        let updated = dispatch_with_manager(
-            &manager,
-            "gateway.update",
-            json!({"name": "fixture-stdio", "allow_stdio": true, "patch": {"proxy_resources": true}}),
-        )
-        .await
-        .expect("stdio update with allow_stdio");
+        .expect("stdio update without ack");
 
         assert_eq!(updated["config"]["proxy_resources"], true);
     }

@@ -662,9 +662,6 @@ export function buildGatewayCreatePayload(input: CreateGatewayInput) {
   })
 
   const payload: Record<string, unknown> = { spec }
-  if (input.transport === 'stdio') {
-    payload.allow_stdio = true
-  }
   const bearerTokenValue = input.config.bearer_token_value?.trim()
   if (bearerTokenValue) {
     payload.bearer_token_value = bearerTokenValue
@@ -749,9 +746,6 @@ export function buildGatewayUpdatePayload(
   const payload: Record<string, unknown> = {
     name: id,
     patch,
-  }
-  if (input.transport === 'stdio') {
-    payload.allow_stdio = true
   }
   const bearerTokenValue = input.config?.bearer_token_value?.trim()
   if (bearerTokenValue) {
