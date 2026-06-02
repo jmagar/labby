@@ -3,3 +3,4 @@
 *.env
 *.env.*
 config.toml
+apps/gateway-admin/out/

@@ -27,16 +27,27 @@ pub struct GatewayArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum GatewayCommand {
+    /// List configured gateways and their runtime status.
     List,
+    /// Get one configured gateway.
     Get(GatewayGetArgs),
+    /// Test a configured or proposed gateway without saving it.
     Test(GatewayTestArgs),
+    /// Add a gateway and reconcile runtime state.
     Add(GatewayAddArgs),
+    /// Update a gateway and reconcile runtime state.
     Update(GatewayUpdateArgs),
+    /// Remove a gateway and reconcile runtime state.
     Remove(GatewayRemoveArgs),
+    /// Manage Lab-backed virtual servers quarantined during config migration.
     Quarantine(GatewayQuarantineArgs),
+    /// Manage public MCP routes protected by Lab OAuth.
     ProtectedRoute(GatewayProtectedRouteArgs),
+    /// Configure gateway-wide tool_search/tool_execute mode.
     ToolSearch(GatewayToolSearchArgs),
+    /// Reload gateways from config and reconcile runtime state.
     Reload,
+    /// Manage upstream MCP server lifecycle and OAuth.
     Mcp(GatewayMcpArgs),
     /// Scan the machine for MCP server configs from known editors and tools (read-only)
     Discover(GatewayDiscoverArgs),
@@ -180,7 +191,9 @@ pub struct GatewayQuarantineArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum GatewayQuarantineCommand {
+    /// List Lab-backed virtual servers quarantined during config migration.
     List,
+    /// Restore a quarantined Lab-backed virtual server into the active gateway list.
     Restore(GatewayQuarantineRestoreArgs),
 }
 
@@ -197,11 +210,17 @@ pub struct GatewayProtectedRouteArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum GatewayProtectedRouteCommand {
+    /// List Gateway-managed public MCP routes protected by Lab OAuth.
     List,
+    /// Get one Gateway-managed protected MCP route.
     Get(GatewayProtectedRouteNameArgs),
+    /// Add a Gateway-managed protected MCP route.
     Add(GatewayProtectedRouteUpsertArgs),
+    /// Replace a Gateway-managed protected MCP route.
     Update(GatewayProtectedRouteUpdateArgs),
+    /// Remove a Gateway-managed protected MCP route.
     Remove(GatewayProtectedRouteNameArgs),
+    /// Validate a proposed protected MCP route without saving it.
     Test(GatewayProtectedRouteUpsertArgs),
 }
 
@@ -263,8 +282,11 @@ pub struct GatewayToolSearchArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum GatewayToolSearchCommand {
+    /// Read the gateway-wide tool_search settings.
     Status,
+    /// Enable gateway-wide tool_search/tool_execute mode for all exposed upstream tools.
     Enable(GatewayToolSearchSetArgs),
+    /// Disable gateway-wide tool_search/tool_execute mode.
     Disable,
 }
 
@@ -284,10 +306,15 @@ pub struct GatewayMcpArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum GatewayMcpCommand {
+    /// Manage upstream MCP server OAuth credentials.
     Auth(GatewayMcpAuthArgs),
+    /// List upstream MCP runtime state, discovery counts, and likely stale process counts.
     List,
+    /// Enable an upstream MCP server so new sessions discover and proxy it again.
     Enable(GatewayMcpLifecycleArgs),
+    /// Disable an upstream MCP server and optionally clean up running processes.
     Disable(GatewayMcpLifecycleArgs),
+    /// Kill or preview running processes associated with one upstream MCP server.
     Cleanup(GatewayMcpCleanupArgs),
 }
 
@@ -299,9 +326,13 @@ pub struct GatewayMcpAuthArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum GatewayMcpAuthCommand {
+    /// Start the upstream OAuth flow and print the browser authorization URL.
     Start(GatewayOauthUpstreamArgs),
+    /// Start the upstream OAuth flow and open the authorization URL in a browser.
     Open(GatewayOauthUpstreamArgs),
+    /// Read upstream OAuth status for the shared gateway credential.
     Status(GatewayOauthUpstreamArgs),
+    /// Clear stored upstream OAuth credentials for the shared gateway credential.
     Clear(GatewayOauthUpstreamArgs),
 }
 
@@ -1014,37 +1045,13 @@ fn render_gateway_list_human(
         } else if s.connected {
             let mut parts = Vec::new();
             if s.exposed_tool_count > 0 {
-                parts.push(format!(
-                    "🔧 {} {}",
-                    s.exposed_tool_count,
-                    if s.exposed_tool_count == 1 {
-                        "tool"
-                    } else {
-                        "tools"
-                    }
-                ));
+                parts.push(format!("🔧 {}", s.exposed_tool_count));
             }
             if s.exposed_prompt_count > 0 {
-                parts.push(format!(
-                    "💬 {} {}",
-                    s.exposed_prompt_count,
-                    if s.exposed_prompt_count == 1 {
-                        "prompt"
-                    } else {
-                        "prompts"
-                    }
-                ));
+                parts.push(format!("💬 {}", s.exposed_prompt_count));
             }
             if s.exposed_resource_count > 0 {
-                parts.push(format!(
-                    "📦 {} {}",
-                    s.exposed_resource_count,
-                    if s.exposed_resource_count == 1 {
-                        "resource"
-                    } else {
-                        "resources"
-                    }
-                ));
+                parts.push(format!("📦 {}", s.exposed_resource_count));
             }
             let joined = if parts.is_empty() {
                 "connected".to_string()

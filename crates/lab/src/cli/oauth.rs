@@ -17,6 +17,7 @@ pub struct OauthArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum OauthCommand {
+    /// Run a local OAuth callback relay that forwards to a machine or explicit target.
     RelayLocal(RelayLocalArgs),
 }
 
