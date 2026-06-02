@@ -117,8 +117,10 @@ pub struct CodeModeExecutionResponse {
     /// returns undefined, null, or throws (the throw case surfaces via ToolError).
     pub result: Option<Value>,
     pub calls: Vec<CodeModeExecutedCall>,
-    /// Captured console.log/warn/error lines from the sandbox runner.
-    /// Populated by the Boa CapturingLogger (non-WASM) or stderr (Javy/WASM).
+    /// Captured console.log/warn/error lines from the runner. Sourced from the
+    /// javy runner subprocess (drained from its stderr); the current javy path
+    /// returns no protocol-carried logs, so this is empty until console capture
+    /// is wired through.
     pub logs: Vec<String>,
 }
 

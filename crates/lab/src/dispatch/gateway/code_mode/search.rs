@@ -116,9 +116,10 @@ impl CodeModeBroker<'_> {
                 .then_with(|| a.name.cmp(&b.name))
         });
 
-        // The catalog is injected as `const tools` into the Boa sandbox and never
-        // enters the model context (only the caller's filtered result does), so it
-        // is served complete and uncapped — matching Cloudflare's Code Mode design.
+        // The catalog is injected as `const tools` into the javy runner (via the
+        // runner `proxy` slot) and never enters the model context (only the
+        // caller's filtered result does), so it is served complete and uncapped —
+        // matching Cloudflare's Code Mode design.
         let serialized_size = serialized_catalog_size(&entries)?;
 
         Ok((entries, serialized_size))

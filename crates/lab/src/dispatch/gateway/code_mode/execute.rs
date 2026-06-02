@@ -142,15 +142,28 @@ impl CodeModeBroker<'_> {
         // proxy rather than aborting execute — `callTool` is always available as
         // the documented escape hatch, so the run can still proceed without the
         // typed namespace.
-        let proxy = match self
-            .build_code_mode_proxy(&caller, surface, &capability_filter)
-            .await
+        // Bound proxy generation by the same wall-clock budget as the run so a
+        // slow upstream catalog cannot blow past the configured timeout before
+        // the runner even starts. On elapsed or failure, fall back to an empty
+        // proxy and continue — `callTool` is always available as the escape hatch.
+        let proxy = match tokio::time::timeout(
+            timeout,
+            self.build_code_mode_proxy(&caller, surface, &capability_filter),
+        )
+        .await
         {
-            Ok(proxy) => proxy,
-            Err(err) => {
+            Ok(Ok(proxy)) => proxy,
+            Ok(Err(err)) => {
                 tracing::warn!(
                     kind = err.kind(),
                     "code_mode.proxy_generation_failed; continuing with callTool only"
+                );
+                String::new()
+            }
+            Err(_elapsed) => {
+                tracing::warn!(
+                    timeout_ms = timeout.as_millis(),
+                    "code_mode.proxy_generation_timed_out; continuing with callTool only"
                 );
                 String::new()
             }
@@ -254,6 +267,15 @@ impl CodeModeBroker<'_> {
         // Host-side destructive action gate: block tools with destructive=true
         // unless the action is permitted (see `destructive_permitted`).
         if upstream_tool.destructive && !destructive_permitted(surface, caller) {
+            tracing::warn!(
+                surface = "dispatch",
+                service = "code_mode",
+                action = "code_execute",
+                upstream = upstream,
+                tool = tool,
+                kind = "confirmation_required",
+                "blocked destructive Code Mode tool call; allow_destructive_actions is not set"
+            );
             return Err(ToolError::Sdk {
                 sdk_kind: "confirmation_required".to_string(),
                 message: format!(

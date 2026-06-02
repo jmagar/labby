@@ -24,15 +24,32 @@ pub fn engine() -> Result<Engine, wasmtime::Error> {
 }
 
 fn cached_module(engine: &Engine, wat: &str) -> Result<Arc<Module>, wasmtime::Error> {
+    // Fast path: check the cache, then drop the lock before compiling. Holding
+    // the lock across `Module::new` (potentially slow compilation) would serialize
+    // all module compilation behind a single mutex.
+    {
+        let cache = MODULE_CACHE
+            .lock()
+            .map_err(|_| wasmtime::Error::msg("wasm module cache lock poisoned"))?;
+        if let Some(module) = cache.get(wat) {
+            return Ok(Arc::clone(module));
+        }
+    }
+
+    // Compile unlocked. Another thread may compile the same WAT concurrently;
+    // that is acceptable wasted work — the re-lock below resolves the race by
+    // keeping whichever Arc landed in the cache first.
+    let module = Arc::new(Module::new(engine, wat)?);
+
     let mut cache = MODULE_CACHE
         .lock()
         .map_err(|_| wasmtime::Error::msg("wasm module cache lock poisoned"))?;
-    if let Some(module) = cache.get(wat) {
-        return Ok(Arc::clone(module));
-    }
-    let module = Arc::new(Module::new(engine, wat)?);
-    cache.insert(wat.to_string(), Arc::clone(&module));
-    Ok(module)
+    // If a concurrent compile already inserted an entry, return the existing Arc
+    // so all callers share one module instance for a given WAT.
+    let entry = cache
+        .entry(wat.to_string())
+        .or_insert_with(|| Arc::clone(&module));
+    Ok(Arc::clone(entry))
 }
 
 pub fn run_wasm_i32_export_for_smoke(
@@ -53,6 +70,15 @@ pub fn run_wasm_i32_export_for_smoke(
 #[cfg(test)]
 pub fn cached_module_count_for_tests() -> usize {
     MODULE_CACHE.lock().map(|cache| cache.len()).unwrap_or(0)
+}
+
+/// Compile-or-fetch the cached module for `wat`, returning the shared `Arc`.
+/// Tests use `Arc::ptr_eq` on two calls to prove module reuse without depending
+/// on the absolute (shared, parallel-test) cache size.
+#[cfg(test)]
+pub fn cached_module_arc_for_tests(wat: &str) -> Arc<Module> {
+    let engine = engine().expect("engine builds");
+    cached_module(&engine, wat).expect("module compiles")
 }
 
 pub fn trap_kind(error: &wasmtime::Error) -> Option<&'static str> {

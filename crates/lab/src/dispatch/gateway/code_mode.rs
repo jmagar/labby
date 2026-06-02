@@ -68,7 +68,9 @@ pub(in crate::dispatch::gateway::code_mode) use schema::{
     unwrap_code_mode_upstream_result, validate_code_mode_params_against_schema,
 };
 #[cfg(test)]
-pub(in crate::dispatch::gateway::code_mode) use truncate::truncate_execution_response;
+pub(in crate::dispatch::gateway::code_mode) use truncate::{
+    apply_log_caps, truncate_execution_response,
+};
 #[cfg(test)]
 pub(in crate::dispatch::gateway::code_mode) use types::destructive_permitted;
 

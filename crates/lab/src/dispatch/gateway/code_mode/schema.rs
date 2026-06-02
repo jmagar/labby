@@ -1,11 +1,54 @@
 //! JSON Schema validation for Code Mode callTool params and upstream-result unwrapping.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use rmcp::model::CallToolResult;
 use serde_json::{Map, Value, json};
 
 use crate::dispatch::error::ToolError;
+
+/// Serialize `value` with object keys sorted recursively, so two `Value`-equal
+/// inputs always produce the same string. Used to key `uniqueItems` dedup in a
+/// `HashSet` without depending on object key insertion order (serde_json runs
+/// with `preserve_order` in this crate).
+fn canonical_json(value: &Value) -> String {
+    fn write(value: &Value, out: &mut String) {
+        match value {
+            Value::Object(map) => {
+                out.push('{');
+                let mut keys: Vec<&String> = map.keys().collect();
+                keys.sort_unstable();
+                for (index, key) in keys.into_iter().enumerate() {
+                    if index > 0 {
+                        out.push(',');
+                    }
+                    // Quote the key via serde so it is escaped identically to a
+                    // normal JSON string.
+                    out.push_str(&Value::String(key.clone()).to_string());
+                    out.push(':');
+                    write(&map[key], out);
+                }
+                out.push('}');
+            }
+            Value::Array(items) => {
+                out.push('[');
+                for (index, item) in items.iter().enumerate() {
+                    if index > 0 {
+                        out.push(',');
+                    }
+                    write(item, out);
+                }
+                out.push(']');
+            }
+            // Scalars serialize unambiguously; reuse serde for correct escaping
+            // and number formatting.
+            other => out.push_str(&other.to_string()),
+        }
+    }
+    let mut out = String::new();
+    write(value, &mut out);
+    out
+}
 
 pub(in crate::dispatch::gateway::code_mode) fn validate_code_mode_params_against_schema(
     params: &Value,
@@ -262,8 +305,14 @@ fn validate_json_schema_value_inner(
             .and_then(Value::as_bool)
             .unwrap_or(false)
         {
-            for (left_index, left) in array.iter().enumerate() {
-                if array.iter().skip(left_index + 1).any(|right| right == left) {
+            // O(n) dedup via a set of canonical (sorted-key) serializations.
+            // Canonicalization makes the string key match `Value` equality even
+            // though `serde_json` preserves object key insertion order, so this
+            // is semantically identical to the previous O(n²) `right == left`
+            // pairwise scan (same accept/reject, same error).
+            let mut seen = HashSet::with_capacity(array.len());
+            for item in array {
+                if !seen.insert(canonical_json(item)) {
                     return Err(invalid_schema_param(path, "must contain unique items"));
                 }
             }

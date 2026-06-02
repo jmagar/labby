@@ -20,9 +20,16 @@ pub fn run_code_mode_runner_stdio() -> ExitCode {
         use nix::sys::prctl;
         if prctl::set_dumpable(false).is_err() {
             // Non-fatal — execution continues but /proc/<pid>/environ may be readable.
-            eprintln!(
-                "WARNING: prctl(PR_SET_DUMPABLE, 0) failed; runner environment may be readable via /proc"
-            );
+            // This runs inside the runner SUBPROCESS, which has no tracing
+            // subscriber installed; tracing::warn! here would be dropped. The
+            // parent drains this child's stderr into the response logs, so
+            // eprintln! is the channel that actually surfaces the warning.
+            #[allow(clippy::print_stderr)]
+            {
+                eprintln!(
+                    "WARNING: prctl(PR_SET_DUMPABLE, 0) failed; runner environment may be readable via /proc"
+                );
+            }
         }
     }
 
@@ -37,22 +44,75 @@ pub fn run_code_mode_runner_stdio() -> ExitCode {
     let result = run_code_mode_runner();
     if let Err(err) = result {
         drop(runner_emit(CodeModeRunnerOutput::Error {
-            kind: if err.contains("JSON-serializable") {
-                "invalid_param"
-            } else {
-                "server_error"
-            }
-            .to_string(),
-            message: err,
+            kind: err.kind,
+            message: err.message,
         }));
         return ExitCode::from(1);
     }
     ExitCode::SUCCESS
 }
 
-fn run_code_mode_runner() -> Result<(), String> {
+/// Runner failure with an explicit error kind so the contract distinguishes a
+/// caller mistake (`invalid_param`: malformed JS that fails to parse/eval, or a
+/// non-JSON-serializable result) from a genuine backend fault (`server_error`).
+///
+/// `From<String>` defaults to `server_error`, so every existing
+/// `map_err(|e| e.to_string())?` site keeps the previous behavior. The eval site
+/// and the main-promise rejection classifier override the kind explicitly.
+struct CodeModeRunnerError {
+    kind: String,
+    message: String,
+}
+
+impl From<String> for CodeModeRunnerError {
+    fn from(message: String) -> Self {
+        Self {
+            kind: "server_error".to_string(),
+            message,
+        }
+    }
+}
+
+/// Classify a main-promise rejection message into an error kind:
+/// 1. If the message is a JSON object carrying a `kind`, preserve that kind
+///    (structured tool-error rejections re-raised through the sandbox).
+/// 2. Else if it mentions `JSON-serializable`, the result could not be
+///    serialized — a caller mistake → `invalid_param`.
+/// 3. Otherwise it is a runtime throw (e.g. the non-function TypeError) →
+///    `server_error`.
+fn classify_rejection(message: String) -> CodeModeRunnerError {
+    // An uncaught structured tool-error rejection arrives as the JS Error's
+    // stringified form, e.g. `Error: {"kind":"upstream_error","message":"..."}`
+    // followed by a `\n    at ...` stack trace that QuickJS appends. Take only
+    // the first line and strip the `Error: ` prefix before attempting to recover
+    // the structured `{kind,message}` payload — the trailing stack would
+    // otherwise make `serde_json::from_str` reject the candidate as having
+    // trailing garbage and silently fall through to `server_error`.
+    let first_line = message.lines().next().unwrap_or(&message);
+    let json_candidate = first_line.strip_prefix("Error: ").unwrap_or(first_line);
+    if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(json_candidate)
+        && let Some(kind) = map.get("kind").and_then(Value::as_str)
+    {
+        return CodeModeRunnerError {
+            kind: kind.to_string(),
+            message,
+        };
+    }
+    if message.contains("JSON-serializable") {
+        return CodeModeRunnerError {
+            kind: "invalid_param".to_string(),
+            message,
+        };
+    }
+    CodeModeRunnerError {
+        kind: "server_error".to_string(),
+        message,
+    }
+}
+
+fn run_code_mode_runner() -> Result<(), CodeModeRunnerError> {
     let CodeModeRunnerInput::Start { code, proxy } = runner_read_input()? else {
-        return Err("runner expected start message".to_string());
+        return Err("runner expected start message".to_string().into());
     };
 
     let mut config = javy::Config::default();
@@ -129,10 +189,18 @@ globalThis.__labMainPromise = (async () => {{
         proxy = proxy,
     );
 
+    // A failure here is a parse/eval error in the caller's code (e.g. the
+    // malformed `async () => {`), before the main promise is ever created. That
+    // is a caller mistake, not a backend fault → `invalid_param`. (A non-function
+    // body like `42` evals fine; its TypeError surfaces later as a promise
+    // rejection and is classified by `classify_rejection`.)
     runtime
         .context()
         .with(|cx| cx.eval::<(), _>(wrapped))
-        .map_err(javy_error_message)?;
+        .map_err(|err| CodeModeRunnerError {
+            kind: "invalid_param".to_string(),
+            message: javy_error_message(err),
+        })?;
 
     // Run the event loop until the main promise settles.
     let resolved_result = loop {
@@ -141,7 +209,9 @@ globalThis.__labMainPromise = (async () => {{
             .map_err(|err| err.to_string())?;
         match javy_main_promise_state(&runtime)? {
             JavyMainPromiseState::Resolved(result) => break result,
-            JavyMainPromiseState::Rejected(message) => return Err(message),
+            JavyMainPromiseState::Rejected(message) => {
+                return Err(classify_rejection(message));
+            }
             JavyMainPromiseState::Pending => {
                 let input = runner_read_input()?;
                 javy_settle_tool_promise(&runtime, &input)?;
@@ -153,6 +223,7 @@ globalThis.__labMainPromise = (async () => {{
         result: resolved_result,
         logs: Vec::new(),
     })
+    .map_err(CodeModeRunnerError::from)
 }
 
 enum JavyMainPromiseState {

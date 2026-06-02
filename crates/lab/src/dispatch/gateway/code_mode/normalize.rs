@@ -23,8 +23,10 @@ use boa_parser::{Parser, Source as ParserSource};
 /// 5. Loose statements / trailing expressions are wrapped in `async () => { ... }`;
 ///    if the trailing statement looks like an expression, it is returned.
 ///
-/// Both `execute` and `search` normalize the caller's code through this before
-/// handing it to the Javy runner.
+/// Only `execute` normalizes the caller's code through this before handing it to
+/// the Javy runner. `search` passes its code to the runner *raw* (no
+/// normalization) so that a non-function search input still surfaces as a
+/// contract error instead of being silently wrapped into a valid async arrow.
 ///
 /// Exposed (`pub`) so integration tests can normalize a body form and pipe the
 /// exact post-normalize string through the runner end to end.
@@ -90,13 +92,17 @@ fn normalize_module_code(source: &str) -> Option<String> {
     let module = parser
         .parse_module(&boa_ast::scope::Scope::new_global(), &mut interner)
         .ok()?;
-    let items = module.items().items();
-    let [item] = items else {
-        return None;
-    };
-    let boa_ast::ModuleItem::ExportDeclaration(export) = item else {
-        return None;
-    };
+    // Find the `export default` declaration among the module items, ignoring any
+    // import/other prologue items. Requiring exactly one item made a module with
+    // a prologue (e.g. `const x = 1; export default async () => x`) fall through
+    // to the loose-wrap path and produce invalid wrapper JS.
+    let export = module.items().items().iter().find_map(|item| {
+        if let boa_ast::ModuleItem::ExportDeclaration(export) = item {
+            Some(export)
+        } else {
+            None
+        }
+    })?;
     match export.as_ref() {
         boa_ast::declaration::ExportDeclaration::DefaultAssignmentExpression(expr) => {
             Some(normalize_user_code(&expr.to_interned_string(&interner)))
@@ -186,11 +192,37 @@ fn normalize_script_code(source: &str) -> Option<String> {
 }
 
 fn strip_trailing_statement_semicolon(source: &str) -> String {
-    let trimmed = source.trim();
+    // Strip a trailing line/block comment first so `async () => 42; // note`
+    // does not leave a `;` (and the comment) inside the wrapper grouping, which
+    // would be a syntax error. After removing any trailing comment + whitespace,
+    // drop the statement-terminating semicolon.
+    let trimmed = strip_trailing_comment(source.trim_end()).trim_end();
     trimmed.strip_suffix(';').map_or_else(
-        || source.to_string(),
+        || trimmed.to_string(),
         |without| without.trim_end().to_string(),
     )
+}
+
+/// Remove a single trailing `// ...` line comment or `/* ... */` block comment
+/// (and only when it is genuinely at the end of the source). Conservative: bails
+/// out unchanged if a `//` or `*/` also appears earlier, since a mid-source
+/// occurrence may be inside a string literal we must not disturb.
+fn strip_trailing_comment(source: &str) -> &str {
+    let trimmed = source.trim_end();
+    if let Some(idx) = trimmed.rfind("//") {
+        // Only treat as a trailing line comment if nothing but the comment text
+        // follows on the last line (no earlier `//` that could be in a string).
+        if trimmed.matches("//").count() == 1 && !trimmed[idx..].contains('\n') {
+            return trimmed[..idx].trim_end();
+        }
+    }
+    if trimmed.ends_with("*/")
+        && let Some(start) = trimmed.rfind("/*")
+        && trimmed.matches("/*").count() == 1
+    {
+        return trimmed[..start].trim_end();
+    }
+    trimmed
 }
 
 fn function_declaration_name(

@@ -81,34 +81,42 @@ impl CodeModeBroker<'_> {
         })?;
 
         // Drain stderr continuously in a background task to prevent pipe-buffer
-        // deadlock when the runner emits more than ~64KB of console output.
-        // This covers the Javy path where console output goes to stderr.
-        // For the Boa path, stderr may be empty (logs go via CapturingLogger),
-        // but draining is still correct.
-        let stderr_lines = {
+        // deadlock when the runner emits more than ~64KB of console output. The
+        // javy runner redirects console output to stderr, so this is where the
+        // captured logs come from.
+        let (stderr_lines, stderr_task) = {
             let stderr = child.stderr.take().ok_or_else(|| ToolError::Sdk {
                 sdk_kind: "internal_error".to_string(),
                 message: "Code Mode runner stderr was not available".to_string(),
             })?;
             let stderr_buf = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
             let stderr_buf_clone = stderr_buf.clone();
-            tokio::spawn(async move {
+            let task = tokio::spawn(async move {
                 // Mirror the runner-side hard caps so the parent buffer can't
                 // grow unbounded when the wasm feature swaps the runner backend.
                 const CAP_ENTRIES: usize = 10_000;
                 const CAP_BYTES: usize = 1024 * 1024;
                 let mut lines = TokioBufReader::new(stderr).lines();
                 let mut total_bytes = 0usize;
+                let mut capped = false;
+                // Keep draining the pipe to EOF even after the cap is reached:
+                // stopping the read would let the child's stderr pipe fill and
+                // block the child on write (hang on large log output). Once
+                // capped, discard further lines instead of appending.
                 while let Ok(Some(line)) = lines.next_line().await {
+                    if capped {
+                        continue;
+                    }
                     total_bytes += line.len() + 1;
                     let mut buf = stderr_buf_clone.lock().await;
                     if buf.len() >= CAP_ENTRIES || total_bytes > CAP_BYTES {
-                        break;
+                        capped = true;
+                        continue;
                     }
                     buf.push(line);
                 }
             });
-            stderr_buf
+            (stderr_buf, task)
         };
 
         write_runner_input(
@@ -213,9 +221,15 @@ impl CodeModeBroker<'_> {
                                 });
                             }
                             calls.sort_by_key(|(seq, _)| *seq);
+                            // The child has exited (child.wait() above), so its
+                            // stderr pipe is closed and the drain task will reach
+                            // EOF. Await it before reading the buffer so trailing
+                            // stderr lines are not lost.
+                            let _joined = stderr_task.await;
                             // Merge stderr lines (Javy path: redirect_stdout_to_stderr)
-                            // with protocol-carried logs (Boa path: CapturingLogger).
-                            // For Boa, stderr is empty; for Javy, logs is empty.
+                            // with protocol-carried logs. The javy path currently
+                            // emits no protocol-carried logs, so `logs` is empty
+                            // and stderr supplies the captured output.
                             let mut all_logs = logs;
                             {
                                 let stderr_captured = stderr_lines.lock().await;

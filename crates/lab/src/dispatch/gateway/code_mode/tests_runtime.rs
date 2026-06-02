@@ -140,15 +140,46 @@ fn log_trimming_terminates_when_budget_unreachable() {
 }
 
 #[test]
+fn apply_log_caps_byte_count_reflects_only_kept_bytes() {
+    // Three 10-byte lines against a 25-byte cap: the first two (20 bytes) fit,
+    // the third would push to 30 > 25 and is dropped. The sentinel must report
+    // 20 kept bytes — NOT 30 (the over-cap total) and NOT 25 (the cap).
+    let logs = vec!["a".repeat(10), "b".repeat(10), "c".repeat(10)];
+    let capped = apply_log_caps(logs, 1000, 25);
+
+    // Two original lines kept + one sentinel.
+    assert_eq!(
+        capped.len(),
+        3,
+        "expected 2 kept lines + sentinel: {capped:?}"
+    );
+    let sentinel = capped.last().expect("sentinel present");
+    assert_eq!(
+        sentinel, "[log output truncated at 2 lines / 20 bytes]",
+        "sentinel must report kept bytes (20), got: {sentinel}"
+    );
+}
+
+#[test]
+fn apply_log_caps_entry_cap_reports_kept_bytes() {
+    // Entry cap trips at 2 entries; the byte count must equal the sum of the two
+    // kept lines, independent of the dropped remainder.
+    let logs = vec!["x".repeat(5), "y".repeat(7), "z".repeat(100)];
+    let capped = apply_log_caps(logs, 2, 1_000_000);
+    let sentinel = capped.last().expect("sentinel present");
+    assert_eq!(sentinel, "[log output truncated at 2 lines / 12 bytes]");
+}
+
+#[test]
 fn wasm_runner_returns_42() {
-    let result = super::wasm_runner::run_wasm_i32_export_for_smoke(
+    let result = wasm_runner::run_wasm_i32_export_for_smoke(
         r#"
         (module
           (func (export "run") (result i32)
             i32.const 42))
         "#,
         "run",
-        super::wasm_runner::DEFAULT_SEARCH_FUEL,
+        wasm_runner::DEFAULT_SEARCH_FUEL,
     )
     .expect("wasm smoke runs");
 
@@ -157,35 +188,33 @@ fn wasm_runner_returns_42() {
 
 #[test]
 fn wasm_runner_reuses_cached_modules() {
+    // Use a WAT unique to this test so the assertion is robust against the
+    // module cache being shared across parallel tests: compiling the same WAT
+    // twice must hand back the SAME Arc (pointer-equal), proving reuse without
+    // depending on the absolute global cache size.
     let wat = r#"
         (module
           (func (export "run") (result i32)
-            i32.const 7))
+            i32.const 7331))
         "#;
-    super::wasm_runner::run_wasm_i32_export_for_smoke(
-        wat,
-        "run",
-        super::wasm_runner::DEFAULT_SEARCH_FUEL,
-    )
-    .expect("first wasm smoke runs");
-    let after_first = super::wasm_runner::cached_module_count_for_tests();
-    super::wasm_runner::run_wasm_i32_export_for_smoke(
-        wat,
-        "run",
-        super::wasm_runner::DEFAULT_SEARCH_FUEL,
-    )
-    .expect("second wasm smoke runs");
-    let after_second = super::wasm_runner::cached_module_count_for_tests();
+    let first = wasm_runner::cached_module_arc_for_tests(wat);
+    let count_after_first = wasm_runner::cached_module_count_for_tests();
+    let second = wasm_runner::cached_module_arc_for_tests(wat);
+    let count_after_second = wasm_runner::cached_module_count_for_tests();
 
+    assert!(
+        std::sync::Arc::ptr_eq(&first, &second),
+        "same WAT must return the same cached module Arc"
+    );
     assert_eq!(
-        after_second, after_first,
-        "same WAT should reuse cached module"
+        count_after_second, count_after_first,
+        "re-fetching the same WAT must not grow the cache"
     );
 }
 
 #[test]
 fn wasm_runner_reports_fuel_exhaustion_kind() {
-    let err = super::wasm_runner::run_wasm_i32_export_for_smoke(
+    let err = wasm_runner::run_wasm_i32_export_for_smoke(
         r#"
         (module
           (func (export "run") (result i32)
@@ -198,7 +227,7 @@ fn wasm_runner_reports_fuel_exhaustion_kind() {
     .expect_err("fuel should be exhausted");
 
     assert_eq!(
-        super::wasm_runner::trap_kind(&err),
+        wasm_runner::trap_kind(&err),
         Some("code_mode_fuel_exhausted")
     );
 }

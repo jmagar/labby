@@ -11,7 +11,7 @@ fn parse_rejects_lab_id() {
     let err =
         CodeModeToolId::parse("lab::radarr.movie.search").expect_err("lab:: ids are rejected");
     match err {
-        super::ToolError::Sdk { sdk_kind, message } => {
+        ToolError::Sdk { sdk_kind, message } => {
             assert_eq!(sdk_kind, "unknown_tool");
             assert!(message.contains("lab::"));
             // Message references canonical tool name "execute" (Cloudflare-parity rename
@@ -53,7 +53,7 @@ fn rejects_invalid_ids() {
 
 #[test]
 fn capability_filter_allows_only_selected_upstreams_and_tools() {
-    let filter = super::CodeModeCapabilityFilter::new(
+    let filter = CodeModeCapabilityFilter::new(
         vec!["github".to_string()],
         vec!["upstream::github::search_issues".to_string()],
     );
@@ -88,7 +88,7 @@ fn unwrap_upstream_tool_result_prefers_structured_content() {
         "total": 1
     }));
 
-    let unwrapped = super::unwrap_code_mode_upstream_result(result);
+    let unwrapped = unwrap_code_mode_upstream_result(result);
 
     assert_eq!(
         unwrapped,
@@ -104,28 +104,26 @@ fn unwrap_upstream_tool_result_prefers_structured_content() {
 
 #[test]
 fn unwrap_upstream_tool_result_parses_or_returns_text_content() {
-    let parsed =
-        super::unwrap_code_mode_upstream_result(CallToolResult::success(vec![Content::text(
-            r#"{"ok":true}"#,
-        )]));
+    let parsed = unwrap_code_mode_upstream_result(CallToolResult::success(vec![Content::text(
+        r#"{"ok":true}"#,
+    )]));
     assert_eq!(parsed, json!({"ok": true}));
 
-    let raw =
-        super::unwrap_code_mode_upstream_result(CallToolResult::success(vec![Content::text(
-            "plain text",
-        )]));
+    let raw = unwrap_code_mode_upstream_result(CallToolResult::success(vec![Content::text(
+        "plain text",
+    )]));
     assert_eq!(raw, json!("plain text"));
 }
 
 #[test]
 fn unwrap_upstream_tool_result_joins_all_text_and_preserves_mixed_content() {
-    let joined = super::unwrap_code_mode_upstream_result(CallToolResult::success(vec![
+    let joined = unwrap_code_mode_upstream_result(CallToolResult::success(vec![
         Content::text("{\"a\":"),
         Content::text("1}"),
     ]));
     assert_eq!(joined, json!({"a": 1}));
 
-    let mixed = super::unwrap_code_mode_upstream_result(CallToolResult::success(vec![
+    let mixed = unwrap_code_mode_upstream_result(CallToolResult::success(vec![
         Content::text("caption"),
         Content::image("AQID", "image/png"),
     ]));
@@ -143,19 +141,15 @@ fn validates_code_mode_params_against_input_schema() {
         "required": ["query"]
     });
 
-    super::validate_code_mode_params_against_schema(
-        &json!({"query": "rust", "limit": 10}),
-        Some(&schema),
-    )
-    .expect("valid params pass");
+    validate_code_mode_params_against_schema(&json!({"query": "rust", "limit": 10}), Some(&schema))
+        .expect("valid params pass");
 
-    let missing = super::validate_code_mode_params_against_schema(&json!({}), Some(&schema))
+    let missing = validate_code_mode_params_against_schema(&json!({}), Some(&schema))
         .expect_err("missing required field fails");
     assert_eq!(missing.kind(), "missing_param");
 
-    let invalid =
-        super::validate_code_mode_params_against_schema(&json!({"query": 42}), Some(&schema))
-            .expect_err("wrong field type fails");
+    let invalid = validate_code_mode_params_against_schema(&json!({"query": 42}), Some(&schema))
+        .expect_err("wrong field type fails");
     assert_eq!(invalid.kind(), "invalid_param");
 }
 
@@ -178,7 +172,7 @@ fn validates_code_mode_params_recursively_against_schema() {
         "required": ["state", "owner"]
     });
 
-    super::validate_code_mode_params_against_schema(
+    validate_code_mode_params_against_schema(
         &json!({
             "state": "open",
             "limit": null,
@@ -197,7 +191,7 @@ fn validates_code_mode_params_recursively_against_schema() {
         json!({"state": "open", "owner": {"login": "octo"}, "limit": 0}),
         json!({"state": "open", "owner": {"login": "octo"}, "extra": true}),
     ] {
-        let err = super::validate_code_mode_params_against_schema(&params, Some(&schema))
+        let err = validate_code_mode_params_against_schema(&params, Some(&schema))
             .expect_err("invalid nested params fail");
         assert_eq!(err.kind(), "invalid_param", "{params}");
     }
@@ -250,7 +244,7 @@ fn validates_code_mode_params_through_local_refs_and_constraints() {
         }
     });
 
-    super::validate_code_mode_params_against_schema(
+    validate_code_mode_params_against_schema(
         &json!({
             "query": "abc",
             "tags": ["one", "two"],
@@ -274,7 +268,7 @@ fn validates_code_mode_params_through_local_refs_and_constraints() {
         json!({"query": "abc", "tags": ["one"], "flag": true, "meta": {"count": "one"}}),
         json!({"query": "abc", "tags": ["one"], "flag": true, "labels": {"owner": "me"}}),
     ] {
-        let err = super::validate_code_mode_params_against_schema(&params, Some(&schema))
+        let err = validate_code_mode_params_against_schema(&params, Some(&schema))
             .expect_err("invalid params fail through local ref");
         assert!(
             matches!(err.kind(), "missing_param" | "invalid_param"),

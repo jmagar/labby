@@ -8,7 +8,10 @@
 //! (`lifecycle`, `probe`, `ensure`, `tools_call`, `resources_read`,
 //! `prompts_get`).
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
+
+#[cfg(unix)]
+use std::time::Duration;
 
 #[cfg(unix)]
 use crate::process::unix::{

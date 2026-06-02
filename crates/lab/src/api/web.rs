@@ -16,12 +16,15 @@ use axum::{
 include!(concat!(env!("OUT_DIR"), "/web_assets.rs"));
 
 /// Look up an embedded asset by its `/`-separated relative path.
+///
+/// `build.rs` emits `EMBEDDED_WEB_ASSETS` sorted by key, so this binary-searches
+/// (O(log n)) instead of linearly scanning ~800 entries per request.
 fn embedded_asset_bytes(relative: &Path) -> Option<&'static [u8]> {
     let key = relative.to_str()?.replace('\\', "/");
     EMBEDDED_WEB_ASSETS
-        .iter()
-        .find(|(name, _)| *name == key.as_str())
-        .map(|(_, bytes)| *bytes)
+        .binary_search_by(|(name, _)| (*name).cmp(key.as_str()))
+        .ok()
+        .map(|index| EMBEDDED_WEB_ASSETS[index].1)
 }
 
 pub fn embedded_web_assets_available() -> bool {

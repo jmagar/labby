@@ -6,8 +6,6 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use super::*;
-
 fn fixture_upstream_entry(
     upstream: &str,
     tools: HashMap<String, crate::dispatch::upstream::types::UpstreamTool>,
@@ -374,12 +372,15 @@ async fn code_execute_call_tool_lab_id_returns_unknown_tool() {
 
 /// When the search/execute surface is enabled (`tool_search.enabled=true`),
 /// `resolve_code_mode_upstream_tool` must NOT reject calls with a surface guard.
-/// It should attempt to resolve from the upstream pool and return `unknown_tool`
-/// only if the tool is genuinely absent, not because of a surface guard.
+/// With a live (healthy) `testup` entry seeded in the pool, requesting a tool
+/// that entry does not expose must surface a genuine `unknown_tool` lookup miss
+/// — not an `upstream_connect_error` that fires before the lookup ever runs.
 #[tokio::test]
 async fn resolve_upstream_tool_returns_unknown_tool_for_absent_tool() {
     let dir = tempfile::tempdir().expect("tempdir");
     let runtime = super::super::runtime::GatewayRuntimeHandle::default();
+    let pool = Arc::new(crate::dispatch::upstream::pool::UpstreamPool::new());
+    runtime.swap(Some(Arc::clone(&pool))).await;
     let manager = super::GatewayManager::new(dir.path().join("config.toml"), runtime);
     manager
         .seed_config(crate::config::LabConfig {
@@ -409,25 +410,36 @@ async fn resolve_upstream_tool_returns_unknown_tool_for_absent_tool() {
         })
         .await;
 
+    // Seed a HEALTHY testup entry that exposes `present_tool` but not the tool
+    // we will ask for. Because the entry is already healthy, the runtime-ready
+    // step short-circuits (no cold connect), so the request reaches the actual
+    // tool lookup and misses — proving a real `unknown_tool`, not a connect error.
+    pool.insert_entry_for_tests(
+        "testup",
+        fixture_upstream_entry(
+            "testup",
+            HashMap::from([(
+                "present_tool".to_string(),
+                fixture_catalog_tool("testup", "present_tool"),
+            )]),
+        ),
+    )
+    .await;
+
     let err = manager
         .resolve_code_mode_upstream_tool("testup", "some_tool", None, None)
         .await
-        .expect_err("tool not present — expect unknown_tool, not a mode-guard error");
+        .expect_err("tool not present — expect unknown_tool from a real lookup miss");
 
     match err {
         super::ToolError::Sdk { sdk_kind, message } => {
-            // Must NOT be the old "tool search is not enabled" guard.
-            assert_ne!(
-                message,
-                "tool search is not enabled; code mode upstream tools require tool_search mode",
-                "mode-guard error must not fire in exclusive code mode"
+            assert_eq!(
+                sdk_kind, "unknown_tool",
+                "absent tool on a healthy upstream must be a real unknown_tool lookup miss: {message}"
             );
-            // Should be a pool/tool-not-found error (upstream_connect_error or unknown_tool).
             assert!(
-                sdk_kind == "unknown_tool"
-                    || sdk_kind == "upstream_connect_error"
-                    || sdk_kind == "upstream_error",
-                "unexpected sdk_kind: {sdk_kind}: {message}"
+                message.contains("testup::some_tool"),
+                "error must name the missing tool, got: {message}"
             );
         }
         other => panic!("expected Sdk error, got {other:?}"),

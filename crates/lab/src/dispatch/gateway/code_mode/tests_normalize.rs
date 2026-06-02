@@ -1,8 +1,6 @@
 //! Tests: normalize_user_code shapes, surface/caller destructive gating, oauth subject.
 #![cfg(test)]
 
-use super::*;
-
 #[test]
 fn normalize_user_code_strips_javascript_markdown_fences() {
     let fenced = "```javascript\nconsole.log('hi');\n```";
@@ -131,6 +129,51 @@ fn normalize_user_code_strips_arrow_expression_trailing_semicolon() {
     assert!(
         !result.trim_end().ends_with(';'),
         "normalized arrow must not keep the source trailing semicolon: {result}"
+    );
+}
+
+#[test]
+fn normalize_user_code_finds_export_default_after_prologue() {
+    // A module with prologue statements before `export default` used to fall
+    // through to the loose-wrap path (requiring exactly one module item),
+    // producing invalid wrapper JS like `return (export default ...)`. The export
+    // must now be located among the items, ignoring the prologue. Covers both the
+    // DefaultAssignmentExpression arm and the DefaultAsyncFunctionDeclaration arm.
+    for source in [
+        // DefaultAssignmentExpression with a leading const prologue.
+        "const base = 41;\nexport default base + 1;",
+        // DefaultAsyncFunctionDeclaration with a leading const prologue.
+        "const base = 41;\nexport default async function () { return base + 1; }",
+    ] {
+        let result = super::normalize_user_code(source);
+        assert!(
+            !result.contains("export default"),
+            "export default must be stripped, got: {result}"
+        );
+        assert!(
+            result.contains("base + 1"),
+            "the default-export body must be preserved, got: {result}"
+        );
+        assert!(
+            result.trim_start().starts_with("async () =>") || result.trim_start().starts_with('('),
+            "result must be a wrapped async arrow, got: {result}"
+        );
+    }
+}
+
+#[test]
+fn normalize_user_code_strips_trailing_line_comment_after_semicolon() {
+    // `; // comment` must not leave a semicolon (or the comment) inside the
+    // wrapper grouping `(...)`, which would be a syntax error.
+    let result = super::normalize_user_code("async () => 42; // trailing note");
+    assert!(result.starts_with("async () =>"), "got: {result}");
+    assert!(
+        !result.contains("//"),
+        "trailing comment must be stripped, got: {result}"
+    );
+    assert!(
+        !result.trim_end().ends_with(';'),
+        "trailing semicolon must be stripped, got: {result}"
     );
 }
 
@@ -272,27 +315,23 @@ fn oauth_subject_falls_back_to_shared_when_sub_absent() {
         sub: None,
     };
 
-    // PRESENCE: falls back to some non-None shared subject
-    let subject = caller.oauth_subject();
-    assert!(
-        subject.is_some(),
-        "oauth_subject must return Some (shared fallback) when sub is None"
-    );
-    // ABSENCE: not the same as the user-specific email
-    assert_ne!(
-        subject,
-        Some("user@example.com"),
-        "fallback subject must not be user-specific"
+    // Enforce the exact shared gateway subject fallback, not merely "some
+    // non-user subject" — the fallback must be the gateway-owned credential
+    // identity so OAuth upstreams resolve the shared grant.
+    assert_eq!(
+        caller.oauth_subject(),
+        Some(super::SHARED_GATEWAY_OAUTH_SUBJECT),
+        "oauth_subject must fall back to the shared gateway subject when sub is None"
     );
 }
 
 #[test]
 fn oauth_subject_trusted_local_returns_shared_subject() {
     let caller = super::CodeModeCaller::TrustedLocal;
-    // PRESENCE: trusted local also returns a subject (the shared gateway subject)
-    assert!(
-        caller.oauth_subject().is_some(),
-        "TrustedLocal must return Some oauth_subject"
+    assert_eq!(
+        caller.oauth_subject(),
+        Some(super::SHARED_GATEWAY_OAUTH_SUBJECT),
+        "TrustedLocal must resolve to the shared gateway subject"
     );
 }
 

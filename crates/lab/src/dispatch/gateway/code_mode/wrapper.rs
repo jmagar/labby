@@ -1,7 +1,7 @@
 //! Shared JS wrapper constants and the execute-wrapper body builder.
 
-/// The single contract error message for the execute wrapper, shared by both
-/// runner engines (Javy and Boa) so it cannot diverge between them.
+/// The single contract error message for the execute wrapper, defined once for
+/// the javy runner so the shape contract has a single source of truth.
 const CODE_MODE_MAIN_SHAPE_ERROR: &str =
     "code_execute code must evaluate to an async arrow function: async () => { ... }";
 
@@ -39,6 +39,21 @@ function __labBytesFromBase64(data) {
   }
   return new Uint8Array(out);
 }
+var __labBinaryTypes = {
+  Int8Array: typeof Int8Array !== "undefined" ? Int8Array : null,
+  Uint8Array: typeof Uint8Array !== "undefined" ? Uint8Array : null,
+  Uint8ClampedArray: typeof Uint8ClampedArray !== "undefined" ? Uint8ClampedArray : null,
+  Int16Array: typeof Int16Array !== "undefined" ? Int16Array : null,
+  Uint16Array: typeof Uint16Array !== "undefined" ? Uint16Array : null,
+  Int32Array: typeof Int32Array !== "undefined" ? Int32Array : null,
+  Uint32Array: typeof Uint32Array !== "undefined" ? Uint32Array : null,
+  Float32Array: typeof Float32Array !== "undefined" ? Float32Array : null,
+  Float64Array: typeof Float64Array !== "undefined" ? Float64Array : null,
+  BigInt64Array: typeof BigInt64Array !== "undefined" ? BigInt64Array : null,
+  BigUint64Array: typeof BigUint64Array !== "undefined" ? BigUint64Array : null,
+  DataView: typeof DataView !== "undefined" ? DataView : null,
+  ArrayBuffer: typeof ArrayBuffer !== "undefined" ? ArrayBuffer : null
+};
 function __labEncodeResult(value) {
   if (value == null) return value;
   if (typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer) {
@@ -49,6 +64,11 @@ function __labEncodeResult(value) {
   }
   if (Array.isArray(value)) return value.map(__labEncodeResult);
   if (typeof value === "object") {
+    // Honor toJSON() (e.g. Date) exactly like JSON.stringify would, so a Date
+    // round-trips as its ISO string instead of collapsing to {}.
+    if (typeof value.toJSON === "function") {
+      return __labEncodeResult(value.toJSON());
+    }
     const out = {};
     for (const key of Object.keys(value)) out[key] = __labEncodeResult(value[key]);
     return out;
@@ -57,12 +77,29 @@ function __labEncodeResult(value) {
 }
 function __labDecodeResult(value) {
   if (value == null) return value;
-  if (typeof value === "object" && value.__labBinary === "base64" && typeof value.data === "string") {
+  if (
+    typeof value === "object" &&
+    value.__labBinary === "base64" &&
+    typeof value.data === "string" &&
+    typeof value.type === "string" &&
+    Object.prototype.hasOwnProperty.call(__labBinaryTypes, value.type) &&
+    __labBinaryTypes[value.type]
+  ) {
     const bytes = __labBytesFromBase64(value.data);
     if (value.type === "ArrayBuffer") {
       return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
     }
-    return bytes;
+    const Ctor = __labBinaryTypes[value.type];
+    if (value.type === "DataView") {
+      return new DataView(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    }
+    if (value.type === "Uint8Array" || value.type === "Uint8ClampedArray") {
+      // Already a byte view of the right width — wrap without re-walking bytes.
+      return new Ctor(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    }
+    // Reconstruct the original element width from the raw bytes. Use a copied
+    // ArrayBuffer so byteOffset/length line up with the typed-array constructor.
+    return new Ctor(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
   }
   if (Array.isArray(value)) return value.map(__labDecodeResult);
   if (typeof value === "object") {
@@ -76,11 +113,11 @@ function __labDecodeResult(value) {
 
 /// Build the shared inner body of the execute wrapper for `code`.
 ///
-/// Both runner engines invoke the result identically: assign the user code to
-/// `__codeModeMain`, verify it is a function (throwing the shared contract error
-/// otherwise), then `return await __codeModeMain();`. Built by concatenation
-/// (not a brace-laden `format!`) so the literal JS braces need no escaping and
-/// the snippet stays identical across engines.
+/// The javy runner invokes the result by assigning the user code to
+/// `__codeModeMain`, verifying it is a function (throwing the shared contract
+/// error otherwise), then `return await __codeModeMain();`. Built by
+/// concatenation (not a brace-laden `format!`) so the literal JS braces need no
+/// escaping.
 pub(in crate::dispatch::gateway::code_mode) fn code_mode_main_invoker(code: &str) -> String {
     let mut body = String::new();
     body.push_str("  const __codeModeMain = (");

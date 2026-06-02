@@ -49,36 +49,40 @@ pub(in crate::dispatch::gateway::code_mode) fn truncate_execution_response(
             token_estimate_divisor,
         )
     {
-        let original_len = response.logs.len();
-        let mut dropped = 0usize;
-        // Drop oldest lines one at a time, replacing the dropped prefix with a
-        // single sentinel, until within budget or all original lines are gone.
-        // Terminates: each iteration removes one line; the sentinel is a short
-        // fixed string, so logs collapse to at most one entry.
+        let original = std::mem::take(&mut response.logs);
+        let total = original.len();
+        // Drop oldest lines, replacing the dropped prefix with a single sentinel,
+        // advancing a start index instead of `remove(0)` so the scan is O(n) (no
+        // repeated front-shift / full clone per step). Stop as soon as the trial
+        // fits the budget, or when every original line has been dropped.
+        //
+        // Best-effort: `calls[]` metadata is not trimmed here, so an extreme
+        // high-fan-out run can stay over budget even after all logs are gone. In
+        // that case we keep the fully-collapsed logs (sentinel only) rather than
+        // claim success — the residual `calls[]` overflow is a known follow-up.
+        let mut start = 0usize;
         loop {
-            let sentinel =
-                format!("[logs truncated to fit response budget — {dropped} line(s) dropped]");
-            let mut candidate = Vec::with_capacity(response.logs.len() + 1);
+            let dropped = start;
+            let mut candidate = Vec::with_capacity(original.len() - start + 1);
             if dropped > 0 {
-                candidate.push(sentinel);
+                candidate.push(format!(
+                    "[logs truncated to fit response budget — {dropped} line(s) dropped]"
+                ));
             }
-            candidate.extend(response.logs.iter().cloned());
-            let mut trial = response.clone();
-            trial.logs = candidate;
+            candidate.extend_from_slice(&original[start..]);
+            response.logs = candidate;
             if response_within_budget(
-                &trial,
+                &response,
                 max_response_bytes,
                 max_response_tokens,
                 token_estimate_divisor,
-            ) || response.logs.is_empty()
+            ) || start >= total
             {
-                response.logs = trial.logs;
                 break;
             }
-            response.logs.remove(0);
-            dropped += 1;
+            start += 1;
         }
-        debug_assert!(dropped <= original_len);
+        debug_assert!(start <= total);
     }
 
     response
@@ -128,7 +132,7 @@ pub(in crate::dispatch::gateway::code_mode) fn apply_log_caps(
     let max_entries = max_entries.max(1);
     let max_bytes = max_bytes.max(1);
 
-    let mut total_bytes: usize = 0;
+    let mut kept_bytes: usize = 0;
     let mut kept = 0;
     let mut truncated = false;
 
@@ -137,20 +141,21 @@ pub(in crate::dispatch::gateway::code_mode) fn apply_log_caps(
             truncated = true;
             break;
         }
-        total_bytes += line.len();
-        if total_bytes > max_bytes {
+        // Check the prospective total before counting the line so a line that
+        // would push us over the cap is dropped without inflating the reported
+        // byte count — the sentinel reflects only the bytes actually kept.
+        if kept_bytes + line.len() > max_bytes {
             truncated = true;
             break;
         }
+        kept_bytes += line.len();
         kept = i + 1;
     }
 
     if truncated {
         logs.truncate(kept);
         logs.push(format!(
-            "[log output truncated at {} lines / {} bytes]",
-            kept,
-            total_bytes.min(max_bytes),
+            "[log output truncated at {kept} lines / {kept_bytes} bytes]"
         ));
     }
 
