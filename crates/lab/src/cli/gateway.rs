@@ -532,10 +532,9 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
                 GatewayCommand::Get(args) => {
                     ("gateway.get".to_string(), json!({ "name": args.name }))
                 }
-                GatewayCommand::Test(args) => (
-                    "gateway.test".to_string(),
-                    json!({ "name": args.name }),
-                ),
+                GatewayCommand::Test(args) => {
+                    ("gateway.test".to_string(), json!({ "name": args.name }))
+                }
                 GatewayCommand::Add(args) => (
                     "gateway.add".to_string(),
                     json!({
