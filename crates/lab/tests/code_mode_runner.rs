@@ -112,10 +112,51 @@ fn code_mode_runner_evaluates_js_in_a_minimal_host_environment() {
     stderr
         .read_to_string(&mut stderr_text)
         .expect("read runner stderr");
-    // Console.log capture routes to stderr only on the WASM/Javy path; the
-    // Boa path defers console capture to Bead 3 (boa_runtime integration).
-    #[cfg(feature = "code_mode_wasm")]
+    // Console.log capture routes to stderr on the Javy path.
     assert!(stderr_text.contains("runner console check"));
+}
+
+/// The `search` action passes the caller's code to the runner *raw* (no
+/// `normalize_user_code`). A non-function search input (e.g. `42`) must surface
+/// as `server_error`, preserving the contract the old in-process
+/// `evaluate_code_search` enforced. The runner's invoker requires the code to
+/// evaluate to a function and throws a TypeError otherwise, which
+/// `run_code_mode_runner_stdio` maps to `server_error`.
+#[test]
+fn code_mode_runner_rejects_non_function_search_input_as_server_error() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+
+    // Raw, un-normalized non-function code with the search-shaped catalog proxy.
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "start",
+            "code": "42",
+            "proxy": "const tools = [];\n"
+        })
+    )
+    .expect("write start");
+
+    let error = read_protocol_line(&mut stdout);
+    assert_eq!(error["type"], "error", "expected error, got: {error}");
+    assert_eq!(
+        error["kind"], "server_error",
+        "non-function search input must surface as server_error, got: {error}"
+    );
+
+    let status = child.wait().expect("wait for runner");
+    assert!(!status.success(), "runner must exit non-zero after error");
 }
 
 #[test]

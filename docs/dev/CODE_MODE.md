@@ -221,9 +221,11 @@ The stdio parent-broker protocol is:
    `tool_error`.
 5. Child settles pending promises and emits `done`.
 
-With `code_mode_wasm` enabled, the child runner uses Javy/QuickJS for snippet
-execution. Without it, the runner keeps the Boa fallback implementation for
-development builds that do not include the Javy/Wasmtime dependencies.
+Code Mode always uses Javy/QuickJS for snippet execution — a single engine, with
+no Boa fallback and no `code_mode_wasm` feature. Both `execute` and `search` run
+in the Javy child runner (search injects the tool catalog as `const tools` and
+runs with `max_tool_calls = 0`). Javy and Wasmtime are pulled in by the `gateway`
+feature.
 
 The runner starts with an empty environment in a temporary directory. It does not
 provide Node, Deno, Bun, `fetch`, `connect`, `XMLHttpRequest`, `require`, or host
