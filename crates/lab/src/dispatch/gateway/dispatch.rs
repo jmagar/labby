@@ -822,6 +822,7 @@ mod tests {
         assert!(names.contains(&"gateway.public_urls.get"));
 
         for name in [
+            "gateway.test",
             "gateway.add",
             "gateway.update",
             "gateway.remove",

@@ -2240,8 +2240,8 @@
   {
     "service": "gateway",
     "action": "gateway.test",
-    "description": "Test a configured or proposed gateway without saving it",
-    "destructive": false,
+    "description": "Test a configured or proposed gateway without saving it (probing a stdio gateway runs its local command)",
+    "destructive": true,
     "params": [
       {
         "name": "name",

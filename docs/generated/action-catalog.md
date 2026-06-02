@@ -87,7 +87,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `gateway` | `gateway.service_config.set` | false | true | `service*: string`<br>`values*: json` | `ServiceConfigView` | cli, mcp, api, web |
 | `gateway` | `gateway.status` | false | false | `name: string` | `GatewayRuntimeView[]` | cli, mcp, api, web |
 | `gateway` | `gateway.supported_services` | false | false |  | `SupportedServiceView[]` | cli, mcp, api, web |
-| `gateway` | `gateway.test` | false | false | `name: string`<br>`spec: json` | `GatewayTestResult` | cli, mcp, api, web |
+| `gateway` | `gateway.test` | false | true | `name: string`<br>`spec: json` | `GatewayTestResult` | cli, mcp, api, web |
 | `gateway` | `gateway.tool_search.get` | false | false |  | `ToolSearchConfig` | cli, mcp, api, web |
 | `gateway` | `gateway.tool_search.set` | false | true | `enabled*: boolean`<br>`top_k_default: integer`<br>`max_tools: integer` | `ToolSearchConfig` | cli, mcp, api, web |
 | `gateway` | `gateway.update` | false | true | `name*: string`<br>`patch*: json`<br>`bearer_token_value: string` | `GatewayView` | cli, mcp, api, web |

@@ -28,17 +28,23 @@ The complete gateway action inventory is generated from `ActionSpec`:
 - [generated action catalog](../generated/action-catalog.md)
 - [generated action catalog JSON](../generated/action-catalog.json)
 
-`gateway.add`, `gateway.update`, `gateway.remove`, and `gateway.reload` are
-destructive actions in shared action metadata. HTTP callers must send
-`params.confirm = true`, CLI callers must confirm interactively or use `--yes` / `-y`, and MCP callers
-must go through elicitation when supported.
+`gateway.test`, `gateway.add`, `gateway.update`, `gateway.remove`, and
+`gateway.reload` are destructive actions in shared action metadata. HTTP callers
+must send `params.confirm = true`, CLI callers must confirm interactively or use
+`--yes` / `-y`, and MCP callers must go through elicitation when supported.
 
 ### Stdio Gateways
 
 Stdio upstreams run a configured command on the local host running `lab` when
-they are tested or reconciled. Adding, updating, and testing them is gated only
-by the normal destructive confirmation (`confirm: true` / `--yes` / elicitation)
-that applies to all config mutations — there is no separate stdio acknowledgement.
+they are tested or reconciled. There is no separate stdio acknowledgement — they
+are gated only by the normal destructive confirmation (`confirm: true` /
+`--yes` / elicitation).
+
+`gateway.test` is marked destructive specifically because probing a stdio
+gateway spawns its local command. Unlike `add`/`update`, a test performs no
+config mutation, but it can still execute a local process — so the confirmation
+gate is what keeps a read-only-looking call from running arbitrary commands on
+behalf of a remote HTTP/MCP caller.
 
 ## Tool Exposure
 
@@ -258,8 +264,9 @@ Tool-search observability:
 - RFC1918 and other private-network URLs are allowed
 - stdio gateways are allowed. Proposed or persisted enabled stdio specs can
   execute local commands during `gateway.test`, `gateway.add`, and
-  `gateway.update`; these are gated only by the normal destructive confirmation
-  that applies to all config mutations.
+  `gateway.update`; all three are marked destructive and gated by the normal
+  destructive confirmation. `gateway.test` is destructive even though it never
+  mutates config, because probing a stdio gateway spawns its local command.
 
 ## Reconcile Model
 

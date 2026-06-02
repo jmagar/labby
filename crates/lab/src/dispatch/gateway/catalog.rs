@@ -358,8 +358,11 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "gateway.test",
-        description: "Test a configured or proposed gateway without saving it",
-        destructive: false,
+        // Destructive because probing a stdio gateway spawns the configured
+        // local command. The confirmation gate is the only thing standing
+        // between a remote caller and arbitrary local command execution.
+        description: "Test a configured or proposed gateway without saving it (probing a stdio gateway runs its local command)",
+        destructive: true,
         returns: "GatewayTestResult",
         params: &[
             ParamSpec {
@@ -807,7 +810,6 @@ mod tests {
             "gateway.list",
             "gateway.tool_search.get",
             "gateway.get",
-            "gateway.test",
             "gateway.status",
             "gateway.virtual_server.quarantine.list",
             "gateway.discovered_tools",
