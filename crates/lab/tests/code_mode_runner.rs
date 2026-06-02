@@ -112,10 +112,132 @@ fn code_mode_runner_evaluates_js_in_a_minimal_host_environment() {
     stderr
         .read_to_string(&mut stderr_text)
         .expect("read runner stderr");
-    // Console.log capture routes to stderr only on the WASM/Javy path; the
-    // Boa path defers console capture to Bead 3 (boa_runtime integration).
-    #[cfg(feature = "code_mode_wasm")]
+    // Console.log capture routes to stderr on the Javy path.
     assert!(stderr_text.contains("runner console check"));
+}
+
+/// The `search` action passes the caller's code to the runner *raw* (no
+/// `normalize_user_code`). A non-function search input (e.g. `42`) must surface
+/// as `server_error`, preserving the contract the old in-process
+/// `evaluate_code_search` enforced. The runner's invoker requires the code to
+/// evaluate to a function and throws a TypeError otherwise, which
+/// `run_code_mode_runner_stdio` maps to `server_error`.
+#[test]
+fn code_mode_runner_rejects_non_function_search_input_as_server_error() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+
+    // Raw, un-normalized non-function code with the search-shaped catalog proxy.
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "start",
+            "code": "42",
+            "proxy": "const tools = [];\n"
+        })
+    )
+    .expect("write start");
+
+    let error = read_protocol_line(&mut stdout);
+    assert_eq!(error["type"], "error", "expected error, got: {error}");
+    assert_eq!(
+        error["kind"], "server_error",
+        "non-function search input must surface as server_error, got: {error}"
+    );
+
+    let status = child.wait().expect("wait for runner");
+    assert!(!status.success(), "runner must exit non-zero after error");
+}
+
+/// Malformed search JS (a syntax/parse error like `async () => {`) fails at the
+/// top-level `cx.eval` before the main promise is ever created. That is a caller
+/// mistake, so it must surface as `invalid_param` — matching the contract the old
+/// in-process `evaluate_code_search` enforced — not `server_error`. (Contrast with
+/// the non-function `42` case above, whose TypeError surfaces as a promise
+/// rejection and stays `server_error`.)
+#[test]
+fn code_mode_runner_rejects_malformed_search_js_as_invalid_param() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+
+    // Raw, un-normalized malformed code (unterminated arrow body) with the
+    // search-shaped catalog proxy.
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "start",
+            "code": "async () => {",
+            "proxy": "const tools = [];\n"
+        })
+    )
+    .expect("write start");
+
+    let error = read_protocol_line(&mut stdout);
+    assert_eq!(error["type"], "error", "expected error, got: {error}");
+    assert_eq!(
+        error["kind"], "invalid_param",
+        "malformed search JS must surface as invalid_param, got: {error}"
+    );
+
+    let status = child.wait().expect("wait for runner");
+    assert!(!status.success(), "runner must exit non-zero after error");
+}
+
+/// An *uncaught* structured rejection — the main promise throws an Error whose
+/// message is a `{kind,message}` JSON payload — must preserve that `kind` in the
+/// top-level error envelope rather than collapsing to a blanket `server_error`
+/// (#2b). Contrast with the non-function `42` case, whose plain TypeError stays
+/// `server_error`. (When the same structured error is *caught* inside the user
+/// code, the run resolves normally — that path is covered by the fan-out tests.)
+#[test]
+fn code_mode_runner_preserves_kind_from_uncaught_structured_rejection() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+
+    // The main promise throws an Error carrying a structured {kind,message}.
+    let code = r#"async () => {
+        throw new Error(JSON.stringify({ kind: "rate_limited", message: "slow down" }));
+    }"#;
+    writeln!(stdin, "{}", json!({ "type": "start", "code": code })).expect("write start");
+
+    let error = read_protocol_line(&mut stdout);
+    assert_eq!(error["type"], "error", "expected error, got: {error}");
+    assert_eq!(
+        error["kind"], "rate_limited",
+        "an uncaught structured rejection must preserve its kind, got: {error}"
+    );
+
+    let status = child.wait().expect("wait for runner");
+    assert!(!status.success(), "runner must exit non-zero after error");
 }
 
 #[test]
@@ -249,6 +371,85 @@ fn code_mode_runner_preserves_binary_tool_args_and_results() {
     assert_eq!(
         done["result"],
         json!({"isBytes": true, "values": [4, 5, 6]})
+    );
+    let status = child.wait().expect("wait for runner");
+    assert!(status.success(), "runner exited with {status}");
+}
+
+/// The JS value codec must (a) honor `toJSON()` so a `Date` round-trips as its
+/// ISO string instead of `{}`, (b) tag an `Int16Array` with its real class so
+/// the decoder can reconstruct the correct element width, and (c) reconstruct
+/// the recorded class from a binary-result sentinel — an `Int16Array` sentinel
+/// must decode back into an `Int16Array`, not collapse to `Uint8Array`.
+#[test]
+fn code_mode_runner_round_trips_date_typed_array_and_array_buffer() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+
+    // Args carry a Date, an Int16Array([256, -1]), and an ArrayBuffer.
+    let code = r#"async () => {
+        const buf = new Uint8Array([9, 8, 7]).buffer;
+        const echoed = await callTool('upstream::test::echo', {
+          when: new Date(0),
+          ints: new Int16Array([256, -1]),
+          raw: buf
+        });
+        return {
+          isInt16: echoed instanceof Int16Array,
+          ctor: echoed && echoed.constructor && echoed.constructor.name,
+          values: Array.from(echoed)
+        };
+    }"#;
+
+    writeln!(stdin, "{}", json!({ "type": "start", "code": code })).expect("write start");
+
+    let call = read_protocol_line(&mut stdout);
+    assert_eq!(call["type"], "tool_call");
+    // (a) Date honored toJSON() → ISO string, not {}.
+    assert_eq!(
+        call["params"]["when"],
+        json!("1970-01-01T00:00:00.000Z"),
+        "Date must encode via toJSON() to its ISO string, got: {}",
+        call["params"]["when"]
+    );
+    // (b) Int16Array tagged with its real class and little-endian bytes.
+    assert_eq!(
+        call["params"]["ints"],
+        json!({ "__labBinary": "base64", "type": "Int16Array", "data": "AAH//w==" })
+    );
+    // ArrayBuffer tagged as ArrayBuffer.
+    assert_eq!(call["params"]["raw"]["__labBinary"], json!("base64"));
+    assert_eq!(call["params"]["raw"]["type"], json!("ArrayBuffer"));
+
+    let seq = call["seq"].as_u64().expect("seq");
+    // (c) Result is an Int16Array sentinel: bytes [1,0,2,0,3,0] → [1,2,3].
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "tool_result",
+            "seq": seq,
+            "result": { "__labBinary": "base64", "type": "Int16Array", "data": "AQACAAMA" }
+        })
+    )
+    .expect("write result");
+
+    let done = read_protocol_line(&mut stdout);
+    assert_eq!(done["type"], "done");
+    assert_eq!(
+        done["result"],
+        json!({ "isInt16": true, "ctor": "Int16Array", "values": [1, 2, 3] }),
+        "Int16Array result sentinel must reconstruct as Int16Array, got: {}",
+        done["result"]
     );
     let status = child.wait().expect("wait for runner");
     assert!(status.success(), "runner exited with {status}");

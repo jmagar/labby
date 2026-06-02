@@ -86,27 +86,13 @@
         "deploy",
         "mcpregistry",
         "gateway",
-        "marketplace",
-        "code_mode_wasm"
+        "marketplace"
       ],
       "included_in_default": true,
       "included_in_all": true,
       "classification": "aggregate_default",
       "mapped_crate_feature": "lab-apis/all",
       "exception_reason": "aggregate/default feature"
-    },
-    {
-      "crate_name": "labby",
-      "feature": "code_mode_wasm",
-      "dependencies": [
-        "dep:javy",
-        "dep:wasmtime"
-      ],
-      "included_in_default": true,
-      "included_in_all": true,
-      "classification": "helper_internal",
-      "mapped_crate_feature": null,
-      "exception_reason": "helper/internal feature"
     },
     {
       "crate_name": "labby",
@@ -150,12 +136,15 @@
     {
       "crate_name": "labby",
       "feature": "gateway",
-      "dependencies": [],
+      "dependencies": [
+        "dep:javy",
+        "dep:wasmtime"
+      ],
       "included_in_default": true,
       "included_in_all": true,
-      "classification": "intentional_exception",
+      "classification": "helper_internal",
       "mapped_crate_feature": null,
-      "exception_reason": "intentional crate-local exception"
+      "exception_reason": "helper/internal feature"
     },
     {
       "crate_name": "labby",
