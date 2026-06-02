@@ -17,7 +17,6 @@ Commands:
   nodes        Query nodes from the configured controller
   health       Quick reachability check for configured services
   setup        Open the web-based first-run wizard (or settings) — lab-bg3e.3
-  help         Print the service + action catalog
   completions  Generate shell completions
   gateway      Manage proxied upstream MCP gateways
   oauth        Run local OAuth callback relay helpers
@@ -26,6 +25,7 @@ Commands:
   registry     MCP Registry — look up and install servers from registry.modelcontextprotocol.io
   stash        Component versioning and deployment
   deploy       Deploy the local lab release binary to SSH targets
+  help         Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -52,7 +52,8 @@ Start the MCP server (stdio or HTTP transport)
 Usage: serve [OPTIONS] [COMMAND]
 
 Commands:
-  mcp  Run the MCP server over stdio instead of the default HTTP transport
+  mcp   Run the MCP server over stdio instead of the default HTTP transport
+  help  Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -109,6 +110,18 @@ Options:
           Print help
 ```
 
+## `labby serve help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
 ## `labby mcp`
 
 ```text
@@ -149,6 +162,7 @@ Commands:
   system    Run local system checks (env vars, Docker, disk, toolchain)
   service   Probe a single configured service
   services  Probe all configured services
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -285,6 +299,18 @@ Options:
           Print help
 ```
 
+## `labby doctor help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
 ## `labby docs`
 
 ```text
@@ -295,6 +321,7 @@ Usage: docs [OPTIONS] <COMMAND>
 Commands:
   generate  Regenerate every tracked generated-docs artifact
   check     Verify generated-docs artifacts are fresh
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -352,6 +379,18 @@ Options:
           Print help
 ```
 
+## `labby docs help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
 ## `labby nodes`
 
 ```text
@@ -364,6 +403,7 @@ Commands:
   get          Get details for a specific node by `node_id`
   update       Build and roll out the local release binary to selected nodes
   enrollments  Manage pending, approved, and denied node enrollments
+  help         Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -464,6 +504,7 @@ Commands:
   list     List pending, approved, and denied enrollments
   approve  Approve a pending enrollment
   deny     Deny a pending or approved enrollment
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -556,6 +597,30 @@ Options:
           Print help
 ```
 
+## `labby nodes enrollments help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
+## `labby nodes help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
 ## `labby health`
 
 ```text
@@ -596,6 +661,7 @@ Commands:
   install              Copy the labby binary into ~/.local/bin so it is callable in your own terminal
   install-plugin       Install the Claude Code plugin for a configured service
   uninstall-plugin     Uninstall the Claude Code plugin for a service
+  help                 Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -892,28 +958,16 @@ Options:
           Print help
 ```
 
-## `labby help`
+## `labby setup help`
 
 ```text
-Print the service + action catalog
+Print this message or the help of the given subcommand(s)
 
-Usage: help [OPTIONS]
+Usage: help [COMMAND]...
 
-Options:
-      --all
-          Show every compiled-in service, even if required env vars are missing
-
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
 ```
 
 ## `labby completions`
@@ -951,22 +1005,23 @@ Manage proxied upstream MCP gateways
 Usage: gateway [OPTIONS] <COMMAND>
 
 Commands:
-  list
-  get
-  test
-  add
-  update
-  remove
-  quarantine
-  protected-route
-  tool-search
-  reload
-  mcp
+  list             List configured gateways and their runtime status
+  get              Get one configured gateway
+  test             Test a configured or proposed gateway without saving it
+  add              Add a gateway and reconcile runtime state
+  update           Update a gateway and reconcile runtime state
+  remove           Remove a gateway and reconcile runtime state
+  quarantine       Manage Lab-backed virtual servers quarantined during config migration
+  protected-route  Manage public MCP routes protected by Lab OAuth
+  tool-search      Configure gateway-wide tool_search/tool_execute mode
+  reload           Reload gateways from config and reconcile runtime state
+  mcp              Manage upstream MCP server lifecycle and OAuth
   discover         Scan the machine for MCP server configs from known editors and tools (read-only)
   import           Import discovered MCP servers into the gateway (disabled by default)
   pending          Manage pending discovered servers waiting for approval
   public-urls      Show resolved public URL configuration (app and MCP gateway)
   code             Search, inspect, and execute Code Mode snippets through dispatch
+  help             Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -985,6 +1040,8 @@ Options:
 ## `labby gateway list`
 
 ```text
+List configured gateways and their runtime status
+
 Usage: list [OPTIONS]
 
 Options:
@@ -1004,6 +1061,8 @@ Options:
 ## `labby gateway get`
 
 ```text
+Get one configured gateway
+
 Usage: get [OPTIONS] <NAME>
 
 Arguments:
@@ -1027,6 +1086,8 @@ Options:
 ## `labby gateway test`
 
 ```text
+Test a configured or proposed gateway without saving it
+
 Usage: test [OPTIONS]
 
 Options:
@@ -1052,6 +1113,8 @@ Options:
 ## `labby gateway add`
 
 ```text
+Add a gateway and reconcile runtime state
+
 Usage: add [OPTIONS] --name <NAME>
 
 Options:
@@ -1092,6 +1155,8 @@ Options:
 ## `labby gateway update`
 
 ```text
+Update a gateway and reconcile runtime state
+
 Usage: update [OPTIONS] <NAME>
 
 Arguments:
@@ -1136,6 +1201,8 @@ Options:
 ## `labby gateway remove`
 
 ```text
+Remove a gateway and reconcile runtime state
+
 Usage: remove [OPTIONS] <NAME>
 
 Arguments:
@@ -1159,11 +1226,14 @@ Options:
 ## `labby gateway quarantine`
 
 ```text
+Manage Lab-backed virtual servers quarantined during config migration
+
 Usage: quarantine [OPTIONS] <COMMAND>
 
 Commands:
-  list
-  restore
+  list     List Lab-backed virtual servers quarantined during config migration
+  restore  Restore a quarantined Lab-backed virtual server into the active gateway list
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -1182,6 +1252,8 @@ Options:
 ## `labby gateway quarantine list`
 
 ```text
+List Lab-backed virtual servers quarantined during config migration
+
 Usage: list [OPTIONS]
 
 Options:
@@ -1201,6 +1273,8 @@ Options:
 ## `labby gateway quarantine restore`
 
 ```text
+Restore a quarantined Lab-backed virtual server into the active gateway list
+
 Usage: restore [OPTIONS] <ID>
 
 Arguments:
@@ -1221,18 +1295,33 @@ Options:
           Print help
 ```
 
+## `labby gateway quarantine help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
 ## `labby gateway protected-route`
 
 ```text
+Manage public MCP routes protected by Lab OAuth
+
 Usage: protected-route [OPTIONS] <COMMAND>
 
 Commands:
-  list
-  get
-  add
-  update
-  remove
-  test
+  list    List Gateway-managed public MCP routes protected by Lab OAuth
+  get     Get one Gateway-managed protected MCP route
+  add     Add a Gateway-managed protected MCP route
+  update  Replace a Gateway-managed protected MCP route
+  remove  Remove a Gateway-managed protected MCP route
+  test    Validate a proposed protected MCP route without saving it
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -1251,6 +1340,8 @@ Options:
 ## `labby gateway protected-route list`
 
 ```text
+List Gateway-managed public MCP routes protected by Lab OAuth
+
 Usage: list [OPTIONS]
 
 Options:
@@ -1270,6 +1361,8 @@ Options:
 ## `labby gateway protected-route get`
 
 ```text
+Get one Gateway-managed protected MCP route
+
 Usage: get [OPTIONS] <NAME>
 
 Arguments:
@@ -1293,6 +1386,8 @@ Options:
 ## `labby gateway protected-route add`
 
 ```text
+Add a Gateway-managed protected MCP route
+
 Usage: add [OPTIONS] --name <NAME> --public-host <PUBLIC_HOST> --public-path <PUBLIC_PATH>
 
 Options:
@@ -1336,6 +1431,8 @@ Options:
 ## `labby gateway protected-route update`
 
 ```text
+Replace a Gateway-managed protected MCP route
+
 Usage: update [OPTIONS] --public-host <PUBLIC_HOST> --public-path <PUBLIC_PATH> <NAME>
 
 Arguments:
@@ -1383,6 +1480,8 @@ Options:
 ## `labby gateway protected-route remove`
 
 ```text
+Remove a Gateway-managed protected MCP route
+
 Usage: remove [OPTIONS] <NAME>
 
 Arguments:
@@ -1406,6 +1505,8 @@ Options:
 ## `labby gateway protected-route test`
 
 ```text
+Validate a proposed protected MCP route without saving it
+
 Usage: test [OPTIONS] --name <NAME> --public-host <PUBLIC_HOST> --public-path <PUBLIC_PATH>
 
 Options:
@@ -1446,15 +1547,30 @@ Options:
           Print help
 ```
 
+## `labby gateway protected-route help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
 ## `labby gateway tool-search`
 
 ```text
+Configure gateway-wide tool_search/tool_execute mode
+
 Usage: tool-search [OPTIONS] <COMMAND>
 
 Commands:
-  status
-  enable
-  disable
+  status   Read the gateway-wide tool_search settings
+  enable   Enable gateway-wide tool_search/tool_execute mode for all exposed upstream tools
+  disable  Disable gateway-wide tool_search/tool_execute mode
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -1473,6 +1589,8 @@ Options:
 ## `labby gateway tool-search status`
 
 ```text
+Read the gateway-wide tool_search settings
+
 Usage: status [OPTIONS]
 
 Options:
@@ -1492,6 +1610,8 @@ Options:
 ## `labby gateway tool-search enable`
 
 ```text
+Enable gateway-wide tool_search/tool_execute mode for all exposed upstream tools
+
 Usage: enable [OPTIONS]
 
 Options:
@@ -1517,6 +1637,8 @@ Options:
 ## `labby gateway tool-search disable`
 
 ```text
+Disable gateway-wide tool_search/tool_execute mode
+
 Usage: disable [OPTIONS]
 
 Options:
@@ -1533,9 +1655,23 @@ Options:
           Print help
 ```
 
+## `labby gateway tool-search help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
 ## `labby gateway reload`
 
 ```text
+Reload gateways from config and reconcile runtime state
+
 Usage: reload [OPTIONS]
 
 Options:
@@ -1555,14 +1691,17 @@ Options:
 ## `labby gateway mcp`
 
 ```text
+Manage upstream MCP server lifecycle and OAuth
+
 Usage: mcp [OPTIONS] <COMMAND>
 
 Commands:
-  auth
-  list
-  enable
-  disable
-  cleanup
+  auth     Manage upstream MCP server OAuth credentials
+  list     List upstream MCP runtime state, discovery counts, and likely stale process counts
+  enable   Enable an upstream MCP server so new sessions discover and proxy it again
+  disable  Disable an upstream MCP server and optionally clean up running processes
+  cleanup  Kill or preview running processes associated with one upstream MCP server
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -1581,13 +1720,16 @@ Options:
 ## `labby gateway mcp auth`
 
 ```text
+Manage upstream MCP server OAuth credentials
+
 Usage: auth [OPTIONS] <COMMAND>
 
 Commands:
-  start
-  open
-  status
-  clear
+  start   Start the upstream OAuth flow and print the browser authorization URL
+  open    Start the upstream OAuth flow and open the authorization URL in a browser
+  status  Read upstream OAuth status for the shared gateway credential
+  clear   Clear stored upstream OAuth credentials for the shared gateway credential
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -1606,6 +1748,8 @@ Options:
 ## `labby gateway mcp auth start`
 
 ```text
+Start the upstream OAuth flow and print the browser authorization URL
+
 Usage: start [OPTIONS] <NAME>
 
 Arguments:
@@ -1641,6 +1785,8 @@ Options:
 ## `labby gateway mcp auth open`
 
 ```text
+Start the upstream OAuth flow and open the authorization URL in a browser
+
 Usage: open [OPTIONS] <NAME>
 
 Arguments:
@@ -1676,6 +1822,8 @@ Options:
 ## `labby gateway mcp auth status`
 
 ```text
+Read upstream OAuth status for the shared gateway credential
+
 Usage: status [OPTIONS] <NAME>
 
 Arguments:
@@ -1711,6 +1859,8 @@ Options:
 ## `labby gateway mcp auth clear`
 
 ```text
+Clear stored upstream OAuth credentials for the shared gateway credential
+
 Usage: clear [OPTIONS] <NAME>
 
 Arguments:
@@ -1743,9 +1893,23 @@ Options:
           Print help
 ```
 
+## `labby gateway mcp auth help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
 ## `labby gateway mcp list`
 
 ```text
+List upstream MCP runtime state, discovery counts, and likely stale process counts
+
 Usage: list [OPTIONS]
 
 Options:
@@ -1765,6 +1929,8 @@ Options:
 ## `labby gateway mcp enable`
 
 ```text
+Enable an upstream MCP server so new sessions discover and proxy it again
+
 Usage: enable [OPTIONS] <NAME>
 
 Arguments:
@@ -1797,6 +1963,8 @@ Options:
 ## `labby gateway mcp disable`
 
 ```text
+Disable an upstream MCP server and optionally clean up running processes
+
 Usage: disable [OPTIONS] <NAME>
 
 Arguments:
@@ -1829,6 +1997,8 @@ Options:
 ## `labby gateway mcp cleanup`
 
 ```text
+Kill or preview running processes associated with one upstream MCP server
+
 Usage: cleanup [OPTIONS] <NAME>
 
 Arguments:
@@ -1853,6 +2023,18 @@ Options:
 
   -h, --help
           Print help
+```
+
+## `labby gateway mcp help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
 ```
 
 ## `labby gateway discover`
@@ -1926,6 +2108,7 @@ Commands:
   list     List discovered servers waiting for approval
   approve  Approve a pending server and add it to the gateway (disabled by default)
   reject   Reject a pending server and tombstone it so it never re-appears
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -2024,6 +2207,18 @@ Options:
           Print help
 ```
 
+## `labby gateway pending help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
 ## `labby gateway public-urls`
 
 ```text
@@ -2054,6 +2249,7 @@ Usage: code [OPTIONS] <COMMAND>
 
 Commands:
   exec  Execute a sandboxed JavaScript snippet that calls the typed `codemode.<upstream>.<tool>` helpers (or `callTool` directly). Cloudflare-parity: the `code` MCP tool takes only `{ code }`, so the CLI mirrors that — no separate `search` subcommand
+  help  Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -2096,6 +2292,30 @@ Options:
           Print help
 ```
 
+## `labby gateway code help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
+## `labby gateway help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
 ## `labby oauth`
 
 ```text
@@ -2104,7 +2324,8 @@ Run local OAuth callback relay helpers
 Usage: oauth [OPTIONS] <COMMAND>
 
 Commands:
-  relay-local
+  relay-local  Run a local OAuth callback relay that forwards to a machine or explicit target
+  help         Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -2123,6 +2344,8 @@ Options:
 ## `labby oauth relay-local`
 
 ```text
+Run a local OAuth callback relay that forwards to a machine or explicit target
+
 Usage: relay-local [OPTIONS] --port <PORT> <--machine <MACHINE>|--forward-base <FORWARD_BASE>>
 
 Options:
@@ -2148,6 +2371,18 @@ Options:
           Print help
 ```
 
+## `labby oauth help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
 ## `labby logs`
 
 ```text
@@ -2159,6 +2394,7 @@ Commands:
   search   Search fleet logs for a device from the master control plane
   local    Search or inspect the local-master runtime log store
   forward  Forward this node's syslog to the master log store (peer mode)
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -2214,6 +2450,7 @@ Commands:
   tail    Read a bounded follow-up window from the persistent local log store
   stats   Inspect local retention and drop counters
   stream  Live push is HTTP SSE only in v1; this command fails with guidance
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -2355,6 +2592,18 @@ Options:
           Print help
 ```
 
+## `labby logs local help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
 ## `labby logs forward`
 
 ```text
@@ -2399,6 +2648,18 @@ Options:
           Print help
 ```
 
+## `labby logs help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
 ## `labby marketplace`
 
 ```text
@@ -2408,6 +2669,7 @@ Usage: marketplace [OPTIONS] [ACTION] [COMMAND]
 
 Commands:
   generate  Generate a Claude Code marketplace tree from compiled-in PluginMeta
+  help      Print this message or the help of the given subcommand(s)
 
 Arguments:
   [ACTION]
@@ -2470,6 +2732,18 @@ Options:
           Print help
 ```
 
+## `labby marketplace help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
 ## `labby registry`
 
 ```text
@@ -2479,6 +2753,7 @@ Usage: registry [OPTIONS] <COMMAND>
 
 Commands:
   install  Fetch a server from the MCP registry and add it to the local gateway
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -2533,6 +2808,18 @@ Options:
           Print help (see a summary with '-h')
 ```
 
+## `labby registry help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
 ## `labby stash`
 
 ```text
@@ -2582,6 +2869,7 @@ Commands:
   run          Destructive: build, transfer, install, restart, verify
   rollback     Destructive: restore the most recent backup on each target
   monitor      Watch SSH hosts and emit JSON events when they go online or offline
+  help         Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -2750,4 +3038,28 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
+```
+
+## `labby deploy help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
+## `labby help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
 ```

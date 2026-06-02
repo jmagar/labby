@@ -22,6 +22,7 @@ pub mod params;
 pub mod serve;
 pub mod setup;
 pub mod stash;
+pub mod style;
 
 #[cfg(feature = "deploy")]
 pub mod deploy;
@@ -37,7 +38,7 @@ use crate::output::{ColorPolicy, OutputFormat, RenderEnv};
 
 /// `lab` — pluggable homelab CLI + MCP server SDK.
 #[derive(Debug, Parser)]
-#[command(name = "labby", version, about, long_about = None, disable_help_subcommand = true)]
+#[command(name = "labby", version, about, long_about = None, styles = style::AURORA_STYLES)]
 pub struct Cli {
     /// Emit JSON instead of human-readable tables.
     #[arg(long, global = true)]
@@ -78,8 +79,6 @@ pub enum Command {
     Health,
     /// Open the web-based first-run wizard (or settings) — lab-bg3e.3.
     Setup(setup::SetupArgs),
-    /// Print the service + action catalog.
-    Help(help::HelpArgs),
     /// Generate shell completions.
     Completions(completions::CompletionsArgs),
     /// Manage proxied upstream MCP gateways.
@@ -115,7 +114,6 @@ pub async fn dispatch(cli: Cli, config: LabConfig) -> Result<ExitCode> {
         Command::Nodes(args) => nodes::run(args, format, &config).await,
         Command::Health => health::run(format).await,
         Command::Setup(args) => setup::run(args, format).await,
-        Command::Help(args) => help::run(args, format),
         Command::Completions(args) => completions::run(&args),
         Command::Gateway(args) => gateway::run(args, format, &config).await,
         Command::Oauth(args) => oauth::run(args, &config).await,
