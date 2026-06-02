@@ -358,8 +358,11 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "gateway.test",
-        description: "Test a configured or proposed gateway without saving it",
-        destructive: false,
+        // Destructive because probing a stdio gateway spawns the configured
+        // local command. The confirmation gate is the only thing standing
+        // between a remote caller and arbitrary local command execution.
+        description: "Test a configured or proposed gateway without saving it (probing a stdio gateway runs its local command)",
+        destructive: true,
         returns: "GatewayTestResult",
         params: &[
             ParamSpec {
@@ -373,12 +376,6 @@ pub const ACTIONS: &[ActionSpec] = &[
                 ty: "json",
                 required: false,
                 description: "Proposed gateway config payload to test without saving",
-            },
-            ParamSpec {
-                name: "allow_stdio",
-                ty: "boolean",
-                required: false,
-                description: "Required when testing a stdio gateway because probing can execute a local command",
             },
         ],
     },
@@ -550,12 +547,6 @@ pub const ACTIONS: &[ActionSpec] = &[
                 required: false,
                 description: "Write-only: raw bearer token to store securely. Never returned on reads. If bearer_token_env is omitted from the spec, a default env var name is derived from the gateway name.",
             },
-            ParamSpec {
-                name: "allow_stdio",
-                ty: "boolean",
-                required: false,
-                description: "Required when spec.command is set because adding an enabled stdio gateway can execute a local command during reconcile",
-            },
         ],
     },
     ActionSpec {
@@ -576,12 +567,6 @@ pub const ACTIONS: &[ActionSpec] = &[
                 ty: "string",
                 required: false,
                 description: "Write-only: raw bearer token to store securely. Never returned on reads. Requires bearer_token_env in patch or existing config.",
-            },
-            ParamSpec {
-                name: "allow_stdio",
-                ty: "boolean",
-                required: false,
-                description: "Required when the resulting enabled gateway uses stdio because reconcile can execute a local command",
             },
         ],
     },
@@ -825,7 +810,6 @@ mod tests {
             "gateway.list",
             "gateway.tool_search.get",
             "gateway.get",
-            "gateway.test",
             "gateway.status",
             "gateway.virtual_server.quarantine.list",
             "gateway.discovered_tools",

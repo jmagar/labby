@@ -89,13 +89,22 @@ RUN mkdir -p \
       target/release/labby
 
 # ── Real source + frontend assets ─────────────────────────────────────────────
-# The include_dir!() macro in crates/lab/src/api/web.rs embeds the Next.js
-# static export at compile time. The out/ dir must exist before `cargo build`.
+# crates/lab/build.rs embeds the Next.js static export (apps/gateway-admin/out)
+# into the binary via include_bytes!. The out/ dir must exist before `cargo build`.
 # (.dockerignore excludes apps/gateway-admin/{node_modules,.next,...} — only
 # apps/gateway-admin/out is sent in the build context.)
 COPY apps/gateway-admin/out apps/gateway-admin/out
 COPY crates/ crates/
-RUN cargo build --workspace --all-features --release
+# BuildKit normalizes COPYed file mtimes to a fixed past epoch. That timestamp is
+# older than the stub rlibs built in the dep-cache layer above, so cargo's
+# fingerprint considers the real workspace sources "unchanged" and skips
+# rebuilding them — linking the empty stub crates (esp. the patched
+# agent-client-protocol, which is not cargo-cleaned) and producing hundreds of
+# "cannot find X in lab_apis/lab_auth/agent_client_protocol" errors. Touch the
+# real sources so their mtimes are newer, forcing a from-source rebuild of every
+# workspace crate while keeping the cached third-party dependency artifacts.
+RUN find crates -type f -exec touch {} + \
+ && cargo build --workspace --all-features --release
 
 # ─── Stage 2: Runtime ─────────────────────────────────────────────────────────
 FROM debian:trixie-slim AS runtime

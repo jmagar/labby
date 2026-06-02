@@ -89,7 +89,11 @@ async function fetchDiscovery(name: string, signal?: AbortSignal): Promise<Gatew
 
 async function probeGateway(name: string, signal?: AbortSignal) {
   try {
-    const runtime = await gatewayAction<BackendGatewayRuntimeView>('gateway.test', { name }, signal)
+    const runtime = await gatewayAction<BackendGatewayRuntimeView>(
+      'gateway.test',
+      confirmGatewayParams({ name }),
+      signal,
+    )
     return probeStatusFromRuntime(runtime)
   } catch (error) {
     if (error instanceof GatewayApiError) {
@@ -455,7 +459,11 @@ export const gatewayApi = {
 
   async test(id: string, signal?: AbortSignal): Promise<TestGatewayResult> {
     const [runtime, view] = await Promise.all([
-      gatewayAction<BackendGatewayRuntimeView>('gateway.test', { name: id }, signal),
+      gatewayAction<BackendGatewayRuntimeView>(
+        'gateway.test',
+        confirmGatewayParams({ name: id }),
+        signal,
+      ),
       gatewayAction<BackendGatewayView>('gateway.get', { name: id }, signal),
     ])
     const probe = probeStatusFromRuntime(runtime)

@@ -305,20 +305,16 @@ impl UpstreamPool {
             tools: Arc<tokio::sync::RwLock<Vec<String>>>,
         }
 
-        impl rmcp::ServerHandler for MutableToolCatalogServer {
-            fn get_info(&self) -> rmcp::model::ServerInfo {
-                rmcp::model::ServerInfo::new(
-                    rmcp::model::ServerCapabilities::builder()
-                        .enable_tools()
-                        .build(),
-                )
+        impl ServerHandler for MutableToolCatalogServer {
+            fn get_info(&self) -> ServerInfo {
+                ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             }
 
             async fn list_tools(
                 &self,
-                _request: Option<rmcp::model::PaginatedRequestParams>,
-                _context: rmcp::service::RequestContext<rmcp::RoleServer>,
-            ) -> Result<rmcp::model::ListToolsResult, rmcp::model::ErrorData> {
+                _request: Option<PaginatedRequestParams>,
+                _context: RequestContext<RoleServer>,
+            ) -> Result<ListToolsResult, ErrorData> {
                 let tools = self
                     .tools
                     .read()
@@ -332,7 +328,7 @@ impl UpstreamPool {
                         )
                     })
                     .collect::<Vec<_>>();
-                Ok(rmcp::model::ListToolsResult::with_all_items(tools))
+                Ok(ListToolsResult::with_all_items(tools))
             }
         }
 
