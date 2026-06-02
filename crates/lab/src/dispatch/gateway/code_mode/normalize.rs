@@ -68,6 +68,9 @@ pub fn normalize_user_code(code: &str) -> String {
     if let Some((prologue, value)) = split_prologue_export_default(code) {
         let value = value.trim().trim_end_matches(';').trim();
         if !value.is_empty() {
+            // The prologue is kept verbatim except for named exports, whose
+            // `export` keyword would be a syntax error inside the wrapper.
+            let prologue = strip_prologue_exports(prologue);
             let entry = normalize_user_code(&format!("export default {value}"));
             return format!("async () => {{\n{prologue}\nreturn await ({entry})();\n}}");
         }
@@ -98,9 +101,19 @@ fn split_prologue_export_default(code: &str) -> Option<(&str, &str)> {
         // without letting a `//` *inside* a prologue string (e.g. a "http://"
         // URL) corrupt an otherwise-terminated prologue.
         let ends_at_boundary = |s: &str| s.ends_with(';') || s.ends_with('}');
+        // `strip_trailing_comment` bails on any earlier `//` (it can't tell a
+        // string-internal `//` from a comment). That defeats a prologue whose
+        // tail holds both a "http://" URL string and a real trailing comment.
+        // `strip_suffix_line_comment` inspects only the last `//` on the final
+        // line, so it strips the genuine trailing comment regardless. A spurious
+        // strip can only split here if the text before that `//` already ends at
+        // a `;`/`}` — gated by `ends_at_boundary` and by this running only after
+        // both real parses failed.
         let comment_stripped = strip_trailing_comment(before).trim_end();
+        let suffix_stripped = strip_suffix_line_comment(before);
         if (!before.is_empty() && ends_at_boundary(before))
             || (!comment_stripped.is_empty() && ends_at_boundary(comment_stripped))
+            || (!suffix_stripped.is_empty() && ends_at_boundary(suffix_stripped))
         {
             return Some((before, &code[idx + NEEDLE.len()..]));
         }
@@ -175,20 +188,20 @@ fn normalize_module_code(source: &str) -> Option<String> {
     let mut prologue: Vec<String> = Vec::new();
     let mut export = None;
     for item in module.items().items() {
-        match item {
-            // Capture the `export default` declaration specifically — not just any
-            // export. A *named* export (`export const y = 1`, `export { ... }`, a
-            // re-export) after `export default` must not shadow the default and
-            // cause normalization to bail. Named exports have no entry/runtime
-            // role in the sandbox, so they (and imports) are skipped.
-            boa_ast::ModuleItem::ExportDeclaration(decl) if is_default_export(decl) => {
-                export = Some(decl);
-            }
-            boa_ast::ModuleItem::StatementListItem(stmt) => {
-                prologue.push(stmt.to_indented_string(&interner, 0));
-            }
-            boa_ast::ModuleItem::ExportDeclaration(_)
-            | boa_ast::ModuleItem::ImportDeclaration(_) => {}
+        // Capture the `export default` declaration specifically — not just any
+        // export. A *named* export (`export const y = 1`, `export { ... }`, a
+        // re-export) must not shadow the default and cause normalization to bail.
+        if let boa_ast::ModuleItem::ExportDeclaration(decl) = item
+            && is_default_export(decl)
+        {
+            export = Some(decl);
+            continue;
+        }
+        // Everything else: statements and binding-carrying named exports become
+        // prologue (with `export` stripped); imports / `export {}` lists / re-exports
+        // have no sandbox-runtime role and render to nothing.
+        if let Some(rendered) = render_prologue_item(item, &interner) {
+            prologue.push(rendered);
         }
     }
     let entry = match export?.as_ref() {
@@ -215,6 +228,64 @@ fn normalize_module_code(source: &str) -> Option<String> {
             "async () => {{\n{prologue}\nreturn await ({entry})();\n}}"
         ))
     }
+}
+
+/// Render a non-default module item as prologue source, with any `export` keyword
+/// stripped. Returns `None` for items with no sandbox-runtime role: `export default`
+/// (handled by the caller), `export { a, b }` lists, re-exports, and imports (the
+/// sandbox has no module loader). Binding-carrying named exports (`export const`,
+/// `export var`, `export function`, `export class`) keep their binding so a default
+/// that references them resolves at runtime.
+fn render_prologue_item(item: &boa_ast::ModuleItem, interner: &Interner) -> Option<String> {
+    match item {
+        boa_ast::ModuleItem::StatementListItem(stmt) => Some(stmt.to_indented_string(interner, 0)),
+        boa_ast::ModuleItem::ExportDeclaration(decl) => match decl.as_ref() {
+            boa_ast::declaration::ExportDeclaration::VarStatement(var) => {
+                Some(var.to_interned_string(interner))
+            }
+            boa_ast::declaration::ExportDeclaration::Declaration(d) => {
+                Some(d.to_indented_string(interner, 0))
+            }
+            _ => None,
+        },
+        boa_ast::ModuleItem::ImportDeclaration(_) => None,
+    }
+}
+
+/// Strip `export` keywords from a textual-fallback prologue by reparsing it.
+///
+/// The async-arrow `export default` fallback keeps the prologue verbatim, but a
+/// prologue may carry named exports (`export const helper = ...`) whose `export`
+/// keyword is a syntax error inside the generated `async () => { ... }` wrapper.
+/// Unlike the full input, the prologue alone has no async-arrow default and so
+/// parses cleanly as a module — reparse it and re-render statements and
+/// binding-carrying named exports without `export`. Returns the prologue unchanged
+/// if it does not parse as a module (e.g. a plain script prologue), preserving the
+/// prior behavior for the common no-named-export case.
+fn strip_prologue_exports(prologue: &str) -> String {
+    let mut interner = Interner::default();
+    let mut parser = Parser::new(ParserSource::from_bytes(prologue.as_bytes()));
+    let Ok(module) = parser.parse_module(&boa_ast::scope::Scope::new_global(), &mut interner)
+    else {
+        return prologue.to_string();
+    };
+    // Only rewrite when the prologue actually carries a named export; otherwise
+    // keep the verbatim text so re-rendering never perturbs the common case.
+    let has_named_export = module
+        .items()
+        .items()
+        .iter()
+        .any(|item| matches!(item, boa_ast::ModuleItem::ExportDeclaration(_)));
+    if !has_named_export {
+        return prologue.to_string();
+    }
+    module
+        .items()
+        .items()
+        .iter()
+        .filter_map(|item| render_prologue_item(item, &interner))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Wrap a rendered `export default` function declaration as an immediately
@@ -324,6 +395,23 @@ fn strip_trailing_statement_semicolon(source: &str) -> String {
         || trimmed.to_string(),
         |without| without.trim_end().to_string(),
     )
+}
+
+/// Strip a trailing `// ...` line comment, inspecting only the last `//` on the
+/// final line. Unlike [`strip_trailing_comment`], this tolerates an earlier `//`
+/// elsewhere in `source` (e.g. inside a `"http://..."` URL string in a prologue).
+///
+/// Only [`split_prologue_export_default`] uses this, where the result feeds a
+/// `;`/`}` boundary check — a string-internal last `//` produces a non-boundary
+/// remainder and is rejected there, so this loose strip is safe in that context
+/// but is NOT a general-purpose comment stripper.
+fn strip_suffix_line_comment(source: &str) -> &str {
+    let trimmed = source.trim_end();
+    let line_start = trimmed.rfind('\n').map_or(0, |i| i + 1);
+    match trimmed[line_start..].rfind("//") {
+        Some(rel) => trimmed[..line_start + rel].trim_end(),
+        None => trimmed,
+    }
 }
 
 /// Remove a single trailing `// ...` line comment or `/* ... */` block comment

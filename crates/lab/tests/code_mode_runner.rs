@@ -941,6 +941,25 @@ fn normalized_export_default_function_with_prologue_executes_end_to_end() {
     assert_single_call_round_trip(&normalized, json!({"pong": true}));
 }
 
+/// A *named* export the default references, with an async-arrow default — the
+/// textual fallback path (boa can't parse an async-arrow `export default`, so the
+/// whole module fails to parse and the prologue is recovered textually). The
+/// named export's `export` keyword must be stripped, otherwise it is a syntax
+/// error inside the wrapper and nothing runs. Non-vacuous: the default calls the
+/// `tool` binding from `export const`, so a dropped/un-stripped export emits no
+/// tool_call.
+#[test]
+fn normalized_async_arrow_default_with_named_export_executes_end_to_end() {
+    let body = "export const tool = \"upstream::test::ping\";\n\
+                export default async () => await callTool(tool, {});";
+    let normalized = labby::dispatch::gateway::code_mode::normalize_user_code(body);
+    assert!(
+        normalized.starts_with("async () =>") && !normalized.contains("export "),
+        "normalize must strip every `export` keyword, got: {normalized}"
+    );
+    assert_single_call_round_trip(&normalized, json!({"pong": true}));
+}
+
 /// Multiple prologue statements — a function declaration the default closes over
 /// plus a `const` computed from it — must all land in runtime scope. Routes
 /// through the AST path (plain-arrow default → DefaultAssignmentExpression),

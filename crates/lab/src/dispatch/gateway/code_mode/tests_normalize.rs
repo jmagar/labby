@@ -209,6 +209,64 @@ fn normalize_user_code_export_default_arrow_after_url_string_prologue() {
 }
 
 #[test]
+fn normalize_user_code_export_default_arrow_url_string_and_trailing_comment_prologue() {
+    // Regression (CodeRabbit): a prologue tail with BOTH a `//` inside a URL
+    // string AND a real trailing line comment. `strip_trailing_comment` bails
+    // (it sees two `//` and can't tell string from comment), so the suffix-only
+    // strip must carry the `;` boundary check and split rather than loose-wrap.
+    let result = super::normalize_user_code(
+        "const u = \"http://x\"; const x = 1; // note\nexport default async () => x",
+    );
+    assert!(!result.contains("export default"), "got: {result}");
+    assert!(result.starts_with("async () => {"), "got: {result}");
+    assert!(
+        result.contains("http://x"),
+        "URL string must be kept whole, not corrupted by the strip: {result}"
+    );
+    assert!(result.contains("const x = 1"), "got: {result}");
+    assert!(result.contains("(async () => x)()"), "got: {result}");
+}
+
+#[test]
+fn normalize_user_code_keeps_named_export_binding_referenced_by_default() {
+    // Regression (cubic): a named export the default references must keep its
+    // binding in the prologue. Previously every named export was dropped, leaving
+    // the default's free variable undefined (ReferenceError) at runtime.
+    let result = super::normalize_user_code(
+        "export const helper = (n) => n * 2;\nexport default async () => helper(21)",
+    );
+    assert!(!result.contains("export default"), "got: {result}");
+    assert!(
+        !result.contains("export const"),
+        "the `export` keyword must be stripped from the named export: {result}"
+    );
+    assert!(
+        result.contains("helper"),
+        "the named-export binding must be kept in the prologue: {result}"
+    );
+    assert!(result.starts_with("async () => {"), "got: {result}");
+}
+
+#[test]
+fn normalize_user_code_keeps_export_var_and_export_function_bindings() {
+    // Both binding-carrying named-export forms reach the prologue: `export var`
+    // (VarStatement arm) and `export function` (Declaration arm).
+    let result = super::normalize_user_code(
+        "export var base = 40;\nexport function bump() { return base + 2; }\nexport default async () => bump()",
+    );
+    assert!(!result.contains("export default"), "got: {result}");
+    assert!(
+        !result.contains("export var") && !result.contains("export function"),
+        "the `export` keyword must be stripped from both named exports: {result}"
+    );
+    assert!(result.contains("base"), "export var binding kept: {result}");
+    assert!(
+        result.contains("function bump"),
+        "export function binding kept: {result}"
+    );
+}
+
+#[test]
 fn normalize_user_code_export_default_class_with_prologue() {
     // The DefaultClassDeclaration AST arm is only reachable with a prologue (a
     // bare class default is caught by the start-anchored strip). Prologue kept.
