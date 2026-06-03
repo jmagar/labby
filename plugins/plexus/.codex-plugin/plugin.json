@@ -1,6 +1,5 @@
 {
   "name": "plexus",
-  "version": "0.1.0",
   "description": "Remote-device memory and live operating context for host-specific work.",
   "author": {
     "name": "Jacob Magar",

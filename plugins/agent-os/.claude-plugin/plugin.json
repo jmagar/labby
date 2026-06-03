@@ -1,7 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "agent-os",
-  "version": "0.1.0",
   "description": "Drive the agent-os Windows 11 sandbox VM through its Windows-MCP server. Self-registers the windows-mcp MCP from your configured URL + bearer token, ships the agent-os skill, a /agent-os status command, and a SessionStart health check.",
   "author": {
     "name": "Jacob Magar",

@@ -1,7 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "uptime-kuma",
-  "version": "0.1.0",
   "description": "Read-only monitoring of a self-hosted Uptime Kuma instance via direct HTTP — Prometheus /metrics (API-key auth) and public status-page JSON. No monitor management (that requires Uptime Kuma's socket.io API).",
   "author": {
     "name": "Jacob Magar",

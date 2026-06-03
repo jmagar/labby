@@ -1,7 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "navidrome",
-  "version": "0.1.0",
   "description": "Operate a self-hosted Navidrome music server through its Subsonic API with direct HTTP calls — ping, browse artists/albums, search, and list playlists.",
   "author": {
     "name": "Jacob Magar",
