@@ -98,6 +98,24 @@
             "description": "Unraid NAS/homelab monitoring via the unrust MCP server."
         },
         {
+            "name": "rarcane",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/jmagar/rarcane.git",
+                "path": "plugins/rarcane"
+            },
+            "description": "Arcane Docker management via the rarcane MCP server (Rust port of arcane-mcp)."
+        },
+        {
+            "name": "rtemplate",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/jmagar/rtemplate-mcp.git",
+                "path": "plugins/rtemplate"
+            },
+            "description": "Reference rmcp template/example MCP server — scaffold for building new Rust MCP servers."
+        },
+        {
             "name": "tailscale",
             "source": {
                 "source": "git-subdir",
