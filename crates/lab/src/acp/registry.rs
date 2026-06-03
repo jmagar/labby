@@ -94,9 +94,10 @@ struct Session {
     handle: Mutex<Option<RuntimeHandle>>,
     subscribers: Mutex<Vec<mpsc::Sender<Arc<AcpEvent>>>>,
     events: RwLock<Vec<AcpEvent>>,
-    next_seq: Mutex<u64>,
-    /// Updated on create and each prompt. Used by idle-TTL reaper.
-    last_activity: Mutex<Instant>,
+    /// Never held across an `.await` — use std::sync::Mutex for lower overhead.
+    next_seq: std::sync::Mutex<u64>,
+    /// Never held across an `.await` — use std::sync::Mutex for lower overhead.
+    last_activity: std::sync::Mutex<Instant>,
 }
 
 impl Session {
@@ -118,8 +119,8 @@ impl Session {
             handle: Mutex::new(None),
             subscribers: Mutex::new(Vec::new()),
             events: RwLock::new(Vec::new()),
-            next_seq: Mutex::new(next_seq),
-            last_activity: Mutex::new(Instant::now()),
+            next_seq: std::sync::Mutex::new(next_seq),
+            last_activity: std::sync::Mutex::new(Instant::now()),
         })
     }
 }
@@ -646,7 +647,7 @@ impl AcpSessionRegistry {
         }
         // Touch activity timestamp so idle reaper leaves this session alone.
         {
-            let mut activity = session.last_activity.lock().await;
+            let mut activity = session.last_activity.lock().expect("last_activity lock poisoned");
             *activity = Instant::now();
         }
 
@@ -773,9 +774,12 @@ impl AcpSessionRegistry {
             });
         }
 
+        #[derive(Clone, Copy)]
+        enum ContinuityMode { Handoff, Reset }
+
         let continuity_mode = match options.continuity_mode.as_deref() {
-            Some("reset") => "reset",
-            Some("handoff" | "") | None => "handoff",
+            Some("reset") => ContinuityMode::Reset,
+            Some("handoff" | "") | None => ContinuityMode::Handoff,
             Some(other) => {
                 return Err(ToolError::InvalidParam {
                     message: format!("unsupported continuity_mode `{other}`"),
@@ -784,7 +788,7 @@ impl AcpSessionRegistry {
             }
         };
 
-        let prompt_for_provider = if continuity_mode == "reset" {
+        let prompt_for_provider = if matches!(continuity_mode, ContinuityMode::Reset) {
             format!(
                 "You are continuing a Lab conversation that was previously handled by {current_provider}.\n\
                  Continuity mode: reset.\n\
@@ -810,7 +814,7 @@ impl AcpSessionRegistry {
         .await
         .map_err(internal_message)?;
 
-        let switch_message = if continuity_mode == "reset" {
+        let switch_message = if matches!(continuity_mode, ContinuityMode::Reset) {
             format!(
                 "Switched from {current_provider} to {requested_provider}. Context was reset for this provider."
             )
@@ -818,6 +822,10 @@ impl AcpSessionRegistry {
             format!(
                 "Switched from {current_provider} to {requested_provider}. Continuing with a bounded transcript handoff."
             )
+        };
+        let continuity_mode_str = match continuity_mode {
+            ContinuityMode::Reset => "reset",
+            ContinuityMode::Handoff => "handoff",
         };
         let switch_event = next_session_event(
             session,
@@ -828,11 +836,10 @@ impl AcpSessionRegistry {
                 seq: 0,
                 from_provider: current_provider,
                 to_provider: requested_provider.clone(),
-                continuity_mode: continuity_mode.to_string(),
+                continuity_mode: continuity_mode_str.to_string(),
                 message: switch_message,
             },
-        )
-        .await;
+        );
 
         persist_session_event(self, &switch_event).await;
         apply_session_event(session, &switch_event).await;
@@ -1398,7 +1405,7 @@ impl AcpSessionRegistry {
             ) {
                 continue;
             }
-            let idle_duration = { session.last_activity.lock().await.elapsed() };
+            let idle_duration = { session.last_activity.lock().expect("last_activity lock poisoned").elapsed() };
             if idle_duration >= self.idle_timeout {
                 tracing::info!(
                     surface = "acp", service = "registry", action = "idle_reap",
@@ -1422,7 +1429,7 @@ impl AcpSessionRegistry {
         let registry = self.clone();
         tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
-                let event = next_session_event(&session, event).await;
+                let event = next_session_event(&session, event);
                 persist_session_event(&registry, &event).await;
                 apply_session_event(&session, &event).await;
 
@@ -1442,8 +1449,7 @@ impl AcpSessionRegistry {
                                 "after_seq": event.seq(),
                             }),
                         },
-                    )
-                    .await;
+                    );
                     tracing::warn!(
                         surface = "acp", service = "registry", action = "fanout.backpressure",
                         session_id = %session.id, dropped_subscribers = dropped,
@@ -1492,8 +1498,7 @@ impl AcpSessionRegistry {
                         provider: session.summary.read().await.provider.clone(),
                         state: AcpSessionState::Failed,
                     },
-                )
-                .await;
+                );
                 persist_session_event(&registry, &failed).await;
                 apply_session_event(&session, &failed).await;
                 let _ = fanout_event(&session, Arc::new(failed)).await;
@@ -1512,8 +1517,7 @@ impl AcpSessionRegistry {
                             "status": "failed",
                         }),
                     },
-                )
-                .await;
+                );
                 persist_session_event(&registry, &exit_event).await;
                 apply_session_event(&session, &exit_event).await;
                 let _ = fanout_event(&session, Arc::new(exit_event)).await;
@@ -1648,15 +1652,15 @@ impl AcpSessionRegistry {
         let max_seqs = match db.load_max_seqs().await {
             Ok(m) => m,
             Err(error) => {
-                tracing::warn!(
+                tracing::error!(
                     surface = "acp",
                     service = "registry",
                     action = "restore",
                     kind = "internal_error",
                     error = %error,
-                    "failed to load max seqs from SQLite — seeding next_seq=1 for all sessions",
+                    "failed to load max seqs from SQLite — aborting session restore to prevent seq collisions",
                 );
-                HashMap::new()
+                return;
             }
         };
 
@@ -1704,8 +1708,7 @@ impl AcpSessionRegistry {
                         provider: summary.provider.clone(),
                         state: AcpSessionState::Failed,
                     },
-                )
-                .await;
+                );
                 persist_session_event(self, &failed).await;
                 apply_session_event(&session, &failed).await;
 
@@ -1723,8 +1726,7 @@ impl AcpSessionRegistry {
                             "status": "failed",
                         }),
                     },
-                )
-                .await;
+                );
                 persist_session_event(self, &info).await;
                 apply_session_event(&session, &info).await;
             }
@@ -1925,7 +1927,7 @@ impl AcpSessionRegistry {
             let past = Instant::now()
                 .checked_sub(elapsed)
                 .expect("elapsed too large for Instant::checked_sub");
-            *session.last_activity.lock().await = past;
+            *session.last_activity.lock().expect("last_activity lock poisoned") = past;
         }
     }
 
@@ -1977,8 +1979,8 @@ async fn load_in_memory_events(session: &Arc<Session>, since_seq: u64) -> Vec<Ac
     filtered[start..].to_vec()
 }
 
-async fn next_session_event(session: &Arc<Session>, event: AcpEvent) -> AcpEvent {
-    let mut seq_guard = session.next_seq.lock().await;
+fn next_session_event(session: &Arc<Session>, event: AcpEvent) -> AcpEvent {
+    let mut seq_guard = session.next_seq.lock().expect("next_seq lock poisoned");
     let seq = *seq_guard;
     *seq_guard += 1;
     stamp_event_sequence(event, seq)

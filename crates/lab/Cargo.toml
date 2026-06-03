@@ -87,7 +87,7 @@ diffy-imara = "0.3"
 arc-swap = "1"
 tokio-util = { version = "0.7", features = ["rt", "compat"] }
 strip-ansi-escapes = "0.2"
-agent-client-protocol = { version = "0", features = ["unstable"] }
+agent-client-protocol = { version = "=0.13.1", features = ["unstable"] }
 
 hex = "0.4"
 ulid = "1"

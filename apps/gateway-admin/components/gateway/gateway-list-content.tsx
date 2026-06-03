@@ -770,7 +770,7 @@ export function GatewayListView({
 
           <ToolSearchTogglePanel />
 
-          <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start">
+          <div className="grid gap-6 2xl:grid-cols-[280px_minmax(0,1fr)] 2xl:items-start">
             <GatewayFilters
               mode={showToolsView ? 'tools' : 'gateways'}
               search={activeSearch}

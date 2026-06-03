@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 #[cfg(unix)]
 use nix::errno::Errno;
 use tokio::sync::RwLock;
@@ -166,6 +168,7 @@ impl GatewayManager {
     ) -> Result<Vec<super::types::GatewayMcpRuntimeView>, ToolError> {
         let cfg = self.config.read().await.clone();
         let pool = self.runtime.current_pool().await;
+        self.warm_mcp_runtime_catalog(&cfg, pool.as_deref()).await;
         let persisted = self.reconcile_runtime_state(&cfg, pool.as_deref()).await?;
         let mut rows = Vec::with_capacity(cfg.upstream.len());
         for upstream in &cfg.upstream {
@@ -257,6 +260,39 @@ impl GatewayManager {
             });
         }
         Ok(rows)
+    }
+
+    async fn warm_mcp_runtime_catalog(&self, cfg: &LabConfig, pool: Option<&UpstreamPool>) {
+        let Some(pool) = pool else {
+            return;
+        };
+
+        let mut pending = FuturesUnordered::new();
+        for upstream in cfg
+            .upstream
+            .iter()
+            .filter(|upstream| upstream.enabled && upstream.oauth.is_none())
+        {
+            pending.push(async move {
+                (
+                    upstream.name.as_str(),
+                    pool.ensure_tools_for_upstream(upstream, None, None).await,
+                )
+            });
+        }
+
+        while let Some((upstream, result)) = pending.next().await {
+            if let Err(error) = result {
+                tracing::warn!(
+                    surface = "dispatch",
+                    service = "gateway",
+                    action = "gateway.mcp.list",
+                    upstream,
+                    error = %error,
+                    "gateway MCP runtime catalog warm failed"
+                );
+            }
+        }
     }
 
     pub async fn cleanup_upstream_processes(

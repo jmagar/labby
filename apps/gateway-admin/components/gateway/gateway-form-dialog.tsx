@@ -78,7 +78,7 @@ function valuePreview(fieldName: string, preview?: string | null) {
   return preview ?? (fieldName.endsWith('_URL') ? 'http://localhost' : '')
 }
 
-function parseEnvText(text: string): { pairs: Record<string, string>; detectedServices: string[] } {
+export function parseEnvText(text: string): { pairs: Record<string, string>; detectedServices: string[] } {
   const pairs: Record<string, string> = {}
   for (const line of text.split('\n')) {
     const trimmed = line.trim()
@@ -96,8 +96,73 @@ function parseEnvText(text: string): { pairs: Record<string, string>; detectedSe
         found.add(serviceKey)
       }
     }
+    if (found.size === 0 || ![...found].some((service) => key.toLowerCase().startsWith(`${service}_`))) {
+      const match = key.match(/^([A-Za-z][A-Za-z0-9]*)_(URL|URI|TOKEN|API_KEY|KEY|SECRET|HOST|BASE_URL)$/)
+      if (match) {
+        found.add(match[1]!.toLowerCase())
+      }
+    }
   }
   return { pairs, detectedServices: [...found] }
+}
+
+function envPrefixForGatewayName(name: string): string | null {
+  const trimmed = name.trim()
+  if (!trimmed) return null
+  const knownPrefix = Object.entries(SERVICE_ENV_PREFIXES).find(([, key]) => key === trimmed)?.[0]
+  if (knownPrefix) return knownPrefix
+  const prefix = trimmed.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  return prefix || null
+}
+
+function formatEnvPairs(pairs: Record<string, string>): string {
+  return Object.entries(pairs)
+    .filter(([key, value]) => key.trim() && value.trim())
+    .map(([key, value]) => `${key.trim()}=${value.trim()}`)
+    .join('\n')
+}
+
+export function buildEnvTextFromGatewayForm({
+  name,
+  transport,
+  url,
+  stdioEnv,
+}: {
+  name: string
+  transport: TransportType
+  url: string
+  stdioEnv: Record<string, string>
+}): string {
+  if (transport === 'stdio') {
+    return formatEnvPairs(stdioEnv)
+  }
+  const prefix = envPrefixForGatewayName(name)
+  const trimmedUrl = url.trim()
+  if (!prefix || !trimmedUrl) return ''
+  return `${prefix}_URL=${trimmedUrl}`
+}
+
+export function parseGatewayJsonEntry(text: string): { name: string; config: Record<string, unknown> } | null {
+  const parsed = JSON.parse(text) as Record<string, unknown>
+  const root = parsed.mcpServers
+  const entries =
+    root && typeof root === 'object' && !Array.isArray(root)
+      ? Object.entries(root as Record<string, unknown>)
+      : Object.entries(parsed)
+  if (entries.length !== 1) return null
+  const [name, config] = entries[0]!
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return null
+  return { name, config: config as Record<string, unknown> }
+}
+
+function parseGatewayEnvObject(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+      .map(([key, envValue]) => [key.trim(), envValue.trim()] as const)
+      .filter(([key, envValue]) => key.length > 0 && envValue.length > 0),
+  )
 }
 
 function ServiceIconBox({ serviceKey }: { serviceKey: string }) {
@@ -204,6 +269,7 @@ export function GatewayFormDialog({
   const [url, setUrl] = useState('')
   const [protectedPublicPath, setProtectedPublicPath] = useState('')
   const [command, setCommand] = useState('')
+  const [stdioEnv, setStdioEnv] = useState<Record<string, string>>({})
   const [authMode, setAuthMode] = useState<GatewayAuthMode>('none')
   const [authSource, setAuthSource] = useState<GatewayAuthSource>('paste')
   const [bearerTokenEnv, setBearerTokenEnv] = useState('')
@@ -427,6 +493,7 @@ export function GatewayFormDialog({
         setUrl(gateway.config.url || '')
         setProtectedPublicPath(protectedPath)
         setCommand(formatStdioCommandLine(gateway.config.command, gateway.config.args))
+        setStdioEnv(gateway.config.env ?? {})
         setAuthMode(initialAuthMode)
         if (gateway.config.oauth_enabled) {
           setOauthState({ kind: 'connected', upstream: gateway.name, registration_strategy: 'preregistered', scopes: undefined })
@@ -451,6 +518,7 @@ export function GatewayFormDialog({
         protectedRouteTouchedRef.current = false
         autoOauthAttemptedForRef.current = null
         setCommand(emptyCustomState.command)
+        setStdioEnv({})
         setAuthMode('none')
         setAuthSource('paste')
         setBearerTokenEnv(emptyCustomState.bearerTokenEnv)
@@ -615,6 +683,7 @@ export function GatewayFormDialog({
           : {
               command: stdio?.command,
               args: stdio && stdio.args.length > 0 ? stdio.args : undefined,
+              env: Object.keys(stdioEnv).length > 0 ? stdioEnv : undefined,
             }),
         bearer_token_env: !authEnabled
           ? undefined
@@ -834,18 +903,35 @@ export function GatewayFormDialog({
     if (next) setEnvDrawerOpen(false)
   }
 
-  const applyEnvToForm = () => {
-    const { pairs, detectedServices } = parseEnvText(envText)
+  const applyEnvTextToForm = (text: string, { close }: { close: boolean }) => {
+    const { pairs, detectedServices } = parseEnvText(text)
     const detected = detectedServices[0]
-    if (!detected) return
+    if (!detected) return false
     const prefix = Object.entries(SERVICE_ENV_PREFIXES).find(([, key]) => key === detected)?.[0]
-    if (!prefix) return
     setMode('custom')
-    setTransport('http')
-    setName(detected)
-    const urlKey = `${prefix}_URL`
-    if (pairs[urlKey]) setUrl(pairs[urlKey])
-    setEnvDrawerOpen(false)
+    if (prefix) {
+      setTransport('http')
+      setName(detected)
+      const urlKey = `${prefix}_URL`
+      if (pairs[urlKey]) setUrl(pairs[urlKey])
+    } else {
+      setTransport('stdio')
+      setName((current) => current.trim() || detected)
+      setStdioEnv((current) => ({ ...current, ...pairs }))
+    }
+    if (close) setEnvDrawerOpen(false)
+    return true
+  }
+
+  const applyEnvToForm = () => {
+    applyEnvTextToForm(envText, { close: true })
+  }
+
+  const handleEnvTextChange = (next: string) => {
+    setEnvText(next)
+    syncingRef.current = true
+    applyEnvTextToForm(next, { close: false })
+    setTimeout(() => { syncingRef.current = false }, 0)
   }
 
   const buildJsonFromForm = (): object | null => {
@@ -866,12 +952,19 @@ export function GatewayFormDialog({
           cfg.command = trimmed
         }
       }
+      if (Object.keys(stdioEnv).length > 0) cfg.env = stdioEnv
     }
     return { [n]: cfg }
   }
 
+  const isJsonEditorFocused = () => (
+    jsonDrawerOpen &&
+    typeof document !== 'undefined' &&
+    Boolean(document.activeElement?.closest?.('[data-gateway-json-drawer] .cm-editor'))
+  )
+
   const onFormChange = () => {
-    if (syncingRef.current || !jsonDrawerOpen) return
+    if (syncingRef.current || !jsonDrawerOpen || isJsonEditorFocused()) return
     syncingRef.current = true
     const json = buildJsonFromForm()
     if (json) {
@@ -887,28 +980,34 @@ export function GatewayFormDialog({
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { onFormChange() }, [name, url, command, transport, jsonDrawerOpen])
+  useEffect(() => { onFormChange() }, [name, url, command, stdioEnv, transport, jsonDrawerOpen])
+
+  useEffect(() => {
+    if (syncingRef.current || !envDrawerOpen) return
+    setEnvText(buildEnvTextFromGatewayForm({ name, transport, url, stdioEnv }))
+  }, [envDrawerOpen, name, stdioEnv, transport, url])
 
   const parseJsonToForm = (text: string) => {
     if (syncingRef.current) return
     try {
-      const parsed = JSON.parse(text) as Record<string, unknown>
-      const keys = Object.keys(parsed)
-      if (keys.length !== 1) {
+      const entry = parseGatewayJsonEntry(text)
+      if (!entry) {
         setJsonValid(false)
         return
       }
-      const gatewayName = keys[0]!
-      const cfg = parsed[gatewayName] as Record<string, unknown>
+      const gatewayName = entry.name
+      const cfg = entry.config
       setJsonValid(true)
       syncingRef.current = true
       setName(gatewayName)
       if (typeof cfg.url === 'string') {
         setTransport('http')
         setUrl(cfg.url)
+        setStdioEnv({})
       } else if (typeof cfg.command === 'string') {
         setTransport('stdio')
         setCommand(formatStdioCommandLine(cfg.command, Array.isArray(cfg.args) ? cfg.args as string[] : []))
+        setStdioEnv(parseGatewayEnvObject(cfg.env))
       }
       // Defer reset — same reason as onFormChange: the useEffect fires after React
       // flushes the setName/setUrl/setTransport calls; guard must still be true then.
@@ -1482,7 +1581,7 @@ export function GatewayFormDialog({
                 className="w-full min-h-[180px] rounded-md border border-aurora-border-strong bg-aurora-page-bg px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-ring"
                 placeholder={'RADARR_URL=http://localhost:7878\nRADARR_API_KEY=abc123'}
                 value={envText}
-                onChange={(e) => setEnvText(e.target.value)}
+                onChange={(e) => handleEnvTextChange(e.target.value)}
               />
               {(() => {
                 if (!envText.trim()) {
@@ -1524,6 +1623,9 @@ export function GatewayFormDialog({
                 try {
                   const text = await navigator.clipboard.readText()
                   setEnvText(text)
+                  syncingRef.current = true
+                  applyEnvTextToForm(text, { close: false })
+                  setTimeout(() => { syncingRef.current = false }, 0)
                 } catch {
                   // clipboard access denied — user must paste manually
                 }
@@ -1544,6 +1646,7 @@ export function GatewayFormDialog({
 
         {/* JSON drawer */}
         <div
+          data-gateway-json-drawer
           className={cn(
             'absolute top-0 bottom-0 bg-aurora-page-bg border-l border-aurora-border-strong rounded-r-lg overflow-hidden transition-[width] duration-[250ms] ease-[cubic-bezier(.4,0,.2,1)] flex flex-col sm:left-full',
             'max-[600px]:fixed max-[600px]:inset-0 max-[600px]:rounded-none max-[600px]:border-l-0 max-[600px]:z-50',

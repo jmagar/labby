@@ -2,6 +2,7 @@
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
+use hex;
 use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{Value, json};
 use sha2::Sha256;
@@ -40,9 +41,23 @@ fn require_confirm(params: &Value, action: &str) -> Result<(), ToolError> {
 }
 
 fn ensure_params_size(params: &Value, max_bytes: usize) -> Result<(), ToolError> {
-    let size = serde_json::to_vec(params)
-        .map(|bytes| bytes.len())
-        .unwrap_or(usize::MAX);
+    use std::io::Write;
+    struct ByteCounter(usize);
+    impl Write for ByteCounter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0 += buf.len();
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut counter = ByteCounter(0);
+    let size = if serde_json::to_writer(&mut counter, params).is_ok() {
+        counter.0
+    } else {
+        usize::MAX
+    };
     if size > max_bytes {
         return Err(ToolError::Sdk {
             sdk_kind: "content_too_large".to_string(),
@@ -65,13 +80,17 @@ fn ensure_prompt_size(prompt: &str) -> Result<(), ToolError> {
     Ok(())
 }
 
+fn try_meta_action(action: &str, params: &Value) -> Option<Result<Value, ToolError>> {
+    match action {
+        "help" => Some(Ok(help_payload("acp", ACTIONS))),
+        "schema" => Some(require_str(params, "action").and_then(|a| action_schema(ACTIONS, a))),
+        _ => None,
+    }
+}
+
 pub async fn dispatch(action: &str, params: Value) -> Result<Value, ToolError> {
     match action {
-        "help" => Ok(help_payload("acp", ACTIONS)),
-        "schema" => {
-            let a = require_str(&params, "action")?;
-            action_schema(ACTIONS, a)
-        }
+        "help" | "schema" => try_meta_action(action, &params).unwrap(),
         other => {
             if !ACTIONS.iter().any(|a| a.name == other) {
                 tracing::warn!(
@@ -123,13 +142,11 @@ pub async fn dispatch_with_registry(
     };
     ensure_params_size(&params, max_params_bytes)?;
 
-    match action {
-        "help" => Ok(help_payload("acp", ACTIONS)),
-        "schema" => {
-            let a = require_str(&params, "action")?;
-            action_schema(ACTIONS, a)
-        }
+    if let Some(result) = try_meta_action(action, &params) {
+        return result;
+    }
 
+    match action {
         // ── Provider actions ──────────────────────────────────────────────
         "provider.list" => {
             let providers: Vec<_> = registry
@@ -199,6 +216,8 @@ pub async fn dispatch_with_registry(
 
         "session.get" => {
             let session_id = require_str(&params, "session_id")?;
+            let principal = opt_str(&params, "principal").unwrap_or("");
+            registry.check_session_access(session_id, principal).await?;
             let summary = registry
                 .get_session(session_id)
                 .await
@@ -466,12 +485,11 @@ pub async fn dispatch_with_registry(
 
 /// Issue a short-lived HMAC-signed ticket for browser EventSource SSE auth.
 ///
-/// Ticket format (URL-safe base64 of): `{session_id}:{principal}:{exp}:{hmac_hex}`
+/// Ticket format (URL-safe base64 of): `{session_id}:{principal}:{exp}:{sig_hex}`
 ///
-/// Uses the same `LAB_ACP_HMAC_SECRET` as permission outcome signing.
-/// Falls back to a process-ephemeral key if the env var is not set.
+/// Shares the same key as permission-outcome signing via `persistence::acp_hmac_key`.
 fn issue_subscribe_ticket(session_id: &str, principal: &str) -> Result<String, ToolError> {
-    let key = load_hmac_key();
+    let key = super::persistence::acp_hmac_key();
     let exp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -480,13 +498,12 @@ fn issue_subscribe_ticket(session_id: &str, principal: &str) -> Result<String, T
 
     let payload = format!("{session_id}:{principal}:{exp}");
 
-    let mut mac = Hmac::<Sha256>::new_from_slice(&key).map_err(|e| ToolError::Sdk {
+    let mut mac = Hmac::<Sha256>::new_from_slice(key).map_err(|e| ToolError::Sdk {
         sdk_kind: "internal_error".to_string(),
         message: format!("HMAC key error: {e}"),
     })?;
     mac.update(payload.as_bytes());
-    let sig = mac.finalize().into_bytes();
-    let sig_hex = sig.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let sig_hex = hex::encode(mac.finalize().into_bytes());
 
     let ticket = format!("{payload}:{sig_hex}");
     Ok(B64.encode(ticket.as_bytes()))
@@ -494,22 +511,18 @@ fn issue_subscribe_ticket(session_id: &str, principal: &str) -> Result<String, T
 
 /// Validate an SSE ticket. Returns `(session_id, principal)` on success.
 pub fn validate_subscribe_ticket(ticket: &str) -> Result<(String, String), ToolError> {
-    let raw = B64.decode(ticket).map_err(|_| ToolError::Sdk {
+    let auth_err = || ToolError::Sdk {
         sdk_kind: "auth_failed".to_string(),
-        message: "invalid ticket encoding".to_string(),
-    })?;
-    let raw_str = std::str::from_utf8(&raw).map_err(|_| ToolError::Sdk {
-        sdk_kind: "auth_failed".to_string(),
-        message: "invalid ticket encoding".to_string(),
-    })?;
+        message: "invalid ticket".to_string(),
+    };
+
+    let raw = B64.decode(ticket).map_err(|_| auth_err())?;
+    let raw_str = std::str::from_utf8(&raw).map_err(|_| auth_err())?;
 
     // Format: session_id:principal:exp:sig_hex
     let parts: Vec<&str> = raw_str.splitn(4, ':').collect();
     if parts.len() != 4 {
-        return Err(ToolError::Sdk {
-            sdk_kind: "auth_failed".to_string(),
-            message: "malformed ticket".to_string(),
-        });
+        return Err(auth_err());
     }
     let (session_id, principal, exp_str, sig_hex) = (parts[0], parts[1], parts[2], parts[3]);
 
@@ -525,44 +538,19 @@ pub fn validate_subscribe_ticket(ticket: &str) -> Result<(String, String), ToolE
         });
     }
 
-    let key = load_hmac_key();
+    let key = super::persistence::acp_hmac_key();
     let payload = format!("{session_id}:{principal}:{exp_str}");
-    let mut mac = Hmac::<Sha256>::new_from_slice(&key).map_err(|_| ToolError::Sdk {
+    let mut mac = Hmac::<Sha256>::new_from_slice(key).map_err(|_| ToolError::Sdk {
         sdk_kind: "internal_error".to_string(),
         message: "HMAC key error".to_string(),
     })?;
     mac.update(payload.as_bytes());
 
-    let expected = mac.finalize().into_bytes();
-    let expected_hex: String = expected.iter().map(|b| format!("{b:02x}")).collect();
-    if expected_hex != sig_hex {
-        return Err(ToolError::Sdk {
-            sdk_kind: "auth_failed".to_string(),
-            message: "invalid ticket signature".to_string(),
-        });
-    }
+    // Decode the provided hex sig and verify constant-time.
+    let sig_bytes = hex::decode(sig_hex).map_err(|_| auth_err())?;
+    mac.verify_slice(&sig_bytes).map_err(|_| auth_err())?;
 
     Ok((session_id.to_string(), principal.to_string()))
-}
-
-fn load_hmac_key() -> &'static [u8] {
-    use std::sync::OnceLock;
-    static KEY: OnceLock<Vec<u8>> = OnceLock::new();
-    KEY.get_or_init(|| {
-        if let Ok(secret) = std::env::var("LAB_ACP_HMAC_SECRET") {
-            if !secret.is_empty() {
-                return secret.into_bytes();
-            }
-        }
-        // Fall back to process-ephemeral key — stable for the process lifetime.
-        use sha2::{Digest, Sha256};
-        let pid = std::process::id();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        Sha256::digest(format!("lab-acp-hmac-ephemeral:{pid}:{now}").as_bytes()).to_vec()
-    })
 }
 
 #[cfg(test)]

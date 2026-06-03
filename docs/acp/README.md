@@ -98,6 +98,8 @@ available for the hosted chat UI. SSE event delivery is the transport exception:
 browser clients still stream events from
 `GET /v1/acp/sessions/{session_id}/events?ticket=...`.
 
+The REST routes at `/v1/acp/sessions/*` are handled by `api/services/acp.rs`, which calls the shared dispatch layer (`dispatch/acp/dispatch.rs`) — they are not independent handlers. The REST layer is a thin HTTP adapter over the same action catalog used by `POST /v1/acp` and the MCP tool.
+
 ## Provider prompt idle timeout
 
 The ACP runtime watches for provider updates while a prompt is in flight and
@@ -169,9 +171,10 @@ Landed:
   permission request emits an event and waits for an authenticated decision
   bounded by `LAB_ACP_PERMISSION_TIMEOUT_MS` (default 60 s).
 - HTTP authentication propagates `AuthContext.sub` to the registry; sessions
-  are bound to the creating principal and subscribe/prompt/cancel/close
-  enforce the binding. Anonymous principals are rejected at the API
-  boundary.
+  are bound to the creating principal. `subscribe`, `prompt`, `cancel`,
+  `close`, and `events` enforce the binding. `session.get` also enforces
+  ownership via `check_session_access`. Anonymous principals are rejected at
+  the API boundary.
 - Browser SSE attaches a `subscribe_ticket` per stream rather than relying on
   cookie auth alone.
 - ACP Registry installs validate `agent_id` before any path is constructed,
@@ -218,6 +221,8 @@ Landed:
   (`LAB_ACP_PROMPT_IDLE_TIMEOUT_MS`, default 5 s) and its observable firing
   behavior are documented above.
 
+**Caller-controlled `cwd`**: The `cwd` field in `session.start` flows directly into the spawned provider subprocess `current_dir`. In single-operator mode this is acceptable. In multi-principal OAuth deployments, callers can aim an agent at any filesystem path the lab process can read. If deploying with multiple trusted principals who should not access each other's files, constrain `cwd` to a configured workspace root at the API layer.
+
 Remaining gaps tracked but not closed in this remediation pass:
 
 - The legacy `Bridge*` compatibility projection types
@@ -225,6 +230,9 @@ Remaining gaps tracked but not closed in this remediation pass:
   persistence and mirrored by the frontend. Removing them is a coordinated
   Rust + frontend wire-format change deferred until the legacy
   `JsonFileAcpPersistence` is retired.
+
+  **Done when:** all components using `BridgeSession`, `BridgeEvent`, or `BridgeAny` have been migrated to the ACP native types (`AcpSession`, `AcpEvent`, etc.) and the `Bridge*` types have been removed from `crates/lab/src/acp/types.rs` and any re-exports in `lab_apis::acp`.
+
 - Provider sandboxing beyond the disabled-capabilities posture is out of
   scope here. Workspace jails and permission-flow-driven file access remain
   future work tracked separately.

@@ -46,7 +46,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "provider.select",
-        description: "Set the default provider for new sessions",
+        description: "Validate a provider name (note: does not persist a default — planned feature)",
         destructive: false,
         returns: "Value",
         params: &[ParamSpec {

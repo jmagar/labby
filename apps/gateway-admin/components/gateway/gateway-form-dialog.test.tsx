@@ -346,6 +346,66 @@ test('clearing a protected route removes the existing route after saving', async
   }
 })
 
+test('ENV drawer live-applies custom MCP env vars to stdio gateway saves', async () => {
+  const window = installGatewayDialogDom()
+  const onSaveInputs: unknown[] = []
+  const view = await renderOpenGatewayDialog(null, async (input) => {
+    onSaveInputs.push(input)
+  })
+
+  try {
+    const nameInput = document.querySelector('#name') as HTMLInputElement | null
+    const stdioRadio = document.querySelector('#transport-stdio') as HTMLElement | null
+    assert.ok(nameInput)
+    assert.ok(stdioRadio)
+
+    await setInputValue(window, nameInput, 'searxng')
+    await act(async () => {
+      stdioRadio.click()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    const commandInput = document.querySelector('#command') as HTMLInputElement | null
+    assert.ok(commandInput)
+    await setInputValue(window, commandInput, 'npx -y mcp-searxng')
+
+    await clickButton('ENV')
+    const envInput = document.querySelector('textarea') as HTMLTextAreaElement | null
+    assert.ok(envInput)
+    await setTextareaValue(window, envInput, 'SEARXNG_URL=https://s.tootie.tv')
+    await clickSave()
+
+    await waitFor(() => {
+      assert.equal(onSaveInputs.length, 1)
+      assert.deepEqual(onSaveInputs[0], {
+        name: 'searxng',
+        transport: 'stdio',
+        config: {
+          command: 'npx',
+          args: ['-y', 'mcp-searxng'],
+          env: { SEARXNG_URL: 'https://s.tootie.tv' },
+          bearer_token_env: undefined,
+          bearer_token_value: undefined,
+          oauth: undefined,
+          proxy_resources: true,
+          proxy_prompts: true,
+        },
+      })
+    })
+  } finally {
+    await view.unmount()
+  }
+})
+
+async function clickButton(label: string) {
+  const button = [...document.querySelectorAll('button')]
+    .find((item) => item.textContent?.trim() === label) as HTMLButtonElement | undefined
+  assert.ok(button, `button ${label} not found`)
+  await act(async () => {
+    button.click()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+}
+
 test('shouldAutoConnectOauth only allows new HTTP no-auth OAuth discoveries', async () => {
   const { shouldAutoConnectOauth } = await import('./gateway-form-dialog')
 
@@ -393,6 +453,57 @@ test('shouldAutoConnectOauth only allows new HTTP no-auth OAuth discoveries', as
     oauthDiscovered: true,
     upstream: '',
   }), false)
+})
+
+test('parseGatewayJsonEntry accepts standard mcpServers config wrapper', async () => {
+  const { parseGatewayJsonEntry } = await import('./gateway-form-dialog')
+
+  const entry = parseGatewayJsonEntry(JSON.stringify({
+    mcpServers: {
+      searxng: {
+        command: 'npx',
+        args: ['-y', 'mcp-searxng'],
+        env: { SEARXNG_URL: 'https://s.tootie.tv' },
+      },
+    },
+  }))
+
+  assert.equal(entry?.name, 'searxng')
+  assert.equal(entry?.config.command, 'npx')
+  assert.deepEqual(entry?.config.args, ['-y', 'mcp-searxng'])
+})
+
+test('parseEnvText detects custom MCP env prefixes', async () => {
+  const { parseEnvText } = await import('./gateway-form-dialog')
+
+  const parsed = parseEnvText('SEARXNG_URL=https://s.tootie.tv\n')
+
+  assert.equal(parsed.pairs.SEARXNG_URL, 'https://s.tootie.tv')
+  assert.deepEqual(parsed.detectedServices, ['searxng'])
+})
+
+test('buildEnvTextFromGatewayForm reflects form state for ENV drawer', async () => {
+  const { buildEnvTextFromGatewayForm } = await import('./gateway-form-dialog')
+
+  assert.equal(
+    buildEnvTextFromGatewayForm({
+      name: 'searxng',
+      transport: 'http',
+      url: 'https://s.tootie.tv',
+      stdioEnv: {},
+    }),
+    'SEARXNG_URL=https://s.tootie.tv',
+  )
+
+  assert.equal(
+    buildEnvTextFromGatewayForm({
+      name: 'searxng',
+      transport: 'stdio',
+      url: '',
+      stdioEnv: { SEARXNG_URL: 'https://s.tootie.tv' },
+    }),
+    'SEARXNG_URL=https://s.tootie.tv',
+  )
 })
 
 test('oauthConnectButtonLabel exposes blocked popup recovery copy', async () => {
@@ -517,6 +628,15 @@ async function renderOpenGatewayDialog(
 async function setInputValue(window: Window, input: HTMLInputElement, value: string) {
   await act(async () => {
     const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+    setValue?.call(input, value)
+    input.dispatchEvent(new window.InputEvent('input', { bubbles: true, data: value }) as unknown as Event)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+}
+
+async function setTextareaValue(window: Window, input: HTMLTextAreaElement, value: string) {
+  await act(async () => {
+    const setValue = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set
     setValue?.call(input, value)
     input.dispatchEvent(new window.InputEvent('input', { bubbles: true, data: value }) as unknown as Event)
     await new Promise((resolve) => setTimeout(resolve, 0))

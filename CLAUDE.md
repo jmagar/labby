@@ -88,17 +88,17 @@ lab/
 ├── Cargo.toml                        # workspace
 ├── Justfile
 ├── deny.toml
-├── crates/vendor/
-│   └── agent-client-protocol/        # vendored fork of agent-client-protocol (see Vendored ACP SDK below)
 ├── docs/README.md
 └── CLAUDE.md
 ```
 
-### Vendored ACP SDK
+### ACP SDK
 
-`crates/vendor/agent-client-protocol/` is a local fork of `agent-client-protocol` 0.11.1 with one patch: `ActiveSession` preserves the `models: Option<SessionModelState>` field that upstream's `attach_session()` was discarding. Without the patch, `session.response()` rebuilds a `NewSessionResponse` without the model list and the chat UI's adapter model picker stays empty even when codex/claude/gemini advertise models in their `NewSessionResponse`.
+The ACP SDK (`agent-client-protocol`) is consumed directly from crates.io at `=0.13.1` with the `unstable` feature. No local vendor patch is in use.
 
-Wired via `[patch.crates-io]` in the workspace `Cargo.toml`. Drop the patch when upstream gains a public accessor for session models on `ActiveSession` — the change is small enough that an upstream PR is the right long-term fix. Don't edit this directory casually; if you need to bump the underlying SDK version, copy `~/.cargo/registry/src/index.crates.io-*/agent-client-protocol-<VER>` over the directory, re-apply the same three deltas in `src/session.rs` (struct field, `attach_session`, `response()`, and the proxy-mode destructure stub), and re-run `just build`.
+The key API used for model/config discovery is `session_config_options()` — it reads `SessionConfigOption` entries from the raw `NewSessionResponse` before `attach_session` consumes it. Session start bypasses `build_session().start_session()` and calls `send_request_to(Agent, NewSessionRequest::new(&*cwd))` directly to intercept the response. Model switching uses `SetSessionConfigOptionRequest::new(session_id, "model", model_id)`.
+
+When upgrading: pin to an exact version (`=X.Y.Z`), verify the `unstable` feature still compiles, and re-check `session_config_options()` behavior against the new SDK's `SessionConfigOption` / `SessionConfigKind::Select` API.
 
 ## Key Patterns
 

@@ -158,6 +158,14 @@ function normalizeArgs(args?: string[]): string[] {
   return Array.isArray(args) ? args : []
 }
 
+function normalizeEnv(env?: Record<string, string>): Record<string, string> | undefined {
+  if (!env) return undefined
+  const entries = Object.entries(env)
+    .map(([key, value]) => [key.trim(), value.trim()] as const)
+    .filter(([key, value]) => key.length > 0 && value.length > 0)
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined
+}
+
 function matchPattern(toolName: string, pattern: string): boolean {
   if (pattern === '*') {
     return true
@@ -626,11 +634,13 @@ export function probeStatusFromRuntime(runtime: BackendGatewayRuntimeView): Gate
 }
 
 export function gatewayInputToSpec(input: CreateGatewayInput) {
+  const env = input.transport === 'stdio' ? normalizeEnv(input.config.env) : undefined
   const spec: Record<string, unknown> = {
     name: input.name,
     url: input.transport === 'http' ? input.config.url ?? null : null,
     command: input.transport === 'stdio' ? input.config.command ?? null : null,
     args: input.transport === 'stdio' ? normalizeArgs(input.config.args) : [],
+    ...(env ? { env } : {}),
     bearer_token_env: input.config.bearer_token_env ?? null,
     proxy_resources: input.config.proxy_resources ?? false,
     proxy_prompts: input.config.proxy_prompts ?? true,
@@ -685,10 +695,12 @@ export function buildGatewayPatch(input: UpdateGatewayInput & { name?: string; t
     patch.url = null
     patch.command = config.command ?? null
     patch.args = normalizeArgs(config.args)
+    if (config.env !== undefined) patch.env = normalizeEnv(config.env) ?? {}
   } else {
     if (config.url !== undefined) patch.url = config.url
     if (config.command !== undefined) patch.command = config.command
     if (config.args !== undefined) patch.args = normalizeArgs(config.args)
+    if (config.env !== undefined) patch.env = normalizeEnv(config.env) ?? {}
   }
 
   if (config.bearer_token_env !== undefined) {

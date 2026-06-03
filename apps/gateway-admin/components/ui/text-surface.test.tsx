@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 import { TextSurface } from './text-surface'
 import type { EditorDiagnostic } from '@/lib/editor/types'
@@ -78,4 +80,13 @@ test('applies Aurora editor classes instead of prism markup', () => {
   assert.match(markup, /cm-editor/)
   assert.match(markup, /aurora-text-surface/)
   assert.doesNotMatch(markup, /token punctuation/)
+})
+
+test('CodeMirror creation effect does not depend on controlled value callbacks', () => {
+  const source = readFileSync(fileURLToPath(import.meta.resolve('./text-surface.tsx')), 'utf8')
+  const creationEffect = source.match(/new EditorView\([\s\S]+?\n  \}, \[([^\]]*)\]\)/)
+
+  assert.ok(creationEffect, 'expected to find the EditorView creation effect')
+  assert.doesNotMatch(creationEffect[1] ?? '', /\bvalue\b/)
+  assert.doesNotMatch(creationEffect[1] ?? '', /\bonChange\b/)
 })

@@ -77,6 +77,9 @@ services:
       # entrypoints by absolute host path. Mirror those paths for stdio
       # gateways such as Bitwarden.
       - ${HOME}/.codex/plugins:${HOME}/.codex/plugins:ro
+      # beads-mcp shells out to the host-managed bd binary. Mount it at a
+      # stable container path and point BEADS_PATH there in the gateway config.
+      - ${HOME}/.local/bin/bd:/usr/local/bin/bd:ro
       # Bitwarden MCP validates the host-managed BW_SESSION file and shells
       # out to the Bitwarden CLI before starting the pinned MCP package.
       - /run/user/1000/bitwarden-mcp:/run/user/1000/bitwarden-mcp:ro
@@ -120,6 +123,14 @@ services:
       # Parallel upstream MCP server discovery. Default is 3; bump so startup
       # warms ~20 upstreams in roughly one 15s window instead of seven.
       LAB_UPSTREAM_DISCOVERY_CONCURRENCY: "16"
+      # Beads gateway upstreams inherit these so the mounted bd binary can use
+      # the same external Dolt server/auth context as the host CLI.
+      BEADS_DOLT_SERVER_MODE: "${BEADS_DOLT_SERVER_MODE:-}"
+      BEADS_DOLT_SERVER_HOST: "${BEADS_DOLT_SERVER_HOST:-}"
+      BEADS_DOLT_SERVER_PORT: "${BEADS_DOLT_SERVER_PORT:-}"
+      BEADS_DOLT_SERVER_TLS: "${BEADS_DOLT_SERVER_TLS:-}"
+      BEADS_DOLT_SERVER_USER: "${BEADS_DOLT_SERVER_USER:-}"
+      BEADS_DOLT_PASSWORD: "${BEADS_DOLT_PASSWORD:-}"
 
     # ── Hard outer boundary ──────────────────────────────────────────────────
     # Even if the spawn-guard logic in the binary fails, the container's pid
@@ -131,6 +142,7 @@ services:
       resources:
         limits:
           memory: 2G
+          cpus: "2.0"
           pids: 1000
 
 volumes:

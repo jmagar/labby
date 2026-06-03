@@ -964,12 +964,12 @@ Recommended initial actions:
 - `session.list`
 - `session.get`
 - `session.start`
-- `session.load`
+- `session.load` <!-- Status: deferred — not implemented as of 0.13.x -->
 - `session.prompt`
 - `session.cancel`
 - `session.close`
 - `session.events`
-- `target.list`
+- `target.list` <!-- Status: deferred — not implemented as of 0.13.x -->
 
 Likely later additions:
 
@@ -1369,12 +1369,12 @@ Initial MCP `action` set:
 - `session.list`
 - `session.get`
 - `session.start`
-- `session.load`
+- `session.load` <!-- Status: deferred — not implemented as of 0.13.x -->
 - `session.prompt`
 - `session.cancel`
 - `session.close`
 - `session.events`
-- `target.list`
+- `target.list` <!-- Status: deferred — not implemented as of 0.13.x -->
 
 Likely later MCP additions:
 
@@ -1407,12 +1407,12 @@ Initial CLI command shape:
 - `lab acp sessions list`
 - `lab acp sessions get <session_id>`
 - `lab acp sessions start`
-- `lab acp sessions load <session_id>`
+- `lab acp sessions load <session_id>` <!-- Status: deferred — not implemented as of 0.13.x -->
 - `lab acp sessions prompt <session_id> --text <prompt>`
 - `lab acp sessions cancel <session_id>`
 - `lab acp sessions close <session_id>`
 - `lab acp sessions events <session_id>`
-- `lab acp targets list`
+- `lab acp targets list` <!-- Status: deferred — not implemented as of 0.13.x -->
 
 Likely later CLI additions:
 
@@ -1534,9 +1534,18 @@ These questions remain intentionally open and should be resolved in follow-up
 planning, not ad hoc implementation:
 
 1. What exact trait or interface should ACP use for gateway tool execution?
+
+   **Resolution:** ACP accesses `GatewayManager` in-process via `AppState` (an `Arc`-shared concrete struct); no loopback HTTP is used. `GatewayManager` exposes `discovered_tools()` for listing; a `call_tool` execution method is Phase 2 work.
+
 2. Which ACP actions are exposed on day one through MCP and CLI?
+
+   **Resolution:** The implemented Phase 1 action set is: `provider.get`, `provider.list`, `provider.select`, `session.list`, `session.get`, `session.start`, `session.start_and_prompt`, `session.prompt`, `session.cancel`, `session.close`, `session.bulk_close`, `session.events`, `session.subscribe_ticket`, `session.permission.approve`, `session.permission.reject`. CLI typed subcommands are Phase 2.
+
 3. Should ACP publish `PluginMeta`, or should product-local always-on services
    use a separate metadata pattern consistent with `gateway`?
+
+   **Resolution:** ACP publishes `PluginMeta` (with `META` constant in `lab-apis::acp`) and is registered via `build_default_registry()` like other always-on services. No separate metadata pattern was needed.
+
 4. How much of the current `crates/lab/src/acp/` code moves into
    `lab-apis::acp` in the first migration pass versus later cleanup?
 5. What is the exact ACP target/deploy contract between Marketplace and ACP?

@@ -68,6 +68,8 @@ authoritative source and can be read efficiently by seq range.
 
 ### C4 — Subprocess Inherits All Lab Credentials
 
+> **RESOLVED** (2026-06) — Provider subprocesses now spawn with `env_clear()` and a fixed allowlist (`PATH`, `HOME`, locale vars, terminal vars, Windows `SystemRoot`). Per-provider entries can extend the allowlist explicitly via the structured `env` field on `AcpProviderEntry`. See `docs/acp/README.md` security section.
+
 **Source:** security-sentinel  
 **File:** `crates/lab/src/acp/runtime.rs:153–161`  
 **Severity: HIGH**
@@ -83,6 +85,8 @@ all of them via `process.env`.
 ---
 
 ### C5 — Permission Auto-Selection Bypasses User Consent
+
+> **RESOLVED** (2026-06) — A pending-permission state machine is now implemented. Permission decisions are explicit with no auto-approval path. Each request emits an event and waits for an authenticated decision bounded by `LAB_ACP_PERMISSION_TIMEOUT_MS` (default 60 s). `session.permission.approve` and `session.permission.reject` are Phase 1 dispatch actions. HMAC-signed `permission_outcome` payloads detect tampering. See `docs/acp/README.md` security section.
 
 **Source:** security-sentinel, agent-native-reviewer  
 **File:** `crates/lab/src/acp/runtime.rs:196–257`  

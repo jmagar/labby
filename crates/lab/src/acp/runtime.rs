@@ -8,12 +8,13 @@ use agent_client_protocol::schema::{
     BlobResourceContents, CancelNotification, ClientCapabilities, ConfigOptionUpdate, ContentBlock,
     ContentChunk, CreateTerminalRequest, CurrentModeUpdate, EmbeddedResource,
     EmbeddedResourceResource, FileSystemCapabilities, Implementation, InitializeRequest,
-    KillTerminalRequest, PermissionOption, PermissionOptionKind, PromptRequest, PromptResponse,
-    ProtocolVersion, ReadTextFileRequest, ReleaseTerminalRequest, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
-    SessionInfoUpdate, SessionNotification, SessionUpdate, SetSessionModelRequest, StopReason,
-    TerminalOutputRequest, TextContent, TextResourceContents, WaitForTerminalExitRequest,
-    WriteTextFileRequest,
+    KillTerminalRequest, NewSessionRequest, PermissionOption, PermissionOptionKind, PromptRequest,
+    PromptResponse, ProtocolVersion, ReadTextFileRequest, ReleaseTerminalRequest,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
+    SessionConfigSelectOptions, SessionInfoUpdate, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, StopReason, TerminalOutputRequest, TextContent,
+    TextResourceContents, WaitForTerminalExitRequest, WriteTextFileRequest,
 };
 use agent_client_protocol::{
     Agent, ByteStreams, Client, ConnectionTo, Dispatch, JsonRpcMessage, on_receive_request,
@@ -301,26 +302,77 @@ struct RuntimeStarted {
     model_id: Option<String>,
     model_name: Option<String>,
     models: Vec<lab_apis::acp::types::AcpModelOption>,
+    config_options: Vec<lab_apis::acp::types::AcpSessionConfigOptionView>,
 }
 
-fn session_model_options(
-    response: &agent_client_protocol::schema::NewSessionResponse,
-) -> (Option<String>, Vec<lab_apis::acp::types::AcpModelOption>) {
-    let Some(models) = response.models.as_ref() else {
-        return (None, Vec::new());
-    };
-    let current = Some(models.current_model_id.to_string());
-    let options = models
-        .available_models
-        .iter()
-        .map(|model| lab_apis::acp::types::AcpModelOption {
-            id: model.model_id.to_string(),
-            name: model.name.clone(),
-            description: model.description.clone(),
-            fixed: false,
-        })
-        .collect();
-    (current, options)
+fn session_config_options(
+    raw: &[SessionConfigOption],
+) -> (
+    Option<String>,
+    Vec<lab_apis::acp::types::AcpModelOption>,
+    Vec<lab_apis::acp::types::AcpSessionConfigOptionView>,
+) {
+    use lab_apis::acp::types::{AcpModelOption, AcpSessionConfigOptionView};
+
+    let mut model_id: Option<String> = None;
+    let mut models: Vec<AcpModelOption> = Vec::new();
+    let mut views: Vec<AcpSessionConfigOptionView> = Vec::new();
+
+    for opt in raw {
+        let is_model = opt.category.as_ref() == Some(&SessionConfigOptionCategory::Model);
+        let category_str = opt.category.as_ref().map(|c| {
+            serde_json::to_value(c)
+                .ok()
+                .and_then(|v| v.as_str().map(ToString::to_string))
+                .unwrap_or_else(|| format!("{c:?}"))
+        });
+
+        let (current_value, option_list) = match &opt.kind {
+            SessionConfigKind::Select(select) => {
+                let current = select.current_value.to_string();
+                let opts: Vec<AcpModelOption> = match &select.options {
+                    SessionConfigSelectOptions::Ungrouped(options) => options
+                        .iter()
+                        .map(|o| AcpModelOption {
+                            id: o.value.to_string(),
+                            name: o.name.clone(),
+                            description: o.description.clone(),
+                            fixed: false,
+                        })
+                        .collect(),
+                    SessionConfigSelectOptions::Grouped(groups) => groups
+                        .iter()
+                        .flat_map(|g| {
+                            g.options.iter().map(|o| AcpModelOption {
+                                id: o.value.to_string(),
+                                name: o.name.clone(),
+                                description: o.description.clone(),
+                                fixed: false,
+                            })
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                (Some(current), opts)
+            }
+            _ => (None, Vec::new()),
+        };
+
+        if is_model {
+            model_id = current_value.clone();
+            models = option_list.clone();
+        }
+
+        views.push(AcpSessionConfigOptionView {
+            id: opt.id.to_string(),
+            name: opt.name.clone(),
+            category: category_str,
+            current_value,
+            options: option_list,
+        });
+    }
+
+    (model_id, models, views)
 }
 
 #[derive(Default)]
@@ -598,7 +650,7 @@ pub async fn launch_codex_runtime(
             model_id: started.model_id,
             model_name: started.model_name,
             models: started.models,
-            config_options: Vec::new(),
+            config_options: started.config_options,
         },
     ))
 }
@@ -1480,18 +1532,24 @@ async fn run_codex_session(
                         .await
                         .map_err(|error| acp_internal_error(error.to_string()))?;
 
-                    let mut session = connection
-                        .build_session(cwd)
+                    let new_session_response = connection
+                        .send_request_to(
+                            Agent,
+                            NewSessionRequest::new(&*cwd),
+                        )
                         .block_task()
-                        .start_session()
                         .await
                         .map_err(|error| acp_internal_error(error.to_string()))?;
-                    let session_response = session.response();
-                    let (model_id, models) = session_model_options(&session_response);
+                    let (model_id, models, config_options) = session_config_options(
+                        new_session_response.config_options.as_deref().unwrap_or_default(),
+                    );
                     let model_name = model_id
                         .as_ref()
                         .and_then(|id| models.iter().find(|model| &model.id == id))
                         .map(|model| model.name.clone());
+                    let mut session = connection
+                        .attach_session(new_session_response, vec![])
+                        .map_err(|error| acp_internal_error(error.to_string()))?;
 
                     let started = RuntimeStarted {
                         provider_session_id: session.session_id().to_string(),
@@ -1514,6 +1572,7 @@ async fn run_codex_session(
                         model_id,
                         model_name,
                         models,
+                        config_options,
                     };
                     if let Some(sender) = started_tx.lock().ok().and_then(|mut guard| guard.take()) {
                         drop(sender.send(Ok(started)));
@@ -1626,9 +1685,10 @@ async fn run_codex_session(
                                         .connection()
                                         .send_request_to(
                                             Agent,
-                                            SetSessionModelRequest::new(
+                                            SetSessionConfigOptionRequest::new(
                                                 session.session_id().clone(),
-                                                model_id.to_string(),
+                                                "model",
+                                                model_id,
                                             ),
                                         )
                                         .block_task()

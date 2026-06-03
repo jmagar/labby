@@ -29,7 +29,6 @@ agent-client-protocol = "0"               # types + transport (AgentSideConnecti
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["compat"] }  # required: .compat() / .compat_write() bridge
 futures = "0.3"                           # AsyncRead/AsyncWrite traits expected by AgentSideConnection
-async-trait = "0.1"
 anyhow = "1"
 uuid = { version = "1", features = ["v4"] }
 dashmap = "5"   # preferred over std::sync::Mutex<HashMap> in async contexts
@@ -54,8 +53,9 @@ See `references/wire-format.md` for full JSON examples of every message.
 Implement the `Agent` trait and run it on stdio:
 
 ```rust
-// CRITICAL: use ?Send — the SDK uses Rc internally and requires LocalSet.
-#[async_trait::async_trait(?Send)]
+// CRITICAL: the SDK uses Rc internally and requires LocalSet (?Send).
+// Use native async fn in trait (stable since Rust 1.75) — do NOT add async-trait.
+// Note: the SDK's Agent trait itself is defined with ?Send bounds; implement it directly.
 impl Agent for MyAgent {
     async fn initialize(&self, req: InitializeRequest) -> acp::Result<InitializeResponse>;
     async fn authenticate(&self, req: AuthenticateRequest) -> acp::Result<AuthenticateResponse>;
@@ -169,8 +169,8 @@ tokio::task::spawn_local(async move {
 Implement the `Client` trait to handle agent requests:
 
 ```rust
-// CRITICAL: use ?Send — same requirement as Agent.
-#[async_trait::async_trait(?Send)]
+// CRITICAL: same ?Send requirement as Agent — SDK uses Rc internally.
+// Use native async fn in trait (stable since Rust 1.75) — do NOT add async-trait.
 impl Client for MyClient {
     // REQUIRED: receives session/update notifications (streaming chunks, tool calls, etc.).
     // Route by SessionUpdate variant to render in the UI.
@@ -258,7 +258,7 @@ These reference files contain detail beyond the core guide above:
 ### New Rust ACP Agent
 
 - [ ] `#![deny(clippy::print_stdout, clippy::print_stderr)]` in crate root — one stray `println!` corrupts the binary protocol stream
-- [ ] Use `#[async_trait::async_trait(?Send)]` — NOT `#[async_trait]`; the SDK uses Rc internally
+- [ ] Do NOT add `async-trait` to Cargo.toml — use native `async fn in trait` (stable Rust 1.75+); the SDK trait already has ?Send bounds built in
 - [ ] Run `AgentSideConnection` inside `tokio::task::LocalSet` — required for `!Send` types
 - [ ] Use `#[tokio::main(flavor = "current_thread")]` — matches the `?Send` trait requirement
 - [ ] Add `use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt}` — then call `.compat()` / `.compat_write()` on tokio IO types (they do NOT implement `futures::AsyncRead/Write` natively)
@@ -275,7 +275,7 @@ These reference files contain detail beyond the core guide above:
 
 ### New Rust ACP Client
 
-- [ ] Use `#[async_trait::async_trait(?Send)]` — NOT `#[async_trait]`
+- [ ] Do NOT add `async-trait` — use native `async fn in trait` (stable Rust 1.75+); SDK trait has ?Send bounds built in
 - [ ] Spawn agent binary with `tokio::process::Command`, pipe stdio
 - [ ] `ClientSideConnection::new` arg order: `(client, outgoing→agent_stdin, incoming←agent_stdout, spawner)`
 - [ ] `ClientSideConnection::new` returns `(conn, io_task)` — use `conn.initialize()` etc. to drive the session

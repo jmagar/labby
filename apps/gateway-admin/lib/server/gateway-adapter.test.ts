@@ -119,6 +119,32 @@ test('buildGatewayCreatePayload builds a stdio spec without any ack flag', () =>
   })
 })
 
+test('buildGatewayCreatePayload includes stdio environment variables', () => {
+  const payload = buildGatewayCreatePayload({
+    name: 'searxng',
+    transport: 'stdio',
+    config: {
+      command: 'npx',
+      args: ['-y', 'mcp-searxng'],
+      env: { SEARXNG_URL: 'https://s.tootie.tv' },
+    },
+  })
+
+  assert.deepEqual(payload.spec, {
+    name: 'searxng',
+    url: null,
+    command: 'npx',
+    args: ['-y', 'mcp-searxng'],
+    env: { SEARXNG_URL: 'https://s.tootie.tv' },
+    bearer_token_env: null,
+    proxy_resources: false,
+    proxy_prompts: true,
+    expose_tools: null,
+    expose_resources: null,
+    expose_prompts: null,
+  })
+})
+
 test('buildGatewayUpdatePayload clears auth when bearer_token_env is blanked', () => {
   const payload = buildGatewayUpdatePayload('github', {
     transport: 'http',

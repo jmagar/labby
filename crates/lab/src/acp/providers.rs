@@ -51,7 +51,40 @@ pub fn providers_path() -> Result<PathBuf, ToolError> {
     Ok(dir.join("acp-providers.json"))
 }
 
+/// Read providers from disk, cached with a 5-second TTL.
+///
+/// The cache avoids repeated filesystem reads on the hot dispatch path
+/// (provider.list, provider.get, switch_runtime_if_requested).
 pub fn read_providers() -> Result<Vec<AcpProviderEntry>, ToolError> {
+    use std::sync::{Mutex, OnceLock};
+
+    struct Cache {
+        entries: Vec<AcpProviderEntry>,
+        fetched_at: std::time::Instant,
+    }
+    static CACHE: OnceLock<Mutex<Option<Cache>>> = OnceLock::new();
+    let mutex = CACHE.get_or_init(|| Mutex::new(None));
+
+    {
+        let guard = mutex.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(ref c) = *guard {
+            if c.fetched_at.elapsed() < std::time::Duration::from_secs(5) {
+                return Ok(c.entries.clone());
+            }
+        }
+    }
+
+    let entries = read_providers_from_disk()?;
+
+    let mut guard = mutex.lock().unwrap_or_else(|p| p.into_inner());
+    *guard = Some(Cache {
+        entries: entries.clone(),
+        fetched_at: std::time::Instant::now(),
+    });
+    Ok(entries)
+}
+
+fn read_providers_from_disk() -> Result<Vec<AcpProviderEntry>, ToolError> {
     let path = providers_path()?;
     if !path.exists() {
         return Ok(Vec::new());

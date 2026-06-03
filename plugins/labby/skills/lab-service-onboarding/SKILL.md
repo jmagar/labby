@@ -1,6 +1,7 @@
 ---
 name: lab-service-onboarding
-description: This skill should be used when adding a new service integration to `lab`, finishing a partial one, migrating a dispatch stub to the full directory layout, or wiring any of the standard surfaces — `lab-apis`, dispatch, CLI, MCP, API, health, docs — into the repo's service contract. Trigger phrases include: "add a service", "onboard Foo", "wire up dispatch for Foo", "finish the Foo integration", "migrate the Foo stub", "add Foo to lab".
+description: >-
+  This skill should be used when adding a new service integration to `lab`, finishing a partial one, migrating a dispatch stub to the full directory layout, or wiring any of the standard surfaces — `lab-apis`, dispatch, CLI, MCP, API, health, docs — into the repo's service contract. Trigger phrases include: "add a service", "onboard Foo", "wire up dispatch for Foo", "finish the Foo integration", "migrate the Foo stub", "add Foo to lab".
 ---
 
 # Lab Service Onboarding

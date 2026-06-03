@@ -105,6 +105,7 @@ fn acp_pragma_init(
 ) -> impl Fn(&mut Connection) -> rusqlite::Result<()> + Send + Sync + 'static {
     move |conn| {
         conn.busy_timeout(std::time::Duration::from_millis(5_000))?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "mmap_size", 134_217_728_i64)?;
@@ -134,7 +135,7 @@ impl SqliteAcpPersistence {
             )));
         }
 
-        let hmac_key = Arc::new(load_or_generate_hmac_key());
+        let hmac_key = Arc::new(acp_hmac_key().to_vec());
         let path = db_path.clone();
 
         let (write_pool, read_pool, writer_task_conn) =
@@ -368,8 +369,17 @@ async fn writer_task(conn: Arc<Mutex<Connection>>, mut rx: mpsc::Receiver<Persis
                     break;
                 }
                 Ok(None) => {
-                    // Channel closed — flush and exit task.
-                    drop(flush_batch(&conn, &mut batch).await);
+                    // Channel closed — flush remaining events before exiting.
+                    if flush_batch(&conn, &mut batch).await.is_some() {
+                        tracing::error!(
+                            surface = "acp",
+                            service = "persistence",
+                            action = "shutdown_flush",
+                            kind = "internal_error",
+                            events = batch.len(),
+                            "ACP writer task: final flush failed — events may be lost"
+                        );
+                    }
                     return;
                 }
                 Err(_) => {
@@ -397,26 +407,33 @@ async fn flush_batch(
     }
     let events = std::mem::take(batch);
     let count = events.len();
-    let retry_events = events.clone();
     let conn = Arc::clone(conn);
-    let result = tokio::task::spawn_blocking(move || {
-        let c = conn
-            .lock()
-            .map_err(|_| "writer mutex poisoned".to_string())?;
-        db_batch_insert_events(&c, &events).map_err(|e| format!("batch insert events: {e}"))
+    // Move events into the closure. On failure, return them for retry — no clone needed.
+    let result = tokio::task::spawn_blocking(move || -> Result<(), (Vec<(AcpEvent, String)>, String)> {
+        let c = match conn.lock() {
+            Ok(c) => c,
+            Err(_) => return Err((events, "writer mutex poisoned".to_string())),
+        };
+        match db_batch_insert_events(&c, &events) {
+            Ok(()) => Ok(()),
+            Err(e) => Err((events, format!("batch insert events: {e}"))),
+        }
     })
     .await;
     match result {
         Ok(Ok(())) => return None,
-        Ok(Err(error)) => tracing::error!(
-            surface = "acp",
-            service = "persistence",
-            action = "flush_batch",
-            kind = "internal_error",
-            events = count,
-            error,
-            "acp event batch insert failed",
-        ),
+        Ok(Err((retry, error))) => {
+            tracing::error!(
+                surface = "acp",
+                service = "persistence",
+                action = "flush_batch",
+                kind = "internal_error",
+                events = count,
+                error,
+                "acp event batch insert failed",
+            );
+            return Some(retry);
+        }
         Err(join_err) => tracing::error!(
             surface = "acp",
             service = "persistence",
@@ -427,7 +444,7 @@ async fn flush_batch(
             "acp event flush task panicked",
         ),
     }
-    Some(retry_events)
+    None
 }
 
 // ── Database helpers ──────────────────────────────────────────────────────────
@@ -929,34 +946,37 @@ fn hmac_tag(key: &[u8], message: &str) -> String {
     hex::encode(result.into_bytes())
 }
 
-/// Load the HMAC secret from `LAB_ACP_HMAC_SECRET` or generate an ephemeral
-/// key from process ID + startup timestamp hashed through SHA-256.
+/// Single process-wide HMAC key shared by ticket signing (dispatch) and
+/// permission-outcome signing (persistence).  Using one `OnceLock` guarantees
+/// both subsystems derive the same key regardless of initialization order.
 ///
-/// The generated key is NOT cryptographically random — it is only suitable
-/// for protecting against naive DB-write bypass within a single process
-/// lifetime. For cross-restart signature verification, set
-/// `LAB_ACP_HMAC_SECRET` in `~/.lab/.env`.
-fn load_or_generate_hmac_key() -> Vec<u8> {
-    if let Ok(secret) = std::env::var("LAB_ACP_HMAC_SECRET") {
-        if !secret.is_empty() {
-            return secret.into_bytes();
+/// Loaded from `LAB_ACP_HMAC_SECRET`; falls back to an ephemeral key seeded
+/// from PID + startup timestamp (NOT cryptographically random — suitable only
+/// for single-process protection, not cross-restart).
+pub(crate) fn acp_hmac_key() -> &'static [u8] {
+    use std::sync::OnceLock;
+    static KEY: OnceLock<Vec<u8>> = OnceLock::new();
+    KEY.get_or_init(|| {
+        if let Ok(secret) = std::env::var("LAB_ACP_HMAC_SECRET") {
+            if !secret.is_empty() {
+                return secret.into_bytes();
+            }
         }
-    }
-    tracing::warn!(
-        surface = "acp",
-        service = "persistence",
-        action = "hmac_key_init",
-        kind = "ephemeral_key",
-        "LAB_ACP_HMAC_SECRET is not set; using an ephemeral non-random HMAC key. \
-         Set LAB_ACP_HMAC_SECRET in ~/.lab/.env for persistent, \
-         cryptographically-random protection."
-    );
-    let pid = std::process::id();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    generate_ephemeral_hmac_key(pid, now)
+        tracing::warn!(
+            surface = "acp",
+            service = "persistence",
+            action = "hmac_key_init",
+            kind = "ephemeral_key",
+            "LAB_ACP_HMAC_SECRET is not set; using an ephemeral HMAC key. \
+             Set LAB_ACP_HMAC_SECRET in ~/.lab/.env for cross-restart protection."
+        );
+        let pid = std::process::id();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        generate_ephemeral_hmac_key(pid, now)
+    })
 }
 
 fn generate_ephemeral_hmac_key(pid: u32, now_nanos: u128) -> Vec<u8> {

@@ -457,23 +457,23 @@ export function GatewayTable({
       </div>
 
       <div className={cn(AURORA_GATEWAY_TABLE_SHELL, 'hidden overflow-hidden md:block')}>
-        <Table className="table-fixed">
+        <Table className="min-w-[920px] table-fixed">
           <TableHeader>
             <TableRow className="border-b border-aurora-border-strong bg-[rgba(7,17,26,0.48)] hover:bg-[rgba(7,17,26,0.48)]">
-              <TableHead className={cn(AURORA_MUTED_LABEL, 'w-[44%] px-6 py-4')}>Server</TableHead>
-              <TableHead className={cn(AURORA_MUTED_LABEL, 'w-[9%] px-2 py-4 text-center')}>
+              <TableHead className={cn(AURORA_MUTED_LABEL, 'w-[37%] px-6 py-4')}>Server</TableHead>
+              <TableHead className={cn(AURORA_MUTED_LABEL, 'w-[11%] px-2 py-4 text-center')}>
                 <SortHeader label="Transport" sort="transport" />
               </TableHead>
-              <TableHead className={cn(AURORA_MUTED_LABEL, 'w-[9%] px-2 py-4 text-center')}>
+              <TableHead className={cn(AURORA_MUTED_LABEL, 'w-[11%] px-2 py-4 text-center')}>
                 <SortHeader label="Tools" sort="tools" />
               </TableHead>
-              <TableHead className={cn(AURORA_MUTED_LABEL, 'w-[9%] px-2 py-4 text-center')}>
+              <TableHead className={cn(AURORA_MUTED_LABEL, 'w-[11%] px-2 py-4 text-center')}>
                 <SortHeader label="Resources" sort="resources" />
               </TableHead>
-              <TableHead className={cn(AURORA_MUTED_LABEL, 'w-[9%] px-2 py-4 text-center')}>
+              <TableHead className={cn(AURORA_MUTED_LABEL, 'w-[11%] px-2 py-4 text-center')}>
                 <SortHeader label="Prompts" sort="prompts" />
               </TableHead>
-              <TableHead className={cn(AURORA_MUTED_LABEL, 'w-[20%] px-4 py-4 text-right')}>Actions</TableHead>
+              <TableHead className={cn(AURORA_MUTED_LABEL, 'w-[19%] px-4 py-4 text-right')}>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

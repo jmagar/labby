@@ -6,6 +6,7 @@ export interface GatewayConfig {
   url?: string
   command?: string
   args?: string[]
+  env?: Record<string, string>
   bearer_token_env?: string
   oauth_enabled?: boolean
   proxy_resources?: boolean

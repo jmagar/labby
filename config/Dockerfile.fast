@@ -61,5 +61,9 @@ ENV HOME=/home/lab
 USER 1000:1000
 WORKDIR /home/lab
 EXPOSE 8765
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -sf http://localhost:8765/health || exit 1
+
 ENTRYPOINT ["/usr/local/bin/labby"]
 CMD ["serve"]

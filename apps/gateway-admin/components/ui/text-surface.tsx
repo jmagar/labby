@@ -39,7 +39,15 @@ function createState(doc: string, editable: boolean, diagnostics: EditorDiagnost
 export function TextSurface({ path, value, mode, language, dirty = false, diagnostics, onChange, onSave, onDeploy, onCopy }: TextSurfaceProps) {
   const hostRef = React.useRef<HTMLDivElement | null>(null)
   const viewRef = React.useRef<EditorView | null>(null)
+  const onChangeRef = React.useRef(onChange)
+  const initialValueRef = React.useRef(value)
+  const initialEditableRef = React.useRef(mode === 'edit')
+  const initialDiagnosticsRef = React.useRef(diagnostics ?? [])
   const [resolvedDiagnostics, setResolvedDiagnostics] = React.useState<EditorDiagnostic[]>(diagnostics ?? [])
+
+  React.useEffect(() => {
+    onChangeRef.current = onChange
+  }, [onChange])
 
   React.useEffect(() => {
     let cancelled = false
@@ -61,12 +69,12 @@ export function TextSurface({ path, value, mode, language, dirty = false, diagno
     if (!hostRef.current || viewRef.current) return
 
     const view = new EditorView({
-      state: createState(value, mode === 'edit', diagnostics ?? []),
+      state: createState(initialValueRef.current, initialEditableRef.current, initialDiagnosticsRef.current),
       parent: hostRef.current,
       dispatch(transaction) {
         view.update([transaction])
         if (transaction.docChanged) {
-          onChange?.(transaction.state.doc.toString())
+          onChangeRef.current?.(transaction.state.doc.toString())
         }
       },
     })
@@ -76,7 +84,7 @@ export function TextSurface({ path, value, mode, language, dirty = false, diagno
       view.destroy()
       viewRef.current = null
     }
-  }, [diagnostics, mode, onChange, value])
+  }, [])
 
   React.useEffect(() => {
     const view = viewRef.current

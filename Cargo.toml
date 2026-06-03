@@ -2,13 +2,6 @@
 resolver = "3"
 members = ["crates/lab-apis", "crates/lab", "crates/lab-auth"]
 
-# TEMP patch: vendored agent-client-protocol with `models` preserved on
-# ActiveSession. Upstream 0.11.1 strips models in attach_session(), losing
-# the model list returned by codex-acp. Drop this patch when upstream fixes
-# https://github.com/agentclientprotocol/agent-client-protocol/issues/<TBD>.
-[patch.crates-io]
-agent-client-protocol = { path = "crates/vendor/agent-client-protocol" }
-
 [workspace.package]
 version = "0.21.4"
 edition = "2024"

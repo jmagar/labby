@@ -2,7 +2,11 @@
 
 All 9 unstable feature flags in the `agent-client-protocol` crate. Each is independently activatable; use the umbrella `unstable` to enable all.
 
-> **Source verified:** `~/workspace/agent-client-protocol/` (schema crate, v0.11.2) and `~/workspace/codex-acp/Cargo.toml`
+> **Reviewed against agent-client-protocol 0.13.1.** Some unstable features from 0.11.2 may have been stabilized or removed. Verify current status with `cargo search agent-client-protocol` and the grep pattern at the bottom of this file before assuming a feature is still gated.
+>
+> **Note on `unstable_session_model`:** In 0.13.x this feature no longer exists as a separate flag. The `unstable` umbrella feature gates the entire unstable surface; there is no independent `unstable_session_model` flag to enable selectively.
+>
+> **Source verified:** `~/workspace/agent-client-protocol/` (schema crate, v0.13.1) and `~/workspace/codex-acp/Cargo.toml`
 
 ---
 
@@ -58,7 +62,7 @@ CloseSessionRequest { session_id: "uuid-1234".into(), meta: None }
 CloseSessionResponse {}
 ```
 
-> ⚠️ **Still unstable as of v0.11.2** — the schema crate still gates this behind `#[cfg(feature = "unstable_session_close")]`. Do not expect it without enabling the feature flag.
+> ⚠️ **Still unstable as of v0.13.1** — the schema crate still gates this behind `#[cfg(feature = "unstable_session_close")]`. Do not expect it without enabling the feature flag.
 
 ---
 
@@ -234,7 +238,7 @@ Agents that advertise boolean config options must enable this flag and handle bo
 
 ## Stability Notes
 
-- As of **v0.11.2** (schema crate), **all 9 features remain unstable**. The crate version number does not indicate that any feature has been promoted to stable.
+- As of **v0.13.1** (schema crate), verify each feature's current gate status using the grep pattern below — some features from 0.11.2 may have been stabilized or removed. The `unstable` umbrella feature still enables the remaining gated surface. `unstable_session_model` is no longer a separate feature in 0.13.x; model-related capabilities are controlled by the umbrella `unstable` flag.
 - `codex-acp` enables `features = ["unstable"]` (all 9) — this is the recommended pattern for production agents that need the full feature set.
 - `session_info_update` (`session/update` with session title) is **stable** and available without any feature flag.
 - The stable `Agent::on_cancel()` trait method handles `session/cancel` as a notification. `unstable_cancel_request` is only needed for the request/response variant and the -32800 error code.
