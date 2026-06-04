@@ -14,7 +14,6 @@ Read the base URL and API key from `~/.lab/.env`:
 ```bash
 IMMICH_URL=$(grep -E '^IMMICH_URL='     ~/.lab/.env | cut -d= -f2-)
 IMMICH_API_KEY=$(grep -E '^IMMICH_API_KEY=' ~/.lab/.env | cut -d= -f2-)
-API=("$IMMICH_URL/api" -H "x-api-key: $IMMICH_API_KEY")
 ```
 
 Authentication is the `x-api-key: <key>` header on every request. Never echo the key.
@@ -32,6 +31,8 @@ Authentication is the `x-api-key: <key>` header on every request. Never echo the
 | Current user (me) | `curl -sS -H "x-api-key: $IMMICH_API_KEY" "$IMMICH_URL/api/users/me"` |
 | Search assets (metadata) | `curl -sS -X POST -H "x-api-key: $IMMICH_API_KEY" -H 'Content-Type: application/json' "$IMMICH_URL/api/search/metadata" -d '{"query":"beach"}'` |
 | Get one asset | `curl -sS -H "x-api-key: $IMMICH_API_KEY" "$IMMICH_URL/api/assets/<id>"` |
+| List albums | `curl -sS -H "x-api-key: $IMMICH_API_KEY" "$IMMICH_URL/api/albums"` |
+| Get album assets | `curl -sS -H "x-api-key: $IMMICH_API_KEY" "$IMMICH_URL/api/albums/<albumId>"` |
 
 Full API reference: <https://api.immich.app/> (OpenAPI). The `/api/search/metadata` body accepts the full Immich search filter (album, person, type, date ranges, etc.).
 

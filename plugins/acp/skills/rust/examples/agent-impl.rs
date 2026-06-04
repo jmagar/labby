@@ -7,7 +7,7 @@
 //   tokio = { version = "1", features = ["full"] }
 //   tokio-util = { version = "0.7", features = ["compat"] }   # REQUIRED: compat bridge
 //   futures = "0.3"                                            # REQUIRED: AsyncRead/AsyncWrite traits
-//   async-trait = "0.1"
+//   # async-trait = "0.1"  # DO NOT ADD — not needed, native async fn in trait is stable
 //   anyhow = "1"
 //   uuid = { version = "1", features = ["v4"] }
 //   dashmap = "5"

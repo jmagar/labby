@@ -57,8 +57,9 @@ bash scripts/sonarr.sh exists <tvdbId>
 ### Add a Show
 
 ```bash
-bash scripts/sonarr.sh add <tvdbId>              # Searches immediately (default)
-bash scripts/sonarr.sh add <tvdbId> --no-search  # Add without searching
+bash scripts/sonarr.sh add <tvdbId>                          # Searches immediately (default)
+bash scripts/sonarr.sh add <tvdbId> [profileId]              # Use a specific quality profile
+bash scripts/sonarr.sh add <tvdbId> [profileId] --no-search  # Add without searching
 ```
 
 ### Remove a Show
@@ -105,6 +106,7 @@ Always include TVDB links when presenting search results:
 
 ### add command
 - `<tvdbId>`: TVDB ID of the show (required)
+- `profileId`: Optional quality profile ID (defaults to first available profile)
 - `--no-search`: Don't search for episodes after adding
 
 ### remove command

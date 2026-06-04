@@ -1,8 +1,6 @@
 ---
 name: mcporter
 description: Use when the user mentions mcporter, says "test an MCP server", "smoke-test these tools", "automate MCP testing", "call a tool from the shell", "list MCP tools", "exercise the gateway tools", or asks for a script that hits MCP endpoints. Covers using mcporter to discover, inspect, and call MCP servers from the shell, and to write repeatable regression or smoke-test scripts. Not for designing new MCP servers, writing server-side handlers, or generic API testing unrelated to MCP.
-allowed-tools: Read, Write, Edit, Bash
-argument-hint: [server-name or http-url]
 ---
 
 ## Context
@@ -172,6 +170,6 @@ mcporter generate-cli --server <s> --compile ./bin/<s>       # ship a binary
 
 - Don't paste secrets as `key=value` on the command line — use `--env KEY=$VAR` for stdio servers, env-injection for HTTP.
 - Don't write a Node/TS client when `mcporter call` + a shell loop will do.
-- Don't `mcporter call` without `--output json` inside a script — you'll regret parsing the text format.
+- Don't rely on `--output json` for machine-parseable output in scripts — it emits Node util.inspect format, not valid JSON. Use `--output text` for assertions and `--output raw` for envelope inspection.
 - Don't run smoke scripts against production data without checking which side-effects each tool has; mcporter is just a transport, it has no idea what's destructive.
 - Don't commit `./config/mcporter.json` with personal tokens; use editor-imports or `--env`.

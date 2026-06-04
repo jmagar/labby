@@ -1,6 +1,6 @@
 ---
 name: bootstrap-plexus
-description: "Use when installing, setting up, repairing, or initializing the Plexus remote-device memory plugin; when the user asks where Plexus stores persistent REMOTE.md host profiles; or when seeded host profiles need to be created from bundled templates. Runs Plexus bootstrap to copy missing templates into plugin data without overwriting user-authored profiles."
+description: "This skill should be used when the user wants to install, set up, repair, or initialize the Plexus remote-device memory plugin; when they ask where Plexus stores persistent REMOTE.md host profiles; or when host profiles are missing and need to be seeded from bundled defaults."
 argument-hint: "[--json] [--data-dir PATH]"
 ---
 
