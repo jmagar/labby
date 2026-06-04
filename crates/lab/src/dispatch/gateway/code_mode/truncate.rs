@@ -100,7 +100,13 @@ pub(in crate::dispatch::gateway::code_mode) fn response_within_budget(
                 && estimated_tokens(bytes.len(), token_estimate_divisor)
                     <= max_response_tokens.max(1)
         }
-        Err(_) => false,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "response_within_budget: failed to serialize response; treating as over-budget"
+            );
+            false
+        }
     }
 }
 
