@@ -483,21 +483,16 @@ pub(crate) fn elevate_scope_for_allowed_user(scope: &str, default_scope: &str) -
     let base = default_scope.split(':').next().unwrap_or(default_scope);
     let admin_scope = format!("{base}:admin");
     let mut scopes: Vec<&str> = scope.split_whitespace().filter(|s| !s.is_empty()).collect();
-    // Only elevate when the scope belongs to the same brand as default_scope.
-    // A token from a different resource (e.g. "mcp:read mcp:write" for a
-    // syslog endpoint) must not receive "lab:admin" injected into it.
-    // An empty scope is allowed through so the rare zero-scope path still works.
-    let same_brand = scopes.is_empty()
-        || scopes
-            .iter()
-            .any(|s| *s == base || s.starts_with(&format!("{base}:")));
-    if !same_brand {
-        return scopes.join(" ");
+    // Always inject the default-brand admin scope (e.g. "lab:admin") for
+    // allowlisted users, even when the token is for a cross-brand protected
+    // route (e.g. "mcp:read mcp:write" for a cortex endpoint).  The JWT
+    // audience is still bound to the specific resource URL, so a cortex token
+    // carrying "lab:admin" cannot be presented to lab endpoints.  This lets
+    // authenticate_protected_route_request recognise the admin unconditionally
+    // without re-reading the allowlist at request time.
+    if !scopes.iter().any(|s| *s == admin_scope.as_str()) {
+        scopes.push(admin_scope.as_str());
     }
-    if scopes.iter().any(|s| *s == admin_scope.as_str()) {
-        return scopes.join(" ");
-    }
-    scopes.push(admin_scope.as_str());
     scopes.join(" ")
 }
 
@@ -1361,6 +1356,18 @@ pub mod tests {
         assert_eq!(
             super::elevate_scope_for_allowed_user("syslog:read syslog:admin", "syslog:read"),
             "syslog:read syslog:admin"
+        );
+        // Cross-brand: protected route token (mcp:read mcp:write) for a lab
+        // default_scope gets lab:admin injected so authenticate_protected_route_request
+        // can recognise the admin without re-reading the allowlist.
+        assert_eq!(
+            super::elevate_scope_for_allowed_user("mcp:read mcp:write", "lab"),
+            "mcp:read mcp:write lab:admin"
+        );
+        // Cross-brand already has admin → no duplication.
+        assert_eq!(
+            super::elevate_scope_for_allowed_user("mcp:read mcp:write lab:admin", "lab"),
+            "mcp:read mcp:write lab:admin"
         );
     }
 
