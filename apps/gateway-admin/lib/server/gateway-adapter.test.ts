@@ -824,3 +824,48 @@ test('normalizeServerView ignores custom gateway resource discovery method-not-f
   assert.equal(gateway.status.last_error, undefined)
   assert.deepEqual(gateway.warnings, [])
 })
+
+test('normalizeGateway does not fabricate created_at or updated_at when backend does not supply them', () => {
+  const gateway = normalizeGateway(
+    {
+      config: {
+        name: 'no-timestamps',
+        url: 'http://127.0.0.1:9999/mcp',
+      },
+      runtime: {
+        name: 'no-timestamps',
+        tool_count: 1,
+        resource_count: 0,
+        prompt_count: 0,
+      },
+    },
+    { connected: true, healthy: true },
+    { tools: ['a.read'], resources: [], prompts: [] },
+  )
+
+  // Backend-owned timestamps must be absent, not invented by the adapter.
+  assert.equal(gateway.created_at, undefined)
+  assert.equal(gateway.updated_at, undefined)
+})
+
+test('normalizeServerView does not fabricate created_at or updated_at when backend does not supply them', () => {
+  const gateway = normalizeServerView({
+    id: 'my-service',
+    name: 'my-service',
+    source: 'in_process',
+    configured: true,
+    enabled: true,
+    connected: true,
+    discovered_tool_count: 2,
+    exposed_tool_count: 2,
+    discovered_resource_count: 0,
+    exposed_resource_count: 0,
+    discovered_prompt_count: 0,
+    exposed_prompt_count: 0,
+    warnings: [],
+  })
+
+  // Backend-owned timestamps must be absent, not invented by the adapter.
+  assert.equal(gateway.created_at, undefined)
+  assert.equal(gateway.updated_at, undefined)
+})

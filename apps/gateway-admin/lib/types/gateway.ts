@@ -117,8 +117,10 @@ export interface Gateway {
   status: GatewayStatus
   discovery: GatewayDiscovery
   warnings: GatewayWarning[]
-  created_at: string
-  updated_at: string
+  /** ISO timestamp from the backend. Absent for synthesized/adapter-only views where the backend does not provide it. */
+  created_at?: string
+  /** ISO timestamp from the backend. Absent for synthesized/adapter-only views where the backend does not provide it. */
+  updated_at?: string
 }
 
 /** Provenance record for a gateway imported from an external MCP config file. */

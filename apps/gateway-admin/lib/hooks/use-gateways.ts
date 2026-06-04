@@ -276,8 +276,7 @@ export function useGatewayMutations() {
         },
         discovery: { tools: [], resources: [], prompts: [] },
         warnings: [],
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        // created_at / updated_at come from the backend; omit in mock paths.
       }
       await mutate(GATEWAYS_KEY, (current: Gateway[] = []) => [...current, newGateway], false)
       return newGateway
@@ -353,8 +352,7 @@ export function useGatewayMutations() {
         },
         discovery: { tools: [], resources: [], prompts: [] },
         warnings: [],
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        // created_at / updated_at come from the backend; omit in mock paths.
       }
     }
     const gateway = await gatewayApi.restoreImportTombstone(server)
@@ -374,7 +372,7 @@ export function useGatewayMutations() {
           ...gateway.config,
           ...input.config,
         },
-        updated_at: new Date().toISOString(),
+        // updated_at comes from the backend; omit in mock paths.
       }
       if (input.config?.proxy_resources !== undefined) {
         setMockGatewayOverride(id, { proxyResources: input.config.proxy_resources })

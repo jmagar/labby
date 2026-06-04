@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import type { Gateway, ServiceAction, ServiceConfig, SupportedService } from '../types/gateway.ts'
-import { mergeGatewayListWithSupportedServices, upstreamMcpGateways } from './gateway-list-model.ts'
+import { mergeGatewayListWithSupportedServices, synthesizeLabGateway, upstreamMcpGateways } from './gateway-list-model.ts'
 
 function makeGateway(partial: Partial<Gateway> & Pick<Gateway, 'id' | 'name'>): Gateway {
   return {
@@ -31,8 +31,10 @@ function makeGateway(partial: Partial<Gateway> & Pick<Gateway, 'id' | 'name'>): 
     },
     discovery: partial.discovery ?? { tools: [], resources: [], prompts: [] },
     warnings: partial.warnings ?? [],
-    created_at: partial.created_at ?? '2026-04-16T00:00:00Z',
-    updated_at: partial.updated_at ?? '2026-04-16T00:00:00Z',
+    // created_at / updated_at are optional; only supply them when the test
+    // explicitly needs them to reflect backend-provided data.
+    ...(partial.created_at !== undefined ? { created_at: partial.created_at } : {}),
+    ...(partial.updated_at !== undefined ? { updated_at: partial.updated_at } : {}),
   }
 }
 
@@ -146,4 +148,21 @@ test('mergeGatewayListWithSupportedServices preserves existing disabled lab rows
   assert.deepEqual(merged.map((gateway) => gateway.id), ['custom-1', 'radarr'])
   assert.equal(merged[1]?.enabled, false)
   assert.equal(merged[1]?.status.discovered_tool_count, 53)
+})
+
+test('synthesizeLabGateway does not fabricate created_at or updated_at', () => {
+  const service: SupportedService = {
+    key: 'sonarr',
+    display_name: 'Sonarr',
+    category: 'Media',
+    description: 'Sonarr service',
+    required_env: [],
+    optional_env: [],
+  }
+
+  const gateway = synthesizeLabGateway(service, undefined, undefined)
+
+  // Synthesized gateways have no backend-provided timestamps; they must be absent.
+  assert.equal(gateway.created_at, undefined)
+  assert.equal(gateway.updated_at, undefined)
 })

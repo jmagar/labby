@@ -239,7 +239,7 @@ export function buildGatewayActivityFeed(gateways: Gateway[]): GatewayActivityIt
             tone: 'success',
             title: `${gateway.name} is healthy`,
             detail: `Probe completed successfully with ${gateway.status.discovered_tool_count} discovered tools over ${gateway.transport.toUpperCase()}.`,
-            timestamp: gateway.updated_at,
+            timestamp: gateway.updated_at ?? '',
           }
         : {
             id: `${gateway.id}-status`,
@@ -249,7 +249,7 @@ export function buildGatewayActivityFeed(gateways: Gateway[]): GatewayActivityIt
             tone: 'danger',
             title: `${gateway.name} needs attention`,
             detail: gateway.status.last_error || 'Gateway is disconnected or not yet configured.',
-            timestamp: gateway.updated_at,
+            timestamp: gateway.updated_at ?? '',
           }
 
       const warningItems = gateway.warnings.map<GatewayActivityItem>((warning, index) => ({

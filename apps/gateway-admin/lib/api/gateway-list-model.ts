@@ -9,7 +9,6 @@ export function synthesizeLabGateway(
   config: ServiceConfig | undefined,
   actions: ServiceAction[] | undefined,
 ): Gateway {
-  const now = new Date().toISOString()
   const urlField = config?.fields.find((field) => field.name.endsWith('_URL'))?.value_preview ?? undefined
   const tools = (actions ?? []).map((action) => ({
     name: action.name,
@@ -51,8 +50,7 @@ export function synthesizeLabGateway(
       prompts: [],
     },
     warnings: [],
-    created_at: now,
-    updated_at: now,
+    // created_at / updated_at are not available for synthesized lab-service views.
   }
 }
 

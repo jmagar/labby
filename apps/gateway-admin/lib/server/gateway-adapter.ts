@@ -143,7 +143,8 @@ export interface GatewayDiscoverySnapshot {
   }>
 }
 
-const NOW = () => new Date().toISOString()
+/** Returns the current ISO timestamp. Used only for derived warning records (observation time), not for backend-owned fields. */
+const warningTimestampNow = () => new Date().toISOString()
 
 const VALID_TRANSPORTS = ['http', 'stdio', 'in_process'] as const satisfies readonly TransportType[]
 function isValidTransport(v: unknown): v is TransportType {
@@ -374,7 +375,7 @@ function buildWarnings(probe: GatewayProbeStatus): GatewayWarning[] {
     {
       code: warning.code,
       message: warning.message ?? probe.last_error,
-      timestamp: NOW(),
+      timestamp: warningTimestampNow(),
     },
   ]
 }
@@ -408,7 +409,7 @@ export function normalizeServerView(
     return {
       code: warning.code ?? classified.code,
       message,
-      timestamp: NOW(),
+      timestamp: warningTimestampNow(),
     }
   }).filter((warning): warning is GatewayWarning => warning !== null)
   const lastError = warnings[0]?.message
@@ -497,8 +498,8 @@ export function normalizeServerView(
       prompts: [],
     },
     warnings,
-    created_at: NOW(),
-    updated_at: NOW(),
+    // created_at / updated_at are not provided by the server-view endpoint;
+    // leave them absent rather than fabricating synthetic timestamps.
   }
 }
 
@@ -606,8 +607,8 @@ export function normalizeGateway(
       ...probe,
       last_error: humanizedError,
     }),
-    created_at: NOW(),
-    updated_at: NOW(),
+    // created_at / updated_at are not provided by the gateway probe/runtime
+    // endpoint; leave them absent rather than fabricating synthetic timestamps.
   }
 }
 
