@@ -2,6 +2,7 @@
 
 #[cfg(target_os = "linux")]
 use std::path::Path;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -304,7 +305,8 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         "preparing lazy upstream gateway catalog"
     );
     crate::config::set_process_code_mode_enabled(config.code_mode.enabled);
-    let mut pool_builder = crate::dispatch::upstream::pool::UpstreamPool::new();
+    let mut pool_builder = crate::dispatch::upstream::pool::UpstreamPool::new()
+        .with_in_process_connector(crate::mcp::in_process_peer::connector());
     if let Some(rt) = &upstream_oauth_runtime {
         pool_builder = pool_builder.with_oauth_client_cache(rt.cache.clone());
     }
@@ -336,6 +338,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         gateway_runtime.clone(),
     )
     .with_builtin_service_registry(registry.clone())
+    .with_in_process_connector(crate::mcp::in_process_peer::connector())
     .with_service_clients(service_clients);
     if let Some(rt) = upstream_oauth_runtime {
         gateway_manager = gateway_manager
@@ -1100,7 +1103,7 @@ async fn run_http(
         let mut sigusr1 =
             signal(SignalKind::user_defined1()).context("failed to register SIGUSR1 handler")?;
         tokio::select! {
-            result = axum::serve(listener, router) => { result?; }
+            result = axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>()) => { result?; }
             _ = async {
                 loop {
                     sigusr1.recv().await;
@@ -1115,7 +1118,7 @@ async fn run_http(
     }
     #[cfg(not(unix))]
     {
-        axum::serve(listener, router).await?;
+        axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>()).await?;
     }
     Ok(ExitCode::SUCCESS)
 }
