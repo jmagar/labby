@@ -67,6 +67,16 @@ pub enum ToolError {
         /// The identifier of the conflicting resource.
         existing_id: String,
     },
+    /// Caller lacks the required OAuth scopes to invoke this tool.
+    ///
+    /// Replaces the bare `build_error_extra(..., "forbidden", ...)` path so
+    /// scope denials flow through the canonical `ToolError` envelope (lab-l9n0n).
+    Forbidden {
+        /// Human-readable message.
+        message: String,
+        /// The scopes the caller would need to proceed.
+        required_scopes: Vec<String>,
+    },
     /// Pass-through of an `ApiError::kind()` tag from the SDK.
     Sdk {
         /// Stable kind tag (`auth_failed`, `rate_limited`, …).
@@ -121,6 +131,14 @@ impl Serialize for ToolError {
                 "message": message,
                 "existing_id": existing_id,
             }),
+            Self::Forbidden {
+                message,
+                required_scopes,
+            } => serde_json::json!({
+                "kind": "forbidden",
+                "message": message,
+                "required_scopes": required_scopes,
+            }),
             Self::Sdk { sdk_kind, message } => serde_json::json!({
                 "kind": sdk_kind,
                 "message": message,
@@ -154,6 +172,7 @@ impl ToolError {
             Self::AmbiguousTool { .. } => "ambiguous_tool",
             Self::ConfirmationRequired { .. } => "confirmation_required",
             Self::Conflict { .. } => "conflict",
+            Self::Forbidden { .. } => "forbidden",
             Self::Sdk { sdk_kind, .. } => sdk_kind.as_str(),
         }
     }
@@ -171,6 +190,7 @@ impl ToolError {
             | Self::AmbiguousTool { message, .. }
             | Self::ConfirmationRequired { message }
             | Self::Conflict { message, .. }
+            | Self::Forbidden { message, .. }
             | Self::Sdk { message, .. } => message.as_str(),
         }
     }
