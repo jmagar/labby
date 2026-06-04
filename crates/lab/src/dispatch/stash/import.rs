@@ -137,6 +137,7 @@ fn walk_measure_and_copy(src: &Path, dst: &Path) -> Result<(), ToolError> {
     })?;
 
     let mut total_size: u64 = 0;
+    let mut file_count: usize = 0;
     let mut stack: Vec<(PathBuf, PathBuf)> = vec![(src.to_path_buf(), dst.to_path_buf())];
     while let Some((src_dir, dst_dir)) = stack.pop() {
         let read_dir = std::fs::read_dir(&src_dir).map_err(|e| ToolError::Sdk {
@@ -174,6 +175,18 @@ fn walk_measure_and_copy(src: &Path, dst: &Path) -> Result<(), ToolError> {
                 })?;
                 stack.push((src_path, dst_path));
             } else {
+                // Enforce per-file count limit before processing the file (lab-se5t).
+                file_count += 1;
+                if file_count > limits::MAX_FILE_COUNT {
+                    return Err(ToolError::Sdk {
+                        sdk_kind: "too_many_files".into(),
+                        message: format!(
+                            "workspace exceeds MAX_FILE_COUNT ({} files); \
+                             use a more focused import path",
+                            limits::MAX_FILE_COUNT,
+                        ),
+                    });
+                }
                 let file_size = meta.len();
                 if file_size > limits::MAX_FILE_SIZE {
                     return Err(ToolError::Sdk {
@@ -701,5 +714,41 @@ mod tests {
         let files_dir = store.revision_files_path(&rev.id);
         assert!(files_dir.join("settings.json").exists());
         assert!(!files_dir.join("file").exists());
+    }
+
+    // ── file-count limit (lab-se5t) ──────────────────────────────────────────
+
+    /// walk_measure_and_copy must reject a directory containing more than
+    /// MAX_FILE_COUNT files with sdk_kind = "too_many_files".
+    #[test]
+    fn walk_measure_and_copy_rejects_too_many_files() {
+        let src_dir = tempdir().unwrap();
+        let dst_dir = tempdir().unwrap();
+
+        // Create MAX_FILE_COUNT + 1 files (all tiny — well under size limits).
+        for i in 0..=limits::MAX_FILE_COUNT {
+            std::fs::write(src_dir.path().join(format!("f{i}.txt")), b"x").unwrap();
+        }
+
+        let err = walk_measure_and_copy(src_dir.path(), dst_dir.path()).unwrap_err();
+        assert_eq!(
+            err.kind(),
+            "too_many_files",
+            "expected too_many_files, got: {err:?}"
+        );
+    }
+
+    /// A directory with exactly MAX_FILE_COUNT files must succeed.
+    #[test]
+    fn walk_measure_and_copy_accepts_exact_file_count_limit() {
+        let src_dir = tempdir().unwrap();
+        let dst_dir = tempdir().unwrap();
+
+        for i in 0..limits::MAX_FILE_COUNT {
+            std::fs::write(src_dir.path().join(format!("f{i}.txt")), b"x").unwrap();
+        }
+
+        walk_measure_and_copy(src_dir.path(), dst_dir.path())
+            .expect("exactly MAX_FILE_COUNT files should succeed");
     }
 }
