@@ -480,6 +480,51 @@
                 "repo": "ArkTechNWA/zsh-tool"
             },
             "description": "Zsh shell for Claude Code - full terminal control, live output, PTY mode for interactive commands"
+        },
+        {
+            "name": "nvidia-skills",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/anthropics/claude-plugins-official.git",
+                "path": "plugins/nvidia-skills"
+            },
+            "description": "NVIDIA agent skills for accelerated-computing workflows."
+        },
+        {
+            "name": "qdrant-skills",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/anthropics/claude-plugins-official.git",
+                "path": "plugins/qdrant-skills"
+            },
+            "description": "Agent skills for Qdrant vector search covering scaling, performance, and best practices."
+        },
+        {
+            "name": "redis-development",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/anthropics/claude-plugins-official.git",
+                "path": "plugins/redis-development"
+            },
+            "description": "Redis development best practices — data structures, query efficiency, and performance patterns."
+        },
+        {
+            "name": "mcp-apps",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/anthropics/claude-plugins-official.git",
+                "path": "plugins/mcp-apps"
+            },
+            "description": "Skills for creating MCP Apps with the MCP Apps SDK."
+        },
+        {
+            "name": "mcp-tunnels",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/anthropics/claude-plugins-official.git",
+                "path": "plugins/mcp-tunnels"
+            },
+            "description": "Connect Claude to a private MCP server through an Anthropic-managed tunnel."
         }
     ]
 }
