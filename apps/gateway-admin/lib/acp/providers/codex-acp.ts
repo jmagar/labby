@@ -40,28 +40,18 @@ class CodexBridgeClient implements Client {
   async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
     this.onEvent({ type: 'permission_request', request: params })
 
-    const selected =
-      params.options.find((option) => option.kind === 'allow_once') ??
-      params.options.find((option) => option.kind === 'allow_always') ??
-      params.options[0]
-
-    const selectedOptionId = selected?.optionId ?? null
-
+    // Do NOT auto-approve. Surface the permission request to the UI and wait
+    // for the user to respond. For now, always cancel — callers must wire a
+    // proper user-mediated resolution path before enabling auto-accept here.
+    // See lab-qq8y.6 for the full hardening spec.
     this.onEvent({
       type: 'permission_resolved',
       request: params,
-      selectedOptionId,
+      selectedOptionId: null,
     })
 
     return {
-      outcome: selectedOptionId
-        ? {
-            outcome: 'selected',
-            optionId: selectedOptionId,
-          }
-        : {
-            outcome: 'cancelled',
-          },
+      outcome: { outcome: 'cancelled' },
     }
   }
 
@@ -93,9 +83,29 @@ export class CodexAcpProvider implements AcpProvider {
     result: StartSessionResult
   }> {
     const launch = resolveCodexLaunch()
+
+    // Use an explicit env allowlist rather than forwarding all of process.env.
+    // This prevents the child process from inheriting secrets (tokens, API keys,
+    // session cookies) that are present in the Node.js server environment.
+    const ALLOWED_ENV_KEYS = [
+      'HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'LC_CTYPE',
+      'PATH', 'TMPDIR', 'TMP', 'TEMP',
+      // Codex-specific variables callers may need to set.
+      'CODEX_SANDBOX_NETWORK', 'CODEX_DISABLE_SANDBOX',
+    ] as const
+    const filteredEnv: NodeJS.ProcessEnv = {
+      // NODE_ENV is always forwarded — it is not a secret and is required by ProcessEnv.
+      NODE_ENV: process.env.NODE_ENV,
+      ...Object.fromEntries(
+        ALLOWED_ENV_KEYS
+          .filter((key) => key in process.env)
+          .map((key) => [key, process.env[key]]),
+      ),
+    }
+
     const child = spawn(launch.command, launch.args, {
       cwd: input.cwd,
-      env: process.env,
+      env: filteredEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
 
@@ -127,12 +137,11 @@ export class CodexAcpProvider implements AcpProvider {
         title: 'Gateway Admin',
         version: '0.2.3',
       },
-      clientCapabilities: input.clientCapabilities ?? {
-        fs: {
-          readTextFile: true,
-          writeTextFile: true,
-        },
-      },
+      // Filesystem capabilities default OFF — callers must explicitly opt in
+      // by providing clientCapabilities in StartSessionInput. This prevents
+      // unintended filesystem exposure when the provider is used without a
+      // customized input. See lab-qq8y.6.
+      clientCapabilities: input.clientCapabilities ?? {},
     })
 
     const created = await connection.newSession({
