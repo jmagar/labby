@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use lab_apis::stash::types::{StashProviderRecord, StashRevision};
 
 use crate::dispatch::error::ToolError;
+use crate::dispatch::path_safety::canonicalize_and_reject_write_path;
 use crate::dispatch::stash::provider::StashProvider;
 use crate::dispatch::stash::revision::{compute_digest, walk_files_sorted};
 use crate::dispatch::stash::store::StashStore;
@@ -59,6 +60,9 @@ impl FilesystemProvider {
                 message: "filesystem provider config.root must be an absolute path".into(),
             });
         }
+        // Reject sensitive system roots and canonicalize to prevent traversal
+        // tricks via symlinks or `..` components (lab-thqv).
+        let root = canonicalize_and_reject_write_path(&root)?;
         Ok(Self { root })
     }
 
@@ -228,6 +232,9 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), ToolError> {
 }
 
 /// List names of subdirectories under `dir`.
+///
+/// Uses `symlink_metadata` so symlinks that point to directories are NOT
+/// included — only real directories are returned (lab-ewqo).
 fn list_subdirectory_names(dir: &Path) -> Result<Vec<String>, ToolError> {
     let mut names = Vec::new();
     for entry in std::fs::read_dir(dir).map_err(|e| ToolError::Sdk {
@@ -238,7 +245,13 @@ fn list_subdirectory_names(dir: &Path) -> Result<Vec<String>, ToolError> {
             sdk_kind: "sync_failed".into(),
             message: format!("read_dir entry: {e}"),
         })?;
-        if entry.path().is_dir() {
+        // Use symlink_metadata (lstat) so symlinks to dirs are excluded.
+        let is_real_dir = entry
+            .path()
+            .symlink_metadata()
+            .map(|m| m.file_type().is_dir())
+            .unwrap_or(false);
+        if is_real_dir {
             if let Some(name) = entry.file_name().to_str() {
                 names.push(name.to_string());
             }
@@ -263,7 +276,19 @@ fn is_valid_revision_id(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lab_apis::stash::types::StashProviderRecord;
+    use serde_json::json;
     use tempfile::tempdir;
+
+    fn make_provider_record(root: &str) -> StashProviderRecord {
+        StashProviderRecord {
+            id: "prov-01".to_string(),
+            component_id: "comp-01".to_string(),
+            kind: "filesystem".to_string(),
+            label: "test".to_string(),
+            config: json!({ "root": root }),
+        }
+    }
 
     #[test]
     fn list_valid_revision_directory_names_ignores_stray_dirs() {
@@ -277,5 +302,64 @@ mod tests {
 
         let names = list_valid_revision_directory_names(dir.path()).unwrap();
         assert_eq!(names, vec![valid_old.to_string(), valid_new.to_string()]);
+    }
+
+    // ── from_record path validation (lab-thqv) ───────────────────────────────
+
+    /// A provider pointing to a real directory must succeed.
+    #[test]
+    fn from_record_accepts_valid_existing_dir() {
+        let dir = tempdir().unwrap();
+        let record = make_provider_record(dir.path().to_str().unwrap());
+        assert!(
+            FilesystemProvider::from_record(&record).is_ok(),
+            "expected Ok for valid dir"
+        );
+    }
+
+    /// A provider with a relative root must be rejected.
+    #[test]
+    fn from_record_rejects_relative_root() {
+        let record = make_provider_record("relative/path");
+        let err = FilesystemProvider::from_record(&record).unwrap_err();
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    /// A provider pointing to a sensitive system path must be rejected.
+    #[test]
+    fn from_record_rejects_sensitive_system_path() {
+        // /etc is in the SENSITIVE_WRITE_PATH_DENYLIST and always exists.
+        let record = make_provider_record("/etc");
+        let err = FilesystemProvider::from_record(&record).unwrap_err();
+        assert_eq!(
+            err.kind(),
+            "path_traversal",
+            "expected path_traversal for /etc, got: {err:?}"
+        );
+    }
+
+    /// A provider with an empty root must be rejected.
+    #[test]
+    fn from_record_rejects_empty_root() {
+        let record = make_provider_record("");
+        let err = FilesystemProvider::from_record(&record).unwrap_err();
+        assert_eq!(err.kind(), "invalid_param");
+    }
+
+    // ── list_subdirectory_names symlink exclusion (lab-ewqo) ─────────────────
+
+    #[cfg(unix)]
+    #[test]
+    fn list_subdirectory_names_excludes_symlinks_to_dirs() {
+        let dir = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+
+        // Real subdirectory — should be included.
+        std::fs::create_dir_all(dir.path().join("real-dir")).unwrap();
+        // Symlink that points to a directory — must be excluded.
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("linked-dir")).unwrap();
+
+        let names = list_subdirectory_names(dir.path()).unwrap();
+        assert_eq!(names, vec!["real-dir".to_string()]);
     }
 }

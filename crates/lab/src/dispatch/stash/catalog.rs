@@ -214,7 +214,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "provider.link",
         description: "Register a sync provider for a component",
-        destructive: false,
+        destructive: true,
         returns: "Provider",
         params: &[
             ParamSpec {
