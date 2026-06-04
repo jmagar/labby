@@ -1,6 +1,6 @@
 ---
 name: chrome
-description: 'Use when the user wants to inspect or control a real Chrome session over SSH via Chrome DevTools Protocol. For web-dev/browser verification, prefer this ladder: CDP on agent-os, agent-browser, claude-in-chrome on agent-os, agent-os Windows-MCP, then claude-in-chrome on steamy. Triggers imply a real Chrome session: "grab my chrome tab", "show me my tabs", "screenshot my <site> tab", "what''s open in my chrome", "eval this in my browser", "cookies from my chrome", "navigate my chrome to", "what''s the page console showing", "check my chrome network requests". For the user''s personal Chrome on steamy, require Chrome launched with `--remote-debugging-port=9222`; for generic automation, fall back instead of stopping.'
+description: "This skill should be used when the user wants to inspect or control their own Chrome browser session over CDP. Triggers include: \"grab my chrome tab\", \"show me my tabs\", \"screenshot my [site] tab\", \"what's open in my chrome\", \"eval this in my browser\", \"cookies from my chrome\", \"navigate my chrome to\", \"what's the page console showing\", \"check my chrome network requests\". Does not apply for generic browser automation (use webwright) or the agent-os Chrome endpoint (use agent-os)."
 ---
 
 # chrome

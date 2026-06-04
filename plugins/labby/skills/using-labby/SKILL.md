@@ -1,6 +1,6 @@
 ---
 name: using-labby
-description: Operate Labby, the Lab CLI/MCP/API gateway. Use when the user wants to run labby CLI commands, manage the Labby MCP stdio or HTTP/API server, use Code Mode search/execute against upstream MCP tools, configure ~/.lab/.env or config.toml, check Lab health with labby doctor, manage gateway/marketplace/setup/plugin surfaces, discover/import upstream MCP server configs, or perform action + params dispatch against Lab operator services.
+description: "This skill should be used when the user mentions labby, the labby CLI, the Lab gateway, or any Lab operator surface. Triggers include: \"run labby doctor\", \"check labby health\", \"start the labby MCP server\", \"configure ~/.lab/.env\", \"search upstream MCP tools with Code Mode\", \"use labby gateway to import servers\", \"manage the Labby marketplace\", \"reload the gateway\", or any request to run labby CLI commands, inspect gateway upstreams, or dispatch an action against a Lab service."
 ---
 
 # Using the `labby` CLI

@@ -1,6 +1,6 @@
 ---
 name: check-skill-clis
-description: Audit CLI dependencies referenced by active, installed, and disabled skills for Claude, Codex, and Copilot. Use when the user asks to check whether skill-required commands are installed, verify all skill CLIs, compare enabled versus disabled skill dependencies, or produce a report of missing, shadowed, or misresolved command-line tools used by local agent skills.
+description: "This skill should be used when the user asks to verify, audit, or report on CLI tools required by their agent skills. Triggers include: \"check whether skill CLIs are installed\", \"are all my skill tools available\", \"which commands do my skills need\", \"find missing skill dependencies\", \"compare enabled vs disabled skill CLIs\", or \"produce a report of missing agent tools\" across Claude, Codex, and Copilot surfaces."
 ---
 
 # Check Skill CLIs
