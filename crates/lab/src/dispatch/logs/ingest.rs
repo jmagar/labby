@@ -172,7 +172,7 @@ pub fn spawn_writer(
 // ── Canonicalization ─────────────────────────────────────────────────────────
 
 fn canonicalize(mut raw: RawLogEvent) -> LogEvent {
-    raw.message = redact_bearer(&raw.message);
+    raw.message = redact_secrets(&raw.message);
 
     let ts = raw.ts.unwrap_or_else(now_ms);
     let level = raw
@@ -220,7 +220,30 @@ fn canonicalize(mut raw: RawLogEvent) -> LogEvent {
     }
 }
 
-fn redact_bearer(msg: &str) -> String {
+/// Redact free-form secret tokens from a log message string.
+///
+/// Covered patterns (all case-sensitive unless noted):
+/// - `Bearer <token>` — HTTP Authorization header value
+/// - `token=<value>` / `api_key=<value>` / `password=<value>` / `secret=<value>`
+///   key=value pairs (case-insensitive key match, value ends at whitespace/,/&)
+/// - GitHub tokens: `ghp_…`, `ghs_…`, `gho_…`, `ghu_…`, `ghr_…`
+///   (min 10 non-whitespace chars after the prefix)
+/// - OpenAI/Anthropic-style keys: `sk-…` (min 20 non-whitespace chars, avoids
+///   clipping normal short log words like "sk-node")
+///
+/// Notably NOT redacted: plain UUIDs — those are correlation/request IDs used
+/// throughout observability. Do not add UUID redaction.
+fn redact_secrets(msg: &str) -> String {
+    // Phase 1: Bearer tokens.
+    let msg = redact_bearer_inner(msg);
+    // Phase 2: key=value pairs with secret-like key names.
+    let msg = redact_key_value_secrets(&msg);
+    // Phase 3: well-known opaque token prefixes.
+    redact_prefixed_tokens(&msg)
+}
+
+/// Replace `Bearer <token>` with `<redacted-auth>`.
+fn redact_bearer_inner(msg: &str) -> String {
     // Replace the entire "Bearer <token>" sequence with "<redacted-auth>" so the
     // literal substring "Bearer " does not survive — asserted by
     // tests/logs_dispatch.rs:221.
@@ -239,6 +262,142 @@ fn redact_bearer(msg: &str) -> String {
     out
 }
 
+/// Redact values in `key=value` pairs where the key looks like a secret.
+///
+/// Matches case-insensitively. Value ends at the first whitespace, `,`, `&`,
+/// `"`, or `'` character.  Only redacts if the value is non-empty.
+fn redact_key_value_secrets(msg: &str) -> String {
+    const SECRET_KEYS: &[&str] = &[
+        "token=",
+        "api_key=",
+        "apikey=",
+        "password=",
+        "secret=",
+        "credential=",
+        "private_key=",
+        "auth=",
+    ];
+
+    let lower = msg.to_ascii_lowercase();
+    let mut replacements: Vec<(usize, usize)> = Vec::new(); // (value_start, value_end) byte ranges
+
+    for needle in SECRET_KEYS {
+        let mut search_from = 0usize;
+        while let Some(rel) = lower[search_from..].find(needle) {
+            let key_end = search_from + rel + needle.len();
+            if key_end >= msg.len() {
+                break;
+            }
+            let value_part = &msg[key_end..];
+            let val_len = value_part
+                .find(|c: char| c.is_whitespace() || matches!(c, ',' | '&' | '"' | '\''))
+                .unwrap_or(value_part.len());
+            if val_len > 0 {
+                replacements.push((key_end, key_end + val_len));
+            }
+            search_from = key_end + val_len.max(1);
+        }
+    }
+
+    if replacements.is_empty() {
+        return msg.to_string();
+    }
+
+    // Sort and apply replacements (they don't overlap by construction).
+    replacements.sort_unstable_by_key(|&(start, _)| start);
+    let mut out = String::with_capacity(msg.len());
+    let mut cursor = 0usize;
+    for (start, end) in replacements {
+        if start < cursor {
+            continue; // overlapping — skip (shouldn't happen)
+        }
+        out.push_str(&msg[cursor..start]);
+        out.push_str("<redacted>");
+        cursor = end;
+    }
+    out.push_str(&msg[cursor..]);
+    out
+}
+
+/// Redact well-known opaque token prefixes that appear as standalone tokens
+/// (surrounded by whitespace, start of string, or end of string).
+///
+/// GitHub prefixes: `ghp_`, `ghs_`, `gho_`, `ghu_`, `ghr_`
+/// OpenAI/Anthropic `sk-` keys (require ≥ 20 chars after `sk-` to avoid
+/// false-positives on short strings like `sk-node`).
+fn redact_prefixed_tokens(msg: &str) -> String {
+    // GitHub personal / server / OAuth / user / refresh tokens.
+    const GH_PREFIXES: &[&str] = &["ghp_", "ghs_", "gho_", "ghu_", "ghr_"];
+    const GH_MIN_LEN: usize = 10; // chars after the prefix
+
+    // sk- keys: require a longer suffix to avoid false positives.
+    const SK_PREFIX: &str = "sk-";
+    const SK_MIN_SUFFIX_LEN: usize = 20;
+
+    let mut out = String::with_capacity(msg.len());
+    let mut rest = msg;
+
+    'outer: while !rest.is_empty() {
+        // Try each GitHub prefix.
+        for gh_prefix in GH_PREFIXES {
+            if let Some(pos) = rest.find(gh_prefix) {
+                // Only redact if preceded by whitespace or start-of-string.
+                let preceded_ok = pos == 0
+                    || rest
+                        .as_bytes()
+                        .get(pos - 1)
+                        .map(|b| b.is_ascii_whitespace())
+                        .unwrap_or(true);
+                let after_prefix = &rest[pos + gh_prefix.len()..];
+                let tok_len = after_prefix
+                    .find(|c: char| c.is_whitespace())
+                    .unwrap_or(after_prefix.len());
+                if preceded_ok && tok_len >= GH_MIN_LEN {
+                    out.push_str(&rest[..pos]);
+                    out.push_str("<redacted-token>");
+                    rest = &after_prefix[tok_len..];
+                    continue 'outer;
+                }
+                // Not a match — advance past this occurrence to avoid looping.
+                out.push_str(&rest[..pos + gh_prefix.len()]);
+                rest = &rest[pos + gh_prefix.len()..];
+                continue 'outer;
+            }
+        }
+
+        // Try sk- prefix.
+        if let Some(pos) = rest.find(SK_PREFIX) {
+            let preceded_ok = pos == 0
+                || rest
+                    .as_bytes()
+                    .get(pos - 1)
+                    .map(|b| b.is_ascii_whitespace())
+                    .unwrap_or(true);
+            let after_prefix = &rest[pos + SK_PREFIX.len()..];
+            let tok_len = after_prefix
+                .find(|c: char| c.is_whitespace())
+                .unwrap_or(after_prefix.len());
+            if preceded_ok && tok_len >= SK_MIN_SUFFIX_LEN {
+                out.push_str(&rest[..pos]);
+                out.push_str("<redacted-token>");
+                rest = &after_prefix[tok_len..];
+                continue;
+            }
+            // Not a match — advance past this occurrence.
+            out.push_str(&rest[..pos + SK_PREFIX.len()]);
+            rest = &rest[pos + SK_PREFIX.len()..];
+            continue;
+        }
+
+        // No match found — emit the rest as-is.
+        out.push_str(rest);
+        break;
+    }
+
+    out
+}
+
+
 fn scrub_json(v: serde_json::Value) -> serde_json::Value {
     match v {
         serde_json::Value::Object(map) => {
@@ -255,7 +414,7 @@ fn scrub_json(v: serde_json::Value) -> serde_json::Value {
         serde_json::Value::Array(arr) => {
             serde_json::Value::Array(arr.into_iter().map(scrub_json).collect())
         }
-        serde_json::Value::String(s) => serde_json::Value::String(redact_bearer(&s)),
+        serde_json::Value::String(s) => serde_json::Value::String(redact_secrets(&s)),
         other => other,
     }
 }
@@ -420,7 +579,7 @@ mod tests {
     #[test]
     fn redact_bearer_replaces_token() {
         let msg = "Authorization: Bearer secret-value";
-        let out = redact_bearer(msg);
+        let out = redact_secrets(msg);
         assert!(!out.contains("secret-value"));
         assert!(!out.contains("Bearer "));
         assert!(out.contains("<redacted-auth>"));
@@ -440,5 +599,61 @@ mod tests {
         let out = scrub_json(v).to_string();
         assert!(!out.contains("\"abc\""));
         assert!(!out.contains("Bearer xyz"));
+    }
+
+    // ── Extended redaction coverage ───────────────────────────────────────────
+
+    #[test]
+    fn redact_key_value_token_param() {
+        let msg = "request failed: token=super-secret-value, retry=true";
+        let out = redact_secrets(msg);
+        assert!(!out.contains("super-secret-value"), "token value must be redacted: {out}");
+        assert!(out.contains("token=<redacted>"), "key prefix must survive: {out}");
+        assert!(out.contains("retry=true"), "unrelated key must survive: {out}");
+    }
+
+    #[test]
+    fn redact_key_value_api_key_param() {
+        let msg = "api_key=abc123 sent to upstream";
+        let out = redact_secrets(msg);
+        assert!(!out.contains("abc123"), "api_key value must be redacted: {out}");
+        assert!(out.contains("api_key=<redacted>"), "key must survive: {out}");
+        assert!(out.contains("sent to upstream"), "surrounding text must survive: {out}");
+    }
+
+    #[test]
+    fn redact_github_personal_token() {
+        let token = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef";
+        let msg = format!("authenticating with {token}");
+        let out = redact_secrets(&msg);
+        assert!(!out.contains(token), "GitHub token must be redacted: {out}");
+        assert!(out.contains("<redacted-token>"), "placeholder must appear: {out}");
+    }
+
+    #[test]
+    fn redact_openai_sk_key() {
+        let key = "sk-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
+        let msg = format!("using key {key} for request");
+        let out = redact_secrets(&msg);
+        assert!(!out.contains(key), "sk- key must be redacted: {out}");
+        assert!(out.contains("<redacted-token>"), "placeholder must appear: {out}");
+    }
+
+    #[test]
+    fn plain_uuid_survives_redaction() {
+        // Correlation IDs are UUIDs and must never be redacted.
+        let uuid = "550e8400-e29b-41d4-a716-446655440000";
+        let msg = format!("request_id={uuid} processed");
+        let out = redact_secrets(&msg);
+        assert!(out.contains(uuid), "UUID correlation ID must NOT be redacted: {out}");
+    }
+
+    #[test]
+    fn short_sk_prefix_not_redacted() {
+        // Short sk- strings (e.g. package names) must not be redacted.
+        let msg = "package sk-node installed";
+        let out = redact_secrets(&msg);
+        // "sk-node" is only 4 chars after "sk-", well below the 20-char threshold.
+        assert!(out.contains("sk-node"), "short sk- word must survive: {out}");
     }
 }
