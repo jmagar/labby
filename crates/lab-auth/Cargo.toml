@@ -19,6 +19,7 @@ default = []
 [dependencies]
 axum.workspace = true
 base64.workspace = true
+dashmap = "6"
 getrandom = "0.4"
 httpdate = "1"
 jsonwebtoken.workspace = true

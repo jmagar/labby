@@ -1,4 +1,6 @@
-use axum::extract::{Query, State};
+use std::net::{IpAddr, SocketAddr};
+
+use axum::extract::{ConnectInfo, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Redirect};
 use axum::{Json, response::Response};
@@ -19,6 +21,19 @@ use crate::types::{
 use crate::util::{expires_at, fingerprint, now_unix, random_token};
 
 const AUTH_REQUEST_TTL_SECS: i64 = 300;
+
+/// Extract the `IpAddr` from a `SocketAddr`, normalizing IPv4-mapped IPv6
+/// addresses (`::ffff:a.b.c.d`) back to plain IPv4 so per-IP rate-limiting
+/// keys are consistent regardless of listener address family (lab-77y5.10).
+fn remote_ip(addr: SocketAddr) -> IpAddr {
+    match addr.ip() {
+        IpAddr::V6(v6) => v6
+            .to_ipv4_mapped()
+            .map(IpAddr::V4)
+            .unwrap_or(IpAddr::V6(v6)),
+        v4 => v4,
+    }
+}
 
 /// Enforces the configured email allowlist.
 ///
@@ -63,9 +78,10 @@ fn check_email_allowlist(
 
 pub async fn browser_login(
     State(state): State<AuthState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Query(query): Query<BrowserLoginQuery>,
 ) -> Result<Response, AuthError> {
-    state.check_authorize_rate_limit()?;
+    state.check_authorize_rate_limit(remote_ip(addr)).await?;
     state.ensure_pending_oauth_state_capacity().await?;
     let return_to = sanitize_return_to(&state, query.return_to.as_deref());
     let provider_code_verifier = random_token(32)?;
@@ -106,9 +122,10 @@ pub async fn browser_login(
 
 pub async fn register_client(
     State(state): State<AuthState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(request): Json<ClientRegistrationRequest>,
 ) -> Result<Json<ClientRegistrationResponse>, AuthError> {
-    state.check_register_rate_limit()?;
+    state.check_register_rate_limit(remote_ip(addr)).await?;
     if request.redirect_uris.is_empty() {
         warn!("oauth register rejected: no redirect URIs provided");
         return Err(AuthError::Validation(
@@ -149,9 +166,10 @@ pub async fn register_client(
 
 pub async fn authorize(
     State(state): State<AuthState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Query(query): Query<AuthorizeQuery>,
 ) -> Result<Response, AuthError> {
-    state.check_authorize_rate_limit()?;
+    state.check_authorize_rate_limit(remote_ip(addr)).await?;
     state.ensure_pending_oauth_state_capacity().await?;
     validate_response_type(&query.response_type)?;
     let resource = validate_resource(&state, query.resource.as_deref())?;

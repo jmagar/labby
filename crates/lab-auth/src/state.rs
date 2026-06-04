@@ -1,8 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::net::IpAddr;
 use std::sync::Arc;
-use std::sync::{Mutex, RwLock};
+use std::sync::RwLock;
 use std::time::Instant;
 
+use dashmap::DashMap;
+use tokio::sync::Mutex;
 use tracing::{debug, info};
 use url::Url;
 
@@ -14,12 +17,7 @@ use crate::sqlite::SqliteStore;
 
 const RATE_LIMIT_RETRY_AFTER_MS: u64 = 60_000;
 
-/// Simple token-bucket rate limiter (shared across clones via Arc).
-#[derive(Clone)]
-struct RateLimiter {
-    inner: Arc<Mutex<RateLimiterInner>>,
-}
-
+/// Per-request parameters for rate-limiting. Each bucket is independent.
 struct RateLimiterInner {
     /// Tokens available in the bucket.
     tokens: f64,
@@ -31,35 +29,75 @@ struct RateLimiterInner {
     last_refill: Instant,
 }
 
-impl RateLimiter {
+impl RateLimiterInner {
     fn new(requests_per_minute: u32) -> Self {
         let rate = requests_per_minute as f64 / 60.0;
-        // Burst = requests_per_minute: allows consuming the full per-minute quota
-        // immediately, then refills at `rate` tokens/second.
         let max_tokens = requests_per_minute.max(1) as f64;
         Self {
-            inner: Arc::new(Mutex::new(RateLimiterInner {
-                tokens: max_tokens,
-                max_tokens,
-                refill_rate: rate,
-                last_refill: Instant::now(),
-            })),
+            tokens: max_tokens,
+            max_tokens,
+            refill_rate: rate,
+            last_refill: Instant::now(),
         }
     }
 
-    /// Try to consume one token. Returns `true` if allowed, `false` if rate-limited.
-    fn try_acquire(&self) -> bool {
-        let mut inner = self.inner.lock().expect("rate limiter lock");
+    fn try_acquire(&mut self) -> bool {
         let now = Instant::now();
-        let elapsed = now.duration_since(inner.last_refill).as_secs_f64();
-        inner.tokens = (inner.tokens + elapsed * inner.refill_rate).min(inner.max_tokens);
-        inner.last_refill = now;
-        if inner.tokens >= 1.0 {
-            inner.tokens -= 1.0;
+        let elapsed = now.duration_since(self.last_refill).as_secs_f64();
+        self.tokens = (self.tokens + elapsed * self.refill_rate).min(self.max_tokens);
+        self.last_refill = now;
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
             true
         } else {
             false
         }
+    }
+}
+
+/// Per-IP token-bucket rate limiter.
+///
+/// Uses a `DashMap` of `tokio::sync::Mutex<RateLimiterInner>` so:
+/// - different IPs can be checked concurrently without serializing on a global lock
+///   (lab-77y5.10 — one IP cannot exhaust the global bucket),
+/// - the per-bucket lock is a `tokio::sync::Mutex` so contention does not park a
+///   Tokio worker thread (lab-77y5.9).
+///
+/// Cheap to clone (all state is behind `Arc`).
+#[derive(Clone)]
+struct PerIpRateLimiter {
+    requests_per_minute: u32,
+    /// Per-IP buckets.  Entries accumulate over time; they are not evicted
+    /// (memory growth is bounded by the number of distinct client IPs).
+    buckets: Arc<DashMap<IpAddr, Mutex<RateLimiterInner>>>,
+}
+
+impl PerIpRateLimiter {
+    fn new(requests_per_minute: u32) -> Self {
+        Self {
+            requests_per_minute,
+            buckets: Arc::new(DashMap::new()),
+        }
+    }
+
+    /// Try to consume one token for `ip`. Returns `true` if allowed.
+    async fn try_acquire(&self, ip: IpAddr) -> bool {
+        // Fast path: bucket already exists.
+        if let Some(bucket) = self.buckets.get(&ip) {
+            return bucket.value().lock().await.try_acquire();
+        }
+        // Slow path: insert a new bucket and immediately try.
+        self.buckets
+            .entry(ip)
+            .or_insert_with(|| Mutex::new(RateLimiterInner::new(self.requests_per_minute)));
+        // Safe unwrap: we just inserted the entry above.
+        self.buckets
+            .get(&ip)
+            .expect("bucket just inserted")
+            .value()
+            .lock()
+            .await
+            .try_acquire()
     }
 }
 
@@ -70,8 +108,8 @@ pub struct AuthState {
     pub signing_keys: Arc<SigningKeys>,
     pub google: Arc<GoogleProvider>,
     allowed_resource_scopes: Arc<RwLock<BTreeMap<String, BTreeSet<String>>>>,
-    authorize_limiter: RateLimiter,
-    register_limiter: RateLimiter,
+    authorize_limiter: PerIpRateLimiter,
+    register_limiter: PerIpRateLimiter,
 }
 
 impl AuthState {
@@ -110,8 +148,8 @@ impl AuthState {
             "auth state initialized"
         );
 
-        let authorize_limiter = RateLimiter::new(config.authorize_requests_per_minute);
-        let register_limiter = RateLimiter::new(config.register_requests_per_minute);
+        let authorize_limiter = PerIpRateLimiter::new(config.authorize_requests_per_minute);
+        let register_limiter = PerIpRateLimiter::new(config.register_requests_per_minute);
         Ok(Self {
             config: Arc::new(config),
             store,
@@ -180,8 +218,12 @@ impl AuthState {
     }
 
     /// Rate-limit guard for `/authorize` and `/browser_login` endpoints.
-    pub fn check_authorize_rate_limit(&self) -> Result<(), AuthError> {
-        if self.authorize_limiter.try_acquire() {
+    ///
+    /// Keyed per remote IP so one client cannot exhaust the global bucket
+    /// (lab-77y5.10). Uses `tokio::sync::Mutex` internally so contention does
+    /// not park a Tokio worker thread (lab-77y5.9).
+    pub async fn check_authorize_rate_limit(&self, ip: IpAddr) -> Result<(), AuthError> {
+        if self.authorize_limiter.try_acquire(ip).await {
             Ok(())
         } else {
             Err(AuthError::RateLimited {
@@ -192,8 +234,10 @@ impl AuthState {
     }
 
     /// Rate-limit guard for `/register` endpoint.
-    pub fn check_register_rate_limit(&self) -> Result<(), AuthError> {
-        if self.register_limiter.try_acquire() {
+    ///
+    /// Keyed per remote IP — see `check_authorize_rate_limit` for the rationale.
+    pub async fn check_register_rate_limit(&self, ip: IpAddr) -> Result<(), AuthError> {
+        if self.register_limiter.try_acquire(ip).await {
             Ok(())
         } else {
             Err(AuthError::RateLimited {
@@ -241,8 +285,8 @@ impl AuthState {
         signing_keys: SigningKeys,
         google: GoogleProvider,
     ) -> Self {
-        let authorize_limiter = RateLimiter::new(config.authorize_requests_per_minute);
-        let register_limiter = RateLimiter::new(config.register_requests_per_minute);
+        let authorize_limiter = PerIpRateLimiter::new(config.authorize_requests_per_minute);
+        let register_limiter = PerIpRateLimiter::new(config.register_requests_per_minute);
         Self {
             config: Arc::new(config),
             store,
