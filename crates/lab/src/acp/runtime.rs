@@ -1695,6 +1695,27 @@ async fn run_codex_session(
                                         .await
                                         .map_err(|error| acp_internal_error(error.to_string()))?;
                                 }
+                                // Redact: store length + a short sanitised preview
+                                // instead of the full prompt text to avoid persisting
+                                // potentially sensitive user input in provider_info events.
+                                let prompt_len = input.text.len();
+                                let raw_preview: String =
+                                    input.text.chars().take(64).collect();
+                                let sanitised_preview: String = raw_preview
+                                    .chars()
+                                    .map(|c| {
+                                        if c.is_ascii_graphic() || c == ' ' {
+                                            c
+                                        } else {
+                                            '?'
+                                        }
+                                    })
+                                    .collect();
+                                let prompt_preview = if prompt_len > 64 {
+                                    format!("{sanitised_preview}…[{prompt_len}b]")
+                                } else {
+                                    sanitised_preview
+                                };
                                 drop(
                                     event_tx
                                         .send(provider_info_event(
@@ -1703,7 +1724,8 @@ async fn run_codex_session(
                                             json!({
                                                 "type": "prompt_started",
                                                 "title": "Prompt started",
-                                                "text": input.text.clone(),
+                                                "prompt_len": prompt_len,
+                                                "prompt_preview": prompt_preview,
                                                 "attachment_count": input.attachments.len(),
                                                 "model_id": model_id,
                                             }),
