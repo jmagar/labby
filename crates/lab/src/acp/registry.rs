@@ -176,8 +176,27 @@ pub struct AcpSessionRegistry<P = SqliteAcpPersistence> {
     provider_models: Arc<RwLock<HashMap<String, Vec<AcpModelOption>>>>,
 }
 
+/// Options forwarded by callers that still use the legacy split API.
+/// Prefer [`PromptOptions`] for new call sites.
 #[derive(Debug, Clone, Default)]
 pub struct PromptSessionOptions {
+    pub provider: Option<String>,
+    pub continuity_mode: Option<String>,
+}
+
+/// Unified options struct for `prompt_session`.
+///
+/// Collapses the previous four overloads
+/// (`prompt_session` / `prompt_session_with_attachments` /
+/// `prompt_session_with_options` / `prompt_session_input`) into a single
+/// call site.  All fields are optional except `session_id` and `principal`.
+#[derive(Debug, Clone)]
+pub struct PromptOptions {
+    pub session_id: String,
+    pub principal: String,
+    pub text: String,
+    pub attachments: Vec<crate::acp::params::LocalPromptAttachment>,
+    pub model_id: Option<String>,
     pub provider: Option<String>,
     pub continuity_mode: Option<String>,
 }
@@ -482,34 +501,21 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
     }
 
     #[allow(dead_code)]
-    pub async fn prompt_session(
-        &self,
-        session_id: &str,
-        prompt: &str,
-        principal: &str,
-        model_id: Option<&str>,
-    ) -> Result<(), ToolError> {
-        self.prompt_session_input(
+    /// Send a prompt to an existing session.
+    ///
+    /// This is the single entry point replacing the previous four overloads
+    /// (`prompt_session`, `prompt_session_with_attachments`,
+    /// `prompt_session_with_options`, `prompt_session_input`).
+    pub async fn prompt_session(&self, opts: PromptOptions) -> Result<(), ToolError> {
+        let PromptOptions {
             session_id,
-            PromptInput {
-                text: prompt.to_string(),
-                attachments: Vec::new(),
-            },
             principal,
+            text,
+            attachments,
             model_id,
-        )
-        .await
-    }
-
-    pub async fn prompt_session_with_attachments(
-        &self,
-        session_id: &str,
-        prompt: &str,
-        attachments: Vec<crate::acp::params::LocalPromptAttachment>,
-        principal: &str,
-        model_id: Option<&str>,
-        options: PromptSessionOptions,
-    ) -> Result<(), ToolError> {
+            provider,
+            continuity_mode,
+        } = opts;
         let runtime_attachments = attachments
             .into_iter()
             .map(|attachment| {
@@ -530,61 +536,19 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
                 }
             })
             .collect();
-
-        self.prompt_session_input_with_options(
-            session_id,
-            PromptInput {
-                text: prompt.to_string(),
-                attachments: runtime_attachments,
-            },
-            principal,
-            model_id,
-            options,
-        )
-        .await
+        let prompt_input = PromptInput {
+            text,
+            attachments: runtime_attachments,
+        };
+        let options = PromptSessionOptions {
+            provider,
+            continuity_mode,
+        };
+        self.prompt_session_inner(&session_id, prompt_input, &principal, model_id.as_deref(), options)
+            .await
     }
 
-    #[allow(dead_code)]
-    async fn prompt_session_input(
-        &self,
-        session_id: &str,
-        prompt: PromptInput,
-        principal: &str,
-        model_id: Option<&str>,
-    ) -> Result<(), ToolError> {
-        self.prompt_session_input_with_options(
-            session_id,
-            prompt,
-            principal,
-            model_id,
-            PromptSessionOptions::default(),
-        )
-        .await
-    }
-
-    #[allow(dead_code)]
-    pub async fn prompt_session_with_options(
-        &self,
-        session_id: &str,
-        prompt: &str,
-        principal: &str,
-        model_id: Option<&str>,
-        options: PromptSessionOptions,
-    ) -> Result<(), ToolError> {
-        self.prompt_session_input_with_options(
-            session_id,
-            PromptInput {
-                text: prompt.to_string(),
-                attachments: Vec::new(),
-            },
-            principal,
-            model_id,
-            options,
-        )
-        .await
-    }
-
-    async fn prompt_session_input_with_options(
+    async fn prompt_session_inner(
         &self,
         session_id: &str,
         mut prompt: PromptInput,
@@ -1160,14 +1124,15 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
         let session = self.create_session(input, principal).await?;
 
         let prompt_result = self
-            .prompt_session_with_attachments(
-                &session.id,
-                prompt_text,
-                prompt_attachments,
-                principal,
-                session.model_id.as_deref(),
-                prompt_options,
-            )
+            .prompt_session(PromptOptions {
+                session_id: session.id.clone(),
+                principal: principal.to_string(),
+                text: prompt_text.to_string(),
+                attachments: prompt_attachments,
+                model_id: session.model_id.clone(),
+                provider: prompt_options.provider,
+                continuity_mode: prompt_options.continuity_mode,
+            })
             .await;
 
         if let Err(prompt_err) = prompt_result {
@@ -1762,12 +1727,20 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
             "ACP sessions restored from SQLite",
         );
     }
+}
 
+// ---------------------------------------------------------------------------
+// Test-only helpers — isolated from production code paths.
+// Methods on AcpSessionRegistry that are only used in #[cfg(test)] modules.
+// Kept in a separate impl block so they are invisible in production builds.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+impl<P: AcpPersistence> AcpSessionRegistry<P> {
     // ── Test helpers ───────────────────────────────────────────────────────
 
     /// Create a test registry with a custom idle timeout. Background tasks are
     /// NOT spawned so tests run in isolation.
-    #[cfg(test)]
     pub fn new_for_tests(idle_timeout: Duration) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
@@ -1780,7 +1753,6 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
         }
     }
 
-    #[cfg(test)]
     pub fn new_for_test_with_provider_models(
         provider_models: Vec<(String, Vec<AcpModelOption>)>,
     ) -> Self {
@@ -1801,7 +1773,6 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
 
     /// Inject a pre-built session with a fake RuntimeHandle — no subprocess spawned.
     /// The returned session summary mirrors what create_session would return.
-    #[cfg(test)]
     pub async fn inject_fake_session(
         &self,
         session_id: &str,
@@ -1863,7 +1834,6 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
     /// Force the cached summary state of a session for tests. Both the
     /// fast-path state lock and the summary lock are updated so any consumer
     /// that reads either sees the new value.
-    #[cfg(test)]
     pub async fn force_summary_state_for_tests(&self, session_id: &str, state: AcpSessionState) {
         if let Ok(session) = self.get_session_arc(session_id).await {
             *session.state.write().await = state.clone();
@@ -1872,13 +1842,11 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
     }
 
     /// Check whether a session id is still registered (for assertions).
-    #[cfg(test)]
     pub async fn session_exists_for_tests(&self, session_id: &str) -> bool {
         self.sessions.read().await.contains_key(session_id)
     }
 
     /// Inject a pre-built session whose runtime command queue is already full.
-    #[cfg(test)]
     pub async fn inject_saturated_fake_session(
         &self,
         session_id: &str,
@@ -1934,7 +1902,6 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
     }
 
     /// Override last_activity on a session to simulate being idle for `elapsed`.
-    #[cfg(test)]
     pub async fn set_last_activity_for_test(&self, session_id: &str, elapsed: Duration) {
         if let Ok(session) = self.get_session_arc(session_id).await {
             let past = Instant::now()
@@ -1947,21 +1914,18 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
         }
     }
 
-    #[cfg(test)]
     pub async fn set_title_for_test(&self, session_id: &str, title: &str) {
         if let Ok(session) = self.get_session_arc(session_id).await {
             session.summary.write().await.title = title.to_string();
         }
     }
 
-    #[cfg(test)]
     pub async fn detach_runtime_for_test(&self, session_id: &str) {
         if let Ok(session) = self.get_session_arc(session_id).await {
             *session.handle.lock().await = None;
         }
     }
 
-    #[cfg(test)]
     pub async fn session_count(&self) -> usize {
         self.sessions.read().await.len()
     }
@@ -2456,7 +2420,15 @@ mod tests {
             .await;
 
         let err = registry
-            .prompt_session("saturated-sess", "hello", "alice", None)
+            .prompt_session(PromptOptions {
+                session_id: "saturated-sess".to_string(),
+                principal: "alice".to_string(),
+                text: "hello".to_string(),
+                attachments: Vec::new(),
+                model_id: None,
+                provider: None,
+                continuity_mode: None,
+            })
             .await
             .expect_err("full command queue must be rejected");
 
@@ -2472,12 +2444,15 @@ mod tests {
             .await;
 
         registry
-            .prompt_session(
-                "title-sess",
-                "Context: route=/chat\n\nInvestigate empty ACP sessions",
-                "alice",
-                None,
-            )
+            .prompt_session(PromptOptions {
+                session_id: "title-sess".to_string(),
+                principal: "alice".to_string(),
+                text: "Context: route=/chat\n\nInvestigate empty ACP sessions".to_string(),
+                attachments: Vec::new(),
+                model_id: None,
+                provider: None,
+                continuity_mode: None,
+            })
             .await
             .expect("prompt dispatch");
 
@@ -2496,16 +2471,15 @@ mod tests {
             .await;
 
         let err = registry
-            .prompt_session_with_options(
-                "switch-fail-sess",
-                "continue this on another provider",
-                "alice",
-                None,
-                PromptSessionOptions {
-                    provider: Some("missing-provider".to_string()),
-                    continuity_mode: Some("handoff".to_string()),
-                },
-            )
+            .prompt_session(PromptOptions {
+                session_id: "switch-fail-sess".to_string(),
+                principal: "alice".to_string(),
+                text: "continue this on another provider".to_string(),
+                attachments: Vec::new(),
+                model_id: None,
+                provider: Some("missing-provider".to_string()),
+                continuity_mode: Some("handoff".to_string()),
+            })
             .await
             .expect_err("unknown provider switch should fail");
 
