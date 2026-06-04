@@ -819,4 +819,76 @@ mod tests {
             "other-principal session must remain untouched",
         );
     }
+
+    // ── Principal isolation (IDOR) ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn session_get_rejects_wrong_principal() {
+        let registry = AcpSessionRegistry::new_for_tests(Duration::from_millis(100));
+        registry.inject_fake_session("idor-sess", "alice").await;
+        let err = dispatch_with_registry(
+            &registry,
+            "session.get",
+            json!({ "session_id": "idor-sess", "principal": "bob" }),
+        )
+        .await
+        .expect_err("wrong principal must be rejected");
+        assert_eq!(err.kind(), "not_found", "IDOR must mask as not_found");
+    }
+
+    #[tokio::test]
+    async fn session_events_rejects_wrong_principal() {
+        let registry = AcpSessionRegistry::new_for_tests(Duration::from_millis(100));
+        registry.inject_fake_session("idor-events", "alice").await;
+        let err = dispatch_with_registry(
+            &registry,
+            "session.events",
+            json!({ "session_id": "idor-events", "principal": "bob" }),
+        )
+        .await
+        .expect_err("wrong principal must be rejected");
+        assert_eq!(err.kind(), "not_found", "IDOR must mask as not_found");
+    }
+
+    #[tokio::test]
+    async fn session_prompt_rejects_wrong_principal() {
+        let registry = AcpSessionRegistry::new_for_tests(Duration::from_millis(100));
+        registry.inject_fake_session("idor-prompt", "alice").await;
+        let err = dispatch_with_registry(
+            &registry,
+            "session.prompt",
+            json!({ "session_id": "idor-prompt", "principal": "bob", "text": "hi" }),
+        )
+        .await
+        .expect_err("wrong principal must be rejected");
+        assert_eq!(err.kind(), "not_found", "IDOR must mask as not_found");
+    }
+
+    #[tokio::test]
+    async fn session_cancel_rejects_wrong_principal() {
+        let registry = AcpSessionRegistry::new_for_tests(Duration::from_millis(100));
+        registry.inject_fake_session("idor-cancel", "alice").await;
+        let err = dispatch_with_registry(
+            &registry,
+            "session.cancel",
+            json!({ "session_id": "idor-cancel", "principal": "bob", "confirm": true }),
+        )
+        .await
+        .expect_err("wrong principal must be rejected");
+        assert_eq!(err.kind(), "not_found", "IDOR must mask as not_found");
+    }
+
+    #[tokio::test]
+    async fn subscribe_ticket_rejects_wrong_principal() {
+        let registry = AcpSessionRegistry::new_for_tests(Duration::from_millis(100));
+        registry.inject_fake_session("idor-ticket", "alice").await;
+        let err = dispatch_with_registry(
+            &registry,
+            "session.subscribe_ticket",
+            json!({ "session_id": "idor-ticket", "principal": "bob" }),
+        )
+        .await
+        .expect_err("wrong principal must be rejected");
+        assert_eq!(err.kind(), "not_found", "IDOR must mask as not_found");
+    }
 }
