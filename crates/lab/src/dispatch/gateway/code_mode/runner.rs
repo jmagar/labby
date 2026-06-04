@@ -353,7 +353,16 @@ fn javy_main_promise_state(runtime: &javy::Runtime) -> Result<JavyMainPromiseSta
                     Ok(JavyMainPromiseState::Resolved(result))
                 }
                 Some(Err(err)) => {
+                    // Capture a debug representation before `from_js_error`
+                    // consumes `err`; used as a fallback when the stringified
+                    // JS error is empty (lab-4uele).
+                    let debug_fallback = format!("{err:?}");
                     let message = javy::from_js_error(cx.clone(), err).to_string();
+                    let message = if message.is_empty() {
+                        debug_fallback
+                    } else {
+                        message
+                    };
                     Ok(JavyMainPromiseState::Rejected(message))
                 }
             }
