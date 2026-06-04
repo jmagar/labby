@@ -160,4 +160,10 @@ OVERSEERR_URL="http://server2:5055" OVERSEERR_API_KEY="key2" node scripts/search
 - [Overseerr API Documentation](https://api-docs.overseerr.dev/)
 - [Overseerr GitHub](https://github.com/sct/overseerr)
 
+## Local References
+
+- `references/quick-reference.md` — curl examples for all common operations
+- `references/troubleshooting.md` — error diagnosis and common failure modes
+- `references/api-endpoints.md` — full API endpoint catalog
+
 ---

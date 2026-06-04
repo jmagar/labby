@@ -6,14 +6,14 @@ Drive Claude's dedicated sandboxed Windows 11 VM, the **`agent-os`** VM (contain
 
 This skill used to drive the VM over noVNC at `http://tootie:8006` via `agent-browser`, dispatching `MouseEvent`s on the canvas and typing one keystroke at a time. That path worked but was slow and had a known `Shift+<digit>` bug.
 
-Windows-MCP ([CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP)) replaces it. The MCP server runs inside the agent-os VM and exposes native Windows automation as `mcp__windows-mcp__*` tools. You get a real keyboard, a real accessibility tree (`Snapshot`), and direct PowerShell (`Shell`).
+Windows-MCP ([CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP)) replaces it. The MCP server runs inside the agent-os VM and exposes native Windows automation as `mcp__windows-mcp__*` tools. You get a real keyboard, a real accessibility tree (`Snapshot`), and direct PowerShell (`PowerShell`).
 
 ## What it does
 
 - **Look at the desktop** — `Screenshot` (fast PNG + window list) or `Snapshot` (accessibility tree with interactive element ids)
 - **Interact** — `Click`, `Move`, `Scroll`, `Type`, `Shortcut`, `MultiSelect`, `MultiEdit`
 - **Launch and manage** — `App` to open from Start menu, `Process` to list/kill, `Notification` to toast
-- **Headless ops** — `Shell` (PowerShell), `FileSystem` (read/write/list), `Clipboard` (read/set), `Registry` (read/write/delete/list)
+- **Headless ops** — `PowerShell` (run shell commands), `FileSystem` (read/write/list), `Clipboard` (read/set), `Registry` (read/write/delete/list)
 - **Utility** — `Wait`, `Scrape` (page text when a browser is foregrounded)
 
 ## When to invoke
@@ -47,7 +47,7 @@ Side-channels exposed by the container, in case Windows-MCP is wedged:
 
 - **`Type` handles full strings reliably** — no more per-char `press` loops, no Shift-key flakiness
 - **`Snapshot` returns interactive element ids** — target controls by accessibility, not pixel guessing
-- **`Shell` runs PowerShell directly** — anything expressible as a command bypasses the GUI entirely
+- **`PowerShell` runs PowerShell directly** — anything expressible as a command bypasses the GUI entirely
 - **No browser session to manage** — no `agent-browser open`, no canvas focus juggling
 
 ## Visual debugging fallback
