@@ -66,6 +66,8 @@ Dispatch layers may add the following kinds on top of SDK errors:
 - `code_mode_fuel_exhausted` — the Wasmtime Code Mode runner consumed its configured fuel budget before completion. HTTP 408.
 - `code_mode_timeout` — the Code Mode wall-clock backstop interrupted execution before completion. HTTP 408.
 - `queue_saturated` — bounded runtime queue is full; caller should retry after the current work drains. HTTP 429.
+- `session_limit_exceeded` — ACP registry has reached `MAX_CONCURRENT_SESSIONS` (20); no new provider processes will be launched until existing sessions are closed. HTTP 429.
+- `too_many_subscribers` — a single ACP session has reached `MAX_SUBSCRIBERS_PER_SESSION` (32) concurrent SSE subscribers; the caller must reconnect later. HTTP 429.
 
 ### Fleet-WS install hardening kinds (lab-zxx5.18)
 

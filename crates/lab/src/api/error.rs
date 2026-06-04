@@ -18,7 +18,7 @@ impl IntoResponse for ToolError {
         let status = match self.kind() {
             "auth_failed" => StatusCode::UNAUTHORIZED,
             "not_found" => StatusCode::NOT_FOUND,
-            "rate_limited" | "queue_saturated" => StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited" | "queue_saturated" | "session_limit_exceeded" | "too_many_subscribers" => StatusCode::TOO_MANY_REQUESTS,
             "sync_in_progress" | "service_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
             "missing_param" | "invalid_param" | "validation_failed" => {
                 StatusCode::UNPROCESSABLE_ENTITY
@@ -97,6 +97,26 @@ mod tests {
         let response = ToolError::Sdk {
             sdk_kind: "queue_saturated".to_string(),
             message: "queue full".to_string(),
+        }
+        .into_response();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[test]
+    fn acp_session_limit_exceeded_maps_to_429() {
+        let response = ToolError::Sdk {
+            sdk_kind: "session_limit_exceeded".to_string(),
+            message: "session limit reached".to_string(),
+        }
+        .into_response();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[test]
+    fn acp_too_many_subscribers_maps_to_429() {
+        let response = ToolError::Sdk {
+            sdk_kind: "too_many_subscribers".to_string(),
+            message: "subscriber limit reached".to_string(),
         }
         .into_response();
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
