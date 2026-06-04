@@ -137,6 +137,15 @@ impl LabMcpServer {
         let subject = self.request_subject_log_tag(context);
         let auth = auth_context_from_extensions(&context.extensions);
         if !code_mode_search_scope_allowed(auth) {
+            let required_scopes = vec![
+                "lab:read".to_string(),
+                "lab".to_string(),
+                "lab:admin".to_string(),
+            ];
+            let err = DispatchToolError::Forbidden {
+                message: "code_search requires one of scopes: lab:read, lab, lab:admin".to_string(),
+                required_scopes: required_scopes.clone(),
+            };
             tracing::warn!(
                 surface = "mcp",
                 service = %service,
@@ -147,13 +156,7 @@ impl LabMcpServer {
                 kind = "forbidden",
                 "gateway code search denied by scope"
             );
-            let env = build_error_extra(
-                service,
-                "call_tool",
-                "forbidden",
-                "code_search requires one of scopes: lab:read, lab, lab:admin",
-                &serde_json::json!({ "required_scopes": ["lab:read", "lab", "lab:admin"] }),
-            );
+            let env = tool_error_envelope(service, "call_tool", &err);
             return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
         }
         let code = args
@@ -244,6 +247,10 @@ impl LabMcpServer {
         let subject = self.request_subject_log_tag(context);
         let auth = auth_context_from_extensions(&context.extensions);
         if !tool_execute_scope_allowed(auth) {
+            let err = DispatchToolError::Forbidden {
+                message: "code_execute requires one of scopes: lab, lab:admin".to_string(),
+                required_scopes: vec!["lab".to_string(), "lab:admin".to_string()],
+            };
             tracing::warn!(
                 surface = "mcp",
                 service = %service,
@@ -254,13 +261,7 @@ impl LabMcpServer {
                 kind = "forbidden",
                 "gateway code execute denied by scope"
             );
-            let env = build_error_extra(
-                service,
-                "call_tool",
-                "forbidden",
-                "code_execute requires one of scopes: lab, lab:admin",
-                &serde_json::json!({ "required_scopes": ["lab", "lab:admin"] }),
-            );
+            let env = tool_error_envelope(service, "call_tool", &err);
             return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
         }
         let Some(manager) = &self.gateway_manager else {
