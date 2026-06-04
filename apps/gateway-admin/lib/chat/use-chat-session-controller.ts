@@ -19,6 +19,7 @@ export type CreateSessionOptions = {
   closeSessionPanel?: boolean
   providerId?: string | null
   modelId?: string | null
+  signal?: AbortSignal
 }
 export type CreateSessionFn = (options?: CreateSessionOptions) => Promise<ACPRun>
 

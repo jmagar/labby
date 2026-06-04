@@ -373,6 +373,7 @@ export function ChatSessionProvider({
             provider,
             ...(model && { model }),
           }),
+          ...(createOptions?.signal && { signal: createOptions.signal }),
         })
         const payload = await readJsonSafe<SessionCreatePayload | ErrorPayload>(response)
         if (!response.ok || !payload) {
@@ -541,19 +542,22 @@ export function ChatSessionProvider({
   // Gated on `autoBootstrap`: the provider mounts on every admin page, but we only want to mint a
   // session when the user has actually surfaced the chat (popover open or /chat route). Otherwise
   // every dashboard view would silently create an empty session + SSE stream on the backend.
-  // NOTE(phase-2): wire AbortController once createSession accepts a signal.
+  // AbortController cancels the in-flight POST if the component unmounts or the effect re-runs.
   React.useEffect(() => {
     if (!autoBootstrap) return
     if (!sessionsLoaded) return
     if (!shouldAutoCreateInitialRun(Boolean(providerHealth?.ready), runs.length, selectedRunId)) return
 
+    const controller = new AbortController()
     void (async () => {
       try {
-        await createSession()
+        await createSession({ signal: controller.signal })
       } catch {
-        // providerHealth.message carries the failure detail
+        // Abort errors and providerHealth.message failures are both silent here;
+        // providerHealth.message carries the failure detail for non-abort errors.
       }
     })()
+    return () => controller.abort()
   }, [autoBootstrap, createSession, providerHealth?.ready, runs.length, selectedRunId, sessionsLoaded])
 
   // Update run status from session events (bail-out setter for re-render efficiency)

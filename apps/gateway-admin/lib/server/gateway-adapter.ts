@@ -10,6 +10,7 @@ import type {
   UpdateGatewayInput,
 } from '../types/gateway'
 import { EXPOSE_NONE_PATTERN, stripExposeNonePattern } from '../api/tool-exposure-draft.ts'
+import { previewExposurePolicy as sharedPreviewExposurePolicy } from '../api/exposure-policy-matcher.ts'
 import { defaultGatewayBearerEnvName } from '../gateway-env.ts'
 
 export interface BackendSurfaceStateView {
@@ -780,46 +781,11 @@ export function exposurePolicyFromConfig(config: BackendGatewayConfigView): Expo
   return { mode: 'allowlist', patterns }
 }
 
+// Delegate to the shared pure matcher so this adapter and the client-side
+// mock preview path both use the same algorithm (lab-2oec.7).
 export function previewExposurePolicy(
   toolNames: string[],
   patterns: string[],
 ): ExposurePolicyPreview {
-  if (patterns.length === 0) {
-    return {
-      matched_tools: toolNames.map((name) => ({ name, matched_by: '*' })),
-      unmatched_patterns: [],
-      filtered_tools: [],
-      exposed_count: toolNames.length,
-      filtered_count: 0,
-    }
-  }
-
-  const matched_tools: ExposurePolicyPreview['matched_tools'] = []
-  const filtered_tools: string[] = []
-  const usedPatterns = new Set<string>()
-
-  for (const toolName of toolNames) {
-    let matchedBy: string | null = null
-    for (const pattern of patterns) {
-      if (matchPattern(toolName, pattern)) {
-        matchedBy = pattern
-        usedPatterns.add(pattern)
-        break
-      }
-    }
-
-    if (matchedBy) {
-      matched_tools.push({ name: toolName, matched_by: matchedBy })
-    } else {
-      filtered_tools.push(toolName)
-    }
-  }
-
-  return {
-    matched_tools,
-    unmatched_patterns: patterns.filter((pattern) => !usedPatterns.has(pattern)),
-    filtered_tools,
-    exposed_count: matched_tools.length,
-    filtered_count: filtered_tools.length,
-  }
+  return sharedPreviewExposurePolicy(toolNames, patterns)
 }
