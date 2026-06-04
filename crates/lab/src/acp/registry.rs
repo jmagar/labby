@@ -1645,6 +1645,7 @@ impl AcpSessionRegistry {
         Ok(())
     }
 
+    #[cfg(test)]
     async fn runtime_session_count(&self) -> usize {
         let sessions: Vec<Arc<Session>> =
             { self.sessions.read().await.values().cloned().collect() };
