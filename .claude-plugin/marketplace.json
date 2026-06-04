@@ -10,9 +10,8 @@
         {
             "name": "lumen",
             "source": {
-                "source": "git-subdir",
-                "url": "https://github.com/jmagar/lumen.git",
-                "path": "plugins/lumen"
+                "source": "github",
+                "repo": "jmagar/lumen"
             },
             "description": "Precise local semantic code search via MCP. Indexes your codebase with Go AST parsing and vector embeddings — Ollama, LM Studio, or HuggingFace TEI."
         },
