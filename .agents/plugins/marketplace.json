@@ -130,6 +130,38 @@
       }
     },
     {
+      "name": "beads",
+      "description": "AI-supervised issue tracker for coding workflows.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/gastownhall/beads.git",
+        "path": "plugins/beads"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Beads",
+        "shortDescription": "AI-supervised issue tracker with beads for task creation, progress tracking, and dependency management.",
+        "longDescription": "Beads is a lightweight issue tracker purpose-built for AI coding workflows. Create issues before writing code, claim work, track dependencies, close on completion, and search persistent knowledge — all via the bd CLI. Replaces TodoWrite and markdown task files with a durable, cross-session store.",
+        "developerName": "gastownhall",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write",
+          "Automation"
+        ],
+        "defaultPrompt": [
+          "Use Beads to list ready work.",
+          "Create a Beads issue for this task.",
+          "Show blocked Beads issues and their dependencies."
+        ],
+        "brandColor": "#6366F1"
+      }
+    },
+    {
       "name": "bitwarden",
       "description": "Bitwarden and secrets-management workflows for homelab operations.",
       "source": {
@@ -336,6 +368,38 @@
           "Check recent LoggiFly alert matches."
         ],
         "brandColor": "#F43F5E"
+      }
+    },
+    {
+      "name": "lavra",
+      "description": "30 specialized agents, 28 commands, 15 skills, persistent memory with auto-recall.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/roberto-mello/lavra.git",
+        "path": "plugins/lavra"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Lavra",
+        "shortDescription": "30 specialized agents, 28 commands, 15 skills, and persistent memory with auto-recall.",
+        "longDescription": "Lavra is a comprehensive agent and skills toolkit covering brainstorming, planning, research, feature development, code review, QA, design, and retrospectives. It ships 30 specialized agents, 28 slash commands, 15 skills, and a persistent cross-session memory system.",
+        "developerName": "roberto-mello",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write",
+          "Automation"
+        ],
+        "defaultPrompt": [
+          "Use Lavra to plan and implement this feature.",
+          "Run a Lavra code review on recent changes.",
+          "Use Lavra brainstorming to explore this design."
+        ],
+        "brandColor": "#8B5CF6"
       }
     },
     {
@@ -604,6 +668,36 @@
           "Inspect existing SWAG configs for a service."
         ],
         "brandColor": "#10B981"
+      }
+    },
+    {
+      "name": "superpowers",
+      "description": "Core skills library: TDD, debugging, collaboration patterns, and proven techniques.",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/obra/superpowers.git"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Superpowers",
+        "shortDescription": "Core skills library for TDD, systematic debugging, collaboration patterns, and engineering discipline.",
+        "longDescription": "Superpowers provides foundational coding discipline skills: test-driven development, systematic debugging, code review workflows, git worktrees, plan writing, subagent-driven development, and verification before completion. Each skill enforces a proven technique to reduce errors and improve output quality.",
+        "developerName": "obra",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Automation"
+        ],
+        "defaultPrompt": [
+          "Use Superpowers TDD to implement this feature.",
+          "Use Superpowers systematic-debugging to diagnose this failure.",
+          "Use Superpowers to review and verify this change before merging."
+        ],
+        "brandColor": "#F59E0B"
       }
     },
     {
