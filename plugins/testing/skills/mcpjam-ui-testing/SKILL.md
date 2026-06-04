@@ -1,6 +1,6 @@
 ---
 name: mcpjam-ui-testing
-description: Validate MCP-UI / MCP Apps implementations with MCPJam CLI and Inspector. Use when testing a server's UI-capable MCP tools, `_meta.ui.resourceUri`, `ui://` resources, `text/html;profile=mcp-app` resource contents, `structuredContent`, Inspector rendering, or Axon-style MCP Apps widgets.
+description: "This skill should be used when the user wants to validate an MCP-UI or MCP Apps implementation — checking widget rendering in the Inspector, verifying ui:// resource contracts, testing structuredContent, or running MCP Apps conformance checks. Triggers include: \"why isn't my MCP widget rendering\", \"test my MCP-UI implementation\", \"check if my tool passes MCP Apps conformance\", \"verify the ui:// resource contract\", \"debug my Inspector view\". Does not apply for general MCP tool smoke-testing (use mcporter for that)."
 ---
 
 # MCPJam UI Testing

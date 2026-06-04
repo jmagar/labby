@@ -1,6 +1,6 @@
 ---
 name: immich
-description: Immich — self-hosted photo and video management. Use when the user wants to check their Immich server, look up their profile, or search photos and videos. Talks directly to the Immich REST API.
+description: "This skill should be used when the user mentions Immich or asks to browse their photo library, search for photos, find pictures from a trip or date range, list albums, check server stats, or view storage usage. Triggers include: \"find photos of\", \"show my albums\", \"search Immich\", \"how many photos do I have\", \"check my Immich server\", or any question about a self-hosted photo library."
 ---
 
 # Immich

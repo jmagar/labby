@@ -1,6 +1,6 @@
 ---
 name: navidrome
-description: Self-hosted Navidrome music server via its Subsonic API. Use when the user wants to check Navidrome status, browse artists/albums, search the library, list playlists, or inspect what's playing. Talks directly to the Subsonic REST API with HTTP calls — no MCP server, no lab CLI.
+description: "This skill should be used when the user wants to interact with their Navidrome self-hosted music server — checking server status, browsing artists or albums, searching the music library, listing playlists, viewing now-playing or recently played tracks, or accessing starred items. Triggers include: \"what's playing on Navidrome\", \"show my playlists\", \"search for an artist\", \"recent albums\", \"Navidrome status\"."
 ---
 
 # Navidrome

@@ -15,7 +15,7 @@ Linkding uses token-based authentication. Generate a token from the Settings pag
 
 ## Quick Start
 
-Add credentials to `~/.claude-homelab/.env`:
+Add credentials to `~/.lab/.env`:
 ```bash
 LINKDING_URL="http://localhost:9090"
 LINKDING_API_KEY="your-api-token"
@@ -24,7 +24,7 @@ LINKDING_API_KEY="your-api-token"
 Then test connection:
 ```bash
 # Load credentials
-source ~/.claude-homelab/.env
+source ~/.lab/.env
 
 # Test connection - list bookmarks
 curl -s "$LINKDING_URL/api/bookmarks/" \

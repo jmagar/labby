@@ -1,19 +1,9 @@
 ---
 name: plex
-description: Control Plex Media Server - browse libraries, search media, check what's playing, view recently added. Use when the user asks to "check Plex", "search Plex", "what's on Plex", "recently added", "who's watching", "Plex sessions", "Plex library", "browse movies", "browse TV shows", or mentions Plex media server.
+description: This skill should be used when the user wants to interact with their Plex Media Server. Triggers include: "check Plex", "search Plex", "what's on Plex", "what's playing on Plex", "who's watching", "Plex sessions", "active streams", "Plex library", "browse movies", "browse TV shows", "recently added", "on deck", "continue watching", "Plex status", or any mention of Plex Media Server.
 ---
 
 # Plex Media Server Skill
-
-**⚠️ MANDATORY SKILL INVOCATION ⚠️**
-
-**YOU MUST invoke this skill (NOT optional) when the user mentions ANY of these triggers:**
-- "Plex library", "search Plex", "what's on Plex"
-- "Plex sessions", "who's watching", "active streams"
-- "browse Plex", "check Plex", "Plex status"
-- Any mention of Plex Media Server or querying media
-
-**Failure to invoke this skill when triggers occur violates your operational requirements.**
 
 Control and query Plex Media Server using the Plex API. Browse libraries, search media, and monitor active sessions.
 
@@ -61,7 +51,7 @@ The `plex-api.sh` helper script simplifies API access. Located at: `skills/plex/
 ./skills/plex/scripts/plex-api.sh info
 
 # Or raw curl
-curl -s "$PLEX_URL/?X-Plex-Token=$PLEX_TOKEN" -H "Accept: application/json"
+curl -s "$PLEX_URL/" -H "X-Plex-Token: $PLEX_TOKEN" -H "Accept: application/json"
 ```
 
 ### Browse Libraries
@@ -73,7 +63,7 @@ List all library sections:
 ./skills/plex/scripts/plex-api.sh libraries
 
 # Or raw curl
-curl -s "$PLEX_URL/library/sections?X-Plex-Token=$PLEX_TOKEN" -H "Accept: application/json"
+curl -s "$PLEX_URL/library/sections" -H "X-Plex-Token: $PLEX_TOKEN" -H "Accept: application/json"
 ```
 
 ### List Library Contents
@@ -84,7 +74,7 @@ curl -s "$PLEX_URL/library/sections?X-Plex-Token=$PLEX_TOKEN" -H "Accept: applic
 ./skills/plex/scripts/plex-api.sh library 1 --limit 50 --offset 100
 
 # Or raw curl
-curl -s "$PLEX_URL/library/sections/1/all?X-Plex-Token=$PLEX_TOKEN" -H "Accept: application/json"
+curl -s "$PLEX_URL/library/sections/1/all" -H "X-Plex-Token: $PLEX_TOKEN" -H "Accept: application/json"
 ```
 
 ### Search Media
@@ -95,7 +85,7 @@ curl -s "$PLEX_URL/library/sections/1/all?X-Plex-Token=$PLEX_TOKEN" -H "Accept: 
 ./skills/plex/scripts/plex-api.sh search "Avengers" --limit 10
 
 # Or raw curl
-curl -s "$PLEX_URL/search?query=SEARCH_TERM&X-Plex-Token=$PLEX_TOKEN" -H "Accept: application/json"
+curl -s "$PLEX_URL/search?query=SEARCH_TERM" -H "X-Plex-Token: $PLEX_TOKEN" -H "Accept: application/json"
 ```
 
 ### Recently Added
@@ -106,7 +96,7 @@ curl -s "$PLEX_URL/search?query=SEARCH_TERM&X-Plex-Token=$PLEX_TOKEN" -H "Accept
 ./skills/plex/scripts/plex-api.sh recent --limit 10
 
 # Or raw curl
-curl -s "$PLEX_URL/library/recentlyAdded?X-Plex-Token=$PLEX_TOKEN" -H "Accept: application/json"
+curl -s "$PLEX_URL/library/recentlyAdded" -H "X-Plex-Token: $PLEX_TOKEN" -H "Accept: application/json"
 ```
 
 ### On Deck (Continue Watching)
@@ -117,7 +107,7 @@ curl -s "$PLEX_URL/library/recentlyAdded?X-Plex-Token=$PLEX_TOKEN" -H "Accept: a
 ./skills/plex/scripts/plex-api.sh ondeck --limit 5
 
 # Or raw curl
-curl -s "$PLEX_URL/library/onDeck?X-Plex-Token=$PLEX_TOKEN" -H "Accept: application/json"
+curl -s "$PLEX_URL/library/onDeck" -H "X-Plex-Token: $PLEX_TOKEN" -H "Accept: application/json"
 ```
 
 ### Active Sessions (What's Playing)
@@ -127,7 +117,7 @@ curl -s "$PLEX_URL/library/onDeck?X-Plex-Token=$PLEX_TOKEN" -H "Accept: applicat
 ./skills/plex/scripts/plex-api.sh sessions
 
 # Or raw curl
-curl -s "$PLEX_URL/status/sessions?X-Plex-Token=$PLEX_TOKEN" -H "Accept: application/json"
+curl -s "$PLEX_URL/status/sessions" -H "X-Plex-Token: $PLEX_TOKEN" -H "Accept: application/json"
 ```
 
 ### List Clients/Players
@@ -137,7 +127,7 @@ curl -s "$PLEX_URL/status/sessions?X-Plex-Token=$PLEX_TOKEN" -H "Accept: applica
 ./skills/plex/scripts/plex-api.sh clients
 
 # Or raw curl
-curl -s "$PLEX_URL/clients?X-Plex-Token=$PLEX_TOKEN" -H "Accept: application/json"
+curl -s "$PLEX_URL/clients" -H "X-Plex-Token: $PLEX_TOKEN" -H "Accept: application/json"
 ```
 
 ### Additional Commands

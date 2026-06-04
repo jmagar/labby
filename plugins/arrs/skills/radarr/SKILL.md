@@ -1,19 +1,9 @@
 ---
 name: radarr
-description: This skill should be used when managing movies in Radarr. Use when the user asks to "add a movie", "search Radarr", "find a film", "add to Radarr", "remove a movie", "add movie collection", "check if movie exists", "Radarr library", or mentions movie management, TMDB integration, or Radarr operations.
+description: This skill should be used when the user wants to manage movies in Radarr. Triggers include: "add a movie", "search Radarr", "find a film", "download a movie", "remove a movie", "add movie collection", "check if movie exists", "is [film] in my library", "monitor a film", "check download queue", "Radarr library", or any mention of movie management or TMDB integration.
 ---
 
 # Radarr Movie Management Skill
-
-**⚠️ MANDATORY SKILL INVOCATION ⚠️**
-
-**YOU MUST invoke this skill (NOT optional) when the user mentions ANY of these triggers:**
-- "add a movie", "search Radarr", "find a film", "add to Radarr"
-- "remove a movie", "delete movie", "check if movie exists"
-- "add movie collection", "Radarr library", "movie management"
-- Any mention of Radarr or managing movies
-
-**Failure to invoke this skill when triggers occur violates your operational requirements.**
 
 Search and add movies to your Radarr library with support for collections, quality profiles, and search-on-add.
 

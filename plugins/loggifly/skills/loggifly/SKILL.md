@@ -1,6 +1,6 @@
 ---
 name: loggifly
-description: LoggiFly — Docker container log alerting via keyword/regex patterns. Use when the user wants to set up or edit log-based alerts, monitor container logs for keywords, or configure LoggiFly notifications. LoggiFly is operated through its config.yaml, not a query API.
+description: "This skill should be used when the user wants to configure LoggiFly Docker log alerting, add or edit keyword or regex alert patterns, set up notifications for container log events, watch container logs for errors or crashes, configure container_action restart/stop rules, or troubleshoot why LoggiFly alerts are not firing. Triggers include: \"alert me when my container logs an error\", \"how do I add a regex pattern to loggifly\", \"set up loggifly notifications\", \"loggifly config\"."
 ---
 
 # LoggiFly

@@ -1,19 +1,9 @@
 ---
 name: sonarr
-description: This skill should be used when managing TV shows in Sonarr. Use when the user asks to "add a TV show", "search Sonarr", "find a series", "add to Sonarr", "remove a show", "check if show exists", "Sonarr library", "TVDB lookup", or mentions TV show management or Sonarr operations.
+description: This skill should be used when the user wants to manage TV shows in Sonarr. Triggers include: "add a TV show", "add to Sonarr", "search Sonarr", "find a series", "remove a show", "delete show", "check if show exists", "is [show] in my library", "what's airing this week", "upcoming episodes", "Sonarr library", or any general mention of Sonarr or TV show library management.
 ---
 
 # Sonarr TV Show Management Skill
-
-**⚠️ MANDATORY SKILL INVOCATION ⚠️**
-
-**YOU MUST invoke this skill (NOT optional) when the user mentions ANY of these triggers:**
-- "add a TV show", "search Sonarr", "find a series", "add to Sonarr"
-- "remove a show", "delete show", "check if show exists"
-- "Sonarr library", "TV show management", "add show"
-- Any mention of Sonarr or managing TV shows
-
-**Failure to invoke this skill when triggers occur violates your operational requirements.**
 
 Search and add TV shows to your Sonarr library with support for monitor options, quality profiles, and search-on-add.
 
@@ -45,7 +35,7 @@ SONARR_DEFAULT_QUALITY_PROFILE="1"  # Optional: defaults to 1 if not set
 
 ## Commands
 
-All commands return JSON output.
+The `search-json` command returns raw JSON; all other commands return formatted text.
 
 ### Search for Shows
 
@@ -125,7 +115,7 @@ Always include TVDB links when presenting search results:
 
 - Requires network access to your Sonarr server
 - Uses Sonarr API v3
-- All data operations return JSON
+- The `search-json` command returns raw JSON; all other commands return formatted text.
 - Quality profile IDs vary by installation — use `config` to discover yours
 - The `SONARR_DEFAULT_QUALITY_PROFILE` from `.env` is used when adding shows (defaults to 1)
 

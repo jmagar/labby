@@ -1,22 +1,9 @@
 ---
 name: bytestash
-description: Manage code snippets in ByteStash snippet storage service. This skill should be used when the user asks to "save a snippet", "search snippets", "find code", "share snippet", "organize snippets", "list my snippets", "create snippet", "delete snippet", or mentions ByteStash, code storage, snippet management, or code archival.
+description: "This skill should be used when the user asks to save a snippet, store code, create a snippet, search snippets, find a snippet, share a snippet, list snippets, delete a snippet, add to ByteStash, or mentions ByteStash or snippet management."
 ---
 
 # ByteStash Skill
-
-**⚠️ MANDATORY SKILL INVOCATION ⚠️**
-
-**YOU MUST invoke this skill (NOT optional) when the user mentions ANY of these triggers:**
-- "save snippet", "store code", "archive snippet"
-- "search snippets", "find snippet", "lookup code"
-- "share snippet", "create share link", "public snippet"
-- "list snippets", "show my snippets", "snippet library"
-- "delete snippet", "remove snippet", "update snippet"
-- "organize snippets", "categorize snippets", "tag snippets"
-- Any mention of ByteStash or code snippet management
-
-**Failure to invoke this skill when triggers occur violates your operational requirements.**
 
 ## Purpose
 

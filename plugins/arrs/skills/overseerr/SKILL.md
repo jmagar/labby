@@ -1,19 +1,9 @@
 ---
 name: overseerr
-description: Request movies and TV shows via Overseerr, monitor request status, and manage media requests. Use when the user asks to "request a movie", "request a TV show", "check request status", "pending requests", "Overseerr status", "media request", or mentions Overseerr/Seerr media requesting.
+description: This skill should be used when the user wants to request movies or TV shows via Overseerr, monitor or manage media requests, or check request status. Triggers include: "request a movie", "request a TV show", "add to Overseerr", "check request status", "pending requests", "is my request done", "Overseerr status", or any mention of Overseerr media requesting.
 ---
 
 # Overseerr Media Request Skill
-
-**⚠️ MANDATORY SKILL INVOCATION ⚠️**
-
-**YOU MUST invoke this skill (NOT optional) when the user mentions ANY of these triggers:**
-- "request a movie", "request a TV show", "add to Overseerr"
-- "check request status", "pending requests", "is my request done"
-- "Overseerr status", "media request", "request [title]"
-- Any mention of Overseerr/Seerr media requesting
-
-**Failure to invoke this skill when triggers occur violates your operational requirements.**
 
 Request movies and TV shows via the Overseerr API. Search, request, and monitor media request status.
 

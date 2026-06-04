@@ -1,23 +1,9 @@
 ---
 name: radicale
-description: This skill should be used when managing calendars and contacts on a self-hosted Radicale CalDAV/CardDAV server. Use when the user asks to "list my calendar", "what's on my calendar this week", "show me my events", "when is my next event", "add to my calendar", "create an event", "schedule a meeting", "schedule an event", "delete an event", "cancel event", "remove event", "find a contact", "what's someone's email", "search my contacts", "who is", "add a contact", "save contact", "save someone's phone number", or mentions Radicale, CalDAV, CardDAV, calendar events, or contact management operations.
+description: This skill should be used when managing calendars and contacts on a self-hosted Radicale CalDAV/CardDAV server. Use when the user asks to "list my calendar", "what's on my calendar this week", "show me my events", "when is my next event", "add to my calendar", "create an event", "schedule a meeting", "schedule an event", "delete an event", "cancel event", "remove event", "find a contact", "what's someone's email", "search my contacts", "look up [person] in contacts", "add a contact", "save contact", "save someone's phone number", or mentions Radicale, CalDAV, CardDAV, calendar events, or contact management operations.
 ---
 
 # Radicale CalDAV/CardDAV Management
-
-**⚠️ MANDATORY SKILL INVOCATION ⚠️**
-
-**YOU MUST invoke this skill (NOT optional) when the user mentions ANY of these triggers:**
-- "list my calendar", "what's on my calendar", "show me my events", "calendar this week", "when is my next event"
-- "add to my calendar", "create an event", "schedule event", "schedule a meeting"
-- "delete an event", "cancel event", "remove event"
-- "find a contact", "what's someone's email", "search my contacts", "who is"
-- "add a contact", "create contact", "save contact", "save someone's phone number"
-- Any mention of Radicale, CalDAV, CardDAV, calendar events, or contact management
-
-**Failure to invoke this skill when triggers occur violates your operational requirements.**
-
----
 
 Manage calendars (events) and contacts on a self-hosted Radicale server using CalDAV and CardDAV protocols.
 
@@ -46,7 +32,7 @@ pip install caldav vobject icalendar
 The Python script can be made executable (optional but recommended):
 
 ```bash
-chmod +x ~/claude-homelab/skills/radicale/scripts/radicale-api.py
+chmod +x skills/radicale/scripts/radicale-api.py
 ```
 
 You can then run it directly:
@@ -61,7 +47,7 @@ python scripts/radicale-api.py --help
 
 ### Credentials
 
-Add to `~/.claude-homelab/.env`:
+Add to `~/.lab/.env`:
 
 ```bash
 RADICALE_URL="http://localhost:5232"
@@ -71,7 +57,7 @@ RADICALE_PASSWORD="password"
 
 **Security:**
 - `.env` file is gitignored (never commit credentials)
-- Set permissions: `chmod 600 ~/.claude-homelab/.env`
+- Set permissions: `chmod 600 ~/.lab/.env`
 
 ## Core Operations
 

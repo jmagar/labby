@@ -1,22 +1,9 @@
 ---
 name: linkding
-description: Manage bookmarks with Linkding. Use when the user asks to "save a bookmark", "add link", "search bookmarks", "list my bookmarks", "find saved links", "tag a bookmark", "archive bookmark", "check if URL is saved", "list tags", "create bundle", or mentions Linkding bookmark management.
+description: "This skill should be used when the user asks to save a bookmark, add or save a link, search bookmarks, list bookmarks, find saved links, tag a bookmark, archive a bookmark, check if a URL is already saved, list tags, or create a bundle. It also applies when the user mentions Linkding by name or asks about their bookmark library."
 ---
 
 # Linkding Bookmark Manager
-
-**⚠️ MANDATORY SKILL INVOCATION ⚠️**
-
-**YOU MUST invoke this skill (NOT optional) when the user mentions ANY of these triggers:**
-- "search bookmarks", "Linkding", "bookmark manager", "my bookmarks"
-- "add bookmark", "save link", "save this URL", "save this page", "bookmark this"
-- "archived bookmarks", "archive link", "reading list"
-- "check bookmarks", "find bookmark", "bookmark tags", "show bookmarks tagged X"
-- "did I bookmark this", "did I save this URL", "is this saved"
-- "delete bookmark", "remove bookmark", "remove link"
-- Any mention of Linkding or bookmark management
-
-**Failure to invoke this skill when triggers occur violates your operational requirements.**
 
 Query and manage bookmarks via the Linkding REST API.
 
@@ -35,7 +22,7 @@ Operations include both read and write actions. **Always confirm before deleting
 
 ## Setup
 
-Credentials: `~/.claude-homelab/.env`
+Credentials: `~/.lab/.env`
 
 ```bash
 LINKDING_URL="http://localhost:9090"

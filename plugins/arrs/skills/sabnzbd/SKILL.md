@@ -1,19 +1,9 @@
 ---
 name: sabnzbd
-description: Manage Usenet downloads with SABnzbd. Use when the user asks to "check SABnzbd", "list NZB queue", "add NZB", "pause downloads", "resume downloads", "SABnzbd status", "Usenet queue", "NZB history", or mentions SABnzbd/sab download management.
+description: This skill should be used when the user wants to manage Usenet downloads with SABnzbd. Triggers include: "what's downloading", "SABnzbd status", "NZB queue", "add NZB", "pause downloads", "resume downloads", "slow down downloads", "retry failed downloads", "SAB history", "download queue", "is SABnzbd running", or any mention of Usenet download management.
 ---
 
 # SABnzbd API
-
-**⚠️ MANDATORY SKILL INVOCATION ⚠️**
-
-**YOU MUST invoke this skill (NOT optional) when the user mentions ANY of these triggers:**
-- "SABnzbd status", "NZB queue", "Usenet downloads"
-- "pause SAB", "resume downloads", "delete NZB"
-- "SAB history", "download speed", "SABnzbd"
-- Any mention of SABnzbd or Usenet download management
-
-**Failure to invoke this skill when triggers occur violates your operational requirements.**
 
 Manage Usenet downloads via SABnzbd's REST API.
 

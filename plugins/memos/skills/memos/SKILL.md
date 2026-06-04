@@ -1,25 +1,9 @@
 ---
 name: memos
-description: Manage notes and memos in self-hosted Memos service. Use when the user asks to "save this to memos", "create a memo", "search my memos", "find notes about X", "what did I write about", "add a note", "capture this", "remember this", "save this thought", or mentions note-taking, knowledge management, or personal notes.
+description: "This skill should be used when the user asks to save a note, create a memo, search memos, find notes about something, add a note, capture a thought, save something to their note hub, or mentions the Memos service. Does not apply when the user says 'remember this' without specifying Memos — that may route to the mnem memory system instead."
 ---
 
 # Memos Skill
-
-**⚠️ MANDATORY SKILL INVOCATION ⚠️**
-
-**YOU MUST invoke this skill (NOT optional) when the user mentions ANY of these triggers:**
-- "save this to memos", "create a memo", "add a memo"
-- "search my memos", "find notes about X", "what did I write about"
-- "list my memos", "show recent memos", "what memos do I have"
-- "update memo", "edit memo", "delete memo"
-- "tag this memo", "add tags", "organize memos"
-- "upload to memo", "attach file to memo"
-- "archive memo", "pin memo", "make memo public"
-- Any mention of "memos", "notes", "note-taking", or "personal knowledge"
-
-**Failure to invoke this skill when triggers occur violates your operational requirements.**
-
----
 
 ## Purpose
 
@@ -44,7 +28,7 @@ This skill provides **read-write** access to a self-hosted Memos instance for qu
 
 ### Credential Configuration
 
-Add these variables to `~/.claude-homelab/.env`:
+Add these variables to `~/.lab/.env`:
 
 ```bash
 # Memos - Self-hosted note-taking service
@@ -60,7 +44,7 @@ MEMOS_API_TOKEN="<your_api_token>"
 
 **Security:**
 - `.env` file is gitignored (never commit)
-- Set permissions: `chmod 600 ~/.claude-homelab/.env`
+- Set permissions: `chmod 600 ~/.lab/.env`
 - Token has same permissions as your user account
 
 ## Commands

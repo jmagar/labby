@@ -11,7 +11,7 @@ description: This skill should be used when the user says "add proxy config", "c
 
 **HTTP fallback**: No meaningful curl equivalent — SWAG config management requires direct filesystem access. If MCP server is unavailable, surface the issue to the user and suggest restarting it.
 
-**MCP URL**: `${user_config.swag_mcp_url}`
+# MCP URL is provided via plugin configuration (SWAG_MCP_URL)
 
 ---
 

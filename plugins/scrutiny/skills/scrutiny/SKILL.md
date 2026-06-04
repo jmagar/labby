@@ -1,6 +1,6 @@
 ---
 name: scrutiny
-description: Scrutiny — SMART hard-drive health monitoring. Use when the user wants to check drive health, view the dashboard summary, or inspect a device's SMART details on their Scrutiny instance. Talks directly to the Scrutiny web API.
+description: "This skill should be used when the user asks about hard drive or SSD health, SMART data, disk failures, drive temperatures, or storage device status. Triggers include: \"check my drives\", \"are any disks failing\", \"show SMART errors\", \"what's the temperature on my drives\", \"is drive X healthy\", \"check Scrutiny\", or any question about disk health monitoring."
 ---
 
 # Scrutiny

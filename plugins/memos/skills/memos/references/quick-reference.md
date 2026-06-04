@@ -5,10 +5,7 @@ Common operations and copy-paste examples.
 ## Quick Start
 
 ```bash
-# Navigate to skill directory
-cd ~/claude-homelab/skills/memos
-
-# All scripts source credentials from ~/.claude-homelab/.env
+# All scripts source credentials from ~/.lab/.env
 # No additional configuration needed
 ```
 

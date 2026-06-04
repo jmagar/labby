@@ -1,6 +1,6 @@
 ---
 name: tei
-description: TEI — Hugging Face Text Embeddings Inference server. Use when the user wants to embed text, rerank candidates, tokenize, or check the loaded model on their TEI instance. Talks directly to the TEI HTTP API.
+description: "This skill should be used when the user wants to generate text embeddings, rerank a list of candidates by relevance, tokenize text, or inspect the loaded model on their Hugging Face Text Embeddings Inference (TEI) server. Triggers include: \"embed this text\", \"convert to a vector\", \"rerank these results\", \"what model is my TEI server running\", \"tokenize this sentence\", \"check TEI health\"."
 ---
 
 # TEI

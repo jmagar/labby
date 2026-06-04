@@ -1,0 +1,4 @@
+interface:
+  display_name: "Using Labby"
+  short_description: "Operate Labby CLI and gateway tools"
+  default_prompt: "Use $using-labby to inspect the current Labby CLI, gateway, or Code Mode surface and run the appropriate operator workflow."

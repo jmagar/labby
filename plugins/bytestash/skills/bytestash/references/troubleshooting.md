@@ -51,7 +51,7 @@ curl -I https://bytestash.example.com
 
 ### Checks
 ```bash
-grep '^BYTESTASH_' ~/.claude-homelab/.env
+grep '^BYTESTASH_' ~/.lab/.env
 ```
 
 ### Fixes
@@ -95,5 +95,5 @@ Some ByteStash deployments require JWT auth for share endpoints instead of API k
 
 ### Fix
 ```bash
-chmod +x ~/claude-homelab/skills/bytestash/scripts/bytestash-api.sh
+chmod +x skills/bytestash/scripts/bytestash-api.sh
 ```

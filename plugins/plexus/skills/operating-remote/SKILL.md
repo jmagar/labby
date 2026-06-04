@@ -47,6 +47,6 @@ state for operational decisions.
 
 ## Related Context
 
-Plexus pairs well with `syslog-mcp`: recent logs and AI/session history explain
+Plexus pairs well with `cortex:cortex-logs`: recent logs and AI/session history explain
 what changed before the current request. It also composes with service-specific
 skills like `tailscale`, `unraid`, `create-swag-config`, and `homelab-map`.

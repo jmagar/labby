@@ -188,7 +188,7 @@ curl -X POST "$PROWLARR_URL/api/v1/command" \
   -H "X-Api-Key: $PROWLARR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "ApplicationSync"
+    "name": "ApplicationIndexerSync"
   }'
 ```
 
@@ -308,7 +308,7 @@ curl -s "$PROWLARR_URL/api/v1/notification" \
    curl -X POST "$PROWLARR_URL/api/v1/command" \
      -H "X-Api-Key: $PROWLARR_API_KEY" \
      -H "Content-Type: application/json" \
-     -d '{"name": "ApplicationSync"}'
+     -d '{"name": "ApplicationIndexerSync"}'
    ```
 
 ### Workflow: Test All Indexers
@@ -381,7 +381,7 @@ done
 curl -X POST "$PROWLARR_URL/api/v1/command" \
   -H "X-Api-Key: $PROWLARR_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name": "ApplicationSync"}'
+  -d '{"name": "ApplicationIndexerSync"}'
 ```
 
 ### Workflow: Search Comparison Across Indexers

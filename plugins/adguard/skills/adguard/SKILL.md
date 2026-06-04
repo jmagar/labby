@@ -1,6 +1,6 @@
 ---
 name: adguard
-description: AdGuard Home — DNS-level ad blocking and network filtering. Use when the user wants to check their AdGuard instance status, query stats, search the DNS query log, or check filtering. Talks directly to the AdGuard Home control API.
+description: "This skill should be used when the user asks about AdGuard Home status, DNS filtering, or blocked domains. Triggers include: \"is adguard running\", \"how many queries did it block today\", \"show me recent DNS queries\", \"search the DNS log for a domain\", \"is example.com blocked\", \"AdGuard stats\", or any question about DNS-level ad blocking or network filtering."
 ---
 
 # AdGuard
@@ -12,9 +12,9 @@ DNS-level ad blocking and network filtering. Talk to it directly over the AdGuar
 Read the base URL and credentials from `~/.lab/.env`:
 
 ```bash
-ADGUARD_URL=$(grep -E '^ADGUARD_URL='      ~/.lab/.env | cut -d= -f2-)
-ADGUARD_USERNAME=$(grep -E '^ADGUARD_USERNAME=' ~/.lab/.env | cut -d= -f2-)
-ADGUARD_PASSWORD=$(grep -E '^ADGUARD_PASSWORD=' ~/.lab/.env | cut -d= -f2-)
+ADGUARD_URL=$(grep -E '^ADGUARD_URL='      ~/.lab/.env | cut -d= -f2- | tr -d '"')
+ADGUARD_USERNAME=$(grep -E '^ADGUARD_USERNAME=' ~/.lab/.env | cut -d= -f2- | tr -d '"')
+ADGUARD_PASSWORD=$(grep -E '^ADGUARD_PASSWORD=' ~/.lab/.env | cut -d= -f2- | tr -d '"')
 AUTH=(-u "$ADGUARD_USERNAME:$ADGUARD_PASSWORD")
 ```
 

@@ -1,6 +1,6 @@
 ---
 name: neo4j
-description: Neo4j — graph database (nodes, relationships, Cypher queries). Use when the user wants to run Cypher, inspect the schema, or check their Neo4j instance. Talks to Neo4j over its HTTP transactional Cypher API.
+description: "This skill should be used when the user wants to query a Neo4j graph database, run Cypher statements, inspect node labels or relationship types, check schema constraints or indexes, verify Neo4j connectivity, or explore graph data. Triggers include: \"run a Cypher query\", \"what nodes are in my graph\", \"list relationship types\", \"check my Neo4j instance\", \"show me the graph schema\", or any question about graph database queries."
 ---
 
 # Neo4j
@@ -15,7 +15,7 @@ NEO4J_PASSWORD=$(grep -E '^NEO4J_PASSWORD=' ~/.lab/.env | cut -d= -f2-)
 NEO4J_DB=$(grep -E '^NEO4J_DB='         ~/.lab/.env | cut -d= -f2-); NEO4J_DB=${NEO4J_DB:-neo4j}
 # NOTE: ~/.lab/.env stores NEO4J_URL as a bolt:// endpoint, which curl cannot speak.
 # The HTTP API listens separately (default port 7474). Set NEO4J_HTTP_URL to it:
-NEO4J_HTTP_URL="http://tootie:7474"        # adjust host/port to your HTTP listener
+NEO4J_HTTP_URL="http://<neo4j-host>:7474"  # adjust host/port to your HTTP listener
 AUTH=(-u "$NEO4J_USER:$NEO4J_PASSWORD")
 ```
 
@@ -27,9 +27,10 @@ All queries go through `POST /db/<database>/tx/commit` with a `statements` array
 
 ```bash
 cypher() {
+  jq -n --arg stmt "$1" '{"statements":[{"statement":$stmt}]}' | \
   curl -sS "${AUTH[@]}" -H 'Content-Type: application/json' \
     "$NEO4J_HTTP_URL/db/$NEO4J_DB/tx/commit" \
-    -d "{\"statements\":[{\"statement\":\"$1\"}]}"
+    -d @-
 }
 ```
 

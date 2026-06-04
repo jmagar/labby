@@ -1,19 +1,9 @@
 ---
 name: qbittorrent
-description: Manage torrents with qBittorrent. Use when the user asks to "list torrents", "add torrent", "pause torrent", "resume torrent", "delete torrent", "check download status", "torrent speed", "qBittorrent stats", or mentions qBittorrent/qbit torrent management.
+description: This skill should be used when the user asks about torrents, downloading, seeding, or the qBittorrent client. Triggers include: "what's downloading", "list torrents", "add a torrent", "pause/resume/delete torrent", "torrent speed", "download queue", "qbit", "qBittorrent stats", "check download status", or any mention of managing a torrent client.
 ---
 
 # qBittorrent WebUI API
-
-**⚠️ MANDATORY SKILL INVOCATION ⚠️**
-
-**YOU MUST invoke this skill (NOT optional) when the user mentions ANY of these triggers:**
-- "qBittorrent status", "torrent list", "active torrents"
-- "pause torrent", "resume torrent", "delete torrent"
-- "add torrent", "qBit", "download manager"
-- Any mention of qBittorrent or torrent management
-
-**Failure to invoke this skill when triggers occur violates your operational requirements.**
 
 Manage torrents via qBittorrent's WebUI API (v4.1+).
 

@@ -19,7 +19,7 @@ Common issues and their solutions.
 **Solutions:**
 1. Verify token in `.env` file:
    ```bash
-   grep "^MEMOS_API_TOKEN" ~/.claude-homelab/.env
+   grep "^MEMOS_API_TOKEN" ~/.lab/.env
    ```
 
 2. Regenerate token in Memos UI:
@@ -30,7 +30,6 @@ Common issues and their solutions.
 
 3. Test authentication:
    ```bash
-   cd ~/claude-homelab/skills/memos
    bash scripts/user-api.sh whoami
    ```
 
@@ -62,7 +61,7 @@ curl: (7) Failed to connect to memos.example.com port 443
 **Solutions:**
 1. Verify URL:
    ```bash
-   grep "^MEMOS_URL" ~/.claude-homelab/.env
+   grep "^MEMOS_URL" ~/.lab/.env
    ```
 
 2. Test connectivity:
@@ -150,19 +149,19 @@ curl: (60) SSL certificate problem: unable to get local issuer certificate
 
 **Error Message:**
 ```json
-{"error": "Environment file not found", "path": "/home/user/.claude-homelab/.env"}
+{"error": "Environment file not found", "path": "/home/user/.lab/.env"}
 ```
 
 **Solution:**
 1. Create `.env` file:
    ```bash
-   touch ~/.claude-homelab/.env
-   chmod 600 ~/.claude-homelab/.env
+   touch ~/.lab/.env
+   chmod 600 ~/.lab/.env
    ```
 
 2. Add credentials:
    ```bash
-   cat >> ~/.claude-homelab/.env <<'EOF'
+   cat >> ~/.lab/.env <<'EOF'
    MEMOS_URL="https://memos.example.com"
    MEMOS_API_TOKEN="<your_api_token>"
    EOF
@@ -178,7 +177,7 @@ curl: (60) SSL certificate problem: unable to get local issuer certificate
 **Solution:**
 1. Check `.env` contains both variables:
    ```bash
-   grep "^MEMOS" ~/.claude-homelab/.env
+   grep "^MEMOS" ~/.lab/.env
    ```
 
 2. Ensure no typos in variable names (case-sensitive)
@@ -211,7 +210,7 @@ bash: ./scripts/memo-api.sh: Permission denied
 
 **Solution:** Make scripts executable:
 ```bash
-chmod +x ~/claude-homelab/skills/memos/scripts/*.sh
+chmod +x skills/memos/scripts/*.sh
 ```
 
 ## Data Issues
@@ -357,7 +356,7 @@ curl -v -H "Authorization: Bearer $MEMOS_API_TOKEN" \
 
 3. Verify API access directly:
    ```bash
-   source ~/.claude-homelab/.env
+   source ~/.lab/.env
    curl -H "Authorization: Bearer $MEMOS_API_TOKEN" \
      "https://memos.example.com/api/v1/users/1"
    ```

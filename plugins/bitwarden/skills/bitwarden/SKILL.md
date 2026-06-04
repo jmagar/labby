@@ -1,6 +1,6 @@
 ---
 name: bitwarden
-description: Use whenever the user mentions Bitwarden — vault items, logins, passwords, secure notes, cards, identities, folders, collections, attachments, Sends, organizations (members, groups, policies, collections, events, subscription, device approvals), password/passphrase generation, vault sync/lock/unlock, BW_SESSION handling, the Bitwarden CLI (`bw`), or the Bitwarden MCP server. Prefer the MCP tools (`mcp__bitwarden__*`) over shelling out to `bw`; only fall back to the CLI for session lifecycle (unlock/lock/status) and operations the MCP server does not expose.
+description: "This skill should be used when the user wants to interact with their Bitwarden password vault — looking up, saving, generating, or sharing passwords, logins, secure notes, cards, identities, or attachments; managing Bitwarden Sends; administering organization members, groups, collections, or policies; syncing, locking, or unlocking the vault; or doing anything involving the Bitwarden MCP server or bw CLI. Triggers include: \"look up my password for X\", \"generate a strong password\", \"save this login\", \"share this securely via Send\", \"unlock Bitwarden\"."
 ---
 
 # Bitwarden

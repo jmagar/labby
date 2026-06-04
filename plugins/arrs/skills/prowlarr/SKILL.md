@@ -1,20 +1,9 @@
 ---
 name: prowlarr
-description: Search indexers and manage Prowlarr. Use when the user asks to "search for a torrent", "search indexers", "find a release", "check indexer status", "list indexers", "prowlarr search", "sync indexers", or mentions Prowlarr/indexer management.
+description: This skill should be used when the user asks to search indexers, find a release, check indexer status, list indexers, sync indexers to Sonarr or Radarr, connect Prowlarr to another app, or mentions Prowlarr or indexer management.
 ---
 
 # Prowlarr Skill
-
-**⚠️ MANDATORY SKILL INVOCATION ⚠️**
-
-**YOU MUST invoke this skill (NOT optional) when the user mentions ANY of these triggers:**
-- "search for a torrent", "search indexers", "find a release"
-- "search Prowlarr", "Prowlarr indexers", "indexer search"
-- "check indexer status", "test indexers", "Prowlarr stats"
-- "list indexers", "sync indexers", "push indexers to Sonarr"
-- Any mention of Prowlarr or indexer management
-
-**Failure to invoke this skill when triggers occur violates your operational requirements.**
 
 Search across all your indexers and manage Prowlarr via API.
 

@@ -1,6 +1,6 @@
 ---
 name: claude-in-mobile
-description: Use when the user wants to use claude-in-mobile, its MCP server, or its native CLI to automate Android devices/emulators, iOS Simulators, Aurora OS devices, macOS desktop apps, Chrome/Chromium CDP sessions, screenshots/logs, UI inspection, accessibility or visual checks, multi-device flows, or app-store release operations.
+description: "This skill should be used when the user wants to automate an iOS Simulator, drive an Android device or emulator via MCP tools, test on multiple devices simultaneously, run a visual regression baseline on mobile, audit accessibility on a real device, release an app to the Play Store, or use the claude-in-mobile CLI or MCP server. Does not apply for structured end-to-end test reports (use android-app-testing or desktop-app-testing for those)."
 ---
 
 # Claude in Mobile

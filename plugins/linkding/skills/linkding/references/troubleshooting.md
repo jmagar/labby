@@ -43,7 +43,7 @@ Common issues and solutions when working with the Linkding API.
 4. **Check environment variables:**
    ```bash
    # Load from .env
-   source ~/.claude-homelab/.env
+   source ~/.lab/.env
 
    echo "URL: $LINKDING_URL"
    echo "API Key set: $([ -n "$LINKDING_API_KEY" ] && echo "Yes" || echo "No")"

@@ -1,6 +1,6 @@
 ---
 name: qdrant
-description: Qdrant — vector database for semantic search and embeddings. Use when the user wants to manage their Qdrant instance, inspect collections, upsert points, or run vector similarity search. Talks directly to the Qdrant REST API.
+description: "This skill should be used when the user asks about vector search, semantic search, or managing a Qdrant vector database. Triggers include: \"list collections\", \"create a collection\", \"search by vector\", \"upsert points\", \"run a similarity search\", \"find nearest neighbors\", \"check Qdrant health\", \"embedding storage\", or any mention of managing a Qdrant instance."
 ---
 
 # Qdrant

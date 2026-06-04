@@ -1,6 +1,6 @@
 ---
 name: dozzle
-description: Direct Dozzle API and native Dozzle MCP workflow for the real-time Docker container log viewer. Use when the user wants to inspect Dozzle health, version, containers, logs, authentication failures, session-cookie refresh, auth setup, or Dozzle MCP. Uses `DOZZLE_URL` and optional `DOZZLE_SESSION_COOKIE`; Dozzle MCP uses the native Streamable HTTP `/api/mcp` endpoint, not the stale Lab command wrapper.
+description: "This skill should be used when the user wants to view Docker container logs via Dozzle, check Dozzle health or version, list running containers, troubleshoot a Dozzle 401 or expired session cookie, configure Dozzle authentication, or enable and use Dozzle's native MCP endpoint. Also use when the user asks why mcp__lab__dozzle or lab dozzle does not work — the Lab command wrapper is stale; the native Dozzle MCP server is the correct path."
 ---
 
 # Dozzle

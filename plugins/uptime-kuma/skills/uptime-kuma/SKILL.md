@@ -1,6 +1,6 @@
 ---
 name: uptime-kuma
-description: Self-hosted Uptime Kuma monitoring, read-only via direct HTTP. Use when the user wants to check monitor up/down state, uptime, response times, or a status page. Reads the Prometheus /metrics endpoint (API-key auth) and public status-page JSON. Does NOT create, edit, pause, or delete monitors — that requires Uptime Kuma's socket.io API, which is not reachable over plain HTTP.
+description: "This skill should be used when the user asks whether a service or monitor is up or down, wants to view uptime percentages, check response times, inspect a public status page, or see which monitors are currently failing. Triggers include: \"is my site down\", \"check uptime\", \"show monitor status\", \"which monitors are failing\", \"Uptime Kuma status\", or any question about service availability monitoring."
 ---
 
 # Uptime Kuma
