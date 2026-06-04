@@ -298,15 +298,28 @@ async fn plugin_deploy_preview(id: &str) -> Result<Value, ToolError> {
 
 const MAX_ARTIFACTS: usize = 200;
 const MAX_ARTIFACT_BYTES: u64 = 256 * 1024;
+/// Cap on total serialized content across all artifacts.  A realistic plugin
+/// with 50 files at 10 KB each is 500 KB; 512 KB keeps single-collection
+/// responses well inside rmcp's message limits.
+const MAX_TOTAL_CONTENT_BYTES: usize = 512 * 1024;
 
 pub(crate) fn walk_artifacts(root: &Path, dir: &Path) -> Result<Vec<Artifact>, ToolError> {
     let mut out = Vec::new();
-    walk_artifacts_into(root, dir, &mut out)?;
+    let mut total_content_bytes: usize = 0;
+    walk_artifacts_into(root, dir, &mut out, &mut total_content_bytes)?;
     Ok(out)
 }
 
-fn walk_artifacts_into(root: &Path, dir: &Path, out: &mut Vec<Artifact>) -> Result<(), ToolError> {
+fn walk_artifacts_into(
+    root: &Path,
+    dir: &Path,
+    out: &mut Vec<Artifact>,
+    total_content_bytes: &mut usize,
+) -> Result<(), ToolError> {
     if out.len() >= MAX_ARTIFACTS {
+        return Ok(());
+    }
+    if *total_content_bytes >= MAX_TOTAL_CONTENT_BYTES {
         return Ok(());
     }
 
@@ -328,7 +341,7 @@ fn walk_artifacts_into(root: &Path, dir: &Path, out: &mut Vec<Artifact>) -> Resu
                 continue;
             }
         };
-        if out.len() >= MAX_ARTIFACTS {
+        if out.len() >= MAX_ARTIFACTS || *total_content_bytes >= MAX_TOTAL_CONTENT_BYTES {
             break;
         }
         let p = entry.path();
@@ -360,7 +373,7 @@ fn walk_artifacts_into(root: &Path, dir: &Path, out: &mut Vec<Artifact>) -> Resu
             continue;
         }
         if ft.is_dir() {
-            walk_artifacts_into(root, &p, out)?;
+            walk_artifacts_into(root, &p, out, total_content_bytes)?;
             continue;
         }
         if entry
@@ -402,6 +415,18 @@ fn walk_artifacts_into(root: &Path, dir: &Path, out: &mut Vec<Artifact>) -> Resu
                 continue;
             }
         };
+        // Skip this artifact if it would exceed the total payload cap.
+        if *total_content_bytes + content.len() > MAX_TOTAL_CONTENT_BYTES {
+            tracing::debug!(
+                service = "marketplace",
+                event = "artifact.read.skipped",
+                path = %p.display(),
+                total_content_bytes = *total_content_bytes,
+                "total content cap reached; skipping remaining artifacts"
+            );
+            break;
+        }
+        *total_content_bytes += content.len();
         out.push(Artifact {
             path: rel,
             lang,
@@ -690,11 +715,32 @@ async fn sources_add(
     dead_code,
     reason = "reserved for future marketplace source persistence"
 )]
-fn persist_marketplace_auto_update(target: &str, auto_update: bool) -> Result<(), ToolError> {
+async fn persist_marketplace_auto_update(target: &str, auto_update: bool) -> Result<(), ToolError> {
+    let target = target.to_string();
+    tokio::task::spawn_blocking(move || {
+        persist_marketplace_auto_update_sync(&target, auto_update)
+    })
+    .await
+    .map_err(|e| ToolError::Sdk {
+        sdk_kind: "internal_error".into(),
+        message: format!("spawn_blocking failed: {e}"),
+    })?
+}
+
+fn persist_marketplace_auto_update_sync(target: &str, auto_update: bool) -> Result<(), ToolError> {
     let path = client::plugins_root()?.join("known_marketplaces.json");
     if !path.exists() {
         return Ok(());
     }
+
+    // Take an advisory lock on the file for the duration of the read-modify-write
+    // cycle to prevent concurrent write corruption when both MCP server and CLI
+    // access the file simultaneously.
+    let lock_file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .map_err(io_internal)?;
+    lock_file.lock().map_err(io_internal)?;
 
     let mut value = read_json(&path)?;
     let Some(entries) = value.as_object_mut() else {
@@ -723,8 +769,16 @@ fn persist_marketplace_auto_update(target: &str, auto_update: bool) -> Result<()
         return Ok(());
     }
 
+    // Atomic write: write to a temp file in the same directory, then rename.
+    let temp_dir = path.parent().unwrap_or(Path::new("."));
     let bytes = serde_json::to_vec_pretty(&value).map_err(io_internal)?;
-    std::fs::write(path, bytes).map_err(io_internal)
+    let mut temp = NamedTempFile::new_in(temp_dir).map_err(io_internal)?;
+    temp.write_all(&bytes).map_err(io_internal)?;
+    temp.flush().map_err(io_internal)?;
+    temp.persist(&path).map_err(|e| io_internal(e.error))?;
+
+    // Lock is released when lock_file is dropped.
+    Ok(())
 }
 
 async fn plugin_shell(verb: &'static str, id: &str) -> Result<Value, ToolError> {
