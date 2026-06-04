@@ -6,16 +6,29 @@ use tokio::sync::RwLock;
 
 /// Pre-built service clients, constructed once at startup from environment variables.
 ///
-/// Each optional field is `None` when the required env vars are absent.
-/// Surfaces extract the pre-built client to avoid per-request env reads and
-/// `reqwest::Client` (connection pool) construction.
+/// Fields are added here as services are onboarded. Each optional field is `None`
+/// when the required env vars are absent. Surfaces extract the pre-built client to
+/// avoid per-request env reads and `reqwest::Client` (connection pool) construction.
 ///
-/// # TODO(perf): sub-dispatcher threading
+/// # Client-resolution patterns
 ///
-/// Radarr and `UniFi` use multi-level dispatch — their sub-dispatchers
-/// (`movies`, `queue`, `devices`, etc.) each call `require_client()` independently.
-/// Threading the pre-built client through those sub-dispatchers is a follow-on task.
-/// `ByteStash` and `SABnzbd` are fully wired to use the client here.
+/// Two supported patterns (see `dispatch/CLAUDE.md` for the canonical templates):
+///
+/// 1. **`AppState`-wired (preferred):** add an `Option<FooClient>` field here,
+///    populate it in `from_env()` via `dispatch::foo::client::client_from_env()`.
+///    API handlers receive the pre-built client from `AppState`.
+///
+/// 2. **`require_client()` fallback:** used by MCP/CLI dispatch when `AppState`
+///    is not available (e.g. CLI invocations without a running server). Each
+///    service's `dispatch/<service>/client.rs` exposes `require_client()` which
+///    reads env vars on demand. This is the only permitted per-request env read.
+///
+/// Multi-instance services use `InstancePool<C>` (from `dispatch::helpers`) instead
+/// of a bespoke `OnceLock`. `InstancePool::build(prefix, factory)` scans for
+/// `{PREFIX}_URL` (default) and `{PREFIX}_{LABEL}_URL` (named) at first call.
+///
+/// Do NOT create per-service bespoke pools, per-method sub-dispatchers that
+/// re-read env vars, or inline `std::env::var` calls outside `client.rs`.
 #[derive(Clone, Default)]
 pub struct ServiceClients {
     // [lab-scaffold: state-fields]
