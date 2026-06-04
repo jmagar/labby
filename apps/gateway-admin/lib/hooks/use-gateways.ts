@@ -16,6 +16,7 @@ import {
   mockReloadResult,
   mockTestResult,
 } from '@/lib/api/mock-data'
+import { previewExposurePolicy as sharedPreviewExposurePolicy } from '@/lib/api/exposure-policy-matcher'
 import type {
   Gateway,
   CreateGatewayInput,
@@ -467,60 +468,10 @@ export function useGatewayMutations() {
       const gateway = mockGateways.find(g => g.id === id)
       if (!gateway) throw new Error('Gateway not found')
 
-      if (patterns.length === 0) {
-        return {
-          matched_tools: gateway.discovery.tools.map((tool) => ({
-            name: tool.name,
-            matched_by: '*',
-          })),
-          unmatched_patterns: [],
-          filtered_tools: [],
-          exposed_count: gateway.discovery.tools.length,
-          filtered_count: 0,
-        }
-      }
-      
-      const matchedTools: Array<{ name: string; matched_by: string }> = []
-      const filteredTools: string[] = []
-      const usedPatterns = new Set<string>()
-
-      for (const tool of gateway.discovery.tools) {
-        let matched = false
-        for (const pattern of patterns) {
-          if (pattern === '*') {
-            matchedTools.push({ name: tool.name, matched_by: pattern })
-            usedPatterns.add(pattern)
-            matched = true
-            break
-          } else if (pattern.endsWith('*')) {
-            const prefix = pattern.slice(0, -1)
-            if (tool.name.startsWith(prefix)) {
-              matchedTools.push({ name: tool.name, matched_by: pattern })
-              usedPatterns.add(pattern)
-              matched = true
-              break
-            }
-          } else if (tool.name === pattern) {
-            matchedTools.push({ name: tool.name, matched_by: pattern })
-            usedPatterns.add(pattern)
-            matched = true
-            break
-          }
-        }
-        if (!matched) {
-          filteredTools.push(tool.name)
-        }
-      }
-
-      const unmatchedPatterns = patterns.filter(p => !usedPatterns.has(p))
-
-      return {
-        matched_tools: matchedTools,
-        unmatched_patterns: unmatchedPatterns,
-        filtered_tools: filteredTools,
-        exposed_count: matchedTools.length,
-        filtered_count: filteredTools.length,
-      }
+      // Use the shared pure matcher so mock and real preview paths are
+      // semantically identical (lab-2oec.7).
+      const toolNames = gateway.discovery.tools.map((t) => t.name)
+      return sharedPreviewExposurePolicy(toolNames, patterns)
     }
     return gatewayApi.previewExposurePolicy(id, patterns, signal)
   }, [])

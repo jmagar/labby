@@ -10,7 +10,10 @@ import type {
   UpdateGatewayInput,
 } from '../types/gateway'
 import { EXPOSE_NONE_PATTERN, stripExposeNonePattern } from '../api/tool-exposure-draft.ts'
-import { previewExposurePolicy as sharedPreviewExposurePolicy } from '../api/exposure-policy-matcher.ts'
+import {
+  matchPattern,
+  previewExposurePolicy as sharedPreviewExposurePolicy,
+} from '../api/exposure-policy-matcher.ts'
 import { defaultGatewayBearerEnvName } from '../gateway-env.ts'
 
 export interface BackendSurfaceStateView {
@@ -168,47 +171,12 @@ function normalizeEnv(env?: Record<string, string>): Record<string, string> | un
   return entries.length > 0 ? Object.fromEntries(entries) : undefined
 }
 
-function matchPattern(toolName: string, pattern: string): boolean {
-  if (pattern === '*') {
-    return true
-  }
-
-  const parts = pattern.split('*')
-  if (parts.length === 1) {
-    return pattern === toolName
-  }
-
-  const anchoredStart = !pattern.startsWith('*')
-  const anchoredEnd = !pattern.endsWith('*')
-  const nonEmptyParts = parts.filter((part) => part.length > 0)
-
-  if (nonEmptyParts.length === 0) {
-    return true
-  }
-
-  let cursor = 0
-  for (const [index, part] of nonEmptyParts.entries()) {
-    if (index === 0 && anchoredStart) {
-      if (!toolName.slice(cursor).startsWith(part)) {
-        return false
-      }
-      cursor += part.length
-      continue
-    }
-
-    const found = toolName.slice(cursor).indexOf(part)
-    if (found === -1) {
-      return false
-    }
-    cursor += found + part.length
-  }
-
-  if (anchoredEnd) {
-    return toolName.endsWith(nonEmptyParts[nonEmptyParts.length - 1]!)
-  }
-
-  return true
-}
+// Re-export the shared matcher so call sites within this module continue to
+// compile unmodified.  The canonical implementation lives in
+// `lib/api/exposure-policy-matcher.ts` and is shared with the client-side
+// mock preview path — keeping both paths on the same algorithm eliminates
+// the semantic drift identified in lab-2oec.7.
+export { matchPattern }
 
 function matchTool(toolName: string, patterns?: string[] | null): string | null {
   if (!patterns || patterns.length === 0) {
