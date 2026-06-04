@@ -243,7 +243,7 @@ pub fn export_plugin_env_from(env: PathBuf) -> Result<PluginExportOutcome, ToolE
             continue;
         }
         if let Some((k, v)) = trimmed.split_once('=') {
-            env_map.insert(k.trim(), v.to_string());
+            env_map.insert(k.trim(), env_merge::strip_quotes(v.trim()));
         }
     }
 
