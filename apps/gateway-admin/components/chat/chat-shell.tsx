@@ -11,6 +11,7 @@ import { SessionSidebar } from './session-sidebar'
 import { MessageThread } from './message-thread'
 import { ChatInput, type ChatInputPayload } from './chat-input'
 import { SettingsPanel } from './settings-panel'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
 import type { ACPMessage } from './types'
 import {
   useChatSessionData,
@@ -301,17 +302,38 @@ export function ChatShell() {
           />
         </div>
 
-        {settingsOpen && (
-          <SettingsPanel
-            agent={selectedAgent}
-            onClose={() => setSettingsOpen(false)}
-            systemPrompt={systemPrompt}
-            onSystemPromptChange={setSystemPrompt}
-            temperature={temperature}
-            onTemperatureChange={setTemperature}
-            maxTokens={maxTokens}
-            onMaxTokensChange={setMaxTokens}
-          />
+        {/* Desktop: fixed side rail. Mobile: Sheet overlay to avoid crushing the message thread. */}
+        {isMobileViewport ? (
+          <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+            <SheetContent
+              side="right"
+              className="w-[min(88vw,320px)] border-aurora-border-default bg-aurora-nav-bg p-0 sm:max-w-xs"
+            >
+              <SettingsPanel
+                agent={selectedAgent}
+                onClose={() => setSettingsOpen(false)}
+                systemPrompt={systemPrompt}
+                onSystemPromptChange={setSystemPrompt}
+                temperature={temperature}
+                onTemperatureChange={setTemperature}
+                maxTokens={maxTokens}
+                onMaxTokensChange={setMaxTokens}
+              />
+            </SheetContent>
+          </Sheet>
+        ) : (
+          settingsOpen && (
+            <SettingsPanel
+              agent={selectedAgent}
+              onClose={() => setSettingsOpen(false)}
+              systemPrompt={systemPrompt}
+              onSystemPromptChange={setSystemPrompt}
+              temperature={temperature}
+              onTemperatureChange={setTemperature}
+              maxTokens={maxTokens}
+              onMaxTokensChange={setMaxTokens}
+            />
+          )
         )}
       </div>
     </div>

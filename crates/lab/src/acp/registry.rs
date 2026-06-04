@@ -23,8 +23,8 @@ use lab_apis::acp::types::{
     AcpEvent, AcpModelOption, AcpProviderHealth, AcpSessionState, AcpSessionSummary,
 };
 
-use crate::dispatch::acp::params::BulkCloseSelector;
-use crate::dispatch::acp::persistence::SqliteAcpPersistence;
+use crate::acp::sqlite_persistence::SqliteAcpPersistence;
+use crate::acp::types::{BulkCloseSelector, LocalAttachmentContent, LocalPromptAttachment};
 use crate::dispatch::error::ToolError;
 
 use super::runtime::{
@@ -509,7 +509,7 @@ impl AcpSessionRegistry {
         &self,
         session_id: &str,
         prompt: &str,
-        attachments: Vec<crate::dispatch::acp::params::LocalPromptAttachment>,
+        attachments: Vec<LocalPromptAttachment>,
         principal: &str,
         model_id: Option<&str>,
         options: PromptSessionOptions,
@@ -518,10 +518,8 @@ impl AcpSessionRegistry {
             .into_iter()
             .map(|attachment| {
                 let content = match attachment.content {
-                    crate::dispatch::acp::params::LocalAttachmentContent::Text { text } => {
-                        PromptAttachmentContent::Text(text)
-                    }
-                    crate::dispatch::acp::params::LocalAttachmentContent::Blob { base64 } => {
+                    LocalAttachmentContent::Text { text } => PromptAttachmentContent::Text(text),
+                    LocalAttachmentContent::Blob { base64 } => {
                         PromptAttachmentContent::Blob(base64)
                     }
                 };
@@ -1156,7 +1154,7 @@ impl AcpSessionRegistry {
         &self,
         input: StartSessionInput,
         prompt_text: &str,
-        prompt_attachments: Vec<crate::dispatch::acp::params::LocalPromptAttachment>,
+        prompt_attachments: Vec<LocalPromptAttachment>,
         principal: &str,
         prompt_options: PromptSessionOptions,
     ) -> Result<StartAndPromptResult, ToolError> {
@@ -1681,6 +1679,13 @@ impl AcpSessionRegistry {
         let mut restored = 0usize;
 
         for summary in sessions {
+            // Closed sessions are excluded from the active working set — they are
+            // preserved in SQLite for audit purposes but must not re-appear in
+            // list_sessions output after a restart. Skip them here.
+            if summary.state == AcpSessionState::Closed {
+                continue;
+            }
+
             let principal = match &summary.principal {
                 Some(p) if !p.is_empty() => p.clone(),
                 _ => continue,
@@ -1795,6 +1800,25 @@ impl AcpSessionRegistry {
             shutting_down: Arc::new(AtomicBool::new(false)),
             idle_timeout: Duration::from_millis(100),
             provider_models: Arc::new(RwLock::new(models)),
+        }
+    }
+
+    /// Create a test registry pre-seeded with an existing persistence.
+    /// Background tasks are NOT spawned so tests run in isolation.
+    #[cfg(test)]
+    pub fn new_for_tests_with_persistence(db: SqliteAcpPersistence) -> Self {
+        let cell = OnceCell::new();
+        // set() only fails if the cell is already initialized, which is
+        // impossible on a freshly-created OnceCell.
+        drop(cell.set(db));
+        Self {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            persistence: Arc::new(cell),
+            default_cwd: ".".to_string(),
+            recent_creations: Arc::new(Mutex::new(VecDeque::new())),
+            shutting_down: Arc::new(AtomicBool::new(false)),
+            idle_timeout: Duration::from_millis(100),
+            provider_models: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -2594,5 +2618,56 @@ mod tests {
     fn utf8_tail_by_bytes_never_splits_multibyte_characters() {
         assert_eq!(utf8_tail_by_bytes("a🙂b", 2), "b");
         assert_eq!(utf8_tail_by_bytes("a🙂b", 5), "🙂b");
+    }
+
+    /// Regression: closed sessions persisted in SQLite must not re-appear in
+    /// list_sessions after a restart (restore_from_db must skip Closed rows).
+    /// See lab-wykt.
+    #[tokio::test]
+    async fn test_restore_from_db_skips_closed_sessions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("test-acp.db");
+        let db = SqliteAcpPersistence::open(db_path)
+            .await
+            .expect("open test DB");
+
+        let now = jiff::Timestamp::now().to_string();
+
+        // Insert one active session and one closed session.
+        let active = AcpSessionSummary {
+            id: "active-sess".to_string(),
+            provider: "codex-acp".to_string(),
+            title: "Active".to_string(),
+            cwd: ".".to_string(),
+            state: AcpSessionState::Idle,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            principal: Some("alice".to_string()),
+            provider_session_id: None,
+            agent_name: None,
+            agent_version: None,
+            model_id: None,
+            model_name: None,
+            config_options: vec![],
+        };
+        let closed = AcpSessionSummary {
+            id: "closed-sess".to_string(),
+            state: AcpSessionState::Closed,
+            title: "Closed".to_string(),
+            principal: Some("alice".to_string()),
+            ..active.clone()
+        };
+
+        db.save_session(&active).await.expect("save active");
+        db.save_session(&closed).await.expect("save closed");
+
+        // Simulate restart: create a fresh registry with the same DB and restore.
+        let registry = AcpSessionRegistry::new_for_tests_with_persistence(db);
+        registry.restore_from_db().await;
+
+        // Only the active session should be present; the closed one must be excluded.
+        let sessions = registry.list_sessions("alice").await;
+        assert_eq!(sessions.len(), 1, "only active session should be restored");
+        assert_eq!(sessions[0].id, "active-sess");
     }
 }
