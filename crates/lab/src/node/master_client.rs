@@ -169,7 +169,15 @@ impl MasterClient {
             Some(host) => host.to_string(),
             None => resolve_local_hostname()?,
         };
-        let port = port_override.or(config.mcp.port).unwrap_or(8765);
+        // Priority: explicit override → LAB_MCP_HTTP_PORT env var → config → default 8765
+        // (lab-zc5r: env var was previously ignored)
+        let env_port = std::env::var("LAB_MCP_HTTP_PORT")
+            .ok()
+            .and_then(|v| v.trim().parse::<u16>().ok());
+        let port = port_override
+            .or(env_port)
+            .or(config.mcp.port)
+            .unwrap_or(8765);
         Self::with_bearer_token(format!("http://{host}:{port}"), master_bearer_token())
     }
 
