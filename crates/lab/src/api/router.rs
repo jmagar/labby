@@ -1,13 +1,14 @@
 //! Top-level axum router — mounts `POST /v1/<service>` for every enabled service
 //! and the MCP streamable HTTP transport at `/mcp`.
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Query, State},
+    extract::{ConnectInfo, Query, State},
     http::{HeaderName, HeaderValue, Method, Request, StatusCode, header},
     middleware::Next,
     response::{Html, IntoResponse},
@@ -233,17 +234,20 @@ async fn auth_jwks(State(state): State<AppState>) -> Result<impl IntoResponse, L
 
 async fn auth_register(
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     body: Json<lab_auth::types::ClientRegistrationRequest>,
 ) -> Result<impl IntoResponse, LabAuthError> {
-    Ok(lab_auth::authorize::register_client(State(app_auth_state(&state)?), body).await?)
+    Ok(lab_auth::authorize::register_client(State(app_auth_state(&state)?), ConnectInfo(addr), body).await?)
 }
 
 async fn auth_authorize(
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     query: Query<lab_auth::types::AuthorizeQuery>,
 ) -> Result<impl IntoResponse, LabAuthError> {
     Ok(lab_auth::authorize::authorize(
         State(app_auth_state_with_protected_routes(&state).await?),
+        ConnectInfo(addr),
         query,
     )
     .await?)
@@ -251,9 +255,10 @@ async fn auth_authorize(
 
 async fn auth_browser_login(
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     query: Query<lab_auth::types::BrowserLoginQuery>,
 ) -> Result<impl IntoResponse, LabAuthError> {
-    Ok(lab_auth::authorize::browser_login(State(app_auth_state(&state)?), query).await?)
+    Ok(lab_auth::authorize::browser_login(State(app_auth_state(&state)?), ConnectInfo(addr), query).await?)
 }
 
 async fn auth_callback(

@@ -14,14 +14,13 @@ use futures::stream::FuturesUnordered;
 
 use crate::registry::{RegisteredService, ToolRegistry};
 
-use super::connect_stdio::connect_in_process_service_peer;
 use super::entries::{
     failed_in_process_entry, failed_in_process_entry_from_existing, healthy_in_process_entry,
 };
 use super::helpers::{
     IN_PROCESS_DISCOVERY_TIMEOUT, cached_upstream_tool, in_process_upstream_name,
 };
-use super::{InProcessConnector, InProcessRegistration, UpstreamPool};
+use super::{InProcessConnector, UpstreamPool};
 
 impl UpstreamPool {
     pub async fn register_in_process_service_peers(&self, registry: &ToolRegistry) {
@@ -35,19 +34,13 @@ impl UpstreamPool {
     }
 
     async fn register_in_process_service_list(&self, services: Vec<RegisteredService>) {
-        let connector: InProcessConnector = Arc::new(|service| {
-            Box::pin(async move {
-                let upstream_name = in_process_upstream_name(service.name);
-                let entry_name: Arc<str> = Arc::from(upstream_name.as_str());
-                let (conn, tools) = connect_in_process_service_peer(&service).await?;
-                Ok(InProcessRegistration {
-                    connection: Some(conn),
-                    tools,
-                    entry_name,
-                    upstream_name,
-                })
-            })
-        });
+        let Some(connector) = self.in_process_connector.clone() else {
+            tracing::warn!(
+                service_count = services.len(),
+                "in-process peer registration skipped: no connector was provided by the surface"
+            );
+            return;
+        };
         self.register_in_process_service_list_with_connector(services, connector)
             .await;
     }
