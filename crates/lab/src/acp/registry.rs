@@ -93,7 +93,8 @@ struct Session {
     summary: RwLock<AcpSessionSummary>,
     handle: Mutex<Option<RuntimeHandle>>,
     subscribers: Mutex<Vec<mpsc::Sender<Arc<AcpEvent>>>>,
-    events: RwLock<Vec<AcpEvent>>,
+    /// In-memory event ring buffer. Capped at 500 events; `pop_front` is O(1).
+    events: RwLock<VecDeque<Arc<AcpEvent>>>,
     /// Never held across an `.await` — use std::sync::Mutex for lower overhead.
     next_seq: std::sync::Mutex<u64>,
     /// Never held across an `.await` — use std::sync::Mutex for lower overhead.
@@ -118,7 +119,7 @@ impl Session {
             summary: RwLock::new(summary),
             handle: Mutex::new(None),
             subscribers: Mutex::new(Vec::new()),
-            events: RwLock::new(Vec::new()),
+            events: RwLock::new(VecDeque::new()),
             next_seq: std::sync::Mutex::new(next_seq),
             last_activity: std::sync::Mutex::new(Instant::now()),
         })
@@ -842,9 +843,10 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
             },
         );
 
+        let switch_event = Arc::new(switch_event);
         persist_session_event(self, &switch_event).await;
-        apply_session_event(session, &switch_event).await;
-        let _ = fanout_event(session, Arc::new(switch_event)).await;
+        let _ = fanout_event(session, Arc::clone(&switch_event)).await;
+        apply_session_event(session, switch_event).await;
 
         let old_runtime = {
             let mut handle = session.handle.lock().await;
@@ -1435,14 +1437,16 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
     ) {
         let registry = self.clone();
         tokio::spawn(async move {
-            while let Some(event) = rx.recv().await {
-                let event = next_session_event(&session, event);
+            while let Some(raw_event) = rx.recv().await {
+                // Allocate Arc once; share via cheap Arc::clone across all paths.
+                let event = Arc::new(next_session_event(&session, raw_event));
                 persist_session_event(&registry, &event).await;
-                apply_session_event(&session, &event).await;
+                // Arc::clone gives apply_session_event ownership without deep copy.
+                let dropped = fanout_event(&session, Arc::clone(&event)).await;
+                apply_session_event(&session, Arc::clone(&event)).await;
 
-                let dropped = fanout_event(&session, Arc::new(event.clone())).await;
                 if dropped > 0 {
-                    let marker = next_session_event(
+                    let marker = Arc::new(next_session_event(
                         &session,
                         AcpEvent::ProviderInfo {
                             id: uuid::Uuid::new_v4().to_string(),
@@ -1456,7 +1460,7 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
                                 "after_seq": event.seq(),
                             }),
                         },
-                    );
+                    ));
                     tracing::warn!(
                         surface = "acp", service = "registry", action = "fanout.backpressure",
                         session_id = %session.id, dropped_subscribers = dropped,
@@ -1464,8 +1468,8 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
                         "subscriber backpressure — subscribers removed, replay required",
                     );
                     persist_session_event(&registry, &marker).await;
-                    apply_session_event(&session, &marker).await;
-                    let _ = fanout_event(&session, Arc::new(marker)).await;
+                    let _ = fanout_event(&session, Arc::clone(&marker)).await;
+                    apply_session_event(&session, marker).await;
                 }
             }
 
@@ -1506,11 +1510,12 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
                         state: AcpSessionState::Failed,
                     },
                 );
+                let failed = Arc::new(failed);
                 persist_session_event(&registry, &failed).await;
-                apply_session_event(&session, &failed).await;
-                let _ = fanout_event(&session, Arc::new(failed)).await;
+                let _ = fanout_event(&session, Arc::clone(&failed)).await;
+                apply_session_event(&session, failed).await;
 
-                let exit_event = next_session_event(
+                let exit_event = Arc::new(next_session_event(
                     &session,
                     AcpEvent::ProviderInfo {
                         id: uuid::Uuid::new_v4().to_string(),
@@ -1524,10 +1529,10 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
                             "status": "failed",
                         }),
                     },
-                );
+                ));
                 persist_session_event(&registry, &exit_event).await;
-                apply_session_event(&session, &exit_event).await;
-                let _ = fanout_event(&session, Arc::new(exit_event)).await;
+                let _ = fanout_event(&session, Arc::clone(&exit_event)).await;
+                apply_session_event(&session, exit_event).await;
 
                 tracing::error!(
                     surface = "acp", service = "registry", action = "runtime.exit",
@@ -1716,10 +1721,11 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
                         state: AcpSessionState::Failed,
                     },
                 );
+                let failed = Arc::new(failed);
                 persist_session_event(self, &failed).await;
-                apply_session_event(&session, &failed).await;
+                apply_session_event(&session, failed).await;
 
-                let info = next_session_event(
+                let info = Arc::new(next_session_event(
                     &session,
                     AcpEvent::ProviderInfo {
                         id: uuid::Uuid::new_v4().to_string(),
@@ -1733,9 +1739,9 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
                             "status": "failed",
                         }),
                     },
-                );
+                ));
                 persist_session_event(self, &info).await;
-                apply_session_event(&session, &info).await;
+                apply_session_event(&session, info).await;
             }
 
             {
@@ -1980,10 +1986,12 @@ async fn cancel_and_drop_runtime(session: &Arc<Session>) {
 
 async fn load_in_memory_events(session: &Arc<Session>, since_seq: u64) -> Vec<AcpEvent> {
     let events = session.events.read().await;
+    // Deref Arc<AcpEvent> → &AcpEvent for the seq filter; clone only the events
+    // that pass (these go out to callers and need owned values).
     let filtered: Vec<AcpEvent> = events
         .iter()
         .filter(|e| e.seq() > since_seq)
-        .cloned()
+        .map(|arc| (**arc).clone())
         .collect();
     let start = filtered.len().saturating_sub(BACKFILL_CAP as usize);
     filtered[start..].to_vec()
@@ -1996,18 +2004,18 @@ fn next_session_event(session: &Arc<Session>, event: AcpEvent) -> AcpEvent {
     stamp_event_sequence(event, seq)
 }
 
-async fn apply_session_event(session: &Arc<Session>, event: &AcpEvent) {
-    let maybe_new_state = session_state_from_event(event);
+async fn apply_session_event(session: &Arc<Session>, event: Arc<AcpEvent>) {
+    let maybe_new_state = session_state_from_event(&event);
     {
         let mut summary = session.summary.write().await;
-        summary.updated_at = event_created_at(event).to_string();
+        summary.updated_at = event_created_at(&event).to_string();
         if let Some(ref state) = maybe_new_state {
             summary.state = state.clone();
         }
-        if let Some(title) = session_title_from_event(event) {
+        if let Some(title) = session_title_from_event(&event) {
             summary.title = title;
         }
-        if let AcpEvent::ProviderSwitch { to_provider, .. } = event {
+        if let AcpEvent::ProviderSwitch { to_provider, .. } = event.as_ref() {
             summary.provider = to_provider.clone();
         }
     }
@@ -2016,11 +2024,11 @@ async fn apply_session_event(session: &Arc<Session>, event: &AcpEvent) {
     }
     {
         let mut events = session.events.write().await;
-        events.push(event.clone());
-        if events.len() > 500 {
-            let extra = events.len() - 500;
-            events.drain(0..extra);
+        // O(1) front removal via VecDeque instead of O(n) Vec::drain.
+        while events.len() >= 500 {
+            events.pop_front();
         }
+        events.push_back(event);
     }
 }
 
@@ -2181,7 +2189,7 @@ async fn build_handoff_prompt(session: &Arc<Session>, from_provider: &str, promp
             text,
             provider,
             ..
-        } = event
+        } = event.as_ref()
         {
             if text.trim().is_empty() {
                 continue;
@@ -2519,7 +2527,7 @@ mod tests {
             .expect("session");
         {
             let mut events = session.events.write().await;
-            events.push(AcpEvent::MessageChunk {
+            events.push_back(Arc::new(AcpEvent::MessageChunk {
                 id: "evt-1".to_string(),
                 created_at: "2026-05-05T00:00:00Z".to_string(),
                 session_id: "handoff-sess".to_string(),
@@ -2528,7 +2536,7 @@ mod tests {
                 role: "assistant".to_string(),
                 text: "🙂".repeat(HANDOFF_MAX_BYTES),
                 message_id: "msg-1".to_string(),
-            });
+            }));
         }
         let prompt = format!("Preserve this exact prompt: {}", "ü".repeat(256));
 
