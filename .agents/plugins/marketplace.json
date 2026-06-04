@@ -790,6 +790,96 @@
       }
     },
     {
+      "name": "mcp-apps",
+      "description": "Skills for creating MCP Apps with the MCP Apps SDK.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/modelcontextprotocol/ext-apps.git",
+        "path": "plugins/mcp-apps",
+        "ref": "main",
+        "sha": "a9907802937f1da067cbc4aa48b283cd4cfa7dc8"
+      },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_USE" },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "MCP Apps",
+        "shortDescription": "Build interactive MCP Apps with the MCP Apps SDK.",
+        "longDescription": "MCP Apps provides skills and guidance for creating interactive MCP-native applications using the MCP Apps SDK, including UI widgets, structured content, and resource-driven interfaces.",
+        "developerName": "Anthropic / Model Context Protocol",
+        "category": "Developer Tools",
+        "capabilities": ["Read", "Write"],
+        "defaultPrompt": ["Use MCP Apps to scaffold a new MCP App.", "Help me build an MCP widget with structuredContent.", "Show me how to use the MCP Apps SDK."],
+        "brandColor": "#FF6B35"
+      }
+    },
+    {
+      "name": "nvidia-skills",
+      "description": "NVIDIA agent skills for accelerated-computing workflows — starting with cuOpt vehicle-routing optimization via the cuOpt Python API.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/NVIDIA/skills.git",
+        "path": "plugins/nvidia-skills",
+        "ref": "main",
+        "sha": "e695a8397463bbb64d787b3cd88d3c58889be633"
+      },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_USE" },
+      "category": "AI",
+      "interface": {
+        "displayName": "NVIDIA Skills",
+        "shortDescription": "Agent skills for NVIDIA accelerated-computing and cuOpt optimization workflows.",
+        "longDescription": "NVIDIA Skills provides guidance for GPU-accelerated computing and cuOpt vehicle-routing optimization (VRP, TSP, PDP) via the cuOpt Python API.",
+        "developerName": "NVIDIA",
+        "category": "AI",
+        "capabilities": ["Read"],
+        "defaultPrompt": ["Use NVIDIA skills to optimize this routing problem.", "Help me set up cuOpt for VRP.", "Use NVIDIA skills for vehicle routing optimization."],
+        "brandColor": "#76B900"
+      }
+    },
+    {
+      "name": "qdrant-skills",
+      "description": "Agent skills for Qdrant vector search covering scaling, performance, search quality, monitoring, deployment, and SDK usage.",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/qdrant/skills.git",
+        "sha": "cace39df5cc46f7f0c192ced7391d767749142a0"
+      },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_USE" },
+      "category": "Data Analytics",
+      "interface": {
+        "displayName": "Qdrant Skills",
+        "shortDescription": "Best-practice skills for Qdrant vector search — scaling, indexing, and performance tuning.",
+        "longDescription": "Qdrant Skills provides agent guidance on vector search architecture, collection design, indexing strategies, filtering, payload management, and performance optimization across Python, TypeScript, Rust, Go, .NET, and Java SDKs.",
+        "developerName": "Qdrant",
+        "category": "Data Analytics",
+        "capabilities": ["Read"],
+        "defaultPrompt": ["Use Qdrant skills to optimize my collection design.", "Review my vector search setup for performance.", "Help me choose the right indexing strategy for Qdrant."],
+        "brandColor": "#DC244C"
+      }
+    },
+    {
+      "name": "redis-development",
+      "description": "Redis development best practices — data structures, query engine, vector search, caching, and performance optimization.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/redis/agent-skills.git",
+        "path": "plugins/redis-development",
+        "ref": "main",
+        "sha": "5ca2e1a2d82a768221e8f71a02e3ca095a37d38e"
+      },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_USE" },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Redis Development",
+        "shortDescription": "Redis development skills covering data structures, caching patterns, and query efficiency.",
+        "longDescription": "Redis Development provides agent guidance on Redis data structure selection, caching strategies, Lua scripting, pub/sub patterns, streams, cluster configuration, and query performance optimization.",
+        "developerName": "Redis",
+        "category": "Developer Tools",
+        "capabilities": ["Read"],
+        "defaultPrompt": ["Use Redis skills to design my caching layer.", "Review my Redis data model for efficiency.", "Help me implement a Redis pub/sub pattern."],
+        "brandColor": "#DC382D"
+      }
+    },
+    {
       "name": "mcp-tunnels",
       "description": "Connect Claude to a private MCP server through an Anthropic-managed tunnel.",
       "source": {

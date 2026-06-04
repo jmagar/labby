@@ -482,6 +482,48 @@
             "description": "Zsh shell for Claude Code - full terminal control, live output, PTY mode for interactive commands"
         },
         {
+            "name": "mcp-apps",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/modelcontextprotocol/ext-apps.git",
+                "path": "plugins/mcp-apps",
+                "ref": "main",
+                "sha": "a9907802937f1da067cbc4aa48b283cd4cfa7dc8"
+            },
+            "description": "Skills for creating MCP Apps with the MCP Apps SDK"
+        },
+        {
+            "name": "nvidia-skills",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/NVIDIA/skills.git",
+                "path": "plugins/nvidia-skills",
+                "ref": "main",
+                "sha": "e695a8397463bbb64d787b3cd88d3c58889be633"
+            },
+            "description": "NVIDIA agent skills for accelerated-computing workflows — starting with cuOpt vehicle-routing optimization (VRP, TSP, PDP) via the cuOpt Python API."
+        },
+        {
+            "name": "qdrant-skills",
+            "source": {
+                "source": "url",
+                "url": "https://github.com/qdrant/skills.git",
+                "sha": "cace39df5cc46f7f0c192ced7391d767749142a0"
+            },
+            "description": "Agent skills for Qdrant vector search covering scaling, performance optimization, search quality, monitoring, deployment, model migration, version upgrades, and SDK usage."
+        },
+        {
+            "name": "redis-development",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/redis/agent-skills.git",
+                "path": "plugins/redis-development",
+                "ref": "main",
+                "sha": "5ca2e1a2d82a768221e8f71a02e3ca095a37d38e"
+            },
+            "description": "Redis development best practices — data structures, query engine, vector search, caching, and performance optimization"
+        },
+        {
             "name": "mcp-tunnels",
             "source": {
                 "source": "git-subdir",
