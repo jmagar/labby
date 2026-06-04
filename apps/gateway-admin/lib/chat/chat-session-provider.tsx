@@ -573,10 +573,14 @@ export function ChatSessionProvider({
     )
   }, [selectedRunId, sessionStatus, events.length])
 
-  // ---- SSE stream management (active whenever selectedRunId is non-null) ----
+  // ---- SSE stream management (active only when chat is visible AND selectedRunId is non-null) ----
+  // Gated on `autoBootstrap` so the stream does not open on every admin page load when
+  // selectedRunId is restored from localStorage — same guard as the auto-bootstrap effect.
+  // Reconnection on re-open is cheap: sessionEventCache rehydrates the transcript immediately
+  // and the ?since=lastSeq param skips already-seen events.
 
   React.useEffect(() => {
-    if (!selectedRunId) {
+    if (!autoBootstrap || !selectedRunId) {
       setEvents([])
       setConnectionState('idle')
       lastSeqRef.current = 0
@@ -673,7 +677,7 @@ export function ChatSessionProvider({
     return () => {
       abortController.abort()
     }
-  }, [selectedRunId])
+  }, [autoBootstrap, selectedRunId])
 
   // ---- Context values ----
 
