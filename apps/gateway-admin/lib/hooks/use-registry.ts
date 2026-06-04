@@ -66,9 +66,14 @@ export function useRegistryServers(
   cursor: string | null = null,
   version?: string,
   updatedSince?: string,
+  featured?: boolean,
+  reviewed?: boolean,
+  recommended?: boolean,
+  hidden?: boolean,
+  tag?: string,
 ) {
   return useSWR<ServerListResponse>(
-    registryServersKey(query, cursor, version, updatedSince),
+    registryServersKey(query, cursor, version, updatedSince, featured, reviewed, recommended, hidden, tag),
     (key: RegistryServersKey) =>
       fetchRegistryServers(key, undefined),
     { revalidateOnFocus: false },

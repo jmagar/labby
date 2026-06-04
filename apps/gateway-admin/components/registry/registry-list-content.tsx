@@ -53,7 +53,7 @@ export function RegistryListContent({ onSelectServer }: RegistryListContentProps
   const sentinelRef = useRef<HTMLDivElement>(null)
   const pagingRef = useRef(false)
 
-  // Debounce filter fields; sort is client-side so no debounce needed
+  // Debounce filter fields before updating the SWR key to avoid a fetch on every keystroke
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(search)
