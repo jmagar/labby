@@ -182,6 +182,32 @@ pub fn action_schema(actions: &[ActionSpec], action_name: &str) -> Result<Value,
     }))
 }
 
+/// Handle the `help` and `schema` built-in actions that every service dispatcher
+/// must respond to **before** resolving any service-specific client or manager.
+///
+/// # Contract (shared dispatch rule)
+///
+/// `help` and `schema` must succeed without any backing client/manager installed.
+/// They answer from the statically-compiled action catalog, so they are always
+/// available.  Every service dispatcher MUST call this before its own
+/// client-resolution step — failure to do so causes built-in actions to return
+/// `internal_error` when no client is wired (the regression fixed by lab-l3cm).
+///
+/// Returns `Some(result)` when the action was handled; `None` to let the caller
+/// continue with service-specific dispatch.
+pub fn handle_builtin(
+    action: &str,
+    params: &Value,
+    service: &str,
+    actions: &[ActionSpec],
+) -> Option<Result<Value, ToolError>> {
+    match action {
+        "help" => Some(Ok(help_payload(service, actions))),
+        "schema" => Some(require_str(params, "action").and_then(|a| action_schema(actions, a))),
+        _ => None,
+    }
+}
+
 /// Create a database file with Unix 0600 permissions if it does not already exist.
 ///
 /// This is a no-op when the file already exists (uses `create_new`, so an

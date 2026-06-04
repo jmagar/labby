@@ -17,6 +17,7 @@ use super::UpstreamPool;
 use super::discover::routable_upstream_peers;
 use super::helpers::merge_upstream_prompts;
 use super::logging::is_capability_unsupported;
+use super::tools::MAX_UPSTREAM_PROMPTS;
 
 impl UpstreamPool {
     /// Fetch prompts from all healthy upstreams and merge them, returning both the
@@ -97,7 +98,14 @@ impl UpstreamPool {
             }
         }
 
-        let (prompts, owners) = merge_upstream_prompts(builtin_names, upstream_prompts);
+        let (mut prompts, owners) = merge_upstream_prompts(builtin_names, upstream_prompts);
+        if prompts.len() > MAX_UPSTREAM_PROMPTS {
+            prompts.truncate(MAX_UPSTREAM_PROMPTS);
+            tracing::warn!(
+                limit = MAX_UPSTREAM_PROMPTS,
+                "upstream prompt catalog exceeds limit — truncating to cap"
+            );
+        }
         if !prompt_name_updates.is_empty() {
             for prompt in &prompts {
                 if let Some(upstream_name) = owners.get(prompt.name.as_str())
@@ -130,6 +138,20 @@ impl UpstreamPool {
             .values()
             .flat_map(|entry| entry.prompt_names.iter().cloned())
             .filter(|name| !builtins.contains(&name.as_str()))
+            .collect()
+    }
+
+    /// Return cached prompt names keyed by upstream name.
+    ///
+    /// Used by inspection actions (e.g. `gateway.discovered_prompts`) to answer
+    /// from already-populated catalog data without issuing live RPCs to all upstreams.
+    /// Entries whose `prompt_health` is not routable are excluded.
+    pub async fn cached_upstream_prompt_names_by_upstream(&self) -> Vec<(String, Vec<String>)> {
+        let catalog = self.catalog.read().await;
+        catalog
+            .iter()
+            .filter(|(_, entry)| entry.prompt_health.is_routable() && !entry.prompt_names.is_empty())
+            .map(|(name, entry)| (name.clone(), entry.prompt_names.clone()))
             .collect()
     }
 

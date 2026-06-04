@@ -17,11 +17,28 @@ use super::UpstreamPool;
 use super::connect::connect_upstream;
 use super::helpers::UpstreamCachedSummary;
 
+/// Hard cap on the total number of tools returned by a single `healthy_tools()` call.
+///
+/// Prevents runaway allocations when a malicious or misconfigured upstream
+/// exposes an extremely large catalog.  A truncation warning is emitted when
+/// this limit is hit.  Tests can reference this constant to assert bounds behavior.
+pub const MAX_UPSTREAM_TOOLS: usize = 1000;
+
+/// Hard cap on the total number of resources returned by `list_upstream_resources()`.
+pub const MAX_UPSTREAM_RESOURCES: usize = 1000;
+
+/// Hard cap on the total number of prompts returned by `collect_upstream_prompts()`.
+pub const MAX_UPSTREAM_PROMPTS: usize = 1000;
+
 impl UpstreamPool {
-    /// Get all healthy upstream tools.
+    /// Get all healthy upstream tools, up to [`MAX_UPSTREAM_TOOLS`] total.
+    ///
+    /// If the combined catalog across all upstreams exceeds the cap, the excess
+    /// is dropped and a `tracing::warn!` is emitted.  This prevents a buggy or
+    /// malicious upstream from forcing large allocations.
     pub async fn healthy_tools(&self) -> Vec<UpstreamTool> {
         let catalog = self.catalog.read().await;
-        catalog
+        let mut tools: Vec<UpstreamTool> = catalog
             .values()
             .filter(|entry| entry.tool_health.is_routable())
             .flat_map(|entry| {
@@ -32,7 +49,16 @@ impl UpstreamPool {
                         .then(|| tool.clone())
                 })
             })
-            .collect()
+            .take(MAX_UPSTREAM_TOOLS + 1)
+            .collect();
+        if tools.len() > MAX_UPSTREAM_TOOLS {
+            tools.truncate(MAX_UPSTREAM_TOOLS);
+            tracing::warn!(
+                limit = MAX_UPSTREAM_TOOLS,
+                "upstream tool catalog exceeds limit — truncating to cap"
+            );
+        }
+        tools
     }
 
     pub async fn healthy_tools_for_upstream(&self, upstream: &str) -> Vec<UpstreamTool> {
@@ -322,5 +348,59 @@ mod tests {
 
         assert!(pool.find_tool("search_repos").await.is_some());
         assert!(pool.find_tool("delete_repo").await.is_none());
+    }
+
+    // --- lab-tad5: oversized catalog bounds regression tests ---
+
+    /// A gateway pool that receives more than `MAX_UPSTREAM_TOOLS` tools must cap
+    /// the result at exactly the limit and not panic or allocate unboundedly.
+    #[tokio::test]
+    async fn gateway_upstream_tool_cap_truncates_oversized_catalog() {
+        let pool = UpstreamPool::new();
+        let upstream_name: Arc<str> = Arc::from("big-upstream");
+
+        // Build more tools than the cap.
+        let tool_names: Vec<String> =
+            (0..MAX_UPSTREAM_TOOLS + 50).map(|i| format!("tool_{i:04}")).collect();
+        let tool_name_refs: Vec<&str> = tool_names.iter().map(String::as_str).collect();
+        let tools = test_upstream_tools(&upstream_name, &tool_name_refs);
+
+        let entry = healthy_in_process_entry(Arc::clone(&upstream_name), tools);
+        pool.catalog
+            .write()
+            .await
+            .insert("big-upstream".to_string(), entry);
+
+        let result = pool.healthy_tools().await;
+        assert_eq!(
+            result.len(),
+            MAX_UPSTREAM_TOOLS,
+            "healthy_tools() must cap at MAX_UPSTREAM_TOOLS={MAX_UPSTREAM_TOOLS}"
+        );
+    }
+
+    /// A pool with exactly `MAX_UPSTREAM_TOOLS` tools must NOT be truncated.
+    #[tokio::test]
+    async fn gateway_upstream_tool_cap_allows_exactly_limit_tools() {
+        let pool = UpstreamPool::new();
+        let upstream_name: Arc<str> = Arc::from("exact-upstream");
+
+        let tool_names: Vec<String> =
+            (0..MAX_UPSTREAM_TOOLS).map(|i| format!("tool_{i:04}")).collect();
+        let tool_name_refs: Vec<&str> = tool_names.iter().map(String::as_str).collect();
+        let tools = test_upstream_tools(&upstream_name, &tool_name_refs);
+
+        let entry = healthy_in_process_entry(Arc::clone(&upstream_name), tools);
+        pool.catalog
+            .write()
+            .await
+            .insert("exact-upstream".to_string(), entry);
+
+        let result = pool.healthy_tools().await;
+        assert_eq!(
+            result.len(),
+            MAX_UPSTREAM_TOOLS,
+            "healthy_tools() must not truncate exactly MAX_UPSTREAM_TOOLS tools"
+        );
     }
 }

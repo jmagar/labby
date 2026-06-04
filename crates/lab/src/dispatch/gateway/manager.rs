@@ -1919,16 +1919,13 @@ impl GatewayManager {
         let Some(pool) = self.runtime.current_pool().await else {
             return Ok(Vec::new());
         };
-        let mut resources: Vec<String> = pool
-            .list_upstream_resources()
-            .await
+        // Serve from the cached resource URI snapshot to avoid a live fan-out
+        // RPC burst on every admin inspection call (lab-mzm2).
+        let all = pool.cached_upstream_resource_uris().await;
+        let mut resources: Vec<String> = all
             .into_iter()
-            .filter_map(|resource| {
-                resource
-                    .uri
-                    .strip_prefix(&format!("lab://upstream/{name}/"))
-                    .map(ToOwned::to_owned)
-            })
+            .filter(|(upstream_name, _)| upstream_name == name)
+            .flat_map(|(_, uris)| uris)
             .collect();
         resources.sort();
         Ok(resources)
@@ -1938,12 +1935,13 @@ impl GatewayManager {
         let Some(pool) = self.runtime.current_pool().await else {
             return Ok(Vec::new());
         };
-
-        let owners = pool.prompt_ownership_map(&[]).await;
-        let mut prompts: Vec<String> = owners
+        // Serve from the cached prompt name snapshot to avoid a live fan-out
+        // RPC burst on every admin inspection call (lab-mzm2).
+        let all = pool.cached_upstream_prompt_names_by_upstream().await;
+        let mut prompts: Vec<String> = all
             .into_iter()
-            .filter(|(_, owner)| owner == name)
-            .map(|(prompt_name, _)| prompt_name)
+            .filter(|(upstream_name, _)| upstream_name == name)
+            .flat_map(|(_, names)| names)
             .collect();
         prompts.sort();
         Ok(prompts)
@@ -4586,5 +4584,65 @@ mod tests {
                 "missing gateway manager observability field `{expected}`"
             );
         }
+    }
+
+    // --- lab-tad5: gateway inspection churn reduction regression tests ---
+
+    /// `discovered_resources` must not issue live RPC calls; it must serve from
+    /// the cached resource URI snapshot populated during the last pool connection.
+    /// With the lab-mzm2 fix, calling it repeatedly on an empty pool must not
+    /// trigger any live fan-out.
+    #[tokio::test]
+    async fn gateway_discovered_resources_serves_from_cache_not_live_rpc() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manager = GatewayManager::new(
+            dir.path().join("config.toml"),
+            GatewayRuntimeHandle::default(),
+        );
+
+        // With no pool or no cached URIs, results must be empty — not an error.
+        let result = manager.discovered_resources("nonexistent-upstream").await;
+        assert!(result.is_ok(), "discovered_resources must not error on empty pool");
+        assert!(
+            result.unwrap().is_empty(),
+            "discovered_resources must return empty vec when no pool is present"
+        );
+    }
+
+    /// `discovered_prompts` must not issue live RPC calls; it must serve from
+    /// the cached prompt name snapshot.
+    #[tokio::test]
+    async fn gateway_discovered_prompts_serves_from_cache_not_live_rpc() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manager = GatewayManager::new(
+            dir.path().join("config.toml"),
+            GatewayRuntimeHandle::default(),
+        );
+
+        let result = manager.discovered_prompts("nonexistent-upstream").await;
+        assert!(result.is_ok(), "discovered_prompts must not error on empty pool");
+        assert!(
+            result.unwrap().is_empty(),
+            "discovered_prompts must return empty vec when no pool is present"
+        );
+    }
+
+    /// `discovered_tools` must serve from the cached tool exposure rows — this
+    /// already worked pre-fix, but we pin it here alongside the resource/prompt
+    /// tests so the full inspection surface is regression-covered (lab-tad5).
+    #[tokio::test]
+    async fn gateway_discovered_tools_serves_from_cache() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manager = GatewayManager::new(
+            dir.path().join("config.toml"),
+            GatewayRuntimeHandle::default(),
+        );
+
+        let result = manager.discovered_tools("nonexistent-upstream").await;
+        assert!(result.is_ok(), "discovered_tools must not error on empty pool");
+        assert!(
+            result.unwrap().is_empty(),
+            "discovered_tools must return empty vec when no pool is present"
+        );
     }
 }

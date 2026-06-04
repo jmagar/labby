@@ -32,3 +32,15 @@ pub fn not_configured_error() -> ToolError {
         message: "gateway manager not wired".to_string(),
     }
 }
+
+/// Atomically replace the installed gateway manager and return the previous
+/// value.  Intended for unit tests that need to exercise the managerless path.
+#[cfg(test)]
+pub fn swap_gateway_manager_for_test(
+    new: Option<Arc<GatewayManager>>,
+) -> Option<Arc<GatewayManager>> {
+    let mut guard = manager_slot()
+        .write()
+        .expect("gateway manager lock poisoned");
+    std::mem::replace(&mut *guard, new)
+}

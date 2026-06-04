@@ -19,6 +19,7 @@ use super::discover::routable_upstream_peers;
 use super::entries::health_str;
 use super::helpers::{bare_upstream_resource_uri, rewrite_resource_uri};
 use super::logging::is_capability_unsupported;
+use super::tools::MAX_UPSTREAM_RESOURCES;
 
 impl UpstreamPool {
     /// Return cached resource URIs keyed by upstream name (used in catalog snapshots).
@@ -160,6 +161,14 @@ impl UpstreamPool {
                         }
                     }
                     for mut resource in result.resources {
+                        if resources.len() >= MAX_UPSTREAM_RESOURCES {
+                            tracing::warn!(
+                                upstream = %name,
+                                limit = MAX_UPSTREAM_RESOURCES,
+                                "upstream resource catalog exceeds limit — truncating to cap"
+                            );
+                            break;
+                        }
                         rewrite_resource_uri(&mut resource, &name);
                         resources.push(resource);
                     }

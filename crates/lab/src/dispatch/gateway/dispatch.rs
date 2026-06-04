@@ -2,7 +2,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::dispatch::error::ToolError;
-use crate::dispatch::helpers::{action_schema, help_payload, require_str, to_json};
+use crate::dispatch::helpers::{action_schema, handle_builtin, help_payload, require_str, to_json};
 
 use super::SHARED_GATEWAY_OAUTH_SUBJECT;
 use super::catalog::ACTIONS;
@@ -34,12 +34,12 @@ pub async fn dispatch_with_manager(
     action: &str,
     params_value: Value,
 ) -> Result<Value, ToolError> {
+    // Defense-in-depth: built-ins handled here so direct callers of
+    // dispatch_with_manager (e.g. HTTP handlers) also get the correct behavior.
+    if let Some(result) = handle_builtin(action, &params_value, "gateway", ACTIONS) {
+        return result;
+    }
     match action {
-        "help" => Ok(help_payload("gateway", ACTIONS)),
-        "schema" => {
-            let action_name = require_str(&params_value, "action")?;
-            action_schema(ACTIONS, action_name)
-        }
         "gateway.code_mode.get" | "gateway.code_mode.set" => {
             handle_tool_actions(manager, action, params_value).await
         }
@@ -512,6 +512,17 @@ async fn handle_gateway_actions(
             to_json(manager.get(&params.name).await?)
         }
         "gateway.test" => {
+            // SECURITY NOTE: When called with a `spec` (unsaved config) for a
+            // stdio-backed upstream, this action may **execute a local command**.
+            // The `command` field of the spec is passed directly to the child
+            // process launcher; there is no sandbox.  Only callers with gateway
+            // admin privileges should be able to reach this action, and operators
+            // must treat `spec`-mode as equivalent to running the named binary.
+            //
+            // When called with a `name` (saved config), the command comes from the
+            // persisted config file, which is under operator control.  The same
+            // execution risk applies — the test action spawns the stdio process
+            // and probes it exactly as the gateway would during live operation.
             let params: GatewayTestParams = parse_params(params_value)?;
             match (params.name.as_deref(), params.spec.as_ref()) {
                 (Some(name), None) => to_json(manager.test(Err(name)).await?),
@@ -749,7 +760,24 @@ fn compiled_service_actions(
         .collect())
 }
 
+/// Public entry point for gateway dispatch.
+///
+/// Built-in actions (`help`, `schema`) are handled **before** manager
+/// resolution so they succeed even when no gateway manager is installed.
+/// This matches the shared dispatch contract used by every other service.
 pub async fn dispatch(action: &str, params_value: Value) -> Result<Value, ToolError> {
+    // Handle catalog-discovery built-ins first — they must not fail when no
+    // gateway manager is installed (e.g. during initial setup or test runs
+    // that do not wire a manager).  Fixing the dispatch contract here is the
+    // minimum required change (see bead lab-l3cm).
+    match action {
+        "help" => return Ok(help_payload("gateway", ACTIONS)),
+        "schema" => {
+            let action_name = require_str(&params_value, "action")?;
+            return action_schema(ACTIONS, action_name);
+        }
+        _ => {}
+    }
     let manager = require_gateway_manager()?;
     dispatch_with_manager(&manager, action, params_value).await
 }
@@ -1593,8 +1621,12 @@ mod tests {
         assert_eq!(err.kind(), "invalid_param");
     }
 
+    /// `gateway.test` with a `spec` whose `command` field names a stdio upstream
+    /// **executes that command as a real child process**.  This test uses `echo` so
+    /// the subprocess exits cleanly on all platforms.  See docs/UPSTREAM.md §"Testing
+    /// with Stdio Upstreams" and the SECURITY NOTE in the `gateway.test` handler.
     #[tokio::test]
-    async fn gateway_test_accepts_name_or_spec() {
+    async fn gateway_test_spec_stdio_executes_command_and_name_routes_to_config() {
         let manager = test_manager();
         manager
             .replace_config_for_tests(vec![
@@ -2276,6 +2308,53 @@ mod tests {
             result.get("imported").is_some(),
             "should have imported field"
         );
+    }
+
+    // --- lab-l3cm regression: public dispatch() must handle built-ins before manager resolution ---
+
+    /// `gateway::dispatch("help", …)` must succeed even when no gateway manager
+    /// is installed.  The old code called `require_gateway_manager()` first,
+    /// which returned `internal_error` in that situation.
+    #[tokio::test]
+    async fn gateway_dispatch_help_succeeds_without_manager() {
+        let old = super::super::client::swap_gateway_manager_for_test(None);
+        let result = dispatch("help", serde_json::json!({})).await;
+        super::super::client::swap_gateway_manager_for_test(old);
+
+        let value = result.expect("help must not require a gateway manager");
+        assert_eq!(value["service"], "gateway");
+        assert!(
+            value["actions"].is_array(),
+            "help response must contain an actions array"
+        );
+    }
+
+    /// `gateway::dispatch("schema", {action: "gateway.list"})` must succeed even
+    /// when no gateway manager is installed.
+    #[tokio::test]
+    async fn gateway_dispatch_schema_succeeds_without_manager() {
+        let old = super::super::client::swap_gateway_manager_for_test(None);
+        let result =
+            dispatch("schema", serde_json::json!({"action": "gateway.list"})).await;
+        super::super::client::swap_gateway_manager_for_test(old);
+
+        let value = result.expect("schema must not require a gateway manager");
+        assert_eq!(value["action"], "gateway.list");
+    }
+
+    /// `gateway::dispatch("schema", {})` with a missing `action` param must
+    /// return `missing_param`, not `internal_error`.
+    #[tokio::test]
+    async fn gateway_dispatch_schema_missing_param_without_manager() {
+        let old = super::super::client::swap_gateway_manager_for_test(None);
+        let err = dispatch("schema", serde_json::json!({}))
+            .await
+            .expect_err("schema without action param must fail");
+        super::super::client::swap_gateway_manager_for_test(old);
+
+        let body = serde_json::to_value(&err).expect("serialize");
+        assert_eq!(body["kind"], "missing_param");
+        assert_eq!(body["param"], "action");
     }
 }
 

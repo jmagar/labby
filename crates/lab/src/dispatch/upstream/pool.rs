@@ -45,6 +45,10 @@ mod validate;
 use helpers::DEFAULT_REQUEST_TIMEOUT;
 pub(crate) use helpers::redact_resource_uri_for_logging;
 pub use helpers::{UpstreamCachedSummary, in_process_upstream_name};
+// Re-export the catalog size caps so tests and gateway code can reference them
+// without reaching into a submodule path.
+#[allow(unused_imports)]
+pub use tools::{MAX_UPSTREAM_PROMPTS, MAX_UPSTREAM_RESOURCES, MAX_UPSTREAM_TOOLS};
 
 /// Upstream connection pool — holds live connections and discovered tool catalogs.
 #[derive(Clone)]
