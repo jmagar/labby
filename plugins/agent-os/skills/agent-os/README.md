@@ -24,17 +24,20 @@ Sandbox-specific triggers only: `agent-os`, `the agent-os VM`, `winbox`, `the wi
 
 For browser verification and web-dev workflows, use this order unless the user asked for a specific session:
 
-1. CDP running on agent-os
-2. agent-browser
-3. claude-in-chrome on agent-os
-4. agent-os Windows-MCP
-5. claude-in-chrome on steamy
+For web dev verification, prefer: **webwright** (generic web tasks) → CDP on agent-os → agent-browser → claude-in-chrome on agent-os → Windows-MCP.
+
+1. webwright (generic web tasks and web dev verification)
+2. CDP running on agent-os
+3. agent-browser
+4. claude-in-chrome on agent-os
+5. agent-os Windows-MCP
+6. claude-in-chrome on steamy
 
 Use Windows-MCP for desktop/OS state, native dialogs, installed Windows software, and browser work that must happen inside the sandbox desktop. Use `agent-browser` before Windows-MCP for generic fresh-browser checks.
 
 ## Connection
 
-Configured as an HTTP MCP server in `~/.claude.json` under `mcpServers.windows-mcp` (Tailscale address + Bearer token). Claude Code reaches it automatically. Nothing to start.
+Configuration is handled automatically via the agent-os plugin userConfig — there is nothing to edit in `~/.claude.json`. Set credentials in plugin settings when installing. Claude Code reaches the Windows-MCP server automatically. Nothing to start.
 
 If unreachable: `ssh tootie "docker ps --format '{{.Names}}' | grep agent-os"` to confirm the container (`agent-os-win11`) is up.
 
