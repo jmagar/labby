@@ -372,6 +372,56 @@ async fn destructive_acp_actions_require_confirmation() {
     assert_eq!(explicit_false.kind(), "confirmation_required");
 }
 
+/// Bead lab-qq8y.3: regression coverage for the intentional product decision
+/// that session creation and prompting do NOT require confirmation.
+///
+/// `session.start`, `session.start_and_prompt`, `session.prompt`, and
+/// `session.permission.reject` are explicitly non-destructive — they create
+/// or continue work rather than deleting it. This test locks that contract in
+/// so any accidental flip to `destructive: true` is caught immediately.
+#[test]
+fn non_destructive_acp_actions_do_not_require_confirmation() {
+    use labby::dispatch::acp::catalog::ACTIONS;
+
+    let non_destructive_actions = [
+        "session.start",
+        "session.start_and_prompt",
+        "session.prompt",
+        "session.permission.reject",
+    ];
+
+    for action_name in non_destructive_actions {
+        let spec = ACTIONS
+            .iter()
+            .find(|spec| spec.name == action_name)
+            .unwrap_or_else(|| panic!("catalog must contain action `{action_name}`"));
+        assert!(
+            !spec.destructive,
+            "action `{action_name}` must remain non-destructive (product decision): \
+             flipping to destructive requires explicit product sign-off"
+        );
+    }
+}
+
+/// Complementary to the above: the destructive actions must remain destructive.
+#[test]
+fn destructive_acp_catalog_actions_are_marked_correctly() {
+    use labby::dispatch::acp::catalog::ACTIONS;
+
+    let destructive_actions = ["session.cancel", "session.close", "session.bulk_close"];
+
+    for action_name in destructive_actions {
+        let spec = ACTIONS
+            .iter()
+            .find(|spec| spec.name == action_name)
+            .unwrap_or_else(|| panic!("catalog must contain action `{action_name}`"));
+        assert!(
+            spec.destructive,
+            "action `{action_name}` must remain destructive"
+        );
+    }
+}
+
 #[tokio::test]
 async fn http_acp_handlers_scope_sessions_to_authenticated_principal() {
     let _test_guard = test_lock().lock().await;
