@@ -124,6 +124,12 @@ pub mod limits {
     pub const MAX_WORKSPACE_SIZE: u64 = 200 * 1024 * 1024;
     /// Maximum number of components tracked per stash instance.
     pub const MAX_COMPONENTS: usize = 10_000;
+    /// Maximum number of files in a single component workspace (lab-se5t).
+    ///
+    /// Prevents DoS via mass-tiny-file imports: 10,000 files × ~1 B each
+    /// would consume negligible disk space but flood the inode table and
+    /// make every walk O(N) without this guard.
+    pub const MAX_FILE_COUNT: usize = 10_000;
     /// Deploy operation timeout in milliseconds.
     pub const DEPLOY_TIMEOUT_MS: u64 = 30_000;
 }
