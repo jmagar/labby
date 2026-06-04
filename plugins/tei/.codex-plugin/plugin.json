@@ -1,0 +1,35 @@
+{
+  "name": "tei",
+  "description": "Skill for operating tei via the lab MCP server / CLI.",
+  "author": {
+    "name": "Jacob Magar",
+    "email": "jmagar@users.noreply.github.com"
+  },
+  "repository": "https://github.com/jmagar/lab",
+  "homepage": "https://github.com/jmagar/lab",
+  "license": "MIT",
+  "keywords": [
+    "tei",
+    "embeddings",
+    "ai",
+    "ml",
+    "homelab"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "TEI",
+    "shortDescription": "Use Hugging Face Text Embeddings Inference for embeddings and reranking.",
+    "longDescription": "TEI provides workflows for checking Text Embeddings Inference health, embedding text, tokenizing input, and reranking documents against a query.",
+    "developerName": "Jacob Magar",
+    "category": "AI",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": [
+      "Use TEI to embed this text.",
+      "Check TEI health and model info.",
+      "Rerank these documents for this query."
+    ],
+    "brandColor": "#FF9D00"
+  }
+}

@@ -17,10 +17,10 @@
   "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Plexus",
-    "shortDescription": "Host-specific REMOTE.md memory with live probes",
-    "longDescription": "Plexus gives agents a CLAUDE.md-style memory file for each remote host, then combines it with live SSH, Tailscale, Docker, systemd, and syslog-mcp context before operating.",
+    "shortDescription": "Host-specific REMOTE.md memory with live infrastructure probes.",
+    "longDescription": "Plexus gives agents a CLAUDE.md-style memory file for each remote host, then combines it with live SSH, Tailscale, Docker, systemd, and log context before operating.",
     "developerName": "Jacob Magar",
-    "category": "Productivity",
+    "category": "Operations",
     "capabilities": [
       "Read",
       "Automation"
@@ -28,8 +28,11 @@
     "defaultPrompt": [
       "Use Plexus to inspect squirts before changing it.",
       "Load live remote context for dookie.",
-      "Summarize recent syslog activity for a host."
+      "Summarize recent host activity."
     ],
     "brandColor": "#2563EB"
-  }
+  },
+  "commands": "./commands/",
+  "repository": "https://github.com/jmagar/lab",
+  "homepage": "https://github.com/jmagar/lab"
 }

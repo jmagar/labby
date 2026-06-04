@@ -1,0 +1,730 @@
+{
+  "name": "jmagar-lab",
+  "owner": {
+    "name": "Jacob Magar",
+    "email": "jmagar@users.noreply.github.com"
+  },
+  "description": "Local Codex marketplace for Jacob Magar's Lab homelab plugins.",
+  "interface": {
+    "displayName": "Jacob's Lab"
+  },
+  "plugins": [
+    {
+      "name": "acp",
+      "description": "Agent Client Protocol skills for Rust, Python, and TypeScript implementations.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/acp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "ACP",
+        "shortDescription": "Agent Client Protocol implementation guidance for Rust, Python, and TypeScript.",
+        "longDescription": "ACP packages implementation skills and protocol references for building Agent Client Protocol clients and agents, including session lifecycle, streaming, tool calls, and adapter patterns.",
+        "developerName": "Jacob Magar",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Use ACP to design a Rust agent-client-protocol integration.",
+          "Review this ACP session lifecycle implementation.",
+          "Explain how ACP tool calls should stream results."
+        ],
+        "brandColor": "#7C3AED"
+      }
+    },
+    {
+      "name": "adguard",
+      "description": "Skill for operating adguard via the lab MCP server / CLI.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/adguard"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Network",
+      "interface": {
+        "displayName": "AdGuard Home",
+        "shortDescription": "Operate AdGuard Home DNS filtering and network-blocking workflows.",
+        "longDescription": "AdGuard Home provides agent workflows for inspecting DNS filtering state, reviewing blocked queries, managing allow/block decisions, and troubleshooting homelab DNS behavior.",
+        "developerName": "Jacob Magar",
+        "category": "Network",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use AdGuard to inspect DNS filtering health.",
+          "Find recent blocked domains for a client.",
+          "Help troubleshoot why a domain is not resolving."
+        ],
+        "brandColor": "#22C55E"
+      }
+    },
+    {
+      "name": "agent-os",
+      "description": "Drive the agent-os Windows 11 sandbox VM through its Windows-MCP server. Self-registers the windows-mcp MCP from your configured URL + bearer token, ships the agent-os skill, a /agent-os status command, and a SessionStart health check.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agent-os"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Agent OS",
+        "shortDescription": "Drive the dedicated Windows 11 agent VM through Windows-MCP.",
+        "longDescription": "Agent OS connects Codex to the dedicated Windows 11 sandbox VM for desktop automation, Windows app testing, screenshots, shell commands, and VM health checks.",
+        "developerName": "Jacob Magar",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Interactive",
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Agent OS to inspect the Windows VM.",
+          "Run a PowerShell command on agent-os.",
+          "Take a screenshot of the agent-os desktop."
+        ],
+        "brandColor": "#60A5FA"
+      }
+    },
+    {
+      "name": "arrs",
+      "description": "The *arr / media-automation stack in one plugin: Radarr, Sonarr, Prowlarr, Overseerr, SABnzbd, qBittorrent, Plex, Jellyfin, Tautulli, and Tracearr — each operated via its own REST API. Credentials are configured here and bridged to the skills via a generated env file.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/arrs"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Media",
+      "interface": {
+        "displayName": "Arrs",
+        "shortDescription": "Operate the Radarr, Sonarr, Prowlarr, Plex, Jellyfin, and downloader stack.",
+        "longDescription": "Arrs bundles media-automation skills for Radarr, Sonarr, Prowlarr, Overseerr, SABnzbd, qBittorrent, Plex, Jellyfin, Tautulli, and Tracearr using each service API directly.",
+        "developerName": "Jacob Magar",
+        "category": "Media",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Arrs to check the media stack.",
+          "Find stalled downloads across the Arr stack.",
+          "Search for a movie and prepare a Radarr add request."
+        ],
+        "brandColor": "#F59E0B"
+      }
+    },
+    {
+      "name": "bitwarden",
+      "description": "Bitwarden and secrets-management workflows for homelab operations.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/bitwarden"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Security",
+      "interface": {
+        "displayName": "Bitwarden",
+        "shortDescription": "Work with Bitwarden vault items and secrets-management flows.",
+        "longDescription": "Bitwarden provides secure agent workflows for finding vault items, handling unlocked CLI sessions, and supporting homelab credential lookup without hardcoding secrets.",
+        "developerName": "Jacob Magar",
+        "category": "Security",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Bitwarden to find the credential for this service.",
+          "Check whether the Bitwarden CLI session is unlocked.",
+          "Help prepare a secret lookup without exposing the value."
+        ],
+        "brandColor": "#175DDC"
+      }
+    },
+    {
+      "name": "broadcastr",
+      "description": "Real-time activity broadcast across concurrent Claude Code sessions. Captures commits and plan/session document activity into a shared JSONL bus; each session sees what others are doing.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/broadcastr"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Broadcastr",
+        "shortDescription": "Broadcast session activity across concurrent agent work.",
+        "longDescription": "Broadcastr writes commits, plans, and session activity to a shared JSONL bus so concurrent coding agents can see what related sessions are doing in real time.",
+        "developerName": "Jacob Magar",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Automation"
+        ],
+        "defaultPrompt": [
+          "Use Broadcastr to summarize recent session activity.",
+          "Show what other agents have changed recently.",
+          "Check the activity bus before I edit this repo."
+        ],
+        "brandColor": "#EC4899"
+      }
+    },
+    {
+      "name": "bytestash",
+      "description": "Skills for operating a ByteStash snippet manager.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/bytestash"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "ByteStash",
+        "shortDescription": "Manage ByteStash snippets and reusable code notes.",
+        "longDescription": "ByteStash provides snippet search, creation, update, organization, and troubleshooting workflows for the self-hosted code snippet manager.",
+        "developerName": "Jacob Magar",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use ByteStash to search for a Docker snippet.",
+          "Create a ByteStash snippet from this script.",
+          "Organize snippets related to Rust."
+        ],
+        "brandColor": "#14B8A6"
+      }
+    },
+    {
+      "name": "dozzle",
+      "description": "Skill for operating Dozzle through direct HTTP API checks, auth guidance, and MCP setup notes.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dozzle"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Operations",
+      "interface": {
+        "displayName": "Dozzle",
+        "shortDescription": "Inspect Docker container logs through Dozzle and its native MCP endpoint.",
+        "longDescription": "Dozzle provides direct HTTP and MCP-oriented workflows for checking live Docker container logs, authentication setup, and log-viewer connectivity.",
+        "developerName": "Jacob Magar",
+        "category": "Operations",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Use Dozzle to inspect recent container logs.",
+          "Check whether Dozzle MCP is reachable.",
+          "Help debug a container error from Dozzle logs."
+        ],
+        "brandColor": "#F97316"
+      }
+    },
+    {
+      "name": "immich",
+      "description": "Skill for operating immich via the lab MCP server / CLI.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/immich"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Media",
+      "interface": {
+        "displayName": "Immich",
+        "shortDescription": "Operate Immich photo and video management workflows.",
+        "longDescription": "Immich packages workflows for searching assets, reviewing albums and jobs, checking server state, and assisting with self-hosted photo library operations.",
+        "developerName": "Jacob Magar",
+        "category": "Media",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Immich to inspect recent upload status.",
+          "Search Immich for assets from a date range.",
+          "Check Immich server health."
+        ],
+        "brandColor": "#6366F1"
+      }
+    },
+    {
+      "name": "linkding",
+      "description": "Skills for operating a Linkding bookmark manager.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/linkding"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Linkding",
+        "shortDescription": "Search and manage Linkding bookmarks.",
+        "longDescription": "Linkding provides bookmark search, creation, update, tagging, and cleanup workflows for the self-hosted bookmark manager.",
+        "developerName": "Jacob Magar",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Linkding to find bookmarks about Rust MCP.",
+          "Save this URL to Linkding with tags.",
+          "Summarize my recent Linkding bookmarks."
+        ],
+        "brandColor": "#0EA5E9"
+      }
+    },
+    {
+      "name": "loggifly",
+      "description": "Skill for operating loggifly via the lab MCP server / CLI.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/loggifly"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Operations",
+      "interface": {
+        "displayName": "LoggiFly",
+        "shortDescription": "Configure Docker log alerting with keyword and regex rules.",
+        "longDescription": "LoggiFly helps inspect and manage Docker container log alerting rules, keyword patterns, regex checks, and notification routing for homelab services.",
+        "developerName": "Jacob Magar",
+        "category": "Operations",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use LoggiFly to inspect active alert rules.",
+          "Add a log alert pattern for this container.",
+          "Check recent LoggiFly alert matches."
+        ],
+        "brandColor": "#F43F5E"
+      }
+    },
+    {
+      "name": "memos",
+      "description": "Skills for operating a Memos note hub.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/memos"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Memos",
+        "shortDescription": "Manage notes and memos in the self-hosted Memos service.",
+        "longDescription": "Memos provides workflows for searching, creating, updating, and organizing short notes in a self-hosted Memos instance.",
+        "developerName": "Jacob Magar",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Memos to search for notes about this project.",
+          "Create a memo from this summary.",
+          "List recent Memos entries."
+        ],
+        "brandColor": "#A855F7"
+      }
+    },
+    {
+      "name": "navidrome",
+      "description": "Operate a self-hosted Navidrome music server through its Subsonic API with direct HTTP calls — ping, browse artists/albums, search, and list playlists.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/navidrome"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Media",
+      "interface": {
+        "displayName": "Navidrome",
+        "shortDescription": "Browse and inspect a Navidrome music library through the Subsonic API.",
+        "longDescription": "Navidrome provides read-only music-library workflows for pinging the server, browsing artists and albums, searching tracks, listing playlists, and checking now-playing state.",
+        "developerName": "Jacob Magar",
+        "category": "Media",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Use Navidrome to search my music library.",
+          "List Navidrome playlists.",
+          "Check whether Navidrome is reachable."
+        ],
+        "brandColor": "#06B6D4"
+      }
+    },
+    {
+      "name": "neo4j",
+      "description": "Skill for operating neo4j via the lab MCP server / CLI.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/neo4j"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Data Analytics",
+      "interface": {
+        "displayName": "Neo4j",
+        "shortDescription": "Run Neo4j graph queries and inspect graph schema.",
+        "longDescription": "Neo4j bundles Cypher query, schema inspection, node and relationship exploration, and graph-database troubleshooting workflows.",
+        "developerName": "Jacob Magar",
+        "category": "Data Analytics",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Neo4j to inspect the graph schema.",
+          "Run a Cypher query for related nodes.",
+          "Explain this Neo4j query plan."
+        ],
+        "brandColor": "#008CC1"
+      }
+    },
+    {
+      "name": "notebooklm",
+      "description": "NotebookLM research, source, generation, and download workflows.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/notebooklm"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Research",
+      "interface": {
+        "displayName": "NotebookLM",
+        "shortDescription": "Operate NotebookLM sources, notebooks, and generated research artifacts.",
+        "longDescription": "NotebookLM provides programmatic workflows for managing sources, querying notebooks, generating summaries, and downloading research outputs.",
+        "developerName": "Jacob Magar",
+        "category": "Research",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use NotebookLM to summarize this notebook.",
+          "Add this source to NotebookLM.",
+          "List recent NotebookLM generated outputs."
+        ],
+        "brandColor": "#4285F4"
+      }
+    },
+    {
+      "name": "plexus",
+      "description": "Remote-device memory and live operating context for host-specific work.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/plexus"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Operations",
+      "interface": {
+        "displayName": "Plexus",
+        "shortDescription": "Host-specific REMOTE.md memory with live infrastructure probes.",
+        "longDescription": "Plexus gives agents a CLAUDE.md-style memory file for each remote host, then combines it with live SSH, Tailscale, Docker, systemd, and log context before operating.",
+        "developerName": "Jacob Magar",
+        "category": "Operations",
+        "capabilities": [
+          "Read",
+          "Automation"
+        ],
+        "defaultPrompt": [
+          "Use Plexus to inspect squirts before changing it.",
+          "Load live remote context for dookie.",
+          "Summarize recent host activity."
+        ],
+        "brandColor": "#2563EB"
+      }
+    },
+    {
+      "name": "qdrant",
+      "description": "Skill for operating qdrant via the lab MCP server / CLI.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/qdrant"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Data Analytics",
+      "interface": {
+        "displayName": "Qdrant",
+        "shortDescription": "Inspect and manage Qdrant vector collections.",
+        "longDescription": "Qdrant provides workflows for collections, points, payloads, search, vector database health, and semantic-search troubleshooting.",
+        "developerName": "Jacob Magar",
+        "category": "Data Analytics",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Qdrant to list collections.",
+          "Inspect this Qdrant collection configuration.",
+          "Search Qdrant for similar vectors."
+        ],
+        "brandColor": "#DC244C"
+      }
+    },
+    {
+      "name": "radicale",
+      "description": "CalDAV and CardDAV workflow skills for Radicale.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/radicale"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Radicale",
+        "shortDescription": "Manage CalDAV calendars and CardDAV contacts through Radicale.",
+        "longDescription": "Radicale packages calendar and contact workflows for inspecting collections, managing events or contacts, and troubleshooting CalDAV/CardDAV state.",
+        "developerName": "Jacob Magar",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Radicale to inspect calendar collections.",
+          "Find contacts matching this query.",
+          "Check whether the CalDAV endpoint is reachable."
+        ],
+        "brandColor": "#84CC16"
+      }
+    },
+    {
+      "name": "scrutiny",
+      "description": "Skill for operating scrutiny via the lab MCP server / CLI.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/scrutiny"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Operations",
+      "interface": {
+        "displayName": "Scrutiny",
+        "shortDescription": "Inspect SMART drive health through Scrutiny.",
+        "longDescription": "Scrutiny provides workflows for checking disk SMART status, drive health, temperature, failure indicators, and homelab storage monitoring data.",
+        "developerName": "Jacob Magar",
+        "category": "Operations",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Use Scrutiny to check drive health.",
+          "Show drives with SMART warnings.",
+          "Summarize recent disk-health changes."
+        ],
+        "brandColor": "#F59E0B"
+      }
+    },
+    {
+      "name": "swag-mcp",
+      "description": "SWAG reverse proxy configuration management via MCP. Create, edit, view, and manage nginx proxy configurations with auth integration.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/swag"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Network",
+      "interface": {
+        "displayName": "SWAG MCP",
+        "shortDescription": "Manage SWAG reverse-proxy configuration through MCP workflows.",
+        "longDescription": "SWAG MCP helps create, edit, view, back up, and validate SWAG nginx reverse-proxy configs with auth integration and local or SSH-backed storage.",
+        "developerName": "Jacob Magar",
+        "category": "Network",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use SWAG MCP to create a proxy config.",
+          "Validate this nginx proxy configuration.",
+          "Inspect existing SWAG configs for a service."
+        ],
+        "brandColor": "#10B981"
+      }
+    },
+    {
+      "name": "tei",
+      "description": "Skill for operating tei via the lab MCP server / CLI.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tei"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "AI",
+      "interface": {
+        "displayName": "TEI",
+        "shortDescription": "Use Hugging Face Text Embeddings Inference for embeddings and reranking.",
+        "longDescription": "TEI provides workflows for checking Text Embeddings Inference health, embedding text, tokenizing input, and reranking documents against a query.",
+        "developerName": "Jacob Magar",
+        "category": "AI",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Use TEI to embed this text.",
+          "Check TEI health and model info.",
+          "Rerank these documents for this query."
+        ],
+        "brandColor": "#FF9D00"
+      }
+    },
+    {
+      "name": "testing",
+      "description": "App-testing and MCP-tooling skills: live QA of web, Android, and desktop apps; MCP server smoke-testing (mcporter); MCP-UI / Apps validation (mcpjam); and claude-in-mobile device automation.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/testing"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Testing",
+      "interface": {
+        "displayName": "Testing",
+        "shortDescription": "Run web, Android, desktop, MCP, and app-validation testing workflows.",
+        "longDescription": "Testing bundles end-to-end QA skills for browser apps, Android APKs, Windows desktop apps, MCP smoke tests, MCP-UI validation, and mobile device automation.",
+        "developerName": "Jacob Magar",
+        "category": "Testing",
+        "capabilities": [
+          "Interactive",
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Testing to run a web app QA pass.",
+          "Smoke-test this MCP server.",
+          "Test this Android APK end to end."
+        ],
+        "brandColor": "#A3E635"
+      }
+    },
+    {
+      "name": "uptime-kuma",
+      "description": "Read-only monitoring of a self-hosted Uptime Kuma instance via direct HTTP — Prometheus /metrics (API-key auth) and public status-page JSON. No monitor management (that requires Uptime Kuma's socket.io API).",
+      "source": {
+        "source": "local",
+        "path": "./plugins/uptime-kuma"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Operations",
+      "interface": {
+        "displayName": "Uptime Kuma",
+        "shortDescription": "Read Uptime Kuma monitor, metrics, and public status-page state.",
+        "longDescription": "Uptime Kuma provides read-only monitoring workflows for Prometheus metrics, API-key checks, public status-page JSON, heartbeat history, and uptime summaries.",
+        "developerName": "Jacob Magar",
+        "category": "Operations",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Use Uptime Kuma to check monitor status.",
+          "Summarize the public status page.",
+          "Find monitors with recent downtime."
+        ],
+        "brandColor": "#5CDD8B"
+      }
+    },
+    {
+      "name": "vibin",
+      "description": "Session, GitHub review, and CI workflow skills for quick push, session documentation, PR comments, and CI debugging.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vibin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Vibin",
+        "shortDescription": "Session, GitHub review, CI, and agent workflow utilities.",
+        "longDescription": "Vibin bundles session documentation, quick-push, GitHub PR review, CI debugging, Windows VM, screenshot, clipboard, and homelab workflow skills.",
+        "developerName": "Jacob Magar",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write",
+          "Automation"
+        ],
+        "defaultPrompt": [
+          "Use Vibin to quick-push this change.",
+          "Use Vibin to address PR review comments.",
+          "Save this session to Markdown."
+        ],
+        "brandColor": "#D946EF"
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "name": "memos",
+  "description": "Skills for operating a Memos note hub.",
+  "author": {
+    "name": "Jacob Magar",
+    "email": "jmagar@users.noreply.github.com"
+  },
+  "repository": "https://github.com/jmagar/lab",
+  "homepage": "https://github.com/jmagar/lab",
+  "license": "MIT",
+  "keywords": [
+    "memos",
+    "notes",
+    "journals",
+    "homelab"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Memos",
+    "shortDescription": "Manage notes and memos in the self-hosted Memos service.",
+    "longDescription": "Memos provides workflows for searching, creating, updating, and organizing short notes in a self-hosted Memos instance.",
+    "developerName": "Jacob Magar",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use Memos to search for notes about this project.",
+      "Create a memo from this summary.",
+      "List recent Memos entries."
+    ],
+    "brandColor": "#A855F7"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "linkding",
+  "description": "Skills for operating a Linkding bookmark manager.",
+  "author": {
+    "name": "Jacob Magar",
+    "email": "jmagar@users.noreply.github.com"
+  },
+  "repository": "https://github.com/jmagar/lab",
+  "homepage": "https://github.com/jmagar/lab",
+  "license": "MIT",
+  "keywords": [
+    "linkding",
+    "bookmarks",
+    "notes",
+    "homelab"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Linkding",
+    "shortDescription": "Search and manage Linkding bookmarks.",
+    "longDescription": "Linkding provides bookmark search, creation, update, tagging, and cleanup workflows for the self-hosted bookmark manager.",
+    "developerName": "Jacob Magar",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use Linkding to find bookmarks about Rust MCP.",
+      "Save this URL to Linkding with tags.",
+      "Summarize my recent Linkding bookmarks."
+    ],
+    "brandColor": "#0EA5E9"
+  }
+}

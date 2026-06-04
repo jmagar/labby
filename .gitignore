@@ -31,6 +31,7 @@ backups/
 .claude/worktrees/
 .omc/
 .lavra/
+.mnem/
 .beads/
 **/.beads/
 .dolt/

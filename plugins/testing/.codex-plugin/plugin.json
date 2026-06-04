@@ -1,0 +1,42 @@
+{
+  "name": "testing",
+  "description": "App-testing and MCP-tooling skills: live QA of web, Android, and desktop apps; MCP server smoke-testing (mcporter); MCP-UI / Apps validation (mcpjam); and claude-in-mobile device automation.",
+  "author": {
+    "name": "Jacob Magar",
+    "email": "jmagar@users.noreply.github.com"
+  },
+  "repository": "https://github.com/jmagar/lab",
+  "homepage": "https://github.com/jmagar/lab",
+  "license": "MIT",
+  "keywords": [
+    "testing",
+    "qa",
+    "e2e",
+    "android",
+    "desktop",
+    "web",
+    "mcp",
+    "mcporter",
+    "mcpjam",
+    "homelab"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Testing",
+    "shortDescription": "Run web, Android, desktop, MCP, and app-validation testing workflows.",
+    "longDescription": "Testing bundles end-to-end QA skills for browser apps, Android APKs, Windows desktop apps, MCP smoke tests, MCP-UI validation, and mobile device automation.",
+    "developerName": "Jacob Magar",
+    "category": "Testing",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use Testing to run a web app QA pass.",
+      "Smoke-test this MCP server.",
+      "Test this Android APK end to end."
+    ],
+    "brandColor": "#A3E635"
+  }
+}

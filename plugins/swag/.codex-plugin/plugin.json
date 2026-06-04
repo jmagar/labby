@@ -1,0 +1,38 @@
+{
+  "name": "swag-mcp",
+  "description": "SWAG reverse proxy configuration management via MCP. Create, edit, view, and manage nginx proxy configurations with auth integration.",
+  "author": {
+    "name": "Jacob Magar",
+    "email": "jmagar@users.noreply.github.com"
+  },
+  "repository": "https://github.com/jmagar/swag-mcp",
+  "license": "MIT",
+  "keywords": [
+    "swag",
+    "nginx",
+    "reverse-proxy",
+    "homelab",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "homepage": "https://github.com/jmagar/swag-mcp",
+  "interface": {
+    "displayName": "SWAG MCP",
+    "shortDescription": "Manage SWAG reverse-proxy configuration through MCP workflows.",
+    "longDescription": "SWAG MCP helps create, edit, view, back up, and validate SWAG nginx reverse-proxy configs with auth integration and local or SSH-backed storage.",
+    "developerName": "Jacob Magar",
+    "category": "Network",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use SWAG MCP to create a proxy config.",
+      "Validate this nginx proxy configuration.",
+      "Inspect existing SWAG configs for a service."
+    ],
+    "brandColor": "#10B981"
+  },
+  "mcpServers": "./.mcp.json"
+}

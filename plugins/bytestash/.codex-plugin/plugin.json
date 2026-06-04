@@ -1,0 +1,35 @@
+{
+  "name": "bytestash",
+  "description": "Skills for operating a ByteStash snippet manager.",
+  "author": {
+    "name": "Jacob Magar",
+    "email": "jmagar@users.noreply.github.com"
+  },
+  "repository": "https://github.com/jmagar/lab",
+  "homepage": "https://github.com/jmagar/lab",
+  "license": "MIT",
+  "keywords": [
+    "bytestash",
+    "snippets",
+    "notes",
+    "homelab"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ByteStash",
+    "shortDescription": "Manage ByteStash snippets and reusable code notes.",
+    "longDescription": "ByteStash provides snippet search, creation, update, organization, and troubleshooting workflows for the self-hosted code snippet manager.",
+    "developerName": "Jacob Magar",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use ByteStash to search for a Docker snippet.",
+      "Create a ByteStash snippet from this script.",
+      "Organize snippets related to Rust."
+    ],
+    "brandColor": "#14B8A6"
+  }
+}

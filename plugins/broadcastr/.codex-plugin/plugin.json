@@ -1,0 +1,78 @@
+{
+  "name": "broadcastr",
+  "description": "Real-time activity broadcast across concurrent Claude Code sessions. Captures commits and plan/session document activity into a shared JSONL bus; each session sees what others are doing.",
+  "author": {
+    "name": "Jacob Magar",
+    "email": "jmagar@gmail.com"
+  },
+  "license": "MIT",
+  "keywords": [
+    "multi-agent",
+    "coordination",
+    "notifications",
+    "homelab",
+    "git-hooks"
+  ],
+  "homepage": "https://github.com/jmagar/.agents/tree/main/plugins/broadcastr",
+  "experimental": {
+    "monitors": "./monitors/monitors.json"
+  },
+  "userConfig": {
+    "apprise_enabled": {
+      "type": "boolean",
+      "title": "Enable Apprise alerts",
+      "default": true,
+      "description": "Fan out alert-tier events to apprise"
+    },
+    "apprise_tag": {
+      "type": "string",
+      "title": "Apprise tag",
+      "default": "broadcastr",
+      "description": "Apprise routing tag"
+    },
+    "global_feed": {
+      "type": "boolean",
+      "title": "Enable global feed",
+      "default": true,
+      "description": "Tail the global bus in addition to the per-repo bus"
+    },
+    "mute_categories": {
+      "type": "string",
+      "title": "Muted categories",
+      "default": "",
+      "description": "Comma-separated categories to drop from the agent feed"
+    },
+    "bus_max_bytes": {
+      "type": "number",
+      "title": "Bus max bytes",
+      "default": 5242880,
+      "description": "Rotate the bus when it exceeds this size"
+    },
+    "bus_retain": {
+      "type": "number",
+      "title": "Bus files to retain",
+      "default": 3,
+      "description": "Number of rotated bus files to keep"
+    }
+  },
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Broadcastr",
+    "shortDescription": "Broadcast session activity across concurrent agent work.",
+    "longDescription": "Broadcastr writes commits, plans, and session activity to a shared JSONL bus so concurrent coding agents can see what related sessions are doing in real time.",
+    "developerName": "Jacob Magar",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Automation"
+    ],
+    "defaultPrompt": [
+      "Use Broadcastr to summarize recent session activity.",
+      "Show what other agents have changed recently.",
+      "Check the activity bus before I edit this repo."
+    ],
+    "brandColor": "#EC4899"
+  }
+}

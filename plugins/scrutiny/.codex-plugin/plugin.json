@@ -1,0 +1,35 @@
+{
+  "name": "scrutiny",
+  "description": "Skill for operating scrutiny via the lab MCP server / CLI.",
+  "author": {
+    "name": "Jacob Magar",
+    "email": "jmagar@users.noreply.github.com"
+  },
+  "repository": "https://github.com/jmagar/lab",
+  "homepage": "https://github.com/jmagar/lab",
+  "license": "MIT",
+  "keywords": [
+    "scrutiny",
+    "smart",
+    "drives",
+    "health",
+    "homelab"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Scrutiny",
+    "shortDescription": "Inspect SMART drive health through Scrutiny.",
+    "longDescription": "Scrutiny provides workflows for checking disk SMART status, drive health, temperature, failure indicators, and homelab storage monitoring data.",
+    "developerName": "Jacob Magar",
+    "category": "Operations",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": [
+      "Use Scrutiny to check drive health.",
+      "Show drives with SMART warnings.",
+      "Summarize recent disk-health changes."
+    ],
+    "brandColor": "#F59E0B"
+  }
+}

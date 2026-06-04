@@ -1,0 +1,45 @@
+{
+  "name": "dozzle",
+  "description": "Skill for operating Dozzle through direct HTTP API checks, auth guidance, and MCP setup notes.",
+  "author": {
+    "name": "Jacob Magar",
+    "email": "jmagar@users.noreply.github.com"
+  },
+  "repository": "https://github.com/jmagar/lab",
+  "homepage": "https://github.com/jmagar/lab",
+  "license": "MIT",
+  "keywords": [
+    "dozzle",
+    "docker",
+    "logs",
+    "containers",
+    "homelab"
+  ],
+  "userConfig": {
+    "dozzle_mcp_url": {
+      "type": "string",
+      "title": "Dozzle MCP URL",
+      "description": "Dozzle's native Streamable HTTP MCP endpoint. Enable Dozzle with DOZZLE_ENABLE_MCP=true or --enable-mcp, then point this at the reachable /api/mcp URL. Include any configured base path before /api/mcp.",
+      "required": true,
+      "default": "http://localhost:8080/api/mcp"
+    }
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Dozzle",
+    "shortDescription": "Inspect Docker container logs through Dozzle and its native MCP endpoint.",
+    "longDescription": "Dozzle provides direct HTTP and MCP-oriented workflows for checking live Docker container logs, authentication setup, and log-viewer connectivity.",
+    "developerName": "Jacob Magar",
+    "category": "Operations",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": [
+      "Use Dozzle to inspect recent container logs.",
+      "Check whether Dozzle MCP is reachable.",
+      "Help debug a container error from Dozzle logs."
+    ],
+    "brandColor": "#F97316"
+  },
+  "mcpServers": "./.mcp.json"
+}

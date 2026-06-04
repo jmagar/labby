@@ -1,0 +1,43 @@
+{
+  "name": "vibin",
+  "description": "Session, GitHub review, and CI workflow skills for quick push, session documentation, PR comments, and CI debugging.",
+  "author": {
+    "name": "Jacob Magar",
+    "email": "jmagar@users.noreply.github.com"
+  },
+  "repository": "https://github.com/jmagar/lab",
+  "homepage": "https://github.com/jmagar/lab",
+  "license": "MIT",
+  "keywords": [
+    "git",
+    "session",
+    "workflow",
+    "commit",
+    "documentation",
+    "github",
+    "ci",
+    "pull-requests",
+    "reviews"
+  ],
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "interface": {
+    "displayName": "Vibin",
+    "shortDescription": "Session, GitHub review, CI, and agent workflow utilities.",
+    "longDescription": "Vibin bundles session documentation, quick-push, GitHub PR review, CI debugging, Windows VM, screenshot, clipboard, and homelab workflow skills.",
+    "developerName": "Jacob Magar",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Automation"
+    ],
+    "defaultPrompt": [
+      "Use Vibin to quick-push this change.",
+      "Use Vibin to address PR review comments.",
+      "Save this session to Markdown."
+    ],
+    "brandColor": "#D946EF"
+  },
+  "mcpServers": "./.mcp.json"
+}
