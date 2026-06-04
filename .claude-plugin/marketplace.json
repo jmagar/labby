@@ -539,6 +539,14 @@
                 "path": "plugins/mcp-tunnels"
             },
             "description": "Connect Claude to a private MCP server through an Anthropic-managed tunnel."
+        },
+        {
+            "name": "ytdl-mcp",
+            "source": {
+                "source": "github",
+                "repo": "jmagar/youtube-dl-mcp"
+            },
+            "description": "Download audio/video from any yt-dlp-supported site, embed metadata and cover art, organize by artist, and rsync to an SSH remote with separate audio/video destinations."
         }
     ]
 }
