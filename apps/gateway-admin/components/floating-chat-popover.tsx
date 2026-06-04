@@ -413,8 +413,8 @@ export function FloatingChatPopover({
     <div
       id="floating-chat-panel"
       ref={panelRef}
-      role="dialog"
-      aria-labelledby="floating-chat-title"
+      role="complementary"
+      aria-label="Chat"
       tabIndex={-1}
       style={docked ? dockedStyle : floatingStyle}
       className={cn(
