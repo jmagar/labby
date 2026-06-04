@@ -613,8 +613,11 @@ export function ChatSessionProvider({
         const { ticket } = await ticketRes.json() as { ticket: string }
 
         const response = await fetchAcpRef.current(
-          `/sessions/${selectedRunId}/events?since=${lastSeqRef.current}&ticket=${encodeURIComponent(ticket)}`,
-          { signal: abortController.signal },
+          `/sessions/${selectedRunId}/events?since=${lastSeqRef.current}`,
+          {
+            signal: abortController.signal,
+            headers: { Authorization: `Bearer ${ticket}` },
+          },
         )
 
         if (!response.ok || !response.body) {
