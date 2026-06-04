@@ -494,16 +494,32 @@ pub(crate) fn io_internal(error: impl std::fmt::Display) -> ToolError {
 
 #[cfg(test)]
 pub(super) fn with_test_plugins_root<T>(home: &Path, run: impl FnOnce() -> T) -> T {
-    let _guard = TEST_PLUGINS_ROOT_LOCK.lock().unwrap();
+    // Recover from a poisoned serialization lock so that a panicking test
+    // does not permanently block subsequent tests.
+    let _guard = TEST_PLUGINS_ROOT_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let plugins_root = home.join(".claude").join("plugins");
     let previous = {
-        let mut slot = TEST_PLUGINS_ROOT_OVERRIDE.lock().unwrap();
+        let mut slot = TEST_PLUGINS_ROOT_OVERRIDE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         std::mem::replace(&mut *slot, Some(plugins_root))
     };
-    let result = run();
-    let mut slot = TEST_PLUGINS_ROOT_OVERRIDE.lock().unwrap();
-    *slot = previous;
-    result
+
+    // RAII guard: restore the override slot in `Drop` so that a panicking
+    // `run()` closure never leaves stale global state.
+    struct RestoreGuard(Option<PathBuf>);
+    impl Drop for RestoreGuard {
+        fn drop(&mut self) {
+            *TEST_PLUGINS_ROOT_OVERRIDE
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = self.0.take();
+        }
+    }
+    let _restore = RestoreGuard(previous);
+
+    run()
 }
 
 #[cfg(test)]
