@@ -346,6 +346,61 @@ test('clearing a protected route removes the existing route after saving', async
   }
 })
 
+test('saving a custom HTTP server with no auth sends no bearer credential', async () => {
+  const window = installGatewayDialogDom()
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async (input, init) => {
+    const path = String(input)
+    if (path === '/v1/gateway' && init?.method === 'POST') {
+      return gatewayActionResponse(init, {})
+    }
+    if (path === '/v1/gateway/oauth/probe') {
+      return jsonResponse({
+        upstream: 'deepwiki',
+        url: 'https://mcp.deepwiki.com/mcp',
+        oauth_discovered: false,
+      })
+    }
+    throw new Error(`unexpected fetch ${path}`)
+  }) as typeof fetch
+
+  try {
+    const onSaveInputs: unknown[] = []
+    const view = await renderOpenGatewayDialog(null, async (input) => {
+      onSaveInputs.push(input)
+    })
+
+    const nameInput = document.querySelector('#name') as HTMLInputElement | null
+    const urlInput = document.querySelector('#url') as HTMLInputElement | null
+    assert.ok(nameInput)
+    assert.ok(urlInput)
+
+    await setInputValue(window, nameInput, 'deepwiki')
+    await setInputValue(window, urlInput, 'https://mcp.deepwiki.com/mcp')
+    await clickSave()
+
+    await waitFor(() => {
+      assert.equal(onSaveInputs.length, 1)
+      assert.deepEqual(onSaveInputs[0], {
+        name: 'deepwiki',
+        transport: 'http',
+        config: {
+          url: 'https://mcp.deepwiki.com/mcp',
+          bearer_token_env: null,
+          bearer_token_value: undefined,
+          oauth: undefined,
+          proxy_resources: true,
+          proxy_prompts: true,
+        },
+      })
+    })
+
+    await view.unmount()
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('ENV drawer live-applies custom MCP env vars to stdio gateway saves', async () => {
   const window = installGatewayDialogDom()
   const onSaveInputs: unknown[] = []

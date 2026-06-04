@@ -1700,6 +1700,19 @@ mod tests {
         assert_eq!(added["config"]["name"], "fixture-http");
         assert_eq!(added["config"]["bearer_token_env"], "FIXTURE_HTTP_TOKEN");
 
+        let public = dispatch_with_manager(
+            &manager,
+            "gateway.add",
+            json!({"spec": {
+                "name": "deepwiki",
+                "url": "https://mcp.deepwiki.com/mcp"
+            }}),
+        )
+        .await
+        .expect("add no-auth http");
+        assert_eq!(public["config"]["name"], "deepwiki");
+        assert_eq!(public["config"]["bearer_token_env"], Value::Null);
+
         let updated = dispatch_with_manager(
             &manager,
             "gateway.update",

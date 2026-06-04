@@ -94,6 +94,32 @@ test('buildGatewayCreatePayload generates an auth env var when a bearer token is
   })
 })
 
+test('buildGatewayCreatePayload preserves no-auth HTTP upstreams', () => {
+  const payload = buildGatewayCreatePayload({
+    name: 'deepwiki',
+    transport: 'http',
+    config: {
+      url: 'https://mcp.deepwiki.com/mcp',
+      bearer_token_env: null,
+    },
+  })
+
+  assert.deepEqual(payload, {
+    spec: {
+      name: 'deepwiki',
+      url: 'https://mcp.deepwiki.com/mcp',
+      command: null,
+      args: [],
+      bearer_token_env: null,
+      proxy_resources: false,
+      proxy_prompts: true,
+      expose_tools: null,
+      expose_resources: null,
+      expose_prompts: null,
+    },
+  })
+})
+
 test('buildGatewayCreatePayload builds a stdio spec without any ack flag', () => {
   const payload = buildGatewayCreatePayload({
     name: 'fixture-stdio',

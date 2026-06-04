@@ -688,7 +688,7 @@ export function GatewayFormDialog({
         bearer_token_env: !authEnabled
           ? undefined
           : authMode === 'none' || authMode === 'oauth'
-            ? ''
+            ? null
             : authSource === 'env'
               ? bearerTokenEnv
               : bearerTokenEnv || undefined,

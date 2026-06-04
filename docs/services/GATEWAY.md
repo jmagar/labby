@@ -304,6 +304,7 @@ labby gateway list
 labby gateway get remote-lab
 labby gateway test --name remote-lab
 labby gateway add --name remote-lab --url https://lab2.example.com/mcp --bearer-token-env REMOTE_LAB_TOKEN
+labby gateway add --name deepwiki --url https://mcp.deepwiki.com/mcp
 labby gateway add --name local-tools --command local-mcp-server
 labby gateway update remote-lab --proxy-resources true
 labby gateway remove remote-lab
@@ -315,9 +316,14 @@ labby gateway reload
 ```json
 { "tool": "gateway", "input": { "action": "gateway.list", "params": {} } }
 { "tool": "gateway", "input": { "action": "gateway.add", "params": { "confirm": true, "spec": { "name": "remote-lab", "url": "https://lab2.example.com/mcp", "bearer_token_env": "REMOTE_LAB_TOKEN" } } } }
+{ "tool": "gateway", "input": { "action": "gateway.add", "params": { "confirm": true, "spec": { "name": "deepwiki", "url": "https://mcp.deepwiki.com/mcp" } } } }
 { "tool": "gateway", "input": { "action": "gateway.add", "params": { "confirm": true, "spec": { "name": "local-tools", "command": "local-mcp-server" } } } }
 { "tool": "gateway", "input": { "action": "gateway.reload", "params": { "confirm": true } } }
 ```
+
+For public streamable HTTP upstreams that require no upstream auth, omit
+`bearer_token_env` and `oauth`. DeepWiki's deprecated `/sse` endpoint returns
+HTTP 410; use `https://mcp.deepwiki.com/mcp`.
 
 ### HTTP API
 
