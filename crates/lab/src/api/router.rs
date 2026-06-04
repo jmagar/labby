@@ -415,9 +415,11 @@ async fn authenticate_protected_route_request(
         })?;
     let required_scopes = route.scopes.iter().map(String::as_str).collect::<Vec<_>>();
     let granted = claims.scope.split_whitespace().collect::<Vec<_>>();
-    if !required_scopes
-        .iter()
-        .all(|required| granted.iter().any(|scope| scope == required))
+    let is_lab_admin = granted.iter().any(|s| *s == "lab:admin");
+    if !is_lab_admin
+        && !required_scopes
+            .iter()
+            .all(|required| granted.iter().any(|scope| scope == required))
     {
         tracing::warn!(
             route = %route.name,
