@@ -73,28 +73,31 @@ pub struct UpstreamPool {
     runtime_owner: Option<UpstreamRuntimeOwner>,
     /// Maximum time to wait for an upstream tool/resource/prompt response.
     request_timeout: Duration,
+    /// Optional connector for in-process (built-in) service peers.
+    /// When set, built-in lab services are reachable via the upstream pool.
+    in_process_connector: Option<InProcessConnector>,
 }
 
 /// A live connection to an upstream MCP server.
-struct UpstreamConnection {
+pub(crate) struct UpstreamConnection {
     /// The running client service handle — kept alive to maintain the connection.
-    _client_service: rmcp::service::RunningService<RoleClient, ()>,
+    pub(crate) _client_service: rmcp::service::RunningService<RoleClient, ()>,
     /// Background task holding an in-process server alive when applicable.
-    _server_task: Option<tokio::task::JoinHandle<()>>,
+    pub(crate) _server_task: Option<tokio::task::JoinHandle<()>>,
     /// The peer handle for making requests.
-    peer: rmcp::service::Peer<RoleClient>,
+    pub(crate) peer: rmcp::service::Peer<RoleClient>,
     /// Runtime metadata for process-backed upstreams.
-    runtime: UpstreamRuntimeMetadata,
+    pub(crate) runtime: UpstreamRuntimeMetadata,
 }
 
-struct InProcessRegistration {
-    connection: Option<UpstreamConnection>,
-    tools: Vec<rmcp::model::Tool>,
-    entry_name: Arc<str>,
-    upstream_name: String,
+pub(crate) struct InProcessRegistration {
+    pub(crate) connection: Option<UpstreamConnection>,
+    pub(crate) tools: Vec<rmcp::model::Tool>,
+    pub(crate) entry_name: Arc<str>,
+    pub(crate) upstream_name: String,
 }
 
-type InProcessConnector = Arc<
+pub(crate) type InProcessConnector = Arc<
     dyn Fn(RegisteredService) -> BoxFuture<'static, anyhow::Result<InProcessRegistration>>
         + Send
         + Sync,
@@ -125,7 +128,18 @@ impl UpstreamPool {
             runtime_origin: None,
             runtime_owner: None,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            in_process_connector: None,
         }
+    }
+
+    /// Attach a connector for in-process (built-in) service peers.
+    ///
+    /// When provided, built-in lab services are registered as in-process
+    /// upstream peers rather than external HTTP/stdio connections.
+    #[must_use]
+    pub fn with_in_process_connector(mut self, connector: InProcessConnector) -> Self {
+        self.in_process_connector = Some(connector);
+        self
     }
 
     /// Attach the per-`(upstream, subject)` OAuth client cache so the pool can

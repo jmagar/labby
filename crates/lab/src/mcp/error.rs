@@ -191,6 +191,13 @@ impl From<ToolError> for DispatchError {
                 param: None,
                 hint: None,
             },
+            ToolError::Forbidden { message, .. } => Self {
+                kind: "forbidden",
+                message,
+                valid: None,
+                param: None,
+                hint: None,
+            },
             ToolError::AmbiguousTool { message, valid } => Self {
                 kind: "ambiguous_tool",
                 message,

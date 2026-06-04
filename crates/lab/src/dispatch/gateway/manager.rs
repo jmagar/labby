@@ -13,7 +13,7 @@ use crate::config::{
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::error::ToolError;
 use crate::dispatch::upstream::pool::{
-    UpstreamCachedSummary, UpstreamPool, in_process_upstream_name,
+    InProcessConnector, UpstreamCachedSummary, UpstreamPool, in_process_upstream_name,
 };
 use crate::dispatch::upstream::types::{UpstreamRuntimeOwner, UpstreamTool};
 use crate::oauth::upstream::cache::OauthClientCache;
@@ -284,6 +284,10 @@ pub struct GatewayManager {
     pub(super) oauth_key: Option<EncryptionKey>,
     pub(super) oauth_redirect_uri: Option<Arc<String>>,
     protected_route_index: Arc<RwLock<ProtectedRouteIndex>>,
+    /// Optional connector for in-process (built-in) service peers.
+    /// Propagated to each pool the manager creates so built-in services are
+    /// reachable without an external HTTP/stdio connection.
+    in_process_connector: Option<InProcessConnector>,
 }
 
 impl GatewayManager {
@@ -305,7 +309,18 @@ impl GatewayManager {
             oauth_key: None,
             oauth_redirect_uri: None,
             protected_route_index: Arc::new(RwLock::new(ProtectedRouteIndex::default())),
+            in_process_connector: None,
         }
+    }
+
+    /// Attach a connector for in-process (built-in) service peers.
+    ///
+    /// The connector is propagated to every `UpstreamPool` the manager creates
+    /// so built-in lab services are accessible as in-process MCP peers.
+    #[must_use]
+    pub fn with_in_process_connector(mut self, connector: InProcessConnector) -> Self {
+        self.in_process_connector = Some(connector);
+        self
     }
 
     #[must_use]

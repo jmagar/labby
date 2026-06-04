@@ -1,3 +1,4 @@
+pub mod params;
 pub mod persistence;
 pub mod providers;
 pub mod registry;

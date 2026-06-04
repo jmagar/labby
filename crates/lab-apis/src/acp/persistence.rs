@@ -70,4 +70,12 @@ pub trait AcpPersistence: Send + Sync + Clone + 'static {
         session_id: &str,
         state: AcpSessionState,
     ) -> impl Future<Output = Result<(), AcpError>> + Send;
+
+    /// Return the maximum persisted event sequence number for every session.
+    ///
+    /// Sessions with no events are not included in the map; callers should
+    /// treat a missing entry as `0` and seed `next_seq = max + 1`.
+    fn load_max_seqs(
+        &self,
+    ) -> impl Future<Output = Result<std::collections::HashMap<String, u64>, AcpError>> + Send;
 }

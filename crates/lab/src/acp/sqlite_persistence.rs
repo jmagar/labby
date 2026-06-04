@@ -248,6 +248,27 @@ impl SqliteAcpPersistence {
 
 // ── Non-trait restore helpers ─────────────────────────────────────────────────
 
+impl SqliteAcpPersistence {
+    /// Return the max persisted event seq for every session in one query.
+    /// Sessions with no events map to 0; callers should seed `next_seq = max + 1`.
+    pub async fn load_max_seqs(&self) -> Result<std::collections::HashMap<String, u64>, AcpError> {
+        self.blocking_read("load_max_seqs", |c| {
+            let mut stmt = c.prepare(
+                "SELECT session_id, MAX(seq) AS max_seq \
+                 FROM acp_session_events \
+                 GROUP BY session_id",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                let session_id: String = row.get("session_id")?;
+                let max_seq: i64 = row.get("max_seq")?;
+                Ok((session_id, max_seq as u64))
+            })?;
+            rows.collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()
+        })
+        .await
+    }
+}
+
 // ── AcpPersistence impl ───────────────────────────────────────────────────────
 
 impl AcpPersistence for SqliteAcpPersistence {
@@ -322,20 +343,8 @@ impl AcpPersistence for SqliteAcpPersistence {
     }
 
     async fn load_max_seqs(&self) -> Result<std::collections::HashMap<String, u64>, AcpError> {
-        self.blocking_read("load_max_seqs", |c| {
-            let mut stmt = c.prepare(
-                "SELECT session_id, MAX(seq) AS max_seq \
-                 FROM acp_session_events \
-                 GROUP BY session_id",
-            )?;
-            let rows = stmt.query_map([], |row| {
-                let session_id: String = row.get("session_id")?;
-                let max_seq: i64 = row.get("max_seq")?;
-                Ok((session_id, max_seq as u64))
-            })?;
-            rows.collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()
-        })
-        .await
+        // Delegate to the inherent method which has the same signature.
+        SqliteAcpPersistence::load_max_seqs(self).await
     }
 }
 

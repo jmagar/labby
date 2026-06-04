@@ -751,4 +751,83 @@ mod tests {
         walk_measure_and_copy(src_dir.path(), dst_dir.path())
             .expect("exactly MAX_FILE_COUNT files should succeed");
     }
+
+    // ── source-path system denylist regression tests ──────────────────────────
+    //
+    // These tests verify that `import_component` (the public path, which calls
+    // `canonicalize_and_reject_read_path`) rejects source paths that resolve
+    // into sensitive system directories.  They are integration-level — they
+    // exercise the full async import path rather than the path-safety helpers
+    // in isolation, which are already unit-tested in `dispatch/path_safety.rs`.
+
+    #[tokio::test]
+    async fn import_rejects_etc_shadow_source_path() {
+        let (store, _dir) = make_store();
+        let id = ulid::Ulid::new().to_string().to_lowercase();
+        // /etc/shadow may not exist in CI; the denylist check fires before we
+        // even try to open the file, so the error is path_traversal regardless.
+        let err = import_component(
+            &store,
+            &id,
+            Path::new("/etc/shadow"),
+            Some(StashComponentKind::Script),
+            "secret",
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            err.kind(),
+            "path_traversal",
+            "expected path_traversal, got {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn import_rejects_etc_passwd_source_path() {
+        let (store, _dir) = make_store();
+        let id = ulid::Ulid::new().to_string().to_lowercase();
+        let err = import_component(
+            &store,
+            &id,
+            Path::new("/etc/passwd"),
+            Some(StashComponentKind::Script),
+            "passwd",
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind(), "path_traversal");
+    }
+
+    #[tokio::test]
+    async fn import_rejects_proc_environ_source_path() {
+        let (store, _dir) = make_store();
+        let id = ulid::Ulid::new().to_string().to_lowercase();
+        let err = import_component(
+            &store,
+            &id,
+            Path::new("/proc/self/environ"),
+            Some(StashComponentKind::Script),
+            "environ",
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind(), "path_traversal");
+    }
+
+    #[tokio::test]
+    async fn import_allows_tempdir_source_path() {
+        let (store, _dir) = make_store();
+        let src_dir = tempdir().unwrap();
+        let src = src_dir.path().join("settings.json");
+        std::fs::write(&src, b"{}").unwrap();
+        let id = ulid::Ulid::new().to_string().to_lowercase();
+        let comp = import_component(&store, &id, &src, None, "allowed-import", None)
+            .await
+            .expect("import from tempdir should succeed");
+        assert_eq!(comp.kind, StashComponentKind::Settings);
+    }
 }

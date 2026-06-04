@@ -18,6 +18,7 @@ use agent_client_protocol::schema::{
 };
 use agent_client_protocol::{
     Agent, ByteStreams, Client, ConnectionTo, Dispatch, JsonRpcMessage, on_receive_request,
+    role::HasPeer,
 };
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -1353,6 +1354,418 @@ pub fn sanitize_provider_error(message: &str) -> String {
     out
 }
 
+/// Message type for the inner prompt-turn select! loop.
+///
+/// Declares at module scope so the type name is stable and each arm of the
+/// loop can be read without knowing the nesting depth. Previously declared
+/// inline inside the loop body.
+enum PromptTurnMessage {
+    Provider(Result<agent_client_protocol::SessionMessage, agent_client_protocol::Error>),
+    Stop(Result<StopReason, String>),
+    Idle,
+}
+
+/// How a prompt turn ended — used by the caller to decide whether to drain
+/// the session before accepting the next prompt.
+enum PromptTurnOutcome {
+    /// Turn ended with an explicit stop reason from the provider.
+    Completed,
+    /// Turn ended via the idle-completion timeout (no explicit StopReason yet).
+    IdleCompleted,
+}
+
+/// Drain stale messages left over from a turn that ended via idle-completion.
+///
+/// When the previous turn ended via [`PromptTurnOutcome::IdleCompleted`], the
+/// ACP provider may still send a trailing `StopReason` message. This function
+/// consumes that message (or gives up after the drain timeout) so it cannot
+/// corrupt the next turn's read loop.
+async fn drain_previous_turn<Link>(
+    session: &mut agent_client_protocol::ActiveSession<'_, Link>,
+    session_id: &str,
+) where
+    Link: HasPeer<Agent>,
+{
+    let deadline = tokio::time::Instant::now() + acp_turn_drain_timeout();
+    tracing::debug!(
+        surface = "acp",
+        service = "runtime",
+        action = "turn_drain.start",
+        session_id = %session_id,
+        "Draining stale messages from previous idle-completed turn",
+    );
+    loop {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            tracing::warn!(
+                surface = "acp",
+                service = "runtime",
+                action = "turn_drain.timeout",
+                session_id = %session_id,
+                timeout_secs = acp_turn_drain_timeout().as_secs(),
+                "Drain timeout: starting next turn without consuming \
+                 late StopReason; next turn may see unexpected content",
+            );
+            break;
+        }
+        match tokio::time::timeout(deadline - now, session.read_update()).await {
+            Ok(Ok(agent_client_protocol::SessionMessage::StopReason(_))) => {
+                tracing::debug!(
+                    surface = "acp",
+                    service = "runtime",
+                    action = "turn_drain.done",
+                    session_id = %session_id,
+                    "Drained late StopReason; previous turn is clean",
+                );
+                break;
+            }
+            Ok(Ok(_)) => {
+                // Discard stale content from the previous turn.
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(
+                    surface = "acp",
+                    service = "runtime",
+                    action = "turn_drain.error",
+                    session_id = %session_id,
+                    error = %error,
+                    "Connection error while draining previous turn",
+                );
+                break;
+            }
+            Err(_elapsed) => {
+                tracing::warn!(
+                    surface = "acp",
+                    service = "runtime",
+                    action = "turn_drain.timeout",
+                    session_id = %session_id,
+                    timeout_secs = acp_turn_drain_timeout().as_secs(),
+                    "Drain timeout: starting next turn without consuming \
+                     late StopReason; next turn may see unexpected content",
+                );
+                break;
+            }
+        }
+    }
+}
+
+/// Execute one prompt turn: send the prompt to the provider and drive the
+/// streaming read loop until the turn completes or an error occurs.
+///
+/// Returns [`PromptTurnOutcome`] to indicate whether the caller should drain
+/// stale provider messages before starting the next turn.
+///
+/// # Parameters
+/// - `session` — live ACP provider session (mutable; used for reads and
+///   model-config requests)
+/// - `session_id` — stable session identifier used in tracing and events
+/// - `provider_id` — provider name used in events and tracing
+/// - `event_tx` — channel for emitting ACP events to the registry
+/// - `prompt_lifecycle` — shared lifecycle tracker (start/finish/unfinished)
+/// - `model_id` — optional model to set via `SetSessionConfigOptionRequest`
+///   before sending the prompt
+/// - `input` — prompt text and attachments
+#[allow(clippy::too_many_arguments)]
+async fn run_prompt_turn<Link>(
+    session: &mut agent_client_protocol::ActiveSession<'_, Link>,
+    session_id: &str,
+    provider_id: &str,
+    event_tx: &mpsc::Sender<AcpEvent>,
+    prompt_lifecycle: &Arc<PromptLifecycle>,
+    model_id: Option<&str>,
+    input: PromptInput,
+) -> Result<PromptTurnOutcome, agent_client_protocol::Error>
+where
+    Link: HasPeer<Agent>,
+{
+    drop(
+        event_tx
+            .send(session_state_event(
+                session_id.to_string(),
+                provider_id,
+                lab_apis::acp::types::AcpSessionState::Running,
+            ))
+            .await,
+    );
+    if let Some(model_id) = model_id {
+        session
+            .connection()
+            .send_request_to(
+                Agent,
+                SetSessionConfigOptionRequest::new(
+                    session.session_id().clone(),
+                    "model",
+                    model_id,
+                ),
+            )
+            .block_task()
+            .await
+            .map_err(|error| acp_internal_error(error.to_string()))?;
+    }
+    // Redact: store length + a short sanitised preview instead of the full
+    // prompt text to avoid persisting potentially sensitive user input in
+    // provider_info events.
+    let prompt_len = input.text.len();
+    let raw_preview: String = input.text.chars().take(64).collect();
+    let sanitised_preview: String = raw_preview
+        .chars()
+        .map(|c| {
+            if c.is_ascii_graphic() || c == ' ' {
+                c
+            } else {
+                '?'
+            }
+        })
+        .collect();
+    let prompt_preview = if prompt_len > 64 {
+        format!("{sanitised_preview}…[{prompt_len}b]")
+    } else {
+        sanitised_preview
+    };
+    drop(
+        event_tx
+            .send(provider_info_event(
+                session_id.to_string(),
+                provider_id,
+                json!({
+                    "type": "prompt_started",
+                    "title": "Prompt started",
+                    "prompt_len": prompt_len,
+                    "prompt_preview": prompt_preview,
+                    "attachment_count": input.attachments.len(),
+                    "model_id": model_id,
+                }),
+            ))
+            .await,
+    );
+
+    let (prompt_response_tx, prompt_response_rx) =
+        oneshot::channel::<Result<StopReason, String>>();
+    let mut prompt_response_rx = Box::pin(prompt_response_rx);
+    let blocks = prompt_input_to_content_blocks(&input);
+    session
+        .connection()
+        .send_request_to(
+            Agent,
+            PromptRequest::new(session.session_id().clone(), blocks),
+        )
+        .on_receiving_result(async move |result| {
+            let stop_reason = result
+                .map(|PromptResponse { stop_reason, .. }| stop_reason)
+                .map_err(|error| error.to_string());
+            drop(prompt_response_tx.send(stop_reason));
+            Ok(())
+        })
+        .map_err(|error| acp_internal_error(error.to_string()))?;
+
+    let stream_message_ids = Arc::new(Mutex::new(StreamMessageIds::default()));
+    let mut saw_assistant_output = false;
+    let mut ended_via_idle = false;
+
+    loop {
+        let update = tokio::select! {
+            // Prefer consuming a real update over the idle timeout.
+            // Without `biased`, when both arms are ready simultaneously
+            // (provider sent PromptResponse just as the timer fires),
+            // tokio picks randomly. A timeout win leaves StopReason
+            // in the channel where it poisons the next turn's read loop.
+            biased;
+            stop_reason = &mut prompt_response_rx => {
+                PromptTurnMessage::Stop(
+                    stop_reason.unwrap_or_else(|_| Err("prompt response channel closed".to_string())),
+                )
+            },
+            update = session.read_update() => PromptTurnMessage::Provider(update),
+            () = tokio::time::sleep(acp_prompt_idle_timeout()), if saw_assistant_output => PromptTurnMessage::Idle,
+        };
+        let update = match update {
+            PromptTurnMessage::Provider(update) => update,
+            PromptTurnMessage::Stop(Ok(stop_reason)) => {
+                let stop_reason = map_stop_reason(&stop_reason).to_string();
+                let state = if stop_reason == "cancelled" {
+                    lab_apis::acp::types::AcpSessionState::Cancelled
+                } else {
+                    lab_apis::acp::types::AcpSessionState::Completed
+                };
+                drop(
+                    event_tx
+                        .send(session_state_event(session_id.to_string(), provider_id, state.clone()))
+                        .await,
+                );
+                drop(
+                    event_tx
+                        .send(provider_info_event(
+                            session_id.to_string(),
+                            provider_id,
+                            json!({
+                                "type": "stop_reason",
+                                "title": "Prompt completed",
+                                "status": match state {
+                                    lab_apis::acp::types::AcpSessionState::Cancelled => "cancelled",
+                                    _ => "completed",
+                                },
+                                "stop_reason": stop_reason,
+                            }),
+                        ))
+                        .await,
+                );
+                prompt_lifecycle.finish();
+                break;
+            }
+            PromptTurnMessage::Stop(Err(error)) => {
+                drop(
+                    event_tx
+                        .send(session_state_event(
+                            session_id.to_string(),
+                            provider_id,
+                            lab_apis::acp::types::AcpSessionState::Failed,
+                        ))
+                        .await,
+                );
+                drop(
+                    event_tx
+                        .send(provider_info_event(
+                            session_id.to_string(),
+                            provider_id,
+                            json!({
+                                "type": "provider_error",
+                                "title": "Provider error",
+                                "text": error,
+                            }),
+                        ))
+                        .await,
+                );
+                prompt_lifecycle.finish();
+                break;
+            }
+            PromptTurnMessage::Idle => {
+                drop(
+                    event_tx
+                        .send(session_state_event(
+                            session_id.to_string(),
+                            provider_id,
+                            lab_apis::acp::types::AcpSessionState::Completed,
+                        ))
+                        .await,
+                );
+                drop(
+                    event_tx
+                        .send(provider_info_event(
+                            session_id.to_string(),
+                            provider_id,
+                            json!({
+                                "type": "idle_completion",
+                                "title": "Prompt completed after provider idle timeout",
+                                "status": "completed",
+                                "timeout_ms": acp_prompt_idle_timeout().as_millis(),
+                            }),
+                        ))
+                        .await,
+                );
+                prompt_lifecycle.finish();
+                ended_via_idle = true;
+                break;
+            }
+        };
+
+        match update {
+            Ok(agent_client_protocol::SessionMessage::SessionMessage(dispatch)) => {
+                let progress = handle_session_dispatch(
+                    session_id,
+                    provider_id,
+                    event_tx,
+                    dispatch,
+                    &stream_message_ids,
+                )
+                .await
+                .map_err(acp_internal_error)?;
+                saw_assistant_output |= progress.assistant_output;
+                if progress.prompt_progress {
+                    prompt_lifecycle.note_prompt_progress();
+                }
+            }
+            Ok(agent_client_protocol::SessionMessage::StopReason(stop_reason)) => {
+                let stop_reason = map_stop_reason(&stop_reason).to_string();
+                let state = if stop_reason == "cancelled" {
+                    lab_apis::acp::types::AcpSessionState::Cancelled
+                } else {
+                    lab_apis::acp::types::AcpSessionState::Completed
+                };
+                drop(
+                    event_tx
+                        .send(session_state_event(session_id.to_string(), provider_id, state.clone()))
+                        .await,
+                );
+                drop(
+                    event_tx
+                        .send(provider_info_event(
+                            session_id.to_string(),
+                            provider_id,
+                            json!({
+                                "type": "stop_reason",
+                                "title": "Prompt completed",
+                                "status": match state {
+                                    lab_apis::acp::types::AcpSessionState::Cancelled => "cancelled",
+                                    _ => "completed",
+                                },
+                                "stop_reason": stop_reason,
+                            }),
+                        ))
+                        .await,
+                );
+                prompt_lifecycle.finish();
+                break;
+            }
+            Ok(_) => {
+                drop(
+                    event_tx
+                        .send(provider_info_event(
+                            session_id.to_string(),
+                            provider_id,
+                            json!({
+                                "type": "unhandled_provider_message",
+                                "title": "Unhandled provider update",
+                            }),
+                        ))
+                        .await,
+                );
+            }
+            Err(error) => {
+                drop(
+                    event_tx
+                        .send(session_state_event(
+                            session_id.to_string(),
+                            provider_id,
+                            lab_apis::acp::types::AcpSessionState::Failed,
+                        ))
+                        .await,
+                );
+                drop(
+                    event_tx
+                        .send(provider_info_event(
+                            session_id.to_string(),
+                            provider_id,
+                            json!({
+                                "type": "provider_error",
+                                "title": "Provider error",
+                                "text": error.to_string(),
+                            }),
+                        ))
+                        .await,
+                );
+                prompt_lifecycle.finish();
+                break;
+            }
+        }
+    }
+
+    if ended_via_idle {
+        Ok(PromptTurnOutcome::IdleCompleted)
+    } else {
+        Ok(PromptTurnOutcome::Completed)
+    }
+}
+
 async fn run_codex_session(
     session_id: String,
     input: StartSessionInput,
@@ -1593,387 +2006,22 @@ async fn run_codex_session(
                                 prompt_lifecycle.start();
 
                                 if previous_turn_idle {
-                                    // Drain stale messages left by the previous idle-completed turn.
-                                    // We loop until StopReason (turn fully acknowledged by the
-                                    // provider), a connection error, or the drain timeout.
-                                    let deadline =
-                                        tokio::time::Instant::now() + acp_turn_drain_timeout();
-                                    tracing::debug!(
-                                        surface = "acp",
-                                        service = "runtime",
-                                        action = "turn_drain.start",
-                                        session_id = %session_id,
-                                        "Draining stale messages from previous idle-completed turn",
-                                    );
-                                    loop {
-                                        let now = tokio::time::Instant::now();
-                                        if now >= deadline {
-                                            tracing::warn!(
-                                                surface = "acp",
-                                                service = "runtime",
-                                                action = "turn_drain.timeout",
-                                                session_id = %session_id,
-                                                timeout_secs = acp_turn_drain_timeout().as_secs(),
-                                                "Drain timeout: starting next turn without consuming \
-                                                 late StopReason; next turn may see unexpected content",
-                                            );
-                                            break;
-                                        }
-                                        match tokio::time::timeout(
-                                            deadline - now,
-                                            session.read_update(),
-                                        )
-                                        .await
-                                        {
-                                            Ok(Ok(
-                                                agent_client_protocol::SessionMessage::StopReason(
-                                                    _,
-                                                ),
-                                            )) => {
-                                                tracing::debug!(
-                                                    surface = "acp",
-                                                    service = "runtime",
-                                                    action = "turn_drain.done",
-                                                    session_id = %session_id,
-                                                    "Drained late StopReason; previous turn is clean",
-                                                );
-                                                break;
-                                            }
-                                            Ok(Ok(_)) => {
-                                                // Discard stale content from the previous turn.
-                                            }
-                                            Ok(Err(error)) => {
-                                                tracing::warn!(
-                                                    surface = "acp",
-                                                    service = "runtime",
-                                                    action = "turn_drain.error",
-                                                    session_id = %session_id,
-                                                    error = %error,
-                                                    "Connection error while draining previous turn",
-                                                );
-                                                break;
-                                            }
-                                            Err(_elapsed) => {
-                                                tracing::warn!(
-                                                    surface = "acp",
-                                                    service = "runtime",
-                                                    action = "turn_drain.timeout",
-                                                    session_id = %session_id,
-                                                    timeout_secs = acp_turn_drain_timeout().as_secs(),
-                                                    "Drain timeout: starting next turn without consuming \
-                                                     late StopReason; next turn may see unexpected content",
-                                                );
-                                                break;
-                                            }
-                                        }
-                                    }
+                                    drain_previous_turn(&mut session, &session_id).await;
                                 }
 
-                                let stream_message_ids =
-                                    Arc::new(Mutex::new(StreamMessageIds::default()));
-                                drop(
-                                    event_tx
-                                        .send(session_state_event(
-                                            session_id.clone(),
-                                            &provider_id,
-                                            lab_apis::acp::types::AcpSessionState::Running,
-                                        ))
-                                        .await,
-                                );
-                                if let Some(model_id) = model_id.as_deref() {
-                                    session
-                                        .connection()
-                                        .send_request_to(
-                                            Agent,
-                                            SetSessionConfigOptionRequest::new(
-                                                session.session_id().clone(),
-                                                "model",
-                                                model_id,
-                                            ),
-                                        )
-                                        .block_task()
-                                        .await
-                                        .map_err(|error| acp_internal_error(error.to_string()))?;
-                                }
-                                // Redact: store length + a short sanitised preview
-                                // instead of the full prompt text to avoid persisting
-                                // potentially sensitive user input in provider_info events.
-                                let prompt_len = input.text.len();
-                                let raw_preview: String =
-                                    input.text.chars().take(64).collect();
-                                let sanitised_preview: String = raw_preview
-                                    .chars()
-                                    .map(|c| {
-                                        if c.is_ascii_graphic() || c == ' ' {
-                                            c
-                                        } else {
-                                            '?'
-                                        }
-                                    })
-                                    .collect();
-                                let prompt_preview = if prompt_len > 64 {
-                                    format!("{sanitised_preview}…[{prompt_len}b]")
-                                } else {
-                                    sanitised_preview
-                                };
-                                drop(
-                                    event_tx
-                                        .send(provider_info_event(
-                                            session_id.clone(),
-                                            &provider_id,
-                                            json!({
-                                                "type": "prompt_started",
-                                                "title": "Prompt started",
-                                                "prompt_len": prompt_len,
-                                                "prompt_preview": prompt_preview,
-                                                "attachment_count": input.attachments.len(),
-                                                "model_id": model_id,
-                                            }),
-                                        ))
-                                        .await,
-                                );
-
-                                let (prompt_response_tx, prompt_response_rx) =
-                                    oneshot::channel::<Result<StopReason, String>>();
-                                let mut prompt_response_rx = Box::pin(prompt_response_rx);
-                                let blocks = prompt_input_to_content_blocks(&input);
-                                session
-                                    .connection()
-                                    .send_request_to(
-                                        Agent,
-                                        PromptRequest::new(session.session_id().clone(), blocks),
-                                    )
-                                    .on_receiving_result(async move |result| {
-                                        let stop_reason = result
-                                            .map(|PromptResponse { stop_reason, .. }| stop_reason)
-                                            .map_err(|error| error.to_string());
-                                        drop(prompt_response_tx.send(stop_reason));
-                                        Ok(())
-                                    })
-                                    .map_err(|error| acp_internal_error(error.to_string()))?;
-
-                                let mut saw_assistant_output = false;
-                                // Set to true when the turn ends via idle_completion rather
-                                // than an explicit StopReason so the drain block above runs
-                                // before the next turn's prompt is dispatched.
-                                let mut ended_via_idle = false;
-                                loop {
-                                    enum PromptTurnMessage {
-                                        Provider(Result<agent_client_protocol::SessionMessage, agent_client_protocol::Error>),
-                                        Stop(Result<StopReason, String>),
-                                        Idle,
-                                    }
-
-                                    let update = tokio::select! {
-                                        // Prefer consuming a real update over the idle timeout.
-                                        // Without `biased`, when both arms are ready simultaneously
-                                        // (provider sent PromptResponse just as the timer fires),
-                                        // tokio picks randomly. A timeout win leaves StopReason
-                                        // in the channel where it poisons the next turn's read loop.
-                                        biased;
-                                        stop_reason = &mut prompt_response_rx => {
-                                            PromptTurnMessage::Stop(
-                                                stop_reason.unwrap_or_else(|_| Err("prompt response channel closed".to_string())),
-                                            )
-                                        },
-                                        update = session.read_update() => PromptTurnMessage::Provider(update),
-                                        () = tokio::time::sleep(acp_prompt_idle_timeout()), if saw_assistant_output => PromptTurnMessage::Idle,
-                                    };
-                                    let update = match update {
-                                        PromptTurnMessage::Provider(update) => update,
-                                        PromptTurnMessage::Stop(Ok(stop_reason)) => {
-                                            let stop_reason =
-                                                map_stop_reason(&stop_reason).to_string();
-                                            let state = if stop_reason == "cancelled" {
-                                                lab_apis::acp::types::AcpSessionState::Cancelled
-                                            } else {
-                                                lab_apis::acp::types::AcpSessionState::Completed
-                                            };
-                                            drop(
-                                                event_tx
-                                                    .send(session_state_event(
-                                                        session_id.clone(),
-                                                        &provider_id,
-                                                        state.clone(),
-                                                    ))
-                                                    .await,
-                                            );
-                                            drop(
-                                                event_tx
-                                                    .send(provider_info_event(
-                                                        session_id.clone(),
-                                                        &provider_id,
-                                                        json!({
-                                                            "type": "stop_reason",
-                                                            "title": "Prompt completed",
-                                                            "status": match state {
-                                                                lab_apis::acp::types::AcpSessionState::Cancelled => "cancelled",
-                                                                _ => "completed",
-                                                            },
-                                                            "stop_reason": stop_reason,
-                                                        }),
-                                                    ))
-                                                    .await,
-                                            );
-                                            prompt_lifecycle.finish();
-                                            break;
-                                        }
-                                        PromptTurnMessage::Stop(Err(error)) => {
-                                            drop(
-                                                event_tx
-                                                    .send(session_state_event(
-                                                        session_id.clone(),
-                                                        &provider_id,
-                                                        lab_apis::acp::types::AcpSessionState::Failed,
-                                                    ))
-                                                    .await,
-                                            );
-                                            drop(
-                                                event_tx
-                                                    .send(provider_info_event(
-                                                        session_id.clone(),
-                                                        &provider_id,
-                                                        json!({
-                                                            "type": "provider_error",
-                                                            "title": "Provider error",
-                                                            "text": error,
-                                                        }),
-                                                    ))
-                                                    .await,
-                                            );
-                                            prompt_lifecycle.finish();
-                                            break;
-                                        }
-                                        PromptTurnMessage::Idle => {
-                                            drop(
-                                                event_tx
-                                                    .send(session_state_event(
-                                                        session_id.clone(),
-                                                        &provider_id,
-                                                        lab_apis::acp::types::AcpSessionState::Completed,
-                                                    ))
-                                                    .await,
-                                            );
-                                            drop(
-                                                event_tx
-                                                    .send(provider_info_event(
-                                                        session_id.clone(),
-                                                        &provider_id,
-                                                        json!({
-                                                            "type": "idle_completion",
-                                                            "title": "Prompt completed after provider idle timeout",
-                                                            "status": "completed",
-                                                            "timeout_ms": acp_prompt_idle_timeout().as_millis(),
-                                                        }),
-                                                    ))
-                                                    .await,
-                                            );
-                                            prompt_lifecycle.finish();
-                                            ended_via_idle = true;
-                                            break;
-                                        }
-                                    };
-
-                                    match update {
-                                        Ok(agent_client_protocol::SessionMessage::SessionMessage(
-                                            dispatch,
-                                        )) => {
-                                            let progress = handle_session_dispatch(
-                                                &session_id,
-                                                &provider_id,
-                                                &event_tx,
-                                                dispatch,
-                                                &stream_message_ids,
-                                            )
-                                            .await
-                                            .map_err(acp_internal_error)?;
-                                            saw_assistant_output |= progress.assistant_output;
-                                            if progress.prompt_progress {
-                                                prompt_lifecycle.note_prompt_progress();
-                                            }
-                                        }
-                                        Ok(agent_client_protocol::SessionMessage::StopReason(
-                                            stop_reason,
-                                        )) => {
-                                            let stop_reason =
-                                                map_stop_reason(&stop_reason).to_string();
-                                            let state = if stop_reason == "cancelled" {
-                                                lab_apis::acp::types::AcpSessionState::Cancelled
-                                            } else {
-                                                lab_apis::acp::types::AcpSessionState::Completed
-                                            };
-                                            drop(
-                                                event_tx
-                                                    .send(session_state_event(
-                                                        session_id.clone(),
-                                                        &provider_id,
-                                                        state.clone(),
-                                                    ))
-                                                    .await,
-                                            );
-                                            drop(
-                                                event_tx
-                                                    .send(provider_info_event(
-                                                        session_id.clone(),
-                                                        &provider_id,
-                                                        json!({
-                                                            "type": "stop_reason",
-                                                            "title": "Prompt completed",
-                                                            "status": match state {
-                                                                lab_apis::acp::types::AcpSessionState::Cancelled => "cancelled",
-                                                                _ => "completed",
-                                                            },
-                                                            "stop_reason": stop_reason,
-                                                        }),
-                                                    ))
-                                                    .await,
-                                            );
-                                            prompt_lifecycle.finish();
-                                            break;
-                                        }
-                                        Ok(_) => {
-                                            drop(
-                                                event_tx
-                                                    .send(provider_info_event(
-                                                        session_id.clone(),
-                                                        &provider_id,
-                                                        json!({
-                                                            "type": "unhandled_provider_message",
-                                                            "title": "Unhandled provider update",
-                                                        }),
-                                                    ))
-                                                    .await,
-                                            );
-                                        }
-                                        Err(error) => {
-                                            drop(
-                                                event_tx
-                                                    .send(session_state_event(
-                                                        session_id.clone(),
-                                                        &provider_id,
-                                                        lab_apis::acp::types::AcpSessionState::Failed,
-                                                    ))
-                                                    .await,
-                                            );
-                                            drop(
-                                                event_tx
-                                                    .send(provider_info_event(
-                                                        session_id.clone(),
-                                                        &provider_id,
-                                                        json!({
-                                                            "type": "provider_error",
-                                                            "title": "Provider error",
-                                                            "text": error.to_string(),
-                                                        }),
-                                                    ))
-                                                    .await,
-                                            );
-                                            prompt_lifecycle.finish();
-                                            break;
-                                        }
-                                    }
-                                }
-                                previous_turn_idle = ended_via_idle;
+                                let outcome = run_prompt_turn(
+                                    &mut session,
+                                    &session_id,
+                                    &provider_id,
+                                    &event_tx,
+                                    &prompt_lifecycle,
+                                    model_id.as_deref(),
+                                    input,
+                                )
+                                .await
+                                .map_err(|error| acp_internal_error(error.to_string()))?;
+                                previous_turn_idle =
+                                    matches!(outcome, PromptTurnOutcome::IdleCompleted);
                             }
                             SessionCommand::Cancel => {
                                 permissions.cancel_session(&session.session_id().to_string());

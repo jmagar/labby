@@ -16,15 +16,15 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use futures::{Stream, StreamExt, stream};
-use tokio::sync::{Mutex, OnceCell, RwLock, mpsc};
+use tokio::sync::{Mutex, RwLock, mpsc};
 
 use lab_apis::acp::persistence::AcpPersistence;
 use lab_apis::acp::types::{
     AcpEvent, AcpModelOption, AcpProviderHealth, AcpSessionState, AcpSessionSummary,
 };
 
-use crate::acp::sqlite_persistence::SqliteAcpPersistence;
-use crate::acp::types::{BulkCloseSelector, LocalAttachmentContent, LocalPromptAttachment};
+use crate::acp::params::BulkCloseSelector;
+use crate::dispatch::acp::persistence::SqliteAcpPersistence;
 use crate::dispatch::error::ToolError;
 
 use super::runtime::{
@@ -93,7 +93,8 @@ struct Session {
     summary: RwLock<AcpSessionSummary>,
     handle: Mutex<Option<RuntimeHandle>>,
     subscribers: Mutex<Vec<mpsc::Sender<Arc<AcpEvent>>>>,
-    events: RwLock<Vec<AcpEvent>>,
+    /// In-memory event ring buffer. Capped at 500 events; `pop_front` is O(1).
+    events: RwLock<VecDeque<Arc<AcpEvent>>>,
     /// Never held across an `.await` — use std::sync::Mutex for lower overhead.
     next_seq: std::sync::Mutex<u64>,
     /// Never held across an `.await` — use std::sync::Mutex for lower overhead.
@@ -118,7 +119,7 @@ impl Session {
             summary: RwLock::new(summary),
             handle: Mutex::new(None),
             subscribers: Mutex::new(Vec::new()),
-            events: RwLock::new(Vec::new()),
+            events: RwLock::new(VecDeque::new()),
             next_seq: std::sync::Mutex::new(next_seq),
             last_activity: std::sync::Mutex::new(Instant::now()),
         })
@@ -160,9 +161,11 @@ pub struct StartAndPromptResult {
 }
 
 #[derive(Clone)]
-pub struct AcpSessionRegistry {
+pub struct AcpSessionRegistry<P = SqliteAcpPersistence> {
     sessions: Arc<RwLock<HashMap<String, Arc<Session>>>>,
-    persistence: Arc<OnceCell<SqliteAcpPersistence>>,
+    /// Injected at construction time; `None` when persistence is disabled or
+    /// unavailable (e.g., in unit tests or when `LAB_ACP_DB` is unset).
+    persistence: Option<Arc<P>>,
     default_cwd: String,
     /// Storm detection: timestamps of recent session creations (sliding window).
     recent_creations: Arc<Mutex<VecDeque<Instant>>>,
@@ -176,13 +179,35 @@ pub struct AcpSessionRegistry {
     provider_models: Arc<RwLock<HashMap<String, Vec<AcpModelOption>>>>,
 }
 
+/// Options forwarded by callers that still use the legacy split API.
+/// Prefer [`PromptOptions`] for new call sites.
 #[derive(Debug, Clone, Default)]
 pub struct PromptSessionOptions {
     pub provider: Option<String>,
     pub continuity_mode: Option<String>,
 }
 
-impl AcpSessionRegistry {
+/// Unified options struct for `prompt_session`.
+///
+/// Collapses the previous four overloads
+/// (`prompt_session` / `prompt_session_with_attachments` /
+/// `prompt_session_with_options` / `prompt_session_input`) into a single
+/// call site.  All fields are optional except `session_id` and `principal`.
+#[derive(Debug, Clone)]
+pub struct PromptOptions {
+    pub session_id: String,
+    pub principal: String,
+    pub text: String,
+    pub attachments: Vec<crate::acp::params::LocalPromptAttachment>,
+    pub model_id: Option<String>,
+    pub provider: Option<String>,
+    pub continuity_mode: Option<String>,
+}
+
+impl<P: AcpPersistence> AcpSessionRegistry<P> {
+    /// Construct a registry without persistence (e.g., for tests or builder patterns).
+    /// Call [`AcpSessionRegistry::new_with_persistence`] or
+    /// [`AcpSessionRegistry::<SqliteAcpPersistence>::from_env`] when persistence is needed.
     #[must_use]
     pub fn new() -> Self {
         crate::acp::runtime::warn_if_acp_provider_sandbox_is_incompatible();
@@ -193,7 +218,7 @@ impl AcpSessionRegistry {
         });
         let registry = Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
-            persistence: Arc::new(OnceCell::new()),
+            persistence: None,
             default_cwd,
             recent_creations: Arc::new(Mutex::new(VecDeque::new())),
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -206,18 +231,8 @@ impl AcpSessionRegistry {
         registry
     }
 
-    async fn persistence(&self) -> Option<&SqliteAcpPersistence> {
-        self.persistence
-            .get_or_try_init(|| async { SqliteAcpPersistence::from_env().await })
-            .await
-            .map_err(|error| {
-                tracing::error!(
-                    surface = "acp", service = "persistence", action = "init",
-                    kind = "internal_error", error = %error,
-                    "failed to open SQLite ACP database — registry will run without persistence",
-                );
-            })
-            .ok()
+    fn persistence(&self) -> Option<&P> {
+        self.persistence.as_deref()
     }
 
     async fn get_session_arc(&self, session_id: &str) -> Result<Arc<Session>, ToolError> {
@@ -486,7 +501,7 @@ impl AcpSessionRegistry {
             "ACP session created successfully",
         );
 
-        if let Some(db) = self.persistence().await {
+        if let Some(db) = self.persistence() {
             if let Err(error) = db.save_session(&summary).await {
                 tracing::warn!(
                     surface = "acp", service = "registry", action = "session.save",
@@ -500,40 +515,29 @@ impl AcpSessionRegistry {
     }
 
     #[allow(dead_code)]
-    pub async fn prompt_session(
-        &self,
-        session_id: &str,
-        prompt: &str,
-        principal: &str,
-        model_id: Option<&str>,
-    ) -> Result<(), ToolError> {
-        self.prompt_session_input(
+    /// Send a prompt to an existing session.
+    ///
+    /// This is the single entry point replacing the previous four overloads
+    /// (`prompt_session`, `prompt_session_with_attachments`,
+    /// `prompt_session_with_options`, `prompt_session_input`).
+    pub async fn prompt_session(&self, opts: PromptOptions) -> Result<(), ToolError> {
+        let PromptOptions {
             session_id,
-            PromptInput {
-                text: prompt.to_string(),
-                attachments: Vec::new(),
-            },
             principal,
+            text,
+            attachments,
             model_id,
-        )
-        .await
-    }
-
-    pub async fn prompt_session_with_attachments(
-        &self,
-        session_id: &str,
-        prompt: &str,
-        attachments: Vec<LocalPromptAttachment>,
-        principal: &str,
-        model_id: Option<&str>,
-        options: PromptSessionOptions,
-    ) -> Result<(), ToolError> {
+            provider,
+            continuity_mode,
+        } = opts;
         let runtime_attachments = attachments
             .into_iter()
             .map(|attachment| {
                 let content = match attachment.content {
-                    LocalAttachmentContent::Text { text } => PromptAttachmentContent::Text(text),
-                    LocalAttachmentContent::Blob { base64 } => {
+                    crate::acp::params::LocalAttachmentContent::Text { text } => {
+                        PromptAttachmentContent::Text(text)
+                    }
+                    crate::acp::params::LocalAttachmentContent::Blob { base64 } => {
                         PromptAttachmentContent::Blob(base64)
                     }
                 };
@@ -546,61 +550,19 @@ impl AcpSessionRegistry {
                 }
             })
             .collect();
-
-        self.prompt_session_input_with_options(
-            session_id,
-            PromptInput {
-                text: prompt.to_string(),
-                attachments: runtime_attachments,
-            },
-            principal,
-            model_id,
-            options,
-        )
-        .await
+        let prompt_input = PromptInput {
+            text,
+            attachments: runtime_attachments,
+        };
+        let options = PromptSessionOptions {
+            provider,
+            continuity_mode,
+        };
+        self.prompt_session_inner(&session_id, prompt_input, &principal, model_id.as_deref(), options)
+            .await
     }
 
-    #[allow(dead_code)]
-    async fn prompt_session_input(
-        &self,
-        session_id: &str,
-        prompt: PromptInput,
-        principal: &str,
-        model_id: Option<&str>,
-    ) -> Result<(), ToolError> {
-        self.prompt_session_input_with_options(
-            session_id,
-            prompt,
-            principal,
-            model_id,
-            PromptSessionOptions::default(),
-        )
-        .await
-    }
-
-    #[allow(dead_code)]
-    pub async fn prompt_session_with_options(
-        &self,
-        session_id: &str,
-        prompt: &str,
-        principal: &str,
-        model_id: Option<&str>,
-        options: PromptSessionOptions,
-    ) -> Result<(), ToolError> {
-        self.prompt_session_input_with_options(
-            session_id,
-            PromptInput {
-                text: prompt.to_string(),
-                attachments: Vec::new(),
-            },
-            principal,
-            model_id,
-            options,
-        )
-        .await
-    }
-
-    async fn prompt_session_input_with_options(
+    async fn prompt_session_inner(
         &self,
         session_id: &str,
         mut prompt: PromptInput,
@@ -716,7 +678,7 @@ impl AcpSessionRegistry {
             .await
             .map_err(session_command_error)?;
 
-        if let Some(db) = self.persistence().await {
+        if let Some(db) = self.persistence() {
             let summary = session.summary.read().await;
             if let Err(error) = db.save_session(&summary).await {
                 tracing::warn!(
@@ -859,9 +821,10 @@ impl AcpSessionRegistry {
             },
         );
 
+        let switch_event = Arc::new(switch_event);
         persist_session_event(self, &switch_event).await;
-        apply_session_event(session, &switch_event).await;
-        let _ = fanout_event(session, Arc::new(switch_event)).await;
+        let _ = fanout_event(session, Arc::clone(&switch_event)).await;
+        apply_session_event(session, switch_event).await;
 
         let old_runtime = {
             let mut handle = session.handle.lock().await;
@@ -915,7 +878,7 @@ impl AcpSessionRegistry {
         );
         cancel_and_drop_runtime(&session, Some(&self.active_runtime_count)).await;
 
-        if let Some(db) = self.persistence().await {
+        if let Some(db) = self.persistence() {
             if let Err(error) = db
                 .update_session_state(session_id, AcpSessionState::Cancelled)
                 .await
@@ -1029,7 +992,7 @@ impl AcpSessionRegistry {
             self.sessions.write().await.remove(session_id);
         }
 
-        if let Some(db) = self.persistence().await {
+        if let Some(db) = self.persistence() {
             if let Err(error) = db
                 .update_session_state(session_id, AcpSessionState::Closed)
                 .await
@@ -1168,21 +1131,22 @@ impl AcpSessionRegistry {
         &self,
         input: StartSessionInput,
         prompt_text: &str,
-        prompt_attachments: Vec<LocalPromptAttachment>,
+        prompt_attachments: Vec<crate::acp::params::LocalPromptAttachment>,
         principal: &str,
         prompt_options: PromptSessionOptions,
     ) -> Result<StartAndPromptResult, ToolError> {
         let session = self.create_session(input, principal).await?;
 
         let prompt_result = self
-            .prompt_session_with_attachments(
-                &session.id,
-                prompt_text,
-                prompt_attachments,
-                principal,
-                session.model_id.as_deref(),
-                prompt_options,
-            )
+            .prompt_session(PromptOptions {
+                session_id: session.id.clone(),
+                principal: principal.to_string(),
+                text: prompt_text.to_string(),
+                attachments: prompt_attachments,
+                model_id: session.model_id.clone(),
+                provider: prompt_options.provider,
+                continuity_mode: prompt_options.continuity_mode,
+            })
             .await;
 
         if let Err(prompt_err) = prompt_result {
@@ -1289,7 +1253,7 @@ impl AcpSessionRegistry {
     ) -> Result<Vec<AcpEvent>, ToolError> {
         let session = self.get_session_arc(session_id).await?;
         Self::check_principal(&session, principal)?;
-        if let Some(db) = self.persistence().await {
+        if let Some(db) = self.persistence() {
             match db.load_events_since(session_id, since_seq).await {
                 Ok(events) => return Ok(events),
                 Err(error) => {
@@ -1309,7 +1273,7 @@ impl AcpSessionRegistry {
         session_id: &str,
         since_seq: u64,
         principal: &str,
-    ) -> Result<impl Stream<Item = Arc<AcpEvent>> + use<>, ToolError> {
+    ) -> Result<impl Stream<Item = Arc<AcpEvent>> + use<P>, ToolError> {
         let session = self.get_session_arc(session_id).await?;
         Self::check_principal(&session, principal)?;
 
@@ -1328,7 +1292,7 @@ impl AcpSessionRegistry {
             subs.push(tx);
         }
 
-        let backlog: Vec<Arc<AcpEvent>> = if let Some(db) = self.persistence().await {
+        let backlog: Vec<Arc<AcpEvent>> = if let Some(db) = self.persistence() {
             match db
                 .load_events_since_capped(session_id, since_seq, BACKFILL_CAP)
                 .await
@@ -1402,7 +1366,7 @@ impl AcpSessionRegistry {
         });
     }
 
-    fn spawn_idle_reaper(registry: AcpSessionRegistry, interval_secs: u64) {
+    fn spawn_idle_reaper(registry: AcpSessionRegistry<P>, interval_secs: u64) {
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
             loop {
@@ -1452,14 +1416,16 @@ impl AcpSessionRegistry {
     ) {
         let registry = self.clone();
         tokio::spawn(async move {
-            while let Some(event) = rx.recv().await {
-                let event = next_session_event(&session, event);
+            while let Some(raw_event) = rx.recv().await {
+                // Allocate Arc once; share via cheap Arc::clone across all paths.
+                let event = Arc::new(next_session_event(&session, raw_event));
                 persist_session_event(&registry, &event).await;
-                apply_session_event(&session, &event).await;
+                // Arc::clone gives apply_session_event ownership without deep copy.
+                let dropped = fanout_event(&session, Arc::clone(&event)).await;
+                apply_session_event(&session, Arc::clone(&event)).await;
 
-                let dropped = fanout_event(&session, Arc::new(event.clone())).await;
                 if dropped > 0 {
-                    let marker = next_session_event(
+                    let marker = Arc::new(next_session_event(
                         &session,
                         AcpEvent::ProviderInfo {
                             id: uuid::Uuid::new_v4().to_string(),
@@ -1473,7 +1439,7 @@ impl AcpSessionRegistry {
                                 "after_seq": event.seq(),
                             }),
                         },
-                    );
+                    ));
                     tracing::warn!(
                         surface = "acp", service = "registry", action = "fanout.backpressure",
                         session_id = %session.id, dropped_subscribers = dropped,
@@ -1481,8 +1447,8 @@ impl AcpSessionRegistry {
                         "subscriber backpressure — subscribers removed, replay required",
                     );
                     persist_session_event(&registry, &marker).await;
-                    apply_session_event(&session, &marker).await;
-                    let _ = fanout_event(&session, Arc::new(marker)).await;
+                    let _ = fanout_event(&session, Arc::clone(&marker)).await;
+                    apply_session_event(&session, marker).await;
                 }
             }
 
@@ -1523,11 +1489,12 @@ impl AcpSessionRegistry {
                         state: AcpSessionState::Failed,
                     },
                 );
+                let failed = Arc::new(failed);
                 persist_session_event(&registry, &failed).await;
-                apply_session_event(&session, &failed).await;
-                let _ = fanout_event(&session, Arc::new(failed)).await;
+                let _ = fanout_event(&session, Arc::clone(&failed)).await;
+                apply_session_event(&session, failed).await;
 
-                let exit_event = next_session_event(
+                let exit_event = Arc::new(next_session_event(
                     &session,
                     AcpEvent::ProviderInfo {
                         id: uuid::Uuid::new_v4().to_string(),
@@ -1541,10 +1508,10 @@ impl AcpSessionRegistry {
                             "status": "failed",
                         }),
                     },
-                );
+                ));
                 persist_session_event(&registry, &exit_event).await;
-                apply_session_event(&session, &exit_event).await;
-                let _ = fanout_event(&session, Arc::new(exit_event)).await;
+                let _ = fanout_event(&session, Arc::clone(&exit_event)).await;
+                apply_session_event(&session, exit_event).await;
 
                 tracing::error!(
                     surface = "acp", service = "registry", action = "runtime.exit",
@@ -1672,7 +1639,7 @@ impl AcpSessionRegistry {
     ///   events written to both the in-memory buffer and SQLite so callers see
     ///   a clean terminal transition.
     pub async fn restore_from_db(&self) {
-        let Some(db) = self.persistence().await else {
+        let Some(db) = self.persistence() else {
             tracing::warn!(
                 surface = "acp",
                 service = "registry",
@@ -1765,10 +1732,11 @@ impl AcpSessionRegistry {
                         state: AcpSessionState::Failed,
                     },
                 );
+                let failed = Arc::new(failed);
                 persist_session_event(self, &failed).await;
-                apply_session_event(&session, &failed).await;
+                apply_session_event(&session, failed).await;
 
-                let info = next_session_event(
+                let info = Arc::new(next_session_event(
                     &session,
                     AcpEvent::ProviderInfo {
                         id: uuid::Uuid::new_v4().to_string(),
@@ -1782,9 +1750,9 @@ impl AcpSessionRegistry {
                             "status": "failed",
                         }),
                     },
-                );
+                ));
                 persist_session_event(self, &info).await;
-                apply_session_event(&session, &info).await;
+                apply_session_event(&session, info).await;
             }
 
             {
@@ -1805,16 +1773,24 @@ impl AcpSessionRegistry {
             "ACP sessions restored from SQLite",
         );
     }
+}
 
+// ---------------------------------------------------------------------------
+// Test-only helpers — isolated from production code paths.
+// Methods on AcpSessionRegistry that are only used in #[cfg(test)] modules.
+// Kept in a separate impl block so they are invisible in production builds.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+impl<P: AcpPersistence> AcpSessionRegistry<P> {
     // ── Test helpers ───────────────────────────────────────────────────────
 
     /// Create a test registry with a custom idle timeout. Background tasks are
     /// NOT spawned so tests run in isolation.
-    #[cfg(test)]
     pub fn new_for_tests(idle_timeout: Duration) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
-            persistence: Arc::new(OnceCell::new()),
+            persistence: None,
             default_cwd: ".".to_string(),
             recent_creations: Arc::new(Mutex::new(VecDeque::new())),
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -1824,7 +1800,6 @@ impl AcpSessionRegistry {
         }
     }
 
-    #[cfg(test)]
     pub fn new_for_test_with_provider_models(
         provider_models: Vec<(String, Vec<AcpModelOption>)>,
     ) -> Self {
@@ -1834,7 +1809,7 @@ impl AcpSessionRegistry {
             .collect();
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
-            persistence: Arc::new(OnceCell::new()),
+            persistence: None,
             default_cwd: ".".to_string(),
             recent_creations: Arc::new(Mutex::new(VecDeque::new())),
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -1848,16 +1823,13 @@ impl AcpSessionRegistry {
     /// Background tasks are NOT spawned so tests run in isolation.
     #[cfg(test)]
     pub fn new_for_tests_with_persistence(db: SqliteAcpPersistence) -> Self {
-        let cell = OnceCell::new();
-        // set() only fails if the cell is already initialized, which is
-        // impossible on a freshly-created OnceCell.
-        drop(cell.set(db));
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
-            persistence: Arc::new(cell),
+            persistence: Some(Arc::new(db)),
             default_cwd: ".".to_string(),
             recent_creations: Arc::new(Mutex::new(VecDeque::new())),
             shutting_down: Arc::new(AtomicBool::new(false)),
+            active_runtime_count: Arc::new(AtomicUsize::new(0)),
             idle_timeout: Duration::from_millis(100),
             provider_models: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -1865,7 +1837,6 @@ impl AcpSessionRegistry {
 
     /// Inject a pre-built session with a fake RuntimeHandle — no subprocess spawned.
     /// The returned session summary mirrors what create_session would return.
-    #[cfg(test)]
     pub async fn inject_fake_session(
         &self,
         session_id: &str,
@@ -1931,7 +1902,6 @@ impl AcpSessionRegistry {
     /// Force the cached summary state of a session for tests. Both the
     /// fast-path state lock and the summary lock are updated so any consumer
     /// that reads either sees the new value.
-    #[cfg(test)]
     pub async fn force_summary_state_for_tests(&self, session_id: &str, state: AcpSessionState) {
         if let Ok(session) = self.get_session_arc(session_id).await {
             *session.state.write().await = state.clone();
@@ -1940,13 +1910,11 @@ impl AcpSessionRegistry {
     }
 
     /// Check whether a session id is still registered (for assertions).
-    #[cfg(test)]
     pub async fn session_exists_for_tests(&self, session_id: &str) -> bool {
         self.sessions.read().await.contains_key(session_id)
     }
 
     /// Inject a pre-built session whose runtime command queue is already full.
-    #[cfg(test)]
     pub async fn inject_saturated_fake_session(
         &self,
         session_id: &str,
@@ -2004,7 +1972,6 @@ impl AcpSessionRegistry {
     }
 
     /// Override last_activity on a session to simulate being idle for `elapsed`.
-    #[cfg(test)]
     pub async fn set_last_activity_for_test(&self, session_id: &str, elapsed: Duration) {
         if let Ok(session) = self.get_session_arc(session_id).await {
             let past = Instant::now()
@@ -2017,21 +1984,18 @@ impl AcpSessionRegistry {
         }
     }
 
-    #[cfg(test)]
     pub async fn set_title_for_test(&self, session_id: &str, title: &str) {
         if let Ok(session) = self.get_session_arc(session_id).await {
             session.summary.write().await.title = title.to_string();
         }
     }
 
-    #[cfg(test)]
     pub async fn detach_runtime_for_test(&self, session_id: &str) {
         if let Ok(session) = self.get_session_arc(session_id).await {
             *session.handle.lock().await = None;
         }
     }
 
-    #[cfg(test)]
     pub async fn session_count(&self) -> usize {
         self.sessions.read().await.len()
     }
@@ -2091,10 +2055,12 @@ async fn cancel_and_drop_runtime(session: &Arc<Session>, counter: Option<&Arc<At
 
 async fn load_in_memory_events(session: &Arc<Session>, since_seq: u64) -> Vec<AcpEvent> {
     let events = session.events.read().await;
+    // Deref Arc<AcpEvent> → &AcpEvent for the seq filter; clone only the events
+    // that pass (these go out to callers and need owned values).
     let filtered: Vec<AcpEvent> = events
         .iter()
         .filter(|e| e.seq() > since_seq)
-        .cloned()
+        .map(|arc| (**arc).clone())
         .collect();
     let start = filtered.len().saturating_sub(BACKFILL_CAP as usize);
     filtered[start..].to_vec()
@@ -2107,18 +2073,18 @@ fn next_session_event(session: &Arc<Session>, event: AcpEvent) -> AcpEvent {
     stamp_event_sequence(event, seq)
 }
 
-async fn apply_session_event(session: &Arc<Session>, event: &AcpEvent) {
-    let maybe_new_state = session_state_from_event(event);
+async fn apply_session_event(session: &Arc<Session>, event: Arc<AcpEvent>) {
+    let maybe_new_state = session_state_from_event(&event);
     {
         let mut summary = session.summary.write().await;
-        summary.updated_at = event_created_at(event).to_string();
+        summary.updated_at = event_created_at(&event).to_string();
         if let Some(ref state) = maybe_new_state {
             summary.state = state.clone();
         }
-        if let Some(title) = session_title_from_event(event) {
+        if let Some(title) = session_title_from_event(&event) {
             summary.title = title;
         }
-        if let AcpEvent::ProviderSwitch { to_provider, .. } = event {
+        if let AcpEvent::ProviderSwitch { to_provider, .. } = event.as_ref() {
             summary.provider = to_provider.clone();
         }
     }
@@ -2127,11 +2093,11 @@ async fn apply_session_event(session: &Arc<Session>, event: &AcpEvent) {
     }
     {
         let mut events = session.events.write().await;
-        events.push(event.clone());
-        if events.len() > 500 {
-            let extra = events.len() - 500;
-            events.drain(0..extra);
+        // O(1) front removal via VecDeque instead of O(n) Vec::drain.
+        while events.len() >= 500 {
+            events.pop_front();
         }
+        events.push_back(event);
     }
 }
 
@@ -2175,8 +2141,8 @@ async fn fanout_event(session: &Arc<Session>, event: Arc<AcpEvent>) -> usize {
     dropped
 }
 
-async fn persist_session_event(registry: &AcpSessionRegistry, event: &AcpEvent) {
-    if let Some(db) = registry.persistence().await {
+async fn persist_session_event<P: AcpPersistence>(registry: &AcpSessionRegistry<P>, event: &AcpEvent) {
+    if let Some(db) = registry.persistence() {
         if let Err(error) = db.append_event(event).await {
             tracing::warn!(
                 surface = "acp", service = "registry", action = "event.persist",
@@ -2292,7 +2258,7 @@ async fn build_handoff_prompt(session: &Arc<Session>, from_provider: &str, promp
             text,
             provider,
             ..
-        } = event
+        } = event.as_ref()
         {
             if text.trim().is_empty() {
                 continue;
@@ -2351,6 +2317,50 @@ fn utf8_tail_by_bytes(value: &str, max_bytes: usize) -> &str {
         start += 1;
     }
     &value[start..]
+}
+
+// ---------------------------------------------------------------------------
+// Concrete SqliteAcpPersistence constructor
+// ---------------------------------------------------------------------------
+
+impl AcpSessionRegistry<SqliteAcpPersistence> {
+    /// Build a registry backed by `SqliteAcpPersistence`, initialising
+    /// persistence from the `LAB_ACP_DB` environment variable.
+    ///
+    /// If the env var is absent or the database cannot be opened, the registry
+    /// falls back to in-memory-only mode (no persistence) and logs a warning.
+    pub async fn from_env() -> Self {
+        crate::acp::runtime::warn_if_acp_provider_sandbox_is_incompatible();
+        let default_cwd = std::env::var("ACP_SESSION_CWD").unwrap_or_else(|_| {
+            std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| ".".to_string())
+        });
+        let persistence = match SqliteAcpPersistence::from_env().await {
+            Ok(db) => Some(Arc::new(db)),
+            Err(error) => {
+                tracing::error!(
+                    surface = "acp", service = "persistence", action = "init",
+                    kind = "internal_error", error = %error,
+                    "failed to open SQLite ACP database — registry will run without persistence",
+                );
+                None
+            }
+        };
+        let registry = Self {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            persistence,
+            default_cwd,
+            recent_creations: Arc::new(Mutex::new(VecDeque::new())),
+            shutting_down: Arc::new(AtomicBool::new(false)),
+            active_runtime_count: Arc::new(AtomicUsize::new(0)),
+            idle_timeout: Duration::from_secs(SESSION_IDLE_TIMEOUT_MINS * 60),
+            provider_models: Arc::new(RwLock::new(HashMap::new())),
+        };
+        Self::spawn_health_reporter(Arc::clone(&registry.sessions));
+        Self::spawn_idle_reaper(registry.clone(), IDLE_REAPER_INTERVAL_SECS);
+        registry
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2516,7 +2526,15 @@ mod tests {
             .await;
 
         let err = registry
-            .prompt_session("saturated-sess", "hello", "alice", None)
+            .prompt_session(PromptOptions {
+                session_id: "saturated-sess".to_string(),
+                principal: "alice".to_string(),
+                text: "hello".to_string(),
+                attachments: Vec::new(),
+                model_id: None,
+                provider: None,
+                continuity_mode: None,
+            })
             .await
             .expect_err("full command queue must be rejected");
 
@@ -2532,12 +2550,15 @@ mod tests {
             .await;
 
         registry
-            .prompt_session(
-                "title-sess",
-                "Context: route=/chat\n\nInvestigate empty ACP sessions",
-                "alice",
-                None,
-            )
+            .prompt_session(PromptOptions {
+                session_id: "title-sess".to_string(),
+                principal: "alice".to_string(),
+                text: "Context: route=/chat\n\nInvestigate empty ACP sessions".to_string(),
+                attachments: Vec::new(),
+                model_id: None,
+                provider: None,
+                continuity_mode: None,
+            })
             .await
             .expect("prompt dispatch");
 
@@ -2556,16 +2577,15 @@ mod tests {
             .await;
 
         let err = registry
-            .prompt_session_with_options(
-                "switch-fail-sess",
-                "continue this on another provider",
-                "alice",
-                None,
-                PromptSessionOptions {
-                    provider: Some("missing-provider".to_string()),
-                    continuity_mode: Some("handoff".to_string()),
-                },
-            )
+            .prompt_session(PromptOptions {
+                session_id: "switch-fail-sess".to_string(),
+                principal: "alice".to_string(),
+                text: "continue this on another provider".to_string(),
+                attachments: Vec::new(),
+                model_id: None,
+                provider: Some("missing-provider".to_string()),
+                continuity_mode: Some("handoff".to_string()),
+            })
             .await
             .expect_err("unknown provider switch should fail");
 
@@ -2587,7 +2607,7 @@ mod tests {
             .expect("session");
         {
             let mut events = session.events.write().await;
-            events.push(AcpEvent::MessageChunk {
+            events.push_back(Arc::new(AcpEvent::MessageChunk {
                 id: "evt-1".to_string(),
                 created_at: "2026-05-05T00:00:00Z".to_string(),
                 session_id: "handoff-sess".to_string(),
@@ -2596,7 +2616,7 @@ mod tests {
                 role: "assistant".to_string(),
                 text: "🙂".repeat(HANDOFF_MAX_BYTES),
                 message_id: "msg-1".to_string(),
-            });
+            }));
         }
         let prompt = format!("Preserve this exact prompt: {}", "ü".repeat(256));
 
@@ -2675,7 +2695,7 @@ mod tests {
 
     #[test]
     fn provider_healths_does_not_synthesize_current_or_default_model_from_order() {
-        let registry = AcpSessionRegistry::new_for_test_with_provider_models(vec![(
+        let registry: AcpSessionRegistry = AcpSessionRegistry::new_for_test_with_provider_models(vec![(
             "codex-acp".to_string(),
             vec![AcpModelOption {
                 id: "gpt-5-mini".to_string(),
