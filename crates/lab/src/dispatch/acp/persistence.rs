@@ -409,17 +409,18 @@ async fn flush_batch(
     let count = events.len();
     let conn = Arc::clone(conn);
     // Move events into the closure. On failure, return them for retry — no clone needed.
-    let result = tokio::task::spawn_blocking(move || -> Result<(), (Vec<(AcpEvent, String)>, String)> {
-        let c = match conn.lock() {
-            Ok(c) => c,
-            Err(_) => return Err((events, "writer mutex poisoned".to_string())),
-        };
-        match db_batch_insert_events(&c, &events) {
-            Ok(()) => Ok(()),
-            Err(e) => Err((events, format!("batch insert events: {e}"))),
-        }
-    })
-    .await;
+    let result =
+        tokio::task::spawn_blocking(move || -> Result<(), (Vec<(AcpEvent, String)>, String)> {
+            let c = match conn.lock() {
+                Ok(c) => c,
+                Err(_) => return Err((events, "writer mutex poisoned".to_string())),
+            };
+            match db_batch_insert_events(&c, &events) {
+                Ok(()) => Ok(()),
+                Err(e) => Err((events, format!("batch insert events: {e}"))),
+            }
+        })
+        .await;
     match result {
         Ok(Ok(())) => return None,
         Ok(Err((retry, error))) => {
@@ -925,18 +926,18 @@ fn verify_permission_outcome_payload(value: &Value, key: &[u8]) -> Result<(), St
         return Ok(());
     }
 
-    let expected = value
+    let expected_hex = value
         .get("hmac")
         .and_then(Value::as_str)
         .ok_or_else(|| "permission outcome payload missing hmac".to_string())?;
     let message = permission_outcome_message(value)
         .ok_or_else(|| "permission outcome payload missing required fields".to_string())?;
-    let actual = hmac_tag(key, &message);
-    if actual == expected {
-        Ok(())
-    } else {
-        Err("permission outcome hmac mismatch".to_string())
-    }
+    let expected_bytes = hex::decode(expected_hex)
+        .map_err(|_| "permission outcome hmac has invalid hex encoding".to_string())?;
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts any key length");
+    mac.update(message.as_bytes());
+    mac.verify_slice(&expected_bytes)
+        .map_err(|_| "permission outcome hmac mismatch".to_string())
 }
 
 fn hmac_tag(key: &[u8], message: &str) -> String {

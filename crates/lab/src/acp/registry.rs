@@ -647,7 +647,10 @@ impl AcpSessionRegistry {
         }
         // Touch activity timestamp so idle reaper leaves this session alone.
         {
-            let mut activity = session.last_activity.lock().expect("last_activity lock poisoned");
+            let mut activity = session
+                .last_activity
+                .lock()
+                .expect("last_activity lock poisoned");
             *activity = Instant::now();
         }
 
@@ -775,7 +778,10 @@ impl AcpSessionRegistry {
         }
 
         #[derive(Clone, Copy)]
-        enum ContinuityMode { Handoff, Reset }
+        enum ContinuityMode {
+            Handoff,
+            Reset,
+        }
 
         let continuity_mode = match options.continuity_mode.as_deref() {
             Some("reset") => ContinuityMode::Reset,
@@ -1405,7 +1411,13 @@ impl AcpSessionRegistry {
             ) {
                 continue;
             }
-            let idle_duration = { session.last_activity.lock().expect("last_activity lock poisoned").elapsed() };
+            let idle_duration = {
+                session
+                    .last_activity
+                    .lock()
+                    .expect("last_activity lock poisoned")
+                    .elapsed()
+            };
             if idle_duration >= self.idle_timeout {
                 tracing::info!(
                     surface = "acp", service = "registry", action = "idle_reap",
@@ -1927,7 +1939,10 @@ impl AcpSessionRegistry {
             let past = Instant::now()
                 .checked_sub(elapsed)
                 .expect("elapsed too large for Instant::checked_sub");
-            *session.last_activity.lock().expect("last_activity lock poisoned") = past;
+            *session
+                .last_activity
+                .lock()
+                .expect("last_activity lock poisoned") = past;
         }
     }
 
