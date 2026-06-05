@@ -11,8 +11,9 @@ The user develops over SSH; their desktop is on another machine. This skill turn
 
 ```bash
 SSH_TARGET="${SCREENS_HOST:-steamy-wsl}"                                            # ssh alias of the desktop machine
-REMOTE_DIR="${SCREENS_REMOTE_DIR:-/mnt/c/screens}"                                  # screenshots dir, POSIX path on the SSH host
-NATIVE_DIR="${SCREENS_NATIVE_DIR:-C:\\screens}"                                     # same dir in native OS form (Windows only)
+SCREENS_BASE="${SCREENS_BASE:-/mnt/c/screens}"                                       # root screenshots dir
+REMOTE_DIR="${SCREENS_REMOTE_DIR:-$SCREENS_BASE/$(date +%Y-%m)}"                    # current month subdir (ShareX saves to YYYY-MM folders)
+NATIVE_DIR="${SCREENS_NATIVE_DIR:-C:\\screens}"                                     # same root in native Windows form
 POWERSHELL="${SCREENS_POWERSHELL:-/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe}"
 SHAREX="${SCREENS_SHAREX:-/mnt/c/Program Files/ShareX/ShareX.exe}"                  # ShareX CLI path
 SKILL_DIR=/home/jmagar/.agents/src/skills/screenshots
@@ -31,15 +32,19 @@ Variable names match the prior `ss` skill so existing `~/.claude/settings.json` 
 
 Triggers: "check my screen", "look at the screenshot", "latest screen".
 
+ShareX saves to `C:\screens\YYYY-MM\` (month subdirs). Search the current month dir first, fall back to the whole tree if empty.
+
 ```bash
 dest="${CLAUDE_JOB_DIR:-/tmp}/screen-$$.png"
 latest=$(ssh "$SSH_TARGET" "ls -t $REMOTE_DIR/*.png 2>/dev/null | head -1")
+# fallback: search entire screens tree (catches shots from prior month near month boundary)
+[ -z "$latest" ] && latest=$(ssh "$SSH_TARGET" "find $SCREENS_BASE -name '*.png' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-")
 [ -z "$latest" ] && { echo "no screenshots found"; exit 1; }
 ssh "$SSH_TARGET" "cat \"$latest\"" > "$dest"
 echo "$dest"
 ```
 
-List the 10 most recent and let the user pick: `ssh "$SSH_TARGET" "ls -lt $REMOTE_DIR/*.png | head -10"`.
+List the 10 most recent: `ssh "$SSH_TARGET" "ls -lt $REMOTE_DIR/*.png 2>/dev/null | head -10"`.
 
 ## Mode 2 — fresh capture via ShareX (preferred)
 
