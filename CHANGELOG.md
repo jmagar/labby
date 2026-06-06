@@ -8,6 +8,20 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.22.2] - 2026-06-06
+
+### Highlights
+
+- **Production Synapse2 workspace mount** — bind-mount `/workspace/synapse2`
+  into the production Labby container so gateway config entries that reference
+  the local Synapse2 MCP workspace resolve inside the runtime.
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | fix(compose): mount Synapse2 workspace in production Labby container |
+
+---
+
 ## [0.22.1] - 2026-06-04
 
 ### Highlights
