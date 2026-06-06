@@ -4,9 +4,9 @@ repo: git@github.com:jmagar/lab.git
 branch: fix/synapse2-prod-mount
 head: c6e0a64d
 session id: abba9d8d-e1f3-46c8-9b06-a5359b0a88d3
-transcript: /home/jmagar/.claude/projects/-home-jmagar-workspace-lab/abba9d8d-e1f3-46c8-9b06-a5359b0a88d3.jsonl
-working directory: /home/jmagar/workspace/lab
-worktree: /home/jmagar/workspace/lab
+transcript: local Claude transcript path
+working directory: lab workspace
+worktree: lab workspace
 ---
 
 # Synapse2 production mount quick push
@@ -29,7 +29,7 @@ Prepared a patch release for a production Docker Compose mount update that expos
 
 ## Key Findings
 
-- `docker-compose.prod.yml` now bind-mounts `/workspace/synapse2:/workspace/synapse2`, matching the local path referenced by Lab gateway config.
+- `docker-compose.prod.yml` now bind-mounts the configured Synapse2 workspace into `/workspace/synapse2`, matching the container path referenced by Lab gateway config.
 - Current project version fields were present in `Cargo.toml` and `apps/gateway-admin/package.json`; `Cargo.lock` carried crate versions for `lab-apis`, `lab-auth`, and `labby`.
 - `git grep -F "0.22.1" -- '*.toml' '*.json' '*.md' '*.yml' '*.yaml'` only found historical changelog/reference docs and third-party dependency pins after the bump.
 
@@ -66,7 +66,7 @@ Recent beads were read only. No new remaining work was discovered that required 
 
 ### Worktrees and branches
 
-`git worktree list --porcelain` showed one registered worktree at `/home/jmagar/workspace/lab` on branch `fix/synapse2-prod-mount`. `git branch -vv` showed local branches `fix/synapse2-prod-mount` and `main`; no branch cleanup was performed.
+`git worktree list --porcelain` showed one registered Lab worktree on branch `fix/synapse2-prod-mount`. `git branch -vv` showed local branches `fix/synapse2-prod-mount` and `main`; no branch cleanup was performed.
 
 ### Stale docs
 
@@ -100,7 +100,7 @@ No broad stale-doc sweep was performed. The only doc update was the release entr
 
 | area | before | after |
 |---|---|---|
-| Production Labby container mounts | Synapse2 workspace path was not mounted into the container. | `/workspace/synapse2` is mounted inside the Labby runtime. |
+| Production Labby container mounts | Synapse2 workspace path was not mounted into the container. | Configured Synapse2 workspace is mounted at `/workspace/synapse2` inside the Labby runtime. |
 | Release version | Current project version was `0.22.1`. | Current project version is `0.22.2`. |
 
 ## Verification Evidence
@@ -113,7 +113,7 @@ No broad stale-doc sweep was performed. The only doc update was the release entr
 
 ## Risks and Rollback
 
-The production compose mount assumes `/workspace/synapse2` exists on the host where the production stack runs. Rollback is to remove the added mount from `docker-compose.prod.yml` and revert the `0.22.2` version/changelog commit.
+The production compose mount defaults to `${HOME}/workspace/synapse2` on the host and can be overridden with `SYNAPSE2_WORKSPACE`. Rollback is to remove the added mount from `docker-compose.prod.yml` and revert the `0.22.2` version/changelog commit.
 
 ## Decisions Not Taken
 
@@ -129,7 +129,7 @@ The production compose mount assumes `/workspace/synapse2` exists on the host wh
 
 ## Open Questions
 
-- Whether the production host always has `/workspace/synapse2` populated is assumed from the existing gateway config context and was not independently verified in this session.
+- Whether the production host always has the default Synapse2 workspace path populated is assumed from the existing gateway config context and was not independently verified in this session.
 
 ## Next Steps
 

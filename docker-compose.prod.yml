@@ -90,7 +90,7 @@ services:
       # absolute path in Codex config.
       - ${HOME}/workspace/open-design:${HOME}/workspace/open-design
       # Synapse2 is a local workspace MCP referenced by Lab gateway config.
-      - /workspace/synapse2:/workspace/synapse2
+      - ${SYNAPSE2_WORKSPACE:-${HOME}/workspace/synapse2}:/workspace/synapse2
       - .:/workspace/lab
       - .:${HOME}/workspace/lab
 
