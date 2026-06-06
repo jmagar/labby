@@ -65,6 +65,7 @@ pub struct LocalLogsArgs {
 }
 
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum LocalLogsCommand {
     /// Search the persistent local log store.
     Search(LocalSearchArgs),

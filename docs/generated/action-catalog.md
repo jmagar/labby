@@ -178,7 +178,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `stash` | `component.workspace` | false | false | `id*: string` | `WorkspacePath` | cli, mcp, api |
 | `stash` | `components.list` | false | false |  | `ComponentSummary[]` | cli, mcp, api |
 | `stash` | `help` | false | false |  | `Catalog` | cli, mcp, api |
-| `stash` | `provider.link` | false | false | `id*: string`<br>`kind*: string`<br>`label*: string`<br>`config*: object` | `Provider` | cli, mcp, api |
+| `stash` | `provider.link` | false | true | `id*: string`<br>`kind*: string`<br>`label*: string`<br>`config*: object` | `Provider` | cli, mcp, api |
 | `stash` | `provider.pull` | false | true | `id*: string`<br>`provider_id*: string` | `SyncResult` | cli, mcp, api |
 | `stash` | `provider.push` | false | true | `id*: string`<br>`provider_id*: string` | `SyncResult` | cli, mcp, api |
 | `stash` | `providers.list` | false | false |  | `Provider[]` | cli, mcp, api |

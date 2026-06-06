@@ -318,7 +318,7 @@ impl GatewayManager {
     /// The connector is propagated to every `UpstreamPool` the manager creates
     /// so built-in lab services are accessible as in-process MCP peers.
     #[must_use]
-    pub fn with_in_process_connector(mut self, connector: InProcessConnector) -> Self {
+    pub(crate) fn with_in_process_connector(mut self, connector: InProcessConnector) -> Self {
         self.in_process_connector = Some(connector);
         self
     }
@@ -4617,7 +4617,10 @@ mod tests {
 
         // With no pool or no cached URIs, results must be empty — not an error.
         let result = manager.discovered_resources("nonexistent-upstream").await;
-        assert!(result.is_ok(), "discovered_resources must not error on empty pool");
+        assert!(
+            result.is_ok(),
+            "discovered_resources must not error on empty pool"
+        );
         assert!(
             result.unwrap().is_empty(),
             "discovered_resources must return empty vec when no pool is present"
@@ -4635,7 +4638,10 @@ mod tests {
         );
 
         let result = manager.discovered_prompts("nonexistent-upstream").await;
-        assert!(result.is_ok(), "discovered_prompts must not error on empty pool");
+        assert!(
+            result.is_ok(),
+            "discovered_prompts must not error on empty pool"
+        );
         assert!(
             result.unwrap().is_empty(),
             "discovered_prompts must return empty vec when no pool is present"
@@ -4654,7 +4660,10 @@ mod tests {
         );
 
         let result = manager.discovered_tools("nonexistent-upstream").await;
-        assert!(result.is_ok(), "discovered_tools must not error on empty pool");
+        assert!(
+            result.is_ok(),
+            "discovered_tools must not error on empty pool"
+        );
         assert!(
             result.unwrap().is_empty(),
             "discovered_tools must return empty vec when no pool is present"

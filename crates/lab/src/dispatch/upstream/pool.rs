@@ -137,7 +137,7 @@ impl UpstreamPool {
     /// When provided, built-in lab services are registered as in-process
     /// upstream peers rather than external HTTP/stdio connections.
     #[must_use]
-    pub fn with_in_process_connector(mut self, connector: InProcessConnector) -> Self {
+    pub(crate) fn with_in_process_connector(mut self, connector: InProcessConnector) -> Self {
         self.in_process_connector = Some(connector);
         self
     }

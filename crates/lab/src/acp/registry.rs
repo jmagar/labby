@@ -558,8 +558,14 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
             provider,
             continuity_mode,
         };
-        self.prompt_session_inner(&session_id, prompt_input, &principal, model_id.as_deref(), options)
-            .await
+        self.prompt_session_inner(
+            &session_id,
+            prompt_input,
+            &principal,
+            model_id.as_deref(),
+            options,
+        )
+        .await
     }
 
     async fn prompt_session_inner(
@@ -2141,7 +2147,10 @@ async fn fanout_event(session: &Arc<Session>, event: Arc<AcpEvent>) -> usize {
     dropped
 }
 
-async fn persist_session_event<P: AcpPersistence>(registry: &AcpSessionRegistry<P>, event: &AcpEvent) {
+async fn persist_session_event<P: AcpPersistence>(
+    registry: &AcpSessionRegistry<P>,
+    event: &AcpEvent,
+) {
     if let Some(db) = registry.persistence() {
         if let Err(error) = db.append_event(event).await {
             tracing::warn!(
@@ -2695,15 +2704,16 @@ mod tests {
 
     #[test]
     fn provider_healths_does_not_synthesize_current_or_default_model_from_order() {
-        let registry: AcpSessionRegistry = AcpSessionRegistry::new_for_test_with_provider_models(vec![(
-            "codex-acp".to_string(),
-            vec![AcpModelOption {
-                id: "gpt-5-mini".to_string(),
-                name: "GPT-5 Mini".to_string(),
-                description: None,
-                fixed: false,
-            }],
-        )]);
+        let registry: AcpSessionRegistry =
+            AcpSessionRegistry::new_for_test_with_provider_models(vec![(
+                "codex-acp".to_string(),
+                vec![AcpModelOption {
+                    id: "gpt-5-mini".to_string(),
+                    name: "GPT-5 Mini".to_string(),
+                    description: None,
+                    fixed: false,
+                }],
+            )]);
 
         let codex = registry
             .provider_healths()

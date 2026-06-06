@@ -179,7 +179,11 @@ impl CodexMarketplaceBackend {
             .map(PathBuf::from);
         if let Some(path) = explicit {
             let root = base_dir.unwrap_or_else(|| Path::new("."));
-            let joined = if path.is_absolute() { path } else { root.join(path) };
+            let joined = if path.is_absolute() {
+                path
+            } else {
+                root.join(path)
+            };
             // Reject traversal: the resolved path must stay within the catalog root.
             let canonical = std::fs::canonicalize(&joined).ok()?;
             let canonical_root = std::fs::canonicalize(root).ok()?;

@@ -1492,11 +1492,7 @@ where
             .connection()
             .send_request_to(
                 Agent,
-                SetSessionConfigOptionRequest::new(
-                    session.session_id().clone(),
-                    "model",
-                    model_id,
-                ),
+                SetSessionConfigOptionRequest::new(session.session_id().clone(), "model", model_id),
             )
             .block_task()
             .await
@@ -1539,8 +1535,7 @@ where
             .await,
     );
 
-    let (prompt_response_tx, prompt_response_rx) =
-        oneshot::channel::<Result<StopReason, String>>();
+    let (prompt_response_tx, prompt_response_rx) = oneshot::channel::<Result<StopReason, String>>();
     let mut prompt_response_rx = Box::pin(prompt_response_rx);
     let blocks = prompt_input_to_content_blocks(&input);
     session
@@ -1589,7 +1584,11 @@ where
                 };
                 drop(
                     event_tx
-                        .send(session_state_event(session_id.to_string(), provider_id, state.clone()))
+                        .send(session_state_event(
+                            session_id.to_string(),
+                            provider_id,
+                            state.clone(),
+                        ))
                         .await,
                 );
                 drop(
@@ -1693,7 +1692,11 @@ where
                 };
                 drop(
                     event_tx
-                        .send(session_state_event(session_id.to_string(), provider_id, state.clone()))
+                        .send(session_state_event(
+                            session_id.to_string(),
+                            provider_id,
+                            state.clone(),
+                        ))
                         .await,
                 );
                 drop(
@@ -1859,9 +1862,14 @@ async fn run_codex_session(
                 let permissions = Arc::clone(&permissions);
                 let provider_id = provider_id.clone();
                 async move |args: RequestPermissionRequest, responder, _cx| {
-                    let response =
-                        handle_permission_request(&session_id, &provider_id, &event_tx, &permissions, args)
-                            .await;
+                    let response = handle_permission_request(
+                        &session_id,
+                        &provider_id,
+                        &event_tx,
+                        &permissions,
+                        args,
+                    )
+                    .await;
                     responder.respond(response)
                 }
             },
@@ -1946,15 +1954,15 @@ async fn run_codex_session(
                         .map_err(|error| acp_internal_error(error.to_string()))?;
 
                     let new_session_response = connection
-                        .send_request_to(
-                            Agent,
-                            NewSessionRequest::new(&*cwd),
-                        )
+                        .send_request_to(Agent, NewSessionRequest::new(&*cwd))
                         .block_task()
                         .await
                         .map_err(|error| acp_internal_error(error.to_string()))?;
                     let (model_id, models, config_options) = session_config_options(
-                        new_session_response.config_options.as_deref().unwrap_or_default(),
+                        new_session_response
+                            .config_options
+                            .as_deref()
+                            .unwrap_or_default(),
                     );
                     let model_name = model_id
                         .as_ref()
@@ -1987,7 +1995,8 @@ async fn run_codex_session(
                         models,
                         config_options,
                     };
-                    if let Some(sender) = started_tx.lock().ok().and_then(|mut guard| guard.take()) {
+                    if let Some(sender) = started_tx.lock().ok().and_then(|mut guard| guard.take())
+                    {
                         drop(sender.send(Ok(started)));
                     }
 

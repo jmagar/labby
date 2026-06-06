@@ -204,11 +204,11 @@ Options:
 ```text
 Check public Lab and protected MCP proxy endpoints from caller-visible URLs
 
-Usage: proxy [OPTIONS] --app-url <APP_URL> --mcp-url <MCP_URL> --route <ROUTE>
+Usage: proxy [OPTIONS] --route <ROUTE>
 
 Options:
       --app-url <APP_URL>
-          Public Lab app URL, e.g. https://lab.example.com
+          Public Lab app URL, e.g. https://lab.example.com (default: LAB_PUBLIC_URL)
 
       --json
           Emit JSON instead of human-readable tables
@@ -220,7 +220,7 @@ Options:
           [possible values: auto, plain, color]
 
       --mcp-url <MCP_URL>
-          Public MCP gateway URL, e.g. https://mcp.example.com
+          Public MCP gateway URL, e.g. https://mcp.example.com (default: LAB_MCP_GATEWAY_URL)
 
       --route <ROUTE>
           Protected MCP public route path, e.g. /syslog
@@ -449,7 +449,7 @@ Usage: get [OPTIONS] <NODE_ID>
 
 Arguments:
   <NODE_ID>
-
+          Node ID to retrieve
 
 Options:
       --json
@@ -1094,7 +1094,7 @@ Options:
           Emit JSON instead of human-readable tables
 
       --name <NAME>
-
+          Name of a configured gateway to test (omit to test with inline --url/--command)
 
       --color <COLOR>
           Control human-readable CLI styling
@@ -1118,7 +1118,7 @@ Options:
           Emit JSON instead of human-readable tables
 
       --name <NAME>
-
+          Unique name for the gateway upstream
 
       --color <COLOR>
           Control human-readable CLI styling
@@ -1127,19 +1127,20 @@ Options:
           [possible values: auto, plain, color]
 
       --url <URL>
-
+          HTTP(S) URL for a remote MCP server (mutually exclusive with --command)
 
       --command <COMMAND>
-
+          Stdio command to launch for a local MCP server (mutually exclusive with --url)
 
       --arg <ARGS>
-
+          Additional arguments passed to the stdio command (repeat for multiple)
 
       --bearer-token-env <BEARER_TOKEN_ENV>
+          Environment variable name whose value is used as the upstream bearer token
 
-
-      --proxy-resources
-
+      --proxy-resources <PROXY_RESOURCES>
+          [default: true]
+          [possible values: true, false]
 
   -h, --help
           Print help
@@ -1154,14 +1155,14 @@ Usage: update [OPTIONS] <NAME>
 
 Arguments:
   <NAME>
-
+          Name of the gateway upstream to update
 
 Options:
       --json
           Emit JSON instead of human-readable tables
 
       --new-name <NEW_NAME>
-
+          Rename the gateway upstream to this new name
 
       --color <COLOR>
           Control human-readable CLI styling
@@ -1170,16 +1171,16 @@ Options:
           [possible values: auto, plain, color]
 
       --url <URL>
-
+          New HTTP(S) URL for a remote MCP server
 
       --command <COMMAND>
-
+          New stdio command for a local MCP server
 
       --arg <ARGS>
-
+          Replace all command arguments with these values (repeat for multiple)
 
       --bearer-token-env <BEARER_TOKEN_ENV>
-
+          Environment variable name whose value is used as the upstream bearer token
 
       --proxy-resources <PROXY_RESOURCES>
           [possible values: true, false]
@@ -2361,10 +2362,10 @@ Usage: search [OPTIONS] <DEVICE> <QUERY>
 
 Arguments:
   <DEVICE>
-
+          Device (node) ID to search logs for
 
   <QUERY>
-
+          Query string to search for
 
 Options:
       --json
@@ -2413,17 +2414,21 @@ Options:
 ```text
 Search the persistent local log store
 
-Usage: search [OPTIONS]
+Usage: search [OPTIONS] [QUERY]
+
+Arguments:
+  [QUERY]
+          Positional query shorthand — equivalent to `--text <QUERY>`
 
 Options:
       --json
           Emit JSON instead of human-readable tables
 
-      --text <TEXT>
-
+      --text <QUERY>
+          Text to search for in log messages (also accepted as a positional argument)
 
       --after-ts <AFTER_TS>
-
+          Only include events after this Unix timestamp (milliseconds)
 
       --color <COLOR>
           Control human-readable CLI styling
@@ -2432,7 +2437,7 @@ Options:
           [possible values: auto, plain, color]
 
       --before-ts <BEFORE_TS>
-
+          Only include events before this Unix timestamp (milliseconds)
 
       --level <LEVELS>
           [possible values: trace, debug, info, warn, error]
@@ -2444,19 +2449,19 @@ Options:
           [possible values: cli, mcp, api, web, core_runtime]
 
       --action <ACTION>
-
+          Filter by dispatch action name
 
       --request-id <REQUEST_ID>
-
+          Filter by request ID (x-request-id header)
 
       --session-id <SESSION_ID>
-
+          Filter by session ID
 
       --correlation-id <CORRELATION_ID>
-
+          Filter by correlation ID
 
       --limit <LIMIT>
-
+          Maximum number of results to return
 
   -h, --help
           Print help
@@ -2471,7 +2476,7 @@ Usage: tail [OPTIONS]
 
 Options:
       --after-ts <AFTER_TS>
-
+          Only include events after this Unix timestamp (milliseconds)
 
       --json
           Emit JSON instead of human-readable tables
@@ -2483,10 +2488,10 @@ Options:
           [possible values: auto, plain, color]
 
       --since-event-id <SINCE_EVENT_ID>
-
+          Resume from after this event ID (exclusive)
 
       --limit <LIMIT>
-
+          Maximum number of results to return
 
   -h, --help
           Print help
