@@ -711,11 +711,23 @@ pub mod tests {
     use super::{host_pattern_matches, is_allowed_redirect_uri, wildcard_matches};
     use crate::config::{AuthConfig, AuthMode, GoogleConfig};
     use crate::google::GoogleProvider;
-    use crate::routes::router;
     use crate::state::AuthState;
     use crate::types::{AuthorizationRequestRow, RegisteredClient};
 
     use crate::util::now_unix;
+
+    use axum::Router;
+    use axum::extract::connect_info::MockConnectInfo;
+    use std::net::SocketAddr;
+
+    // `oneshot` bypasses the live `into_make_service_with_connect_info` layer,
+    // so the rate-limit handlers' `ConnectInfo<SocketAddr>` extractor would be
+    // missing and every request would 500. Wrap the real router with a mock
+    // peer address; handlers that don't extract `ConnectInfo` ignore it.
+    fn router(state: AuthState) -> Router {
+        crate::routes::router(state)
+            .layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 9001))))
+    }
 
     #[tokio::test]
     async fn register_accepts_public_dcr_and_enforces_loopback_redirects() {

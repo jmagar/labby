@@ -173,6 +173,9 @@ mod tests {
     use tower::util::ServiceExt;
     use tracing_subscriber::layer::SubscriberExt;
 
+    use axum::extract::connect_info::MockConnectInfo;
+    use std::net::SocketAddr;
+
     use super::*;
     use crate::authorize::tests::{test_auth_config, test_auth_state, test_auth_state_with_config};
 
@@ -205,7 +208,9 @@ mod tests {
         // Build a state with dynamic registration enabled so /register is mounted.
         let mut config = test_auth_config();
         config.enable_dynamic_registration = true;
-        let app = router(test_auth_state_with_config(config).await);
+        // `oneshot` skips the live ConnectInfo layer the rate-limit extractor needs.
+        let app = router(test_auth_state_with_config(config).await)
+            .layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 9001))));
         let response = app
             .oneshot(
                 HttpRequest::builder()

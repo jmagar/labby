@@ -9,6 +9,22 @@ use serde_json::Value;
 
 use crate::dispatch::error::ToolError;
 
+/// Resolve the lab home directory: `$LAB_HOME` if set, else `$HOME/.lab/`.
+///
+/// Lives in `helpers` (a leaf module) rather than `setup` so peer services
+/// can resolve the path without importing the `setup` orchestrator — see
+/// `dispatch/CLAUDE.md` § Orchestrator Exception.
+#[must_use]
+pub fn lab_home() -> std::path::PathBuf {
+    if let Ok(home) = std::env::var("LAB_HOME")
+        && !home.is_empty()
+    {
+        return std::path::PathBuf::from(home);
+    }
+    let base = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    std::path::PathBuf::from(base).join(".lab")
+}
+
 /// Replace the user's home-directory prefix with literal `~` so paths
 /// embedded in log events, response bodies, and error messages don't leak
 /// the OS username.
