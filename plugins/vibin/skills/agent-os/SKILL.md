@@ -40,6 +40,8 @@ Windows-MCP is exposed inside agent-os over HTTP + Bearer token and registered i
 
 If the server is unreachable: SSH into `tootie`, confirm the VM container is up (`docker ps --format '{{.Names}}' | grep agent-os`; the container name is `agent-os-win11`), and that the MCP service inside is listening. The container persists `/storage` across restarts so installed software survives.
 
+**SSH-only fallback for a native GUI.** If neither Windows-MCP nor noVNC is reachable but `ssh agent-os` works, you can still launch + screenshot a native GUI — but only from the **interactive console session (session 1)**. Plain SSH lands in **session 0**, which has no window station: a GUI `.exe` launched there crashes with `This operation requires an interactive window station (os error 1459)` and PowerShell `CopyFromScreen` returns a blank frame. Launch + capture via a `schtasks /it` scheduled task instead (prefix `MSYS_NO_PATHCONV=1` so git-bash doesn't mangle the `/flags`); confirm the interactive session with `ssh agent-os 'query user'` (expect `docker console 1 Active`). Full recipe: `~/workspace/lab/plugins/testing/skills/desktop-app-testing/references/ssh-fallback-capture.md`.
+
 ## Tool surface
 
 All tools are namespaced `mcp__windows-mcp__<Name>`. Use them directly — they're loaded when the windows-mcp server is up.
