@@ -558,8 +558,14 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
             provider,
             continuity_mode,
         };
-        self.prompt_session_inner(&session_id, prompt_input, &principal, model_id.as_deref(), options)
-            .await
+        self.prompt_session_inner(
+            &session_id,
+            prompt_input,
+            &principal,
+            model_id.as_deref(),
+            options,
+        )
+        .await
     }
 
     async fn prompt_session_inner(
@@ -1819,22 +1825,6 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
         }
     }
 
-    /// Create a test registry pre-seeded with an existing persistence.
-    /// Background tasks are NOT spawned so tests run in isolation.
-    #[cfg(test)]
-    pub fn new_for_tests_with_persistence(db: SqliteAcpPersistence) -> Self {
-        Self {
-            sessions: Arc::new(RwLock::new(HashMap::new())),
-            persistence: Some(Arc::new(db)),
-            default_cwd: ".".to_string(),
-            recent_creations: Arc::new(Mutex::new(VecDeque::new())),
-            shutting_down: Arc::new(AtomicBool::new(false)),
-            active_runtime_count: Arc::new(AtomicUsize::new(0)),
-            idle_timeout: Duration::from_millis(100),
-            provider_models: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
     /// Inject a pre-built session with a fake RuntimeHandle — no subprocess spawned.
     /// The returned session summary mirrors what create_session would return.
     pub async fn inject_fake_session(
@@ -2141,7 +2131,10 @@ async fn fanout_event(session: &Arc<Session>, event: Arc<AcpEvent>) -> usize {
     dropped
 }
 
-async fn persist_session_event<P: AcpPersistence>(registry: &AcpSessionRegistry<P>, event: &AcpEvent) {
+async fn persist_session_event<P: AcpPersistence>(
+    registry: &AcpSessionRegistry<P>,
+    event: &AcpEvent,
+) {
     if let Some(db) = registry.persistence() {
         if let Err(error) = db.append_event(event).await {
             tracing::warn!(
@@ -2324,6 +2317,22 @@ fn utf8_tail_by_bytes(value: &str, max_bytes: usize) -> &str {
 // ---------------------------------------------------------------------------
 
 impl AcpSessionRegistry<SqliteAcpPersistence> {
+    /// Create a test registry pre-seeded with an existing persistence.
+    /// Background tasks are NOT spawned so tests run in isolation.
+    #[cfg(test)]
+    pub fn new_for_tests_with_persistence(db: SqliteAcpPersistence) -> Self {
+        Self {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            persistence: Some(Arc::new(db)),
+            default_cwd: ".".to_string(),
+            recent_creations: Arc::new(Mutex::new(VecDeque::new())),
+            shutting_down: Arc::new(AtomicBool::new(false)),
+            active_runtime_count: Arc::new(AtomicUsize::new(0)),
+            idle_timeout: Duration::from_millis(100),
+            provider_models: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
     /// Build a registry backed by `SqliteAcpPersistence`, initialising
     /// persistence from the `LAB_ACP_DB` environment variable.
     ///
@@ -2695,15 +2704,16 @@ mod tests {
 
     #[test]
     fn provider_healths_does_not_synthesize_current_or_default_model_from_order() {
-        let registry: AcpSessionRegistry = AcpSessionRegistry::new_for_test_with_provider_models(vec![(
-            "codex-acp".to_string(),
-            vec![AcpModelOption {
-                id: "gpt-5-mini".to_string(),
-                name: "GPT-5 Mini".to_string(),
-                description: None,
-                fixed: false,
-            }],
-        )]);
+        let registry: AcpSessionRegistry =
+            AcpSessionRegistry::new_for_test_with_provider_models(vec![(
+                "codex-acp".to_string(),
+                vec![AcpModelOption {
+                    id: "gpt-5-mini".to_string(),
+                    name: "GPT-5 Mini".to_string(),
+                    description: None,
+                    fixed: false,
+                }],
+            )]);
 
         let codex = registry
             .provider_healths()

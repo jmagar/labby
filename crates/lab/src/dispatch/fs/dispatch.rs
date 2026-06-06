@@ -1187,8 +1187,7 @@ mod tests {
             .expect_err("final-component symlink must be refused by openat O_NOFOLLOW");
         match err {
             ToolError::Sdk { sdk_kind, .. } => assert_eq!(
-                sdk_kind,
-                "permission_denied",
+                sdk_kind, "permission_denied",
                 "expected permission_denied, got: {sdk_kind}"
             ),
             other => panic!("expected Sdk permission_denied; got {other:?}"),

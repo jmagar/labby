@@ -2334,8 +2334,7 @@ mod tests {
     #[tokio::test]
     async fn gateway_dispatch_schema_succeeds_without_manager() {
         let old = super::super::client::swap_gateway_manager_for_test(None);
-        let result =
-            dispatch("schema", serde_json::json!({"action": "gateway.list"})).await;
+        let result = dispatch("schema", serde_json::json!({"action": "gateway.list"})).await;
         super::super::client::swap_gateway_manager_for_test(old);
 
         let value = result.expect("schema must not require a gateway manager");

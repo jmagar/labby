@@ -1435,9 +1435,7 @@ mod tests {
         assert!(rev1_dir.exists(), "rev1 dir");
         assert!(rev2_dir.exists(), "rev2 dir");
         assert!(
-            store
-                .component_revision_index_path("comp-del")
-                .exists(),
+            store.component_revision_index_path("comp-del").exists(),
             "rev index"
         );
         assert!(
@@ -1449,9 +1447,7 @@ mod tests {
             "prov2 record"
         );
         assert!(
-            store
-                .component_provider_index_path("comp-del")
-                .exists(),
+            store.component_provider_index_path("comp-del").exists(),
             "prov index"
         );
         assert!(workspace.exists(), "workspace");
@@ -1469,9 +1465,7 @@ mod tests {
         assert!(!rev1_dir.exists(), "rev1 dir gone");
         assert!(!rev2_dir.exists(), "rev2 dir gone");
         assert!(
-            !store
-                .component_revision_index_path("comp-del")
-                .exists(),
+            !store.component_revision_index_path("comp-del").exists(),
             "rev index gone"
         );
         assert!(
@@ -1483,9 +1477,7 @@ mod tests {
             "prov2 gone"
         );
         assert!(
-            !store
-                .component_provider_index_path("comp-del")
-                .exists(),
+            !store.component_provider_index_path("comp-del").exists(),
             "prov index gone"
         );
         assert!(!workspace.exists(), "workspace gone");

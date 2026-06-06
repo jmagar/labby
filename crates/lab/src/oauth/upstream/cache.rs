@@ -80,26 +80,25 @@ impl OauthClientCache {
     ) -> Result<Arc<AuthClient<reqwest::Client>>, OauthError> {
         // For Dynamic upstreams, include the stored client_id in the
         // fingerprint so a re-registration is detected (lab-77y5.13).
-        let dynamic_client_id: Option<String> =
-            if config
-                .oauth
-                .as_ref()
-                .is_some_and(|o| matches!(o.registration, UpstreamOauthRegistration::Dynamic))
-            {
-                self.managers
-                    .get(&config.name)
-                    .map(|r| r.clone())
-                    .ok_or_else(|| {
-                        OauthError::Internal(format!(
-                            "no oauth manager registered for upstream '{}'",
-                            config.name
-                        ))
-                    })?
-                    .stored_dynamic_client_id(subject)
-                    .await?
-            } else {
-                None
-            };
+        let dynamic_client_id: Option<String> = if config
+            .oauth
+            .as_ref()
+            .is_some_and(|o| matches!(o.registration, UpstreamOauthRegistration::Dynamic))
+        {
+            self.managers
+                .get(&config.name)
+                .map(|r| r.clone())
+                .ok_or_else(|| {
+                    OauthError::Internal(format!(
+                        "no oauth manager registered for upstream '{}'",
+                        config.name
+                    ))
+                })?
+                .stored_dynamic_client_id(subject)
+                .await?
+        } else {
+            None
+        };
 
         self.get_or_insert_with(config, subject, dynamic_client_id.as_deref(), || async {
             let manager = self
@@ -397,7 +396,10 @@ mod tests {
             .clients
             .get(&(String::from("acme"), String::from("alice")))
             .expect("stored client");
-        assert_eq!(stored.fingerprint, registration_fingerprint(&new, None).unwrap());
+        assert_eq!(
+            stored.fingerprint,
+            registration_fingerprint(&new, None).unwrap()
+        );
         assert!(Arc::ptr_eq(&stored.client, &client));
     }
 

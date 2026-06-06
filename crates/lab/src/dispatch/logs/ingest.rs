@@ -397,7 +397,6 @@ fn redact_prefixed_tokens(msg: &str) -> String {
     out
 }
 
-
 fn scrub_json(v: serde_json::Value) -> serde_json::Value {
     match v {
         serde_json::Value::Object(map) => {
@@ -607,18 +606,36 @@ mod tests {
     fn redact_key_value_token_param() {
         let msg = "request failed: token=super-secret-value, retry=true";
         let out = redact_secrets(msg);
-        assert!(!out.contains("super-secret-value"), "token value must be redacted: {out}");
-        assert!(out.contains("token=<redacted>"), "key prefix must survive: {out}");
-        assert!(out.contains("retry=true"), "unrelated key must survive: {out}");
+        assert!(
+            !out.contains("super-secret-value"),
+            "token value must be redacted: {out}"
+        );
+        assert!(
+            out.contains("token=<redacted>"),
+            "key prefix must survive: {out}"
+        );
+        assert!(
+            out.contains("retry=true"),
+            "unrelated key must survive: {out}"
+        );
     }
 
     #[test]
     fn redact_key_value_api_key_param() {
         let msg = "api_key=abc123 sent to upstream";
         let out = redact_secrets(msg);
-        assert!(!out.contains("abc123"), "api_key value must be redacted: {out}");
-        assert!(out.contains("api_key=<redacted>"), "key must survive: {out}");
-        assert!(out.contains("sent to upstream"), "surrounding text must survive: {out}");
+        assert!(
+            !out.contains("abc123"),
+            "api_key value must be redacted: {out}"
+        );
+        assert!(
+            out.contains("api_key=<redacted>"),
+            "key must survive: {out}"
+        );
+        assert!(
+            out.contains("sent to upstream"),
+            "surrounding text must survive: {out}"
+        );
     }
 
     #[test]
@@ -627,7 +644,10 @@ mod tests {
         let msg = format!("authenticating with {token}");
         let out = redact_secrets(&msg);
         assert!(!out.contains(token), "GitHub token must be redacted: {out}");
-        assert!(out.contains("<redacted-token>"), "placeholder must appear: {out}");
+        assert!(
+            out.contains("<redacted-token>"),
+            "placeholder must appear: {out}"
+        );
     }
 
     #[test]
@@ -636,7 +656,10 @@ mod tests {
         let msg = format!("using key {key} for request");
         let out = redact_secrets(&msg);
         assert!(!out.contains(key), "sk- key must be redacted: {out}");
-        assert!(out.contains("<redacted-token>"), "placeholder must appear: {out}");
+        assert!(
+            out.contains("<redacted-token>"),
+            "placeholder must appear: {out}"
+        );
     }
 
     #[test]
@@ -645,7 +668,10 @@ mod tests {
         let uuid = "550e8400-e29b-41d4-a716-446655440000";
         let msg = format!("request_id={uuid} processed");
         let out = redact_secrets(&msg);
-        assert!(out.contains(uuid), "UUID correlation ID must NOT be redacted: {out}");
+        assert!(
+            out.contains(uuid),
+            "UUID correlation ID must NOT be redacted: {out}"
+        );
     }
 
     #[test]
@@ -654,6 +680,9 @@ mod tests {
         let msg = "package sk-node installed";
         let out = redact_secrets(&msg);
         // "sk-node" is only 4 chars after "sk-", well below the 20-char threshold.
-        assert!(out.contains("sk-node"), "short sk- word must survive: {out}");
+        assert!(
+            out.contains("sk-node"),
+            "short sk- word must survive: {out}"
+        );
     }
 }

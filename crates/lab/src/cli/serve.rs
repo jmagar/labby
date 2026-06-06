@@ -1,8 +1,8 @@
 //! `labby serve` — start the MCP server.
 
+use std::net::SocketAddr;
 #[cfg(target_os = "linux")]
 use std::path::Path;
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -1118,7 +1118,11 @@ async fn run_http(
     }
     #[cfg(not(unix))]
     {
-        axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>()).await?;
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await?;
     }
     Ok(ExitCode::SUCCESS)
 }

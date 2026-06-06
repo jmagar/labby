@@ -17,8 +17,8 @@ use base64::engine::general_purpose::STANDARD as B64;
 // Re-export shared types from the acp layer so existing dispatch callsites
 // are unaffected without importing from the dispatch layer itself.
 pub use crate::acp::params::{
-    BulkCloseSelector, LocalAttachmentContent, LocalPromptAttachment,
-    MAX_LOCAL_ATTACHMENT_BYTES, MAX_LOCAL_ATTACHMENTS,
+    BulkCloseSelector, LocalAttachmentContent, LocalPromptAttachment, MAX_LOCAL_ATTACHMENT_BYTES,
+    MAX_LOCAL_ATTACHMENTS,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
