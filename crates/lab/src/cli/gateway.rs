@@ -472,7 +472,7 @@ async fn shutdown_signal() -> u8 {
     }
     #[cfg(not(unix))]
     {
-        let _ = tokio::signal::ctrl_c().await;
+        let _unused = tokio::signal::ctrl_c().await;
         130
     }
 }

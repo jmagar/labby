@@ -717,14 +717,12 @@ async fn sources_add(
 )]
 async fn persist_marketplace_auto_update(target: &str, auto_update: bool) -> Result<(), ToolError> {
     let target = target.to_string();
-    tokio::task::spawn_blocking(move || {
-        persist_marketplace_auto_update_sync(&target, auto_update)
-    })
-    .await
-    .map_err(|e| ToolError::Sdk {
-        sdk_kind: "internal_error".into(),
-        message: format!("spawn_blocking failed: {e}"),
-    })?
+    tokio::task::spawn_blocking(move || persist_marketplace_auto_update_sync(&target, auto_update))
+        .await
+        .map_err(|e| ToolError::Sdk {
+            sdk_kind: "internal_error".into(),
+            message: format!("spawn_blocking failed: {e}"),
+        })?
 }
 
 fn persist_marketplace_auto_update_sync(target: &str, auto_update: bool) -> Result<(), ToolError> {
