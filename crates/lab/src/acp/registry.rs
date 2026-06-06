@@ -1825,22 +1825,6 @@ impl<P: AcpPersistence> AcpSessionRegistry<P> {
         }
     }
 
-    /// Create a test registry pre-seeded with an existing persistence.
-    /// Background tasks are NOT spawned so tests run in isolation.
-    #[cfg(test)]
-    pub fn new_for_tests_with_persistence(db: SqliteAcpPersistence) -> Self {
-        Self {
-            sessions: Arc::new(RwLock::new(HashMap::new())),
-            persistence: Some(Arc::new(db)),
-            default_cwd: ".".to_string(),
-            recent_creations: Arc::new(Mutex::new(VecDeque::new())),
-            shutting_down: Arc::new(AtomicBool::new(false)),
-            active_runtime_count: Arc::new(AtomicUsize::new(0)),
-            idle_timeout: Duration::from_millis(100),
-            provider_models: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
     /// Inject a pre-built session with a fake RuntimeHandle — no subprocess spawned.
     /// The returned session summary mirrors what create_session would return.
     pub async fn inject_fake_session(
@@ -2333,6 +2317,22 @@ fn utf8_tail_by_bytes(value: &str, max_bytes: usize) -> &str {
 // ---------------------------------------------------------------------------
 
 impl AcpSessionRegistry<SqliteAcpPersistence> {
+    /// Create a test registry pre-seeded with an existing persistence.
+    /// Background tasks are NOT spawned so tests run in isolation.
+    #[cfg(test)]
+    pub fn new_for_tests_with_persistence(db: SqliteAcpPersistence) -> Self {
+        Self {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            persistence: Some(Arc::new(db)),
+            default_cwd: ".".to_string(),
+            recent_creations: Arc::new(Mutex::new(VecDeque::new())),
+            shutting_down: Arc::new(AtomicBool::new(false)),
+            active_runtime_count: Arc::new(AtomicUsize::new(0)),
+            idle_timeout: Duration::from_millis(100),
+            provider_models: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
     /// Build a registry backed by `SqliteAcpPersistence`, initialising
     /// persistence from the `LAB_ACP_DB` environment variable.
     ///
