@@ -33,6 +33,13 @@ console/network error instrumentation, a failure taxonomy, and the shared report
    ```
    Gotcha: `playwright.__version__` does NOT exist — verify with
    `from playwright.sync_api import sync_playwright`.
+3. **Spinning up the app's own dev server against an auth'd backend?** If you're starting the
+   frontend yourself (not hitting a deployed URL) and it calls a token-protected backend, front the
+   dev server with a proxy that **injects the bearer token** — the browser never holds it and CORS
+   is moot — and make the app's client use **relative** API paths (not an absolute baseUrl) so they
+   hit the proxy. For a vite app you can run it in-process and drive system Edge via `playwright-core`
+   (no browser download). Recipe:
+   `../desktop-app-testing/references/ssh-fallback-capture.md` (§ "Faster loop").
 
 ## The driver
 `scripts/webtest.py` provides a `WebTest` class (connect-over-CDP, evidence capture, resilient
