@@ -17,4 +17,5 @@ mod secret_mask;
 mod state;
 
 pub use catalog::ACTIONS;
+pub use client::lab_home;
 pub use dispatch::dispatch;

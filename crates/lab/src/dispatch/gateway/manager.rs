@@ -2123,6 +2123,76 @@ impl GatewayManager {
         Ok(pool.healthy_tools().await)
     }
 
+    /// One-shot CLI variant of `code_mode_catalog_tools`: serve the codemode
+    /// proxy catalog from the on-disk cache, connecting only upstreams whose
+    /// cache entry is missing, stale, or fingerprint-mismatched.
+    ///
+    /// A one-shot `labby gateway code exec` must not connect the full upstream
+    /// fleet per invocation just to generate the `codemode.*` proxy. Tool calls
+    /// still resolve live (`resolve_code_mode_upstream_tool` ensures the target
+    /// upstream), so a stale cache can only mis-shape the proxy — `callTool`
+    /// remains the always-fresh escape hatch. Upstreams that fail to probe are
+    /// omitted from the proxy and NOT cached, so the next run retries them.
+    pub async fn code_mode_catalog_tools_cached(
+        &self,
+        owner: Option<&UpstreamRuntimeOwner>,
+        oauth_subject: Option<&str>,
+    ) -> Result<Vec<UpstreamTool>, ToolError> {
+        use super::code_mode::catalog_cache;
+
+        let cfg = self.config.read().await.clone();
+        if !cfg.code_mode.enabled {
+            return Ok(Vec::new());
+        }
+
+        let cache = catalog_cache::CatalogCache::load();
+        let mut tools = Vec::new();
+        let mut updates = Vec::new();
+        let mut pool = None;
+        for upstream in cfg.upstream.iter().filter(|u| u.enabled) {
+            let fingerprint = catalog_cache::fingerprint(upstream);
+            if let Some(cached) = cache.fresh_tools(&upstream.name, &fingerprint) {
+                tools.extend(cached);
+                continue;
+            }
+            let pool = match &pool {
+                Some(pool) => Arc::clone(pool),
+                None => {
+                    let fresh = self.ensure_lazy_upstream_pool(&cfg, owner).await;
+                    pool = Some(Arc::clone(&fresh));
+                    fresh
+                }
+            };
+            let subject = upstream.oauth.as_ref().and(oauth_subject);
+            match pool
+                .ensure_tools_for_upstream(upstream, subject, owner)
+                .await
+            {
+                Ok(_) => {
+                    let live = pool.healthy_tools_for_upstream(&upstream.name).await;
+                    updates.push(catalog_cache::CatalogCacheUpdate {
+                        upstream_name: upstream.name.clone(),
+                        fingerprint,
+                        tools: live.clone(),
+                    });
+                    tools.extend(live);
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        surface = "dispatch",
+                        service = "gateway",
+                        action = "code_mode.catalog_cache",
+                        upstream = %upstream.name,
+                        error = %error,
+                        "upstream connect failed; omitting from codemode proxy (not cached)"
+                    );
+                }
+            }
+        }
+        catalog_cache::merge_and_store(updates);
+        Ok(tools)
+    }
+
     /// Refresh the transient Code Mode catalog from live upstream metadata.
     ///
     /// This is intentionally a manager-level policy: Code Mode needs a fresh
@@ -2141,18 +2211,32 @@ impl GatewayManager {
 
         let pool = self.ensure_lazy_upstream_pool(&cfg, owner).await;
         let mut failures = Vec::new();
+        let mut cache_updates = Vec::new();
         for upstream in cfg.upstream.iter().filter(|u| u.enabled) {
             let subject = upstream.oauth.as_ref().and(oauth_subject);
-            if let Err(err) = pool
+            match pool
                 .reprobe_tools_for_upstream_as(upstream, subject, owner)
                 .await
             {
-                failures.push(CodeModeReprobeFailure {
-                    upstream: upstream.name.clone(),
-                    message: err.to_string(),
-                });
+                Ok(_) => {
+                    // Keep the one-shot CLI catalog cache warm from the
+                    // long-lived surface so `gateway code exec` rarely has to
+                    // cold-connect upstreams for proxy generation.
+                    cache_updates.push(super::code_mode::catalog_cache::CatalogCacheUpdate {
+                        upstream_name: upstream.name.clone(),
+                        fingerprint: super::code_mode::catalog_cache::fingerprint(upstream),
+                        tools: pool.healthy_tools_for_upstream(&upstream.name).await,
+                    });
+                }
+                Err(err) => {
+                    failures.push(CodeModeReprobeFailure {
+                        upstream: upstream.name.clone(),
+                        message: err.to_string(),
+                    });
+                }
             }
         }
+        super::code_mode::catalog_cache::merge_and_store(cache_updates);
 
         if !failures.is_empty() && pool.healthy_tools().await.is_empty() {
             let details = failures

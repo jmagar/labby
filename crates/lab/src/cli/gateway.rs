@@ -371,9 +371,14 @@ async fn build_manager(config: &LabConfig, discover_upstreams: bool) -> Arc<Gate
     let runtime = GatewayRuntimeHandle::default();
     let registry = filtered_builtin_service_registry(config);
     if discover_upstreams {
-        let pool = Arc::new(UpstreamPool::new());
-        pool.discover_all_with_in_process_peers(&config.upstream, &registry)
-            .await;
+        // Seed lazily (mirroring `serve`): catalog entries come from config
+        // without spawning any upstream processes. Connections are made on
+        // demand via the manager's `ensure_*_runtime_ready` paths, so one-shot
+        // CLI commands only spawn the upstreams they actually touch.
+        let pool = Arc::new(
+            UpstreamPool::new().with_in_process_connector(crate::mcp::in_process_peer::connector()),
+        );
+        pool.seed_lazy_upstreams(&config.upstream).await;
         runtime.swap(Some(pool)).await;
     }
 
@@ -425,7 +430,15 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
         })
     ) || matches!(&args.command, GatewayCommand::ProtectedRoute(_)));
     let manager = build_manager(config, discover_upstreams).await;
-    let result = dispatch_command(Arc::clone(&manager), args, format).await;
+    // Race the command against SIGINT/SIGTERM so the drain below also runs
+    // when the invocation is killed externally (e.g. `timeout 100s labby
+    // gateway code exec ...` SIGTERMs at the deadline). Without this the
+    // default signal disposition kills the process before the drain and
+    // orphans spawned stdio upstream children.
+    let result = tokio::select! {
+        result = dispatch_command(Arc::clone(&manager), args, format) => result,
+        code = shutdown_signal() => Ok(ExitCode::from(code)),
+    };
     // INVARIANT: drain the upstream pool before the one-shot CLI exits. The
     // manager is installed into a process-global (`install_gateway_manager`),
     // so `UpstreamConnection` Drop never runs at process exit and spawned
@@ -435,6 +448,33 @@ pub async fn run(args: GatewayArgs, format: OutputFormat, config: &LabConfig) ->
         pool.drain_for_swap("gateway.cli.exit").await;
     }
     result
+}
+
+/// Resolve with the conventional exit code (128 + signum) when SIGINT or
+/// SIGTERM arrives.
+async fn shutdown_signal() -> u8 {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let mut sigterm = signal(SignalKind::terminate()).ok();
+        let sigterm_recv = async {
+            match sigterm.as_mut() {
+                Some(sig) => {
+                    sig.recv().await;
+                }
+                None => std::future::pending::<()>().await,
+            }
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => 130,
+            () = sigterm_recv => 143,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+        130
+    }
 }
 
 async fn dispatch_command(
