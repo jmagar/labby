@@ -95,13 +95,22 @@ impl CodeModeBroker<'_> {
         let allow_cold_connect = caller.can_execute();
         let owner = caller.runtime_owner(surface);
         let oauth_subject = caller.oauth_subject();
-        let tools = manager
-            .code_mode_catalog_tools(allow_cold_connect, Some(&owner), oauth_subject)
-            .await
-            .map_err(|err| ToolError::Sdk {
-                sdk_kind: err.kind().to_string(),
-                message: err.user_message().to_string(),
-            })?;
+        // One-shot CLI invocations serve the proxy catalog from the disk cache
+        // (connecting only stale/missing upstreams) instead of cold-connecting
+        // the full fleet per call. The MCP surface keeps the live-pool path.
+        let tools = if surface == CodeModeSurface::Cli {
+            manager
+                .code_mode_catalog_tools_cached(Some(&owner), oauth_subject)
+                .await
+        } else {
+            manager
+                .code_mode_catalog_tools(allow_cold_connect, Some(&owner), oauth_subject)
+                .await
+        }
+        .map_err(|err| ToolError::Sdk {
+            sdk_kind: err.kind().to_string(),
+            message: err.user_message().to_string(),
+        })?;
         let tools = tools
             .into_iter()
             .filter(|tool| {
