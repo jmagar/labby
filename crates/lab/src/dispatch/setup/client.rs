@@ -13,17 +13,10 @@ use lab_apis::core::EnvVar;
 
 use crate::registry::{ToolRegistry, build_default_registry, service_meta};
 
-/// Resolve the lab home directory: `$LAB_HOME` if set, else `$HOME/.lab/`.
-#[must_use]
-pub fn lab_home() -> PathBuf {
-    if let Ok(home) = std::env::var("LAB_HOME")
-        && !home.is_empty()
-    {
-        return PathBuf::from(home);
-    }
-    let base = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(base).join(".lab")
-}
+/// Re-exported from `dispatch::helpers` (the canonical home for this leaf path
+/// helper) so the `env_path`/`draft_path` callers below and `plugin_hook`'s
+/// `client::lab_home` import keep resolving.
+pub use crate::dispatch::helpers::lab_home;
 
 #[must_use]
 pub fn env_path() -> PathBuf {

@@ -30,5 +30,6 @@ pub mod process;
 pub mod registry;
 #[cfg(test)]
 pub mod test_support;
+pub(crate) mod tool_names;
 #[cfg(feature = "fs")]
 pub mod workspace;

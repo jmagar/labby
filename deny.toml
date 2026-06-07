@@ -3,22 +3,22 @@ unmaintained = "all"
 yanked = "deny"
 ignore = [
     # rand: unsound when log+thread_rng features are used with a custom logger (no patch yet)
-    { id = "RUSTSEC-2026-0097", reason = "rand: no patch available upstream yet", expiry-date = "2026-12-01" },
+    { id = "RUSTSEC-2026-0097", reason = "rand: no patch available upstream yet" },
     # rsa/rsa-der-parser: RSA timing side-channel — review if an upstream patch becomes available
-    { id = "RUSTSEC-2023-0071", reason = "RSA timing side-channel; no upstream patch yet — review when rsa crate ships a fix", expiry-date = "2026-12-01" },
+    { id = "RUSTSEC-2023-0071", reason = "RSA timing side-channel; no upstream patch yet - review when rsa crate ships a fix" },
     # webpki: URI name constraints ignored (no API impact for our usage)
-    { id = "RUSTSEC-2026-0098", reason = "webpki: no API impact for our usage", expiry-date = "2026-12-01" },
+    { id = "RUSTSEC-2026-0098", reason = "webpki: no API impact for our usage" },
     # webpki: wildcard name constraint bypass (no API impact for our usage)
-    { id = "RUSTSEC-2026-0099", reason = "webpki: no API impact for our usage", expiry-date = "2026-12-01" },
+    { id = "RUSTSEC-2026-0099", reason = "webpki: no API impact for our usage" },
     # backoff: unmaintained transitive dependency from rust_socketio 0.6.0
-    { id = "RUSTSEC-2025-0012", reason = "backoff: unmaintained transitive dep from rust_socketio 0.6.0", expiry-date = "2026-12-01" },
+    { id = "RUSTSEC-2025-0012", reason = "backoff: unmaintained transitive dep from rust_socketio 0.6.0" },
     # instant: unmaintained transitive dependency from rust_socketio -> backoff
-    { id = "RUSTSEC-2024-0384", reason = "instant: unmaintained transitive dep from rust_socketio -> backoff", expiry-date = "2026-12-01" },
+    { id = "RUSTSEC-2024-0384", reason = "instant: unmaintained transitive dep from rust_socketio -> backoff" },
     # rustls-pemfile: unmaintained transitive dependency from neo4rs 0.9.0-rc.9
-    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile: unmaintained transitive dep from neo4rs 0.9.0-rc.9", expiry-date = "2026-12-01" },
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile: unmaintained transitive dep from neo4rs 0.9.0-rc.9" },
     # paste: unmaintained transitive macro dependency from boa_engine 0.21.1.
     # Code Mode runs Boa in a short-lived child process with no ambient host APIs.
-    { id = "RUSTSEC-2024-0436", reason = "paste: unmaintained transitive dep from boa_engine 0.21.1; Code Mode uses Boa in isolated subprocess", expiry-date = "2026-12-01" },
+    { id = "RUSTSEC-2024-0436", reason = "paste: unmaintained transitive dep from boa_engine 0.21.1; Code Mode uses Boa in isolated subprocess" },
 ]
 
 [licenses]

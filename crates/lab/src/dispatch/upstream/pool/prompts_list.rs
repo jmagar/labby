@@ -150,7 +150,9 @@ impl UpstreamPool {
         let catalog = self.catalog.read().await;
         catalog
             .iter()
-            .filter(|(_, entry)| entry.prompt_health.is_routable() && !entry.prompt_names.is_empty())
+            .filter(|(_, entry)| {
+                entry.prompt_health.is_routable() && !entry.prompt_names.is_empty()
+            })
             .map(|(name, entry)| (name.clone(), entry.prompt_names.clone()))
             .collect()
     }

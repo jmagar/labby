@@ -717,14 +717,12 @@ async fn sources_add(
 )]
 async fn persist_marketplace_auto_update(target: &str, auto_update: bool) -> Result<(), ToolError> {
     let target = target.to_string();
-    tokio::task::spawn_blocking(move || {
-        persist_marketplace_auto_update_sync(&target, auto_update)
-    })
-    .await
-    .map_err(|e| ToolError::Sdk {
-        sdk_kind: "internal_error".into(),
-        message: format!("spawn_blocking failed: {e}"),
-    })?
+    tokio::task::spawn_blocking(move || persist_marketplace_auto_update_sync(&target, auto_update))
+        .await
+        .map_err(|e| ToolError::Sdk {
+            sdk_kind: "internal_error".into(),
+            message: format!("spawn_blocking failed: {e}"),
+        })?
 }
 
 fn persist_marketplace_auto_update_sync(target: &str, auto_update: bool) -> Result<(), ToolError> {
@@ -1187,18 +1185,15 @@ mod tests {
     }
 
     #[test]
-    fn installed_target_rejects_empty_install_path() {
+    fn installed_target_treats_empty_install_path_as_not_installed() {
+        // An empty installPath means "not installed" (Ok(None)), not an error —
+        // see commit c7db07a6 which intentionally changed this from Err(InvalidParam).
         let dir = tempdir().unwrap();
-        let err = with_home(dir.path(), || {
+        let result = with_home(dir.path(), || {
             seed_installed_with_path(dir.path(), "");
-            installed_target_for_plugin("demo-plugin@demo-market").unwrap_err()
+            installed_target_for_plugin("demo-plugin@demo-market").unwrap()
         });
-        match err {
-            ToolError::InvalidParam { message, .. } => {
-                assert!(message.contains("empty"), "{message}")
-            }
-            other => panic!("expected InvalidParam, got {other:?}"),
-        }
+        assert!(result.is_none(), "expected None, got {result:?}");
     }
 
     #[test]

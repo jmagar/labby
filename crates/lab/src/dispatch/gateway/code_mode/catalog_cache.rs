@@ -63,7 +63,7 @@ pub(crate) struct CatalogCacheUpdate {
 }
 
 pub(crate) fn cache_path() -> PathBuf {
-    crate::dispatch::setup::lab_home()
+    crate::dispatch::helpers::lab_home()
         .join("cache")
         .join("codemode-catalog.json")
 }

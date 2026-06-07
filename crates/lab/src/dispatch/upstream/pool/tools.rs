@@ -360,8 +360,9 @@ mod tests {
         let upstream_name: Arc<str> = Arc::from("big-upstream");
 
         // Build more tools than the cap.
-        let tool_names: Vec<String> =
-            (0..MAX_UPSTREAM_TOOLS + 50).map(|i| format!("tool_{i:04}")).collect();
+        let tool_names: Vec<String> = (0..MAX_UPSTREAM_TOOLS + 50)
+            .map(|i| format!("tool_{i:04}"))
+            .collect();
         let tool_name_refs: Vec<&str> = tool_names.iter().map(String::as_str).collect();
         let tools = test_upstream_tools(&upstream_name, &tool_name_refs);
 
@@ -385,8 +386,9 @@ mod tests {
         let pool = UpstreamPool::new();
         let upstream_name: Arc<str> = Arc::from("exact-upstream");
 
-        let tool_names: Vec<String> =
-            (0..MAX_UPSTREAM_TOOLS).map(|i| format!("tool_{i:04}")).collect();
+        let tool_names: Vec<String> = (0..MAX_UPSTREAM_TOOLS)
+            .map(|i| format!("tool_{i:04}"))
+            .collect();
         let tool_name_refs: Vec<&str> = tool_names.iter().map(String::as_str).collect();
         let tools = test_upstream_tools(&upstream_name, &tool_name_refs);
 

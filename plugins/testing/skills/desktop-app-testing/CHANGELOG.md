@@ -1,5 +1,19 @@
 # Changelog — desktop-app-testing
 
+## 2026-06-06 — SSH-only fallback
+
+- Added `references/ssh-fallback-capture.md` and a `## Fallback` note in SKILL.md: when
+  `agent-os_windows-mcp` isn't a connected upstream, run the whole pass over plain `ssh agent-os`.
+- Documents that SSH lands in session 0 (no window station) so a GUI `.exe` crashes there with
+  `os error 1459` and `CopyFromScreen` is blank; the fix is a `schtasks /it` task that launches +
+  captures in the interactive console session (session 1). Includes the `MSYS_NO_PATHCONV=1`
+  git-bash gotcha, Win32 `FindWindow`/`SetForegroundWindow` + `SendKeys` driving, forward-slash scp,
+  and seeding the app's config (`~/.axon/.env`, `%APPDATA%\<id>\settings.json`) to point it at a
+  homelab backend over Tailscale.
+- Added an in-process-vite + `playwright-core`→Edge browser dev-loop (token-injecting vite proxy) for
+  iterating a Tauri/web frontend's identical bundle without a native rebuild.
+- Live-validated 2026-06-06 building + driving the Axon Palette Tauri exe on agent-os.
+
 ## 2026-05-29 — initial release
 - Added — initial release. Live end-to-end Windows `.exe` testing inside the agent-os VM via the
   Windows-MCP gateway.
