@@ -22,14 +22,17 @@ Operations include both read and write actions. **Always confirm before deleting
 
 ## Setup
 
-Credentials: `~/.lab/.env`
+Credentials: plugin userConfig writes
+`${XDG_CONFIG_HOME:-~/.config}/lab-linkding/config.env`; `~/.lab/.env` remains a
+fallback during migration.
 
 ```bash
 LINKDING_URL="http://localhost:9090"
 LINKDING_API_KEY="your-api-key"
 ```
 
-Get your API token from Linkding Settings page.
+Get your API token from Linkding Settings page. `LINKDING_TOKEN` is accepted as
+a local alias when `LINKDING_API_KEY` is unset.
 
 ## Quick Reference
 

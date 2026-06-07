@@ -10,17 +10,21 @@ https://bytestash.example.com
 
 ## Authentication
 
-### API Key Authentication (Recommended)
-
-**Header:** `x-api-key: <your_api_key>`
-
-Used for CLI and automation. API keys are managed in the web UI (Settings → API Keys).
-
-### JWT Token Authentication
+### JWT Authentication (Recommended for Snippet CRUD)
 
 **Header:** `bytestashauth: bearer <your_jwt_token>`
 
-Used for web UI sessions. Tokens obtained from `/api/auth/login` endpoint.
+Tokens are obtained from `POST /api/auth/login`. The wrapper can log in with
+`BYTESTASH_USERNAME` and `BYTESTASH_PASSWORD` and then reuse the returned JWT.
+
+### API Key Authentication
+
+**Header:** `x-api-key: <your_api_key>`
+
+API keys are managed in the web UI, but ByteStash v1.0.0 rejects them on
+snippet write/read endpoints because the route chain still requires a JWT after
+API-key validation. Use API keys only for public/read-only endpoints unless the
+deployment is confirmed newer than v1.0.0.
 
 ## Snippets API
 
@@ -55,7 +59,7 @@ Used for web UI sessions. Tokens obtained from `/api/auth/login` endpoint.
 ### Get Snippet by ID
 
 **Endpoint:** `GET /api/snippets/{id}`
-**Auth:** API Key or JWT required
+**Auth:** JWT required (API keys rejected on v1.0.0; use bytestashauth: bearer <jwt>)
 
 **Parameters:**
 - `id` (path, integer) - Snippet ID
@@ -65,7 +69,7 @@ Used for web UI sessions. Tokens obtained from `/api/auth/login` endpoint.
 ### Create Snippet
 
 **Endpoint:** `POST /api/snippets`
-**Auth:** API Key or JWT required
+**Auth:** JWT required (API keys rejected on v1.0.0; use bytestashauth: bearer <jwt>)
 
 **Request Body:**
 ```json
@@ -89,7 +93,7 @@ Used for web UI sessions. Tokens obtained from `/api/auth/login` endpoint.
 ### Update Snippet
 
 **Endpoint:** `PUT /api/snippets/{id}`
-**Auth:** API Key or JWT required
+**Auth:** JWT required (API keys rejected on v1.0.0; use bytestashauth: bearer <jwt>)
 
 **Parameters:**
 - `id` (path, integer) - Snippet ID
@@ -101,7 +105,7 @@ Used for web UI sessions. Tokens obtained from `/api/auth/login` endpoint.
 ### Delete Snippet
 
 **Endpoint:** `DELETE /api/snippets/{id}`
-**Auth:** API Key or JWT required
+**Auth:** JWT required (API keys rejected on v1.0.0; use bytestashauth: bearer <jwt>)
 
 **Parameters:**
 - `id` (path, integer) - Snippet ID

@@ -28,7 +28,9 @@ This skill provides **read-write** access to a self-hosted Memos instance for qu
 
 ### Credential Configuration
 
-Add these variables to `~/.lab/.env`:
+Configure these values in plugin userConfig. The hook writes
+`${XDG_CONFIG_HOME:-~/.config}/lab-memos/config.env` with mode `600`.
+`~/.lab/.env` remains a fallback during migration:
 
 ```bash
 # Memos - Self-hosted note-taking service
@@ -40,16 +42,17 @@ MEMOS_API_TOKEN="<your_api_token>"
 1. Log into your Memos instance
 2. Go to Settings → Access Tokens
 3. Click "Create" and copy the generated token
-4. Add to `.env` file as shown above
+4. Add the token to plugin userConfig, or to `.env` as a local fallback
 
 **Security:**
-- `.env` file is gitignored (never commit)
+- Generated config and `.env` files are local-only (never commit)
 - Set permissions: `chmod 600 ~/.lab/.env`
 - Token has same permissions as your user account
 
 ## Commands
 
-All commands return JSON output for LLM parsing. Scripts source credentials from `.env` automatically.
+All commands return JSON output for LLM parsing. Scripts source credentials from
+the generated plugin config automatically.
 
 ### Memo Operations
 

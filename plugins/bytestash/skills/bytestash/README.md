@@ -13,29 +13,32 @@ Manage code snippets in your self-hosted ByteStash instance through Claude Code.
 
 ## Setup
 
-### 1. Get Your API Key
+### 1. Configure Login Credentials
 
-1. Log in to ByteStash web interface at https://bytestash.example.com
-2. Click your profile → **Settings**
-3. Navigate to **API Keys** section
-4. Click **Create New Key**
-5. Give it a descriptive name (e.g., "Claude Code CLI")
-6. Copy the generated API key
+ByteStash snippet writes require a JWT via the custom
+`bytestashauth: bearer <token>` header on ByteStash <= 1.0.0. API keys are only
+useful for public/read-only endpoints on that version. The durable setup is to
+store username/password and let the wrapper log in for a fresh JWT each run.
 
 ### 2. Configure Credentials
 
-Add your ByteStash credentials to the homelab `.env` file:
+Configure ByteStash credentials in plugin userConfig. The hook writes
+`${XDG_CONFIG_HOME:-~/.config}/lab-bytestash/config.env` with mode `600`.
+`~/.lab/.env` remains a fallback during migration:
 
 ```bash
-# Edit the .env file
-nano ~/.claude-homelab/.env
+# Optional local fallback:
+nano ~/.lab/.env
 
-# Add these lines:
 BYTESTASH_URL="https://bytestash.example.com"
-BYTESTASH_API_KEY="your-api-key-from-step-1"
+BYTESTASH_USERNAME="<your_username>"
+BYTESTASH_PASSWORD="<your_password>"
 
-# Save and set permissions
-chmod 600 ~/.claude-homelab/.env
+# Optional fallback only:
+BYTESTASH_TOKEN="<a_jwt>"
+BYTESTASH_API_KEY="<api_key_for_public_reads_only>"
+
+chmod 600 ~/.lab/.env
 ```
 
 ### 3. Verify Setup
@@ -43,7 +46,7 @@ chmod 600 ~/.claude-homelab/.env
 Test the connection:
 
 ```bash
-cd ~/claude-homelab/skills/bytestash
+cd ~/workspace/lab/plugins/bytestash/skills/bytestash
 ./scripts/bytestash-api.sh list
 ```
 
@@ -232,15 +235,17 @@ All commands return JSON, making them easy to process with `jq`:
 
 ## Troubleshooting
 
-### API Key Issues
+### Authentication Issues
 
-**Problem:** "401 Unauthorized" or "API key required"
+**Problem:** "401 Unauthorized" or "Authentication required"
 
 **Solutions:**
-1. Verify API key in .env: `grep BYTESTASH_API_KEY ~/.claude-homelab/.env`
-2. Check key is valid in ByteStash web UI (Settings → API Keys)
-3. Ensure no extra spaces or quotes in .env file
-4. Try creating a new API key
+1. Verify login credentials are present without printing secrets:
+   `grep '^BYTESTASH_\\(URL\\|USERNAME\\|PASSWORD\\|TOKEN\\)=' ~/.lab/.env`
+2. Prefer `BYTESTASH_USERNAME` + `BYTESTASH_PASSWORD`; the wrapper logs in for
+   a fresh JWT.
+3. If using `BYTESTASH_TOKEN`, make sure it is an unexpired JWT.
+4. Do not use API keys for snippet CRUD on ByteStash <= 1.0.0.
 
 ### Connection Issues
 
@@ -257,7 +262,8 @@ All commands return JSON, making them easy to process with `jq`:
 **Problem:** "command not found" when running scripts
 
 **Solutions:**
-1. Ensure you're in the right directory: `cd ~/claude-homelab/skills/bytestash`
+1. Ensure you're in the right directory:
+   `cd ~/workspace/lab/plugins/bytestash/skills/bytestash`
 2. Make script executable: `chmod +x scripts/bytestash-api.sh`
 3. Use relative path: `./scripts/bytestash-api.sh list`
 

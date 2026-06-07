@@ -19,7 +19,8 @@ Usage:
     python radicale-api.py contacts delete --addressbook "Contacts" --uid "contact-uid-here"
 
 Credentials:
-    Reads from ~/.claude-homelab/.env:
+    Reads from ~/.config/lab-radicale/config.env (plugin hook output), then
+    falls back to ~/.lab/.env and ~/.claude-homelab/.env:
         RADICALE_URL="http://localhost:5232"
         RADICALE_USERNAME="admin"
         RADICALE_PASSWORD="password"
@@ -27,6 +28,7 @@ Credentials:
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -43,11 +45,24 @@ except ImportError:
 
 
 def load_env() -> Dict[str, str]:
-    """Load environment variables from .env file."""
-    env_path = Path.home() / ".claude" / ".env"
+    """Load environment variables from generated config or legacy env files."""
+    config_home = Path.home() / ".config"
+    env_paths = [
+        Path.home()
+        / ".config"
+        / "lab-radicale"
+        / "config.env",
+        Path.home() / ".lab" / ".env",
+        Path.home() / ".claude-homelab" / ".env",
+    ]
 
-    if not env_path.exists():
-        print(f"ERROR: .env file not found at {env_path}", file=sys.stderr)
+    xdg_config_home = Path(os.environ.get("XDG_CONFIG_HOME", str(config_home)))
+    env_paths[0] = xdg_config_home / "lab-radicale" / "config.env"
+
+    env_path = next((path for path in env_paths if path.exists()), None)
+    if env_path is None:
+        searched = ", ".join(str(path) for path in env_paths)
+        print(f"ERROR: Radicale config not found. Searched: {searched}", file=sys.stderr)
         sys.exit(1)
 
     env_vars = {}

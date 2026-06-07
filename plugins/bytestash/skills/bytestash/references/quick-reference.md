@@ -8,11 +8,16 @@ Quick command examples for common ByteStash operations.
 # Add credentials to .env
 cat >> ~/.lab/.env <<EOF
 BYTESTASH_URL="https://bytestash.example.com"
-BYTESTASH_API_KEY="<your_api_key>"
+BYTESTASH_USERNAME="<your_username>"
+BYTESTASH_PASSWORD="<your_password>"
 EOF
 
 chmod 600 ~/.lab/.env
 ```
+
+The wrapper logs in at `POST /api/auth/login` and sends snippet requests with
+`bytestashauth: bearer <jwt>`. Do not use `BYTESTASH_API_KEY` for snippet CRUD on
+ByteStash <= 1.0.0; API keys are limited to public/read-only endpoints there.
 
 ## Common Tasks
 
@@ -295,8 +300,7 @@ echo "Link: https://bytestash.example.com/s/$share_id"
 
 ```bash
 # Test connection
-curl -H "bytestashauth: bearer $BYTESTASH_TOKEN" \
-  "$BYTESTASH_URL/api/v1/snippets" | jq .
+./scripts/bytestash-api.sh list | jq .
 
 # Verify credentials
 if ./scripts/bytestash-api.sh list > /dev/null 2>&1; then
@@ -310,12 +314,19 @@ fi
 
 ```bash
 # Add verbose output to script
-curl -v -H "bytestashauth: bearer $BYTESTASH_TOKEN" \
-  "$BYTESTASH_URL/api/v1/snippets"
+# First obtain a JWT without printing credentials:
+JWT="$(curl -sS -X POST "$BYTESTASH_URL/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -n --arg u "$BYTESTASH_USERNAME" --arg p "$BYTESTASH_PASSWORD" \
+    '{username:$u,password:$p}')" | jq -r '.token')"
+
+curl -v -H "bytestashauth: bearer $JWT" \
+  "$BYTESTASH_URL/api/snippets"
 
 # Check environment variables
 echo "URL: $BYTESTASH_URL"
-echo "API Key: ${BYTESTASH_API_KEY:0:10}..." # Show first 10 chars
+echo "Username set: ${BYTESTASH_USERNAME:+yes}"
+echo "Password set: ${BYTESTASH_PASSWORD:+yes}"
 ```
 
 ### Handle Errors

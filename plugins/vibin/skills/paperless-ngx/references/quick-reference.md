@@ -5,10 +5,13 @@ Quick command examples for common operations.
 ## Setup
 
 ```bash
-# Add to ~/.claude-homelab/.env
+# Add to ~/.lab/.env
 PAPERLESS_URL="https://paperless.example.com"
 PAPERLESS_API_TOKEN="<your_api_token>"
 ```
+
+`PAPERLESS_API_KEY` and `PAPERLESS_TOKEN` are accepted as local aliases when
+`PAPERLESS_API_TOKEN` is unset.
 
 ## Document Operations
 
@@ -461,7 +464,7 @@ curl -H "Authorization: Token ${PAPERLESS_API_TOKEN}" \
 
 ## Environment Variables
 
-Set these in `~/.claude-homelab/.env`:
+Set these in `~/.lab/.env`:
 
 ```bash
 # Required
@@ -475,10 +478,10 @@ Add to your shell config (`.bashrc` or `.zshrc`):
 
 ```bash
 # Paperless shortcuts
-alias pls='cd ~/claude-homelab/skills/paperless-ngx && ./scripts/paperless-api.sh'
-alias ptag='cd ~/claude-homelab/skills/paperless-ngx && ./scripts/tag-api.sh'
-alias pcorr='cd ~/claude-homelab/skills/paperless-ngx && ./scripts/correspondent-api.sh'
-alias pbulk='cd ~/claude-homelab/skills/paperless-ngx && ./scripts/bulk-api.sh'
+alias pls='cd ~/workspace/lab/plugins/vibin/skills/paperless-ngx && ./scripts/paperless-api.sh'
+alias ptag='cd ~/workspace/lab/plugins/vibin/skills/paperless-ngx && ./scripts/tag-api.sh'
+alias pcorr='cd ~/workspace/lab/plugins/vibin/skills/paperless-ngx && ./scripts/correspondent-api.sh'
+alias pbulk='cd ~/workspace/lab/plugins/vibin/skills/paperless-ngx && ./scripts/bulk-api.sh'
 
 # Quick search
 psearch() { pls search "$@" | jq -r '.results[] | "\(.id): \(.title)"'; }

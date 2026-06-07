@@ -17,13 +17,26 @@ ${XDG_CONFIG_HOME:-$HOME/.config}/lab-navidrome/config.env
 
 > Why a file and not env vars: Claude Code injects `CLAUDE_PLUGIN_OPTION_*` only into plugin subprocesses (hooks/MCP/LSP), **not** into the Bash tool that runs these commands. The hook (a subprocess) reads them and materializes this file; the skill sources it.
 
-Load it first. If it is missing, the plugin isn't configured yet — tell the user to set the Navidrome URL/username/password in the plugin settings.
+Load it first. If it is missing, fall back to `~/.lab/.env`; this docs/homelab
+setup keeps `NAVIDROME_URL`, `NAVIDROME_USERNAME`, and `NAVIDROME_PASSWORD`
+there. If neither source has all three values, tell the user to set the
+Navidrome URL/username/password in plugin settings or `~/.lab/.env`.
 
 ```bash
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/lab-navidrome/config.env"
-[ -f "$CONFIG" ] || { echo "navidrome not configured — set URL/username/password in plugin settings"; }
-. "$CONFIG"   # exports NAVIDROME_URL, NAVIDROME_USERNAME, NAVIDROME_PASSWORD
+if [ -f "$CONFIG" ]; then
+  . "$CONFIG"
+elif [ -f "$HOME/.lab/.env" ]; then
+  set -a; . "$HOME/.lab/.env"; set +a
+fi
+[ -n "${NAVIDROME_URL:-}" ] && [ -n "${NAVIDROME_USERNAME:-}" ] && [ -n "${NAVIDROME_PASSWORD:-}" ] || {
+  echo "navidrome not configured — set URL/username/password in plugin settings or ~/.lab/.env"
+}
 ```
+
+In this homelab, the public URL may return `403` for unauthenticated script
+probes. If Subsonic requests through `NAVIDROME_URL` fail with proxy/auth errors,
+use the direct backend `http://10.1.0.2:4533` for API calls.
 
 ## Authentication (do this first, every session)
 

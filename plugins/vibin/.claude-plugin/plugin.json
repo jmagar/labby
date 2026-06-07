@@ -15,9 +15,22 @@
         "workflow",
         "commit",
         "documentation",
-        "github",
-        "ci",
-        "pull-requests",
-        "reviews"
-    ]
+    "github",
+    "ci",
+    "pull-requests",
+    "reviews"
+    ],
+    "userConfig": {
+        "paperless_url": {
+            "type": "string",
+            "title": "Paperless URL",
+            "description": "Base URL of the Paperless-ngx instance, including scheme. Do not include a trailing slash."
+        },
+        "paperless_api_token": {
+            "type": "string",
+            "title": "Paperless API Token",
+            "description": "Paperless-ngx API token used in the Authorization: Token header.",
+            "sensitive": true
+        }
+    }
 }

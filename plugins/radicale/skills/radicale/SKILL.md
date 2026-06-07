@@ -47,7 +47,9 @@ python scripts/radicale-api.py --help
 
 ### Credentials
 
-Add to `~/.lab/.env`:
+Configure these values in plugin userConfig. The hook writes
+`${XDG_CONFIG_HOME:-~/.config}/lab-radicale/config.env` with mode `600`.
+`~/.lab/.env` remains a fallback during migration:
 
 ```bash
 RADICALE_URL="http://localhost:5232"
@@ -56,7 +58,7 @@ RADICALE_PASSWORD="password"
 ```
 
 **Security:**
-- `.env` file is gitignored (never commit credentials)
+- Generated config and `.env` files are local-only (never commit credentials)
 - Set permissions: `chmod 600 ~/.lab/.env`
 
 ## Core Operations
@@ -323,4 +325,3 @@ Run this skill's scripts with the Bash tool directly:
 ```bash
 python ./skills/radicale/scripts/radicale-api.py [args]
 ```
-

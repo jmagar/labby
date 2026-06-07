@@ -15,7 +15,23 @@
     "backup",
     "homelab"
   ],
+  "userConfig": {
+    "immich_url": {
+      "type": "string",
+      "title": "Immich URL",
+      "description": "Base URL of the Immich API, including scheme. Do not include a trailing slash.",
+      "required": true
+    },
+    "immich_api_key": {
+      "type": "string",
+      "title": "API Key",
+      "description": "Immich API key for authenticated requests.",
+      "sensitive": true,
+      "required": true
+    }
+  },
   "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Immich",
     "shortDescription": "Operate Immich photo and video management workflows.",

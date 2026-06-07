@@ -14,5 +14,36 @@
     "snippets",
     "notes",
     "homelab"
-  ]
+  ],
+  "userConfig": {
+    "bytestash_url": {
+      "type": "string",
+      "title": "ByteStash URL",
+      "description": "Base URL of the ByteStash instance, including scheme. Do not include a trailing slash.",
+      "required": true
+    },
+    "bytestash_username": {
+      "type": "string",
+      "title": "Username",
+      "description": "ByteStash username. Recommended because current ByteStash snippet CRUD requires a JWT session token."
+    },
+    "bytestash_password": {
+      "type": "string",
+      "title": "Password",
+      "description": "ByteStash password used by the hook to mint a JWT for snippet API calls.",
+      "sensitive": true
+    },
+    "bytestash_token": {
+      "type": "string",
+      "title": "JWT Token",
+      "description": "Optional pre-minted ByteStash JWT. Used when username/password are not configured.",
+      "sensitive": true
+    },
+    "bytestash_api_key": {
+      "type": "string",
+      "title": "API Key",
+      "description": "Optional ByteStash API key for public/read-only endpoints. Snippet writes still require JWT on current ByteStash.",
+      "sensitive": true
+    }
+  }
 }

@@ -37,13 +37,16 @@ All operations work with your self-hosted Paperless-ngx instance via the REST AP
 
 ### 3. Add Credentials to .env
 
-Edit `~/.claude-homelab/.env` and add:
+Edit `~/.lab/.env` and add:
 
 ```bash
 # Paperless-ngx - Document management system
 PAPERLESS_URL="https://paperless.example.com"
 PAPERLESS_API_TOKEN="<your_api_token>"
 ```
+
+`PAPERLESS_API_KEY` and `PAPERLESS_TOKEN` are accepted as local aliases when
+`PAPERLESS_API_TOKEN` is unset.
 
 **Important:**
 - Remove any trailing slashes from the URL
@@ -53,7 +56,7 @@ PAPERLESS_API_TOKEN="<your_api_token>"
 ### 4. Secure Your Credentials
 
 ```bash
-chmod 600 ~/.claude-homelab/.env
+chmod 600 ~/.lab/.env
 ```
 
 This ensures only you can read the credentials file.
@@ -386,7 +389,7 @@ Bulk operations are efficient for:
 - Never share your API token
 - Rotate tokens periodically (delete old, create new)
 - `.env` file is gitignored - never commit it
-- Set restrictive permissions: `chmod 600 ~/.claude-homelab/.env`
+- Set restrictive permissions: `chmod 600 ~/.lab/.env`
 
 ### Performance
 

@@ -20,12 +20,15 @@ Manage bookmarks via Linkding REST API.
 
 ### 2. Add Credentials to .env
 
-Add these variables to `~/.claude-homelab/.env`:
+Add these variables to `~/.lab/.env`:
 
 ```bash
 LINKDING_URL="http://localhost:9090"
 LINKDING_API_KEY="<your_api_token>"
 ```
+
+`LINKDING_TOKEN` is also accepted as a local alias when `LINKDING_API_KEY` is
+unset.
 
 **Security:**
 - The `.env` file is gitignored and should have permissions `chmod 600`
@@ -111,12 +114,14 @@ linkding-api.sh bundle-create "Work Resources" \
 
 ## Environment Variables
 
-The script automatically loads credentials from `~/.claude-homelab/.env`. You can also set them in your shell environment:
+The script automatically loads credentials from `~/.lab/.env`. You can also set them in your shell environment:
 
 ```bash
 export LINKDING_URL="https://linkding.example.com"
 export LINKDING_API_KEY="your-api-token"
 ```
+
+`LINKDING_TOKEN` is also accepted as a local alias.
 
 ## API Reference
 
@@ -127,13 +132,13 @@ Detailed API documentation is available in the `references/` directory:
 ## Troubleshooting
 
 **"LINKDING_URL and LINKDING_API_KEY must be set"**
-→ Check that `~/.claude-homelab/.env` exists and contains these variables
+→ Check that `~/.lab/.env` exists and contains these variables
 
 **401 Unauthorized**
 → Your API token is invalid — regenerate it in Linkding settings
 
 **"No such file or directory: .env"**
-→ Create the `.env` file at `~/.claude-homelab/.env` with your credentials
+→ Create the `.env` file at `~/.lab/.env` with your credentials
 
 ## License
 

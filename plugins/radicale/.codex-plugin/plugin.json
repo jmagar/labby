@@ -15,7 +15,29 @@
     "calendar",
     "contacts"
   ],
+  "userConfig": {
+    "radicale_url": {
+      "type": "string",
+      "title": "Radicale URL",
+      "description": "Base URL of the Radicale CalDAV/CardDAV server, including scheme.",
+      "required": true
+    },
+    "radicale_username": {
+      "type": "string",
+      "title": "Username",
+      "description": "Radicale username.",
+      "required": true
+    },
+    "radicale_password": {
+      "type": "string",
+      "title": "Password",
+      "description": "Radicale password.",
+      "sensitive": true,
+      "required": true
+    }
+  },
   "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Radicale",
     "shortDescription": "Manage CalDAV calendars and CardDAV contacts through Radicale.",

@@ -9,18 +9,22 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-_LOAD_ENV="${HOME}/.claude-homelab/load-env.sh"
-[[ ! -f "$_LOAD_ENV" ]] && _LOAD_ENV="$SCRIPT_DIR/../load-env.sh"
+_LOAD_ENV="$SCRIPT_DIR/../load-env.sh"
+[[ ! -f "$_LOAD_ENV" ]] && _LOAD_ENV="${HOME}/.claude-homelab/load-env.sh"
 # shellcheck source=/dev/null
 source "$_LOAD_ENV" || { echo "ERROR: load-env.sh not found. Run /homelab-core:setup" >&2; exit 1; }
 
 # === Functions ===
 
 init_config() {
-    # Primary credentials live in ~/.lab/.env (override with BYTESTASH_ENV_FILE).
-    # Falls back to the homelab loader (~/.claude-homelab/.env) if URL is unset.
-    local envf="${BYTESTASH_ENV_FILE:-$HOME/.lab/.env}"
-    if [[ -f "$envf" ]]; then set -a; source "$envf"; set +a; fi
+    # Prefer the plugin hook's generated config; ~/.lab/.env remains a migration fallback.
+    local envf="${BYTESTASH_ENV_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/lab-bytestash/config.env}"
+    if [[ -f "$envf" ]]; then
+        set -a
+        # shellcheck source=/dev/null
+        source "$envf"
+        set +a
+    fi
     if [[ -z "${BYTESTASH_URL:-}" ]]; then
         load_service_credentials "bytestash" "BYTESTASH_URL" "BYTESTASH_URL" 2>/dev/null || true
     fi

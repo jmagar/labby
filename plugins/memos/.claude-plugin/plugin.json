@@ -14,5 +14,20 @@
     "notes",
     "journals",
     "homelab"
-  ]
+  ],
+  "userConfig": {
+    "memos_url": {
+      "type": "string",
+      "title": "Memos URL",
+      "description": "Base URL of the Memos instance, including scheme. Do not include a trailing slash.",
+      "required": true
+    },
+    "memos_api_token": {
+      "type": "string",
+      "title": "API Token",
+      "description": "Memos API token used for authenticated API requests.",
+      "sensitive": true,
+      "required": true
+    }
+  }
 }

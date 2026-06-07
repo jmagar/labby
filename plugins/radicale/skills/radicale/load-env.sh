@@ -1,7 +1,6 @@
 #!/bin/bash
 # Environment Loading Library
-# Canonical source: ~/claude-homelab/lib/load-env.sh
-# Installed to:     ~/.claude-homelab/load-env.sh  (via setup-symlinks.sh)
+# Loads the generated Radicale plugin config with legacy env fallbacks.
 #
 # In skill scripts, source as:
 #   source "$HOME/.claude-homelab/load-env.sh"
@@ -12,15 +11,22 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     exit 1
 fi
 
-# Load ~/.claude-homelab/.env (or an explicit override path)
+# Load a generated plugin config, legacy ~/.lab/.env, or old ~/.claude-homelab/.env.
 # Usage: load_env_file [/optional/override/path]
 load_env_file() {
-    local env_file="${1:-$HOME/.claude-homelab/.env}"
+    local default_file="${XDG_CONFIG_HOME:-$HOME/.config}/lab-radicale/config.env"
+    local env_file="${1:-$default_file}"
+
+    if [[ ! -f "$env_file" && "$env_file" == "$default_file" && -f "$HOME/.lab/.env" ]]; then
+        env_file="$HOME/.lab/.env"
+    fi
+    if [[ ! -f "$env_file" && "$env_file" == "$default_file" && -f "$HOME/.claude-homelab/.env" ]]; then
+        env_file="$HOME/.claude-homelab/.env"
+    fi
 
     if [[ ! -f "$env_file" ]]; then
         echo "ERROR: $env_file not found" >&2
-        echo "Run setup: ~/claude-homelab/scripts/setup-symlinks.sh" >&2
-        echo "Then add your credentials to ~/.claude-homelab/.env" >&2
+        echo "Configure the Radicale plugin or add credentials to ~/.lab/.env" >&2
         return 1
     fi
 
@@ -39,7 +45,7 @@ validate_env_vars() {
     done
 
     if [[ ${#missing[@]} -gt 0 ]]; then
-        echo "ERROR: Missing required variables in ~/.claude-homelab/.env: ${missing[*]}" >&2
+        echo "ERROR: Missing required variables: ${missing[*]}" >&2
         return 1
     fi
 }

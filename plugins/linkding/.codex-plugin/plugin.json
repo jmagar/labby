@@ -14,7 +14,23 @@
     "notes",
     "homelab"
   ],
+  "userConfig": {
+    "linkding_url": {
+      "type": "string",
+      "title": "Linkding URL",
+      "description": "Base URL of the Linkding instance, including scheme. Do not include a trailing slash.",
+      "required": true
+    },
+    "linkding_api_key": {
+      "type": "string",
+      "title": "API Key",
+      "description": "Linkding API token used in the Authorization: Token header.",
+      "sensitive": true,
+      "required": true
+    }
+  },
   "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Linkding",
     "shortDescription": "Search and manage Linkding bookmarks.",

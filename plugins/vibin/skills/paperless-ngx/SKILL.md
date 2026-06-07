@@ -29,7 +29,9 @@ This skill provides **read-write** access to a self-hosted Paperless-ngx instanc
 
 ### Credential Configuration
 
-Add these variables to `~/.claude-homelab/.env`:
+Configure these values in plugin userConfig. The hook writes
+`${XDG_CONFIG_HOME:-~/.config}/lab-paperless/config.env` with mode `600`.
+`~/.lab/.env` remains a fallback during migration:
 
 ```bash
 # Paperless-ngx - Document management system
@@ -37,21 +39,25 @@ PAPERLESS_URL="https://paperless.example.com"
 PAPERLESS_API_TOKEN="<your_api_token>"
 ```
 
+`PAPERLESS_API_KEY` and `PAPERLESS_TOKEN` are accepted as local aliases when
+`PAPERLESS_API_TOKEN` is unset.
+
 **To generate an API token:**
 1. Log into your Paperless-ngx instance
 2. Go to Settings → My Profile
 3. Click "Create Token" under "API Tokens"
 4. Copy the generated token
-5. Add to `.env` file as shown above
+5. Add the token to plugin userConfig, or to `.env` as a local fallback
 
 **Security:**
-- `.env` file is gitignored (never commit)
-- Set permissions: `chmod 600 ~/.claude-homelab/.env`
+- Generated config and `.env` files are local-only (never commit)
+- Set permissions: `chmod 600 ~/.lab/.env`
 - Token has same permissions as your user account
 
 ## Commands
 
-All commands return JSON output for LLM parsing. Scripts source credentials from `.env` automatically.
+All commands return JSON output for LLM parsing. Scripts source credentials from
+the generated plugin config automatically.
 
 ### Document Operations
 

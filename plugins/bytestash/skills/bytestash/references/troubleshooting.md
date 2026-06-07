@@ -55,8 +55,11 @@ grep '^BYTESTASH_' ~/.lab/.env
 ```
 
 ### Fixes
-- Regenerate API key in ByteStash Settings -> API Keys.
-- Replace `BYTESTASH_API_KEY` in `.env`.
+- Prefer `BYTESTASH_USERNAME` + `BYTESTASH_PASSWORD` in `~/.lab/.env`; the
+  wrapper logs in and obtains a fresh JWT.
+- If using `BYTESTASH_TOKEN`, make sure it is an unexpired JWT.
+- Do not expect `BYTESTASH_API_KEY` / `x-api-key` to work for snippet CRUD on
+  ByteStash <= 1.0.0.
 - Ensure no extra spaces or quote mismatches in `.env`.
 
 ## Empty or Invalid JSON Output

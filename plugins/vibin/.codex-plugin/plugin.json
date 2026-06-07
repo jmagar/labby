@@ -19,8 +19,22 @@
     "pull-requests",
     "reviews"
   ],
+  "userConfig": {
+    "paperless_url": {
+      "type": "string",
+      "title": "Paperless URL",
+      "description": "Base URL of the Paperless-ngx instance, including scheme. Do not include a trailing slash."
+    },
+    "paperless_api_token": {
+      "type": "string",
+      "title": "Paperless API Token",
+      "description": "Paperless-ngx API token used in the Authorization: Token header.",
+      "sensitive": true
+    }
+  },
   "skills": "./skills/",
   "commands": "./commands/",
+  "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Vibin",
     "shortDescription": "Session, GitHub review, CI, and agent workflow utilities.",

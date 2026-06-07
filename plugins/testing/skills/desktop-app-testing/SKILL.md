@@ -27,6 +27,14 @@ lab commit `e87940c0`. If drive calls return `confirmation_required: "...destruc
 gateway predates the fix; rebuild + redeploy (see `references/windows-mcp-calls.md`). Read-only
 `Screenshot`/`Snapshot` are never gated, so a UI/UX *review* works even if the gate isn't lifted.
 
+## Fallback — Windows-MCP not reachable
+If `agent-os_windows-mcp` isn't a connected upstream (the Lab gateway is in code-mode and its
+`execute` interface isn't exposed to the session, or the server simply isn't wired in), you can
+still do the whole pass over plain `ssh agent-os`: launch + screenshot the **native** GUI via a
+`/it` scheduled task in the interactive console session (session 0 over SSH has no window station —
+a GUI there crashes with `os error 1459` and screenshots come back blank), and iterate the frontend
+in a browser without rebuilding. Full recipe: `references/ssh-fallback-capture.md`.
+
 ## Prerequisites
 - The **agent-os VM running** on dookie (the skill's preflight starts it if absent).
 - The Lab gateway reachable with an execute-capable scope (for drive actions).
@@ -84,4 +92,7 @@ gateway predates the fix; rebuild + redeploy (see `references/windows-mcp-calls.
 ## References
 - `references/windows-mcp-calls.md` — verified tool names, params, call patterns, the destructive
   gate, build-transfer recipes, evidence capture.
+- `references/ssh-fallback-capture.md` — SSH-only launch + native capture via a `schtasks /it`
+  interactive-session task when Windows-MCP isn't connected, plus an in-process-vite + Edge browser
+  dev-loop for iterating Tauri/web frontends against a real backend.
 - `references/report-format.md` — shared cross-platform report spec, run-dir layout, verdicts.

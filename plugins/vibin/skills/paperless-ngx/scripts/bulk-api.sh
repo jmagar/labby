@@ -9,11 +9,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-_LOAD_ENV="${HOME}/.claude-homelab/load-env.sh"
-[[ ! -f "$_LOAD_ENV" ]] && _LOAD_ENV="$SCRIPT_DIR/../load-env.sh"
+_LOAD_ENV="$SCRIPT_DIR/../load-env.sh"
+[[ ! -f "$_LOAD_ENV" ]] && _LOAD_ENV="${HOME}/.claude-homelab/load-env.sh"
 # shellcheck source=/dev/null
 source "$_LOAD_ENV" || { echo "ERROR: load-env.sh not found. Run /homelab-core:setup" >&2; exit 1; }
-load_service_credentials "paperless-ngx" "PAPERLESS_URL" "PAPERLESS_API_TOKEN"
+if [[ -z "${PAPERLESS_URL:-}" || ( -z "${PAPERLESS_API_TOKEN:-}" && -z "${PAPERLESS_API_KEY:-}" && -z "${PAPERLESS_TOKEN:-}" ) ]]; then
+    load_env_file || exit 1
+fi
+PAPERLESS_API_TOKEN="${PAPERLESS_API_TOKEN:-${PAPERLESS_API_KEY:-${PAPERLESS_TOKEN:-}}}"
+validate_env_vars "PAPERLESS_URL" "PAPERLESS_API_TOKEN"
 
 # API configuration
 API_BASE="${PAPERLESS_URL}/api"

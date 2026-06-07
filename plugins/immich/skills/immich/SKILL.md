@@ -9,16 +9,21 @@ Self-hosted photo and video management. Talk to it directly over the Immich REST
 
 ## How to call it
 
-Read the base URL and API key from `~/.lab/.env`:
+Read the base URL and API key from the generated plugin config first, falling
+back to `~/.lab/.env` during migration:
 
 ```bash
-IMMICH_URL=$(grep -E '^IMMICH_URL='     ~/.lab/.env | cut -d= -f2-)
-IMMICH_API_KEY=$(grep -E '^IMMICH_API_KEY=' ~/.lab/.env | cut -d= -f2-)
+set -a
+source "${XDG_CONFIG_HOME:-$HOME/.config}/lab-immich/config.env" 2>/dev/null || source ~/.lab/.env
+set +a
+IMMICH_URL="${IMMICH_URL:-http://100.120.242.29:2283}"
 ```
 
 Authentication is the `x-api-key: <key>` header on every request. Never echo the key.
 
-> `IMMICH_URL` / `IMMICH_API_KEY` may be unset in `~/.lab/.env` — populate them before use.
+> `IMMICH_API_KEY` is required. If `IMMICH_URL` is unset, this homelab's direct
+> backend is `http://100.120.242.29:2283`; the public routes are
+> `https://immich.tootie.tv` / `https://photos.tootie.tv`.
 
 ## Common operations
 
@@ -38,7 +43,9 @@ Full API reference: <https://api.immich.app/> (OpenAPI). The `/api/search/metada
 
 ## Configuration
 
-`IMMICH_URL` and `IMMICH_API_KEY` live in `~/.lab/.env`. Verify connectivity:
+`IMMICH_URL` and `IMMICH_API_KEY` are configured through plugin userConfig. The
+hook writes them to `${XDG_CONFIG_HOME:-~/.config}/lab-immich/config.env` with
+mode `600`; `~/.lab/.env` is still accepted as a fallback. Verify connectivity:
 
 ```bash
 curl -sS -H "x-api-key: $IMMICH_API_KEY" "$IMMICH_URL/api/server/ping" -w '\nHTTP %{http_code}\n'
