@@ -1,6 +1,7 @@
 //! `CodeModeBroker::run_in_runner`: spawn the runner subprocess and drive the
 //! tool-call/log/completion protocol loop.
 
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -9,7 +10,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader as TokioBufReader;
-use tokio::process::Command;
+use tokio::process::{ChildStdin, Command};
 use ulid::Ulid;
 
 use crate::dispatch::error::ToolError;
@@ -26,6 +27,8 @@ use super::types::{
     CodeModeCaller, CodeModeCapabilityFilter, CodeModeExecutedCall, CodeModeExecutionError,
     CodeModeExecutionResponse, CodeModeSurface,
 };
+
+const ARTIFACT_WRITE_CALL_ID: &str = "code_mode::write_artifact";
 
 impl CodeModeBroker<'_> {
     #[allow(clippy::too_many_arguments)]
@@ -177,16 +180,11 @@ impl CodeModeBroker<'_> {
                             sdk_kind: "internal_error".to_string(),
                             message: format!("Code Mode runner emitted invalid protocol JSON: {err}"),
                         }
-                    })? {
+                        })? {
                         CodeModeRunnerOutput::ToolCall { seq, id, params } => {
-                            if started_tool_calls >= max_tool_calls {
+                            if let Err(err) = ensure_call_budget(started_tool_calls, max_tool_calls, &calls) {
                                 terminate_code_mode_runner(&mut child, child_pid).await;
-                                return Err(CodeModeExecutionError::with_trace(ToolError::Sdk {
-                                    sdk_kind: "tool_call_limit_exceeded".to_string(),
-                                    message: format!(
-                                        "Code Mode execution exceeded max_tool_calls={max_tool_calls}"
-                                    ),
-                                }, sorted_calls(&calls)));
+                                return Err(err);
                             }
                             started_tool_calls += 1;
                             let call_id = id.clone();
@@ -215,67 +213,25 @@ impl CodeModeBroker<'_> {
                             content,
                             content_type,
                         } => {
-                            if started_tool_calls >= max_tool_calls {
+                            if let Err(err) = ensure_call_budget(started_tool_calls, max_tool_calls, &calls) {
                                 terminate_code_mode_runner(&mut child, child_pid).await;
-                                return Err(CodeModeExecutionError::with_trace(ToolError::Sdk {
-                                    sdk_kind: "tool_call_limit_exceeded".to_string(),
-                                    message: format!(
-                                        "Code Mode execution exceeded max_tool_calls={max_tool_calls}"
-                                    ),
-                                }, sorted_calls(&calls)));
+                                return Err(err);
                             }
                             started_tool_calls += 1;
-                            let started = std::time::Instant::now();
-                            let request = CodeModeArtifactWrite {
-                                path,
-                                content,
-                                content_type,
-                            };
-                            let redacted_params = super::trace::redact_trace_params(
-                                &json!({
-                                    "path": request.path,
-                                    "content_type": request.content_type,
-                                }),
+                            handle_artifact_write(
+                                &mut stdin,
+                                &artifact_root,
+                                &mut artifacts,
+                                &mut calls,
+                                seq,
+                                CodeModeArtifactWrite {
+                                    path,
+                                    content,
+                                    content_type,
+                                },
                                 trace_params,
-                            );
-
-                            match write_code_mode_artifact(&artifact_root, &request).await {
-                                Ok(receipt) => {
-                                    let result = json!(receipt);
-                                    artifacts.push(receipt);
-                                    calls.push((seq, CodeModeExecutedCall {
-                                        id: "code_mode::write_artifact".to_string(),
-                                        ok: true,
-                                        elapsed_ms: started.elapsed().as_millis(),
-                                        params: redacted_params,
-                                        error_kind: None,
-                                    }));
-                                    write_runner_input(
-                                        &mut stdin,
-                                        &CodeModeRunnerInput::ToolResult { seq, result },
-                                    )
-                                    .await?;
-                                }
-                                Err(err) => {
-                                    let kind = err.kind().to_string();
-                                    calls.push((seq, CodeModeExecutedCall {
-                                        id: "code_mode::write_artifact".to_string(),
-                                        ok: false,
-                                        elapsed_ms: started.elapsed().as_millis(),
-                                        params: redacted_params,
-                                        error_kind: Some(kind.clone()),
-                                    }));
-                                    write_runner_input(
-                                        &mut stdin,
-                                        &CodeModeRunnerInput::ToolError {
-                                            seq,
-                                            kind,
-                                            message: err.user_message().to_string(),
-                                        },
-                                    )
-                                    .await?;
-                                }
-                            }
+                            )
+                            .await?;
                         }
                         CodeModeRunnerOutput::Done { result, logs } => {
                             if !pending_tool_calls.is_empty() {
@@ -420,4 +376,98 @@ fn sorted_calls(calls: &[(u64, CodeModeExecutedCall)]) -> Vec<CodeModeExecutedCa
     let mut calls = calls.to_vec();
     calls.sort_by_key(|(seq, _)| *seq);
     calls.into_iter().map(|(_, call)| call).collect()
+}
+
+fn ensure_call_budget(
+    started_tool_calls: usize,
+    max_tool_calls: usize,
+    calls: &[(u64, CodeModeExecutedCall)],
+) -> Result<(), CodeModeExecutionError> {
+    if started_tool_calls < max_tool_calls {
+        return Ok(());
+    }
+
+    Err(CodeModeExecutionError::with_trace(
+        ToolError::Sdk {
+            sdk_kind: "tool_call_limit_exceeded".to_string(),
+            message: format!("Code Mode execution exceeded max_tool_calls={max_tool_calls}"),
+        },
+        sorted_calls(calls),
+    ))
+}
+
+async fn handle_artifact_write(
+    stdin: &mut ChildStdin,
+    artifact_root: &Path,
+    artifacts: &mut Vec<CodeModeArtifactReceipt>,
+    calls: &mut Vec<(u64, CodeModeExecutedCall)>,
+    seq: u64,
+    request: CodeModeArtifactWrite,
+    trace_params: bool,
+) -> Result<(), ToolError> {
+    let started = std::time::Instant::now();
+    let redacted_params = artifact_trace_params(&request, trace_params);
+
+    match write_code_mode_artifact(artifact_root, &request).await {
+        Ok(receipt) => {
+            let result = json!(receipt);
+            artifacts.push(receipt);
+            calls.push(artifact_call(
+                seq,
+                true,
+                started.elapsed().as_millis(),
+                redacted_params,
+                None,
+            ));
+            write_runner_input(stdin, &CodeModeRunnerInput::ToolResult { seq, result }).await
+        }
+        Err(err) => {
+            let kind = err.kind().to_string();
+            calls.push(artifact_call(
+                seq,
+                false,
+                started.elapsed().as_millis(),
+                redacted_params,
+                Some(kind.clone()),
+            ));
+            write_runner_input(
+                stdin,
+                &CodeModeRunnerInput::ToolError {
+                    seq,
+                    kind,
+                    message: err.user_message().to_string(),
+                },
+            )
+            .await
+        }
+    }
+}
+
+fn artifact_trace_params(request: &CodeModeArtifactWrite, trace_params: bool) -> Option<Value> {
+    super::trace::redact_trace_params(
+        &json!({
+            "path": request.path.as_str(),
+            "content_type": request.content_type.as_deref(),
+        }),
+        trace_params,
+    )
+}
+
+fn artifact_call(
+    seq: u64,
+    ok: bool,
+    elapsed_ms: u128,
+    params: Option<Value>,
+    error_kind: Option<String>,
+) -> (u64, CodeModeExecutedCall) {
+    (
+        seq,
+        CodeModeExecutedCall {
+            id: ARTIFACT_WRITE_CALL_ID.to_string(),
+            ok,
+            elapsed_ms,
+            params,
+            error_kind,
+        },
+    )
 }

@@ -535,6 +535,7 @@ fn truncation_preserves_artifact_receipts() {
     assert_eq!(result["truncated"], true);
     assert_eq!(result["artifacts"][0]["path"], "brief.md");
 }
+
 #[tokio::test]
 async fn write_code_mode_artifact_rejects_absolute_paths() {
     let root = TempDir::new().expect("temp root");

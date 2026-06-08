@@ -309,17 +309,7 @@ fn javy_emit_tool_call(args: javy::Args<'_>) -> javy::quickjs::Result<u64> {
         ));
     }
 
-    let seq = RUNNER_STATE
-        .with(|state| {
-            let mut state = state.borrow_mut();
-            let state = state
-                .as_mut()
-                .ok_or_else(|| "runner state is not initialized".to_string())?;
-            let seq = state.next_seq;
-            state.next_seq += 1;
-            Ok::<_, String>(seq)
-        })
-        .map_err(|err| javy_type_error(cx.clone(), err))?;
+    let seq = next_runner_seq(&cx)?;
 
     runner_emit(CodeModeRunnerOutput::ToolCall { seq, id, params })
         .map_err(|err| javy_type_error(cx, err))?;
@@ -355,17 +345,7 @@ fn javy_emit_artifact_write(args: javy::Args<'_>) -> javy::quickjs::Result<u64> 
         .transpose()
         .map_err(|err| javy::to_js_error(cx.clone(), err))?;
 
-    let seq = RUNNER_STATE
-        .with(|state| {
-            let mut state = state.borrow_mut();
-            let state = state
-                .as_mut()
-                .ok_or_else(|| "runner state is not initialized".to_string())?;
-            let seq = state.next_seq;
-            state.next_seq += 1;
-            Ok::<_, String>(seq)
-        })
-        .map_err(|err| javy_type_error(cx.clone(), err))?;
+    let seq = next_runner_seq(&cx)?;
 
     runner_emit(CodeModeRunnerOutput::ArtifactWrite {
         seq,
@@ -460,6 +440,20 @@ fn javy_type_error(
     message: impl Into<String>,
 ) -> javy::quickjs::Error {
     javy::to_js_error(message_context, anyhow::anyhow!(message.into()))
+}
+
+fn next_runner_seq(cx: &javy::quickjs::Ctx<'_>) -> javy::quickjs::Result<u64> {
+    RUNNER_STATE
+        .with(|state| {
+            let mut state = state.borrow_mut();
+            let state = state
+                .as_mut()
+                .ok_or_else(|| "runner state is not initialized".to_string())?;
+            let seq = state.next_seq;
+            state.next_seq += 1;
+            Ok::<_, String>(seq)
+        })
+        .map_err(|err| javy_type_error(cx.clone(), err))
 }
 
 fn javy_error_message(error: javy::quickjs::Error) -> String {
