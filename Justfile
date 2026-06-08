@@ -11,6 +11,10 @@ check:
 test:
     cargo nextest run --workspace --all-features
 
+# Verify Cargo wrapper binary sync behavior
+test-cargo-wrapper:
+    scripts/test-cargo-rustc-wrapper.sh
+
 # Regenerate code-owned documentation inventories
 docs-generate:
     cargo run --package labby --all-features -- docs generate
@@ -24,7 +28,7 @@ test-integration:
     cargo nextest run --workspace --all-features --run-ignored ignored-only
 
 # Lint
-lint: skill-drift
+lint: skill-drift test-cargo-wrapper
     cargo clippy --workspace --all-features -- -D warnings
     cargo fmt --all -- --check
 
@@ -45,6 +49,31 @@ build-release:
     cargo build --workspace --all-features --release
     install -D -m 755 target/release/labby bin/labby
     install -D -m 755 target/release/labby plugins/labby/bin/labby
+    just link-bin
+
+# Symlink the compiled release binary into PATH and all known plugin cache slots.
+# Called automatically by `just build-release` and `just install`.
+link-bin:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    LAB_TARGET_DIR="${CARGO_TARGET_DIR:-target}"
+    case "$LAB_TARGET_DIR" in
+      /*) LABBY_BIN="$LAB_TARGET_DIR/release/labby" ;;
+      *)  LABBY_BIN="$(pwd)/$LAB_TARGET_DIR/release/labby" ;;
+    esac
+    if [ ! -x "$LABBY_BIN" ]; then
+      echo "release binary not found at $LABBY_BIN — run 'just build-release' first" >&2
+      exit 1
+    fi
+    mkdir -p ~/.local/bin
+    ln -sf "$LABBY_BIN" ~/.local/bin/labby
+    while IFS= read -r -d '' plugin_bin; do
+      ln -sf "$LABBY_BIN" "$plugin_bin"
+    done < <(find "${HOME}/.claude/plugins/cache/jmagar-lab/labby" -maxdepth 3 -name "labby" \( -type f -o -type l \) -print0 2>/dev/null)
+    echo "labby → $LABBY_BIN"
+
+# Build the release binary and bundle it into the local plugin tree.
+build-plugin: build-release
 
 # Generate Claude Code marketplace tree from compiled service metadata
 marketplace: build-release
@@ -52,7 +81,7 @@ marketplace: build-release
 
 # Install release binary to ~/.local/bin/labby (updates the host CLI)
 install: build-release
-    install -D -m 755 bin/labby ~/.local/bin/labby
+    just link-bin
 
 # Ensure host-side runtime directories are owned by the current user before
 # Docker can claim them as root during bind-mount creation.

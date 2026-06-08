@@ -11,6 +11,10 @@
 # =============================================================================
 
 [build]
+# This wrapper preserves local sccache delegation while copying every completed
+# debug/release labby binary into the local PATH and plugin bundle locations.
+rustc-wrapper = "scripts/cargo-rustc-wrapper"
+
 # sccache and incremental compilation are mutually exclusive — sccache cannot
 # cache Rust artifacts when incremental=true because incremental produces
 # non-deterministic intermediate files. The global ~/.cargo/config.toml sets
