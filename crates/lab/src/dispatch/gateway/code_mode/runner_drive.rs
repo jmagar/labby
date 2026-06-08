@@ -5,15 +5,20 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader as TokioBufReader;
 use tokio::process::Command;
+use ulid::Ulid;
 
 use crate::dispatch::error::ToolError;
 
 use super::CodeModeBroker;
+use super::artifacts::{
+    CodeModeArtifactReceipt, CodeModeArtifactWrite, code_mode_artifact_root,
+    write_code_mode_artifact,
+};
 use super::protocol::{CodeModeRunnerInput, CodeModeRunnerOutput};
 use super::runner_io::{terminate_code_mode_runner, write_runner_input};
 use super::truncate::apply_log_caps;
@@ -134,6 +139,9 @@ impl CodeModeBroker<'_> {
         let mut pending_tool_calls = FuturesUnordered::new();
         let mut started_tool_calls = 0usize;
         let deadline = tokio::time::Instant::now() + timeout;
+        let artifact_run_id = Ulid::new().to_string();
+        let artifact_root = code_mode_artifact_root(&artifact_run_id);
+        let mut artifacts: Vec<CodeModeArtifactReceipt> = Vec::new();
 
         loop {
             tokio::select! {
@@ -201,12 +209,73 @@ impl CodeModeBroker<'_> {
                                 .boxed(),
                             );
                         }
-                        CodeModeRunnerOutput::ArtifactWrite { .. } => {
-                            terminate_code_mode_runner(&mut child, child_pid).await;
-                            return Err(ToolError::Sdk {
-                                sdk_kind: "internal_error".to_string(),
-                                message: "Code Mode artifact writes are not wired in the parent process".to_string(),
-                            });
+                        CodeModeRunnerOutput::ArtifactWrite {
+                            seq,
+                            path,
+                            content,
+                            content_type,
+                        } => {
+                            if started_tool_calls >= max_tool_calls {
+                                terminate_code_mode_runner(&mut child, child_pid).await;
+                                return Err(CodeModeExecutionError::with_trace(ToolError::Sdk {
+                                    sdk_kind: "tool_call_limit_exceeded".to_string(),
+                                    message: format!(
+                                        "Code Mode execution exceeded max_tool_calls={max_tool_calls}"
+                                    ),
+                                }, sorted_calls(&calls)));
+                            }
+                            started_tool_calls += 1;
+                            let started = std::time::Instant::now();
+                            let request = CodeModeArtifactWrite {
+                                path,
+                                content,
+                                content_type,
+                            };
+                            let redacted_params = super::trace::redact_trace_params(
+                                &json!({
+                                    "path": request.path,
+                                    "content_type": request.content_type,
+                                }),
+                                trace_params,
+                            );
+
+                            match write_code_mode_artifact(&artifact_root, &request).await {
+                                Ok(receipt) => {
+                                    let result = json!(receipt);
+                                    artifacts.push(receipt);
+                                    calls.push((seq, CodeModeExecutedCall {
+                                        id: "code_mode::write_artifact".to_string(),
+                                        ok: true,
+                                        elapsed_ms: started.elapsed().as_millis(),
+                                        params: redacted_params,
+                                        error_kind: None,
+                                    }));
+                                    write_runner_input(
+                                        &mut stdin,
+                                        &CodeModeRunnerInput::ToolResult { seq, result },
+                                    )
+                                    .await?;
+                                }
+                                Err(err) => {
+                                    let kind = err.kind().to_string();
+                                    calls.push((seq, CodeModeExecutedCall {
+                                        id: "code_mode::write_artifact".to_string(),
+                                        ok: false,
+                                        elapsed_ms: started.elapsed().as_millis(),
+                                        params: redacted_params,
+                                        error_kind: Some(kind.clone()),
+                                    }));
+                                    write_runner_input(
+                                        &mut stdin,
+                                        &CodeModeRunnerInput::ToolError {
+                                            seq,
+                                            kind,
+                                            message: err.user_message().to_string(),
+                                        },
+                                    )
+                                    .await?;
+                                }
+                            }
                         }
                         CodeModeRunnerOutput::Done { result, logs } => {
                             if !pending_tool_calls.is_empty() {
@@ -263,7 +332,7 @@ impl CodeModeBroker<'_> {
                                 result: result.into_response_result(),
                                 calls: calls.into_iter().map(|(_, call)| call).collect(),
                                 logs: sanitized_logs,
-                                artifacts: vec![],
+                                artifacts,
                             });
                         }
                         CodeModeRunnerOutput::Error { kind, message } => {

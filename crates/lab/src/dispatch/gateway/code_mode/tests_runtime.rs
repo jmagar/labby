@@ -5,7 +5,8 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use super::artifacts::{
-    CodeModeArtifactReceipt, CodeModeArtifactWrite, write_code_mode_artifact,
+    CodeModeArtifactReceipt, CodeModeArtifactWrite, code_mode_artifact_root,
+    write_code_mode_artifact,
 };
 use super::*;
 
@@ -20,6 +21,17 @@ fn code_mode_runner_wrapper_exposes_write_artifact() {
     assert!(wrapped.contains("__labEmitArtifactWrite"));
     assert!(wrapped.contains("writeArtifact path must be a non-empty string"));
     assert!(wrapped.contains("writeArtifact content must be a string"));
+}
+
+#[test]
+fn code_mode_artifact_root_uses_run_id_under_lab_home() {
+    let root = code_mode_artifact_root("01JTEST");
+    let text = root.display().to_string();
+
+    assert!(
+        text.ends_with(".lab/code-mode-artifacts/01JTEST")
+            || text.ends_with("lab/code-mode-artifacts/01JTEST")
+    );
 }
 
 #[test]
