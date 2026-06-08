@@ -227,6 +227,13 @@ async () => {
       .map((candidate) => candidate.url)
   ];
 
+  const slug = (value) =>
+    String(value)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "brief";
+
   const followupSnippet = `async () => {
   const input = ${JSON.stringify(
     {
@@ -357,45 +364,87 @@ async () => {
   };
 }`;
 
+  const timings = [...firstPassResults, ...evidenceResults].map((result) => ({
+    label: result.label,
+    ok: result.ok,
+    ms: result.ms,
+    artifact: result.artifact,
+    error: result.error
+  }));
+  const followupCalls = [
+    ...followupQueries.map((query) => ({ action: "search", query })),
+    ...followupSeedUrls.map((url) => ({ action: "scrape", url }))
+  ];
+  const gapsAndRisks = [
+    evidenceUrls.length === 0 ? "No follow-up evidence URLs were selected." : null,
+    facts.length === 0 ? "No source summaries were extracted from selected evidence." : null,
+    ...timings
+      .filter((timing) => !timing.ok)
+      .map((timing) => `${timing.label} failed: ${timing.error ?? "unknown error"}`)
+  ].filter(Boolean);
+  const brief =
+    facts
+      .slice(0, 3)
+      .map((fact) => `${fact.label}: ${fact.summary}`)
+      .join("\n\n") || "No source-backed summary was available from this run.";
+  const evidenceTable = facts
+    .map((fact) => `| ${fact.label} | ${fact.url} | ${String(fact.summary).replace(/\n/g, " ")} |`)
+    .join("\n");
+  const markdown = [
+    `# ${input.topic}`,
+    "",
+    "## Brief",
+    brief,
+    "",
+    "## Evidence Table",
+    "| Label | URL | Summary |",
+    "|---|---|---|",
+    evidenceTable || "| n/a | n/a | No evidence summaries extracted. |",
+    "",
+    "## Selected Sources",
+    ...evidenceUrls.map(
+      (source) => `- ${source.url} — ${source.reason}; score=${source.score}`
+    ),
+    "",
+    "## Gaps And Risks",
+    ...(gapsAndRisks.length ? gapsAndRisks.map((gap) => `- ${gap}`) : ["- None identified."]),
+    "",
+    "## Follow-Up Calls",
+    "```json",
+    JSON.stringify(followupCalls, null, 2),
+    "```",
+    "",
+    "## Follow-Up Code Mode Snippet",
+    "```js",
+    followupSnippet,
+    "```",
+    "",
+    "## Timings",
+    "```json",
+    JSON.stringify(timings, null, 2),
+    "```"
+  ].join("\n");
+
+  const artifact = await writeArtifact(
+    `axon/${slug(input.topic)}.md`,
+    markdown,
+    { contentType: "text/markdown" }
+  );
+
   return {
-    workflow: "axon_research_brief",
-    total_ms: Date.now() - started,
-    input,
-    selected_sources: evidenceUrls,
-    timings: [...firstPassResults, ...evidenceResults].map((result) => ({
-      label: result.label,
-      ok: result.ok,
-      ms: result.ms,
-      artifact: result.artifact,
-      error: result.error
+    workflow: "axon_fanout_topic",
+    topic: input.topic,
+    summary: brief,
+    artifact,
+    selected_sources: evidenceUrls.map((source) => ({
+      title: source.title,
+      url: source.url,
+      reason: source.reason,
+      score: source.score
     })),
-    brief_material: {
-      answer_instruction:
-        "Compose a concise engineering brief from the source summaries below. Prefer concrete crates, APIs, protocol fields, examples, MIME types, metadata keys, compatibility caveats, and next calls.",
-      topic: input.topic,
-      focus: input.focus,
-      first_pass: firstPassResults.map((result) => ({
-        label: result.label,
-        ok: result.ok,
-        artifact: result.artifact,
-        key_fields: result.key_fields,
-        shape: result.shape
-      })),
-      evidence_summaries: facts
-    },
-    followup_snippet: {
-      purpose:
-        "Run this when the brief has gaps, broad sources, weak citations, or missing implementation details. It expands queries and gathers another scrape/summarize evidence bundle.",
-      code: followupSnippet
-    },
-    output_format: [
-      "Answer",
-      "Implementation Recipe",
-      "Minimal Shape",
-      "Evidence Table",
-      "Gaps And Risks",
-      "Follow-Up Calls"
-    ]
+    gaps_and_risks: gapsAndRisks,
+    followup_calls: followupCalls,
+    timings
   };
 }
 ```
