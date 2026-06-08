@@ -22,7 +22,10 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use serde_json::{Value, json};
 
-use crate::mcp::context::{auth_context_from_extensions, oauth_upstream_subject_for_request};
+use crate::mcp::context::{
+    auth_context_from_extensions, code_mode_search_scope_allowed,
+    oauth_upstream_subject_for_request,
+};
 use crate::mcp::logging::DispatchLogOutcome;
 use crate::mcp::server::LabMcpServer;
 
@@ -72,17 +75,18 @@ const summary=document.getElementById("summary");
 const state=document.getElementById("state");
 function esc(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
 function json(value){try{return JSON.stringify(value,null,2)}catch{return String(value)}}
-function shape(s){if(!s)return"";return [s.type,s.key_count&&`${s.key_count} keys`,s.array_len&&`${s.array_len} items`].filter(Boolean).join(" / ")}
+function shape(s){if(!s)return"";return [s.type,s.key_count&&`${s.key_count} keys`,s.length&&`${s.length} items`].filter(Boolean).join(" / ")}
 function card(body){return `<article class="card">${body}</article>`}
+function statusLabel(item){return item.ok?"ok":(item.error_kind||"error")}
 function callRow(call){
-  const cls=call.status==="ok"?"ok":"err";
+  const cls=call.ok?"ok":"err";
   const params=call.params?`<details><summary>Params</summary><pre>${esc(json(call.params))}</pre></details>`:"";
-  return card(`<div class="row"><div class="name">${esc(call.upstream||"upstream")} / ${esc(call.tool||"tool")}</div><div class="${cls}">${esc(call.status||"")}</div></div><div class="meta">${esc(call.elapsed_ms??0)} ms ${call.error_kind?` / ${esc(call.error_kind)}`:""}</div>${call.result_shape?`<div class="meta">${esc(shape(call.result_shape))}</div>`:""}${params}`);
+  return card(`<div class="row"><div class="name">${esc(call.upstream||"upstream")} / ${esc(call.tool||"tool")}</div><div class="${cls}">${esc(statusLabel(call))}</div></div><div class="meta">${esc(call.elapsed_ms??0)} ms ${call.error_kind?` / ${esc(call.error_kind)}`:""}</div>${call.result_shape?`<div class="meta">${esc(shape(call.result_shape))}</div>`:""}${params}`);
 }
 function matchRow(match){return card(`<div class="row"><div class="name">${esc(match.id||match.name||"match")}</div><div class="info">${esc(match.upstream||"")}</div></div><div class="meta">${esc(match.description||"")}</div>`)}
 function historyRow(entry){
   const count=Array.isArray(entry.calls)?entry.calls.length:0;
-  return card(`<div class="row"><div class="name">${esc(entry.kind||"entry")} / ${esc(entry.action||"")}</div><div class="${entry.status==="ok"?"ok":"err"}">${esc(entry.status||"")}</div></div><div class="meta">${esc(entry.elapsed_ms??0)} ms / ${count} calls / ${esc(entry.recorded_at||"")}</div>`);
+  return card(`<div class="row"><div class="name">${esc(entry.kind||"entry")}</div><div class="${entry.ok?"ok":"err"}">${esc(statusLabel(entry))}</div></div><div class="meta">${esc(entry.elapsed_ms??0)} ms / ${count} calls${entry.match_count!==undefined?` / ${esc(entry.match_count)} matches`:""}</div>`);
 }
 function render(trace){
   const t=trace&&trace.structuredContent?trace.structuredContent:trace;
@@ -125,10 +129,12 @@ impl LabMcpServer {
                 .with_description("Full discovery document for all services")
                 .with_mime_type("application/json")
                 .no_annotation(),
-            code_mode_app_resource(CODE_MODE_SEARCH_APP_URI, "code-mode/search"),
-            code_mode_app_resource(CODE_MODE_EXECUTE_APP_URI, "code-mode/execute"),
-            code_mode_app_resource(CODE_MODE_HISTORY_APP_URI, "code-mode/history"),
         ];
+        if code_mode_app_resources_visible(
+            self.code_mode_visibility().await.exposes_synthetic_tools(),
+        ) {
+            resources.extend(code_mode_app_resources());
+        }
 
         for svc in self.registry.services() {
             if self.service_visible_on_mcp(svc.name).await {
@@ -331,6 +337,44 @@ impl LabMcpServer {
         start: Instant,
         context: &RequestContext<RoleServer>,
     ) -> Result<ReadResourceResult, ErrorData> {
+        if !self.code_mode_visibility().await.exposes_synthetic_tools() {
+            return Err(ErrorData::resource_not_found(
+                format!("unknown UI resource: {uri}"),
+                None,
+            ));
+        }
+        let auth = auth_context_from_extensions(&context.extensions);
+        if !code_mode_search_scope_allowed(auth) {
+            let elapsed_ms = start.elapsed().as_millis();
+            tracing::warn!(
+                surface = "mcp",
+                service = "labby",
+                action = "read_resource",
+                subject,
+                elapsed_ms,
+                kind = "forbidden",
+                resource_uri = uri,
+                "code mode app resource denied by scope"
+            );
+            self.emit_dispatch_notification(
+                context,
+                "lab",
+                "read_resource",
+                elapsed_ms,
+                DispatchLogOutcome::Failure {
+                    level: LoggingLevel::Warning,
+                    kind: "forbidden",
+                },
+            )
+            .await;
+            return Err(ErrorData::invalid_params(
+                "Code Mode app resources require one of scopes: lab:read, lab, lab:admin",
+                Some(json!({
+                    "kind": "forbidden",
+                    "required_scopes": ["lab:read", "lab", "lab:admin"],
+                })),
+            ));
+        }
         let history = if uri == CODE_MODE_HISTORY_APP_URI {
             match &self.gateway_manager {
                 Some(manager) => Some(json!({
@@ -398,6 +442,18 @@ fn code_mode_app_resource(uri: &str, name: &str) -> rmcp::model::Resource {
         .no_annotation()
 }
 
+fn code_mode_app_resources_visible(exposes_synthetic_tools: bool) -> bool {
+    exposes_synthetic_tools
+}
+
+fn code_mode_app_resources() -> [rmcp::model::Resource; 3] {
+    [
+        code_mode_app_resource(CODE_MODE_SEARCH_APP_URI, "code-mode/search"),
+        code_mode_app_resource(CODE_MODE_EXECUTE_APP_URI, "code-mode/execute"),
+        code_mode_app_resource(CODE_MODE_HISTORY_APP_URI, "code-mode/history"),
+    ]
+}
+
 pub(crate) fn code_mode_app_resource_meta(uri: &str) -> Meta {
     let mut meta = serde_json::Map::new();
     meta.insert(
@@ -453,6 +509,31 @@ mod tests {
     }
 
     #[test]
+    fn code_mode_app_resources_follow_synthetic_tool_visibility() {
+        assert!(
+            code_mode_app_resources_visible(true),
+            "Code Mode app resources should be listed with synthetic search/execute tools"
+        );
+        assert!(
+            !code_mode_app_resources_visible(false),
+            "Code Mode app resources should not be listed when synthetic tools are disabled"
+        );
+        let resources = code_mode_app_resources();
+        let uris = resources
+            .iter()
+            .map(|resource| resource.uri.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            uris,
+            vec![
+                CODE_MODE_SEARCH_APP_URI,
+                CODE_MODE_EXECUTE_APP_URI,
+                CODE_MODE_HISTORY_APP_URI
+            ]
+        );
+    }
+
+    #[test]
     fn code_mode_history_html_injects_escaped_snapshot() {
         let html = code_mode_app_html(
             CODE_MODE_HISTORY_APP_URI,
@@ -466,5 +547,37 @@ mod tests {
         assert!(html.contains("code_mode_history"));
         assert!(!html.contains("</script>\""));
         assert!(html.contains("\\u003c/script>"));
+    }
+
+    #[test]
+    fn code_mode_app_html_uses_current_trace_field_names() {
+        let html = code_mode_app_html(
+            CODE_MODE_EXECUTE_APP_URI,
+            Some(&json!({
+                "kind": "code_mode_execute_trace",
+                "call_count": 1,
+                "calls": [{
+                    "id": "github::search_issues",
+                    "upstream": "github",
+                    "tool": "search_issues",
+                    "ok": true,
+                    "elapsed_ms": 12,
+                    "result_shape": {"type": "array", "length": 3},
+                }],
+            })),
+        )
+        .expect("execute resource");
+
+        assert!(html.contains("statusLabel"));
+        assert!(html.contains("call.ok"));
+        assert!(html.contains("s.length"));
+        assert!(
+            !html.contains("call.status"),
+            "inline app must use the emitted ok boolean, not stale status fields"
+        );
+        assert!(
+            !html.contains("array_len"),
+            "inline app must use result_shape.length"
+        );
     }
 }
