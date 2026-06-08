@@ -128,6 +128,8 @@ fn search_trace_summarizes_matched_tools() {
     assert_eq!(trace["kind"], json!("code_mode_search_trace"));
     assert_eq!(trace["query_kind"], json!("catalog_filter"));
     assert_eq!(trace["match_count"], json!(1));
+    assert_eq!(trace["displayed_count"], json!(1));
+    assert_eq!(trace["truncated"], json!(false));
     assert_eq!(trace["matches"][0]["id"], json!("github::search_issues"));
     assert_eq!(trace["matches"][0]["upstream"], json!("github"));
     assert_eq!(trace["matches"][0]["tool"], json!("search_issues"));
@@ -136,4 +138,26 @@ fn search_trace_summarizes_matched_tools() {
 
     let serialized = trace.to_string();
     assert!(!serialized.contains("large"));
+}
+
+#[test]
+fn search_trace_reports_display_truncation() {
+    let response = Value::Array(
+        (0..60)
+            .map(|idx| {
+                json!({
+                    "id": format!("github::tool_{idx}"),
+                    "name": format!("tool_{idx}"),
+                    "upstream": "github",
+                    "description": "Tool",
+                })
+            })
+            .collect(),
+    );
+
+    let trace = code_mode_search_trace(&response, 7);
+    assert_eq!(trace["match_count"], json!(60));
+    assert_eq!(trace["displayed_count"], json!(50));
+    assert_eq!(trace["truncated"], json!(true));
+    assert_eq!(trace["matches"].as_array().expect("matches").len(), 50);
 }

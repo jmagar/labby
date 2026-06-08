@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Clock3, Database, Search, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Clock3, Database, Search, XCircle } from 'lucide-react'
 
 import {
   type CodeModeTrace,
@@ -34,11 +34,17 @@ interface CodeModeInspectorProps {
 
 export function CodeModeInspector({ initialTrace }: CodeModeInspectorProps) {
   const [trace, setTrace] = useState<CodeModeTrace | null>(() => parseCodeModeTrace(initialTrace))
+  const [bridgeWarning, setBridgeWarning] = useState<string | null>(null)
   const [bridgeState, setBridgeState] = useState<'connecting' | 'connected' | 'fallback'>('fallback')
 
   useEffect(() => {
     const injected = parseCodeModeTrace(window.__LAB_CODE_MODE_INITIAL_TRACE__)
-    if (injected) setTrace(injected)
+    if (injected) {
+      setTrace(injected)
+      setBridgeWarning(null)
+    } else if (window.__LAB_CODE_MODE_INITIAL_TRACE__ !== undefined) {
+      setBridgeWarning('Ignored malformed initial trace payload.')
+    }
 
     const App = window.ExtApps?.App
     if (!App) return
@@ -49,8 +55,14 @@ export function CodeModeInspector({ initialTrace }: CodeModeInspectorProps) {
       { autoResize: true },
     )
     app.ontoolresult = (result) => {
-      const next = parseCodeModeTrace(result.structuredContent ?? result.structured_content)
-      if (next) setTrace(next)
+      const payload = result.structuredContent ?? result.structured_content
+      const next = parseCodeModeTrace(payload)
+      if (next) {
+        setTrace(next)
+        setBridgeWarning(null)
+      } else {
+        setBridgeWarning('Ignored malformed bridge payload.')
+      }
     }
     setBridgeState('connecting')
     app
@@ -64,6 +76,12 @@ export function CodeModeInspector({ initialTrace }: CodeModeInspectorProps) {
   }, [])
 
   const rows = flattenTraceRows(trace)
+  const warnings = [
+    ...(bridgeWarning ? [bridgeWarning] : []),
+    ...(trace?.warnings?.map((warning) => warning.message) ?? []),
+  ]
+  const searchCountLabel =
+    trace?.kind === 'code_mode_search_trace' ? formatSearchCount(trace) : undefined
 
   return (
     <main className="min-h-screen bg-aurora-page-bg text-aurora-text-primary">
@@ -88,6 +106,8 @@ export function CodeModeInspector({ initialTrace }: CodeModeInspectorProps) {
 
         {!trace ? <EmptyState /> : null}
 
+        {warnings.length > 0 ? <WarningBanner warnings={warnings} /> : null}
+
         {rows.calls.length > 0 ? (
           <Panel title="Broker-observed execute calls" count={rows.calls.length}>
             <div className="grid gap-2">
@@ -99,7 +119,11 @@ export function CodeModeInspector({ initialTrace }: CodeModeInspectorProps) {
         ) : null}
 
         {rows.matches.length > 0 ? (
-          <Panel title="Catalog-inferred search matches" count={rows.matches.length}>
+          <Panel
+            title="Catalog-inferred search matches"
+            count={searchCountLabel ?? rows.matches.length}
+            meta={trace?.kind === 'code_mode_search_trace' && trace.truncated ? 'truncated' : undefined}
+          >
             <div className="grid gap-2">
               {rows.matches.map((match) => (
                 <SearchRow key={match.id} match={match} />
@@ -141,10 +165,12 @@ export function CodeModeInspector({ initialTrace }: CodeModeInspectorProps) {
 function Panel({
   title,
   count,
+  meta,
   children,
 }: {
   title: string
-  count: number
+  count: number | string
+  meta?: string
   children: React.ReactNode
 }) {
   return (
@@ -154,10 +180,36 @@ function Panel({
         <span className="rounded border border-aurora-border-default bg-aurora-control-surface px-2 py-0.5 text-xs tabular-nums text-aurora-text-muted">
           {count}
         </span>
+        {meta ? (
+          <span className="rounded border border-aurora-warn/50 bg-aurora-warn/10 px-2 py-0.5 text-xs text-aurora-warn">
+            {meta}
+          </span>
+        ) : null}
       </div>
       <div className="p-3">{children}</div>
     </section>
   )
+}
+
+function WarningBanner({ warnings }: { warnings: string[] }) {
+  return (
+    <section className="rounded-md border border-aurora-warn/50 bg-aurora-warn/10 p-3 text-sm text-aurora-warn">
+      <div className="flex gap-2">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+        <div className="grid gap-1">
+          {warnings.map((warning, index) => (
+            <p key={`${warning}-${index}`}>{warning}</p>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function formatSearchCount(trace: Extract<CodeModeTrace, { kind: 'code_mode_search_trace' }>) {
+  const displayed = trace.displayed_count ?? trace.matches.length
+  if (trace.match_count !== displayed || trace.truncated) return `${displayed} of ${trace.match_count}`
+  return displayed
 }
 
 function CallRow({ call }: { call: ReturnType<typeof flattenTraceRows>['calls'][number] }) {

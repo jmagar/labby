@@ -1,7 +1,7 @@
 //! Tests: response-budget truncation, wasm runner smoke, token estimate.
 #![cfg(test)]
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::*;
 
@@ -349,4 +349,126 @@ fn code_mode_history_bounds_by_bytes() {
         snapshot.len() < 10,
         "byte budget should have dropped old entries"
     );
+}
+
+#[test]
+fn code_mode_history_replaces_single_oversized_entry_with_bounded_sentinel() {
+    let mut history = CodeModeHistory::new(50, 1300);
+    history.push(CodeModeHistoryEntry {
+        seq: 0,
+        kind: CodeModeHistoryKind::Execute,
+        ok: false,
+        elapsed_ms: 99,
+        error_kind: Some("server_error".to_string()),
+        calls: vec![CodeModeExecutedCall {
+            id: "test::oversized".to_string(),
+            ok: false,
+            elapsed_ms: 1,
+            params: Some(json!({"safe": "x".repeat(20_000)})),
+            error_kind: Some("server_error".to_string()),
+        }],
+        match_count: None,
+    });
+
+    let snapshot = history.snapshot();
+    let serialized = serde_json::to_vec(&snapshot).unwrap();
+    assert!(
+        serialized.len() <= 1300,
+        "single oversized history entry must be replaced to honor byte budget, got {} bytes",
+        serialized.len()
+    );
+    assert_eq!(snapshot.len(), 1);
+    assert_eq!(snapshot[0].seq, 1);
+    assert_eq!(
+        snapshot[0].error_kind.as_deref(),
+        Some("history_entry_too_large")
+    );
+    assert!(snapshot[0].calls.is_empty());
+}
+
+#[test]
+fn code_mode_call_history_serializes_upstream_and_tool_fields() {
+    let call = CodeModeExecutedCall {
+        id: "github::search_issues".to_string(),
+        ok: true,
+        elapsed_ms: 12,
+        params: Some(json!({"query": "bug"})),
+        error_kind: None,
+    };
+
+    let serialized = serde_json::to_value(&call).unwrap();
+    assert_eq!(serialized["id"], json!("github::search_issues"));
+    assert_eq!(serialized["upstream"], json!("github"));
+    assert_eq!(serialized["tool"], json!("search_issues"));
+    assert_eq!(serialized["params"]["query"], json!("bug"));
+}
+
+#[test]
+fn runner_protocol_preserves_null_distinct_from_undefined() {
+    let null_output = CodeModeRunnerOutput::Done {
+        result: CodeModeRunnerResult::Json(Value::Null),
+        logs: Vec::new(),
+    };
+    let undefined_output = CodeModeRunnerOutput::Done {
+        result: CodeModeRunnerResult::Undefined,
+        logs: Vec::new(),
+    };
+
+    let null_round_trip: CodeModeRunnerOutput =
+        serde_json::from_value(serde_json::to_value(null_output).unwrap()).unwrap();
+    let undefined_round_trip: CodeModeRunnerOutput =
+        serde_json::from_value(serde_json::to_value(undefined_output).unwrap()).unwrap();
+
+    assert_eq!(
+        null_round_trip.result_for_response(),
+        Some(Value::Null),
+        "explicit null must survive protocol round trip"
+    );
+    assert_eq!(
+        undefined_round_trip.result_for_response(),
+        None,
+        "undefined must remain absent"
+    );
+
+    let explicit_null = serde_json::to_value(CodeModeExecutionResponse {
+        result: Some(Value::Null),
+        calls: Vec::new(),
+        logs: Vec::new(),
+    })
+    .unwrap();
+    let undefined = serde_json::to_value(CodeModeExecutionResponse {
+        result: None,
+        calls: Vec::new(),
+        logs: Vec::new(),
+    })
+    .unwrap();
+    assert!(
+        explicit_null.get("result").is_some_and(Value::is_null),
+        "explicit null must serialize as a present null result"
+    );
+    assert!(
+        undefined.get("result").is_none(),
+        "undefined must omit the result field"
+    );
+}
+
+#[test]
+fn code_mode_execution_error_carries_partial_calls() {
+    let call = CodeModeExecutedCall {
+        id: "github::search_issues".to_string(),
+        ok: true,
+        elapsed_ms: 12,
+        params: Some(json!({"query": "bug"})),
+        error_kind: None,
+    };
+    let err = CodeModeExecutionError::with_trace(
+        ToolError::Sdk {
+            sdk_kind: "server_error".to_string(),
+            message: "boom".to_string(),
+        },
+        vec![call.clone()],
+    );
+
+    assert_eq!(err.kind(), "server_error");
+    assert_eq!(err.calls(), &[call]);
 }

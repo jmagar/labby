@@ -18,8 +18,8 @@ use super::protocol::{CodeModeRunnerInput, CodeModeRunnerOutput};
 use super::runner_io::{terminate_code_mode_runner, write_runner_input};
 use super::truncate::apply_log_caps;
 use super::types::{
-    CodeModeCaller, CodeModeCapabilityFilter, CodeModeExecutedCall, CodeModeExecutionResponse,
-    CodeModeSurface,
+    CodeModeCaller, CodeModeCapabilityFilter, CodeModeExecutedCall, CodeModeExecutionError,
+    CodeModeExecutionResponse, CodeModeSurface,
 };
 
 impl CodeModeBroker<'_> {
@@ -36,7 +36,7 @@ impl CodeModeBroker<'_> {
         max_log_bytes: usize,
         trace_params: bool,
         capability_filter: CodeModeCapabilityFilter,
-    ) -> Result<CodeModeExecutionResponse, ToolError> {
+    ) -> Result<CodeModeExecutionResponse, CodeModeExecutionError> {
         let exe = std::env::current_exe().map_err(|err| ToolError::Sdk {
             sdk_kind: "internal_error".to_string(),
             message: format!("failed to locate current executable for Code Mode runner: {err}"),
@@ -142,10 +142,10 @@ impl CodeModeBroker<'_> {
                         Ok(line) => line,
                         Err(_) => {
                             terminate_code_mode_runner(&mut child, child_pid).await;
-                            return Err(ToolError::Sdk {
+                            return Err(CodeModeExecutionError::with_trace(ToolError::Sdk {
                                 sdk_kind: "timeout".to_string(),
                                 message: "Code Mode execution timed out".to_string(),
-                            });
+                            }, sorted_calls(&calls)));
                         }
                     };
                     let Some(line) = line.map_err(|err| ToolError::Sdk {
@@ -157,12 +157,12 @@ impl CodeModeBroker<'_> {
                             sdk_kind: "internal_error".to_string(),
                             message: format!("failed to wait for Code Mode runner: {err}"),
                         })?;
-                        return Err(ToolError::Sdk {
+                        return Err(CodeModeExecutionError::with_trace(ToolError::Sdk {
                             sdk_kind: "server_error".to_string(),
                             message: format!(
                                 "Code Mode runner exited before completion with status {status}"
                             ),
-                        });
+                        }, sorted_calls(&calls)));
                     };
                     match serde_json::from_str::<CodeModeRunnerOutput>(&line).map_err(|err| {
                         ToolError::Sdk {
@@ -173,16 +173,16 @@ impl CodeModeBroker<'_> {
                         CodeModeRunnerOutput::ToolCall { seq, id, params } => {
                             if started_tool_calls >= max_tool_calls {
                                 terminate_code_mode_runner(&mut child, child_pid).await;
-                                return Err(ToolError::Sdk {
+                                return Err(CodeModeExecutionError::with_trace(ToolError::Sdk {
                                     sdk_kind: "tool_call_limit_exceeded".to_string(),
                                     message: format!(
                                         "Code Mode execution exceeded max_tool_calls={max_tool_calls}"
                                     ),
-                                });
+                                }, sorted_calls(&calls)));
                             }
                             started_tool_calls += 1;
                             let call_id = id.clone();
-                            let trace_params =
+                            let redacted_params =
                                 super::trace::redact_trace_params(&params, trace_params);
                             let caller = caller.clone();
                             let capability_filter = capability_filter.clone();
@@ -196,7 +196,7 @@ impl CodeModeBroker<'_> {
                                         )
                                         .await;
                                     let elapsed_ms = call_start.elapsed().as_millis();
-                                    (seq, call_id, trace_params, result, elapsed_ms)
+                                    (seq, call_id, redacted_params, result, elapsed_ms)
                                 }
                                 .boxed(),
                             );
@@ -204,10 +204,10 @@ impl CodeModeBroker<'_> {
                         CodeModeRunnerOutput::Done { result, logs } => {
                             if !pending_tool_calls.is_empty() {
                                 terminate_code_mode_runner(&mut child, child_pid).await;
-                                return Err(ToolError::Sdk {
+                                return Err(CodeModeExecutionError::with_trace(ToolError::Sdk {
                                     sdk_kind: "internal_error".to_string(),
                                     message: "Code Mode runner completed with pending tool calls".to_string(),
-                                });
+                                }, sorted_calls(&calls)));
                             }
                             // Cloudflare parity: pure computation (filter, sort, reduce
                             // over already-known data) is a valid Code Mode use case.
@@ -218,10 +218,10 @@ impl CodeModeBroker<'_> {
                                 message: format!("failed to wait for Code Mode runner: {err}"),
                             })?;
                             if !status.success() {
-                                return Err(ToolError::Sdk {
+                                return Err(CodeModeExecutionError::with_trace(ToolError::Sdk {
                                     sdk_kind: "server_error".to_string(),
                                     message: format!("Code Mode runner exited with status {status}"),
-                                });
+                                }, sorted_calls(&calls)));
                             }
                             calls.sort_by_key(|(seq, _)| *seq);
                             // The child has exited (child.wait() above), so its
@@ -253,7 +253,7 @@ impl CodeModeBroker<'_> {
                                 })
                                 .collect();
                             return Ok(CodeModeExecutionResponse {
-                                result,
+                                result: result.into_response_result(),
                                 calls: calls.into_iter().map(|(_, call)| call).collect(),
                                 logs: sanitized_logs,
                             });
@@ -268,10 +268,10 @@ impl CodeModeBroker<'_> {
                                     "runner exited with error"
                                 );
                             }
-                            return Err(ToolError::Sdk {
+                            return Err(CodeModeExecutionError::with_trace(ToolError::Sdk {
                                 sdk_kind: kind,
                                 message,
-                            });
+                            }, sorted_calls(&calls)));
                         }
                     }
                 }
@@ -337,4 +337,10 @@ impl CodeModeBroker<'_> {
             }
         }
     }
+}
+
+fn sorted_calls(calls: &[(u64, CodeModeExecutedCall)]) -> Vec<CodeModeExecutedCall> {
+    let mut calls = calls.to_vec();
+    calls.sort_by_key(|(seq, _)| *seq);
+    calls.into_iter().map(|(_, call)| call).collect()
 }

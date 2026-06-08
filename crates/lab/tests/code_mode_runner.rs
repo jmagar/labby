@@ -10,6 +10,25 @@ fn read_protocol_line(reader: &mut BufReader<impl Read>) -> Value {
     serde_json::from_str(&line).expect("runner output must be JSON")
 }
 
+fn assert_done_undefined(done: &Value) {
+    assert_eq!(done["result"]["state"], json!("undefined"));
+    assert!(
+        done["result"].get("value").is_none(),
+        "undefined results must not carry a value: {}",
+        done["result"]
+    );
+}
+
+fn done_json_result(done: &Value) -> &Value {
+    assert_eq!(
+        done["result"]["state"],
+        json!("json"),
+        "done.result must carry a JSON value: {}",
+        done["result"]
+    );
+    &done["result"]["value"]
+}
+
 #[test]
 fn code_mode_runner_evaluates_js_in_a_minimal_host_environment() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
@@ -102,8 +121,8 @@ fn code_mode_runner_evaluates_js_in_a_minimal_host_environment() {
     // Done now carries result (the function return value) and logs.
     let done = read_protocol_line(&mut stdout);
     assert_eq!(done["type"], "done");
-    // The test code has no explicit return — result is None (serialized as null).
-    assert!(done["result"].is_null());
+    // The test code has no explicit return.
+    assert_done_undefined(&done);
     // logs is always [] until Bead 3 console capture is implemented.
     assert_eq!(done["logs"], json!([]));
     let status = child.wait().expect("wait for runner");
@@ -267,7 +286,7 @@ fn code_mode_runner_tags_typed_array_results_as_base64() {
     let done = read_protocol_line(&mut stdout);
     assert_eq!(done["type"], "done");
     assert_eq!(
-        done["result"]["bytes"],
+        done_json_result(&done)["bytes"],
         json!({
             "__labBinary": "base64",
             "type": "Uint8Array",
@@ -369,8 +388,8 @@ fn code_mode_runner_preserves_binary_tool_args_and_results() {
     let done = read_protocol_line(&mut stdout);
     assert_eq!(done["type"], "done");
     assert_eq!(
-        done["result"],
-        json!({"isBytes": true, "values": [4, 5, 6]})
+        done_json_result(&done),
+        &json!({"isBytes": true, "values": [4, 5, 6]})
     );
     let status = child.wait().expect("wait for runner");
     assert!(status.success(), "runner exited with {status}");
@@ -446,8 +465,8 @@ fn code_mode_runner_round_trips_date_typed_array_and_array_buffer() {
     let done = read_protocol_line(&mut stdout);
     assert_eq!(done["type"], "done");
     assert_eq!(
-        done["result"],
-        json!({ "isInt16": true, "ctor": "Int16Array", "values": [1, 2, 3] }),
+        done_json_result(&done),
+        &json!({ "isInt16": true, "ctor": "Int16Array", "values": [1, 2, 3] }),
         "Int16Array result sentinel must reconstruct as Int16Array, got: {}",
         done["result"]
     );
@@ -549,8 +568,8 @@ fn code_mode_runner_fans_out_promise_all_tool_calls() {
     // Done now carries result (the function return value) and logs.
     let done = read_protocol_line(&mut stdout);
     assert_eq!(done["type"], "done");
-    // The test code has no explicit return — result is None (serialized as null).
-    assert!(done["result"].is_null());
+    // The test code has no explicit return.
+    assert_done_undefined(&done);
     // logs is always [] until Bead 3 console capture is implemented.
     assert_eq!(done["logs"], json!([]));
     let status = child.wait().expect("wait for runner");
@@ -601,8 +620,8 @@ fn code_mode_runner_done_carries_return_value() {
     assert_eq!(done["type"], "done", "expected done message");
     // The function returned the tool result — should be non-null.
     assert_eq!(
-        done["result"],
-        json!({"pong": true}),
+        done_json_result(&done),
+        &json!({"pong": true}),
         "done.result must carry the function return value"
     );
     assert_eq!(done["logs"], json!([]), "logs must be empty until Bead 3");
@@ -663,9 +682,10 @@ fn code_mode_runner_tool_error_produces_json_encoded_error() {
         "expected done message — if missing, JSON.parse threw SyntaxError"
     );
     // The catch block should have parsed the JSON error and returned the structured result.
-    assert_eq!(done["result"]["caught"], json!(true));
-    assert_eq!(done["result"]["kind"], json!("server_error"));
-    assert_eq!(done["result"]["msg"], json!("upstream exploded"));
+    let result = done_json_result(&done);
+    assert_eq!(result["caught"], json!(true));
+    assert_eq!(result["kind"], json!("server_error"));
+    assert_eq!(result["msg"], json!("upstream exploded"));
     let status = child.wait().expect("wait for runner");
     assert!(status.success(), "runner exited with {status}");
 }
@@ -733,10 +753,11 @@ fn code_mode_runner_tool_error_does_not_abort_fan_out() {
         done["type"], "done",
         "a mid-fan-out tool error must not abort the run"
     );
-    assert_eq!(done["result"][0]["status"], json!("rejected"));
-    assert_eq!(done["result"][0]["kind"], json!("rate_limited"));
-    assert_eq!(done["result"][1]["status"], json!("fulfilled"));
-    assert_eq!(done["result"][1]["value"], json!({"pong": true}));
+    let result = done_json_result(&done);
+    assert_eq!(result[0]["status"], json!("rejected"));
+    assert_eq!(result[0]["kind"], json!("rate_limited"));
+    assert_eq!(result[1]["status"], json!("fulfilled"));
+    assert_eq!(result[1]["value"], json!({"pong": true}));
     let status = child.wait().expect("wait for runner");
     assert!(status.success(), "runner exited with {status}");
 }
@@ -776,7 +797,8 @@ fn assert_single_call_round_trip(code: &str, expected_result: Value) {
     let done = read_protocol_line(&mut stdout);
     assert_eq!(done["type"], "done", "expected done, got: {done}");
     assert_eq!(
-        done["result"], expected_result,
+        done_json_result(&done),
+        &expected_result,
         "done.result must carry the function return value"
     );
     let status = child.wait().expect("wait for runner");
@@ -859,8 +881,8 @@ fn codemode_proxy_routes_through_call_tool() {
     let done = read_protocol_line(&mut stdout);
     assert_eq!(done["type"], "done", "expected done, got: {done}");
     assert_eq!(
-        done["result"],
-        json!({"pong": true}),
+        done_json_result(&done),
+        &json!({"pong": true}),
         "codemode.demo.ping must resolve to the tool result"
     );
     let status = child.wait().expect("wait for runner");

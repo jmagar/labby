@@ -199,9 +199,9 @@ max_log_bytes = 65536
 ```
 
 Operators can change the main execution limits without hand-editing TOML using
-`gateway.code_mode.get` and `gateway.code_mode.set`. The current action accepts
-`enabled`, `trace_params`, `timeout_ms`, `max_tool_calls`,
-`max_response_bytes`, and `max_response_tokens`.
+`gateway.code_mode.get` and `gateway.code_mode.set`. The action accepts all
+fields listed above and validates them with the same ranges used for file
+configuration.
 
 ### `[oauth.machines.<id>]`
 

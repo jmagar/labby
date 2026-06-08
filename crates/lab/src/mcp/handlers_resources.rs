@@ -22,6 +22,7 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use serde_json::{Value, json};
 
+use crate::mcp::catalog::{CODE_MODE_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME};
 use crate::mcp::context::{
     auth_context_from_extensions, code_mode_search_scope_allowed,
     oauth_upstream_subject_for_request,
@@ -33,6 +34,30 @@ pub(crate) const CODE_MODE_APP_MIME: &str = "text/html;profile=mcp-app";
 pub(crate) const CODE_MODE_SEARCH_APP_URI: &str = "ui://lab/code-mode/search";
 pub(crate) const CODE_MODE_EXECUTE_APP_URI: &str = "ui://lab/code-mode/execute";
 pub(crate) const CODE_MODE_HISTORY_APP_URI: &str = "ui://lab/code-mode/history";
+
+pub(crate) struct CodeModeAppResourceDescriptor {
+    pub(crate) uri: &'static str,
+    pub(crate) name: &'static str,
+    pub(crate) tool_name: Option<&'static str>,
+}
+
+pub(crate) const CODE_MODE_APP_RESOURCE_DESCRIPTORS: &[CodeModeAppResourceDescriptor] = &[
+    CodeModeAppResourceDescriptor {
+        uri: CODE_MODE_SEARCH_APP_URI,
+        name: "code-mode/search",
+        tool_name: Some(CODE_MODE_SEARCH_TOOL_NAME),
+    },
+    CodeModeAppResourceDescriptor {
+        uri: CODE_MODE_EXECUTE_APP_URI,
+        name: "code-mode/execute",
+        tool_name: Some(TOOL_EXECUTE_TOOL_NAME),
+    },
+    CodeModeAppResourceDescriptor {
+        uri: CODE_MODE_HISTORY_APP_URI,
+        name: "code-mode/history",
+        tool_name: None,
+    },
+];
 
 const CODE_MODE_APP_FALLBACK_HTML: &str = r#"<!doctype html>
 <html lang="en">
@@ -88,11 +113,12 @@ function historyRow(entry){
   const count=Array.isArray(entry.calls)?entry.calls.length:0;
   return card(`<div class="row"><div class="name">${esc(entry.kind||"entry")}</div><div class="${entry.ok?"ok":"err"}">${esc(statusLabel(entry))}</div></div><div class="meta">${esc(entry.elapsed_ms??0)} ms / ${count} calls${entry.match_count!==undefined?` / ${esc(entry.match_count)} matches`:""}</div>`);
 }
+function searchCount(t){const displayed=t.displayed_count??(Array.isArray(t.matches)?t.matches.length:0);return (t.truncated||displayed!==t.match_count)?`${displayed} of ${t.match_count||0}`:`${t.match_count||0}`;}
 function render(trace){
   const t=trace&&trace.structuredContent?trace.structuredContent:trace;
   if(!t||!t.kind){content.innerHTML=card('<div class="meta">Run Code Mode search or execute to populate the inspector.</div>');return;}
   if(t.kind==="code_mode_execute_trace"){summary.textContent=`${t.call_count||0} broker calls captured`;content.innerHTML=(t.calls||[]).map(callRow).join("")||card('<div class="meta">No broker calls were made.</div>');return;}
-  if(t.kind==="code_mode_search_trace"){summary.textContent=`${t.match_count||0} catalog matches`;content.innerHTML=(t.matches||[]).map(matchRow).join("")||card('<div class="meta">No matches.</div>');return;}
+  if(t.kind==="code_mode_search_trace"){summary.textContent=`${searchCount(t)} catalog matches${t.truncated?" (truncated)":""}`;content.innerHTML=(t.matches||[]).map(matchRow).join("")||card('<div class="meta">No matches.</div>');return;}
   if(t.kind==="code_mode_history"){summary.textContent=`${(t.entries||[]).length} bounded history entries`;content.innerHTML=(t.entries||[]).map(historyRow).join("")||card('<div class="meta">History is empty.</div>');return;}
   content.innerHTML=card(`<pre>${esc(json(t))}</pre>`);
 }
@@ -124,6 +150,7 @@ impl LabMcpServer {
             subject,
             "dispatch start"
         );
+        let auth = auth_context_from_extensions(&context.extensions);
         let mut resources = vec![
             RawResource::new("lab://catalog", "catalog")
                 .with_description("Full discovery document for all services")
@@ -132,6 +159,7 @@ impl LabMcpServer {
         ];
         if code_mode_app_resources_visible(
             self.code_mode_visibility().await.exposes_synthetic_tools(),
+            auth,
         ) {
             resources.extend(code_mode_app_resources());
         }
@@ -152,7 +180,6 @@ impl LabMcpServer {
         if let Some(pool) = self.current_upstream_pool().await {
             resources.extend(pool.gateway_synthetic_resources().await);
             resources.extend(pool.list_upstream_resources().await);
-            let auth = auth_context_from_extensions(&context.extensions);
             if let Some(oauth_subject) =
                 oauth_upstream_subject_for_request(auth, self.request_subject(&context))
             {
@@ -416,10 +443,10 @@ impl LabMcpServer {
 }
 
 fn code_mode_app_html(uri: &str, history: Option<&Value>) -> Result<String, String> {
-    if !matches!(
-        uri,
-        CODE_MODE_SEARCH_APP_URI | CODE_MODE_EXECUTE_APP_URI | CODE_MODE_HISTORY_APP_URI
-    ) {
+    if !CODE_MODE_APP_RESOURCE_DESCRIPTORS
+        .iter()
+        .any(|descriptor| descriptor.uri == uri)
+    {
         return Err(format!("unknown UI resource: {uri}"));
     }
 
@@ -434,24 +461,33 @@ fn code_mode_app_html(uri: &str, history: Option<&Value>) -> Result<String, Stri
     Ok(html)
 }
 
-fn code_mode_app_resource(uri: &str, name: &str) -> rmcp::model::Resource {
-    RawResource::new(uri.to_string(), name.to_string())
+fn code_mode_app_resource(descriptor: &CodeModeAppResourceDescriptor) -> rmcp::model::Resource {
+    RawResource::new(descriptor.uri.to_string(), descriptor.name.to_string())
         .with_description("Read-only MCP App for Code Mode call traces")
         .with_mime_type(CODE_MODE_APP_MIME)
-        .with_meta(code_mode_app_resource_meta(uri))
+        .with_meta(code_mode_app_resource_meta(descriptor.uri))
         .no_annotation()
 }
 
-fn code_mode_app_resources_visible(exposes_synthetic_tools: bool) -> bool {
-    exposes_synthetic_tools
+fn code_mode_app_resources_visible(
+    exposes_synthetic_tools: bool,
+    auth: Option<&crate::api::oauth::AuthContext>,
+) -> bool {
+    exposes_synthetic_tools && code_mode_search_scope_allowed(auth)
 }
 
-fn code_mode_app_resources() -> [rmcp::model::Resource; 3] {
-    [
-        code_mode_app_resource(CODE_MODE_SEARCH_APP_URI, "code-mode/search"),
-        code_mode_app_resource(CODE_MODE_EXECUTE_APP_URI, "code-mode/execute"),
-        code_mode_app_resource(CODE_MODE_HISTORY_APP_URI, "code-mode/history"),
-    ]
+fn code_mode_app_resources() -> Vec<rmcp::model::Resource> {
+    CODE_MODE_APP_RESOURCE_DESCRIPTORS
+        .iter()
+        .map(code_mode_app_resource)
+        .collect()
+}
+
+pub(crate) fn code_mode_app_resource_uri_for_tool(tool_name: &str) -> Option<&'static str> {
+    CODE_MODE_APP_RESOURCE_DESCRIPTORS
+        .iter()
+        .find(|descriptor| descriptor.tool_name == Some(tool_name))
+        .map(|descriptor| descriptor.uri)
 }
 
 pub(crate) fn code_mode_app_resource_meta(uri: &str) -> Meta {
@@ -461,23 +497,63 @@ pub(crate) fn code_mode_app_resource_meta(uri: &str) -> Meta {
         json!({
             "resourceUri": uri,
             "mimeTypes": [CODE_MODE_APP_MIME],
+            "csp": {
+                "connectDomains": [],
+                "resourceDomains": [],
+                "frameDomains": [],
+            },
+            "prefersBorder": false,
         }),
     );
-    meta.insert(
-        "csp".to_string(),
-        json!({
-            "connectDomains": [],
-            "resourceDomains": [],
-            "frameDomains": [],
-        }),
-    );
-    meta.insert("prefersBorder".to_string(), Value::Bool(false));
     Meta(meta)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rmcp::service::{Peer, RequestContext};
+
+    async fn code_mode_server() -> LabMcpServer {
+        let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
+        let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+            std::path::PathBuf::from("config.toml"),
+            runtime,
+        ));
+        manager
+            .seed_config(crate::config::LabConfig {
+                code_mode: crate::config::CodeModeConfig {
+                    enabled: true,
+                    ..crate::config::CodeModeConfig::default()
+                },
+                ..crate::config::LabConfig::default()
+            })
+            .await;
+        LabMcpServer {
+            registry: std::sync::Arc::new(crate::registry::ToolRegistry::new()),
+            gateway_manager: Some(manager),
+            node_role: None,
+            peers: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            logging_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+                crate::mcp::logging::logging_level_rank(LoggingLevel::Emergency),
+            )),
+        }
+    }
+
+    fn scoped_context(peer: Peer<RoleServer>, scopes: &[&str]) -> RequestContext<RoleServer> {
+        let mut context = RequestContext::new(rmcp::model::NumberOrString::Number(1), peer);
+        let mut parts = axum::http::Request::new(()).into_parts().0;
+        parts.extensions.insert(crate::api::oauth::AuthContext {
+            sub: "reader".to_string(),
+            actor_key: None,
+            scopes: scopes.iter().map(|scope| scope.to_string()).collect(),
+            issuer: "https://lab.example.com".to_string(),
+            via_session: true,
+            csrf_token: None,
+            email: None,
+        });
+        context.extensions.insert(parts);
+        context
+    }
 
     #[test]
     fn code_mode_app_resource_meta_uses_mcp_app_mime_and_csp() {
@@ -490,13 +566,114 @@ mod tests {
             meta.0["ui"]["mimeTypes"][0].as_str(),
             Some(CODE_MODE_APP_MIME)
         );
-        assert_eq!(
-            meta.0["csp"]["connectDomains"]
-                .as_array()
-                .expect("connect domains")
-                .len(),
-            0
+        assert_eq!(meta.0["ui"]["prefersBorder"].as_bool(), Some(false));
+        assert!(meta.0.get("csp").is_none(), "CSP belongs under _meta.ui");
+        assert!(
+            meta.0.get("prefersBorder").is_none(),
+            "border preference belongs under _meta.ui"
         );
+        assert_eq!(meta.0["ui"]["csp"]["connectDomains"], json!([]));
+        assert_eq!(meta.0["ui"]["csp"]["resourceDomains"], json!([]));
+        assert_eq!(meta.0["ui"]["csp"]["frameDomains"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn list_resources_only_lists_code_mode_apps_for_read_scope() {
+        let (transport, _client_transport) = tokio::io::duplex(64);
+        let running = rmcp::service::serve_directly::<RoleServer, _, _, std::io::Error, _>(
+            code_mode_server().await,
+            transport,
+            None,
+        );
+
+        let denied = running
+            .service()
+            .list_resources_impl(None, scoped_context(running.peer().clone(), &["profile"]))
+            .await
+            .expect("list resources without scope");
+        assert!(
+            denied
+                .resources
+                .iter()
+                .all(|resource| !resource.uri.starts_with("ui://lab/code-mode/")),
+            "listed Code Mode UI resources without read scope"
+        );
+
+        let allowed = running
+            .service()
+            .list_resources_impl(None, scoped_context(running.peer().clone(), &["lab:read"]))
+            .await
+            .expect("list resources with scope");
+        let code_mode_uris = allowed
+            .resources
+            .iter()
+            .filter(|resource| resource.uri.starts_with("ui://lab/code-mode/"))
+            .map(|resource| resource.uri.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            code_mode_uris,
+            vec![
+                CODE_MODE_SEARCH_APP_URI,
+                CODE_MODE_EXECUTE_APP_URI,
+                CODE_MODE_HISTORY_APP_URI
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn read_history_resource_requires_read_scope_and_returns_html_metadata() {
+        let (transport, _client_transport) = tokio::io::duplex(64);
+        let running = rmcp::service::serve_directly::<RoleServer, _, _, std::io::Error, _>(
+            code_mode_server().await,
+            transport,
+            None,
+        );
+
+        let denied = running
+            .service()
+            .read_resource_impl(
+                ReadResourceRequestParams::new(CODE_MODE_HISTORY_APP_URI),
+                scoped_context(running.peer().clone(), &["profile"]),
+            )
+            .await
+            .expect_err("scope must be denied");
+        assert_eq!(
+            denied.data.as_ref().expect("error data")["kind"],
+            json!("forbidden")
+        );
+
+        let allowed = running
+            .service()
+            .read_resource_impl(
+                ReadResourceRequestParams::new(CODE_MODE_HISTORY_APP_URI),
+                scoped_context(running.peer().clone(), &["lab:read"]),
+            )
+            .await
+            .expect("read history resource");
+        assert_eq!(allowed.contents.len(), 1);
+        match &allowed.contents[0] {
+            ResourceContents::TextResourceContents {
+                uri,
+                mime_type,
+                text,
+                meta,
+            } => {
+                assert_eq!(uri, CODE_MODE_HISTORY_APP_URI);
+                assert_eq!(mime_type.as_deref(), Some(CODE_MODE_APP_MIME));
+                assert!(text.contains("code_mode_history"));
+                let meta = meta.as_ref().expect("resource metadata");
+                assert_eq!(
+                    meta.0["ui"]["resourceUri"],
+                    json!(CODE_MODE_HISTORY_APP_URI)
+                );
+                assert_eq!(meta.0["ui"]["mimeTypes"], json!([CODE_MODE_APP_MIME]));
+                assert_eq!(meta.0["ui"]["prefersBorder"], json!(false));
+                assert_eq!(meta.0["ui"]["csp"]["connectDomains"], json!([]));
+                assert!(meta.0.get("csp").is_none());
+                assert!(meta.0.get("prefersBorder").is_none());
+            }
+            ResourceContents::BlobResourceContents { .. } => panic!("expected text resource"),
+        }
     }
 
     #[test]
@@ -510,12 +687,29 @@ mod tests {
 
     #[test]
     fn code_mode_app_resources_follow_synthetic_tool_visibility() {
+        let read_auth = crate::api::oauth::AuthContext {
+            sub: "reader".to_string(),
+            actor_key: None,
+            scopes: vec!["lab:read".to_string()],
+            issuer: "https://lab.example.com".to_string(),
+            via_session: true,
+            csrf_token: None,
+            email: None,
+        };
+        let denied_auth = crate::api::oauth::AuthContext {
+            scopes: vec!["profile".to_string()],
+            ..read_auth.clone()
+        };
         assert!(
-            code_mode_app_resources_visible(true),
+            code_mode_app_resources_visible(true, Some(&read_auth)),
             "Code Mode app resources should be listed with synthetic search/execute tools"
         );
         assert!(
-            !code_mode_app_resources_visible(false),
+            !code_mode_app_resources_visible(true, Some(&denied_auth)),
+            "Code Mode app resources should not be listed without Code Mode read scope"
+        );
+        assert!(
+            !code_mode_app_resources_visible(false, Some(&read_auth)),
             "Code Mode app resources should not be listed when synthetic tools are disabled"
         );
         let resources = code_mode_app_resources();
@@ -530,6 +724,14 @@ mod tests {
                 CODE_MODE_EXECUTE_APP_URI,
                 CODE_MODE_HISTORY_APP_URI
             ]
+        );
+        assert_eq!(
+            code_mode_app_resource_uri_for_tool(CODE_MODE_SEARCH_TOOL_NAME),
+            Some(CODE_MODE_SEARCH_APP_URI)
+        );
+        assert_eq!(
+            code_mode_app_resource_uri_for_tool(TOOL_EXECUTE_TOOL_NAME),
+            Some(CODE_MODE_EXECUTE_APP_URI)
         );
     }
 

@@ -244,6 +244,12 @@ pub struct CodeModeSetParams {
     pub max_response_bytes: Option<usize>,
     #[serde(default)]
     pub max_response_tokens: Option<usize>,
+    #[serde(default)]
+    pub token_estimate_divisor: Option<u32>,
+    #[serde(default)]
+    pub max_log_entries: Option<usize>,
+    #[serde(default)]
+    pub max_log_bytes: Option<usize>,
 }
 
 /// Parameters for `gateway.discover` — read-only scan of external MCP configs.

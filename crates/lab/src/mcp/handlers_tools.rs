@@ -21,7 +21,7 @@ use crate::mcp::call_tool_codemode::CODE_EXECUTE_DESCRIPTION;
 use crate::mcp::catalog::{CODE_MODE_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME};
 use crate::mcp::completion::action_schema;
 use crate::mcp::context::{auth_context_from_extensions, oauth_upstream_subject_for_request};
-use crate::mcp::handlers_resources::{CODE_MODE_EXECUTE_APP_URI, CODE_MODE_SEARCH_APP_URI};
+use crate::mcp::handlers_resources::code_mode_app_resource_uri_for_tool;
 use crate::mcp::logging::DispatchLogOutcome;
 use crate::mcp::server::LabMcpServer;
 
@@ -86,13 +86,15 @@ impl LabMcpServer {
                 Value::Object(map) => Arc::new(map),
                 _ => unreachable!("search schema must be an object"),
             };
+            let trace_output_schema = code_mode_trace_output_schema();
             tools.push(Tool::new(
                 CODE_MODE_SEARCH_TOOL_NAME,
                 "Filter the upstream MCP tool catalog with JavaScript. Write an async arrow function \
                 that filters `const tools = [...]` (each entry: id, upstream, name, description, schema, output_schema, signature, dts) \
                 and returns what you need. Use before execute() to discover the right tool id.",
                 search_schema,
-            ).with_meta(code_mode_tool_meta(CODE_MODE_SEARCH_APP_URI)));
+            ).with_raw_output_schema(Arc::clone(&trace_output_schema))
+                .with_meta(code_mode_tool_meta(CODE_MODE_SEARCH_TOOL_NAME)));
             gateway_tool_count += 1;
             let execute_schema = match serde_json::json!({
                 "type": "object",
@@ -131,7 +133,8 @@ impl LabMcpServer {
                     CODE_EXECUTE_DESCRIPTION,
                     execute_schema,
                 )
-                .with_meta(code_mode_tool_meta(CODE_MODE_EXECUTE_APP_URI)),
+                .with_raw_output_schema(Arc::clone(&trace_output_schema))
+                .with_meta(code_mode_tool_meta(TOOL_EXECUTE_TOOL_NAME)),
             );
             gateway_tool_count += 1;
         }
@@ -217,7 +220,9 @@ impl LabMcpServer {
     }
 }
 
-fn code_mode_tool_meta(resource_uri: &str) -> Meta {
+fn code_mode_tool_meta(tool_name: &str) -> Meta {
+    let resource_uri = code_mode_app_resource_uri_for_tool(tool_name)
+        .expect("Code Mode tools must have an associated UI resource");
     let mut meta = serde_json::Map::new();
     meta.insert(
         "ui".to_string(),
@@ -226,6 +231,44 @@ fn code_mode_tool_meta(resource_uri: &str) -> Meta {
         }),
     );
     Meta(meta)
+}
+
+fn code_mode_trace_output_schema() -> Arc<serde_json::Map<String, Value>> {
+    match serde_json::json!({
+        "type": "object",
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "kind": { "const": "code_mode_search_trace" },
+                    "query_kind": { "type": "string" },
+                    "elapsed_ms": { "type": "integer", "minimum": 0 },
+                    "match_count": { "type": "integer", "minimum": 0 },
+                    "displayed_count": { "type": "integer", "minimum": 0 },
+                    "truncated": { "type": "boolean" },
+                    "matches": { "type": "array", "items": { "type": "object" } },
+                    "result_shape": { "type": "object" }
+                },
+                "required": ["kind", "query_kind", "elapsed_ms", "match_count", "displayed_count", "truncated", "matches", "result_shape"],
+                "additionalProperties": true
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "kind": { "const": "code_mode_execute_trace" },
+                    "call_count": { "type": "integer", "minimum": 0 },
+                    "calls": { "type": "array", "items": { "type": "object" } },
+                    "result_shape": { "type": "object" },
+                    "logs_count": { "type": "integer", "minimum": 0 }
+                },
+                "required": ["kind", "call_count", "calls", "result_shape", "logs_count"],
+                "additionalProperties": true
+            }
+        ]
+    }) {
+        Value::Object(map) => Arc::new(map),
+        _ => unreachable!("trace output schema must be an object"),
+    }
 }
 
 #[cfg(test)]

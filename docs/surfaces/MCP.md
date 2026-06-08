@@ -158,6 +158,8 @@ the local `lab://` discovery fallback so UI resources have exact lookup
 semantics. The Code Mode `ui://` response is self-contained HTML; browser/static
 build verification for the richer Next route lives under
 `apps/gateway-admin/app/mcp/code-mode/`.
+The history resource is process-local inspection state, not a durable audit log
+or a hard quota guarantee.
 
 ## Top-Level Catalog
 

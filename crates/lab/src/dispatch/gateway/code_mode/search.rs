@@ -76,7 +76,8 @@ impl CodeModeBroker<'_> {
                 false,
                 CodeModeCapabilityFilter::default(),
             )
-            .await?;
+            .await
+            .map_err(super::types::CodeModeExecutionError::into_tool_error)?;
         // search must return an array/Value; undefined/None → [].
         Ok(response.result.unwrap_or_else(|| Value::Array(Vec::new())))
     }

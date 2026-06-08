@@ -18,12 +18,12 @@ use rmcp::ErrorData;
 use rmcp::RoleServer;
 use rmcp::model::{CallToolResult, Content, JsonObject};
 use rmcp::service::RequestContext;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::dispatch::error::ToolError as DispatchToolError;
 use crate::dispatch::gateway::code_mode::{
     CodeModeBroker, CodeModeCaller, CodeModeCapabilityFilter, CodeModeHistoryEntry,
-    CodeModeHistoryKind,
+    CodeModeHistoryKind, code_mode_execute_trace, code_mode_search_trace,
 };
 use crate::mcp::context::{
     auth_context_from_extensions, code_mode_search_scope_allowed, tool_execute_scope_allowed,
@@ -375,18 +375,21 @@ impl LabMcpServer {
             Err(err) => {
                 let after = self.snapshot_catalog().await;
                 self.notify_catalog_changes(&before, &after).await;
+                let calls = err.calls().to_vec();
+                let error_kind = err.kind().to_string();
+                let tool_error = err.into_tool_error();
                 manager
                     .record_code_mode_history(CodeModeHistoryEntry {
                         seq: 0,
                         kind: CodeModeHistoryKind::Execute,
                         ok: false,
                         elapsed_ms: started.elapsed().as_millis(),
-                        error_kind: Some(err.kind().to_string()),
-                        calls: Vec::new(),
+                        error_kind: Some(error_kind),
+                        calls,
                         match_count: None,
                     })
                     .await;
-                let env = tool_error_envelope(service, "call_tool", &err);
+                let env = tool_error_envelope(service, "call_tool", &tool_error);
                 return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
             }
         };
@@ -424,156 +427,6 @@ fn call_result_with_structured(text: String, structured: Value) -> CallToolResul
     let mut result = CallToolResult::success(vec![Content::text(text)]);
     result.structured_content = Some(structured);
     result
-}
-
-fn code_mode_search_trace(response: &Value, elapsed_ms: u128) -> Value {
-    let matched = response
-        .as_array()
-        .map(|items| {
-            items
-                .iter()
-                .take(50)
-                .filter_map(search_match_summary)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    json!({
-        "kind": "code_mode_search_trace",
-        "query_kind": "catalog_filter",
-        "elapsed_ms": elapsed_ms,
-        "match_count": response.as_array().map_or(0, Vec::len),
-        "matches": matched,
-        "result_shape": compact_result_shape(response),
-    })
-}
-
-fn search_match_summary(value: &Value) -> Option<Value> {
-    let object = value.as_object()?;
-    Some(json!({
-        "id": object.get("id").and_then(Value::as_str).unwrap_or_default(),
-        "upstream": object.get("upstream").and_then(Value::as_str).unwrap_or_default(),
-        "tool": object.get("name").and_then(Value::as_str).unwrap_or_default(),
-        "description": object
-            .get("description")
-            .and_then(Value::as_str)
-            .map(|description| truncate_trace_string(description, 240))
-            .unwrap_or_default(),
-        "has_schema": object.get("schema").is_some_and(|value| !value.is_null()),
-        "has_output_schema": object.get("output_schema").is_some_and(|value| !value.is_null()),
-    }))
-}
-
-fn truncate_trace_string(value: &str, max_chars: usize) -> String {
-    let mut chars = value.chars();
-    let prefix = chars.by_ref().take(max_chars).collect::<String>();
-    if chars.next().is_some() {
-        format!("{prefix}...")
-    } else {
-        value.to_string()
-    }
-}
-
-fn code_mode_execute_trace(
-    response: &crate::dispatch::gateway::code_mode::CodeModeExecutionResponse,
-) -> Value {
-    let calls = response
-        .calls
-        .iter()
-        .map(|call| {
-            let (upstream, tool) = call
-                .id
-                .split_once("::")
-                .map_or(("", call.id.as_str()), |(upstream, tool)| (upstream, tool));
-            json!({
-                "id": call.id,
-                "upstream": upstream,
-                "tool": tool,
-                "ok": call.ok,
-                "elapsed_ms": call.elapsed_ms,
-                "params": call.params,
-                "error_kind": call.error_kind,
-            })
-        })
-        .collect::<Vec<_>>();
-    json!({
-        "kind": "code_mode_execute_trace",
-        "call_count": response.calls.len(),
-        "calls": calls,
-        "result_shape": response
-            .result
-            .as_ref()
-            .map(compact_result_shape)
-            .unwrap_or_else(|| json!({ "type": "undefined" })),
-        "logs_count": response.logs.len(),
-    })
-}
-
-fn compact_result_shape(value: &Value) -> Value {
-    let size_bytes = serde_json::to_vec(value)
-        .map(|bytes| bytes.len())
-        .unwrap_or(usize::MAX);
-    match value {
-        Value::Null => json!({ "type": "null", "size_bytes": size_bytes }),
-        Value::Bool(_) => json!({ "type": "boolean", "size_bytes": size_bytes }),
-        Value::Number(_) => json!({ "type": "number", "size_bytes": size_bytes }),
-        Value::String(s) => json!({
-            "type": "string",
-            "size_bytes": size_bytes,
-            "length": s.chars().count(),
-        }),
-        Value::Array(items) => json!({
-            "type": "array",
-            "size_bytes": size_bytes,
-            "length": items.len(),
-            "item_types": compact_item_types(items),
-        }),
-        Value::Object(object) => {
-            let mut keys = object.keys().take(16).cloned().collect::<Vec<_>>();
-            keys.sort();
-            json!({
-                "type": "object",
-                "size_bytes": size_bytes,
-                "keys": keys,
-                "key_count": object.len(),
-                "truncated": object.get("truncated").and_then(Value::as_bool).unwrap_or(false),
-                "content_block_kinds": content_block_kinds(value),
-            })
-        }
-    }
-}
-
-fn compact_item_types(items: &[Value]) -> Vec<&'static str> {
-    let mut types = items.iter().take(16).map(value_type).collect::<Vec<_>>();
-    types.sort_unstable();
-    types.dedup();
-    types
-}
-
-fn value_type(value: &Value) -> &'static str {
-    match value {
-        Value::Null => "null",
-        Value::Bool(_) => "boolean",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-    }
-}
-
-fn content_block_kinds(value: &Value) -> Vec<String> {
-    value
-        .get("content")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .take(16)
-        .filter_map(|block| {
-            block
-                .get("type")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-        })
-        .collect()
 }
 
 #[cfg(test)]

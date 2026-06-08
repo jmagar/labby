@@ -360,6 +360,15 @@ async fn handle_tool_actions(
             if let Some(max_response_tokens) = params.max_response_tokens {
                 next.max_response_tokens = max_response_tokens;
             }
+            if let Some(token_estimate_divisor) = params.token_estimate_divisor {
+                next.token_estimate_divisor = token_estimate_divisor;
+            }
+            if let Some(max_log_entries) = params.max_log_entries {
+                next.max_log_entries = max_log_entries;
+            }
+            if let Some(max_log_bytes) = params.max_log_bytes {
+                next.max_log_bytes = max_log_bytes;
+            }
             to_json(manager.set_code_mode_config(next, None, None).await?)
         }
         unknown => unknown_action(unknown),
@@ -883,6 +892,69 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("config.toml");
         GatewayManager::new(path, GatewayRuntimeHandle::default())
+    }
+
+    #[tokio::test]
+    async fn gateway_code_mode_set_accepts_all_public_config_fields() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manager = GatewayManager::new(
+            dir.path().join("config.toml"),
+            GatewayRuntimeHandle::default(),
+        );
+
+        let value = dispatch_with_manager(
+            &manager,
+            "gateway.code_mode.set",
+            json!({
+                "enabled": true,
+                "trace_params": false,
+                "timeout_ms": 5000,
+                "max_tool_calls": 8,
+                "max_response_bytes": 4096,
+                "max_response_tokens": 1024,
+                "token_estimate_divisor": 2,
+                "max_log_entries": 10,
+                "max_log_bytes": 2048
+            }),
+        )
+        .await
+        .expect("code mode config should update");
+
+        assert_eq!(value["enabled"], true);
+        assert_eq!(value["trace_params"], false);
+        assert_eq!(value["timeout_ms"], 5000);
+        assert_eq!(value["max_tool_calls"], 8);
+        assert_eq!(value["max_response_bytes"], 4096);
+        assert_eq!(value["max_response_tokens"], 1024);
+        assert_eq!(value["token_estimate_divisor"], 2);
+        assert_eq!(value["max_log_entries"], 10);
+        assert_eq!(value["max_log_bytes"], 2048);
+    }
+
+    #[tokio::test]
+    async fn gateway_code_mode_set_rejects_invalid_public_config_fields() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manager = GatewayManager::new(
+            dir.path().join("config.toml"),
+            GatewayRuntimeHandle::default(),
+        );
+
+        let err = dispatch_with_manager(
+            &manager,
+            "gateway.code_mode.set",
+            json!({ "token_estimate_divisor": 0 }),
+        )
+        .await
+        .expect_err("invalid code mode config should be rejected");
+        let body = serde_json::to_value(&err).expect("serialize");
+
+        assert_eq!(body["kind"], "invalid_param");
+        assert!(
+            body["message"]
+                .as_str()
+                .expect("message")
+                .contains("token_estimate_divisor")
+        );
     }
 
     #[tokio::test]

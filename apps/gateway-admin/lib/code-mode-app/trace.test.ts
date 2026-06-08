@@ -47,6 +47,104 @@ test('parses search traces with matched tools', () => {
   assert.equal(flattenTraceRows(trace).matches[0].tool, 'ask')
 })
 
+test('parses history traces and flattens nested execute calls', () => {
+  const trace = parseCodeModeTrace({
+    kind: 'code_mode_history',
+    entries: [
+      {
+        seq: 7,
+        kind: 'execute',
+        ok: true,
+        elapsed_ms: 24,
+        calls: [
+          {
+            id: 'github::search_issues',
+            upstream: 'github',
+            tool: 'search_issues',
+            ok: true,
+            elapsed_ms: 12,
+          },
+        ],
+      },
+      {
+        seq: 8,
+        kind: 'search',
+        ok: false,
+        elapsed_ms: 4,
+        error_kind: 'invalid_query',
+        match_count: 0,
+      },
+    ],
+  })
+
+  assert.equal(trace?.kind, 'code_mode_history')
+  const rows = flattenTraceRows(trace)
+  assert.equal(rows.history.length, 2)
+  assert.equal(rows.calls.length, 1)
+  assert.equal(rows.calls[0].tool, 'search_issues')
+})
+
+test('reports dropped malformed history rows', () => {
+  const trace = parseCodeModeTrace({
+    kind: 'code_mode_history',
+    entries: [
+      { seq: 1, kind: 'search', ok: true, elapsed_ms: 3 },
+      { seq: 2, kind: 'unknown', ok: true, elapsed_ms: 3 },
+    ],
+  })
+
+  assert.equal(trace?.kind, 'code_mode_history')
+  assert.equal(trace?.entries.length, 1)
+  assert.deepEqual(trace?.warnings, [
+    { kind: 'dropped_rows', message: 'Dropped 1 malformed history entry.' },
+  ])
+})
+
+test('accepts only literal booleans for status fields', () => {
+  const trace = parseCodeModeTrace({
+    kind: 'code_mode_execute_trace',
+    call_count: 1,
+    calls: [
+      {
+        id: 'github::search_issues',
+        upstream: 'github',
+        tool: 'search_issues',
+        ok: 'false',
+        elapsed_ms: 12,
+      },
+    ],
+  })
+
+  assert.equal(trace?.kind, 'code_mode_execute_trace')
+  assert.equal(flattenTraceRows(trace).calls[0].ok, false)
+})
+
+test('stringifies unsupported params without throwing', () => {
+  const cyclic: { child?: unknown } = {}
+  cyclic.child = cyclic
+
+  const params = stringifyRedactedParams(cyclic)
+
+  assert.match(params, /^\[unsupported params:/)
+  assert.ok(params.length < 160)
+})
+
+test('parses search truncation metadata', () => {
+  const trace = parseCodeModeTrace({
+    kind: 'code_mode_search_trace',
+    query_kind: 'catalog_filter',
+    displayed_count: 50,
+    truncated: true,
+    match_count: 200,
+    matches: [],
+  })
+
+  assert.equal(trace?.kind, 'code_mode_search_trace')
+  assert.equal(trace?.displayed_count, 50)
+  assert.equal(trace?.truncated, true)
+  assert.equal(trace?.match_count, 200)
+})
+
 test('rejects unknown trace shapes', () => {
   assert.equal(parseCodeModeTrace({ kind: 'tool_explorer' }), null)
 })

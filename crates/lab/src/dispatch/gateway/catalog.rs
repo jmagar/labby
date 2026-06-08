@@ -83,6 +83,24 @@ pub const ACTIONS: &[ActionSpec] = &[
                 required: false,
                 description: "Approximate maximum response tokens",
             },
+            ParamSpec {
+                name: "token_estimate_divisor",
+                ty: "integer",
+                required: false,
+                description: "Byte-to-token divisor used by response limiting",
+            },
+            ParamSpec {
+                name: "max_log_entries",
+                ty: "integer",
+                required: false,
+                description: "Maximum captured console log lines per execution",
+            },
+            ParamSpec {
+                name: "max_log_bytes",
+                ty: "integer",
+                required: false,
+                description: "Maximum captured console log bytes per execution",
+            },
         ],
     },
     ActionSpec {
@@ -819,6 +837,23 @@ mod tests {
             .find(|spec| spec.name == "gateway.code_mode.set")
             .expect("gateway.code_mode.set catalog entry");
         assert!(set.destructive);
+        let params: Vec<&str> = set.params.iter().map(|param| param.name).collect();
+        for param in [
+            "enabled",
+            "trace_params",
+            "timeout_ms",
+            "max_tool_calls",
+            "max_response_bytes",
+            "max_response_tokens",
+            "token_estimate_divisor",
+            "max_log_entries",
+            "max_log_bytes",
+        ] {
+            assert!(
+                params.contains(&param),
+                "gateway.code_mode.set catalog missing {param}; have {params:?}"
+            );
+        }
     }
 
     #[test]

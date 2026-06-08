@@ -43,14 +43,14 @@ pub enum CodeModeRunnerOutput {
         params: Value,
     },
     /// Runner completed successfully. `result` is the serialized return value of
-    /// the async function (None when the function returns undefined/null).
+    /// the async function (`Undefined` when the function returns undefined).
     /// `logs` carries captured console output (Boa path) or redirected stderr (Javy path).
     Done {
         // #[serde(default)] makes this variant forward-compatible: old runner binaries
-        // that emit {"type":"done"} without these fields deserialize to None/[] instead
+        // that emit {"type":"done"} without these fields deserialize to Undefined/[] instead
         // of failing with a missing-field error.
         #[serde(default)]
-        result: Option<Value>,
+        result: CodeModeRunnerResult,
         #[serde(default)]
         logs: Vec<String>,
     },
@@ -58,6 +58,45 @@ pub enum CodeModeRunnerOutput {
         kind: String,
         message: String,
     },
+}
+
+impl CodeModeRunnerOutput {
+    #[must_use]
+    #[cfg(test)]
+    pub(in crate::dispatch::gateway::code_mode) fn result_for_response(&self) -> Option<Value> {
+        match self {
+            Self::Done { result, .. } => result.clone().into_response_result(),
+            Self::ToolCall { .. } | Self::Error { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(tag = "state", content = "value", rename_all = "snake_case")]
+pub enum CodeModeRunnerResult {
+    #[default]
+    Undefined,
+    Json(Value),
+}
+
+impl CodeModeRunnerResult {
+    #[must_use]
+    pub(in crate::dispatch::gateway::code_mode) fn from_response_result(
+        result: Option<Value>,
+    ) -> Self {
+        match result {
+            Some(value) => Self::Json(value),
+            None => Self::Undefined,
+        }
+    }
+
+    #[must_use]
+    pub(in crate::dispatch::gateway::code_mode) fn into_response_result(self) -> Option<Value> {
+        match self {
+            Self::Undefined => None,
+            Self::Json(value) => Some(value),
+        }
+    }
 }
 
 pub(in crate::dispatch::gateway::code_mode) struct CodeModeRunnerState {

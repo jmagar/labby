@@ -15,12 +15,12 @@ use super::runner_io::code_mode_upstream_error_info;
 use super::schema::{unwrap_code_mode_upstream_result, validate_code_mode_params_against_schema};
 use super::truncate::{response_within_budget, truncate_execution_response};
 use super::types::{
-    CodeModeCaller, CodeModeCapabilityFilter, CodeModeExecutionResponse, CodeModeSurface,
-    CodeModeToolId, CodeModeToolRef, destructive_permitted,
+    CodeModeCaller, CodeModeCapabilityFilter, CodeModeExecutionError, CodeModeExecutionResponse,
+    CodeModeSurface, CodeModeToolId, CodeModeToolRef, destructive_permitted,
 };
 
 impl CodeModeBroker<'_> {
-    pub async fn execute(
+    pub(crate) async fn execute(
         &self,
         code: &str,
         max_tool_calls: usize,
@@ -28,7 +28,7 @@ impl CodeModeBroker<'_> {
         surface: CodeModeSurface,
         config: crate::config::CodeModeConfig,
         capability_filter: CodeModeCapabilityFilter,
-    ) -> Result<CodeModeExecutionResponse, ToolError> {
+    ) -> Result<CodeModeExecutionResponse, CodeModeExecutionError> {
         // `execute` is exposed only when the gateway search/execute surface is
         // enabled (code_mode.enabled → RootSynthetic), and the MCP handler
         // gates on `exposes_synthetic_tools()` before reaching here. There is no
@@ -38,7 +38,8 @@ impl CodeModeBroker<'_> {
             return Err(ToolError::Sdk {
                 sdk_kind: "forbidden".to_string(),
                 message: "code_execute requires one of scopes: lab, lab:admin".to_string(),
-            });
+            }
+            .into());
         }
         let started = std::time::Instant::now();
         let response = self
@@ -142,7 +143,7 @@ impl CodeModeBroker<'_> {
         max_log_bytes: usize,
         trace_params: bool,
         capability_filter: CodeModeCapabilityFilter,
-    ) -> Result<CodeModeExecutionResponse, ToolError> {
+    ) -> Result<CodeModeExecutionResponse, CodeModeExecutionError> {
         // Cloudflare-parity: no typed TypeScript preamble is injected. The
         // sandbox exposes only `callTool(id, params)`; the agent uses tool ids
         // discovered via `search`. Normalize the user code and run it directly.

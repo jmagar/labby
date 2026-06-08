@@ -9,19 +9,29 @@ export interface CodeModeExecuteTrace {
   calls: CodeModeCallTrace[]
   result_shape?: ResultShape
   logs_count?: number
+  warnings?: CodeModeTraceWarning[]
 }
 
 export interface CodeModeSearchTrace {
   kind: 'code_mode_search_trace'
   query_kind: string
   match_count: number
+  displayed_count?: number
+  truncated?: boolean
   matches: CodeModeSearchMatch[]
   result_shape?: ResultShape
+  warnings?: CodeModeTraceWarning[]
 }
 
 export interface CodeModeHistoryTrace {
   kind: 'code_mode_history'
   entries: CodeModeHistoryEntry[]
+  warnings?: CodeModeTraceWarning[]
+}
+
+export interface CodeModeTraceWarning {
+  kind: 'dropped_rows'
+  message: string
 }
 
 export interface CodeModeHistoryEntry {
@@ -74,7 +84,12 @@ export function parseCodeModeTrace(value: unknown): CodeModeTrace | null {
 
 export function stringifyRedactedParams(value: unknown): string {
   if (value === undefined || value === null) return ''
-  return JSON.stringify(value, null, 2)
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch (error) {
+    const reason = error instanceof Error && error.message ? error.message : 'unsupported value'
+    return `[unsupported params: ${truncateText(reason, 96)}]`
+  }
 }
 
 export function flattenTraceRows(trace: CodeModeTrace | null) {
@@ -93,46 +108,60 @@ export function flattenTraceRows(trace: CodeModeTrace | null) {
 }
 
 function parseExecuteTrace(value: Record<string, unknown>): CodeModeExecuteTrace | null {
-  const calls = arrayOf(value.calls, parseCallTrace)
+  const calls = arrayOfWithDropped(value.calls, parseCallTrace)
   if (!calls) return null
   return {
     kind: 'code_mode_execute_trace',
-    call_count: numberValue(value.call_count, calls.length),
-    calls,
+    call_count: numberValue(value.call_count, calls.items.length),
+    calls: calls.items,
     result_shape: parseResultShape(value.result_shape),
     logs_count: optionalNumber(value.logs_count),
+    warnings: droppedWarning(calls.dropped, 'execute call'),
   }
 }
 
 function parseSearchTrace(value: Record<string, unknown>): CodeModeSearchTrace | null {
-  const matches = arrayOf(value.matches, parseSearchMatch)
+  const matches = arrayOfWithDropped(value.matches, parseSearchMatch)
   if (!matches) return null
   return {
     kind: 'code_mode_search_trace',
     query_kind: stringValue(value.query_kind, 'catalog_filter'),
-    match_count: numberValue(value.match_count, matches.length),
-    matches,
+    match_count: numberValue(value.match_count, matches.items.length),
+    displayed_count: optionalNumber(value.displayed_count),
+    truncated: booleanOptional(value.truncated),
+    matches: matches.items,
     result_shape: parseResultShape(value.result_shape),
+    warnings: droppedWarning(matches.dropped, 'search match'),
   }
 }
 
 function parseHistoryTrace(value: Record<string, unknown>): CodeModeHistoryTrace | null {
-  const entries = arrayOf(value.entries, parseHistoryEntry)
+  const entries = arrayOfWithDropped(value.entries, parseHistoryEntry)
   if (!entries) return null
   return {
     kind: 'code_mode_history',
-    entries,
+    entries: entries.items,
+    warnings: droppedWarning(entries.dropped, 'history entry'),
   }
 }
 
 function parseHistoryEntry(value: unknown): CodeModeHistoryEntry | null {
   if (!isRecord(value)) return null
-  const kind = value.kind === 'execute' ? 'execute' : value.kind === 'search' ? 'search' : null
-  if (!kind) return null
+  let kind: CodeModeHistoryEntry['kind']
+  switch (value.kind) {
+    case 'execute':
+      kind = 'execute'
+      break
+    case 'search':
+      kind = 'search'
+      break
+    default:
+      return null
+  }
   return {
     seq: numberValue(value.seq, 0),
     kind,
-    ok: Boolean(value.ok),
+    ok: booleanValue(value.ok),
     elapsed_ms: numberValue(value.elapsed_ms, 0),
     error_kind: optionalString(value.error_kind),
     calls: arrayOf(value.calls, parseCallTrace) ?? [],
@@ -146,7 +175,7 @@ function parseCallTrace(value: unknown): CodeModeCallTrace | null {
     id: stringValue(value.id, ''),
     upstream: stringValue(value.upstream, ''),
     tool: stringValue(value.tool, ''),
-    ok: Boolean(value.ok),
+    ok: booleanValue(value.ok),
     elapsed_ms: numberValue(value.elapsed_ms, 0),
     params: value.params,
     error_kind: optionalString(value.error_kind),
@@ -160,8 +189,8 @@ function parseSearchMatch(value: unknown): CodeModeSearchMatch | null {
     upstream: stringValue(value.upstream, ''),
     tool: stringValue(value.tool, ''),
     description: stringValue(value.description, ''),
-    has_schema: Boolean(value.has_schema),
-    has_output_schema: Boolean(value.has_output_schema),
+    has_schema: booleanValue(value.has_schema),
+    has_output_schema: booleanValue(value.has_output_schema),
   }
 }
 
@@ -174,14 +203,32 @@ function parseResultShape(value: unknown): ResultShape | undefined {
     key_count: optionalNumber(value.key_count),
     keys: stringArray(value.keys),
     item_types: stringArray(value.item_types),
-    truncated: typeof value.truncated === 'boolean' ? value.truncated : undefined,
+    truncated: booleanOptional(value.truncated),
     content_block_kinds: stringArray(value.content_block_kinds),
   }
 }
 
 function arrayOf<T>(value: unknown, parse: (item: unknown) => T | null): T[] | null {
+  const result = arrayOfWithDropped(value, parse)
+  return result?.items ?? null
+}
+
+function arrayOfWithDropped<T>(
+  value: unknown,
+  parse: (item: unknown) => T | null,
+): { items: T[]; dropped: number } | null {
   if (!Array.isArray(value)) return null
-  return value.map(parse).filter((item): item is T => item !== null)
+  const items: T[] = []
+  let dropped = 0
+  for (const item of value) {
+    const parsed = parse(item)
+    if (parsed) {
+      items.push(parsed)
+    } else {
+      dropped += 1
+    }
+  }
+  return { items, dropped }
 }
 
 function stringArray(value: unknown): string[] | undefined {
@@ -203,6 +250,28 @@ function numberValue(value: unknown, fallback: number): number {
 
 function optionalNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function booleanValue(value: unknown): boolean {
+  return value === true
+}
+
+function booleanOptional(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined
+}
+
+function droppedWarning(count: number, label: string): CodeModeTraceWarning[] | undefined {
+  if (count <= 0) return undefined
+  return [
+    {
+      kind: 'dropped_rows',
+      message: `Dropped ${count} malformed ${label}${count === 1 ? '' : 's'}.`,
+    },
+  ]
+}
+
+function truncateText(value: string, maxLength: number): string {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 3)}...`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
