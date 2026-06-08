@@ -16,6 +16,7 @@ use crate::tool_names::{CODE_MODE_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME};
 pub(crate) use crate::dispatch::gateway::manager::GatewayManager;
 pub(crate) use crate::registry::ToolRegistry;
 
+mod artifacts;
 pub(crate) mod catalog_cache;
 mod execute;
 mod normalize;

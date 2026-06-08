@@ -2,7 +2,9 @@
 #![cfg(test)]
 
 use serde_json::{Value, json};
+use tempfile::TempDir;
 
+use super::artifacts::{CodeModeArtifactWrite, write_code_mode_artifact};
 use super::*;
 
 #[test]
@@ -471,4 +473,68 @@ fn code_mode_execution_error_carries_partial_calls() {
 
     assert_eq!(err.kind(), "server_error");
     assert_eq!(err.calls(), &[call]);
+}
+
+#[tokio::test]
+async fn write_code_mode_artifact_rejects_absolute_paths() {
+    let root = TempDir::new().expect("temp root");
+    let request = CodeModeArtifactWrite {
+        path: "/tmp/escape.md".to_string(),
+        content: "# nope".to_string(),
+        content_type: Some("text/markdown".to_string()),
+    };
+
+    let err = write_code_mode_artifact(root.path(), &request)
+        .await
+        .expect_err("absolute artifact path must be rejected");
+
+    assert_eq!(err.kind(), "invalid_param");
+    assert!(
+        err.to_string().contains("relative path"),
+        "error should explain relative path requirement: {err}"
+    );
+}
+
+#[tokio::test]
+async fn write_code_mode_artifact_rejects_parent_dir_paths() {
+    let root = TempDir::new().expect("temp root");
+    let request = CodeModeArtifactWrite {
+        path: "../escape.md".to_string(),
+        content: "# nope".to_string(),
+        content_type: Some("text/markdown".to_string()),
+    };
+
+    let err = write_code_mode_artifact(root.path(), &request)
+        .await
+        .expect_err("parent dir artifact path must be rejected");
+
+    assert_eq!(err.kind(), "invalid_param");
+    assert!(
+        err.to_string().contains("path traversal"),
+        "error should mention traversal: {err}"
+    );
+}
+
+#[tokio::test]
+async fn write_code_mode_artifact_persists_content_and_returns_receipt() {
+    let root = TempDir::new().expect("temp root");
+    let request = CodeModeArtifactWrite {
+        path: "axon/brief.md".to_string(),
+        content: "# Brief\n\nUseful output.\n".to_string(),
+        content_type: Some("text/markdown".to_string()),
+    };
+
+    let receipt = write_code_mode_artifact(root.path(), &request)
+        .await
+        .expect("artifact write succeeds");
+
+    assert_eq!(receipt.path, "axon/brief.md");
+    assert_eq!(receipt.content_type, "text/markdown");
+    assert_eq!(receipt.bytes, 24);
+    assert_eq!(receipt.sha256.len(), 64);
+
+    let written = tokio::fs::read_to_string(root.path().join("axon/brief.md"))
+        .await
+        .expect("artifact file exists");
+    assert_eq!(written, "# Brief\n\nUseful output.\n");
 }
