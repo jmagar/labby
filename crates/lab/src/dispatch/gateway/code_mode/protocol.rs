@@ -73,7 +73,7 @@ impl CodeModeRunnerOutput {
     pub(in crate::dispatch::gateway::code_mode) fn result_for_response(&self) -> Option<Value> {
         match self {
             Self::Done { result, .. } => result.clone().into_response_result(),
-            Self::ToolCall { .. } | Self::Error { .. } => None,
+            Self::ToolCall { .. } | Self::ArtifactWrite { .. } | Self::Error { .. } => None,
         }
     }
 }

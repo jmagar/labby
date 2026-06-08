@@ -5,6 +5,7 @@ use rmcp::model::{CallToolResult, Content};
 use serde_json::json;
 
 use super::protocol::CodeModeRunnerOutput;
+use super::runner_io::code_mode_upstream_error_info;
 use super::*;
 
 #[test]
@@ -19,7 +20,7 @@ fn artifact_write_protocol_round_trips() {
     let encoded = serde_json::to_string(&output).expect("serialize protocol");
     assert_eq!(
         encoded,
-        r#"{"type":"artifact_write","seq":7,"path":"axon/brief.md","content":"# Brief","content_type":"text/markdown"}"#
+        r##"{"type":"artifact_write","seq":7,"path":"axon/brief.md","content":"# Brief","content_type":"text/markdown"}"##
     );
 
     let decoded: CodeModeRunnerOutput =

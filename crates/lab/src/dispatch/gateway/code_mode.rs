@@ -72,12 +72,6 @@ pub(crate) use types::{
 // These items are declared `pub(in ...code_mode)`; re-export at the same
 // restricted visibility (a wider `pub(crate)` re-export is rejected by E0364).
 #[cfg(test)]
-pub(in crate::dispatch::gateway::code_mode) use protocol::{
-    CodeModeRunnerOutput, CodeModeRunnerResult,
-};
-#[cfg(test)]
-pub(in crate::dispatch::gateway::code_mode) use runner_io::code_mode_upstream_error_info;
-#[cfg(test)]
 pub(in crate::dispatch::gateway::code_mode) use schema::{
     unwrap_code_mode_upstream_result, validate_code_mode_params_against_schema,
 };

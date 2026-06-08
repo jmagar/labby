@@ -8,14 +8,12 @@ use super::artifacts::{
     CodeModeArtifactReceipt, CodeModeArtifactWrite, code_mode_artifact_root,
     write_code_mode_artifact,
 };
+use super::protocol::{CodeModeRunnerOutput, CodeModeRunnerResult};
 use super::*;
 
 #[test]
 fn code_mode_runner_wrapper_exposes_write_artifact() {
-    let wrapped = super::runner::wrap_code_mode_for_test(
-        "async () => 'ok'",
-        "var codemode = {};",
-    );
+    let wrapped = runner::wrap_code_mode_for_test("async () => 'ok'", "var codemode = {};");
 
     assert!(wrapped.contains("globalThis.writeArtifact"));
     assert!(wrapped.contains("__labEmitArtifactWrite"));

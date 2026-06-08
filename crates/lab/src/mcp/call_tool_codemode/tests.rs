@@ -93,6 +93,7 @@ fn execute_trace_contains_redacted_params_and_compact_result_shape() {
             error_kind: None,
         }],
         logs: vec!["one".to_string()],
+        artifacts: vec![],
     };
 
     let trace = code_mode_execute_trace(&response);
