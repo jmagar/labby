@@ -29,6 +29,7 @@ impl IntoResponse for ToolError {
             // a specific remediation; 422 for validation-style, 413 for size,
             // 504 for timeouts.
             "symlink_rejected"
+            | "path_traversal"
             | "path_traversal_rejected"
             | "invalid_encoding" => StatusCode::UNPROCESSABLE_ENTITY,
             "content_too_large" => StatusCode::PAYLOAD_TOO_LARGE,

@@ -769,6 +769,51 @@ async fn prune_artifact_runs_disabled_when_retain_zero() {
     assert!(store.path().join(&id).exists(), "retain=0 disables pruning");
 }
 
+#[tokio::test]
+async fn prune_artifact_runs_noop_when_retain_at_or_above_count() {
+    let store = TempDir::new().expect("store root");
+    let ids: Vec<String> = (0..2).map(|_| ulid::Ulid::new().to_string()).collect();
+    for id in &ids {
+        tokio::fs::create_dir_all(store.path().join(id))
+            .await
+            .unwrap();
+    }
+
+    // retain == count and retain > count must both keep every run dir.
+    artifacts::prune_artifact_runs_in(store.path(), 2).await;
+    artifacts::prune_artifact_runs_in(store.path(), 9).await;
+
+    for id in &ids {
+        assert!(store.path().join(id).exists(), "{id} must be retained");
+    }
+}
+
+#[test]
+fn artifact_retention_runs_parses_env_and_falls_back_on_garbage() {
+    use crate::dispatch::helpers::with_env_override;
+    use std::collections::HashMap;
+
+    let valid = with_env_override(
+        HashMap::from([(
+            "LAB_CODE_MODE_ARTIFACT_RETENTION_RUNS".to_string(),
+            "50".to_string(),
+        )]),
+        artifacts::artifact_retention_runs,
+    );
+    assert_eq!(valid, 50, "a valid numeric value must be honored");
+
+    // A present-but-unparseable value falls back to the default (200), not to
+    // the garbage. It also emits a warn (not asserted here).
+    let garbage = with_env_override(
+        HashMap::from([(
+            "LAB_CODE_MODE_ARTIFACT_RETENTION_RUNS".to_string(),
+            "5O".to_string(),
+        )]),
+        artifacts::artifact_retention_runs,
+    );
+    assert_eq!(garbage, 200, "garbage must fall back to the default");
+}
+
 #[test]
 fn ensure_call_budget_blocks_at_limit() {
     // Budget gate shared by tool calls AND artifact writes: below the cap is Ok,

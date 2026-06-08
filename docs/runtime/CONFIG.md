@@ -240,10 +240,11 @@ preferred way to keep large markdown reports, source tables, crawl manifests,
 and follow-up snippets out of the final JSON response while still making them
 available on disk.
 
-The store is bounded: on each run Labby prunes old per-run directories, keeping
-the newest `LAB_CODE_MODE_ARTIFACT_RETENTION_RUNS` (default `200`). Only
-ULID-named run directories this feature created are ever pruned; set the value
-to `0` to disable pruning (unbounded growth).
+The store is bounded: on the first artifact write of a run (never on search or
+no-write runs) Labby prunes old per-run directories, keeping the newest
+`LAB_CODE_MODE_ARTIFACT_RETENTION_RUNS` (default `200`). Only ULID-named run
+directories this feature created are ever pruned; set the value to `0` to
+disable pruning (unbounded growth).
 
 ### `[oauth.machines.<id>]`
 

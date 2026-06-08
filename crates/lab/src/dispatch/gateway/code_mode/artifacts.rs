@@ -8,17 +8,17 @@ use tokio::io::AsyncWriteExt;
 use ulid::Ulid;
 
 use crate::dispatch::error::ToolError;
-use crate::dispatch::helpers::{lab_home, redact_home, reject_path_traversal};
+use crate::dispatch::helpers::{env_non_empty, lab_home, redact_home, reject_path_traversal};
 use crate::dispatch::path_safety::reject_existing_symlink_ancestors;
 
 const DEFAULT_CONTENT_TYPE: &str = "text/plain";
 const MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
 
 /// Default number of per-run artifact directories retained under
-/// `$LAB_HOME/code-mode-artifacts/`. Older run directories are pruned on each
-/// new run so the on-disk store stays bounded. Override with
-/// `LAB_CODE_MODE_ARTIFACT_RETENTION_RUNS`; set it to `0` to disable pruning
-/// (unbounded growth).
+/// `$LAB_HOME/code-mode-artifacts/`. Old run directories are pruned on the first
+/// artifact write of a run (never on search / no-write runs) so the on-disk
+/// store stays bounded. Override with `LAB_CODE_MODE_ARTIFACT_RETENTION_RUNS`;
+/// set it to `0` to disable pruning (unbounded growth).
 const DEFAULT_ARTIFACT_RETENTION_RUNS: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,12 +29,13 @@ pub(in crate::dispatch::gateway::code_mode) struct CodeModeArtifactWrite {
     pub content_type: Option<String>,
 }
 
-/// Receipt for one successfully persisted artifact. Construction is
-/// deliberately funnelled through [`write_code_mode_artifact`] — the only
-/// producer — so `bytes`/`sha256`/`content_type` are always derived together
-/// from the same content that was written. Fields are module-visible (not
-/// `pub`) so no other code can mint a receipt whose digest/byte-count disagree
-/// with reality; serde serializes them into the execution response regardless.
+/// Receipt for one successfully persisted artifact. `bytes`/`sha256`/
+/// `content_type` are always derived together from the same content that was
+/// written. Fields are module-visible (not `pub`), so no code outside the
+/// `code_mode` module can mint a receipt; within the module,
+/// [`write_code_mode_artifact`] is by convention the sole producer, which keeps
+/// the digest and byte-count honest. serde serializes the fields into the
+/// execution response regardless of their visibility.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeModeArtifactReceipt {
     pub(in crate::dispatch::gateway::code_mode) path: String,
@@ -57,10 +58,25 @@ pub(in crate::dispatch::gateway::code_mode) fn code_mode_artifact_root(run_id: &
 /// to [`DEFAULT_ARTIFACT_RETENTION_RUNS`]. `0` disables pruning.
 #[must_use]
 pub(in crate::dispatch::gateway::code_mode) fn artifact_retention_runs() -> usize {
-    std::env::var("LAB_CODE_MODE_ARTIFACT_RETENTION_RUNS")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<usize>().ok())
-        .unwrap_or(DEFAULT_ARTIFACT_RETENTION_RUNS)
+    // Absent/blank → default silently. Present-but-unparseable → warn and fall
+    // back, so a fat-fingered value (e.g. `5O`) isn't silently ignored.
+    let Some(raw) = env_non_empty("LAB_CODE_MODE_ARTIFACT_RETENTION_RUNS") else {
+        return DEFAULT_ARTIFACT_RETENTION_RUNS;
+    };
+    match raw.trim().parse::<usize>() {
+        Ok(value) => value,
+        Err(_) => {
+            tracing::warn!(
+                surface = "dispatch",
+                service = "code_mode",
+                action = "code_execute",
+                value = %raw,
+                default = DEFAULT_ARTIFACT_RETENTION_RUNS,
+                "ignoring unparseable LAB_CODE_MODE_ARTIFACT_RETENTION_RUNS; using default"
+            );
+            DEFAULT_ARTIFACT_RETENTION_RUNS
+        }
+    }
 }
 
 /// Best-effort prune of old per-run artifact directories so the store stays
@@ -86,10 +102,39 @@ pub(in crate::dispatch::gateway::code_mode) async fn prune_artifact_runs_in(
     let mut entries = match tokio::fs::read_dir(store_root).await {
         Ok(entries) => entries,
         // Store not created yet (no artifact has ever been written): nothing to prune.
-        Err(_) => return,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
+        // Any other read failure (EACCES, EIO, store replaced by a file, …)
+        // disables retention for this run; surface it so unbounded growth is
+        // diagnosable rather than silent.
+        Err(err) => {
+            tracing::warn!(
+                surface = "dispatch",
+                service = "code_mode",
+                action = "code_execute",
+                error = %err,
+                "code-mode artifact retention disabled: cannot read store directory"
+            );
+            return;
+        }
     };
     let mut run_dirs: Vec<String> = Vec::new();
-    while let Ok(Some(entry)) = entries.next_entry().await {
+    loop {
+        let entry = match entries.next_entry().await {
+            Ok(Some(entry)) => entry,
+            Ok(None) => break,
+            // A mid-enumeration failure can leave `run_dirs` short and skip
+            // pruning entirely; log it so under-pruning isn't silent.
+            Err(err) => {
+                tracing::warn!(
+                    surface = "dispatch",
+                    service = "code_mode",
+                    action = "code_execute",
+                    error = %err,
+                    "code-mode artifact retention: store enumeration interrupted; store may be under-pruned"
+                );
+                break;
+            }
+        };
         let is_dir = entry
             .file_type()
             .await
