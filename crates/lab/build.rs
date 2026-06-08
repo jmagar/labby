@@ -64,6 +64,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     files.sort_by(|a, b| a.0.cmp(&b.0));
+    for (_, abs) in &files {
+        println!("cargo:rerun-if-changed={}", abs.display());
+    }
 
     let mut code = String::with_capacity(files.len() * 96 + 64);
     code.push_str("pub static EMBEDDED_WEB_FILES: &[(&str, &[u8])] = &[\n");

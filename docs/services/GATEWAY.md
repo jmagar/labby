@@ -94,10 +94,14 @@ Configuration lives at root `[code_mode]` in `config.toml`:
 ```toml
 [code_mode]
 enabled = true
+trace_params = true
 timeout_ms = 30000
 max_tool_calls = 1000
 max_response_bytes = 24576
 max_response_tokens = 6000
+token_estimate_divisor = 4
+max_log_entries = 1000
+max_log_bytes = 65536
 ```
 
 CLI:
@@ -116,7 +120,7 @@ HTTP/MCP gateway management actions:
 ```
 
 ```json
-{ "action": "gateway.code_mode.set", "params": { "enabled": true, "timeout_ms": 5000, "max_tool_calls": 8 } }
+{ "action": "gateway.code_mode.set", "params": { "enabled": true, "trace_params": true, "timeout_ms": 5000, "max_tool_calls": 8, "max_log_entries": 100 } }
 ```
 
 MCP `search` call shape:
@@ -141,6 +145,40 @@ the injected `codemode.<upstream>.<tool>()` typed helpers and the escape-hatch
 parent gateway for normal visibility, scope, destructive-action, and upstream
 exposure checks. `params` must be JSON-serializable.
 
+### Code Mode Call Inspector
+
+When Code Mode is enabled, the synthetic MCP `search` and `execute` tools also
+advertise a read-only MCP App inspector through `_meta.ui.resourceUri`.
+
+- `search` attaches `ui://lab/code-mode/search`
+- `execute` attaches `ui://lab/code-mode/execute`
+- recent in-memory history is available at `ui://lab/code-mode/history`
+
+The inspector is passive observability only. It renders tool-result
+`structuredContent` and recent server-injected history snapshots; it does not
+initiate tool calls, call Lab HTTP APIs, or execute app-originated operations in
+v1. The `ui://` resource body is self-contained HTML so MCP hosts do not need to
+resolve exported Next.js chunk assets from the resource body. The Next route in
+`apps/gateway-admin/app/mcp/code-mode/` remains available for browser/static
+build verification.
+
+The trace shapes are intentionally different:
+
+- `search` emits a catalog trace (`code_mode_search_trace`) with matched
+  upstream/tool metadata and result shape. It is inferred from the filtered
+  catalog, not broker-observed runtime telemetry.
+- `execute` emits a runtime trace (`code_mode_execute_trace`) from the broker's
+  actual upstream calls, including upstream, tool, status, elapsed time, error
+  kind, compact result shape, and optional params.
+
+Trace params are redacted and capped before leaving the broker boundary. Raw
+params are consumed only for upstream dispatch; they must not enter public
+response structs, structured content, history, resources, logs, UI state, or
+tests. Set `code_mode.trace_params = false` to omit params from traces entirely.
+History is process-local, memory-only, maintained under entry/byte caps on a
+best-effort basis, and cleared on restart; do not treat it as a durable audit log
+or a hard storage quota until the backend history-cap follow-up lands.
+
 Code Mode execution handles upstream MCP tools only. Lab actions are not callable
 from inside the Code Mode sandbox. Upstream ids use
 `<upstream-name>::<tool-name>`.
@@ -164,6 +202,11 @@ Rules:
 
 - `code_mode.timeout_ms` is validated in the range `1..=60000`
 - `code_mode.max_tool_calls` is validated in the range `1..=10000`
+- `code_mode.max_response_bytes` is validated in the range `1024..=1048576`
+- `code_mode.max_response_tokens` is validated in the range `256..=256000`
+- `code_mode.token_estimate_divisor` is validated in the range `1..=64`
+- `code_mode.max_log_entries` is validated in the range `1..=100000`
+- `code_mode.max_log_bytes` is validated in the range `1..=104857600`
 - `search` and `execute` both require a non-empty `code` string
 - `search` is read-only discovery and accepts `lab:read`, `lab`, or `lab:admin`
 - `execute` requires `lab` or `lab:admin` and brokers calls through the same gateway visibility checks as legacy `tool_execute`

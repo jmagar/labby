@@ -174,6 +174,7 @@ canonical `search` and `execute` tools instead.
 | Key | Env override | Default | Description |
 |-----|-------------|---------|-------------|
 | `enabled` | — | `false` | Replace raw proxied upstream tools with the synthetic Code Mode `search` and `execute` tools for the gateway. `search`/`execute` build over a transient live catalog refreshed from gateway metadata on each call. |
+| `trace_params` | — | `true` | Include only redacted and capped upstream tool params in Code Mode call traces and history. Set false to omit params from traces entirely. |
 | `timeout_ms` | — | `30000` | Maximum wall-clock time for one Code Mode execution. Valid range: 1-60000. |
 | `max_tool_calls` | — | `1000` | Maximum host-brokered upstream tool calls allowed in one execution. Valid range: 1-10000. |
 | `max_response_bytes` | — | `24576` | Maximum serialized response envelope size returned by `execute`. Valid range: 1024-1048576. |
@@ -187,6 +188,7 @@ Example:
 ```toml
 [code_mode]
 enabled = true
+trace_params = true
 max_tool_calls = 1000
 timeout_ms = 30000
 max_response_bytes = 24576
@@ -197,8 +199,9 @@ max_log_bytes = 65536
 ```
 
 Operators can change the main execution limits without hand-editing TOML using
-`gateway.code_mode.get` and `gateway.code_mode.set`. The current action accepts
-`enabled`, `timeout_ms`, `max_tool_calls`, `max_response_bytes`, and `max_response_tokens`.
+`gateway.code_mode.get` and `gateway.code_mode.set`. The action accepts all
+fields listed above and validates them with the same ranges used for file
+configuration.
 
 ### `[oauth.machines.<id>]`
 

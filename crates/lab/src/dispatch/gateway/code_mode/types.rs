@@ -1,9 +1,10 @@
 //! Core Code Mode value types: tool ids, catalog entries, execution responses,
 //! callers, surfaces, and the capability filter.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 
 use serde::Serialize;
+use serde::ser::SerializeStruct;
 use serde_json::Value;
 
 use crate::dispatch::error::ToolError;
@@ -112,7 +113,10 @@ impl CodeModeCatalogEntry {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CodeModeExecutionResponse {
     /// The final return value of the async function. None when the function
-    /// returns undefined, null, or throws (the throw case surfaces via ToolError).
+    /// returns undefined or throws (the throw case surfaces via ToolError).
+    /// Explicit JavaScript `null` is represented as `Some(Value::Null)` and
+    /// serializes as `"result": null`; undefined omits the field.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<Value>,
     pub calls: Vec<CodeModeExecutedCall>,
     /// Captured console.log/warn/error lines from the runner. Sourced from the
@@ -126,13 +130,174 @@ pub struct CodeModeExecutionResponse {
 /// the per-call result payload is NOT carried here — only the model needs the
 /// final `result`. Recording full per-call results bloated context and risked
 /// leaking secrets through the truncation preview.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CodeModeExecutedCall {
     pub id: String,
     pub ok: bool,
     pub elapsed_ms: u128,
+    /// Redacted/capped params captured at the broker boundary. Raw params must
+    /// never be stored in this public trace type.
+    pub params: Option<Value>,
+    pub error_kind: Option<String>,
+}
+
+impl Serialize for CodeModeExecutedCall {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let (upstream, tool) = split_code_mode_call_id(&self.id);
+        let mut state = serializer.serialize_struct("CodeModeExecutedCall", 7)?;
+        state.serialize_field("id", &self.id)?;
+        state.serialize_field("upstream", upstream)?;
+        state.serialize_field("tool", tool)?;
+        state.serialize_field("ok", &self.ok)?;
+        state.serialize_field("elapsed_ms", &self.elapsed_ms)?;
+        if let Some(params) = &self.params {
+            state.serialize_field("params", params)?;
+        }
+        if let Some(error_kind) = &self.error_kind {
+            state.serialize_field("error_kind", error_kind)?;
+        }
+        state.end()
+    }
+}
+
+#[must_use]
+pub(in crate::dispatch::gateway::code_mode) fn split_code_mode_call_id(id: &str) -> (&str, &str) {
+    id.split_once("::")
+        .map_or(("", id), |(upstream, tool)| (upstream, tool))
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CodeModeExecutionError {
+    error: ToolError,
+    calls: Vec<CodeModeExecutedCall>,
+}
+
+impl CodeModeExecutionError {
+    #[must_use]
+    pub(crate) fn with_trace(error: ToolError, calls: Vec<CodeModeExecutedCall>) -> Self {
+        Self { error, calls }
+    }
+
+    #[must_use]
+    pub(crate) fn kind(&self) -> &str {
+        self.error.kind()
+    }
+
+    #[must_use]
+    pub(crate) fn calls(&self) -> &[CodeModeExecutedCall] {
+        &self.calls
+    }
+
+    #[must_use]
+    pub(crate) fn into_tool_error(self) -> ToolError {
+        self.error
+    }
+}
+
+impl std::fmt::Display for CodeModeExecutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl std::error::Error for CodeModeExecutionError {}
+
+impl From<ToolError> for CodeModeExecutionError {
+    fn from(error: ToolError) -> Self {
+        Self::with_trace(error, Vec::new())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeModeHistoryKind {
+    Search,
+    Execute,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CodeModeHistoryEntry {
+    pub seq: u64,
+    pub kind: CodeModeHistoryKind,
+    pub ok: bool,
+    pub elapsed_ms: u128,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_kind: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub calls: Vec<CodeModeExecutedCall>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_count: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CodeModeHistory {
+    entries: VecDeque<CodeModeHistoryEntry>,
+    max_entries: usize,
+    max_bytes: usize,
+    next_seq: u64,
+}
+
+impl Default for CodeModeHistory {
+    fn default() -> Self {
+        Self::new(50, 256 * 1024)
+    }
+}
+
+impl CodeModeHistory {
+    #[must_use]
+    pub fn new(max_entries: usize, max_bytes: usize) -> Self {
+        Self {
+            entries: VecDeque::new(),
+            max_entries: max_entries.max(1),
+            max_bytes: max_bytes.max(1024),
+            next_seq: 1,
+        }
+    }
+
+    pub fn push(&mut self, mut entry: CodeModeHistoryEntry) {
+        entry.seq = self.next_seq;
+        self.next_seq = self.next_seq.saturating_add(1);
+        self.entries.push_back(entry);
+        self.trim();
+    }
+
+    #[must_use]
+    pub fn snapshot(&self) -> Vec<CodeModeHistoryEntry> {
+        self.entries.iter().cloned().collect()
+    }
+
+    fn trim(&mut self) {
+        while self.entries.len() > self.max_entries {
+            self.entries.pop_front();
+        }
+        while self.serialized_size() > self.max_bytes && self.entries.len() > 1 {
+            self.entries.pop_front();
+        }
+        if self.serialized_size() > self.max_bytes
+            && let Some(entry) = self.entries.pop_back()
+        {
+            self.entries
+                .push_back(Self::oversized_entry_sentinel(entry.seq, entry.kind));
+        }
+    }
+
+    fn serialized_size(&self) -> usize {
+        serde_json::to_vec(&self.entries)
+            .map(|bytes| bytes.len())
+            .unwrap_or(usize::MAX)
+    }
+
+    fn oversized_entry_sentinel(seq: u64, kind: CodeModeHistoryKind) -> CodeModeHistoryEntry {
+        CodeModeHistoryEntry {
+            seq,
+            kind,
+            ok: false,
+            elapsed_ms: 0,
+            error_kind: Some("history_entry_too_large".to_string()),
+            calls: Vec::new(),
+            match_count: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

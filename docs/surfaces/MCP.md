@@ -146,6 +146,21 @@ The top-level discovery resource is:
 
 - `lab://catalog`
 
+Code Mode also exposes MCP App UI resources:
+
+- `ui://lab/code-mode/search`
+- `ui://lab/code-mode/execute`
+- `ui://lab/code-mode/history`
+
+These resources return `text/html;profile=mcp-app` and locked-down resource
+metadata for MCP Apps-capable hosts. `ui://` resource reads are handled before
+the local `lab://` discovery fallback so UI resources have exact lookup
+semantics. The Code Mode `ui://` response is self-contained HTML; browser/static
+build verification for the richer Next route lives under
+`apps/gateway-admin/app/mcp/code-mode/`.
+The history resource is process-local inspection state, not a durable audit log
+or a hard quota guarantee.
+
 ## Top-Level Catalog
 
 `lab://catalog` is generated from the same action metadata that powers
@@ -177,6 +192,23 @@ Error shape:
 - structured `error`
 
 The envelope is intended to be the only thing an MCP client needs to parse. Multi-block or prose-heavy responses are explicitly not the default contract.
+
+Code Mode `search` and `execute` preserve their normal text JSON fallback for
+non-MCP-Apps clients and add MCP `structuredContent` for the call inspector:
+
+- `code_mode_search_trace` summarizes catalog-filter matches and result shape.
+- `code_mode_execute_trace` summarizes broker-observed runtime calls, redacted
+  params, status, duration, error kind, result shape, and log count.
+
+Structured traces are summary-only. They do not duplicate raw upstream result
+payloads, and raw tool params never leave the broker boundary. If
+`code_mode.trace_params = false`, params are omitted from traces entirely.
+
+When Code Mode mode advertises synthetic `search` and `execute`, only those two
+tool definitions include canonical nested `_meta.ui.resourceUri` metadata. Lab
+does not add flat compatibility aliases such as `_meta["openai/outputTemplate"]`
+without host evidence. The v1 MCP App is read-only and does not initiate tools
+from the iframe.
 
 ## Prompt Templates
 

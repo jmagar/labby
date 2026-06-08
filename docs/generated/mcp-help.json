@@ -54,6 +54,12 @@
               "description": "Whether the gateway advertises Code Mode search and execute tools"
             },
             {
+              "name": "trace_params",
+              "ty": "boolean",
+              "required": false,
+              "description": "Whether call traces include redacted and capped upstream tool params"
+            },
+            {
               "name": "timeout_ms",
               "ty": "integer",
               "required": false,
@@ -76,6 +82,24 @@
               "ty": "integer",
               "required": false,
               "description": "Approximate maximum response tokens"
+            },
+            {
+              "name": "token_estimate_divisor",
+              "ty": "integer",
+              "required": false,
+              "description": "Byte-to-token divisor used by response limiting"
+            },
+            {
+              "name": "max_log_entries",
+              "ty": "integer",
+              "required": false,
+              "description": "Maximum captured console log lines per execution"
+            },
+            {
+              "name": "max_log_bytes",
+              "ty": "integer",
+              "required": false,
+              "description": "Maximum captured console log bytes per execution"
             }
           ],
           "returns": "CodeModeConfig"

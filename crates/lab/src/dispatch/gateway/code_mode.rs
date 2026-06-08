@@ -26,6 +26,7 @@ mod runner_drive;
 mod runner_io;
 mod schema;
 mod search;
+mod trace;
 mod truncate;
 mod types;
 pub mod types_legacy;
@@ -48,7 +49,11 @@ mod tests_types_legacy;
 
 pub use normalize::normalize_user_code;
 pub use runner::run_code_mode_runner_stdio;
+pub(crate) use trace::{code_mode_execute_trace, code_mode_search_trace};
 pub use types::{CodeModeCaller, CodeModeCapabilityFilter, CodeModeSurface, upstream_tool_id};
+#[cfg(test)]
+pub(crate) use types::{CodeModeExecutionError, CodeModeExecutionResponse};
+pub(crate) use types::{CodeModeHistory, CodeModeHistoryEntry, CodeModeHistoryKind};
 
 // Re-exported for the in-crate test modules (`tests_*`), which reference these
 // types/helpers via `super::*`. Gated to the test build so the non-test lib does
@@ -60,11 +65,15 @@ pub(crate) use crate::dispatch::error::ToolError;
 pub(crate) use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
 #[cfg(test)]
 pub(crate) use types::{
-    CodeModeCatalogEntry, CodeModeExecutedCall, CodeModeExecutionResponse, CodeModeToolId,
-    CodeModeToolRef, sanitize_code_mode_schema,
+    CodeModeCatalogEntry, CodeModeExecutedCall, CodeModeToolId, CodeModeToolRef,
+    sanitize_code_mode_schema,
 };
 // These items are declared `pub(in ...code_mode)`; re-export at the same
 // restricted visibility (a wider `pub(crate)` re-export is rejected by E0364).
+#[cfg(test)]
+pub(in crate::dispatch::gateway::code_mode) use protocol::{
+    CodeModeRunnerOutput, CodeModeRunnerResult,
+};
 #[cfg(test)]
 pub(in crate::dispatch::gateway::code_mode) use runner_io::code_mode_upstream_error_info;
 #[cfg(test)]

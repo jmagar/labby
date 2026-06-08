@@ -22,6 +22,7 @@ use crate::oauth::upstream::manager::UpstreamOauthManager;
 use crate::registry::ToolRegistry;
 
 use super::SHARED_GATEWAY_OAUTH_SUBJECT;
+use super::code_mode::{CodeModeHistory, CodeModeHistoryEntry};
 use super::config::{
     default_gateway_bearer_env_name, insert_protected_mcp_route, insert_upstream,
     load_gateway_config, remove_protected_mcp_route, remove_upstream, tombstone_removed_import,
@@ -284,6 +285,7 @@ pub struct GatewayManager {
     pub(super) oauth_key: Option<EncryptionKey>,
     pub(super) oauth_redirect_uri: Option<Arc<String>>,
     protected_route_index: Arc<RwLock<ProtectedRouteIndex>>,
+    code_mode_history: Arc<Mutex<CodeModeHistory>>,
     /// Optional connector for in-process (built-in) service peers.
     /// Propagated to each pool the manager creates so built-in services are
     /// reachable without an external HTTP/stdio connection.
@@ -309,6 +311,7 @@ impl GatewayManager {
             oauth_key: None,
             oauth_redirect_uri: None,
             protected_route_index: Arc::new(RwLock::new(ProtectedRouteIndex::default())),
+            code_mode_history: Arc::new(Mutex::new(CodeModeHistory::default())),
             in_process_connector: None,
         }
     }
@@ -1557,6 +1560,14 @@ impl GatewayManager {
 
     pub async fn code_mode_config(&self) -> CodeModeConfig {
         self.config.read().await.code_mode.clone()
+    }
+
+    pub async fn record_code_mode_history(&self, entry: CodeModeHistoryEntry) {
+        self.code_mode_history.lock().await.push(entry);
+    }
+
+    pub async fn code_mode_history_snapshot(&self) -> Vec<CodeModeHistoryEntry> {
+        self.code_mode_history.lock().await.snapshot()
     }
 
     pub async fn set_code_mode_config(

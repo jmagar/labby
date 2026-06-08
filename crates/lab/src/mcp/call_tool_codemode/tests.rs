@@ -1,8 +1,11 @@
 //! Tests for the Code Mode gateway meta-tool helpers. Distributed from
 //! `server.rs` (bead `lab-kvji.24.1.6`).
 
-use super::{CODE_EXECUTE_DESCRIPTION, string_array_arg};
-use serde_json::Value;
+use super::{
+    CODE_EXECUTE_DESCRIPTION, code_mode_execute_trace, code_mode_search_trace, string_array_arg,
+};
+use crate::dispatch::gateway::code_mode::{CodeModeExecutedCall, CodeModeExecutionResponse};
+use serde_json::{Value, json};
 
 #[test]
 fn code_mode_filter_arg_rejects_malformed_values() {
@@ -73,4 +76,88 @@ fn gateway_search_input_schema_is_code_only() {
             props.keys().map(String::as_str).collect();
         assert_eq!(prop_names, std::collections::BTreeSet::from(["code"]));
     }
+}
+
+#[test]
+fn execute_trace_contains_redacted_params_and_compact_result_shape() {
+    let response = CodeModeExecutionResponse {
+        result: Some(json!({
+            "items": ["raw payload that should not be copied into trace"],
+            "secret": "result payloads are summarized, not previewed"
+        })),
+        calls: vec![CodeModeExecutedCall {
+            id: "github::search_issues".to_string(),
+            ok: true,
+            elapsed_ms: 12,
+            params: Some(json!({"query": "bug", "token": "[redacted]"})),
+            error_kind: None,
+        }],
+        logs: vec!["one".to_string()],
+    };
+
+    let trace = code_mode_execute_trace(&response);
+    assert_eq!(trace["kind"], json!("code_mode_execute_trace"));
+    assert_eq!(trace["calls"][0]["upstream"], json!("github"));
+    assert_eq!(trace["calls"][0]["tool"], json!("search_issues"));
+    assert_eq!(trace["calls"][0]["params"]["token"], json!("[redacted]"));
+    assert_eq!(trace["result_shape"]["type"], json!("object"));
+    assert_eq!(trace["result_shape"]["key_count"], json!(2));
+
+    let serialized = trace.to_string();
+    assert!(serialized.contains("[redacted]"));
+    assert!(!serialized.contains("raw payload that should not be copied"));
+    assert!(!serialized.contains("result payloads are summarized"));
+}
+
+#[test]
+fn search_trace_summarizes_matched_tools() {
+    let response = json!([
+        {
+            "id": "github::search_issues",
+            "name": "search_issues",
+            "upstream": "github",
+            "description": "Search issues",
+            "schema": {"type": "object"},
+            "output_schema": null,
+            "dts": "large",
+            "signature": "large"
+        }
+    ]);
+
+    let trace = code_mode_search_trace(&response, 7);
+    assert_eq!(trace["kind"], json!("code_mode_search_trace"));
+    assert_eq!(trace["query_kind"], json!("catalog_filter"));
+    assert_eq!(trace["match_count"], json!(1));
+    assert_eq!(trace["displayed_count"], json!(1));
+    assert_eq!(trace["truncated"], json!(false));
+    assert_eq!(trace["matches"][0]["id"], json!("github::search_issues"));
+    assert_eq!(trace["matches"][0]["upstream"], json!("github"));
+    assert_eq!(trace["matches"][0]["tool"], json!("search_issues"));
+    assert_eq!(trace["matches"][0]["has_schema"], json!(true));
+    assert_eq!(trace["matches"][0]["has_output_schema"], json!(false));
+
+    let serialized = trace.to_string();
+    assert!(!serialized.contains("large"));
+}
+
+#[test]
+fn search_trace_reports_display_truncation() {
+    let response = Value::Array(
+        (0..60)
+            .map(|idx| {
+                json!({
+                    "id": format!("github::tool_{idx}"),
+                    "name": format!("tool_{idx}"),
+                    "upstream": "github",
+                    "description": "Tool",
+                })
+            })
+            .collect(),
+    );
+
+    let trace = code_mode_search_trace(&response, 7);
+    assert_eq!(trace["match_count"], json!(60));
+    assert_eq!(trace["displayed_count"], json!(50));
+    assert_eq!(trace["truncated"], json!(true));
+    assert_eq!(trace["matches"].as_array().expect("matches").len(), 50);
 }

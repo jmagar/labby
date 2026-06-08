@@ -8,7 +8,8 @@ use serde_json::Value;
 
 use super::protocol::CODE_MODE_STACK_SIZE_LIMIT;
 use super::protocol::{
-    CodeModeRunnerInput, CodeModeRunnerOutput, CodeModeRunnerState, RUNNER_STATE,
+    CodeModeRunnerInput, CodeModeRunnerOutput, CodeModeRunnerResult, CodeModeRunnerState,
+    RUNNER_STATE,
 };
 use super::wrapper::{CODE_MODE_VALUE_CODEC_JS, code_mode_main_invoker};
 
@@ -220,7 +221,7 @@ globalThis.__labMainPromise = (async () => {{
     };
 
     runner_emit(CodeModeRunnerOutput::Done {
-        result: resolved_result,
+        result: CodeModeRunnerResult::from_response_result(resolved_result),
         logs: Vec::new(),
     })
     .map_err(CodeModeRunnerError::from)
@@ -229,7 +230,7 @@ globalThis.__labMainPromise = (async () => {{
 enum JavyMainPromiseState {
     Pending,
     /// The async function returned. `result` is the JSON-serialized return value,
-    /// or None when the function returned undefined/null.
+    /// or None when the function returned undefined.
     Resolved(Option<Value>),
     Rejected(String),
 }
@@ -315,8 +316,9 @@ fn javy_main_promise_state(runtime: &javy::Runtime) -> Result<JavyMainPromiseSta
                 None => Ok(JavyMainPromiseState::Pending),
                 Some(Ok(val)) => {
                     // Serialize the resolved value to JSON via cx.json_stringify.
-                    // undefined/null cannot be stringified and map to None (no result).
-                    let result = if val.is_undefined() || val.is_null() {
+                    // undefined cannot be stringified and maps to None (no result).
+                    // null is a real JSON value and must round-trip as Some(Null).
+                    let result = if val.is_undefined() {
                         None
                     } else {
                         match cx.json_stringify(val) {
@@ -330,11 +332,6 @@ fn javy_main_promise_state(runtime: &javy::Runtime) -> Result<JavyMainPromiseSta
                                         )));
                                     }
                                 };
-                                if value.is_null() {
-                                    return Ok(JavyMainPromiseState::Rejected(
-                                        "Code Mode result must be JSON-serializable".to_string(),
-                                    ));
-                                }
                                 Some(value)
                             }
                             Ok(None) => {

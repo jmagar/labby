@@ -390,6 +390,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_code_mode_trace_params() -> bool {
+    true
+}
+
 fn default_code_mode_timeout_ms() -> u64 {
     30_000
 }
@@ -426,6 +430,9 @@ pub struct CodeModeConfig {
     /// Whether the MCP gateway advertises Code Mode `search` and `execute`.
     #[serde(default)]
     pub enabled: bool,
+    /// Whether Code Mode call traces include redacted/capped tool params.
+    #[serde(default = "default_code_mode_trace_params")]
+    pub trace_params: bool,
     /// Maximum wall-clock time for one Code Mode execution.
     #[serde(default = "default_code_mode_timeout_ms")]
     pub timeout_ms: u64,
@@ -457,6 +464,7 @@ impl Default for CodeModeConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            trace_params: default_code_mode_trace_params(),
             timeout_ms: default_code_mode_timeout_ms(),
             max_tool_calls: default_code_mode_max_tool_calls(),
             max_response_bytes: default_code_mode_max_response_bytes(),

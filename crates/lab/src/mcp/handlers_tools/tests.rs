@@ -5,6 +5,9 @@
 //! guidance).
 
 use crate::dispatch::error::ToolError;
+use crate::mcp::catalog::{CODE_MODE_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME};
+use crate::mcp::handlers_resources::{CODE_MODE_EXECUTE_APP_URI, CODE_MODE_SEARCH_APP_URI};
+use crate::mcp::handlers_tools::{code_mode_tool_meta, code_mode_trace_output_schema};
 use crate::mcp::logging::logging_level_rank;
 use crate::mcp::server::LabMcpServer;
 use crate::registry::{RegisteredService, ToolRegistry};
@@ -75,6 +78,106 @@ fn completion_test_registry() -> ToolRegistry {
         dispatch: noop_dispatch,
     });
     registry
+}
+
+#[test]
+fn code_mode_tool_meta_points_to_canonical_ui_resource() {
+    let search = code_mode_tool_meta(CODE_MODE_SEARCH_TOOL_NAME);
+    let execute = code_mode_tool_meta(TOOL_EXECUTE_TOOL_NAME);
+
+    assert_eq!(
+        search.0["ui"]["resourceUri"].as_str(),
+        Some(CODE_MODE_SEARCH_APP_URI)
+    );
+    assert_eq!(
+        execute.0["ui"]["resourceUri"].as_str(),
+        Some(CODE_MODE_EXECUTE_APP_URI)
+    );
+    assert!(
+        search.0.get("openai/outputTemplate").is_none(),
+        "compat aliases should not be added without host evidence"
+    );
+}
+
+#[test]
+fn code_mode_trace_output_schema_advertises_structured_trace_kinds() {
+    let schema = code_mode_trace_output_schema();
+    assert_eq!(schema["type"].as_str(), Some("object"));
+
+    let variants = schema["oneOf"].as_array().expect("oneOf variants");
+    let kinds = variants
+        .iter()
+        .filter_map(|variant| variant["properties"]["kind"]["const"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        kinds,
+        vec!["code_mode_search_trace", "code_mode_execute_trace"]
+    );
+}
+
+#[tokio::test]
+async fn list_tools_advertises_code_mode_output_schemas() {
+    let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
+    let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+        std::path::PathBuf::from("config.toml"),
+        runtime,
+    ));
+    manager
+        .seed_config(crate::config::LabConfig {
+            code_mode: crate::config::CodeModeConfig {
+                enabled: true,
+                ..crate::config::CodeModeConfig::default()
+            },
+            ..crate::config::LabConfig::default()
+        })
+        .await;
+    let server = LabMcpServer {
+        registry: std::sync::Arc::new(completion_test_registry()),
+        gateway_manager: Some(manager),
+        node_role: None,
+        peers: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        logging_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(logging_level_rank(
+            rmcp::model::LoggingLevel::Emergency,
+        ))),
+    };
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = rmcp::service::RequestContext::new(
+        rmcp::model::NumberOrString::Number(1),
+        running.peer().clone(),
+    );
+
+    let result = running
+        .service()
+        .list_tools_impl(None, context)
+        .await
+        .expect("list tools");
+    let search = result
+        .tools
+        .iter()
+        .find(|tool| tool.name.as_ref() == CODE_MODE_SEARCH_TOOL_NAME)
+        .expect("search tool");
+    let execute = result
+        .tools
+        .iter()
+        .find(|tool| tool.name.as_ref() == TOOL_EXECUTE_TOOL_NAME)
+        .expect("execute tool");
+
+    for tool in [search, execute] {
+        let schema = tool.output_schema.as_ref().expect("outputSchema");
+        let kinds = schema["oneOf"]
+            .as_array()
+            .expect("oneOf variants")
+            .iter()
+            .filter_map(|variant| variant["properties"]["kind"]["const"].as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            vec!["code_mode_search_trace", "code_mode_execute_trace"]
+        );
+    }
 }
 
 #[tokio::test]

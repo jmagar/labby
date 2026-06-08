@@ -22,7 +22,8 @@ use serde_json::Value;
 
 use crate::dispatch::error::ToolError as DispatchToolError;
 use crate::dispatch::gateway::code_mode::{
-    CodeModeBroker, CodeModeCaller, CodeModeCapabilityFilter,
+    CodeModeBroker, CodeModeCaller, CodeModeCapabilityFilter, CodeModeHistoryEntry,
+    CodeModeHistoryKind, code_mode_execute_trace, code_mode_search_trace,
 };
 use crate::mcp::context::{
     auth_context_from_extensions, code_mode_search_scope_allowed, tool_execute_scope_allowed,
@@ -197,6 +198,19 @@ impl LabMcpServer {
             Ok(response) => {
                 let output =
                     serde_json::to_string(&response).unwrap_or_else(|_| "null".to_string());
+                let elapsed_ms = started.elapsed().as_millis();
+                manager
+                    .record_code_mode_history(CodeModeHistoryEntry {
+                        seq: 0,
+                        kind: CodeModeHistoryKind::Search,
+                        ok: true,
+                        elapsed_ms,
+                        error_kind: None,
+                        calls: Vec::new(),
+                        match_count: response.as_array().map(Vec::len),
+                    })
+                    .await;
+                let structured = code_mode_search_trace(&response, elapsed_ms);
                 let output_tokens = estimate_tokens(&output);
                 tracing::info!(
                     surface = "mcp",
@@ -210,9 +224,21 @@ impl LabMcpServer {
                     output_tokens,
                     "gateway code search ok"
                 );
-                Ok(CallToolResult::success(vec![Content::text(output)]))
+                Ok(call_result_with_structured(output, structured))
             }
             Err(err) => {
+                let elapsed_ms = started.elapsed().as_millis();
+                manager
+                    .record_code_mode_history(CodeModeHistoryEntry {
+                        seq: 0,
+                        kind: CodeModeHistoryKind::Search,
+                        ok: false,
+                        elapsed_ms,
+                        error_kind: Some(err.kind().to_string()),
+                        calls: Vec::new(),
+                        match_count: None,
+                    })
+                    .await;
                 tracing::warn!(
                     surface = "mcp",
                     service = "code_search",
@@ -220,7 +246,7 @@ impl LabMcpServer {
                     subject,
                     code_hash = %code_hash,
                     code_len = code.len(),
-                    elapsed_ms = started.elapsed().as_millis(),
+                    elapsed_ms,
                     input_tokens,
                     kind = err.kind(),
                     error = %err,
@@ -349,11 +375,37 @@ impl LabMcpServer {
             Err(err) => {
                 let after = self.snapshot_catalog().await;
                 self.notify_catalog_changes(&before, &after).await;
-                let env = tool_error_envelope(service, "call_tool", &err);
+                let calls = err.calls().to_vec();
+                let error_kind = err.kind().to_string();
+                let tool_error = err.into_tool_error();
+                manager
+                    .record_code_mode_history(CodeModeHistoryEntry {
+                        seq: 0,
+                        kind: CodeModeHistoryKind::Execute,
+                        ok: false,
+                        elapsed_ms: started.elapsed().as_millis(),
+                        error_kind: Some(error_kind),
+                        calls,
+                        match_count: None,
+                    })
+                    .await;
+                let env = tool_error_envelope(service, "call_tool", &tool_error);
                 return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
             }
         };
+        manager
+            .record_code_mode_history(CodeModeHistoryEntry {
+                seq: 0,
+                kind: CodeModeHistoryKind::Execute,
+                ok: true,
+                elapsed_ms: started.elapsed().as_millis(),
+                error_kind: None,
+                calls: response.calls.clone(),
+                match_count: None,
+            })
+            .await;
         let output = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
+        let structured = code_mode_execute_trace(&response);
         let output_tokens = estimate_tokens(&output);
         tracing::info!(
             surface = "mcp",
@@ -367,8 +419,14 @@ impl LabMcpServer {
             output_tokens,
             "gateway code execute ok"
         );
-        Ok(CallToolResult::success(vec![Content::text(output)]))
+        Ok(call_result_with_structured(output, structured))
     }
+}
+
+fn call_result_with_structured(text: String, structured: Value) -> CallToolResult {
+    let mut result = CallToolResult::success(vec![Content::text(text)]);
+    result.structured_content = Some(structured);
+    result
 }
 
 #[cfg(test)]
