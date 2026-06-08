@@ -1,7 +1,0 @@
-[
-  {
-    "name": "broadcastr",
-    "command": "${CLAUDE_PLUGIN_ROOT}/bin/broadcastr monitor",
-    "description": "Other agents' activity: joins, commits, pushes, doc saves, bead ops. Relay each output line verbatim — do not paraphrase."
-  }
-]

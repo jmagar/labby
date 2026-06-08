@@ -192,36 +192,6 @@
       }
     },
     {
-      "name": "broadcastr",
-      "description": "Real-time activity broadcast across concurrent Claude Code sessions. Captures commits and plan/session document activity into a shared JSONL bus; each session sees what others are doing.",
-      "source": {
-        "source": "local",
-        "path": "./plugins/broadcastr"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Developer Tools",
-      "interface": {
-        "displayName": "Broadcastr",
-        "shortDescription": "Broadcast session activity across concurrent agent work.",
-        "longDescription": "Broadcastr writes commits, plans, and session activity to a shared JSONL bus so concurrent coding agents can see what related sessions are doing in real time.",
-        "developerName": "Jacob Magar",
-        "category": "Developer Tools",
-        "capabilities": [
-          "Read",
-          "Automation"
-        ],
-        "defaultPrompt": [
-          "Use Broadcastr to summarize recent session activity.",
-          "Show what other agents have changed recently.",
-          "Check the activity bus before I edit this repo."
-        ],
-        "brandColor": "#EC4899"
-      }
-    },
-    {
       "name": "bytestash",
       "description": "Skills for operating a ByteStash snippet manager.",
       "source": {
