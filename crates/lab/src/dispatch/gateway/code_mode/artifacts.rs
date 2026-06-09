@@ -38,8 +38,15 @@ const DEFAULT_ARTIFACT_MAX_MIB: usize = 8;
 /// `$LAB_HOME/code-mode-artifacts/`. Old run directories are pruned on the first
 /// artifact write of a run (never on search / no-write runs) so the on-disk
 /// store stays bounded. Override with `LAB_CODE_MODE_ARTIFACT_RETENTION_RUNS`;
-/// set it to `0` to disable pruning (unbounded growth).
+/// set it to `0` to disable *count* pruning.
 const DEFAULT_ARTIFACT_RETENTION_RUNS: usize = 200;
+
+/// Default total-store byte budget, in MiB. Now that a single artifact can be
+/// several MiB, the run-count cap alone no longer bounds disk usage, so pruning
+/// also drops the oldest inactive run directories until the whole store fits
+/// this budget. Override with `LAB_CODE_MODE_ARTIFACT_MAX_STORE_MIB`; set it to
+/// `0` to disable *byte* pruning.
+const DEFAULT_ARTIFACT_MAX_STORE_MIB: u64 = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::dispatch::gateway::code_mode) struct CodeModeArtifactWrite {
@@ -126,6 +133,59 @@ pub(in crate::dispatch::gateway::code_mode) fn artifact_max_bytes() -> usize {
     }
 }
 
+/// Resolve the total-store byte budget from the environment, falling back to
+/// [`DEFAULT_ARTIFACT_MAX_STORE_MIB`]. The env value is in MiB
+/// (`LAB_CODE_MODE_ARTIFACT_MAX_STORE_MIB=8192`); `0` disables byte pruning.
+#[must_use]
+pub(in crate::dispatch::gateway::code_mode) fn artifact_max_store_bytes() -> u64 {
+    let default_bytes = DEFAULT_ARTIFACT_MAX_STORE_MIB * 1024 * 1024;
+    let Some(raw) = env_non_empty("LAB_CODE_MODE_ARTIFACT_MAX_STORE_MIB") else {
+        return default_bytes;
+    };
+    match raw.trim().parse::<u64>() {
+        // `0` is meaningful here (disable byte pruning), unlike the per-artifact
+        // cap where 0 is nonsense.
+        Ok(mib) => mib.saturating_mul(1024 * 1024),
+        Err(_) => {
+            tracing::warn!(
+                surface = "dispatch",
+                service = "code_mode",
+                action = "code_execute",
+                value = %raw,
+                default_mib = DEFAULT_ARTIFACT_MAX_STORE_MIB,
+                "ignoring unparseable LAB_CODE_MODE_ARTIFACT_MAX_STORE_MIB; using default"
+            );
+            default_bytes
+        }
+    }
+}
+
+/// Best-effort recursive byte size of a directory. Symlinks are not followed
+/// (`file_type()` does not traverse them), so the count can never wander outside
+/// the store. Unreadable entries are skipped — this only feeds a retention
+/// heuristic, never a correctness decision.
+async fn dir_size_bytes(path: PathBuf) -> u64 {
+    let mut total: u64 = 0;
+    let mut stack = vec![path];
+    while let Some(dir) = stack.pop() {
+        let Ok(mut entries) = tokio::fs::read_dir(&dir).await else {
+            continue;
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            match entry.file_type().await {
+                Ok(ft) if ft.is_dir() => stack.push(entry.path()),
+                Ok(ft) if ft.is_file() => {
+                    if let Ok(meta) = entry.metadata().await {
+                        total = total.saturating_add(meta.len());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    total
+}
+
 /// Process-global set of run ids whose execution is still in flight.
 ///
 /// The artifact store is shared across all concurrent Code Mode executions, and
@@ -176,27 +236,42 @@ impl Drop for ActiveArtifactRun {
 }
 
 /// Best-effort prune of old per-run artifact directories so the store stays
-/// bounded. Keeps the newest `retain` run directories (ULID names sort
-/// chronologically) and removes the rest, except any run still executing.
+/// bounded by both a run-count cap and a total-byte budget. Keeps the newest
+/// runs (ULID names sort chronologically) and removes older ones, except any run
+/// still executing.
 pub(in crate::dispatch::gateway::code_mode) async fn prune_artifact_runs(retain: usize) {
     let active = active_artifact_runs_snapshot();
-    prune_artifact_runs_in(&artifact_store_root(), retain, &active).await;
+    prune_artifact_runs_in(
+        &artifact_store_root(),
+        retain,
+        artifact_max_store_bytes(),
+        &active,
+    )
+    .await;
 }
 
 /// Core prune over an explicit store root (so tests need no `$LAB_HOME`).
 ///
+/// Removes the oldest run directories that fall outside *either* the run-count
+/// cap (`retain`, newest-N) *or* the total-byte budget (`max_store_bytes`,
+/// newest-fits-first). `retain == 0` disables the count rule and
+/// `max_store_bytes == 0` disables the byte rule; with both off this is a no-op.
+///
 /// Only directories whose names parse as ULIDs — i.e. run directories this
 /// feature created — are ever considered for removal, so an operator's stray
 /// file or directory under the store can never be collected. Run ids in
-/// `active` are skipped unconditionally (even past `retain`) so a concurrent
+/// `active` are skipped unconditionally (even past either limit) so a concurrent
 /// run's directory is never deleted while it is still writing. Errors are
 /// swallowed (best-effort, debug-logged); pruning must never fail a run.
 pub(in crate::dispatch::gateway::code_mode) async fn prune_artifact_runs_in(
     store_root: &Path,
     retain: usize,
+    max_store_bytes: u64,
     active: &HashSet<String>,
 ) {
-    if retain == 0 {
+    let count_pruning = retain > 0;
+    let byte_pruning = max_store_bytes > 0;
+    if !count_pruning && !byte_pruning {
         return;
     }
     let mut entries = match tokio::fs::read_dir(store_root).await {
@@ -250,17 +325,47 @@ pub(in crate::dispatch::gateway::code_mode) async fn prune_artifact_runs_in(
             run_dirs.push(name);
         }
     }
-    if run_dirs.len() <= retain {
-        return;
-    }
     run_dirs.sort(); // ascending: oldest ULID first
-    let remove_count = run_dirs.len() - retain;
-    for name in run_dirs.into_iter().take(remove_count) {
-        // Never collect a run that is still executing — its directory may be
-        // mid-write. It becomes eligible on a later prune once it finishes.
-        if active.contains(&name) {
+    let newest_first: Vec<&String> = run_dirs.iter().rev().collect();
+
+    // When byte-pruning is on, size every run directory concurrently up front —
+    // the walks are independent — instead of serializing them inside the
+    // decision loop below.
+    let sizes: Vec<u64> = if byte_pruning {
+        futures::future::join_all(
+            newest_first
+                .iter()
+                .map(|name| dir_size_bytes(store_root.join(name))),
+        )
+        .await
+    } else {
+        Vec::new()
+    };
+
+    // Walk newest-first, keeping a run while it sits inside BOTH the count window
+    // and the running byte budget; everything past either limit is a removal
+    // candidate. Active runs still count toward the byte total (they're on disk)
+    // but are never themselves removed.
+    let mut cumulative: u64 = 0;
+    let mut to_remove: Vec<String> = Vec::new();
+    for (idx, name) in newest_first.iter().enumerate() {
+        if byte_pruning {
+            cumulative = cumulative.saturating_add(sizes[idx]);
+        }
+        let within_count = !count_pruning || idx < retain;
+        let within_bytes = !byte_pruning || cumulative <= max_store_bytes;
+        if within_count && within_bytes {
             continue;
         }
+        // Never collect a run that is still executing — its directory may be
+        // mid-write. It becomes eligible on a later prune once it finishes.
+        if active.contains(*name) {
+            continue;
+        }
+        to_remove.push((*name).clone());
+    }
+
+    for name in to_remove {
         let path = store_root.join(&name);
         if let Err(err) = tokio::fs::remove_dir_all(&path).await {
             tracing::debug!(
@@ -277,15 +382,16 @@ pub(in crate::dispatch::gateway::code_mode) async fn prune_artifact_runs_in(
 pub(in crate::dispatch::gateway::code_mode) async fn write_code_mode_artifact(
     root: &Path,
     request: &CodeModeArtifactWrite,
+    max_bytes: usize,
 ) -> Result<CodeModeArtifactReceipt, ToolError> {
     let rel_path = normalize_artifact_path(&request.path)?;
+    reject_oversized_content_type(request.content_type.as_deref())?;
     let bytes = request.content.as_bytes();
-    if bytes.len() > MAX_ARTIFACT_BYTES {
+    if bytes.len() > max_bytes {
         return Err(ToolError::InvalidParam {
             message: format!(
-                "artifact content is {} bytes; maximum is {} bytes",
+                "artifact content is {} bytes; maximum is {max_bytes} bytes",
                 bytes.len(),
-                MAX_ARTIFACT_BYTES
             ),
             param: "content".to_string(),
         });
@@ -338,6 +444,24 @@ pub(in crate::dispatch::gateway::code_mode) async fn write_code_mode_artifact(
         bytes: bytes.len(),
         sha256: hex::encode(sha256),
     })
+}
+
+/// Reject a `content_type` that would bloat the response. The receipt (and the
+/// truncation marker) carry this string into the model's context, so unlike the
+/// on-disk content it needs a small, fixed cap.
+fn reject_oversized_content_type(content_type: Option<&str>) -> Result<(), ToolError> {
+    if let Some(value) = content_type
+        && value.len() > MAX_CONTENT_TYPE_BYTES
+    {
+        return Err(ToolError::InvalidParam {
+            message: format!(
+                "artifact content_type is {} bytes; maximum is {MAX_CONTENT_TYPE_BYTES} bytes",
+                value.len(),
+            ),
+            param: "content_type".to_string(),
+        });
+    }
+    Ok(())
 }
 
 fn normalize_artifact_path(raw: &str) -> Result<String, ToolError> {

@@ -141,6 +141,10 @@ impl CodeModeBroker<'_> {
         let mut calls = Vec::new();
         let mut pending_tool_calls = FuturesUnordered::new();
         let mut started_tool_calls = 0usize;
+        // Artifact writes have their own budget, decoupled from tool calls, so a
+        // run that emits many artifacts doesn't starve its upstream tool-call
+        // allowance (and vice versa). Both are gated by `max_tool_calls`.
+        let mut started_artifact_writes = 0usize;
         let deadline = tokio::time::Instant::now() + timeout;
         let artifact_run_id = Ulid::new().to_string();
         let artifact_root = code_mode_artifact_root(&artifact_run_id);
@@ -153,6 +157,9 @@ impl CodeModeBroker<'_> {
         // that never call writeArtifact — including every search — leave
         // `$LAB_HOME/code-mode-artifacts/` untouched.
         let mut artifact_store_pruned = false;
+        // The per-artifact size cap is constant for the run; resolve it once
+        // instead of re-reading the environment on every write.
+        let artifact_max_bytes = super::artifacts::artifact_max_bytes();
 
         loop {
             tokio::select! {
@@ -161,10 +168,7 @@ impl CodeModeBroker<'_> {
                         Ok(line) => line,
                         Err(_) => {
                             terminate_code_mode_runner(&mut child, child_pid).await;
-                            return Err(CodeModeExecutionError::with_trace(ToolError::Sdk {
-                                sdk_kind: "timeout".to_string(),
-                                message: "Code Mode execution timed out".to_string(),
-                            }, sorted_calls(&calls)));
+                            return Err(code_mode_timeout_error(&calls));
                         }
                     };
                     let Some(line) = line.map_err(|err| ToolError::Sdk {
@@ -190,7 +194,7 @@ impl CodeModeBroker<'_> {
                         }
                         })? {
                         CodeModeRunnerOutput::ToolCall { seq, id, params } => {
-                            if let Err(err) = ensure_call_budget(started_tool_calls, max_tool_calls, &calls) {
+                            if let Err(err) = ensure_within_limit(started_tool_calls, max_tool_calls, "tool call", &calls) {
                                 terminate_code_mode_runner(&mut child, child_pid).await;
                                 return Err(err);
                             }
@@ -221,34 +225,50 @@ impl CodeModeBroker<'_> {
                             content,
                             content_type,
                         } => {
-                            if let Err(err) = ensure_call_budget(started_tool_calls, max_tool_calls, &calls) {
+                            if let Err(err) = ensure_within_limit(started_artifact_writes, max_tool_calls, "artifact write", &calls) {
                                 terminate_code_mode_runner(&mut child, child_pid).await;
                                 return Err(err);
                             }
-                            started_tool_calls += 1;
-                            // Keep the on-disk store bounded — once per run, on the
-                            // first write that actually touches it.
-                            if !artifact_store_pruned {
-                                super::artifacts::prune_artifact_runs(
-                                    super::artifacts::artifact_retention_runs(),
+                            started_artifact_writes += 1;
+                            // Prune (lazy, once per run) and the write are host-side
+                            // filesystem work; bound them by the run deadline just
+                            // like tool calls so a hung or slow disk can't outlive
+                            // `timeout_ms`.
+                            let artifact_op = async {
+                                if !artifact_store_pruned {
+                                    super::artifacts::prune_artifact_runs(
+                                        super::artifacts::artifact_retention_runs(),
+                                    )
+                                    .await;
+                                    artifact_store_pruned = true;
+                                }
+                                handle_artifact_write(
+                                    &mut stdin,
+                                    &artifact_root,
+                                    &mut artifacts,
+                                    &mut calls,
+                                    seq,
+                                    CodeModeArtifactWrite {
+                                        path,
+                                        content,
+                                        content_type,
+                                    },
+                                    trace_params,
+                                    artifact_max_bytes,
                                 )
-                                .await;
-                                artifact_store_pruned = true;
+                                .await
+                            };
+                            match tokio::time::timeout_at(deadline, artifact_op).await {
+                                Ok(Ok(())) => {}
+                                Ok(Err(err)) => {
+                                    terminate_code_mode_runner(&mut child, child_pid).await;
+                                    return Err(err.into());
+                                }
+                                Err(_) => {
+                                    terminate_code_mode_runner(&mut child, child_pid).await;
+                                    return Err(code_mode_timeout_error(&calls));
+                                }
                             }
-                            handle_artifact_write(
-                                &mut stdin,
-                                &artifact_root,
-                                &mut artifacts,
-                                &mut calls,
-                                seq,
-                                CodeModeArtifactWrite {
-                                    path,
-                                    content,
-                                    content_type,
-                                },
-                                trace_params,
-                            )
-                            .await?;
                         }
                         CodeModeRunnerOutput::Done { result, logs } => {
                             if !pending_tool_calls.is_empty() {
@@ -395,32 +415,51 @@ fn sorted_calls(calls: &[(u64, CodeModeExecutedCall)]) -> Vec<CodeModeExecutedCa
     calls.into_iter().map(|(_, call)| call).collect()
 }
 
-fn ensure_call_budget(
-    started_tool_calls: usize,
-    max_tool_calls: usize,
+/// The single source of the Code Mode deadline-timeout error, carrying the
+/// partial call trace. Used by both the runner-read and artifact-write timeout
+/// paths so the stable `timeout` kind/message lives in one place.
+fn code_mode_timeout_error(calls: &[(u64, CodeModeExecutedCall)]) -> CodeModeExecutionError {
+    CodeModeExecutionError::with_trace(
+        ToolError::Sdk {
+            sdk_kind: "timeout".to_string(),
+            message: "Code Mode execution timed out".to_string(),
+        },
+        sorted_calls(calls),
+    )
+}
+
+/// Shared budget gate for the two host-brokered operations. Tool calls and
+/// artifact writes each pass their own running count and share the
+/// `max_tool_calls` limit, so neither starves the other. `noun` names the
+/// operation in the error message; both reuse the `tool_call_limit_exceeded`
+/// kind (HTTP 429) per the error contract.
+fn ensure_within_limit(
+    started: usize,
+    limit: usize,
+    noun: &str,
     calls: &[(u64, CodeModeExecutedCall)],
 ) -> Result<(), CodeModeExecutionError> {
-    if started_tool_calls < max_tool_calls {
+    if started < limit {
         return Ok(());
     }
 
     Err(CodeModeExecutionError::with_trace(
         ToolError::Sdk {
             sdk_kind: "tool_call_limit_exceeded".to_string(),
-            message: format!("Code Mode execution exceeded max_tool_calls={max_tool_calls}"),
+            message: format!("Code Mode execution exceeded the {noun} limit of {limit}"),
         },
         sorted_calls(calls),
     ))
 }
 
-/// Test seam for the shared budget gate (tool calls + artifact writes both go
-/// through `ensure_call_budget`). Keeps the trace argument out of the assertion.
+/// Test seam for the shared budget gate. Keeps the trace argument out of the
+/// assertion.
 #[cfg(test)]
 pub(in crate::dispatch::gateway::code_mode) fn ensure_call_budget_for_test(
-    started_tool_calls: usize,
-    max_tool_calls: usize,
+    started: usize,
+    limit: usize,
 ) -> Result<(), CodeModeExecutionError> {
-    ensure_call_budget(started_tool_calls, max_tool_calls, &[])
+    ensure_within_limit(started, limit, "tool call", &[])
 }
 
 async fn handle_artifact_write(
@@ -431,11 +470,12 @@ async fn handle_artifact_write(
     seq: u64,
     request: CodeModeArtifactWrite,
     trace_params: bool,
+    max_bytes: usize,
 ) -> Result<(), ToolError> {
     let started = std::time::Instant::now();
     let redacted_params = artifact_trace_params(&request, trace_params);
 
-    match write_code_mode_artifact(artifact_root, &request).await {
+    match write_code_mode_artifact(artifact_root, &request, max_bytes).await {
         Ok(receipt) => {
             let result = json!(receipt);
             artifacts.push(receipt);

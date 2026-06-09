@@ -57,9 +57,9 @@ Dispatch layers may add the following kinds on top of SDK errors:
 - `conflict` — resource already exists with the given identifier; HTTP 409
 - `ambiguous_tool` — unqualified tool name resolved to multiple upstream gateway candidates; envelope carries `valid: Vec<String>` of fully-qualified `{upstream}::{tool}` names the caller must choose from, plus a `hint` explaining that callers may either pass `name = "{upstream}::{tool}"` or set `upstream` separately. HTTP 409.
 - `invalid_code_mode_id` — Code Mode tool id parsing failed. Valid ids are `<upstream-name>::<tool-name>` only; Lab actions use `tool_execute`/`invoke`. HTTP 422.
-- `tool_call_limit_exceeded` — a Code Mode snippet attempted more host-brokered tool calls than `max_tool_calls` allows (artifact writes count against the same budget). HTTP 429.
+- `tool_call_limit_exceeded` — a Code Mode snippet exceeded a host-brokered operation budget. Tool calls and artifact writes have **separate** counters, each bounded by `max_tool_calls`; the message names which limit was hit. HTTP 429.
 
-> Note: Code Mode artifact writes (`writeArtifact(path, content, options?)`) reuse only kinds already defined in this contract — no artifact-specific kind is introduced. They emit `invalid_param` (empty/absolute/`..` path after `\`→`/` normalization, or content over the 1 MiB cap), `path_traversal`/`symlink_rejected` (the post-join containment check found the destination escaping the per-run root or resolving through a symlinked ancestor), or `internal_error` (a host-side filesystem write/flush failure).
+> Note: Code Mode artifact writes (`writeArtifact(path, content, options?)`) reuse only kinds already defined in this contract — no artifact-specific kind is introduced. They emit `invalid_param` (empty/absolute/`..` path after `\`→`/` normalization, content over the configured size cap — default 8 MiB, raise with `LAB_CODE_MODE_ARTIFACT_MAX_MIB` — or a `content_type` over 256 bytes), `path_traversal`/`symlink_rejected` (the post-join containment check found the destination escaping the per-run root or resolving through a symlinked ancestor), or `internal_error` (a host-side filesystem write/flush failure).
 
 > Note: `code_mode_disabled` and `code_execution_failed` are removed from the contract.
 > Code Mode execution disabled → `internal_error`. Sandbox/runner JS evaluation failure

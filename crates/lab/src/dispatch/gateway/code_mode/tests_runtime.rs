@@ -13,6 +13,11 @@ use super::artifacts::{
 use super::protocol::{CodeModeRunnerOutput, CodeModeRunnerResult};
 use super::*;
 
+/// Generous content cap for artifact tests whose subject is not the size limit
+/// (path safety, content-type defaulting, persistence, I/O failure). The
+/// dedicated size test passes its own explicit cap.
+const TEST_MAX_BYTES: usize = 8 * 1024 * 1024;
+
 #[test]
 fn code_mode_runner_wrapper_exposes_write_artifact() {
     let wrapped = runner::wrap_code_mode_for_test("async () => 'ok'", "var codemode = {};");
@@ -547,7 +552,7 @@ async fn write_code_mode_artifact_rejects_absolute_paths() {
         content_type: Some("text/markdown".to_string()),
     };
 
-    let err = write_code_mode_artifact(root.path(), &request)
+    let err = write_code_mode_artifact(root.path(), &request, TEST_MAX_BYTES)
         .await
         .expect_err("absolute artifact path must be rejected");
 
@@ -567,7 +572,7 @@ async fn write_code_mode_artifact_rejects_parent_dir_paths() {
         content_type: Some("text/markdown".to_string()),
     };
 
-    let err = write_code_mode_artifact(root.path(), &request)
+    let err = write_code_mode_artifact(root.path(), &request, TEST_MAX_BYTES)
         .await
         .expect_err("parent dir artifact path must be rejected");
 
@@ -594,7 +599,7 @@ async fn write_code_mode_artifact_rejects_backslash_relative_traversal() {
         content_type: None,
     };
 
-    let err = write_code_mode_artifact(root.path(), &request)
+    let err = write_code_mode_artifact(root.path(), &request, TEST_MAX_BYTES)
         .await
         .expect_err("backslash traversal must be rejected");
 
@@ -617,7 +622,7 @@ async fn write_code_mode_artifact_rejects_backslash_absolute_path() {
         content_type: None,
     };
 
-    let err = write_code_mode_artifact(root.path(), &request)
+    let err = write_code_mode_artifact(root.path(), &request, TEST_MAX_BYTES)
         .await
         .expect_err("backslash absolute path must be rejected");
 
@@ -642,7 +647,7 @@ async fn write_code_mode_artifact_rejects_symlinked_ancestor() {
         content_type: None,
     };
 
-    let err = write_code_mode_artifact(root.path(), &request)
+    let err = write_code_mode_artifact(root.path(), &request, TEST_MAX_BYTES)
         .await
         .expect_err("symlinked ancestor must be rejected");
 
@@ -654,11 +659,15 @@ async fn write_code_mode_artifact_rejects_symlinked_ancestor() {
 }
 
 #[tokio::test]
-async fn write_code_mode_artifact_rejects_oversized_content() {
+async fn write_code_mode_artifact_enforces_the_passed_content_cap() {
     let root = TempDir::new().expect("temp root");
-    // Exactly 1 MiB succeeds; one byte over must be rejected as invalid_param.
-    let at_cap = "a".repeat(1024 * 1024);
-    let over_cap = "a".repeat(1024 * 1024 + 1);
+    // The cap is whatever the caller passes (resolved from
+    // LAB_CODE_MODE_ARTIFACT_MAX_MIB). Drive it with an explicit 1 MiB cap so the
+    // boundary is exercised cheaply: exactly at-cap succeeds, one byte over is a
+    // clean invalid_param.
+    let cap = 1024 * 1024;
+    let at_cap = "a".repeat(cap);
+    let over_cap = "a".repeat(cap + 1);
 
     let ok = write_code_mode_artifact(
         root.path(),
@@ -667,10 +676,11 @@ async fn write_code_mode_artifact_rejects_oversized_content() {
             content: at_cap,
             content_type: None,
         },
+        cap,
     )
     .await
-    .expect("exactly 1 MiB must be accepted");
-    assert_eq!(ok.bytes, 1024 * 1024);
+    .expect("exactly at-cap must be accepted");
+    assert_eq!(ok.bytes, cap);
 
     let err = write_code_mode_artifact(
         root.path(),
@@ -679,11 +689,103 @@ async fn write_code_mode_artifact_rejects_oversized_content() {
             content: over_cap,
             content_type: Some("text/markdown".to_string()),
         },
+        cap,
     )
     .await
-    .expect_err("over 1 MiB must be rejected");
+    .expect_err("over cap must be rejected");
     assert_eq!(err.kind(), "invalid_param");
     assert!(err.to_string().contains("maximum"), "error: {err}");
+}
+
+#[test]
+fn artifact_max_bytes_parses_env_and_falls_back() {
+    use crate::dispatch::helpers::with_env_override;
+    use std::collections::HashMap;
+
+    // Absent → 8 MiB default.
+    let default = artifacts::artifact_max_bytes();
+    assert_eq!(default, 8 * 1024 * 1024, "absent env must yield the 8 MiB default");
+
+    // Valid MiB value is honored and converted to bytes.
+    let valid = with_env_override(
+        HashMap::from([(
+            "LAB_CODE_MODE_ARTIFACT_MAX_MIB".to_string(),
+            "16".to_string(),
+        )]),
+        artifacts::artifact_max_bytes,
+    );
+    assert_eq!(valid, 16 * 1024 * 1024, "a valid MiB value must be honored");
+
+    // `0` and garbage both fall back to the default (a 0-byte cap rejects all).
+    for bad in ["0", "5O"] {
+        let got = with_env_override(
+            HashMap::from([(
+                "LAB_CODE_MODE_ARTIFACT_MAX_MIB".to_string(),
+                bad.to_string(),
+            )]),
+            artifacts::artifact_max_bytes,
+        );
+        assert_eq!(got, 8 * 1024 * 1024, "{bad:?} must fall back to the default");
+    }
+}
+
+#[test]
+fn artifact_max_store_bytes_parses_env_with_zero_disabling() {
+    use crate::dispatch::helpers::with_env_override;
+    use std::collections::HashMap;
+
+    // Absent → 4 GiB default.
+    assert_eq!(
+        artifacts::artifact_max_store_bytes(),
+        4096 * 1024 * 1024,
+        "absent env must yield the 4 GiB default"
+    );
+
+    let cases = [
+        ("8192", 8192u64 * 1024 * 1024), // valid MiB honored
+        ("0", 0),                        // 0 is meaningful here: disable byte pruning
+        ("5O", 4096 * 1024 * 1024),      // garbage → default
+    ];
+    for (raw, expected) in cases {
+        let got = with_env_override(
+            HashMap::from([(
+                "LAB_CODE_MODE_ARTIFACT_MAX_STORE_MIB".to_string(),
+                raw.to_string(),
+            )]),
+            artifacts::artifact_max_store_bytes,
+        );
+        assert_eq!(got, expected, "{raw:?} must resolve to {expected} bytes");
+    }
+}
+
+#[tokio::test]
+async fn write_code_mode_artifact_rejects_oversized_content_type() {
+    // content_type rides the receipt into the model's context, so it carries its
+    // own 256-byte cap independent of the (large) content cap.
+    let root = TempDir::new().expect("temp root");
+    let err = write_code_mode_artifact(
+        root.path(),
+        &CodeModeArtifactWrite {
+            path: "note.md".to_string(),
+            content: "body".to_string(),
+            content_type: Some("x".repeat(257)),
+        },
+        TEST_MAX_BYTES,
+    )
+    .await
+    .expect_err("oversized content_type must be rejected");
+    assert_eq!(err.kind(), "invalid_param");
+    assert!(
+        err.to_string().contains("content_type"),
+        "error should name the offending param: {err}"
+    );
+
+    // A normal-length content_type is accepted and nothing was written for the
+    // rejected one.
+    assert!(
+        !root.path().join("note.md").exists(),
+        "rejected content_type must not write a file"
+    );
 }
 
 #[tokio::test]
@@ -700,6 +802,7 @@ async fn write_code_mode_artifact_defaults_content_type_to_text_plain() {
                 content: "body".to_string(),
                 content_type,
             },
+            TEST_MAX_BYTES,
         )
         .await
         .expect("write succeeds");
@@ -725,6 +828,7 @@ async fn write_code_mode_artifact_maps_io_failure_to_internal_error() {
             content: "# nope".to_string(),
             content_type: None,
         },
+        TEST_MAX_BYTES,
     )
     .await
     .expect_err("write under a file must fail");
@@ -748,7 +852,7 @@ async fn prune_artifact_runs_keeps_newest_and_ignores_non_ulid_entries() {
         .await
         .unwrap();
 
-    artifacts::prune_artifact_runs_in(store.path(), 1, &HashSet::new()).await;
+    artifacts::prune_artifact_runs_in(store.path(), 1, 0, &HashSet::new()).await;
 
     // Oldest two run dirs pruned; newest retained.
     assert!(!store.path().join(&run_ids[0]).exists());
@@ -774,7 +878,7 @@ async fn prune_artifact_runs_never_deletes_active_run_dir() {
 
     // Mark the OLDEST run active; with retain=1 it would normally be deleted.
     let active = HashSet::from([ids[0].clone()]);
-    artifacts::prune_artifact_runs_in(store.path(), 1, &active).await;
+    artifacts::prune_artifact_runs_in(store.path(), 1, 0, &active).await;
 
     // Active oldest dir survives despite retain=1; the inactive middle dir is
     // pruned; the newest dir is retained by the cap.
@@ -790,6 +894,36 @@ async fn prune_artifact_runs_never_deletes_active_run_dir() {
         store.path().join(&ids[2]).exists(),
         "newest run dir retained"
     );
+}
+
+#[tokio::test]
+async fn prune_artifact_runs_enforces_byte_budget() {
+    // With the count cap effectively off (retain high), the byte budget alone
+    // must drop the oldest runs until the store fits. Three 1000-byte runs
+    // against a 2000-byte budget keep the newest two and prune the oldest.
+    let store = TempDir::new().expect("store root");
+    let mut ids: Vec<String> = (0..3).map(|_| ulid::Ulid::new().to_string()).collect();
+    ids.sort(); // ascending: oldest first
+    for id in &ids {
+        let dir = store.path().join(id);
+        // Nest the file so the recursive size walk is exercised.
+        tokio::fs::create_dir_all(dir.join("sub")).await.unwrap();
+        tokio::fs::write(dir.join("sub/a.md"), vec![b'x'; 1000])
+            .await
+            .unwrap();
+    }
+
+    artifacts::prune_artifact_runs_in(store.path(), 100, 2000, &HashSet::new()).await;
+
+    assert!(
+        !store.path().join(&ids[0]).exists(),
+        "oldest run must be pruned to honor the byte budget"
+    );
+    assert!(
+        store.path().join(&ids[1]).exists(),
+        "second-newest fits the budget"
+    );
+    assert!(store.path().join(&ids[2]).exists(), "newest fits the budget");
 }
 
 #[test]
@@ -819,9 +953,12 @@ async fn prune_artifact_runs_disabled_when_retain_zero() {
         .await
         .unwrap();
 
-    artifacts::prune_artifact_runs_in(store.path(), 0, &HashSet::new()).await;
+    artifacts::prune_artifact_runs_in(store.path(), 0, 0, &HashSet::new()).await;
 
-    assert!(store.path().join(&id).exists(), "retain=0 disables pruning");
+    assert!(
+        store.path().join(&id).exists(),
+        "retain=0 and store-bytes=0 disables all pruning"
+    );
 }
 
 #[tokio::test]
@@ -835,8 +972,8 @@ async fn prune_artifact_runs_noop_when_retain_at_or_above_count() {
     }
 
     // retain == count and retain > count must both keep every run dir.
-    artifacts::prune_artifact_runs_in(store.path(), 2, &HashSet::new()).await;
-    artifacts::prune_artifact_runs_in(store.path(), 9, &HashSet::new()).await;
+    artifacts::prune_artifact_runs_in(store.path(), 2, 0, &HashSet::new()).await;
+    artifacts::prune_artifact_runs_in(store.path(), 9, 0, &HashSet::new()).await;
 
     for id in &ids {
         assert!(store.path().join(id).exists(), "{id} must be retained");
@@ -888,7 +1025,7 @@ async fn write_code_mode_artifact_persists_content_and_returns_receipt() {
         content_type: Some("text/markdown".to_string()),
     };
 
-    let receipt = write_code_mode_artifact(root.path(), &request)
+    let receipt = write_code_mode_artifact(root.path(), &request, TEST_MAX_BYTES)
         .await
         .expect("artifact write succeeds");
 

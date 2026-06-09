@@ -232,19 +232,35 @@ content is then written into a fresh per-run directory under
 }
 ```
 
-A single artifact is capped at **1 MiB**; oversized content is rejected with
-`invalid_param`. `options.contentType` defaults to `text/plain` when omitted or
-blank. Artifact writes do not bypass `timeout_ms`, `max_tool_calls`, or final
-response caps — each write counts against `max_tool_calls`. They are the
-preferred way to keep large markdown reports, source tables, crawl manifests,
-and follow-up snippets out of the final JSON response while still making them
-available on disk.
+Artifact **content** is written to disk and never returned to the model (only
+the receipt is), so its size cap is a resource bound, **not** a context guard. A
+single artifact defaults to a **8 MiB** cap, overridable with
+`LAB_CODE_MODE_ARTIFACT_MAX_MIB` (in MiB); oversized content is rejected with
+`invalid_param`. Keep it below ~64 so a write stays under the runner's JS heap
+and fails cleanly instead of as an opaque out-of-memory trap. `options.contentType`
+defaults to `text/plain` when omitted or blank and is itself capped at 256 bytes
+(it *does* ride the receipt back into the response). Artifact writes do not
+bypass `timeout_ms` or final response caps. Each write counts against a
+**separate** budget from tool calls — both are bounded by `max_tool_calls`
+(default `1000`), but artifact writes and upstream tool calls have independent
+counters, so a write-heavy run never starves its tool-call allowance and vice
+versa. They are the preferred way to keep large markdown reports, source tables,
+crawl manifests, and follow-up snippets out of the final JSON response while
+still making them available on disk.
 
-The store is bounded: on the first artifact write of a run (never on search or
-no-write runs) Labby prunes old per-run directories, keeping the newest
-`LAB_CODE_MODE_ARTIFACT_RETENTION_RUNS` (default `200`). Only ULID-named run
-directories this feature created are ever pruned; set the value to `0` to
-disable pruning (unbounded growth).
+The store is bounded on two axes, pruned on the first artifact write of a run
+(never on search or no-write runs):
+
+- **Run count** — keeps the newest `LAB_CODE_MODE_ARTIFACT_RETENTION_RUNS`
+  (default `200`) run directories; `0` disables the count rule.
+- **Total bytes** — drops the oldest runs until the whole store fits
+  `LAB_CODE_MODE_ARTIFACT_MAX_STORE_MIB` (default `4096`, i.e. 4 GiB); `0`
+  disables the byte rule. This matters once artifacts can be several MiB each,
+  where a run-count cap alone no longer bounds disk usage.
+
+Only ULID-named run directories this feature created are ever pruned, and a
+still-executing run is never collected. Set both knobs to `0` for unbounded
+growth.
 
 ### `[oauth.machines.<id>]`
 
