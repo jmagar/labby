@@ -151,6 +151,15 @@
             "description": "UniFi network management via the rustifi MCP server \u2014 monitor devices, clients, health, alarms, events, and WLANs."
         },
         {
+            "name": "unifi-network",
+            "source": {
+                "source": "git-subdir",
+                "url": "https://github.com/sirkirby/unifi-mcp.git",
+                "path": "plugins/unifi-network"
+            },
+            "description": "UniFi Network MCP server (sirkirby/unifi-mcp) \u2014 manage network devices, clients, firewall, VPN, and more."
+        },
+        {
             "name": "apprise",
             "source": {
                 "source": "git-subdir",
