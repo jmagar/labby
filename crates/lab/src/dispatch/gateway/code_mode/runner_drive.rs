@@ -17,7 +17,7 @@ use crate::dispatch::error::ToolError;
 
 use super::CodeModeBroker;
 use super::artifacts::{
-    CodeModeArtifactReceipt, CodeModeArtifactWrite, code_mode_artifact_root,
+    ActiveArtifactRun, CodeModeArtifactReceipt, CodeModeArtifactWrite, code_mode_artifact_root,
     write_code_mode_artifact,
 };
 use super::protocol::{CodeModeRunnerInput, CodeModeRunnerOutput};
@@ -144,6 +144,10 @@ impl CodeModeBroker<'_> {
         let deadline = tokio::time::Instant::now() + timeout;
         let artifact_run_id = Ulid::new().to_string();
         let artifact_root = code_mode_artifact_root(&artifact_run_id);
+        // Mark this run active before any artifact dir exists, so a concurrent
+        // run's first-write prune can never delete our directory mid-run. The
+        // RAII guard clears the id on every exit path (including early returns).
+        let _active_artifact_run = ActiveArtifactRun::register(&artifact_run_id);
         let mut artifacts: Vec<CodeModeArtifactReceipt> = Vec::new();
         // The store is pruned lazily on the first actual write (below), so runs
         // that never call writeArtifact — including every search — leave

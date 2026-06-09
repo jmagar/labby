@@ -1,6 +1,8 @@
 //! Tests: response-budget truncation, wasm runner smoke, token estimate.
 #![cfg(test)]
 
+use std::collections::HashSet;
+
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -746,7 +748,7 @@ async fn prune_artifact_runs_keeps_newest_and_ignores_non_ulid_entries() {
         .await
         .unwrap();
 
-    artifacts::prune_artifact_runs_in(store.path(), 1).await;
+    artifacts::prune_artifact_runs_in(store.path(), 1, &HashSet::new()).await;
 
     // Oldest two run dirs pruned; newest retained.
     assert!(!store.path().join(&run_ids[0]).exists());
@@ -757,6 +759,59 @@ async fn prune_artifact_runs_keeps_newest_and_ignores_non_ulid_entries() {
 }
 
 #[tokio::test]
+async fn prune_artifact_runs_never_deletes_active_run_dir() {
+    // Concurrency guard: a still-executing run's directory must survive pruning
+    // even when it is the oldest and `retain` would otherwise collect it. This
+    // is the proper fix for the cross-run prune race — not "keep retention high".
+    let store = TempDir::new().expect("store root");
+    let mut ids: Vec<String> = (0..3).map(|_| ulid::Ulid::new().to_string()).collect();
+    ids.sort(); // ascending: oldest first
+    for id in &ids {
+        tokio::fs::create_dir_all(store.path().join(id))
+            .await
+            .unwrap();
+    }
+
+    // Mark the OLDEST run active; with retain=1 it would normally be deleted.
+    let active = HashSet::from([ids[0].clone()]);
+    artifacts::prune_artifact_runs_in(store.path(), 1, &active).await;
+
+    // Active oldest dir survives despite retain=1; the inactive middle dir is
+    // pruned; the newest dir is retained by the cap.
+    assert!(
+        store.path().join(&ids[0]).exists(),
+        "active run dir must never be pruned, even as the oldest under retain=1"
+    );
+    assert!(
+        !store.path().join(&ids[1]).exists(),
+        "inactive old run dir must still be pruned"
+    );
+    assert!(
+        store.path().join(&ids[2]).exists(),
+        "newest run dir retained"
+    );
+}
+
+#[test]
+fn active_artifact_run_guard_registers_and_clears() {
+    // Unique id so the assertion is robust against parallel tests sharing the
+    // process-global active set.
+    let id = ulid::Ulid::new().to_string();
+    assert!(!artifacts::active_artifact_runs_snapshot().contains(&id));
+    {
+        let _guard = artifacts::ActiveArtifactRun::register(&id);
+        assert!(
+            artifacts::active_artifact_runs_snapshot().contains(&id),
+            "register must mark the run active"
+        );
+    }
+    assert!(
+        !artifacts::active_artifact_runs_snapshot().contains(&id),
+        "dropping the guard must clear the run id"
+    );
+}
+
+#[tokio::test]
 async fn prune_artifact_runs_disabled_when_retain_zero() {
     let store = TempDir::new().expect("store root");
     let id = ulid::Ulid::new().to_string();
@@ -764,7 +819,7 @@ async fn prune_artifact_runs_disabled_when_retain_zero() {
         .await
         .unwrap();
 
-    artifacts::prune_artifact_runs_in(store.path(), 0).await;
+    artifacts::prune_artifact_runs_in(store.path(), 0, &HashSet::new()).await;
 
     assert!(store.path().join(&id).exists(), "retain=0 disables pruning");
 }
@@ -780,8 +835,8 @@ async fn prune_artifact_runs_noop_when_retain_at_or_above_count() {
     }
 
     // retain == count and retain > count must both keep every run dir.
-    artifacts::prune_artifact_runs_in(store.path(), 2).await;
-    artifacts::prune_artifact_runs_in(store.path(), 9).await;
+    artifacts::prune_artifact_runs_in(store.path(), 2, &HashSet::new()).await;
+    artifacts::prune_artifact_runs_in(store.path(), 9, &HashSet::new()).await;
 
     for id in &ids {
         assert!(store.path().join(id).exists(), "{id} must be retained");

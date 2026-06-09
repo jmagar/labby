@@ -1,6 +1,8 @@
 //! Host-brokered artifact writes for Code Mode.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -12,7 +14,25 @@ use crate::dispatch::helpers::{env_non_empty, lab_home, redact_home, reject_path
 use crate::dispatch::path_safety::reject_existing_symlink_ancestors;
 
 const DEFAULT_CONTENT_TYPE: &str = "text/plain";
-const MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
+
+/// Upper bound on the `content_type` metadata string.
+///
+/// This is the one artifact field that *does* reach the model: unlike `content`
+/// (written to disk, never returned), `content_type` rides the receipt back into
+/// the execution response and the truncation marker. So it gets a context-bound
+/// cap; a snippet can't bloat the response with a megabyte `contentType`.
+const MAX_CONTENT_TYPE_BYTES: usize = 256;
+
+/// Default per-artifact content cap, in MiB.
+///
+/// This is NOT a context guard — artifact content is written to disk and only
+/// the small receipt is returned to the model. It is a resource bound that keeps
+/// a single write comfortably under the runner's 64 MiB JS heap (see
+/// `runner.rs`), so an oversized artifact fails as a clean `invalid_param`
+/// instead of an opaque QuickJS out-of-memory trap. Override with
+/// `LAB_CODE_MODE_ARTIFACT_MAX_MIB` (keep it below ~64 to preserve the clean
+/// error boundary).
+const DEFAULT_ARTIFACT_MAX_MIB: usize = 8;
 
 /// Default number of per-run artifact directories retained under
 /// `$LAB_HOME/code-mode-artifacts/`. Old run directories are pruned on the first
@@ -79,22 +99,102 @@ pub(in crate::dispatch::gateway::code_mode) fn artifact_retention_runs() -> usiz
     }
 }
 
+/// Resolve the per-artifact content cap (in bytes) from the environment,
+/// falling back to [`DEFAULT_ARTIFACT_MAX_MIB`]. The env value is expressed in
+/// MiB for ergonomics (`LAB_CODE_MODE_ARTIFACT_MAX_MIB=16`).
+#[must_use]
+pub(in crate::dispatch::gateway::code_mode) fn artifact_max_bytes() -> usize {
+    let default_bytes = DEFAULT_ARTIFACT_MAX_MIB * 1024 * 1024;
+    // Absent/blank → default silently. Present-but-unparseable or `0` → warn and
+    // fall back (a 0 MiB cap would reject every write).
+    let Some(raw) = env_non_empty("LAB_CODE_MODE_ARTIFACT_MAX_MIB") else {
+        return default_bytes;
+    };
+    match raw.trim().parse::<usize>() {
+        Ok(mib) if mib > 0 => mib.saturating_mul(1024 * 1024),
+        _ => {
+            tracing::warn!(
+                surface = "dispatch",
+                service = "code_mode",
+                action = "code_execute",
+                value = %raw,
+                default_mib = DEFAULT_ARTIFACT_MAX_MIB,
+                "ignoring invalid LAB_CODE_MODE_ARTIFACT_MAX_MIB; using default"
+            );
+            default_bytes
+        }
+    }
+}
+
+/// Process-global set of run ids whose execution is still in flight.
+///
+/// The artifact store is shared across all concurrent Code Mode executions, and
+/// pruning runs on the first write of *any* run. Without this set, a run with a
+/// low `retain` could `remove_dir_all` a *different* concurrent run's directory
+/// while that run is still writing into it. Membership here makes a run's
+/// directory un-prunable for as long as it is executing — see
+/// [`ActiveArtifactRun`].
+fn active_runs() -> &'static Mutex<HashSet<String>> {
+    static ACTIVE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    ACTIVE.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Snapshot the currently-active run ids so a prune pass can exclude them.
+pub(in crate::dispatch::gateway::code_mode) fn active_artifact_runs_snapshot() -> HashSet<String> {
+    active_runs()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+}
+
+/// RAII registration of an in-flight run id. Construct once per execution and
+/// hold it for the whole run; `Drop` removes the id so the directory becomes
+/// eligible for pruning only after the run has finished.
+pub(in crate::dispatch::gateway::code_mode) struct ActiveArtifactRun {
+    run_id: String,
+}
+
+impl ActiveArtifactRun {
+    pub(in crate::dispatch::gateway::code_mode) fn register(run_id: &str) -> Self {
+        active_runs()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(run_id.to_string());
+        Self {
+            run_id: run_id.to_string(),
+        }
+    }
+}
+
+impl Drop for ActiveArtifactRun {
+    fn drop(&mut self) {
+        active_runs()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.run_id);
+    }
+}
+
 /// Best-effort prune of old per-run artifact directories so the store stays
 /// bounded. Keeps the newest `retain` run directories (ULID names sort
-/// chronologically) and removes the rest.
+/// chronologically) and removes the rest, except any run still executing.
 pub(in crate::dispatch::gateway::code_mode) async fn prune_artifact_runs(retain: usize) {
-    prune_artifact_runs_in(&artifact_store_root(), retain).await;
+    let active = active_artifact_runs_snapshot();
+    prune_artifact_runs_in(&artifact_store_root(), retain, &active).await;
 }
 
 /// Core prune over an explicit store root (so tests need no `$LAB_HOME`).
 ///
 /// Only directories whose names parse as ULIDs — i.e. run directories this
 /// feature created — are ever considered for removal, so an operator's stray
-/// file or directory under the store can never be collected. Errors are
+/// file or directory under the store can never be collected. Run ids in
+/// `active` are skipped unconditionally (even past `retain`) so a concurrent
+/// run's directory is never deleted while it is still writing. Errors are
 /// swallowed (best-effort, debug-logged); pruning must never fail a run.
 pub(in crate::dispatch::gateway::code_mode) async fn prune_artifact_runs_in(
     store_root: &Path,
     retain: usize,
+    active: &HashSet<String>,
 ) {
     if retain == 0 {
         return;
@@ -156,6 +256,11 @@ pub(in crate::dispatch::gateway::code_mode) async fn prune_artifact_runs_in(
     run_dirs.sort(); // ascending: oldest ULID first
     let remove_count = run_dirs.len() - retain;
     for name in run_dirs.into_iter().take(remove_count) {
+        // Never collect a run that is still executing — its directory may be
+        // mid-write. It becomes eligible on a later prune once it finishes.
+        if active.contains(&name) {
+            continue;
+        }
         let path = store_root.join(&name);
         if let Err(err) = tokio::fs::remove_dir_all(&path).await {
             tracing::debug!(
