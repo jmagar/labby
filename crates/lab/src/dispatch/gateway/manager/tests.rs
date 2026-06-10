@@ -121,6 +121,7 @@ fn fixture_oauth_upstream(name: &str, url: &str) -> UpstreamConfig {
         mode: UpstreamOauthMode::AuthorizationCodePkce,
         registration: UpstreamOauthRegistration::Dynamic,
         scopes: None,
+        prefer_client_metadata_document: None,
     });
     upstream
 }

@@ -351,6 +351,7 @@ mod tests {
                     client_secret_env: None,
                 },
                 scopes: None,
+                prefer_client_metadata_document: None,
             }),
             imported_from: None,
             priority: 1.0,

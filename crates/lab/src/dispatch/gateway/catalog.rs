@@ -572,7 +572,13 @@ pub const ACTIONS: &[ActionSpec] = &[
                 name: "spec",
                 ty: "json",
                 required: true,
-                description: "Gateway config payload to persist",
+                description: "Gateway config payload to persist. \
+                    TRUST BOUNDARY: when `command` is set (stdio transport), the gateway \
+                    will spawn that command as a local subprocess with labby's full process \
+                    environment. Only operators with admin access may call this action; \
+                    the command and its arguments are validated against a spawn allowlist \
+                    before being persisted, but callers must treat this as an admin-level \
+                    code-execution primitive.",
             },
             ParamSpec {
                 name: "bearer_token_value",
@@ -594,7 +600,11 @@ pub const ACTIONS: &[ActionSpec] = &[
                 name: "patch",
                 ty: "json",
                 required: true,
-                description: "Partial gateway update payload",
+                description: "Partial gateway update payload. \
+                    TRUST BOUNDARY: if the patch sets or changes `command` (stdio transport), \
+                    the gateway will spawn that command as a local subprocess. The command is \
+                    validated against a spawn allowlist before being persisted, but this \
+                    remains an admin-level code-execution primitive.",
             },
             ParamSpec {
                 name: "bearer_token_value",

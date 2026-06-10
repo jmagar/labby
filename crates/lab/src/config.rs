@@ -876,6 +876,18 @@ pub struct UpstreamOauthConfig {
     pub registration: UpstreamOauthRegistration,
     #[serde(default)]
     pub scopes: Option<Vec<String>>,
+    /// When `true`, always use the Client ID Metadata Document (CIMD) strategy
+    /// regardless of whether the upstream advertises a `registration_endpoint`.
+    /// When `false`, always use dynamic registration (RFC 7591) when the upstream
+    /// advertises a `registration_endpoint`.
+    /// When absent (`None`), the legacy default applies: upstreams named `"swag"`
+    /// default to CIMD; all others default to dynamic registration when available.
+    ///
+    /// Set this field explicitly to remove the deployment-specific `"swag"` name
+    /// check. New upstreams should set this field rather than relying on the legacy
+    /// name-based default.
+    #[serde(default)]
+    pub prefer_client_metadata_document: Option<bool>,
 }
 
 /// Outbound OAuth mode. Currently only `authorization_code_pkce` is supported.

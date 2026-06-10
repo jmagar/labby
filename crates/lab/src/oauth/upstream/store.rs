@@ -275,3 +275,129 @@ impl StateStore for SqliteStateStore {
         Box::pin(async move { Ok(()) })
     }
 }
+
+// ── T10: OAuth callback/state error-path tests ────────────────────────────────
+//
+// Verify that the `SqliteStateStore` adapter correctly rejects unknown,
+// replayed (already-consumed), and expired state tokens.  These paths were
+// previously un-asserted at the adapter layer; the underlying `SqliteStore`
+// primitive is tested in `lab-auth/src/sqlite.rs` but those tests exercise the
+// raw SQL, not the rmcp `StateStore` adapter behaviour.
+
+#[cfg(test)]
+mod tests {
+    use oauth2::{CsrfToken, PkceCodeVerifier};
+    use rmcp::transport::auth::{StateStore, StoredAuthorizationState};
+
+    use super::SqliteStateStore;
+
+    /// Open a disposable in-memory SQLite store for testing.
+    async fn temp_store() -> lab_auth::sqlite::SqliteStore {
+        let path = tempfile::tempdir()
+            .expect("tempdir")
+            .keep()
+            .join("upstream_oauth_test.db");
+        lab_auth::sqlite::SqliteStore::open(path)
+            .await
+            .expect("open test store")
+    }
+
+    fn make_state_store(
+        store: lab_auth::sqlite::SqliteStore,
+        upstream: &str,
+        subject: &str,
+    ) -> SqliteStateStore {
+        SqliteStateStore::new(store, upstream, subject)
+    }
+
+    fn sample_stored_state(csrf: &str) -> StoredAuthorizationState {
+        StoredAuthorizationState::new(
+            &PkceCodeVerifier::new("verifier-value".to_string()),
+            &CsrfToken::new(csrf.to_string()),
+        )
+    }
+
+    /// Loading a state token that was never saved returns `None`.
+    #[tokio::test]
+    async fn unknown_state_returns_none() {
+        let store = make_state_store(temp_store().await, "acme", "alice");
+        let result = store
+            .load("nonexistent-csrf")
+            .await
+            .expect("load should not error");
+        assert!(result.is_none(), "unknown state token must return None");
+    }
+
+    /// Loading a state token a second time returns `None` (replay prevention).
+    ///
+    /// `SqliteStateStore::load` uses an atomic DELETE … RETURNING so the first
+    /// successful load consumes the row.  A subsequent call for the same token
+    /// must return `None` rather than re-authorizing the flow.
+    #[tokio::test]
+    async fn replayed_state_is_rejected() {
+        let sqlite = temp_store().await;
+        let store = make_state_store(sqlite, "acme", "alice");
+        let csrf = "csrf-replay-test";
+
+        // Save state once.
+        store
+            .save(csrf, sample_stored_state(csrf))
+            .await
+            .expect("save should succeed");
+
+        // First load consumes the row.
+        let first = store.load(csrf).await.expect("first load should not error");
+        assert!(first.is_some(), "first load must return the stored state");
+
+        // Second load must return None — the row no longer exists.
+        let second = store
+            .load(csrf)
+            .await
+            .expect("second load should not error");
+        assert!(
+            second.is_none(),
+            "replayed (already-consumed) state token must return None"
+        );
+    }
+
+    /// Loading a state token whose TTL has expired returns `None`.
+    ///
+    /// The underlying `take_upstream_oauth_state` query filters by `expires_at`,
+    /// so an expired row is treated the same as a missing row.  We simulate this
+    /// by writing a row with `expires_at = now - 1` directly via the raw store.
+    #[tokio::test]
+    async fn expired_state_is_rejected() {
+        use lab_auth::types::UpstreamOauthStateRow;
+
+        let sqlite = temp_store().await;
+
+        // Insert an already-expired row directly (bypassing the adapter's TTL).
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let row = UpstreamOauthStateRow {
+            upstream_name: "acme".to_string(),
+            subject: "alice".to_string(),
+            csrf_token: "csrf-expired".to_string(),
+            pkce_verifier: "verifier".to_string(),
+            created_at: now - 400,
+            expires_at: now - 1, // already expired
+        };
+        sqlite
+            .save_upstream_oauth_state(row)
+            .await
+            .expect("save expired row");
+
+        // The adapter must refuse to return an expired state.
+        let store = make_state_store(sqlite, "acme", "alice");
+        let result = store
+            .load("csrf-expired")
+            .await
+            .expect("load should not error on expired state");
+        assert!(
+            result.is_none(),
+            "expired state token must return None, not the stored state"
+        );
+    }
+}

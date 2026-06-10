@@ -1394,6 +1394,7 @@ mod tests {
                     mode: UpstreamOauthMode::AuthorizationCodePkce,
                     registration: UpstreamOauthRegistration::Dynamic,
                     scopes: None,
+                    prefer_client_metadata_document: None,
                 }),
                 imported_from: None,
             }],
