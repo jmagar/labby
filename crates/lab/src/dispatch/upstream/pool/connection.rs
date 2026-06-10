@@ -16,9 +16,6 @@ use crate::process::unix::{
     pid_is_alive, terminate_process_group_sigkill, terminate_process_group_sigterm,
 };
 
-#[cfg(windows)]
-use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
-
 use tokio::sync::Mutex;
 
 use crate::config::UpstreamConfig;
@@ -41,9 +38,9 @@ impl std::fmt::Debug for UpstreamConnection {
 /// `insert()` overwrites, etc.
 ///
 /// The async `shutdown()` graceful path zeroes `self.runtime.pgid` (Unix)
-/// or replaces `self.runtime.job_handle` with `INVALID_HANDLE_VALUE`
-/// (Windows) and takes `_server_task` before its first `.await` so this
-/// Drop no-ops on the graceful path.
+/// or resets `self.runtime.job_handle` to `0` (Windows) and takes
+/// `_server_task` before its first `.await` so this Drop no-ops on the
+/// graceful path.
 ///
 /// - Unix: `SIGTERM` + `SIGKILL` the process group via `killpg`.
 /// - Windows: close the Job Object handle; `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
@@ -82,11 +79,10 @@ impl Drop for UpstreamConnection {
         {
             let pid = self.runtime.pid.unwrap_or(0);
             let job = self.runtime.job_handle;
-            // Replace with sentinel so shutdown()'s Drop no-ops if somehow
-            // called again (shouldn't happen — shutdown consumes self, but
-            // be defensive).
-            self.runtime.job_handle = INVALID_HANDLE_VALUE;
-            // SAFETY: close_job guards against INVALID_HANDLE_VALUE.
+            // Reset to the `0` sentinel so a second close is a no-op (defensive:
+            // shutdown consumes self, but Drop must be idempotent).
+            self.runtime.job_handle = 0;
+            // SAFETY: close_job guards against the `0` sentinel.
             unsafe { crate::process::windows::close_job(job, pid) };
         }
         if let Some(handle) = self._server_task.take() {
@@ -107,7 +103,7 @@ impl UpstreamConnection {
         #[cfg(windows)]
         let runtime_job = {
             let j = self.runtime.job_handle;
-            self.runtime.job_handle = INVALID_HANDLE_VALUE;
+            self.runtime.job_handle = 0;
             j
         };
         let started = Instant::now();
@@ -137,7 +133,7 @@ impl UpstreamConnection {
         #[cfg(windows)]
         {
             let pid = runtime.pid.unwrap_or(0);
-            // SAFETY: close_job guards against INVALID_HANDLE_VALUE.
+            // SAFETY: close_job guards against the `0` sentinel.
             unsafe { crate::process::windows::close_job(runtime_job, pid) };
         }
 

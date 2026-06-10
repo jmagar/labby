@@ -90,18 +90,22 @@ impl Drop for ProcessGroupGuard {
 /// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` was set, the OS terminates every
 /// process in the job (direct child + all descendants).
 ///
-/// On the happy path, `.disarm()` returns the raw handle for storage in
-/// `UpstreamRuntimeMetadata.job_handle`. `UpstreamConnection::Drop` and
+/// On the happy path, `.disarm()` returns the handle (as `isize`) for storage
+/// in `UpstreamRuntimeMetadata.job_handle`. `UpstreamConnection::Drop` and
 /// `shutdown()` close that handle, mirroring the Unix `killpg` path.
 ///
-/// A failed `create_job_for_pid` (Win32 API error) returns
-/// `INVALID_HANDLE_VALUE`; the guard still arms with that sentinel value and
-/// `Drop` / `disarm` treat it as a no-op, so the connect path is never
-/// fatal due to a job-creation failure.
+/// A failed `create_job_for_pid` (Win32 API error) returns `0`; the guard still
+/// arms with that sentinel value and `Drop` / `disarm` treat it as a no-op, so
+/// the connect path is never fatal due to a job-creation failure.
+///
+/// The handle is held as `isize` rather than `HANDLE` because `windows-sys
+/// 0.59`'s `HANDLE` (`*mut c_void`) is `!Send + !Sync`; `isize` keeps the guard
+/// (and any struct that stores its disarmed value) thread-safe with no unsafe
+/// trait impls. The cast back to `HANDLE` happens only inside `close_job`.
 #[cfg(windows)]
 pub struct JobObjectGuard {
-    /// Raw `HANDLE`. `INVALID_HANDLE_VALUE` means creation failed; treated as no-op.
-    job: windows_sys::Win32::Foundation::HANDLE,
+    /// Raw job handle value as `isize`. `0` means creation failed; treated as no-op.
+    job: isize,
     /// PID of the process assigned to the job; used only for log messages.
     pid: u32,
 }
@@ -113,20 +117,20 @@ impl JobObjectGuard {
     #[must_use]
     pub fn arm(pid: u32) -> Self {
         // SAFETY: create_job_for_pid only calls Win32 APIs with well-formed
-        // arguments. Any failure is logged and returns INVALID_HANDLE_VALUE.
+        // arguments. Any failure is logged and returns the `0` sentinel.
         let job = unsafe { crate::process::windows::create_job_for_pid(pid) };
         Self { job, pid }
     }
 
-    /// Disarm the guard, returning the raw job handle.
+    /// Disarm the guard, returning the job handle as `isize`.
     ///
     /// After disarm the guard's `Drop` does nothing; the caller takes ownership
     /// of the handle and is responsible for closing it (typically via
     /// `UpstreamRuntimeMetadata.job_handle`).
-    pub fn disarm(mut self) -> windows_sys::Win32::Foundation::HANDLE {
+    pub fn disarm(mut self) -> isize {
         let handle = self.job;
         // Zero out so Drop no-ops.
-        self.job = windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+        self.job = 0;
         handle
     }
 }
@@ -134,8 +138,8 @@ impl JobObjectGuard {
 #[cfg(windows)]
 impl Drop for JobObjectGuard {
     fn drop(&mut self) {
-        // SAFETY: close_job guards against INVALID_HANDLE_VALUE and only calls
-        // CloseHandle on a handle we created.
+        // SAFETY: close_job guards against the `0` sentinel and only calls
+        // CloseHandle on a handle value we created.
         unsafe { crate::process::windows::close_job(self.job, self.pid) };
     }
 }

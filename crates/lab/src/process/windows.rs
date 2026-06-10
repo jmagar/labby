@@ -66,15 +66,22 @@ use windows_sys::Win32::{
 /// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` so every descendant is terminated
 /// when the last handle to the job is closed.
 ///
-/// Returns the raw job `HANDLE`, or `INVALID_HANDLE_VALUE` on any Win32
-/// failure (logged as a warning but never fatal — the caller falls back to
-/// per-PID kill).
+/// Returns the job handle as an `isize` (the raw `HANDLE` value), or `0` on
+/// any Win32 failure (logged as a warning but never fatal — the caller falls
+/// back to per-PID kill).
+///
+/// The handle is returned as `isize` rather than `HANDLE` (`*mut c_void`)
+/// deliberately: in `windows-sys 0.59` `HANDLE` is a raw pointer, which is
+/// `!Send + !Sync`. Storing it raw in `UpstreamRuntimeMetadata` would poison
+/// `AppState`'s `Send`/`Sync` bounds and break the axum router. `isize` is
+/// `Copy + Send + Sync`, so the stored/passed value crosses thread boundaries
+/// cleanly; we cast back to `HANDLE` only at the `CloseHandle` boundary.
 ///
 /// # Safety
 ///
 /// This function calls Win32 APIs and is therefore unsafe.
 #[cfg(windows)]
-pub unsafe fn create_job_for_pid(pid: u32) -> HANDLE {
+pub unsafe fn create_job_for_pid(pid: u32) -> isize {
     // Open the child process with the rights needed to assign it to a job and
     // to terminate it.
     let proc_handle = unsafe {
@@ -84,24 +91,24 @@ pub unsafe fn create_job_for_pid(pid: u32) -> HANDLE {
             pid,
         )
     };
-    if proc_handle == 0 || proc_handle == INVALID_HANDLE_VALUE {
+    if proc_handle.is_null() || proc_handle == INVALID_HANDLE_VALUE {
         tracing::warn!(
             target: "upstream.process_guard.windows",
             pid,
             "OpenProcess failed — job object not created; falling back to per-PID kill"
         );
-        return INVALID_HANDLE_VALUE;
+        return 0;
     }
 
     let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-    if job == 0 || job == INVALID_HANDLE_VALUE {
+    if job.is_null() || job == INVALID_HANDLE_VALUE {
         tracing::warn!(
             target: "upstream.process_guard.windows",
             pid,
             "CreateJobObjectW failed — falling back to per-PID kill"
         );
         unsafe { CloseHandle(proc_handle) };
-        return INVALID_HANDLE_VALUE;
+        return 0;
     }
 
     // Read current extended limit info, flip on KILL_ON_JOB_CLOSE, write back.
@@ -151,7 +158,7 @@ pub unsafe fn create_job_for_pid(pid: u32) -> HANDLE {
             "AssignProcessToJobObject failed — job created but child not assigned; closing job"
         );
         unsafe { CloseHandle(job) };
-        return INVALID_HANDLE_VALUE;
+        return 0;
     }
 
     tracing::debug!(
@@ -159,23 +166,31 @@ pub unsafe fn create_job_for_pid(pid: u32) -> HANDLE {
         pid,
         "process assigned to job object with KILL_ON_JOB_CLOSE"
     );
-    job
+    // Return the raw HANDLE value as isize — Send/Sync-safe to store and pass.
+    job as isize
 }
 
 /// Close the job object handle, causing the OS to terminate all processes in
 /// the job (including grandchildren) if `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
 /// was set.
 ///
+/// Takes the handle as `isize` (the `Send`/`Sync`-safe representation stored in
+/// `UpstreamRuntimeMetadata.job_handle`); `0` is the "no job" sentinel and is a
+/// no-op. The value is cast back to `HANDLE` only here, immediately before
+/// `CloseHandle`.
+///
 /// Logs warnings on failure but never panics — safe to call from `Drop`.
 ///
 /// # Safety
 ///
-/// `job` must be a valid Job Object `HANDLE` obtained from [`create_job_for_pid`].
+/// `job` must be a value obtained from [`create_job_for_pid`] (either a valid
+/// job handle as `isize`, or `0`).
 #[cfg(windows)]
-pub unsafe fn close_job(job: HANDLE, pid: u32) {
-    if job == INVALID_HANDLE_VALUE || job == 0 {
+pub unsafe fn close_job(job: isize, pid: u32) {
+    if job == 0 {
         return;
     }
+    let job = job as HANDLE;
     let ok = unsafe { CloseHandle(job) };
     if ok == 0 {
         tracing::warn!(

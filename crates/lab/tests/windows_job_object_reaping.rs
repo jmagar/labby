@@ -50,7 +50,7 @@ mod windows_job_reaping {
                 pid,
             )
         };
-        if handle == 0 || handle == INVALID_HANDLE_VALUE {
+        if handle.is_null() || handle == INVALID_HANDLE_VALUE {
             return false; // Process already gone or no permission.
         }
         // A zero timeout: if the process has already exited the handle is
@@ -140,10 +140,12 @@ mod windows_job_reaping {
         );
 
         // Create a Job Object for the direct child (same API as production code).
-        let job = unsafe { labby::process::windows::create_job_for_pid(parent_pid) };
+        // `create_job_for_pid` returns the handle as `isize`; `0` is the failure
+        // sentinel.
+        let job: isize = unsafe { labby::process::windows::create_job_for_pid(parent_pid) };
         assert!(
-            job != INVALID_HANDLE_VALUE && job != 0,
-            "create_job_for_pid should succeed; got handle {job}"
+            job != 0,
+            "create_job_for_pid should succeed; got sentinel handle {job}"
         );
 
         // Close the job handle → OS terminates the whole tree.

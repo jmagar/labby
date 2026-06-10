@@ -194,10 +194,12 @@ pub(super) async fn connect_stdio_upstream(
     #[cfg(all(not(unix), not(windows)))]
     let pgid_for_runtime: Option<u32> = None;
 
+    // `disarm()` returns the job handle as `isize` (`0` == no job). When no
+    // pid was available the guard is `None`, so default to the `0` sentinel.
     #[cfg(windows)]
-    let job_handle_for_runtime = job_guard
+    let job_handle_for_runtime: isize = job_guard
         .map(super::super::process_guard::JobObjectGuard::disarm)
-        .unwrap_or(windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE);
+        .unwrap_or(0);
 
     let conn = UpstreamConnection {
         _client_service: service,
