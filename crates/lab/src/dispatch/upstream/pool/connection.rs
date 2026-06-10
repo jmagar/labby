@@ -265,63 +265,69 @@ impl UpstreamPool {
                 .clone()
         };
         let _guard = connect_lock.lock().await;
-        // Evict the lock entry after acquiring the guard when this is the sole
-        // remaining reference (Arc strong_count == 2: map + our clone).  This
-        // bounds `subject_connect_locks` growth — entries are added on first
-        // demand and removed once the connect completes and no other task is
-        // waiting on the same key.  Mirrors the lazy-lock eviction pattern for
-        // `lazy_connect_locks` (bound `subject_connect_locks` issue fix).
+
+        let result = async {
+            // Re-check after acquiring the lock — another waiter may have
+            // already opened and cached the connection.
+            {
+                let mut cache = self.subject_connections.write().await;
+                if let Some(entry) = cache.get_mut(&key) {
+                    if entry.last_used.elapsed() < SUBJECT_CONN_IDLE_TTL {
+                        entry.last_used = Instant::now();
+                        return Ok((entry.peer.clone(), entry.tools.clone()));
+                    }
+                    cache.remove(&key);
+                }
+            }
+
+            // Open a new connection, reusing the pool-level shared HTTP client.
+            let (conn, tools) = connect_upstream_with_client(
+                config,
+                Some(subject),
+                self.oauth_client_cache.as_ref(),
+                self.runtime_origin.as_deref(),
+                self.runtime_owner.as_ref(),
+                Some(&self.shared_http_client),
+            )
+            .await?;
+
+            let peer = conn.peer.clone();
+            let cached_tools = tools.clone();
+            {
+                let mut cache = self.subject_connections.write().await;
+                cache.insert(
+                    key.clone(),
+                    SubjectScopedConnection {
+                        _connection: conn,
+                        peer: peer.clone(),
+                        tools: cached_tools,
+                        last_used: Instant::now(),
+                    },
+                );
+            }
+            Ok((peer, tools))
+        }
+        .await;
+
+        // Bound `subject_connect_locks` growth: evict the lock entry once the
+        // connect attempt has COMPLETED (success or error) and this is the sole
+        // remaining reference (Arc strong_count == 2: map + our clone).
+        // Eviction must not happen before the connect — a caller arriving
+        // mid-connect would otherwise insert a fresh lock, acquire it
+        // immediately, and race a duplicate connect, defeating single-flight.
+        // After completion the cache is already populated (success) or a retry
+        // is acceptable (error). New clones require the map write lock we hold
+        // here, so the strong_count check cannot race an incoming waiter.
         {
             let mut locks = self.subject_connect_locks.write().await;
-            if let Some(entry) = locks.get(&key) {
-                // strong_count == 2: the map holds one ref, `connect_lock` holds one.
-                // Any other waiter would have cloned it, so count > 2 means another
-                // task is still holding it — leave it in the map for that task.
-                if Arc::strong_count(entry) <= 2 {
-                    locks.remove(&key);
-                }
+            if let Some(entry) = locks.get(&key)
+                && Arc::strong_count(entry) <= 2
+            {
+                locks.remove(&key);
             }
         }
 
-        // Re-check after acquiring the lock — another waiter may have
-        // already opened and cached the connection.
-        {
-            let mut cache = self.subject_connections.write().await;
-            if let Some(entry) = cache.get_mut(&key) {
-                if entry.last_used.elapsed() < SUBJECT_CONN_IDLE_TTL {
-                    entry.last_used = Instant::now();
-                    return Ok((entry.peer.clone(), entry.tools.clone()));
-                }
-                cache.remove(&key);
-            }
-        }
-
-        // Open a new connection, reusing the pool-level shared HTTP client.
-        let (conn, tools) = connect_upstream_with_client(
-            config,
-            Some(subject),
-            self.oauth_client_cache.as_ref(),
-            self.runtime_origin.as_deref(),
-            self.runtime_owner.as_ref(),
-            Some(&self.shared_http_client),
-        )
-        .await?;
-
-        let peer = conn.peer.clone();
-        let cached_tools = tools.clone();
-        {
-            let mut cache = self.subject_connections.write().await;
-            cache.insert(
-                key,
-                SubjectScopedConnection {
-                    _connection: conn,
-                    peer: peer.clone(),
-                    tools: cached_tools,
-                    last_used: Instant::now(),
-                },
-            );
-        }
-        Ok((peer, tools))
+        result
     }
 
     /// Evict all subject-scoped connections for a single upstream.
