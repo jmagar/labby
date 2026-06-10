@@ -206,11 +206,10 @@ impl LabMcpServer {
         if !visibility.hides_raw_tools()
             && let Some(pool) = self.current_upstream_pool().await
         {
-            for tool in pool.healthy_tools().await {
-                let name = tool.tool.name.to_string();
-                if !tools.contains(&name) {
-                    tools.insert(name);
-                }
+            // Use name-only accessor to avoid deep-cloning every tool schema
+            // just for change-detection (P-M2).
+            for name in pool.healthy_tool_names().await {
+                tools.insert(name);
             }
         }
 

@@ -20,6 +20,7 @@ use crate::registry::RegisteredService;
 use super::types::{UpstreamEntry, UpstreamRuntimeMetadata, UpstreamRuntimeOwner};
 
 mod capability;
+mod capability_call;
 mod connect;
 mod connect_stdio;
 mod connection;

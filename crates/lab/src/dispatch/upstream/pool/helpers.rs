@@ -7,7 +7,8 @@
 //! (and its descendants) can use them unqualified via `use helpers::*;`.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::io::Write;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use rmcp::model::{CallToolResult, Prompt, ReadResourceResult, Resource, ResourceContents};
@@ -55,20 +56,71 @@ pub fn in_process_upstream_name(service_name: &str) -> String {
     format!("__in_process__{service_name}")
 }
 
-/// Estimate the serialized size of a `CallToolResult`.
+/// A `Write` sink that counts bytes without allocating.
 ///
-/// Uses `serde_json::to_string` as a reasonable approximation. Not exact
-/// (ignores transport framing) but sufficient for the size cap guard.
-pub(super) fn estimate_response_size(result: &CallToolResult) -> usize {
-    serde_json::to_string(result).map_or(0, |s| s.len())
+/// Used by `estimate_response_size` so we measure JSON size by streaming
+/// through `serde_json::to_writer` instead of building the full string.
+struct ByteCounter(usize);
+
+impl Write for ByteCounter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0 += buf.len();
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
-/// Read the max response size from env or use the default.
+/// Estimate the serialized size of a `CallToolResult`.
+///
+/// Uses `serde_json::to_writer` with a counting sink — no allocation of the
+/// full serialized string.  Not exact (ignores transport framing) but sufficient
+/// for the size cap guard.
+pub(super) fn estimate_response_size(result: &CallToolResult) -> usize {
+    let mut counter = ByteCounter(0);
+    serde_json::to_writer(&mut counter, result).map_or(0, |()| counter.0)
+}
+
+/// Estimate the serialized size of a `ReadResourceResult`.
+///
+/// Mirrors `estimate_response_size` but for resource reads — avoids allocating
+/// the full JSON string just to measure it.
+pub(super) fn estimate_resource_response_size(result: &ReadResourceResult) -> usize {
+    let mut counter = ByteCounter(0);
+    serde_json::to_writer(&mut counter, result).map_or(0, |()| counter.0)
+}
+
+/// Cached max response size (resolved once from env on first call).
+///
+/// `LAB_UPSTREAM_MAX_RESPONSE_BYTES` is read at most once per process.
+/// Tests that need a different cap should use `max_response_bytes_override`
+/// (cfg(test) only) to replace the cached value before the first call.
+static MAX_RESPONSE_BYTES_CACHE: OnceLock<usize> = OnceLock::new();
+
+/// Return the max upstream response size.
+///
+/// Reads `LAB_UPSTREAM_MAX_RESPONSE_BYTES` once and caches the result for the
+/// lifetime of the process.  Subsequent calls return the cached value with no
+/// syscall overhead.
 pub(super) fn max_response_bytes() -> usize {
-    std::env::var("LAB_UPSTREAM_MAX_RESPONSE_BYTES")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(DEFAULT_MAX_RESPONSE_BYTES)
+    *MAX_RESPONSE_BYTES_CACHE.get_or_init(|| {
+        std::env::var("LAB_UPSTREAM_MAX_RESPONSE_BYTES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_MAX_RESPONSE_BYTES)
+    })
+}
+
+/// Override the cached max-response-bytes value for tests.
+///
+/// Must be called before `max_response_bytes()` is first invoked in the test
+/// process.  If the cache is already initialised the call is a no-op — use a
+/// fresh process (e.g. a dedicated `#[test]` binary shard) if you need a
+/// different value after first use.
+#[cfg(test)]
+pub(super) fn max_response_bytes_override(value: usize) -> bool {
+    MAX_RESPONSE_BYTES_CACHE.set(value).is_ok()
 }
 
 pub(super) fn classify_upstream_error(error: &str) -> &'static str {

@@ -90,7 +90,7 @@ impl<'a> UpstreamRequestLog<'a> {
 }
 
 pub(super) fn log_upstream_request_start(event: UpstreamRequestLog<'_>) {
-    tracing::debug!(
+    tracing::info!(
         surface = "dispatch",
         service = "upstream.pool",
         action = "upstream.request",
@@ -162,6 +162,101 @@ pub(super) fn log_upstream_request_error(
 mod tests {
     use super::*;
     use tracing_subscriber::layer::SubscriberExt;
+
+    /// O-L3: `request_id` propagates through the OAuth subject-scoped reconnect
+    /// fan-out.  Every log event emitted during a subject-scoped call — including
+    /// the `upstream_connect_error` emitted when `acquire_or_connect_subject` fails
+    /// — must carry the `request_id` inherited from the outer dispatch span.
+    ///
+    /// We simulate the fan-out by entering a dispatch span with a `request_id`
+    /// field and then calling `log_upstream_request_start` followed by
+    /// `log_upstream_request_error` with `kind = "upstream_connect_error"`, which
+    /// is exactly the sequence emitted by `subject_scoped_call_tool` when the OAuth
+    /// connect step fails.  If `request_id` is present in all three events the
+    /// span-context threading is correct.
+    #[test]
+    fn request_id_propagates_through_subject_scoped_reconnect_fan_out() {
+        let _tracing_lock = crate::test_support::TRACING_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let buf = crate::test_support::SharedBuf::default();
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::new("labby=info"))
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .json()
+                    .with_current_span(true)
+                    .with_writer(buf.clone())
+                    .with_ansi(false)
+                    .without_time(),
+            );
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        // Simulate the outer dispatch span that carries the request_id — this is
+        // created by the MCP/HTTP surface before calling into the pool.
+        let dispatch_span = tracing::info_span!(
+            "dispatch",
+            surface = "mcp",
+            service = "gateway",
+            action = "tools/call",
+            request_id = "req-oauth-fan-out-456"
+        );
+        let _entered = dispatch_span.enter();
+
+        // First hop: start event (subject_scoped = true, transport = "http").
+        let event =
+            UpstreamRequestLog::tool("oauth-upstream", "my_tool", true).with_transport("http");
+        log_upstream_request_start(event);
+
+        // Second hop: the connect error path — simulates `acquire_or_connect_subject`
+        // failing and the caller emitting "upstream_connect_error".
+        log_upstream_request_error(
+            event,
+            5,
+            "upstream_connect_error",
+            Some(&"OAuth token exchange failed"),
+            None,
+            None,
+        );
+
+        // Third hop: a normal error on a different subject (different fan-out branch).
+        let event2 =
+            UpstreamRequestLog::tool("oauth-upstream", "my_tool", true).with_transport("http");
+        log_upstream_request_error(event2, 12, "timeout", None, None, None);
+
+        drop(_entered);
+        drop(_guard);
+
+        let logs = crate::test_support::captured_logs(&buf);
+
+        // Every log line must carry request_id from the outer span.
+        let lines: Vec<&str> = logs.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert!(
+            !lines.is_empty(),
+            "expected at least one log line, got none"
+        );
+        for line in &lines {
+            assert!(
+                line.contains("\"request_id\":\"req-oauth-fan-out-456\""),
+                "request_id missing from log line:\n{line}"
+            );
+            assert!(
+                line.contains("\"subject_scoped\":true"),
+                "subject_scoped field missing from log line:\n{line}"
+            );
+        }
+
+        // The connect error hop must carry "upstream_connect_error" kind.
+        assert!(
+            logs.contains("\"kind\":\"upstream_connect_error\""),
+            "upstream_connect_error kind not found in logs:\n{logs}"
+        );
+        // The timeout hop must carry "timeout" kind.
+        assert!(
+            logs.contains("\"kind\":\"timeout\""),
+            "timeout kind not found in logs:\n{logs}"
+        );
+    }
 
     #[test]
     fn upstream_request_log_helpers_emit_documented_fields_and_inherit_request_id() {

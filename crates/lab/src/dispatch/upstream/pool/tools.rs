@@ -281,6 +281,32 @@ impl UpstreamPool {
         let catalog = self.catalog.read().await;
         catalog.get(upstream_name).map(|entry| entry.tool_health)
     }
+
+    /// Return just the names of all healthy exposed upstream tools.
+    ///
+    /// Cheaper than `healthy_tools()` for callers that only need tool names
+    /// (e.g. `snapshot_catalog` change-detection): avoids deep-cloning every
+    /// tool schema just to extract the name field.
+    pub async fn healthy_tool_names(&self) -> Vec<String> {
+        let catalog = self.catalog.read().await;
+        let mut names: Vec<String> = catalog
+            .values()
+            .filter(|entry| entry.tool_health.is_routable())
+            .flat_map(|entry| {
+                entry.tools.values().filter_map(|tool| {
+                    entry
+                        .exposure_policy
+                        .matches(tool.tool.name.as_ref())
+                        .then(|| tool.tool.name.to_string())
+                })
+            })
+            .take(MAX_UPSTREAM_TOOLS + 1)
+            .collect();
+        if names.len() > MAX_UPSTREAM_TOOLS {
+            names.truncate(MAX_UPSTREAM_TOOLS);
+        }
+        names
+    }
 }
 
 #[cfg(test)]

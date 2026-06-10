@@ -3,10 +3,6 @@
 //! Both acquire/connect the upstream peer, read the resource with a request
 //! timeout, normalize the returned URIs to the gateway form, enforce the
 //! response-size cap, and emit structured request logs.
-//!
-//! NO-TOUCH (plan §6): `subject_scoped_read_resource` retains its `subject`
-//! argument threading and the `redact_resource_uri_for_logging` call; bodies are
-//! moved byte-identical from `pool.rs`.
 
 use std::time::Instant;
 
@@ -16,14 +12,12 @@ use crate::config::UpstreamConfig;
 
 use super::super::types::UpstreamCapability;
 use super::UpstreamPool;
+use super::capability_call::timed_capability_call;
 use super::helpers::{
-    max_response_bytes, normalize_resource_result_uri, redact_resource_uri_for_logging,
-    upstream_transport,
+    estimate_resource_response_size, normalize_resource_result_uri,
+    redact_resource_uri_for_logging, upstream_transport,
 };
-use super::logging::{
-    UpstreamRequestLog, log_upstream_request_error, log_upstream_request_finish,
-    log_upstream_request_start,
-};
+use super::logging::{UpstreamRequestLog, log_upstream_request_error, log_upstream_request_start};
 
 impl UpstreamPool {
     /// Read a resource from an upstream, given a prefixed URI.
@@ -74,84 +68,27 @@ impl UpstreamPool {
         log_upstream_request_start(event);
 
         let params = rmcp::model::ReadResourceRequestParams::new(original_uri);
+        let gateway_uri = uri.to_string();
+        let timeout_ms = self.request_timeout.as_millis();
 
-        let result =
-            match tokio::time::timeout(self.request_timeout, peer.read_resource(params)).await {
-                Ok(Ok(result)) => {
-                    let normalized = normalize_resource_result_uri(result, uri);
-                    Ok(normalized)
-                }
-                Ok(Err(e)) => {
-                    self.record_failure_for(
-                        upstream_name,
-                        UpstreamCapability::Resources,
-                        format!("upstream resource read failed: {e}"),
-                    )
-                    .await;
-                    log_upstream_request_error(
-                        event,
-                        start.elapsed().as_millis(),
-                        "upstream_error",
-                        Some(&e),
-                        None,
-                        None,
-                    );
-                    Err(format!("upstream resource read failed: {e}"))
-                }
-                Err(_) => {
-                    let message = format!(
-                        "upstream resource read timed out after {}ms",
-                        self.request_timeout.as_millis()
-                    );
-                    self.record_failure_for(
-                        upstream_name,
-                        UpstreamCapability::Resources,
-                        message.clone(),
-                    )
-                    .await;
-                    log_upstream_request_error(
-                        event,
-                        start.elapsed().as_millis(),
-                        "timeout",
-                        None,
-                        None,
-                        None,
-                    );
-                    Err(message)
-                }
-            };
-
-        // Enforce the same response size cap as call_tool (post-hoc).
-        if let Ok(ref r) = result {
-            let response_size = serde_json::to_string(r).map_or(0, |s| s.len());
-            let max_bytes = max_response_bytes();
-            if response_size > max_bytes {
-                self.record_failure_for(
-                    upstream_name,
-                    UpstreamCapability::Resources,
-                    format!(
-                        "upstream resource response too large ({response_size} bytes, max {max_bytes})"
-                    ),
-                )
-                .await;
-                log_upstream_request_error(
-                    event,
-                    start.elapsed().as_millis(),
-                    "response_too_large",
-                    None,
-                    Some(response_size),
-                    Some(max_bytes),
-                );
-                return Some(Err(format!(
-                    "upstream resource response too large ({response_size} bytes, max {max_bytes})"
-                )));
-            }
-            self.record_success_for(upstream_name, UpstreamCapability::Resources)
-                .await;
-            log_upstream_request_finish(event, start.elapsed().as_millis(), Some(response_size));
-        }
-
-        Some(result)
+        // Use timed_capability_call for timeout/size-cap/log skeleton, then
+        // normalize the URI in the success path.
+        Some(
+            timed_capability_call(
+                self,
+                upstream_name,
+                UpstreamCapability::Resources,
+                event,
+                start,
+                peer.read_resource(params),
+                estimate_resource_response_size,
+                None,
+                |e| format!("upstream resource read failed: {e}"),
+                format!("upstream resource read timed out after {timeout_ms}ms"),
+            )
+            .await
+            .map(|result| normalize_resource_result_uri(result, &gateway_uri)),
+        )
     }
 
     pub async fn subject_scoped_read_resource(
@@ -190,89 +127,24 @@ impl UpstreamPool {
                 return Err(error.to_string());
             }
         };
-        match tokio::time::timeout(
-            self.request_timeout,
-            peer.read_resource(rmcp::model::ReadResourceRequestParams::new(original_uri)),
+        let params = rmcp::model::ReadResourceRequestParams::new(original_uri);
+        let gateway_uri = uri.to_string();
+        let timeout_ms = self.request_timeout.as_millis();
+
+        timed_capability_call(
+            self,
+            &config.name,
+            UpstreamCapability::Resources,
+            event,
+            start,
+            peer.read_resource(params),
+            estimate_resource_response_size,
+            Some(subject),
+            |e| format!("upstream resource read failed: {e}"),
+            format!("upstream resource read timed out after {timeout_ms}ms"),
         )
         .await
-        {
-            Ok(Ok(result)) => {
-                // Size check before recording success so an oversized response
-                // does not advance the circuit breaker's healthy counter.
-                let response_size = serde_json::to_string(&result).map_or(0, |s| s.len());
-                let max_bytes = max_response_bytes();
-                if response_size > max_bytes {
-                    self.record_failure_for(
-                        &config.name,
-                        UpstreamCapability::Resources,
-                        format!(
-                            "upstream resource response too large ({response_size} bytes, max {max_bytes})"
-                        ),
-                    )
-                    .await;
-                    log_upstream_request_error(
-                        event,
-                        start.elapsed().as_millis(),
-                        "response_too_large",
-                        None,
-                        Some(response_size),
-                        Some(max_bytes),
-                    );
-                    return Err(format!(
-                        "upstream resource response too large ({response_size} bytes, max {max_bytes})"
-                    ));
-                }
-                self.record_success_for(&config.name, UpstreamCapability::Resources)
-                    .await;
-                let normalized = normalize_resource_result_uri(result, uri);
-                log_upstream_request_finish(
-                    event,
-                    start.elapsed().as_millis(),
-                    Some(response_size),
-                );
-                Ok(normalized)
-            }
-            Ok(Err(error)) => {
-                self.record_failure_for(
-                    &config.name,
-                    UpstreamCapability::Resources,
-                    format!("upstream resource read failed: {error}"),
-                )
-                .await;
-                self.evict_subject_connection(&config.name, subject).await;
-                log_upstream_request_error(
-                    event,
-                    start.elapsed().as_millis(),
-                    "upstream_error",
-                    Some(&error),
-                    None,
-                    None,
-                );
-                Err(format!("upstream resource read failed: {error}"))
-            }
-            Err(_) => {
-                let message = format!(
-                    "upstream resource read timed out after {}ms",
-                    self.request_timeout.as_millis()
-                );
-                self.record_failure_for(
-                    &config.name,
-                    UpstreamCapability::Resources,
-                    message.clone(),
-                )
-                .await;
-                self.evict_subject_connection(&config.name, subject).await;
-                log_upstream_request_error(
-                    event,
-                    start.elapsed().as_millis(),
-                    "timeout",
-                    None,
-                    None,
-                    None,
-                );
-                Err(message)
-            }
-        }
+        .map(|result| normalize_resource_result_uri(result, &gateway_uri))
     }
 }
 
@@ -357,5 +229,105 @@ mod tests {
             .expect_err("slow resource read should time out");
 
         assert!(result.contains("timed out"));
+    }
+
+    /// T9: an upstream that returns an oversized resource body gets a structured
+    /// cap error — not a panic or OOM.
+    #[tokio::test]
+    async fn read_resource_oversized_response_returns_cap_error() {
+        use std::collections::HashMap;
+
+        use rmcp::model::{
+            AnnotateAble, ErrorData, ListResourcesResult, PaginatedRequestParams, RawResource,
+            ReadResourceResult, ResourceContents, ServerCapabilities, ServerInfo,
+        };
+        use rmcp::{RoleClient, RoleServer, ServerHandler, ServiceExt};
+
+        use super::super::super::types::UpstreamRuntimeMetadata;
+        use super::super::entries::healthy_in_process_entry;
+        use super::super::helpers::IN_PROCESS_PEER_BUFFER_BYTES;
+        use super::super::{UpstreamConnection, UpstreamPool};
+
+        struct OversizedResourceServer;
+        impl ServerHandler for OversizedResourceServer {
+            fn get_info(&self) -> ServerInfo {
+                ServerInfo::new(ServerCapabilities::builder().enable_resources().build())
+            }
+            async fn list_resources(
+                &self,
+                _: Option<PaginatedRequestParams>,
+                _: rmcp::service::RequestContext<RoleServer>,
+            ) -> Result<ListResourcesResult, ErrorData> {
+                Ok(ListResourcesResult::with_all_items(vec![
+                    RawResource::new("file:///tmp/big", "big-resource").no_annotation(),
+                ]))
+            }
+            async fn read_resource(
+                &self,
+                _: rmcp::model::ReadResourceRequestParams,
+                _: rmcp::service::RequestContext<RoleServer>,
+            ) -> Result<ReadResourceResult, ErrorData> {
+                // 12 MB of text — above the default 10 MB cap.
+                let payload = "x".repeat(12 * 1024 * 1024);
+                Ok(ReadResourceResult::new(vec![ResourceContents::text(
+                    "file:///tmp/big",
+                    payload,
+                )]))
+            }
+        }
+
+        let upstream_name = "oversized-resource";
+        let (server_transport, client_transport) = tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
+        let _server_task = tokio::spawn(async move {
+            let running = OversizedResourceServer
+                .serve(server_transport)
+                .await
+                .expect("oversized resource server starts");
+            running.waiting().await.ok();
+        });
+        let client_service: rmcp::service::RunningService<RoleClient, ()> = ()
+            .serve(client_transport)
+            .await
+            .expect("oversized resource client starts");
+        let peer = client_service.peer().clone();
+
+        let pool = Arc::new(UpstreamPool::new());
+        let upstream_name_arc: Arc<str> = Arc::from(upstream_name);
+        let mut entry = healthy_in_process_entry(Arc::clone(&upstream_name_arc), HashMap::new());
+        entry.resource_count = 1;
+        entry.resource_uris = vec!["file:///tmp/big".to_string()];
+        pool.catalog
+            .write()
+            .await
+            .insert(upstream_name.to_string(), entry);
+        pool.connections.write().await.insert(
+            upstream_name.to_string(),
+            UpstreamConnection {
+                _client_service: client_service,
+                _server_task: Some(_server_task),
+                peer,
+                runtime: UpstreamRuntimeMetadata::default(),
+            },
+        );
+        pool.resource_upstreams
+            .write()
+            .await
+            .push(upstream_name.to_string());
+
+        let uri = format!("lab://upstream/{upstream_name}/file:///tmp/big");
+        let result = pool
+            .read_upstream_resource(&uri)
+            .await
+            .expect("resource upstream is enabled")
+            .expect_err("oversized resource should be rejected");
+
+        assert!(
+            result.contains("too large"),
+            "expected 'too large' in error, got: {result}"
+        );
+        assert!(
+            result.contains("bytes"),
+            "expected byte count in error, got: {result}"
+        );
     }
 }

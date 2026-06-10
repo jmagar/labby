@@ -3,9 +3,6 @@
 //! `subject_scoped_prompts`/`subject_scoped_prompt_owner` discover prompts for
 //! OAuth upstreams under a subject; `get_prompt`/`subject_scoped_get_prompt`
 //! fetch a single prompt with a request timeout and structured logging.
-//!
-//! NO-TOUCH (plan §6): the `subject_scoped_*` methods retain their `subject`
-//! argument threading; bodies are moved byte-identical from `pool.rs`.
 
 use std::time::Instant;
 
@@ -17,14 +14,12 @@ use crate::config::UpstreamConfig;
 
 use super::super::types::UpstreamCapability;
 use super::UpstreamPool;
+use super::capability_call::timed_capability_call;
 use super::helpers::{
     bare_upstream_prompt_name, merge_upstream_prompts, prefixed_upstream_prompt_name,
     upstream_transport,
 };
-use super::logging::{
-    UpstreamRequestLog, log_upstream_request_error, log_upstream_request_finish,
-    log_upstream_request_start,
-};
+use super::logging::{UpstreamRequestLog, log_upstream_request_error, log_upstream_request_start};
 
 impl UpstreamPool {
     /// Discover prompts from all OAuth upstreams visible to `subject`.
@@ -134,52 +129,22 @@ impl UpstreamPool {
 
         log_upstream_request_start(event);
 
-        match tokio::time::timeout(self.request_timeout, peer.get_prompt(params)).await {
-            Ok(Ok(result)) => {
-                self.record_success_for(upstream_name, UpstreamCapability::Prompts)
-                    .await;
-                log_upstream_request_finish(event, start.elapsed().as_millis(), None);
-                Some(Ok(result))
-            }
-            Ok(Err(e)) => {
-                self.record_failure_for(
-                    upstream_name,
-                    UpstreamCapability::Prompts,
-                    format!("upstream prompt get failed: {e}"),
-                )
-                .await;
-                log_upstream_request_error(
-                    event,
-                    start.elapsed().as_millis(),
-                    "upstream_error",
-                    Some(&e),
-                    None,
-                    None,
-                );
-                Some(Err(format!("upstream prompt get failed: {e}")))
-            }
-            Err(_) => {
-                let message = format!(
-                    "upstream prompt get timed out after {}ms",
-                    self.request_timeout.as_millis()
-                );
-                self.record_failure_for(
-                    upstream_name,
-                    UpstreamCapability::Prompts,
-                    message.clone(),
-                )
-                .await;
-                log_upstream_request_error(
-                    event,
-                    start.elapsed().as_millis(),
-                    "timeout",
-                    None,
-                    None,
-                    None,
-                );
-                Some(Err(message))
-            }
-        }
+        let timeout_ms = self.request_timeout.as_millis();
+        Some(
+            timed_capability_call(
+                self,
+                upstream_name,
+                UpstreamCapability::Prompts,
+                event,
+                start,
+                peer.get_prompt(params),
+                |_result: &GetPromptResult| 0, // prompts have no size cap
+                None,
+                |e| format!("upstream prompt get failed: {e}"),
+                format!("upstream prompt get timed out after {timeout_ms}ms"),
+            )
+            .await,
+        )
     }
 
     /// Get a prompt from an OAuth-subject-scoped upstream.
@@ -220,50 +185,20 @@ impl UpstreamPool {
                 return Err(error.to_string());
             }
         };
-        match tokio::time::timeout(self.request_timeout, peer.get_prompt(params)).await {
-            Ok(Ok(result)) => {
-                self.record_success_for(&config.name, UpstreamCapability::Prompts)
-                    .await;
-                log_upstream_request_finish(event, start.elapsed().as_millis(), None);
-                Ok(result)
-            }
-            Ok(Err(error)) => {
-                self.record_failure_for(
-                    &config.name,
-                    UpstreamCapability::Prompts,
-                    format!("upstream prompt get failed: {error}"),
-                )
-                .await;
-                self.evict_subject_connection(&config.name, subject).await;
-                log_upstream_request_error(
-                    event,
-                    start.elapsed().as_millis(),
-                    "upstream_error",
-                    Some(&error),
-                    None,
-                    None,
-                );
-                Err(format!("upstream prompt get failed: {error}"))
-            }
-            Err(_) => {
-                let message = format!(
-                    "upstream prompt get timed out after {}ms",
-                    self.request_timeout.as_millis()
-                );
-                self.record_failure_for(&config.name, UpstreamCapability::Prompts, message.clone())
-                    .await;
-                self.evict_subject_connection(&config.name, subject).await;
-                log_upstream_request_error(
-                    event,
-                    start.elapsed().as_millis(),
-                    "timeout",
-                    None,
-                    None,
-                    None,
-                );
-                Err(message)
-            }
-        }
+        let timeout_ms = self.request_timeout.as_millis();
+        timed_capability_call(
+            self,
+            &config.name,
+            UpstreamCapability::Prompts,
+            event,
+            start,
+            peer.get_prompt(params),
+            |_result: &GetPromptResult| 0, // prompts have no size cap
+            Some(subject),
+            |e| format!("upstream prompt get failed: {e}"),
+            format!("upstream prompt get timed out after {timeout_ms}ms"),
+        )
+        .await
     }
 }
 
