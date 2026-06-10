@@ -15,6 +15,8 @@ use lab_apis::mcpregistry::McpRegistryClient;
 use lab_apis::mcpregistry::types::{EnvironmentVariable, ServerJSON};
 use serde_json::Value;
 
+#[cfg(feature = "mcpregistry")]
+use crate::config::GatewayPreferences;
 use crate::dispatch::error::ToolError;
 #[cfg(feature = "mcpregistry")]
 use crate::dispatch::helpers::to_json;
@@ -22,8 +24,6 @@ use crate::dispatch::helpers::to_json;
 use crate::dispatch::marketplace::LAB_REGISTRY_META_NAMESPACE;
 use crate::dispatch::marketplace::mcp_catalog::MCP_ACTIONS;
 use crate::dispatch::marketplace::mcp_client;
-#[cfg(feature = "mcpregistry")]
-use crate::config::GatewayPreferences;
 #[cfg(feature = "mcpregistry")]
 use crate::dispatch::marketplace::mcp_params;
 #[cfg(feature = "mcpregistry")]
@@ -251,9 +251,7 @@ async fn dispatch_mcp_install_inner(
     client: &McpRegistryClient,
     params: &Value,
 ) -> Result<Value, ToolError> {
-    let prefs = crate::config::load()
-        .map(|c| c.gateway)
-        .unwrap_or_default();
+    let prefs = crate::config::load().map(|c| c.gateway).unwrap_or_default();
     let name = mcp_params::require_name(params)?;
     let version = params["version"].as_str().unwrap_or("latest");
 
@@ -581,7 +579,11 @@ fn build_stdio_command<'a>(
         ),
     })?;
 
-    mcp_params::validate_runtime_hint(hint, &prefs.extra_stdio_commands, prefs.disable_spawn_guard)?;
+    mcp_params::validate_runtime_hint(
+        hint,
+        &prefs.extra_stdio_commands,
+        prefs.disable_spawn_guard,
+    )?;
 
     let mut argv: Vec<String> = pkg
         .runtime_arguments
@@ -957,8 +959,14 @@ mod tests {
 
     #[test]
     fn stdio_install_builds_gateway_spec_from_package() {
-        let spec =
-            install_stdio(&package(Some("npx")), "demo", &json!({}), "io.github/demo", &Default::default()).unwrap();
+        let spec = install_stdio(
+            &package(Some("npx")),
+            "demo",
+            &json!({}),
+            "io.github/demo",
+            &Default::default(),
+        )
+        .unwrap();
 
         assert_eq!(spec["command"], "npx");
         assert_eq!(spec["args"], json!(["-y", "@example/server"]));
@@ -969,7 +977,14 @@ mod tests {
 
     #[test]
     fn stdio_install_rejects_missing_runtime_hint() {
-        let err = install_stdio(&package(None), "demo", &json!({}), "io.github/demo", &Default::default()).unwrap_err();
+        let err = install_stdio(
+            &package(None),
+            "demo",
+            &json!({}),
+            "io.github/demo",
+            &Default::default(),
+        )
+        .unwrap_err();
 
         assert_eq!(err.kind(), "unsupported_runtime_hint");
     }
@@ -979,7 +994,14 @@ mod tests {
         let mut pkg = package(Some("docker"));
         pkg.runtime_arguments = vec![json!("run"), json!("--privileged")];
 
-        let err = install_stdio(&pkg, "demo", &json!({}), "io.github/demo", &Default::default()).unwrap_err();
+        let err = install_stdio(
+            &pkg,
+            "demo",
+            &json!({}),
+            "io.github/demo",
+            &Default::default(),
+        )
+        .unwrap_err();
 
         assert_eq!(err.kind(), "invalid_param");
     }
@@ -998,7 +1020,14 @@ mod tests {
             format: Some("token".to_string()),
         }];
 
-        let err = install_stdio(&pkg, "demo", &json!({}), "io.github/demo", &Default::default()).unwrap_err();
+        let err = install_stdio(
+            &pkg,
+            "demo",
+            &json!({}),
+            "io.github/demo",
+            &Default::default(),
+        )
+        .unwrap_err();
 
         assert_eq!(err.kind(), "missing_env_values");
         assert!(err.to_string().contains("TRUST_API_KEY"));
@@ -1019,7 +1048,14 @@ mod tests {
             format: None,
         }];
 
-        let err = install_stdio(&pkg, "demo", &json!({}), "io.github/demo", &Default::default()).unwrap_err();
+        let err = install_stdio(
+            &pkg,
+            "demo",
+            &json!({}),
+            "io.github/demo",
+            &Default::default(),
+        )
+        .unwrap_err();
 
         assert_eq!(err.kind(), "invalid_param");
     }
@@ -1097,7 +1133,14 @@ mod tests {
         let mut pkg = package(Some("npx"));
         pkg.registry_type = "mcpb".to_string();
 
-        let err = install_stdio(&pkg, "demo", &json!({}), "io.github/demo", &Default::default()).unwrap_err();
+        let err = install_stdio(
+            &pkg,
+            "demo",
+            &json!({}),
+            "io.github/demo",
+            &Default::default(),
+        )
+        .unwrap_err();
 
         assert_eq!(err.kind(), "unsupported_registry_type");
     }

@@ -76,7 +76,11 @@ pub const DANGEROUS_DENO_FLAGS: &[&str] = &["eval", "--allow-all", "-A"];
 /// Pass `bypass = true` to skip all validation (requires `disable_spawn_guard = true`).
 ///
 /// Returns `invalid_param` if the command is not in either allowlist.
-pub fn validate_stdio_command(command: &str, extra: &[String], bypass: bool) -> Result<(), ToolError> {
+pub fn validate_stdio_command(
+    command: &str,
+    extra: &[String],
+    bypass: bool,
+) -> Result<(), ToolError> {
     if bypass {
         return Ok(());
     }
@@ -431,7 +435,8 @@ mod tests {
     fn spec_rejects_ld_preload_env() {
         let mut env = BTreeMap::new();
         env.insert("LD_PRELOAD".to_string(), "/tmp/evil.so".to_string());
-        let err = validate_stdio_spec("node", &["server.js".to_string()], &env, &[], false).unwrap_err();
+        let err =
+            validate_stdio_spec("node", &["server.js".to_string()], &env, &[], false).unwrap_err();
         assert_eq!(err.kind(), "invalid_param");
     }
 
@@ -439,8 +444,14 @@ mod tests {
     fn spec_rejects_path_override() {
         let mut env = BTreeMap::new();
         env.insert("PATH".to_string(), "/tmp/evil:$PATH".to_string());
-        let err = validate_stdio_spec("npx", &["-y".to_string(), "some-pkg".to_string()], &env, &[], false)
-            .unwrap_err();
+        let err = validate_stdio_spec(
+            "npx",
+            &["-y".to_string(), "some-pkg".to_string()],
+            &env,
+            &[],
+            false,
+        )
+        .unwrap_err();
         assert_eq!(err.kind(), "invalid_param");
     }
 
