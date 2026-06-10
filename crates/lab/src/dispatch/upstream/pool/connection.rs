@@ -265,6 +265,23 @@ impl UpstreamPool {
                 .clone()
         };
         let _guard = connect_lock.lock().await;
+        // Evict the lock entry after acquiring the guard when this is the sole
+        // remaining reference (Arc strong_count == 2: map + our clone).  This
+        // bounds `subject_connect_locks` growth — entries are added on first
+        // demand and removed once the connect completes and no other task is
+        // waiting on the same key.  Mirrors the lazy-lock eviction pattern for
+        // `lazy_connect_locks` (bound `subject_connect_locks` issue fix).
+        {
+            let mut locks = self.subject_connect_locks.write().await;
+            if let Some(entry) = locks.get(&key) {
+                // strong_count == 2: the map holds one ref, `connect_lock` holds one.
+                // Any other waiter would have cloned it, so count > 2 means another
+                // task is still holding it — leave it in the map for that task.
+                if Arc::strong_count(entry) <= 2 {
+                    locks.remove(&key);
+                }
+            }
+        }
 
         // Re-check after acquiring the lock — another waiter may have
         // already opened and cached the connection.

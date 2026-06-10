@@ -1,29 +1,36 @@
-//! Connection establishment for stdio (child-process) and in-process upstreams.
+//! Connection establishment for stdio (child-process) upstreams.
 //!
 //! `connect_stdio_upstream` spawns a child process and arms the process-group
-//! guard; `connect_in_process_service_peer` wires a `LabMcpServer` over an
-//! in-memory duplex transport. Both are `pub(super)` so the pool module and the
-//! sibling `connect` module can call them.
-
-use std::sync::Arc;
-use std::sync::atomic::AtomicU8;
-
-use rmcp::model::LoggingLevel;
-use rmcp::{RoleClient, ServiceExt};
-use tokio::sync::RwLock;
+//! guard. In-process peer construction is owned by `crate::mcp::in_process_peer`
+//! (the `InProcessConnector` IoC seam) — this module no longer imports from
+//! `crate::mcp` (A-M6 fix).
 
 use crate::config::UpstreamConfig;
-use crate::mcp::logging::logging_level_rank;
-use crate::mcp::server::LabMcpServer;
-use crate::registry::{RegisteredService, ToolRegistry};
+use rmcp::{RoleClient, ServiceExt};
 
 use super::super::auth::configured_bearer_token;
 use super::super::types::{UpstreamRuntimeMetadata, UpstreamRuntimeOwner};
 use super::UpstreamConnection;
 use super::connect::runtime_origin_label;
-use super::helpers::IN_PROCESS_PEER_BUFFER_BYTES;
 
 /// Connect to a stdio upstream MCP server (child process).
+///
+/// ## Security invariants
+///
+/// - **`env_clear` + allowlist (S1):** the child process is started with a
+///   scrubbed environment (`cmd.env_clear()`). Only vars in `STDIO_ENV_ALLOWLIST`
+///   (runtime essentials: PATH, HOME, TZ, SSL roots, …) are forwarded; the
+///   upstream's declared `env` map and the optional bearer-token var are then
+///   layered on top. `LAB_*` secrets and every other ambient labby env var are
+///   excluded.
+///
+/// - **Spawn-guard allowlist (S6 — accepted residual):** `validate_stdio_command`
+///   in `spawn_guard.rs` checks that the command basename is in
+///   `ALLOWED_RUNTIME_HINTS`. The check is **basename-only** — a path like
+///   `/tmp/x/node` passes because `Path::file_name()` extracts `node`. This is
+///   an accepted residual: the trust boundary is admin-write access to the gateway
+///   config file or authenticated `gateway.add` / `gateway.update` calls. The
+///   allowlist is applied at config-write time, not here.
 pub(super) async fn connect_stdio_upstream(
     command: &str,
     args: &[String],
@@ -196,28 +203,89 @@ fn upstream_stderr_capture_enabled() -> bool {
     }
 }
 
+/// Maximum number of bytes forwarded per line from a child's stderr.
+///
+/// Lines longer than this are truncated before emission so a chatty or
+/// adversarial upstream cannot amplify log volume with a single huge write.
+const STDERR_LINE_MAX_BYTES: usize = 1024;
+
+/// Maximum number of lines forwarded per second from a single upstream's stderr.
+///
+/// Exceeding this cap drops lines and emits a single `WARN` instead, protecting
+/// labby's log stream from a firehose upstream (O-M2 / P-L5).
+const STDERR_RATE_CAP_PER_SEC: u32 = 50;
+
 /// Drain a piped child stderr to EOF, forwarding each non-empty line into the
-/// gateway log under the `labby::upstream_stderr` target (silence just this
-/// stream with `LAB_LOG=labby::upstream_stderr=warn`). Draining is mandatory:
-/// an unread pipe buffer fills and blocks the child's next stderr write.
+/// gateway log under the `labby::upstream_stderr` target at **DEBUG** level
+/// (silence just this stream with `LAB_LOG=labby::upstream_stderr=warn`).
+///
+/// Security / observability invariants (O-M2 / P-L5):
+/// - Lines are emitted at DEBUG so a chatty upstream does not pollute the INFO stream.
+/// - Each line is capped at `STDERR_LINE_MAX_BYTES` before logging.
+/// - Lines are rate-limited to `STDERR_RATE_CAP_PER_SEC`; bursts above the cap
+///   are dropped with a single warning rather than forwarded verbatim.
+/// - Each line is run through `redact_stdio_value` so a third-party upstream
+///   printing its own token cannot launder credentials into labby's log stream.
+///
+/// Draining is mandatory: an unread pipe buffer fills and blocks the child's
+/// next stderr write, hanging the upstream.
 fn forward_upstream_stderr(stderr: Option<tokio::process::ChildStderr>, upstream: String) {
     let Some(stderr) = stderr else { return };
     tokio::spawn(async move {
+        use crate::dispatch::redact::redact_stdio_value;
         use tokio::io::{AsyncBufReadExt, BufReader};
+
         let mut lines = BufReader::new(stderr).lines();
+        // Rate-limiting state: count of lines emitted in the current second.
+        let mut window_start = std::time::Instant::now();
+        let mut lines_this_window: u32 = 0;
+        let mut dropped_this_window: u32 = 0;
+
         loop {
             match lines.next_line().await {
                 Ok(Some(line)) => {
                     if line.trim().is_empty() {
                         continue;
                     }
-                    tracing::info!(
+
+                    // Rotate rate-limit window every second.
+                    if window_start.elapsed().as_secs() >= 1 {
+                        if dropped_this_window > 0 {
+                            tracing::warn!(
+                                target: "labby::upstream_stderr",
+                                upstream = %upstream,
+                                dropped = dropped_this_window,
+                                "upstream stderr rate cap exceeded; lines dropped"
+                            );
+                        }
+                        window_start = std::time::Instant::now();
+                        lines_this_window = 0;
+                        dropped_this_window = 0;
+                    }
+
+                    if lines_this_window >= STDERR_RATE_CAP_PER_SEC {
+                        dropped_this_window += 1;
+                        continue;
+                    }
+                    lines_this_window += 1;
+
+                    // Truncate long lines before redaction/emission.
+                    let truncated = if line.len() > STDERR_LINE_MAX_BYTES {
+                        format!("{}…[truncated]", &line[..STDERR_LINE_MAX_BYTES])
+                    } else {
+                        line
+                    };
+
+                    // Redact credential-shaped tokens before forwarding.
+                    let redacted = redact_stdio_value(&truncated);
+
+                    tracing::debug!(
                         target: "labby::upstream_stderr",
                         surface = "dispatch",
                         service = "upstream.pool",
                         upstream = %upstream,
                         stream = "stderr",
-                        "{line}",
+                        "{redacted}",
                     );
                 }
                 Ok(None) => break,
@@ -233,79 +301,4 @@ fn forward_upstream_stderr(stderr: Option<tokio::process::ChildStderr>, upstream
             }
         }
     });
-}
-
-pub(super) async fn connect_in_process_service_peer(
-    service: &RegisteredService,
-) -> anyhow::Result<(UpstreamConnection, Vec<rmcp::model::Tool>)> {
-    tracing::info!(
-        service = service.name,
-        phase = "in_process.connect.start",
-        "connecting in-process peer"
-    );
-    let (server_transport, client_transport) = tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
-    let mut registry = ToolRegistry::new();
-    registry.register(service.clone());
-    let server = LabMcpServer {
-        registry: Arc::new(registry),
-        gateway_manager: None,
-        node_role: None,
-        peers: Arc::new(RwLock::new(Vec::new())),
-        logging_level: Arc::new(AtomicU8::new(logging_level_rank(LoggingLevel::Emergency))),
-    };
-    let service_name = service.name;
-    let server_task = tokio::spawn(async move {
-        tracing::info!(
-            service = service_name,
-            phase = "in_process.server.spawned",
-            "starting in-process server task"
-        );
-        match server.serve(server_transport).await {
-            Ok(running) => {
-                tracing::info!(
-                    service = service_name,
-                    phase = "in_process.server.ready",
-                    "in-process server transport ready"
-                );
-                if let Err(error) = running.waiting().await {
-                    tracing::warn!(service = service_name, phase = "in_process.server.waiting.error", error = %error, "in-process server exited with error");
-                }
-            }
-            Err(error) => {
-                tracing::warn!(service = service_name, phase = "in_process.server.serve.error", error = %error, "failed to start in-process server");
-            }
-        }
-    });
-    let client_service: rmcp::service::RunningService<RoleClient, ()> =
-        ().serve(client_transport).await?;
-    tracing::info!(
-        service = service.name,
-        phase = "in_process.client.ready",
-        "in-process client transport ready"
-    );
-    let peer = client_service.peer().clone();
-    tracing::info!(
-        service = service.name,
-        phase = "in_process.list_tools.start",
-        process_code_mode_enabled = crate::config::process_code_mode_enabled(),
-        "requesting in-process tool list"
-    );
-    let tools = peer.list_all_tools().await?;
-    tracing::info!(
-        service = service.name,
-        phase = "in_process.list_tools.finish",
-        tool_count = tools.len(),
-        process_code_mode_enabled = crate::config::process_code_mode_enabled(),
-        "in-process tool list received"
-    );
-
-    Ok((
-        UpstreamConnection {
-            _client_service: client_service,
-            _server_task: Some(server_task),
-            peer,
-            runtime: UpstreamRuntimeMetadata::default(),
-        },
-        tools,
-    ))
 }

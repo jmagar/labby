@@ -101,12 +101,16 @@ process environment.** The following invariants are NON-NEGOTIABLE:
    - `pool/connect_stdio.rs` sets a process-group guard so spawned children are
      reaped on drop.
 
-3. **Env inheritance is the current behavior; env_clear hardening is planned.**
-   The runner subprocess currently inherits labby's env. The intended hardened
-   state (SEC work item) is `env_clear` on the runner child with an explicit
-   allowlist. Integration tests in `crates/lab/tests/` that assert on env
-   behavior should document which state they are testing and mark themselves
-   `#[ignore]` if they depend on the hardened path being in place.
+3. **`env_clear` + `STDIO_ENV_ALLOWLIST` is the CURRENT hardened state.**
+   `pool/connect_stdio.rs` calls `cmd.env_clear()` and then layers only the
+   entries in `STDIO_ENV_ALLOWLIST` (PATH, HOME, TZ, SSL roots, and a small set
+   of runtime-essential vars) before adding the upstream's declared `env` map.
+   `LAB_*` secrets and every other ambient labby env var are excluded by default.
+   To extend the allowlist, add entries to `STDIO_ENV_ALLOWLIST` in
+   `pool/connect_stdio.rs` with a comment justifying why the var is safe to
+   forward. Integration tests in `crates/lab/tests/gateway_stdio_spawn.rs` that
+   assert on env behaviour are non-`#[ignore]` where hermetic (Linux `/proc`
+   inspect) and `#[ignore]` where they require a built binary or external tool.
 
 4. **`wasm_runner.rs` is dead code.** No Wasmtime/fuel path is wired. The live
    Code Mode runner is always Javy/QuickJS via subprocess stdio. If you see

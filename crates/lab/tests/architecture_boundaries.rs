@@ -18,12 +18,14 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 /// Dispatch files allowed to reference `crate::mcp`, by `src`-relative path:
-/// - `connect_stdio.rs` constructs an in-process `LabMcpServer` peer; inverting
-///   that dependency is a larger refactor tracked separately and deferred here.
 /// - `prompts_list.rs` / `resources_read.rs` reference the MCP surface only from
 ///   `#[cfg(test)]` fixtures, not the shipped dispatch path.
+///
+/// NOTE: `connect_stdio.rs` was previously in this list because it constructed an
+/// in-process `LabMcpServer` peer directly. That code has been removed (A-M6):
+/// in-process peer construction now lives exclusively in `crate::mcp::in_process_peer`
+/// and is injected via the `InProcessConnector` IoC seam. The boundary is now clean.
 const ALLOWED_MCP_IMPORTS: &[&str] = &[
-    "dispatch/upstream/pool/connect_stdio.rs",
     "dispatch/upstream/pool/prompts_list.rs",
     "dispatch/upstream/pool/resources_read.rs",
 ];

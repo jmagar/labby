@@ -46,10 +46,8 @@ mod validate;
 use helpers::DEFAULT_REQUEST_TIMEOUT;
 pub(crate) use helpers::redact_resource_uri_for_logging;
 pub use helpers::{UpstreamCachedSummary, in_process_upstream_name};
-// Re-export the catalog size caps so tests and gateway code can reference them
-// without reaching into a submodule path.
-#[allow(unused_imports)]
-pub use tools::{MAX_UPSTREAM_PROMPTS, MAX_UPSTREAM_RESOURCES, MAX_UPSTREAM_TOOLS};
+// Catalog size caps are used by pool child modules directly via `super::tools::*`.
+// No external consumer references them through this path, so no `pub use` needed.
 
 /// A cached subject-scoped connection entry.  Holds the live peer plus the
 /// tool list that was discovered when the connection was opened.  Protected
