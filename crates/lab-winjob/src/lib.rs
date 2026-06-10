@@ -1,5 +1,12 @@
 //! Windows Job Object helpers for process-tree reaping.
 //!
+//! This crate is the **sanctioned unsafe boundary** for `lab`'s Windows Job
+//! Object FFI, mirroring how the Unix path routes its unsafe through the
+//! external `nix` crate. The workspace sets `unsafe_code = "forbid"` (which a
+//! `#[allow]` cannot escape), so `lab` and `lab-apis` stay unsafe-free. The raw
+//! `windows-sys` calls are encapsulated here behind a **safe** public API:
+//! callers never write `unsafe`.
+//!
 //! On Windows there is no concept of a process group. A Job Object is the
 //! nearest OS equivalent: the kernel associates a child process (and, when
 //! `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` is set, its entire descendant tree)
@@ -46,6 +53,18 @@
 //! approach is to use `JobObject` from `process-wrap` (which passes
 //! `CREATE_SUSPENDED` to `CreateProcess`) with a custom Tokio child-process
 //! wrapper that resumes the process after the job is assigned.
+//!
+//! ## Handle representation
+//!
+//! The job handle is stored and passed as `isize` (the raw `HANDLE` value), not
+//! `HANDLE` itself. In `windows-sys 0.59` `HANDLE` is `*mut c_void`
+//! (`!Send + !Sync`), which would poison the `Send`/`Sync` bounds of any struct
+//! that stores it (and break `lab`'s axum router). `isize` is
+//! `Copy + Send + Sync`; we cast back to `HANDLE` only at the `CloseHandle`
+//! boundary inside [`close_job`].
+//!
+//! On non-Windows targets this crate compiles to an empty library (`lab` only
+//! depends on it under `cfg(windows)`).
 
 #[cfg(windows)]
 use windows_sys::Win32::{
@@ -56,9 +75,7 @@ use windows_sys::Win32::{
             JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
             QueryInformationJobObject, SetInformationJobObject,
         },
-        Threading::OpenProcess,
-        Threading::PROCESS_SET_QUOTA,
-        Threading::PROCESS_TERMINATE,
+        Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE},
     },
 };
 
@@ -72,16 +89,16 @@ use windows_sys::Win32::{
 ///
 /// The handle is returned as `isize` rather than `HANDLE` (`*mut c_void`)
 /// deliberately: in `windows-sys 0.59` `HANDLE` is a raw pointer, which is
-/// `!Send + !Sync`. Storing it raw in `UpstreamRuntimeMetadata` would poison
-/// `AppState`'s `Send`/`Sync` bounds and break the axum router. `isize` is
-/// `Copy + Send + Sync`, so the stored/passed value crosses thread boundaries
-/// cleanly; we cast back to `HANDLE` only at the `CloseHandle` boundary.
+/// `!Send + !Sync`. Storing it raw in a struct would poison that struct's
+/// `Send`/`Sync` bounds. `isize` is `Copy + Send + Sync`, so the stored/passed
+/// value crosses thread boundaries cleanly; we cast back to `HANDLE` only at
+/// the `CloseHandle` boundary.
 ///
-/// # Safety
-///
-/// This function calls Win32 APIs and is therefore unsafe.
+/// This is a **safe** function: the `unsafe` FFI is fully encapsulated here, so
+/// callers (in `lab`, which forbids unsafe) never write `unsafe`.
 #[cfg(windows)]
-pub unsafe fn create_job_for_pid(pid: u32) -> isize {
+#[must_use]
+pub fn create_job_for_pid(pid: u32) -> isize {
     // Open the child process with the rights needed to assign it to a job and
     // to terminate it.
     let proc_handle = unsafe {
@@ -93,7 +110,7 @@ pub unsafe fn create_job_for_pid(pid: u32) -> isize {
     };
     if proc_handle.is_null() || proc_handle == INVALID_HANDLE_VALUE {
         tracing::warn!(
-            target: "upstream.process_guard.windows",
+            target: "lab_winjob",
             pid,
             "OpenProcess failed — job object not created; falling back to per-PID kill"
         );
@@ -103,7 +120,7 @@ pub unsafe fn create_job_for_pid(pid: u32) -> isize {
     let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
     if job.is_null() || job == INVALID_HANDLE_VALUE {
         tracing::warn!(
-            target: "upstream.process_guard.windows",
+            target: "lab_winjob",
             pid,
             "CreateJobObjectW failed — falling back to per-PID kill"
         );
@@ -118,14 +135,13 @@ pub unsafe fn create_job_for_pid(pid: u32) -> isize {
             job,
             JobObjectExtendedLimitInformation,
             std::ptr::addr_of_mut!(info).cast(),
-            u32::try_from(std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
-                .unwrap_or(u32::MAX),
+            u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()).unwrap_or(u32::MAX),
             std::ptr::null_mut(),
         )
     };
     if ok == 0 {
         tracing::warn!(
-            target: "upstream.process_guard.windows",
+            target: "lab_winjob",
             pid,
             "QueryInformationJobObject failed — killing job without KILL_ON_JOB_CLOSE"
         );
@@ -136,13 +152,13 @@ pub unsafe fn create_job_for_pid(pid: u32) -> isize {
                 job,
                 JobObjectExtendedLimitInformation,
                 std::ptr::addr_of!(info).cast(),
-                u32::try_from(std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
+                u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
                     .unwrap_or(u32::MAX),
             )
         };
         if set_ok == 0 {
             tracing::warn!(
-                target: "upstream.process_guard.windows",
+                target: "lab_winjob",
                 pid,
                 "SetInformationJobObject failed — KILL_ON_JOB_CLOSE not set"
             );
@@ -153,7 +169,7 @@ pub unsafe fn create_job_for_pid(pid: u32) -> isize {
     unsafe { CloseHandle(proc_handle) };
     if assigned == 0 {
         tracing::warn!(
-            target: "upstream.process_guard.windows",
+            target: "lab_winjob",
             pid,
             "AssignProcessToJobObject failed — job created but child not assigned; closing job"
         );
@@ -162,7 +178,7 @@ pub unsafe fn create_job_for_pid(pid: u32) -> isize {
     }
 
     tracing::debug!(
-        target: "upstream.process_guard.windows",
+        target: "lab_winjob",
         pid,
         "process assigned to job object with KILL_ON_JOB_CLOSE"
     );
@@ -174,19 +190,15 @@ pub unsafe fn create_job_for_pid(pid: u32) -> isize {
 /// the job (including grandchildren) if `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
 /// was set.
 ///
-/// Takes the handle as `isize` (the `Send`/`Sync`-safe representation stored in
-/// `UpstreamRuntimeMetadata.job_handle`); `0` is the "no job" sentinel and is a
-/// no-op. The value is cast back to `HANDLE` only here, immediately before
-/// `CloseHandle`.
+/// Takes the handle as `isize` (the `Send`/`Sync`-safe representation stored by
+/// the caller); `0` is the "no job" sentinel and is a no-op. The value is cast
+/// back to `HANDLE` only here, immediately before `CloseHandle`.
 ///
 /// Logs warnings on failure but never panics — safe to call from `Drop`.
 ///
-/// # Safety
-///
-/// `job` must be a value obtained from [`create_job_for_pid`] (either a valid
-/// job handle as `isize`, or `0`).
+/// This is a **safe** function: the `unsafe` FFI is fully encapsulated here.
 #[cfg(windows)]
-pub unsafe fn close_job(job: isize, pid: u32) {
+pub fn close_job(job: isize, pid: u32) {
     if job == 0 {
         return;
     }
@@ -194,15 +206,87 @@ pub unsafe fn close_job(job: isize, pid: u32) {
     let ok = unsafe { CloseHandle(job) };
     if ok == 0 {
         tracing::warn!(
-            target: "upstream.process_guard.windows",
+            target: "lab_winjob",
             pid,
             "CloseHandle(job) failed — descendant processes may have orphaned"
         );
     } else {
         tracing::debug!(
-            target: "upstream.process_guard.windows",
+            target: "lab_winjob",
             pid,
             "job object handle closed — OS reaping descendant tree"
         );
     }
+}
+
+/// Return `true` if `pid` refers to a process that is still running.
+///
+/// Used by the Job Object reaping integration test (which lives in `lab`, where
+/// unsafe is forbidden) to assert that a grandchild was terminated. The unsafe
+/// FFI is encapsulated here so the test stays unsafe-free.
+///
+/// Returns `false` if the process has exited, was never present, or cannot be
+/// opened (e.g. insufficient permission) — for the test's purposes "not
+/// observably alive" is the signal it needs.
+#[cfg(windows)]
+#[must_use]
+pub fn pid_is_alive(pid: u32) -> bool {
+    use windows_sys::Win32::System::Threading::{
+        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, WAIT_OBJECT_0, WaitForSingleObject,
+    };
+
+    let handle = unsafe {
+        OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+            0,
+            pid,
+        )
+    };
+    if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+        return false; // Process already gone or no permission.
+    }
+    // Zero timeout: an already-exited process signals immediately (WAIT_OBJECT_0).
+    let result = unsafe { WaitForSingleObject(handle, 0) };
+    unsafe { CloseHandle(handle) };
+    result != WAIT_OBJECT_0
+}
+
+/// Find the PID of the first child process whose parent is `parent_pid`.
+///
+/// Walks the system process snapshot via the ToolHelp API. Used by the Job
+/// Object reaping integration test to locate the grandchild (`ping.exe` under
+/// `cmd`). Returns `None` if the snapshot cannot be taken or no child is found.
+///
+/// The unsafe FFI is encapsulated here so the test (in `lab`) stays unsafe-free.
+#[cfg(windows)]
+#[must_use]
+pub fn find_first_child_pid(parent_pid: u32) -> Option<u32> {
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+        TH32CS_SNAPPROCESS,
+    };
+
+    let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snap == INVALID_HANDLE_VALUE {
+        return None;
+    }
+
+    let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
+    let Ok(size) = u32::try_from(size_of::<PROCESSENTRY32W>()) else {
+        unsafe { CloseHandle(snap) };
+        return None;
+    };
+    entry.dwSize = size;
+
+    let mut found: Option<u32> = None;
+    let mut more = unsafe { Process32FirstW(snap, &mut entry) } != 0;
+    while more {
+        if entry.th32ParentProcessID == parent_pid {
+            found = Some(entry.th32ProcessID);
+            break;
+        }
+        more = unsafe { Process32NextW(snap, &mut entry) } != 0;
+    }
+    unsafe { CloseHandle(snap) };
+    found
 }

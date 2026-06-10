@@ -116,9 +116,10 @@ impl JobObjectGuard {
     /// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
     #[must_use]
     pub fn arm(pid: u32) -> Self {
-        // SAFETY: create_job_for_pid only calls Win32 APIs with well-formed
-        // arguments. Any failure is logged and returns the `0` sentinel.
-        let job = unsafe { crate::process::windows::create_job_for_pid(pid) };
+        // `lab_winjob::create_job_for_pid` is a SAFE wrapper (the unsafe FFI is
+        // encapsulated in the sanctioned `lab-winjob` crate). On any Win32
+        // failure it logs and returns the `0` sentinel.
+        let job = lab_winjob::create_job_for_pid(pid);
         Self { job, pid }
     }
 
@@ -138,9 +139,9 @@ impl JobObjectGuard {
 #[cfg(windows)]
 impl Drop for JobObjectGuard {
     fn drop(&mut self) {
-        // SAFETY: close_job guards against the `0` sentinel and only calls
-        // CloseHandle on a handle value we created.
-        unsafe { crate::process::windows::close_job(self.job, self.pid) };
+        // `lab_winjob::close_job` is a SAFE wrapper that guards against the `0`
+        // sentinel; the `CloseHandle` FFI is encapsulated in `lab-winjob`.
+        lab_winjob::close_job(self.job, self.pid);
     }
 }
 

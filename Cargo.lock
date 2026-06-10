@@ -2562,6 +2562,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-winjob"
+version = "0.23.1"
+dependencies = [
+ "tracing",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "labby"
 version = "0.23.1"
 dependencies = [
@@ -2597,6 +2605,7 @@ dependencies = [
  "jsonwebtoken",
  "lab-apis",
  "lab-auth",
+ "lab-winjob",
  "lru",
  "nix",
  "num_cpus",
@@ -2640,7 +2649,6 @@ dependencies = [
  "uuid",
  "walkdir",
  "wasmtime",
- "windows-sys 0.59.0",
  "wiremock",
  "xxhash-rust",
 ]

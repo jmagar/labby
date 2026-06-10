@@ -1,0 +1,36 @@
+[package]
+name = "lab-winjob"
+description = "Windows Job Object FFI boundary for lab — sanctioned unsafe crate exposing a safe process-tree reaping API."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "../../README.md"
+keywords = ["windows", "job-object", "process", "reaping", "ffi"]
+categories = ["os::windows-apis", "api-bindings"]
+publish = false
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+  # Test-support helpers (`pid_is_alive`, `find_first_child_pid`) walk the
+  # process list and query process liveness so the integration test stays
+  # unsafe-free.
+  "Win32_System_Diagnostics_ToolHelp",
+] }
+tracing.workspace = true
+
+# This crate is the SANCTIONED unsafe boundary for Windows Job Object FFI —
+# mirroring how the Unix path routes its unsafe through the external `nix`
+# crate. The workspace sets `unsafe_code = "forbid"` (which cannot be escaped
+# with `#[allow]`), so `lab` and `lab-apis` stay unsafe-free. This crate opts
+# OUT of that forbid by NOT inheriting `[lints] workspace = true` and instead
+# allowing unsafe explicitly. The `unsafe` lives inside safe public fns, so
+# callers never write `unsafe`.
+[lints.rust]
+unsafe_code = "allow"

@@ -82,8 +82,9 @@ impl Drop for UpstreamConnection {
             // Reset to the `0` sentinel so a second close is a no-op (defensive:
             // shutdown consumes self, but Drop must be idempotent).
             self.runtime.job_handle = 0;
-            // SAFETY: close_job guards against the `0` sentinel.
-            unsafe { crate::process::windows::close_job(job, pid) };
+            // `lab_winjob::close_job` is a SAFE wrapper that no-ops on the `0`
+            // sentinel; the `CloseHandle` FFI lives in `lab-winjob`.
+            lab_winjob::close_job(job, pid);
         }
         if let Some(handle) = self._server_task.take() {
             handle.abort();
@@ -133,8 +134,9 @@ impl UpstreamConnection {
         #[cfg(windows)]
         {
             let pid = runtime.pid.unwrap_or(0);
-            // SAFETY: close_job guards against the `0` sentinel.
-            unsafe { crate::process::windows::close_job(runtime_job, pid) };
+            // `lab_winjob::close_job` is a SAFE wrapper that no-ops on the `0`
+            // sentinel; the `CloseHandle` FFI lives in `lab-winjob`.
+            lab_winjob::close_job(runtime_job, pid);
         }
 
         match result {
