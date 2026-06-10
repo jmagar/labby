@@ -8,6 +8,34 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.23.1] - 2026-06-10
+
+### Fixed
+
+- **Windows: Job Object reaping for stdio upstream children and Code Mode runner** ([lab-jouhb]).
+  Two spawn sites previously left grandchildren (`cmd → node`, `npx → python`, etc.) orphaned on
+  Windows when an upstream was killed or reloaded, because only the direct child PID was killed:
+
+  - `connect_stdio.rs` — a new `#[cfg(windows)]` `JobObjectGuard` is armed immediately after
+    spawn (mirroring the Unix `ProcessGroupGuard`), disarmed on successful `UpstreamConnection`
+    construction, and the raw Job Object `HANDLE` is stored in `UpstreamRuntimeMetadata.job_handle`.
+    `UpstreamConnection::Drop` and `shutdown()` close the handle, causing the OS to terminate the
+    entire descendant tree via `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
+
+  - `runner_drive.rs` — a `_runner_job_guard` (also `JobObjectGuard`) is held for the lifetime of
+    `run_in_runner_with_config`, covering all exit paths (completion, timeout, protocol error). The
+    existing `terminate_code_mode_runner` direct-child kill is retained as belt-and-suspenders.
+
+  The Unix path (`ProcessGroup::leader()` / `ProcessGroupGuard` / `killpg`) is byte-for-byte
+  unchanged. All new code is additive under `#[cfg(windows)]`. New Windows-only deps
+  (`windows-sys` with `Win32_Foundation`, `Win32_System_JobObjects`,
+  `Win32_System_Threading`) are declared under `[target.'cfg(windows)'.dependencies]` so
+  Linux builds are unaffected. A `#[ignore]` integration test
+  (`tests/windows_job_object_reaping.rs`) is included for verification on the `windows-lab`
+  self-hosted CI runner.
+
+---
+
 ## [0.23.0] - 2026-06-10
 
 ### Highlights

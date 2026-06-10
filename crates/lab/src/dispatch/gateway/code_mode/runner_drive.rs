@@ -168,21 +168,33 @@ impl CodeModeBroker<'_> {
         // Make the child its own process group leader (pgid = pid) so that
         // killpg can reach grandchildren (e.g. any processes spawned by the
         // Boa/Javy runtime) and not just the immediate child.
-        // process_group is Unix-only; on Windows we fall back to kill() on the
-        // direct child only (handled in terminate_code_mode_runner).
+        // process_group is Unix-only; on Windows we attach a Job Object below.
         #[cfg(unix)]
         cmd.process_group(0);
         let mut child = cmd.spawn().map_err(|err| ToolError::Sdk {
             sdk_kind: "internal_error".to_string(),
             message: format!("failed to spawn Code Mode runner: {err}"),
         })?;
-        // Capture pid immediately after spawn (Unix only); it becomes None once
-        // the child has been waited on, so we save it for killpg before any
-        // await points.
-        #[cfg(unix)]
+        // Capture pid immediately after spawn; it becomes None once the child
+        // has been waited on, so we save it before any await points.
+        // On Unix it is used for killpg; on Windows it is used to attach a
+        // Job Object (see below).
         let child_pid = child.id();
-        #[cfg(not(unix))]
-        let child_pid = None::<u32>;
+
+        // Windows: attach the runner child to a Job Object with
+        // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE so the OS terminates the entire
+        // descendant tree (runner + any children it may spawn) when the guard
+        // is dropped — covering all exit paths: normal completion, timeout,
+        // protocol error, and early return from a `?`. On Unix, process_group(0)
+        // + killpg in terminate_code_mode_runner covers the same role.
+        //
+        // The guard is a plain local variable; its Drop fires at the end of
+        // this function on every path, which is intentional: the runner child
+        // is always re-spawned per execution request, so there is no value in
+        // keeping the job alive past the function boundary.
+        #[cfg(windows)]
+        let _runner_job_guard =
+            child_pid.map(crate::dispatch::upstream::process_guard::JobObjectGuard::arm);
 
         let mut stdin = child.stdin.take().ok_or_else(|| ToolError::Sdk {
             sdk_kind: "internal_error".to_string(),

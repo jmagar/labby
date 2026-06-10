@@ -43,7 +43,11 @@ pub(in crate::dispatch::gateway::code_mode) async fn terminate_code_mode_runner(
             let _ = nix::sys::signal::killpg(Pid::from_raw(raw_pid as i32), Signal::SIGKILL);
         }
     }
-    // Fallback (Windows or pid already gone): send SIGKILL to direct child only.
+    // On Windows, the `_runner_job_guard` in `run_in_runner_with_config` owns
+    // a Job Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. Dropping that guard
+    // (which happens on every return path, including timeout) lets the OS
+    // terminate the whole descendant tree. This kill() call is therefore a
+    // belt-and-suspenders direct kill of the immediate child process.
     drop(child.kill().await);
     drop(child.wait().await);
 }

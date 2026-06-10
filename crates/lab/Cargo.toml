@@ -24,6 +24,8 @@ tokio = { workspace = true, features = ["process"] }
 process-wrap = { version = "9.1.0", default-features = false, features = [
   "tokio1",
   "process-group",
+  "job-object",
+  "creation-flags",
 ] }
 nix = { version = "0.31", default-features = false, features = [
   "signal",
@@ -126,6 +128,17 @@ toml_edit = "0.23"
 
 [target.'cfg(unix)'.dependencies]
 sd-notify = { version = "0.5", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+# Raw Windows Job Object API for process-tree reaping on Windows.
+# Only the `Win32_System_JobObjects` and `Win32_Foundation` feature subsets are
+# needed; keeping the feature list minimal avoids pulling in unrelated Win32
+# bindings and keeps Windows-only compile times short.
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 wiremock.workspace = true

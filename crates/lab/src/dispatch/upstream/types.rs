@@ -50,10 +50,26 @@ pub struct UpstreamRuntimeOwner {
 }
 
 /// Runtime metadata for process-backed upstream connections.
+///
+/// On Unix, `pgid` holds the process group id used for `killpg` reaping.
+/// On Windows, `job_handle` holds a raw `HANDLE` to a Windows Job Object
+/// with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` set; closing it terminates the
+/// entire descendant tree. Both fields serve the same role — each is only
+/// populated on its respective platform.
+///
+/// `windows_sys::HANDLE` is `isize`, which is `Clone + Copy`, so the derive
+/// is safe. The value is intentionally copied when we call `runtime.clone()`
+/// in `shutdown()` for logging — the original field is the authoritative owner
+/// and the copy is only used to read `pid` for log fields, never closed.
 #[derive(Debug, Clone, Default)]
 pub struct UpstreamRuntimeMetadata {
     pub pid: Option<u32>,
     pub pgid: Option<u32>,
+    /// Windows Job Object handle. Non-null only on Windows; `INVALID_HANDLE_VALUE`
+    /// (`usize::MAX` on 64-bit) means no job was created. Owned here; closed in
+    /// `UpstreamConnection::Drop` and `shutdown()`.
+    #[cfg(windows)]
+    pub job_handle: windows_sys::Win32::Foundation::HANDLE,
     pub started_at: Option<SystemTime>,
     pub origin: Option<String>,
     pub owner: Option<UpstreamRuntimeOwner>,

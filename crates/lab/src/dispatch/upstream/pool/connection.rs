@@ -16,6 +16,9 @@ use crate::process::unix::{
     pid_is_alive, terminate_process_group_sigkill, terminate_process_group_sigterm,
 };
 
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+
 use tokio::sync::Mutex;
 
 use crate::config::UpstreamConfig;
@@ -31,19 +34,22 @@ impl std::fmt::Debug for UpstreamConnection {
     }
 }
 
-/// Sync Drop: SIGTERM+SIGKILL the process group if any, then abort any
-/// in-process server task. Last-resort abandonment cleanup for stdio
-/// upstreams whose connect future was dropped without going through
-/// `shutdown()` — discovery timeouts, cancelled `buffer_unordered` futures,
-/// pool drops, `insert()` overwrites, etc.
+/// Sync Drop: reap the descendant process tree, then abort any in-process
+/// server task. Last-resort abandonment cleanup for stdio upstreams whose
+/// connect future was dropped without going through `shutdown()` —
+/// discovery timeouts, cancelled `buffer_unordered` futures, pool drops,
+/// `insert()` overwrites, etc.
 ///
-/// The async `shutdown()` graceful path zeroes `self.runtime.pgid` and
-/// takes `_server_task` before its first `.await` so this Drop no-ops on
-/// the graceful path.
+/// The async `shutdown()` graceful path zeroes `self.runtime.pgid` (Unix)
+/// or replaces `self.runtime.job_handle` with `INVALID_HANDLE_VALUE`
+/// (Windows) and takes `_server_task` before its first `.await` so this
+/// Drop no-ops on the graceful path.
 ///
-/// Process-group kill is `#[cfg(unix)]`-gated (no Windows equivalent in the
-/// same shape), but `_server_task.abort()` runs on all platforms — without
-/// it a dropped in-process upstream would leak the spawned tokio task.
+/// - Unix: `SIGTERM` + `SIGKILL` the process group via `killpg`.
+/// - Windows: close the Job Object handle; `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+///   causes the OS to terminate every process in the job (direct child +
+///   all descendants).
+/// - `_server_task.abort()` runs on all platforms.
 impl Drop for UpstreamConnection {
     fn drop(&mut self) {
         #[cfg(unix)]
@@ -72,6 +78,17 @@ impl Drop for UpstreamConnection {
                 );
             }
         }
+        #[cfg(windows)]
+        {
+            let pid = self.runtime.pid.unwrap_or(0);
+            let job = self.runtime.job_handle;
+            // Replace with sentinel so shutdown()'s Drop no-ops if somehow
+            // called again (shouldn't happen — shutdown consumes self, but
+            // be defensive).
+            self.runtime.job_handle = INVALID_HANDLE_VALUE;
+            // SAFETY: close_job guards against INVALID_HANDLE_VALUE.
+            unsafe { crate::process::windows::close_job(job, pid) };
+        }
         if let Some(handle) = self._server_task.take() {
             handle.abort();
         }
@@ -80,17 +97,19 @@ impl Drop for UpstreamConnection {
 
 impl UpstreamConnection {
     pub(super) async fn shutdown(mut self, upstream_name: &str, reason: &'static str) {
-        // Clone runtime BEFORE taking pgid so subsequent log lines surface
-        // the actual pgid (otherwise `runtime.pgid` reads as None after
-        // `.take()` clears it).
+        // Clone runtime BEFORE taking pgid / job_handle so subsequent log
+        // lines still surface the original values.
         let runtime = self.runtime.clone();
-        // INVARIANT: take pgid BEFORE any `.await` so the consuming Drop
-        // sees `None` and no-ops. This prevents double-kill on the graceful
-        // path. `runtime_pgid` carries the value through the function so the
-        // graceful TERM→sleep→KILL sequence below can still target the
-        // process group.
+        // INVARIANT: take pgid (Unix) / job_handle (Windows) BEFORE any
+        // `.await` so the consuming Drop no-ops on the graceful path.
         #[cfg(unix)]
         let runtime_pgid = self.runtime.pgid.take();
+        #[cfg(windows)]
+        let runtime_job = {
+            let j = self.runtime.job_handle;
+            self.runtime.job_handle = INVALID_HANDLE_VALUE;
+            j
+        };
         let started = Instant::now();
         let result = self
             ._client_service
@@ -109,6 +128,17 @@ impl UpstreamConnection {
             if pid_is_alive(pid) {
                 let _ = terminate_process_group_sigkill(pgid);
             }
+        }
+
+        // Windows: close the Job Object handle. The OS terminates every
+        // process in the job (direct child + grandchildren) because we set
+        // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE at creation time. No async
+        // sleep needed — the kernel handles tree termination synchronously.
+        #[cfg(windows)]
+        {
+            let pid = runtime.pid.unwrap_or(0);
+            // SAFETY: close_job guards against INVALID_HANDLE_VALUE.
+            unsafe { crate::process::windows::close_job(runtime_job, pid) };
         }
 
         match result {

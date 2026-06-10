@@ -125,9 +125,11 @@ pub(super) async fn connect_stdio_upstream(
             .spawn()?
     };
     #[cfg(not(unix))]
-    let (process, child_stderr) = TokioChildProcess::builder(cmd)
-        .stderr(stderr_cfg())
-        .spawn()?;
+    let (process, child_stderr) = {
+        TokioChildProcess::builder(cmd)
+            .stderr(stderr_cfg())
+            .spawn()?
+    };
 
     // INVARIANT: a piped child stderr MUST be drained continuously. A chatty
     // upstream (e.g. axon at INFO) fills the ~64 KB pipe buffer and then blocks
@@ -145,15 +147,23 @@ pub(super) async fn connect_stdio_upstream(
         "upstream connect start",
     );
 
-    // INVARIANT: arm the process-group guard immediately after spawn. If any
+    // INVARIANT: arm the process-tree guard immediately after spawn. If any
     // subsequent `?` propagates (serve fails, list_all_tools fails, the outer
-    // future is dropped on timeout), `Drop` on this guard SIGTERM+SIGKILLs
-    // the process group via `killpg`, reaping grandchildren (npx → node,
-    // sh -c → python) that rmcp's per-PID TokioChildProcess Drop would
-    // otherwise miss. With `ProcessGroup::leader()` the child is its own
-    // group leader, so pgid == pid.
+    // future is dropped on timeout), `Drop` on this guard reaps grandchildren
+    // (npx → node, sh -c → python) that rmcp's per-PID TokioChildProcess Drop
+    // would otherwise miss.
+    //
+    // Unix: `ProcessGroup::leader()` made the child its own group leader
+    //   (pgid == pid). The guard SIGTERMs+SIGKILLs the group via `killpg`.
+    //
+    // Windows: `JobObjectGuard::arm` creates a Job Object, assigns the child
+    //   (and therefore all its future descendants) to it, and sets
+    //   JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. Closing the handle (on Drop or in
+    //   shutdown) lets the OS terminate the whole tree.
     #[cfg(unix)]
     let pg_guard = pid.map(super::super::process_guard::ProcessGroupGuard::arm);
+    #[cfg(windows)]
+    let job_guard = pid.map(super::super::process_guard::JobObjectGuard::arm);
 
     let service: rmcp::service::RunningService<RoleClient, ()> = ().serve(process).await?;
     let peer = service.peer().clone();
@@ -168,14 +178,20 @@ pub(super) async fn connect_stdio_upstream(
     );
 
     // INVARIANT: disarm the guard right before successful construction. The
-    // pgid is transferred to UpstreamConnection.runtime.pgid; its own Drop
-    // now owns cleanup. `shutdown()` will zero runtime.pgid before any
-    // `.await` so its Drop no-ops on the graceful path.
+    // reaping resource (pgid on Unix, job handle on Windows) is transferred
+    // to UpstreamConnection.runtime; its own Drop now owns cleanup.
+    // `shutdown()` clears the field before any `.await` so Drop no-ops on
+    // the graceful path.
     #[cfg(unix)]
     let pgid_for_runtime =
         pg_guard.and_then(super::super::process_guard::ProcessGroupGuard::disarm);
     #[cfg(not(unix))]
     let pgid_for_runtime: Option<u32> = pid;
+
+    #[cfg(windows)]
+    let job_handle_for_runtime = job_guard
+        .map(super::super::process_guard::JobObjectGuard::disarm)
+        .unwrap_or(windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE);
 
     let conn = UpstreamConnection {
         _client_service: service,
@@ -184,6 +200,8 @@ pub(super) async fn connect_stdio_upstream(
         runtime: UpstreamRuntimeMetadata {
             pid,
             pgid: pgid_for_runtime,
+            #[cfg(windows)]
+            job_handle: job_handle_for_runtime,
             started_at: Some(std::time::SystemTime::now()),
             origin: runtime_origin_label(runtime_origin, runtime_owner),
             owner: runtime_owner.cloned(),
