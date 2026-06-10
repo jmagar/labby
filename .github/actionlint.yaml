@@ -1,0 +1,5 @@
+# Custom labels for self-hosted runners so actionlint's runner-label check
+# recognizes them. agent-os-lab (Windows sandbox VM) carries windows-lab.
+self-hosted-runner:
+  labels:
+    - windows-lab

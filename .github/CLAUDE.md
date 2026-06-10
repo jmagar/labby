@@ -23,6 +23,7 @@ Every push and PR to `main` must pass all jobs:
 | clippy | `cargo clippy --workspace --all-features -- -D warnings` |
 | deny | `cargo deny check` (via `EmbarkStudios/cargo-deny-action`) |
 | test | `cargo nextest run --workspace --all-features --profile ci` |
+| test-windows | same nextest run on the self-hosted `agent-os-lab` runner (label `windows-lab`); skipped on PRs — push/schedule/dispatch only |
 | release-smoke | `cargo build --workspace --all-features --release` — Linux always; Windows skipped on PRs (see below) |
 | container | Docker build with `config/Dockerfile` |
 

@@ -18,6 +18,7 @@ Every push and pull request must pass all of the following:
 | Lint | `cargo clippy --workspace --all-features -- -D warnings` |
 | Deny | `cargo deny check` |
 | Tests | `cargo nextest run --workspace --all-features --profile ci` |
+| Tests (Windows) | same nextest run on the self-hosted `agent-os-lab` Windows runner; skipped on PRs (fork code must not reach a self-hosted runner) — runs on pushes to main, the weekly schedule, and manual dispatch |
 | Release smoke | `cargo build --workspace --all-features --release` — Linux on every run; Windows only on pushes to main, the weekly schedule, and manual dispatch (skipped on PRs: 20-25 min runner time, and Linux cross-checking is blocked by aws-lc-sys needing a Windows C toolchain) |
 | Container smoke | Docker build using `config/Dockerfile` |
 
