@@ -23,12 +23,16 @@ Every push and PR to `main` must pass all jobs:
 | clippy | `cargo clippy --workspace --all-features -- -D warnings` |
 | deny | `cargo deny check` (via `EmbarkStudios/cargo-deny-action`) |
 | test | `cargo nextest run --workspace --all-features --profile ci` |
-| release-smoke | `cargo build --workspace --all-features --release` on Linux and Windows |
+| release-smoke | `cargo build --workspace --all-features --release` — Linux always; Windows skipped on PRs (see below) |
 | container | Docker build with `config/Dockerfile` |
 
-Most jobs run on `ubuntu-latest`. Windows is a supported target and the release
+Most jobs run on `ubuntu-latest`. Windows is a supported target; the release
 smoke matrix includes `windows-latest` to prove the native MSVC release binary
-builds.
+builds, but ONLY on pushes to main, the weekly schedule, and manual dispatch —
+it is skipped on PRs (20-25 min of runner time per PR, and a Linux cross-check
+is not viable because aws-lc-sys requires a real Windows C toolchain even under
+`cargo check`). Windows breakage therefore surfaces on the post-merge main run,
+not in the PR.
 
 `RUSTFLAGS: -D warnings` is set globally — zero warnings permitted.
 

@@ -18,7 +18,7 @@ Every push and pull request must pass all of the following:
 | Lint | `cargo clippy --workspace --all-features -- -D warnings` |
 | Deny | `cargo deny check` |
 | Tests | `cargo nextest run --workspace --all-features --profile ci` |
-| Release smoke | `cargo build --workspace --all-features --release` on Linux and Windows |
+| Release smoke | `cargo build --workspace --all-features --release` — Linux on every run; Windows only on pushes to main, the weekly schedule, and manual dispatch (skipped on PRs: 20-25 min runner time, and Linux cross-checking is blocked by aws-lc-sys needing a Windows C toolchain) |
 | Container smoke | Docker build using `config/Dockerfile` |
 
 Clippy runs with `-D warnings` — zero warnings are permitted. This is enforced at the workspace lint layer.

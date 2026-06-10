@@ -157,7 +157,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # windows-latest release builds take 20-25 min on GitHub-hosted
+        # runners and a Linux cross-check is not viable (aws-lc-sys needs a
+        # real Windows C toolchain even under `cargo check`). Skip Windows on
+        # PRs; it still runs on every push to main, the weekly schedule, and
+        # release.yml — so Windows breakage surfaces minutes after merge
+        # instead of blocking every PR.
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
