@@ -105,6 +105,21 @@
 # Upstream MCP Registry base URL.
 # url = "https://registry.modelcontextprotocol.io"   # default
 
+# ── Gateway Spawn Guard ───────────────────────────────────────────────────────
+#
+# The gateway only allows known-safe runtimes (npx, uvx, docker, node, python,
+# python3, deno, pipx, dnx) as the `command` of a stdio upstream. Use these
+# knobs when you have custom binaries or want to disable the guard entirely.
+
+[gateway]
+# Additional commands to allow beyond the built-in runtime list.
+# Each entry is matched against the basename of the upstream `command`.
+# extra_stdio_commands = ["labby", "myserver", "runarr"]  # default: []
+
+# Skip the allowlist entirely. Operator takes full responsibility for
+# any command that appears in the gateway config.
+# disable_spawn_guard = false                             # default: false
+
 # ── Node Runtime ─────────────────────────────────────────────────────────────
 
 [node]

@@ -134,9 +134,9 @@ pub struct GatewayUpdatePatch {
     pub name: Option<String>,
     #[serde(default)]
     pub enabled: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_nullable")]
     pub url: Option<Option<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_nullable")]
     pub command: Option<Option<String>>,
     #[serde(default)]
     pub args: Option<Vec<String>>,

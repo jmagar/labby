@@ -165,6 +165,37 @@ Example:
 url = "https://registry.modelcontextprotocol.io"
 ```
 
+### `[gateway]`
+
+Spawn-guard preferences for stdio upstream commands. The gateway only allows
+known-safe runtimes (`npx`, `uvx`, `docker`, `node`, `python`, `python3`,
+`deno`, `pipx`, `dnx`) as the `command` of a stdio upstream by default.
+
+| Key | Env override | Default | Description |
+|-----|-------------|---------|-------------|
+| `extra_stdio_commands` | — | `[]` | Additional basenames allowed as stdio upstream commands, beyond the built-in runtime list. |
+| `disable_spawn_guard` | — | `false` | Skip the command allowlist entirely. Operator takes full responsibility for any command in the gateway config. |
+
+Example — add a custom binary and a local MCP server:
+
+```toml
+[gateway]
+extra_stdio_commands = ["myserver", "labby"]
+```
+
+Example — disable the guard entirely:
+
+```toml
+[gateway]
+disable_spawn_guard = true
+```
+
+Rules:
+
+- entries in `extra_stdio_commands` are matched against the **basename** of the upstream `command` path, so `/usr/local/bin/myserver` matches `"myserver"`.
+- HTTP upstreams are never subject to the spawn guard — only `command`-based (stdio) upstreams are checked.
+- `disable_spawn_guard = true` takes precedence over `extra_stdio_commands`; both can be set together for documentation purposes.
+
 ### `[code_mode]`
 
 Gateway-wide Code Mode exposure and execution limits. When enabled, raw gateway

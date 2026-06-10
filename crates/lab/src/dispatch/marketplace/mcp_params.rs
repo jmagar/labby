@@ -20,21 +20,22 @@ use serde_json::Value;
 use crate::dispatch::error::ToolError;
 use crate::dispatch::upstream::spawn_guard;
 
-/// Validate a `runtimeHint` string against the static allowlist.
+/// Validate a `runtimeHint` string against the spawn-guard allowlist.
+///
+/// Delegates to [`spawn_guard::validate_stdio_command`] so both the gateway and
+/// marketplace paths share exactly one copy of the allowlist logic.
+/// Pass `extra` / `bypass` from `GatewayPreferences` when the caller has config
+/// context; pass empty slice / false otherwise.
 ///
 /// Returns `unsupported_runtime_hint` if the hint is not in the allowed list.
-pub fn validate_runtime_hint(hint: &str) -> Result<(), ToolError> {
-    if spawn_guard::ALLOWED_RUNTIME_HINTS.contains(&hint) {
-        Ok(())
-    } else {
-        Err(ToolError::Sdk {
-            sdk_kind: "unsupported_runtime_hint".to_string(),
-            message: format!(
-                "runtimeHint '{hint}' is not in the allowed list; must be one of: {}",
-                spawn_guard::ALLOWED_RUNTIME_HINTS.join(", ")
-            ),
-        })
-    }
+pub fn validate_runtime_hint(hint: &str, extra: &[String], bypass: bool) -> Result<(), ToolError> {
+    spawn_guard::validate_stdio_command(hint, extra, bypass).map_err(|_| ToolError::Sdk {
+        sdk_kind: "unsupported_runtime_hint".to_string(),
+        message: format!(
+            "runtimeHint '{hint}' is not in the allowed list; must be one of: {}",
+            spawn_guard::ALLOWED_RUNTIME_HINTS.join(", ")
+        ),
+    })
 }
 
 /// Validate that none of the argv strings violates runtime-specific security policy.
@@ -382,7 +383,7 @@ mod tests {
 
     #[test]
     fn runtime_hint_rejects_unrecognized_commands() {
-        let err = validate_runtime_hint("/tmp/evil").unwrap_err();
+        let err = validate_runtime_hint("/tmp/evil", &[], false).unwrap_err();
 
         assert_eq!(err.kind(), "unsupported_runtime_hint");
     }

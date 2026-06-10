@@ -154,15 +154,18 @@ jobs:
     name: Test (windows self-hosted)
     runs-on: [self-hosted, windows-lab]
     needs: frontend-assets
-    # Self-hosted runner on a PUBLIC repo: never run for pull_request events,
-    # so fork code can never reach the runner. Pushes to main, the weekly
-    # schedule, and manual dispatch only — Windows breakage surfaces on the
-    # post-merge run, mirroring the release-smoke policy.
+    # Self-hosted runner on a PUBLIC repo: fork PRs must NEVER reach it.
+    # Run for pushes/schedule/dispatch, and for same-repo pull requests only
+    # (head repo == base repo). Fork PRs (head.repo.full_name != repo) are
+    # skipped, so untrusted code can't execute on the runner — while our own
+    # branch PRs (e.g. Windows reaping work) get pre-merge Windows verification.
     #
     # The runner is the agent-os sandbox VM (dookie-adjacent Windows 11) with
-    # rustup, cargo-nextest, NASM, and CMake preinstalled and a persistent
-    # warm target dir — no toolchain/cache actions needed.
-    if: github.event_name != 'pull_request'
+    # rustup, cargo-nextest, NASM, CMake, and LLVM/libclang preinstalled and a
+    # persistent warm target dir — no toolchain/cache actions needed.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 120
     env:
       # 4-thread / 8 GB VM — cap build parallelism so debug-test linking

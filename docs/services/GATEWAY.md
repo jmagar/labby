@@ -46,6 +46,26 @@ config mutation, but it can still execute a local process — so the confirmatio
 gate is what keeps a read-only-looking call from running arbitrary commands on
 behalf of a remote HTTP/MCP caller.
 
+#### Spawn Guard
+
+The gateway validates that the `command` basename of any stdio upstream is in a
+built-in allowlist (`npx`, `uvx`, `docker`, `node`, `python`, `python3`,
+`deno`, `pipx`, `dnx`) before writing the config. Two `[gateway]` knobs in
+`config.toml` control this:
+
+```toml
+[gateway]
+# Allow additional binaries beyond the built-in list.
+extra_stdio_commands = ["myserver", "labby"]
+
+# Or disable the guard entirely (operator takes full responsibility).
+disable_spawn_guard = true
+```
+
+The guard applies only to stdio upstreams. HTTP upstreams are never checked.
+See [`docs/runtime/CONFIG.md`](../runtime/CONFIG.md) for the full `[gateway]`
+config reference.
+
 ## Tool Exposure
 
 Gateway config can optionally restrict which discovered upstream tools are republished by `lab`.

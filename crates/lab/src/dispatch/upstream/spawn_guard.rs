@@ -71,22 +71,35 @@ pub const DANGEROUS_DENO_FLAGS: &[&str] = &["eval", "--allow-all", "-A"];
 /// string from the operator (gateway add/update/import, marketplace install)
 /// must call this before writing to config.
 ///
-/// Returns `invalid_param` if the command is not in [`ALLOWED_RUNTIME_HINTS`].
-pub fn validate_stdio_command(command: &str) -> Result<(), ToolError> {
+/// Pass `extra` to extend the built-in list with operator-configured commands
+/// (from `[gateway] extra_stdio_commands` in `config.toml`).
+/// Pass `bypass = true` to skip all validation (requires `disable_spawn_guard = true`).
+///
+/// Returns `invalid_param` if the command is not in either allowlist.
+pub fn validate_stdio_command(command: &str, extra: &[String], bypass: bool) -> Result<(), ToolError> {
+    if bypass {
+        return Ok(());
+    }
+
     let binary = std::path::Path::new(command)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or(command);
 
-    if ALLOWED_RUNTIME_HINTS.contains(&binary) {
+    if ALLOWED_RUNTIME_HINTS.contains(&binary) || extra.iter().any(|e| e == binary) {
         Ok(())
     } else {
+        let mut allowed: Vec<&str> = ALLOWED_RUNTIME_HINTS.to_vec();
+        let extra_refs: Vec<&str> = extra.iter().map(String::as_str).collect();
+        allowed.extend_from_slice(&extra_refs);
         Err(ToolError::InvalidParam {
             param: "command".to_string(),
             message: format!(
-                "stdio command '{}' is not in the allowed list; must be one of: {}",
+                "stdio command '{}' is not in the allowed list; must be one of: {} \
+                 (add to [gateway] extra_stdio_commands in config.toml to extend, \
+                 or set disable_spawn_guard = true to disable this check)",
                 command,
-                ALLOWED_RUNTIME_HINTS.join(", ")
+                allowed.join(", ")
             ),
         })
     }
@@ -181,12 +194,16 @@ pub fn validate_stdio_env_value(key: &str, value: &str) -> Result<(), ToolError>
 /// Convenience wrapper that calls [`validate_stdio_command`],
 /// [`validate_stdio_argv`], [`validate_stdio_env_name`], and
 /// [`validate_stdio_env_value`] in sequence. Returns the first error found.
+///
+/// Pass `extra` / `bypass` from `GatewayPreferences` to extend or disable the command allowlist.
 pub fn validate_stdio_spec(
     command: &str,
     args: &[String],
     env: &std::collections::BTreeMap<String, String>,
+    extra: &[String],
+    bypass: bool,
 ) -> Result<(), ToolError> {
-    validate_stdio_command(command)?;
+    validate_stdio_command(command, extra, bypass)?;
 
     // Derive the runtime hint from the binary name for argv checking.
     let runtime_hint = std::path::Path::new(command)
@@ -216,7 +233,7 @@ mod tests {
     fn command_accepts_known_runtimes() {
         for cmd in ALLOWED_RUNTIME_HINTS {
             assert!(
-                validate_stdio_command(cmd).is_ok(),
+                validate_stdio_command(cmd, &[], false).is_ok(),
                 "expected {cmd} to be allowed"
             );
         }
@@ -224,26 +241,42 @@ mod tests {
 
     #[test]
     fn command_rejects_bash() {
-        let err = validate_stdio_command("bash").unwrap_err();
+        let err = validate_stdio_command("bash", &[], false).unwrap_err();
         assert_eq!(err.kind(), "invalid_param");
     }
 
     #[test]
     fn command_rejects_sh_c_style_injection() {
-        let err = validate_stdio_command("/bin/sh").unwrap_err();
+        let err = validate_stdio_command("/bin/sh", &[], false).unwrap_err();
         assert_eq!(err.kind(), "invalid_param");
     }
 
     #[test]
     fn command_rejects_arbitrary_binary() {
-        let err = validate_stdio_command("/tmp/evil").unwrap_err();
+        let err = validate_stdio_command("/tmp/evil", &[], false).unwrap_err();
         assert_eq!(err.kind(), "invalid_param");
     }
 
     #[test]
     fn command_extracts_binary_name_from_absolute_path() {
         // /usr/bin/node → binary "node" → allowed
-        assert!(validate_stdio_command("/usr/bin/node").is_ok());
+        assert!(validate_stdio_command("/usr/bin/node", &[], false).is_ok());
+    }
+
+    #[test]
+    fn command_accepts_extra_allowlisted_binary() {
+        let extra = vec!["labby".to_string(), "runarr".to_string()];
+        assert!(validate_stdio_command("labby", &extra, false).is_ok());
+        assert!(validate_stdio_command("runarr", &extra, false).is_ok());
+        // bash still rejected even with extras
+        assert!(validate_stdio_command("bash", &extra, false).is_err());
+    }
+
+    #[test]
+    fn command_bypass_skips_all_checks() {
+        assert!(validate_stdio_command("bash", &[], true).is_ok());
+        assert!(validate_stdio_command("/bin/sh", &[], true).is_ok());
+        assert!(validate_stdio_command("/tmp/anything", &[], true).is_ok());
     }
 
     // ── validate_stdio_argv ─────────────────────────────────────────────────
@@ -387,6 +420,8 @@ mod tests {
             "bash",
             &["-c".to_string(), "curl evil.com".to_string()],
             &BTreeMap::new(),
+            &[],
+            false,
         )
         .unwrap_err();
         assert_eq!(err.kind(), "invalid_param");
@@ -396,7 +431,7 @@ mod tests {
     fn spec_rejects_ld_preload_env() {
         let mut env = BTreeMap::new();
         env.insert("LD_PRELOAD".to_string(), "/tmp/evil.so".to_string());
-        let err = validate_stdio_spec("node", &["server.js".to_string()], &env).unwrap_err();
+        let err = validate_stdio_spec("node", &["server.js".to_string()], &env, &[], false).unwrap_err();
         assert_eq!(err.kind(), "invalid_param");
     }
 
@@ -404,7 +439,7 @@ mod tests {
     fn spec_rejects_path_override() {
         let mut env = BTreeMap::new();
         env.insert("PATH".to_string(), "/tmp/evil:$PATH".to_string());
-        let err = validate_stdio_spec("npx", &["-y".to_string(), "some-pkg".to_string()], &env)
+        let err = validate_stdio_spec("npx", &["-y".to_string(), "some-pkg".to_string()], &env, &[], false)
             .unwrap_err();
         assert_eq!(err.kind(), "invalid_param");
     }
@@ -420,7 +455,9 @@ mod tests {
                     "-y".to_string(),
                     "@modelcontextprotocol/server-everything".to_string()
                 ],
-                &env
+                &env,
+                &[],
+                false,
             )
             .is_ok()
         );

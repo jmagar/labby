@@ -162,6 +162,28 @@ pub struct LabConfig {
     /// precedence rather than accessing this field directly.
     #[serde(default)]
     pub public_urls: Option<PublicUrlsConfig>,
+    /// Gateway spawn-guard and command-allowlist preferences.
+    #[serde(default)]
+    pub gateway: GatewayPreferences,
+}
+
+/// Controls the stdio spawn-guard that validates upstream MCP server commands.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GatewayPreferences {
+    /// Extra commands allowed as stdio upstream programs beyond the built-in list
+    /// (npx, uvx, docker, node, python, python3, deno, pipx, dnx).
+    ///
+    /// ```toml
+    /// [gateway]
+    /// extra_stdio_commands = ["labby", "runarr", "rgotify"]
+    /// ```
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_stdio_commands: Vec<String>,
+    /// Disable all stdio spawn-guard command validation.
+    /// Any command may be used as a stdio upstream when true.
+    /// Only set this when you control all gateway write access.
+    #[serde(default)]
+    pub disable_spawn_guard: bool,
 }
 
 impl LabConfig {

@@ -23,6 +23,8 @@ use crate::dispatch::marketplace::LAB_REGISTRY_META_NAMESPACE;
 use crate::dispatch::marketplace::mcp_catalog::MCP_ACTIONS;
 use crate::dispatch::marketplace::mcp_client;
 #[cfg(feature = "mcpregistry")]
+use crate::config::GatewayPreferences;
+#[cfg(feature = "mcpregistry")]
 use crate::dispatch::marketplace::mcp_params;
 #[cfg(feature = "mcpregistry")]
 use crate::dispatch::node::send::send_rpc_to_node;
@@ -249,6 +251,9 @@ async fn dispatch_mcp_install_inner(
     client: &McpRegistryClient,
     params: &Value,
 ) -> Result<Value, ToolError> {
+    let prefs = crate::config::load()
+        .map(|c| c.gateway)
+        .unwrap_or_default();
     let name = mcp_params::require_name(params)?;
     let version = params["version"].as_str().unwrap_or("latest");
 
@@ -297,7 +302,7 @@ async fn dispatch_mcp_install_inner(
                 }
             }
         } else if let Some(pkg) = server.packages.first() {
-            install_stdio(pkg, gateway_id, params, &name)?
+            install_stdio(pkg, gateway_id, params, &name, &prefs)?
         } else {
             results.push(serde_json::json!({
                 "gateway_id": gateway_id,
@@ -332,7 +337,7 @@ async fn dispatch_mcp_install_inner(
     }
 
     if !client_targets.is_empty() {
-        let client_config = mcp_client_config(server, params, &name)?;
+        let client_config = mcp_client_config(server, params, &name, &prefs)?;
         for target in &client_targets {
             let target_id = format!("{}:{}", target.node_id, target.client);
             let outcome = send_rpc_to_node(
@@ -560,6 +565,7 @@ fn parse_mcp_client_targets(params: &Value) -> Result<Vec<McpClientTarget>, Tool
 fn build_stdio_command<'a>(
     pkg: &'a lab_apis::mcpregistry::types::Package,
     server_name: &str,
+    prefs: &GatewayPreferences,
 ) -> Result<(&'a str, Vec<String>), ToolError> {
     if pkg.registry_type == "mcpb" {
         return Err(ToolError::Sdk {
@@ -575,7 +581,7 @@ fn build_stdio_command<'a>(
         ),
     })?;
 
-    mcp_params::validate_runtime_hint(hint)?;
+    mcp_params::validate_runtime_hint(hint, &prefs.extra_stdio_commands, prefs.disable_spawn_guard)?;
 
     let mut argv: Vec<String> = pkg
         .runtime_arguments
@@ -598,6 +604,7 @@ fn mcp_client_config(
     server: &ServerJSON,
     params_value: &Value,
     server_name: &str,
+    prefs: &GatewayPreferences,
 ) -> Result<Value, ToolError> {
     if let Some(url) = server.remotes.iter().find_map(|r| r.url.as_deref()) {
         let url_for_check = url.to_string();
@@ -614,7 +621,7 @@ fn mcp_client_config(
         });
     };
 
-    let (hint, argv) = build_stdio_command(pkg, server_name)?;
+    let (hint, argv) = build_stdio_command(pkg, server_name, prefs)?;
     let env = resolve_mcp_env_values(pkg, params_value, server_name)?;
     let mut config = serde_json::json!({
         "command": hint,
@@ -752,8 +759,9 @@ fn install_stdio(
     gateway_name: &str,
     params_value: &Value,
     server_name: &str,
+    prefs: &GatewayPreferences,
 ) -> Result<Value, ToolError> {
-    let (hint, argv) = build_stdio_command(pkg, server_name)?;
+    let (hint, argv) = build_stdio_command(pkg, server_name, prefs)?;
     let resolved_env = resolve_mcp_env_values(pkg, params_value, server_name)?;
 
     // Write resolved env vars to ~/.lab/.env if there are any.
@@ -950,7 +958,7 @@ mod tests {
     #[test]
     fn stdio_install_builds_gateway_spec_from_package() {
         let spec =
-            install_stdio(&package(Some("npx")), "demo", &json!({}), "io.github/demo").unwrap();
+            install_stdio(&package(Some("npx")), "demo", &json!({}), "io.github/demo", &Default::default()).unwrap();
 
         assert_eq!(spec["command"], "npx");
         assert_eq!(spec["args"], json!(["-y", "@example/server"]));
@@ -961,7 +969,7 @@ mod tests {
 
     #[test]
     fn stdio_install_rejects_missing_runtime_hint() {
-        let err = install_stdio(&package(None), "demo", &json!({}), "io.github/demo").unwrap_err();
+        let err = install_stdio(&package(None), "demo", &json!({}), "io.github/demo", &Default::default()).unwrap_err();
 
         assert_eq!(err.kind(), "unsupported_runtime_hint");
     }
@@ -971,7 +979,7 @@ mod tests {
         let mut pkg = package(Some("docker"));
         pkg.runtime_arguments = vec![json!("run"), json!("--privileged")];
 
-        let err = install_stdio(&pkg, "demo", &json!({}), "io.github/demo").unwrap_err();
+        let err = install_stdio(&pkg, "demo", &json!({}), "io.github/demo", &Default::default()).unwrap_err();
 
         assert_eq!(err.kind(), "invalid_param");
     }
@@ -990,7 +998,7 @@ mod tests {
             format: Some("token".to_string()),
         }];
 
-        let err = install_stdio(&pkg, "demo", &json!({}), "io.github/demo").unwrap_err();
+        let err = install_stdio(&pkg, "demo", &json!({}), "io.github/demo", &Default::default()).unwrap_err();
 
         assert_eq!(err.kind(), "missing_env_values");
         assert!(err.to_string().contains("TRUST_API_KEY"));
@@ -1011,7 +1019,7 @@ mod tests {
             format: None,
         }];
 
-        let err = install_stdio(&pkg, "demo", &json!({}), "io.github/demo").unwrap_err();
+        let err = install_stdio(&pkg, "demo", &json!({}), "io.github/demo", &Default::default()).unwrap_err();
 
         assert_eq!(err.kind(), "invalid_param");
     }
@@ -1035,6 +1043,7 @@ mod tests {
             "demo",
             &json!({"env_values": {"TOKEN": "abc\ndef"}}),
             "io.github/demo",
+            &Default::default(),
         )
         .unwrap_err();
 
@@ -1048,6 +1057,7 @@ mod tests {
             "demo",
             &json!({"env_values": {"EXTRA_TOKEN": "ignored"}}),
             "io.github/demo",
+            &Default::default(),
         )
         .unwrap();
 
@@ -1087,7 +1097,7 @@ mod tests {
         let mut pkg = package(Some("npx"));
         pkg.registry_type = "mcpb".to_string();
 
-        let err = install_stdio(&pkg, "demo", &json!({}), "io.github/demo").unwrap_err();
+        let err = install_stdio(&pkg, "demo", &json!({}), "io.github/demo", &Default::default()).unwrap_err();
 
         assert_eq!(err.kind(), "unsupported_registry_type");
     }
