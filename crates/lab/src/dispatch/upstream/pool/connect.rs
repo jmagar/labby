@@ -29,12 +29,20 @@ use super::helpers::{
     upstream_transport,
 };
 
-pub(super) async fn connect_upstream(
+/// Connect to an upstream MCP server, optionally reusing a caller-supplied
+/// `reqwest::Client` for HTTP connections (P-M10).
+///
+/// When `shared_client` is `Some`, that client is used as the base HTTP
+/// transport (non-OAuth) or as the inner client for the OAuth path.  When
+/// `None` the function falls back to building a fresh client, preserving the
+/// pre-P-M10 behaviour.
+pub(super) async fn connect_upstream_with_client(
     config: &UpstreamConfig,
     subject: Option<&str>,
     oauth_client_cache: Option<&OauthClientCache>,
     runtime_origin: Option<&str>,
     runtime_owner: Option<&UpstreamRuntimeOwner>,
+    shared_client: Option<&reqwest::Client>,
 ) -> anyhow::Result<(UpstreamConnection, Vec<rmcp::model::Tool>)> {
     let started = Instant::now();
     tracing::debug!(
@@ -53,7 +61,7 @@ pub(super) async fn connect_upstream(
         if is_websocket_url(url) {
             connect_websocket_upstream(url, config).await
         } else {
-            connect_http_upstream(url, config, subject, oauth_client_cache).await
+            connect_http_upstream(url, config, subject, oauth_client_cache, shared_client).await
         }
     } else if let Some(ref command) = config.command {
         connect_stdio_upstream(command, &config.args, config, runtime_origin, runtime_owner).await
@@ -95,6 +103,24 @@ pub(super) async fn connect_upstream(
         ),
     }
     result
+}
+
+pub(super) async fn connect_upstream(
+    config: &UpstreamConfig,
+    subject: Option<&str>,
+    oauth_client_cache: Option<&OauthClientCache>,
+    runtime_origin: Option<&str>,
+    runtime_owner: Option<&UpstreamRuntimeOwner>,
+) -> anyhow::Result<(UpstreamConnection, Vec<rmcp::model::Tool>)> {
+    connect_upstream_with_client(
+        config,
+        subject,
+        oauth_client_cache,
+        runtime_origin,
+        runtime_owner,
+        None,
+    )
+    .await
 }
 
 pub(super) async fn connect_websocket_upstream(
@@ -148,36 +174,18 @@ pub(super) fn stable_jitter_seed(name: &str, attempt: u32) -> u64 {
     hash ^ u64::from(attempt)
 }
 
-/// Log the "OAuth upstream not yet capped" warning at most once per
-/// upstream name per process. The OAuth path runs on every reprobe/
-/// reconnect, so an unconditional WARN floods logs at REPROBE_INTERVAL
-/// (30s) × N upstreams cadence. This dedup keeps the gap visible without
-/// drowning out real warnings.
-fn log_oauth_uncapped_once(upstream_name: &str) {
-    use std::sync::Mutex;
-    use std::sync::OnceLock;
-    static LOGGED: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
-    let set = LOGGED.get_or_init(|| Mutex::new(std::collections::HashSet::new()));
-    let mut guard = match set.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    if guard.insert(upstream_name.to_string()) {
-        tracing::warn!(
-            surface = "dispatch",
-            service = "upstream.pool",
-            upstream = %upstream_name,
-            "oauth http upstream: response body cap not yet applied (follow-up to lab-4z8sx.2)"
-        );
-    }
-}
-
 /// Connect to an HTTP upstream MCP server.
+///
+/// `shared_client` is an optional caller-supplied `reqwest::Client` to reuse
+/// for connection-pooling and TLS session reuse (P-M10).  When `None` a fresh
+/// client is built.  Both the OAuth and non-OAuth paths wrap the base client in
+/// `BodyCappedHttpClient` so the response-size cap (P-H4) is always applied.
 pub(super) async fn connect_http_upstream(
     url: &str,
     config: &UpstreamConfig,
     subject: Option<&str>,
     oauth_client_cache: Option<&OauthClientCache>,
+    shared_client: Option<&reqwest::Client>,
 ) -> anyhow::Result<(UpstreamConnection, Vec<rmcp::model::Tool>)> {
     tracing::info!(
         surface = "dispatch", service = "upstream.pool",
@@ -186,6 +194,20 @@ pub(super) async fn connect_http_upstream(
         "upstream connect start",
     );
     let transport_config = StreamableHttpClientTransportConfig::with_uri(url);
+
+    // Resolve base HTTP client: reuse the pool-level shared client when
+    // available, otherwise build a fresh one (backward-compatible fallback).
+    let base_client = if let Some(c) = shared_client {
+        c.clone()
+    } else {
+        reqwest::Client::builder()
+            .timeout(DEFAULT_REQUEST_TIMEOUT)
+            .build()?
+    };
+
+    // Wrap in BodyCappedHttpClient so both the OAuth and non-OAuth paths
+    // enforce the streaming response-size cap (P-H4).
+    let capped = http_client::BodyCappedHttpClient::new(base_client, max_response_bytes());
 
     // OAuth path: when the upstream declares oauth config, build an AuthClient.
     if config.oauth.is_some() {
@@ -203,19 +225,11 @@ pub(super) async fn connect_http_upstream(
         })?;
 
         let auth_client = cache
-            .get_or_build(config, subject)
+            .get_or_build_capped(config, subject, capped)
             .await
             .map_err(|e| anyhow::anyhow!("oauth_required: {e}"))?;
 
-        // TODO(follow-up to lab-4z8sx.2): the OAuth path does NOT get the
-        // BodyCappedHttpClient cap because `OauthClientCache` returns a
-        // concrete `AuthClient<reqwest::Client>` and AuthClient is
-        // `#[non_exhaustive]` (no way to swap its inner http_client type).
-        // Threading `BodyCappedHttpClient` through the cache requires
-        // changing the cache to build `AuthClient<BodyCappedHttpClient>` end
-        // to end. The non-OAuth path (below) is capped.
-        log_oauth_uncapped_once(&config.name);
-        let worker = StreamableHttpClientWorker::new((*auth_client).clone(), transport_config);
+        let worker = StreamableHttpClientWorker::new(auth_client, transport_config);
         let service: rmcp::service::RunningService<RoleClient, ()> = ().serve(worker).await?;
         let peer = service.peer().clone();
         let tools = peer.list_all_tools().await?;
@@ -244,15 +258,7 @@ pub(super) async fn connect_http_upstream(
         }
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(DEFAULT_REQUEST_TIMEOUT)
-        .build()?;
-    // Wrap reqwest::Client in BodyCappedHttpClient so a hostile upstream
-    // cannot OOM the gateway via an oversized response. Cap is enforced
-    // during streaming (Content-Length + bytes_stream count). For SSE, the
-    // cap is per-event so legitimate long-lived subscriptions are not
-    // disconnected.
-    let capped = http_client::BodyCappedHttpClient::new(client, max_response_bytes());
+    // `capped` is already built above with the shared/fresh base client.
     let worker = StreamableHttpClientWorker::new(capped, transport_config);
     let service: rmcp::service::RunningService<RoleClient, ()> = ().serve(worker).await?;
     let peer = service.peer().clone();
@@ -359,6 +365,7 @@ mod tests {
             &config,
             None,
             Some(&OauthClientCache::new(Arc::new(dashmap::DashMap::new()))),
+            None,
         )
         .await
         .expect_err("missing subject should fail");
@@ -377,6 +384,7 @@ mod tests {
             config.url.as_deref().expect("url"),
             &config,
             Some("alice"),
+            None,
             None,
         )
         .await

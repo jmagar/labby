@@ -90,12 +90,13 @@ Oversized results are replaced with a truncation marker containing `truncated`, 
 the sandbox before returning — that is the point of Code Mode.
 
 Budget:
-- Time: a 30s wall-clock timeout bounds the whole run (the meaningful limit). \
-There is no small per-run call cap — fan out freely with `Promise.all`.
-- Fuel: default 50M fuel supports heavy fan-out plus moderate result processing; \
-base overhead ~100K, ~2K per callTool boundary.
-- `code_mode_fuel_exhausted` or `timeout`: split the work across calls or reduce \
-local processing.
+- Time: a 30 s wall-clock timeout bounds the whole run. Split work across \
+calls or reduce local computation if the `timeout` kind is returned.
+- Memory: 64 MiB heap limit enforced by the QuickJS runtime. Reduce the data \
+processed inside the sandbox if the runner exits with `server_error`.
+- Stack: QuickJS enforces a native stack depth limit; avoid deep recursion.
+- The only recoverable budget kind is `timeout` — retry with a smaller payload \
+or split into multiple `execute` calls.
 
 Lab actions (`lab::*` tool IDs) are not available in Code Mode. For Lab built-in \
 actions use the `execute` tool in Code Mode mode.";

@@ -153,11 +153,24 @@ pub(crate) fn builtin_action_requires_admin(
     entry: &crate::registry::RegisteredService,
     action: &str,
 ) -> bool {
+    // Gateway and setup use catalog-driven requires_admin / destructive metadata
+    // as the single source of truth (A-H2 / S5 fix: no bespoke match arms).
     if entry.name == "gateway" {
-        return !matches!(
-            action,
-            "help" | "schema" | "gateway.help" | "gateway.schema"
-        );
+        // The universal built-ins are never admin-gated, whether the caller
+        // passes them bare (`help`) or service-prefixed (`gateway.help`).  The
+        // catalog stores them bare, so strip any `gateway.` prefix before the
+        // discovery check.
+        let bare = action.strip_prefix("gateway.").unwrap_or(action);
+        if bare == "help" || bare == "schema" {
+            return false;
+        }
+        return entry
+            .actions
+            .iter()
+            .find(|spec| spec.name == action)
+            .map(|spec| spec.requires_admin)
+            // Unknown actions default to admin-required (fail-safe).
+            .unwrap_or(true);
     }
     entry.name == "setup"
         && entry

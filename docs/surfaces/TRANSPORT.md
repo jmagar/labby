@@ -226,6 +226,58 @@ curl -H "Authorization: Bearer $LAB_MCP_HTTP_TOKEN" \
      -d '{"action":"help"}'
 ```
 
+## Gateway Trust Model
+
+Gateway admin actions (`/v1/gateway/*`, `labby mcp` → `gateway` tool) manage the upstream MCP
+server registry.  **They can spawn arbitrary local stdio commands with labby's full process
+environment.**  The implications are non-negotiable:
+
+### HTTP surface (`labby serve`)
+
+1. **`/v1/gateway` is never mounted when auth is not configured.**
+   `api/router.rs` refuses to mount the gateway route group when neither a static bearer token
+   (`LAB_MCP_HTTP_TOKEN`) nor OAuth state (`LAB_AUTH_MODE=oauth`) is configured.  The startup
+   warning emitted is:
+   ```
+   gateway service routes not mounted: HTTP API has no auth configured
+   ```
+
+2. **All gateway actions except `help` and `schema` require the `lab:admin` scope.**
+   This is enforced by `ActionSpec.requires_admin` in `dispatch/gateway/catalog.rs` — the
+   single source of truth.  Both the API handler (`api/services/gateway.rs`) and the MCP
+   gate (`mcp/context.rs`) read directly from this catalog field; there are no separate
+   bespoke match arms that can drift out of sync.
+
+3. **Requests with no `AuthContext` are denied admin actions.**
+   On the HTTP surface, a missing `Authorization` header yields no `AuthContext` in request
+   extensions.  The gateway handler treats this as "no admin scope" and returns `403 Forbidden`.
+   (`is_none_or(...)` would have allowed unauthenticated requests — it is NOT used here.)
+
+4. **`~/.lab/.env` permissions are tightened at startup.**
+   `cli/serve.rs` calls `heal_env_file_permissions(&env_path)` during gateway manager
+   initialization to chmod `.env` and any `.env.bak.*` sibling files to `0600`, correcting
+   any file that was created without strict permissions.
+
+### MCP surface (`labby mcp`)
+
+Stdio transport has no per-request auth by design — the parent process owns the pipes and
+controls access.  `None` auth means the caller is the orchestrating process (e.g. Claude Code)
+and is trusted as an operator.  Gateway admin actions are therefore allowed on stdio transport
+without a scope check.
+
+**Do not expose `labby mcp` through a network proxy without front-side authentication.**
+An unauthenticated network-accessible stdio process can install arbitrary-command upstreams
+via `gateway.add`.
+
+### What operators must ensure
+
+| Scenario | Required |
+|----------|----------|
+| `labby serve` on LAN / internet | `LAB_MCP_HTTP_TOKEN` or `LAB_AUTH_MODE=oauth` |
+| `labby serve` on loopback only | Auth still recommended; loopback-bind is the fallback guard |
+| `labby mcp` over network proxy | Front-side auth on the proxy, not in lab |
+| `labby mcp` as child process | No extra config — process isolation is the boundary |
+
 ## Related Docs
 
 - [OAUTH.md](../runtime/OAUTH.md) — bearer vs OAuth mode, registration flow, and JWT validation

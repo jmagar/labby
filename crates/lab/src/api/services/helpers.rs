@@ -233,6 +233,7 @@ mod tests {
             name: "safe.read",
             description: "A non-destructive read action",
             destructive: false,
+            requires_admin: false,
             returns: "Value",
             params: &[],
         },
@@ -240,6 +241,7 @@ mod tests {
             name: "danger.delete",
             description: "A destructive delete action",
             destructive: true,
+            requires_admin: false,
             returns: "void",
             params: &[ParamSpec {
                 name: "id",

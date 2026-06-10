@@ -673,6 +673,28 @@ async fn handle_oauth_actions(
             crate::dispatch::gateway::oauth::clear(manager, &params.upstream, subject).await?;
             to_json(serde_json::json!({ "ok": true }))
         }
+        // Q-H3: poll loop moved from cli/gateway.rs into shared dispatch so all
+        // surfaces (CLI, API, MCP) share the same orchestration logic.
+        "gateway.oauth.wait" => {
+            // Extract timeout_secs before parse_params consumes params_value.
+            let timeout_secs: u64 = params_value
+                .get("timeout_secs")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(120);
+            let params: GatewayOauthNameParams = parse_params(params_value)?;
+            let subject = params
+                .subject
+                .as_deref()
+                .unwrap_or(SHARED_GATEWAY_OAUTH_SUBJECT);
+            let timeout = std::time::Duration::from_secs(timeout_secs);
+            let authenticated = manager
+                .await_upstream_authorization(&params.upstream, subject, timeout)
+                .await?;
+            to_json(serde_json::json!({
+                "authenticated": authenticated,
+                "timed_out": !authenticated,
+            }))
+        }
         unknown => unknown_action(unknown),
     }
 }
@@ -1759,7 +1781,7 @@ mod tests {
             "gateway.test",
             json!({"spec": {
                 "name": "fixture-stdio",
-                "command": "echo",
+                "command": "npx",
                 "args": ["hello"]
             }}),
         )
@@ -1837,7 +1859,7 @@ mod tests {
             "gateway.add",
             json!({"spec": {
                 "name": "fixture-stdio",
-                "command": "echo",
+                "command": "npx",
                 "args": ["hello"]
             }}),
         )
@@ -1855,7 +1877,7 @@ mod tests {
             "gateway.add",
             json!({"spec": {
                 "name": "fixture-stdio",
-                "command": "echo",
+                "command": "npx",
                 "args": ["hello"]
             }}),
         )

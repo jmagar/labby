@@ -1,11 +1,18 @@
 //! `CodeModeBroker::run_in_runner`: spawn the runner subprocess and drive the
 //! tool-call/log/completion protocol loop.
+//!
+//! The public entry point is `run_in_runner`, which accepts the same
+//! positional parameters as before (preserving all call sites) but
+//! immediately packs them into a `RunnerConfig` struct and delegates to
+//! `run_in_runner_with_config`. Each major event arm (`Done`, `ToolCall`,
+//! `ArtifactWrite`, `Error`) is handled by a named async helper to keep the
+//! select loop readable.
 
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
-use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
+use futures::{StreamExt, stream::FuturesUnordered};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::io::AsyncBufReadExt;
@@ -30,7 +37,84 @@ use super::types::{
 
 const ARTIFACT_WRITE_CALL_ID: &str = "code_mode::write_artifact";
 
+// Concrete future type for pending tool calls.
+// Using Pin<Box<dyn Future>> keeps the FuturesUnordered type concrete so the
+// compiler can infer the element type at the declaration site without requiring
+// `impl Future` in a non-`async fn` parameter position (which is unsupported).
+type ToolCallFut<'a> = std::pin::Pin<
+    Box<
+        dyn Future<Output = (u64, String, Option<Value>, Result<Value, ToolError>, u128)>
+            + Send
+            + 'a,
+    >,
+>;
+
+// ---------------------------------------------------------------------------
+// RunnerConfig — collects the 10 positional parameters into one struct
+// ---------------------------------------------------------------------------
+
+/// All configuration for a single `run_in_runner` invocation.
+///
+/// Collecting these into a struct eliminates the 10-positional-argument call
+/// site (clippy `too_many_arguments`) and makes each field self-documenting.
+pub(in crate::dispatch::gateway::code_mode) struct RunnerConfig {
+    pub code_to_run: String,
+    pub proxy: String,
+    pub max_tool_calls: usize,
+    pub timeout: Duration,
+    pub caller: CodeModeCaller,
+    pub surface: CodeModeSurface,
+    pub max_log_entries: usize,
+    pub max_log_bytes: usize,
+    pub trace_params: bool,
+    pub capability_filter: CodeModeCapabilityFilter,
+}
+
+// ---------------------------------------------------------------------------
+// Drive state — per-run mutable bookkeeping (excludes pending_tool_calls,
+// which stays local in run_in_runner_with_config so its lifetime is tied to
+// the enclosing async fn and not forced to 'static)
+// ---------------------------------------------------------------------------
+
+struct DriveState {
+    calls: Vec<(u64, CodeModeExecutedCall)>,
+    started_tool_calls: usize,
+    started_artifact_writes: usize,
+    artifacts: Vec<CodeModeArtifactReceipt>,
+    artifact_store_pruned: bool,
+    artifact_max_bytes: usize,
+    artifact_root: std::path::PathBuf,
+}
+
+impl DriveState {
+    fn new(artifact_run_id: &str) -> Self {
+        let artifact_root = code_mode_artifact_root(artifact_run_id);
+        let artifact_max_bytes = super::artifacts::artifact_max_bytes();
+        Self {
+            calls: Vec::new(),
+            started_tool_calls: 0,
+            started_artifact_writes: 0,
+            artifacts: Vec::new(),
+            artifact_store_pruned: false,
+            artifact_max_bytes,
+            artifact_root,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Main entry point
+// ---------------------------------------------------------------------------
+
 impl CodeModeBroker<'_> {
+    /// Spawn the runner subprocess, send the code, and drive the
+    /// tool-call/artifact/completion protocol loop until the runner exits
+    /// or the wall-clock deadline fires.
+    ///
+    /// The signature is kept identical to the original (10 positional params)
+    /// so all call sites compile unchanged. Internally the params are packed
+    /// into [`RunnerConfig`] and the loop arms are delegated to named helpers.
+    /// All timeout, killpg, and budget-gate invariants are preserved exactly.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::dispatch::gateway::code_mode) async fn run_in_runner(
         &self,
@@ -44,6 +128,25 @@ impl CodeModeBroker<'_> {
         max_log_bytes: usize,
         trace_params: bool,
         capability_filter: CodeModeCapabilityFilter,
+    ) -> Result<CodeModeExecutionResponse, CodeModeExecutionError> {
+        let cfg = RunnerConfig {
+            code_to_run,
+            proxy,
+            max_tool_calls,
+            timeout,
+            caller,
+            surface,
+            max_log_entries,
+            max_log_bytes,
+            trace_params,
+            capability_filter,
+        };
+        self.run_in_runner_with_config(cfg).await
+    }
+
+    async fn run_in_runner_with_config(
+        &self,
+        cfg: RunnerConfig,
     ) -> Result<CodeModeExecutionResponse, CodeModeExecutionError> {
         let exe = std::env::current_exe().map_err(|err| ToolError::Sdk {
             sdk_kind: "internal_error".to_string(),
@@ -131,35 +234,25 @@ impl CodeModeBroker<'_> {
         write_runner_input(
             &mut stdin,
             &CodeModeRunnerInput::Start {
-                code: code_to_run,
-                proxy,
+                code: cfg.code_to_run.clone(),
+                proxy: cfg.proxy.clone(),
             },
         )
         .await?;
 
         let mut lines = TokioBufReader::new(stdout).lines();
-        let mut calls = Vec::new();
-        let mut pending_tool_calls = FuturesUnordered::new();
-        let mut started_tool_calls = 0usize;
-        // Artifact writes have their own budget, decoupled from tool calls, so a
-        // run that emits many artifacts doesn't starve its upstream tool-call
-        // allowance (and vice versa). Both are gated by `max_tool_calls`.
-        let mut started_artifact_writes = 0usize;
-        let deadline = tokio::time::Instant::now() + timeout;
+        let deadline = tokio::time::Instant::now() + cfg.timeout;
         let artifact_run_id = Ulid::new().to_string();
-        let artifact_root = code_mode_artifact_root(&artifact_run_id);
+        let mut state = DriveState::new(&artifact_run_id);
         // Mark this run active before any artifact dir exists, so a concurrent
         // run's first-write prune can never delete our directory mid-run. The
         // RAII guard clears the id on every exit path (including early returns).
         let _active_artifact_run = ActiveArtifactRun::register(&artifact_run_id);
-        let mut artifacts: Vec<CodeModeArtifactReceipt> = Vec::new();
-        // The store is pruned lazily on the first actual write (below), so runs
-        // that never call writeArtifact — including every search — leave
-        // `$LAB_HOME/code-mode-artifacts/` untouched.
-        let mut artifact_store_pruned = false;
-        // The per-artifact size cap is constant for the run; resolve it once
-        // instead of re-reading the environment on every write.
-        let artifact_max_bytes = super::artifacts::artifact_max_bytes();
+
+        // pending_tool_calls lives here (not in DriveState) so its lifetime is
+        // tied to this async fn rather than being forced to 'static, allowing
+        // futures to capture `self` (a non-'static reference) without error.
+        let mut pending_tool_calls: FuturesUnordered<ToolCallFut<'_>> = FuturesUnordered::new();
 
         loop {
             tokio::select! {
@@ -168,7 +261,7 @@ impl CodeModeBroker<'_> {
                         Ok(line) => line,
                         Err(_) => {
                             terminate_code_mode_runner(&mut child, child_pid).await;
-                            return Err(code_mode_timeout_error(&calls));
+                            return Err(code_mode_timeout_error(&state.calls));
                         }
                     };
                     let Some(line) = line.map_err(|err| ToolError::Sdk {
@@ -180,44 +273,41 @@ impl CodeModeBroker<'_> {
                             sdk_kind: "internal_error".to_string(),
                             message: format!("failed to wait for Code Mode runner: {err}"),
                         })?;
-                        return Err(CodeModeExecutionError::with_trace(ToolError::Sdk {
-                            sdk_kind: "server_error".to_string(),
-                            message: format!(
-                                "Code Mode runner exited before completion with status {status}"
-                            ),
-                        }, sorted_calls(&calls)));
+                        return Err(CodeModeExecutionError::with_trace(
+                            ToolError::Sdk {
+                                sdk_kind: "server_error".to_string(),
+                                message: format!(
+                                    "Code Mode runner exited before completion with status {status}"
+                                ),
+                            },
+                            sorted_calls(&state.calls),
+                        ));
                     };
-                    match serde_json::from_str::<CodeModeRunnerOutput>(&line).map_err(|err| {
+
+                    let msg = serde_json::from_str::<CodeModeRunnerOutput>(&line).map_err(|err| {
                         ToolError::Sdk {
                             sdk_kind: "internal_error".to_string(),
-                            message: format!("Code Mode runner emitted invalid protocol JSON: {err}"),
+                            message: format!(
+                                "Code Mode runner emitted invalid protocol JSON: {err}"
+                            ),
                         }
-                        })? {
+                    })?;
+
+                    match msg {
                         CodeModeRunnerOutput::ToolCall { seq, id, params } => {
-                            if let Err(err) = ensure_within_limit(started_tool_calls, max_tool_calls, "tool call", &calls) {
-                                terminate_code_mode_runner(&mut child, child_pid).await;
-                                return Err(err);
-                            }
-                            started_tool_calls += 1;
-                            let call_id = id.clone();
-                            let redacted_params =
-                                super::trace::redact_trace_params(&params, trace_params);
-                            let caller = caller.clone();
-                            let capability_filter = capability_filter.clone();
-                            pending_tool_calls.push(
-                                async move {
-                                    let call_start = std::time::Instant::now();
-                                    let result = self
-                                        .call_tool_id_before_deadline(
-                                            &id, params, deadline, caller, surface,
-                                            &capability_filter,
-                                        )
-                                        .await;
-                                    let elapsed_ms = call_start.elapsed().as_millis();
-                                    (seq, call_id, redacted_params, result, elapsed_ms)
-                                }
-                                .boxed(),
-                            );
+                            enqueue_tool_call(
+                                self,
+                                seq,
+                                id,
+                                params,
+                                &mut child,
+                                child_pid,
+                                deadline,
+                                &cfg,
+                                &mut state,
+                                &mut pending_tool_calls,
+                            )
+                            .await?;
                         }
                         CodeModeRunnerOutput::ArtifactWrite {
                             seq,
@@ -225,189 +315,333 @@ impl CodeModeBroker<'_> {
                             content,
                             content_type,
                         } => {
-                            if let Err(err) = ensure_within_limit(started_artifact_writes, max_tool_calls, "artifact write", &calls) {
-                                terminate_code_mode_runner(&mut child, child_pid).await;
-                                return Err(err);
-                            }
-                            started_artifact_writes += 1;
-                            // Prune (lazy, once per run) and the write are host-side
-                            // filesystem work; bound them by the run deadline just
-                            // like tool calls so a hung or slow disk can't outlive
-                            // `timeout_ms`.
-                            let artifact_op = async {
-                                if !artifact_store_pruned {
-                                    super::artifacts::prune_artifact_runs(
-                                        super::artifacts::artifact_retention_runs(),
-                                    )
-                                    .await;
-                                    artifact_store_pruned = true;
-                                }
-                                handle_artifact_write(
-                                    &mut stdin,
-                                    &artifact_root,
-                                    &mut artifacts,
-                                    &mut calls,
-                                    seq,
-                                    CodeModeArtifactWrite {
-                                        path,
-                                        content,
-                                        content_type,
-                                    },
-                                    trace_params,
-                                    artifact_max_bytes,
-                                )
-                                .await
-                            };
-                            match tokio::time::timeout_at(deadline, artifact_op).await {
-                                Ok(Ok(())) => {}
-                                Ok(Err(err)) => {
-                                    terminate_code_mode_runner(&mut child, child_pid).await;
-                                    return Err(err.into());
-                                }
-                                Err(_) => {
-                                    terminate_code_mode_runner(&mut child, child_pid).await;
-                                    return Err(code_mode_timeout_error(&calls));
-                                }
-                            }
+                            handle_artifact_write_event(
+                                seq,
+                                path,
+                                content,
+                                content_type,
+                                &mut stdin,
+                                &mut child,
+                                child_pid,
+                                deadline,
+                                &cfg,
+                                &mut state,
+                            )
+                            .await?;
                         }
                         CodeModeRunnerOutput::Done { result, logs } => {
+                            // Preserve original invariant: Done with in-flight
+                            // tool calls is a protocol error.
                             if !pending_tool_calls.is_empty() {
                                 terminate_code_mode_runner(&mut child, child_pid).await;
-                                return Err(CodeModeExecutionError::with_trace(ToolError::Sdk {
-                                    sdk_kind: "internal_error".to_string(),
-                                    message: "Code Mode runner completed with pending tool calls".to_string(),
-                                }, sorted_calls(&calls)));
+                                return Err(CodeModeExecutionError::with_trace(
+                                    ToolError::Sdk {
+                                        sdk_kind: "internal_error".to_string(),
+                                        message: "Code Mode runner completed with pending tool calls"
+                                            .to_string(),
+                                    },
+                                    sorted_calls(&state.calls),
+                                ));
                             }
-                            // Cloudflare parity: pure computation (filter, sort, reduce
-                            // over already-known data) is a valid Code Mode use case.
-                            // Do not require at least one callTool — let the user return
-                            // a computed value from `result` without any tool calls.
-                            let status = child.wait().await.map_err(|err| ToolError::Sdk {
-                                sdk_kind: "internal_error".to_string(),
-                                message: format!("failed to wait for Code Mode runner: {err}"),
-                            })?;
-                            if !status.success() {
-                                return Err(CodeModeExecutionError::with_trace(ToolError::Sdk {
-                                    sdk_kind: "server_error".to_string(),
-                                    message: format!("Code Mode runner exited with status {status}"),
-                                }, sorted_calls(&calls)));
-                            }
-                            calls.sort_by_key(|(seq, _)| *seq);
-                            // The child has exited (child.wait() above), so its
-                            // stderr pipe is closed and the drain task will reach
-                            // EOF. Await it before reading the buffer so trailing
-                            // stderr lines are not lost.
+                            let response =
+                                finalize_done(result, logs, &mut child, &state).await?;
+                            // The child has exited (child.wait() in finalize_done),
+                            // so stderr is closed and the drain task will reach EOF.
                             let _joined = stderr_task.await;
-                            // Merge stderr lines (Javy path: redirect_stdout_to_stderr)
-                            // with protocol-carried logs. The javy path currently
-                            // emits no protocol-carried logs, so `logs` is empty
-                            // and stderr supplies the captured output.
-                            let mut all_logs = logs;
+                            // Merge stderr lines with protocol-carried logs.
+                            let mut all_logs = response.logs.clone();
                             {
                                 let stderr_captured = stderr_lines.lock().await;
                                 all_logs.extend(stderr_captured.iter().cloned());
                             }
-
-                            // sanitize_tool_text() redacts secrets/control chars.
-                            // Apply log caps from config, appending a sentinel when truncated.
                             let all_logs = apply_log_caps(
                                 all_logs,
-                                max_log_entries,
-                                max_log_bytes,
+                                cfg.max_log_entries,
+                                cfg.max_log_bytes,
                             );
                             let sanitized_logs = all_logs
                                 .into_iter()
                                 .map(|line| {
-                                    crate::dispatch::gateway::projection::sanitize_tool_text(&line, 4096)
+                                    crate::dispatch::gateway::projection::sanitize_tool_text(
+                                        &line, 4096,
+                                    )
                                 })
                                 .collect();
                             return Ok(CodeModeExecutionResponse {
-                                result: result.into_response_result(),
-                                calls: calls.into_iter().map(|(_, call)| call).collect(),
                                 logs: sanitized_logs,
-                                artifacts,
+                                ..response
                             });
                         }
                         CodeModeRunnerOutput::Error { kind, message } => {
-                            if let Ok(status) = child.wait().await {
-                                tracing::debug!(
-                                    surface = "dispatch",
-                                    service = "code_mode",
-                                    action = "code_execute",
-                                    exit_status = %status,
-                                    "runner exited with error"
-                                );
-                            }
-                            return Err(CodeModeExecutionError::with_trace(ToolError::Sdk {
-                                sdk_kind: kind,
+                            return handle_runner_error(
+                                kind,
                                 message,
-                            }, sorted_calls(&calls)));
+                                &mut child,
+                                &state.calls,
+                            )
+                            .await;
                         }
                     }
                 }
-                completed = pending_tool_calls.next(), if !pending_tool_calls.is_empty() => {
-                    let Some((seq, id, params, result, elapsed_ms)):
-                        Option<(u64, String, Option<Value>, Result<Value, ToolError>, u128)> = completed
-                    else {
-                        continue;
-                    };
-                    match result {
-                        Ok(result) => {
-                            calls.push((seq, CodeModeExecutedCall {
-                                id,
-                                ok: true,
-                                elapsed_ms,
-                                params,
-                                error_kind: None,
-                            }));
-                            write_runner_input(
-                                &mut stdin,
-                                &CodeModeRunnerInput::ToolResult { seq, result },
-                            )
-                            .await?;
-                        }
-                        Err(err) => {
-                            // Catchable tool errors (Cloudflare parity): a single failed
-                            // callTool must NOT abort the run. Reject the in-sandbox promise
-                            // with the structured {kind,message} so the user's JS try/catch
-                            // can handle it and continue (e.g. partial fan-out). If the
-                            // rejection is uncaught, the main promise rejects and the
-                            // existing Rejected/Error runner-output path surfaces it as the
-                            // final error. Limit/timeout paths still terminate (handled
-                            // elsewhere) — only per-call tool errors are caught here.
-                            let kind = match &err {
-                                ToolError::Sdk { sdk_kind, .. } => sdk_kind.clone(),
-                                other => other.kind().to_string(),
-                            };
-                            // The ToolError settles this seq's promise in-sandbox; do NOT
-                            // also send a ToolResult for the same seq.
-                            // Use user_message() (the human text), NOT to_string()
-                            // (which emits the full JSON envelope) — otherwise the
-                            // runner re-wraps it and the in-sandbox rejection message
-                            // becomes double-JSON-encoded.
-                            write_runner_input(
-                                &mut stdin,
-                                &CodeModeRunnerInput::ToolError {
-                                    seq,
-                                    kind: kind.clone(),
-                                    message: err.user_message().to_string(),
-                                },
-                            )
-                            .await?;
-                            calls.push((seq, CodeModeExecutedCall {
-                                id,
-                                ok: false,
-                                elapsed_ms,
-                                params,
-                                error_kind: Some(kind),
-                            }));
-                        }
-                    }
+                completed = pending_tool_calls.next(),
+                    if !pending_tool_calls.is_empty() =>
+                {
+                    handle_completed_tool_call(completed, &mut stdin, &mut state).await?;
                 }
             }
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Named arm helpers (free functions so they don't capture `self` lifetimes)
+// ---------------------------------------------------------------------------
+
+/// Enqueue a `ToolCall` request from the runner into `pending_tool_calls`.
+///
+/// Free function (not `&self` method) so the returned future can capture
+/// `broker` with the same lifetime as the enclosing `run_in_runner_with_config`
+/// rather than being forced to `'static`.
+async fn enqueue_tool_call<'a>(
+    broker: &'a CodeModeBroker<'a>,
+    seq: u64,
+    id: String,
+    params: Value,
+    child: &mut tokio::process::Child,
+    child_pid: Option<u32>,
+    deadline: tokio::time::Instant,
+    cfg: &RunnerConfig,
+    state: &mut DriveState,
+    pending_tool_calls: &mut FuturesUnordered<ToolCallFut<'a>>,
+) -> Result<(), CodeModeExecutionError> {
+    if let Err(err) = ensure_within_limit(
+        state.started_tool_calls,
+        cfg.max_tool_calls,
+        "tool call",
+        &state.calls,
+    ) {
+        terminate_code_mode_runner(child, child_pid).await;
+        return Err(err);
+    }
+    state.started_tool_calls += 1;
+    let call_id = id.clone();
+    let redacted_params = super::trace::redact_trace_params(&params, cfg.trace_params);
+    let caller = cfg.caller.clone();
+    let capability_filter = cfg.capability_filter.clone();
+    let surface = cfg.surface;
+    pending_tool_calls.push(Box::pin(async move {
+        let call_start = std::time::Instant::now();
+        let result = broker
+            .call_tool_id_before_deadline(
+                &id,
+                params,
+                deadline,
+                caller,
+                surface,
+                &capability_filter,
+            )
+            .await;
+        let elapsed_ms = call_start.elapsed().as_millis();
+        (seq, call_id, redacted_params, result, elapsed_ms)
+    }));
+    Ok(())
+}
+
+/// Handle an `ArtifactWrite` event from the runner.
+async fn handle_artifact_write_event(
+    seq: u64,
+    path: String,
+    content: String,
+    content_type: Option<String>,
+    stdin: &mut ChildStdin,
+    child: &mut tokio::process::Child,
+    child_pid: Option<u32>,
+    deadline: tokio::time::Instant,
+    cfg: &RunnerConfig,
+    state: &mut DriveState,
+) -> Result<(), CodeModeExecutionError> {
+    if let Err(err) = ensure_within_limit(
+        state.started_artifact_writes,
+        cfg.max_tool_calls,
+        "artifact write",
+        &state.calls,
+    ) {
+        terminate_code_mode_runner(child, child_pid).await;
+        return Err(err);
+    }
+    state.started_artifact_writes += 1;
+    // Prune (lazy, once per run) and the write are host-side filesystem work;
+    // bound them by the run deadline just like tool calls so a hung or slow
+    // disk can't outlive `timeout_ms`.
+    let artifact_root = state.artifact_root.clone();
+    let artifact_max_bytes = state.artifact_max_bytes;
+    let trace_params = cfg.trace_params;
+    let artifact_op = async {
+        if !state.artifact_store_pruned {
+            super::artifacts::prune_artifact_runs(super::artifacts::artifact_retention_runs())
+                .await;
+            state.artifact_store_pruned = true;
+        }
+        handle_artifact_write(
+            stdin,
+            &artifact_root,
+            &mut state.artifacts,
+            &mut state.calls,
+            seq,
+            CodeModeArtifactWrite {
+                path,
+                content,
+                content_type,
+            },
+            trace_params,
+            artifact_max_bytes,
+        )
+        .await
+    };
+    match tokio::time::timeout_at(deadline, artifact_op).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(err)) => {
+            terminate_code_mode_runner(child, child_pid).await;
+            Err(err.into())
+        }
+        Err(_) => {
+            terminate_code_mode_runner(child, child_pid).await;
+            Err(code_mode_timeout_error(&state.calls))
+        }
+    }
+}
+
+/// Handle the `Done` protocol message. Waits for the child to exit and
+/// returns a partially-assembled `CodeModeExecutionResponse` (logs are
+/// merged by the caller after the stderr drain task joins).
+///
+/// Cloudflare parity: pure computation (filter, sort, reduce over
+/// already-known data) is a valid Code Mode use case. Do not require at
+/// least one callTool.
+async fn finalize_done(
+    result: super::protocol::CodeModeRunnerResult,
+    logs: Vec<String>,
+    child: &mut tokio::process::Child,
+    state: &DriveState,
+) -> Result<CodeModeExecutionResponse, CodeModeExecutionError> {
+    let status = child.wait().await.map_err(|err| ToolError::Sdk {
+        sdk_kind: "internal_error".to_string(),
+        message: format!("failed to wait for Code Mode runner: {err}"),
+    })?;
+    if !status.success() {
+        return Err(CodeModeExecutionError::with_trace(
+            ToolError::Sdk {
+                sdk_kind: "server_error".to_string(),
+                message: format!("Code Mode runner exited with status {status}"),
+            },
+            sorted_calls(&state.calls),
+        ));
+    }
+    let mut sorted = state.calls.clone();
+    sorted.sort_by_key(|(seq, _)| *seq);
+    Ok(CodeModeExecutionResponse {
+        result: result.into_response_result(),
+        calls: sorted.into_iter().map(|(_, call)| call).collect(),
+        // Caller merges stderr drain into logs after await-ing the task.
+        logs,
+        artifacts: state.artifacts.clone(),
+    })
+}
+
+/// Handle a runner `Error` protocol message.
+async fn handle_runner_error(
+    kind: String,
+    message: String,
+    child: &mut tokio::process::Child,
+    calls: &[(u64, CodeModeExecutedCall)],
+) -> Result<CodeModeExecutionResponse, CodeModeExecutionError> {
+    if let Ok(status) = child.wait().await {
+        tracing::debug!(
+            surface = "dispatch",
+            service = "code_mode",
+            action = "code_execute",
+            exit_status = %status,
+            "runner exited with error"
+        );
+    }
+    Err(CodeModeExecutionError::with_trace(
+        ToolError::Sdk {
+            sdk_kind: kind,
+            message,
+        },
+        sorted_calls(calls),
+    ))
+}
+
+/// Handle a completed tool-call future from `pending_tool_calls`.
+async fn handle_completed_tool_call(
+    completed: Option<(u64, String, Option<Value>, Result<Value, ToolError>, u128)>,
+    stdin: &mut ChildStdin,
+    state: &mut DriveState,
+) -> Result<(), CodeModeExecutionError> {
+    let Some((seq, id, params, result, elapsed_ms)) = completed else {
+        return Ok(());
+    };
+    match result {
+        Ok(result) => {
+            state.calls.push((
+                seq,
+                CodeModeExecutedCall {
+                    id,
+                    ok: true,
+                    elapsed_ms,
+                    params,
+                    error_kind: None,
+                },
+            ));
+            write_runner_input(stdin, &CodeModeRunnerInput::ToolResult { seq, result }).await?;
+        }
+        Err(err) => {
+            // Catchable tool errors (Cloudflare parity): a single failed
+            // callTool must NOT abort the run. Reject the in-sandbox promise
+            // with the structured {kind,message} so the user's JS try/catch
+            // can handle it and continue (e.g. partial fan-out). If the
+            // rejection is uncaught, the main promise rejects and the
+            // existing Rejected/Error runner-output path surfaces it as the
+            // final error. Limit/timeout paths still terminate (handled
+            // elsewhere) — only per-call tool errors are caught here.
+            let kind = match &err {
+                ToolError::Sdk { sdk_kind, .. } => sdk_kind.clone(),
+                other => other.kind().to_string(),
+            };
+            // The ToolError settles this seq's promise in-sandbox; do NOT
+            // also send a ToolResult for the same seq.
+            // Use user_message() (the human text), NOT to_string()
+            // (which emits the full JSON envelope) — otherwise the
+            // runner re-wraps it and the in-sandbox rejection message
+            // becomes double-JSON-encoded.
+            write_runner_input(
+                stdin,
+                &CodeModeRunnerInput::ToolError {
+                    seq,
+                    kind: kind.clone(),
+                    message: err.user_message().to_string(),
+                },
+            )
+            .await?;
+            state.calls.push((
+                seq,
+                CodeModeExecutedCall {
+                    id,
+                    ok: false,
+                    elapsed_ms,
+                    params,
+                    error_kind: Some(kind),
+                },
+            ));
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers (unchanged from original)
+// ---------------------------------------------------------------------------
 
 fn sorted_calls(calls: &[(u64, CodeModeExecutedCall)]) -> Vec<CodeModeExecutedCall> {
     let mut calls = calls.to_vec();

@@ -32,10 +32,16 @@ impl CodeModeBroker<'_> {
             return Ok(Value::Array(Vec::new()));
         };
 
+        // `require_fresh_catalog = true` triggers `refresh_code_mode_catalog`,
+        // which is now bounded by a 30 s wall-clock TTL and a single-flight
+        // guard — back-to-back searches do not re-probe upstreams within the
+        // freshness window. See `manager/code_mode_runtime.rs`.
         let require_fresh_catalog = true;
         let owner = caller.runtime_owner(surface);
         let oauth_subject = caller.oauth_subject();
-        let (catalog, serialized_size) = self
+        // Returns (entries, catalog_json, serialized_size) — all from the
+        // render cache when the healthy tool set has not changed.
+        let (catalog, catalog_json, serialized_size) = self
             .code_search_catalog(manager, require_fresh_catalog, &owner, oauth_subject)
             .await?;
         tracing::info!(
@@ -51,10 +57,9 @@ impl CodeModeBroker<'_> {
         // catalog is injected as a global `const tools = [...]`, mirroring the
         // typed proxy `execute` injects. `max_tool_calls = 0` means any stray
         // `callTool` in the search filter errors out — search must not call tools.
-        let catalog_json = serde_json::to_string(&catalog).map_err(|err| ToolError::Sdk {
-            sdk_kind: "internal_error".to_string(),
-            message: format!("failed to serialize Code Mode search catalog: {err}"),
-        })?;
+        //
+        // Use the pre-serialized `catalog_json` from the render cache so we do
+        // not pay `serde_json::to_string` again when the catalog is unchanged.
         let proxy = format!("const tools = {catalog_json};\n");
         // Search passes the caller's code to the runner *raw* (no
         // `normalize_user_code`). The runner's invoker requires the code to
@@ -82,16 +87,55 @@ impl CodeModeBroker<'_> {
         Ok(response.result.unwrap_or_else(|| Value::Array(Vec::new())))
     }
 
+    /// Build or return the cached Code Mode search catalog.
+    ///
+    /// Returns `(entries, catalog_json, serialized_size)`. The `catalog_json`
+    /// is the pre-serialized `serde_json::to_string(&entries)` string, ready
+    /// to inject as `const tools = ...;` into the runner. Both are served from
+    /// the manager-level render cache when the healthy tool fingerprint matches,
+    /// avoiding repeated `generate_tool_types` calls and JSON serialization.
     pub(in crate::dispatch::gateway::code_mode) async fn code_search_catalog(
         &self,
         manager: &GatewayManager,
         allow_cold_connect: bool,
         owner: &UpstreamRuntimeOwner,
         oauth_subject: Option<&str>,
-    ) -> Result<(Vec<CodeModeCatalogEntry>, usize), ToolError> {
-        let mut entries = manager
+    ) -> Result<(Vec<CodeModeCatalogEntry>, String, usize), ToolError> {
+        let raw_tools = manager
             .code_mode_catalog_tools(allow_cold_connect, Some(owner), oauth_subject)
-            .await?
+            .await?;
+
+        // --- P-H3: catalog render cache ---
+        // Compute a cheap fingerprint from the sorted healthy tool ids. This
+        // detects upstream additions/removals/renames without needing a pool
+        // generation counter. The sort makes the fingerprint order-independent
+        // (the pool may return tools in any order).
+        let fingerprint = {
+            let mut ids: Vec<String> = raw_tools
+                .iter()
+                .map(|t| format!("{}::{}", t.upstream_name, t.tool.name))
+                .collect();
+            ids.sort_unstable();
+            ids.join("\n")
+        };
+
+        // Check the manager-level render cache before re-building entries
+        // (which includes `generate_tool_types` per tool — non-trivial work).
+        if let Some((entries, catalog_json, serialized_size)) =
+            manager.cached_catalog_render(&fingerprint).await
+        {
+            tracing::debug!(
+                surface = "dispatch",
+                service = "code_search",
+                action = "catalog.build",
+                entry_count = entries.len(),
+                "Code Mode search catalog served from render cache"
+            );
+            return Ok((entries, catalog_json, serialized_size));
+        }
+
+        // Cache miss — build entries (includes `generate_tool_types` per entry).
+        let mut entries = raw_tools
             .into_iter()
             .map(|tool| {
                 let upstream = tool.upstream_name.to_string();
@@ -118,12 +162,27 @@ impl CodeModeBroker<'_> {
                 .then_with(|| a.name.cmp(&b.name))
         });
 
-        // The catalog is injected as `const tools` into the javy runner (via the
-        // runner `proxy` slot) and never enters the model context (only the
-        // caller's filtered result does), so it is served complete and uncapped —
-        // matching Cloudflare's Code Mode design.
+        // The catalog is injected as `const tools` into the javy runner and
+        // never enters the model context, so it is served complete and uncapped.
         let serialized_size = serialized_catalog_size(&entries)?;
 
-        Ok((entries, serialized_size))
+        // Serialize once and store so subsequent calls within the same pool
+        // state reuse this string directly.
+        let catalog_json = serde_json::to_string(&entries).map_err(|err| ToolError::Sdk {
+            sdk_kind: "internal_error".to_string(),
+            message: format!("failed to serialize Code Mode search catalog: {err}"),
+        })?;
+
+        // Store the render for the next search call.
+        manager
+            .store_catalog_render_cache(super::CatalogRenderCache {
+                fingerprint,
+                entries: entries.clone(),
+                catalog_json: catalog_json.clone(),
+                serialized_size,
+            })
+            .await;
+
+        Ok((entries, catalog_json, serialized_size))
     }
 }

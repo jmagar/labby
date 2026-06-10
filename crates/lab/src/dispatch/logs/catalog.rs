@@ -10,6 +10,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "help",
         description: "Show this action catalog",
         destructive: false,
+        requires_admin: false,
         returns: "Catalog",
         params: &[],
     },
@@ -17,6 +18,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "schema",
         description: "Return the parameter schema for a named action",
         destructive: false,
+        requires_admin: false,
         returns: "Schema",
         params: &[ParamSpec {
             name: "action",
@@ -29,6 +31,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "logs.search",
         description: "Search persisted log events with filters",
         destructive: false,
+        requires_admin: false,
         returns: "Value",
         params: &[ParamSpec {
             name: "query",
@@ -41,6 +44,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "logs.tail",
         description: "Bounded follow-up read from the persisted store",
         destructive: false,
+        requires_admin: false,
         returns: "Value",
         params: &[
             ParamSpec {
@@ -67,6 +71,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "logs.stats",
         description: "Return retention metadata and drop counters",
         destructive: false,
+        requires_admin: false,
         returns: "Value",
         params: &[],
     },
@@ -74,6 +79,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "logs.stream",
         description: "Live push is HTTP SSE only; dispatch returns guidance",
         destructive: false,
+        requires_admin: false,
         returns: "Value",
         params: &[],
     },

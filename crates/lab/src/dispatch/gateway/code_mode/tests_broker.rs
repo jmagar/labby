@@ -125,7 +125,7 @@ async fn broker_search_exposes_typed_schema_metadata_from_live_catalog() {
     let surface = super::CodeModeSurface::Mcp;
     let owner = caller.runtime_owner(surface);
     let oauth_subject = caller.oauth_subject();
-    let (entries, _size) = broker
+    let (entries, _catalog_json, _size) = broker
         .code_search_catalog(&manager, true, &owner, oauth_subject)
         .await
         .expect("catalog builds over live catalog");
@@ -227,7 +227,7 @@ async fn broker_search_refreshes_read_only_catalog_after_upstream_tool_expansion
         names
     };
 
-    let (initial, _size) = broker
+    let (initial, _catalog_json, _size) = broker
         .code_search_catalog(&manager, true, &owner, oauth_subject)
         .await
         .expect("initial read-only catalog builds over partial catalog");
@@ -240,7 +240,7 @@ async fn broker_search_refreshes_read_only_catalog_after_upstream_tool_expansion
         "Wait".to_string(),
     ];
 
-    let (refreshed, _size) = broker
+    let (refreshed, _catalog_json, _size) = broker
         .code_search_catalog(&manager, true, &owner, oauth_subject)
         .await
         .expect("read-only catalog refreshes expanded live catalog");

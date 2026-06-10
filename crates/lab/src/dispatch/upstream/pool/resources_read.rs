@@ -16,7 +16,6 @@ use crate::config::UpstreamConfig;
 
 use super::super::types::UpstreamCapability;
 use super::UpstreamPool;
-use super::connect::connect_upstream;
 use super::helpers::{
     max_response_bytes, normalize_resource_result_uri, redact_resource_uri_for_logging,
     upstream_transport,
@@ -170,16 +169,9 @@ impl UpstreamPool {
         let event = UpstreamRequestLog::resource(&config.name, redacted_uri, true)
             .with_transport(upstream_transport(config));
         log_upstream_request_start(event);
-        let (conn, _) = match connect_upstream(
-            config,
-            Some(subject),
-            self.oauth_client_cache.as_ref(),
-            None,
-            None,
-        )
-        .await
-        {
-            Ok(conn) => conn,
+        // P-C1: reuse cached per-(upstream,subject) connection instead of opening fresh.
+        let (peer, _tools) = match self.acquire_or_connect_subject(config, subject).await {
+            Ok(pair) => pair,
             Err(error) => {
                 self.record_failure_for(
                     &config.name,
@@ -200,8 +192,7 @@ impl UpstreamPool {
         };
         match tokio::time::timeout(
             self.request_timeout,
-            conn.peer
-                .read_resource(rmcp::model::ReadResourceRequestParams::new(original_uri)),
+            peer.read_resource(rmcp::model::ReadResourceRequestParams::new(original_uri)),
         )
         .await
         {
@@ -248,6 +239,7 @@ impl UpstreamPool {
                     format!("upstream resource read failed: {error}"),
                 )
                 .await;
+                self.evict_subject_connection(&config.name, subject).await;
                 log_upstream_request_error(
                     event,
                     start.elapsed().as_millis(),
@@ -269,6 +261,7 @@ impl UpstreamPool {
                     message.clone(),
                 )
                 .await;
+                self.evict_subject_connection(&config.name, subject).await;
                 log_upstream_request_error(
                     event,
                     start.elapsed().as_millis(),

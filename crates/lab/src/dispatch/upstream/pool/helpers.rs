@@ -39,6 +39,11 @@ pub(super) const DEFAULT_UPSTREAM_DISCOVERY_CONCURRENCY: usize = 3;
 /// Per-request timeout for upstream tool/resource/prompt RPCs.
 pub(super) const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 pub(super) const STDIO_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+/// Idle TTL for per-`(upstream, subject)` cached connections.
+///
+/// A connection that has not been used for this long will be evicted from
+/// the subject-connection cache on the next access for its key (P-C1).
+pub(super) const SUBJECT_CONN_IDLE_TTL: Duration = Duration::from_secs(300);
 
 /// Default maximum response size from upstream servers (10 MB).
 pub(super) const DEFAULT_MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;

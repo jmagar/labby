@@ -7,6 +7,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "help",
         description: "Show this action catalog",
         destructive: false,
+        requires_admin: false,
         params: &[],
         returns: "Catalog",
     },
@@ -14,6 +15,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "schema",
         description: "Return the parameter schema for a named action",
         destructive: false,
+        requires_admin: false,
         params: &[ParamSpec {
             name: "action",
             ty: "string",
@@ -26,6 +28,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "sources.list",
         description: "List configured marketplaces",
         destructive: false,
+        requires_admin: false,
         params: &[],
         returns: "Marketplace[]",
     },
@@ -33,6 +36,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "plugins.list",
         description: "List plugins across marketplaces. Supports server-side filtering by kind, installed state, and text query. All filter params are optional and additive.",
         destructive: false,
+        requires_admin: false,
         params: &[
             ParamSpec {
                 name: "marketplace",
@@ -65,6 +69,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "plugin.get",
         description: "Return a single plugin by id (`name@marketplace`)",
         destructive: false,
+        requires_admin: false,
         params: &[ParamSpec {
             name: "id",
             ty: "string",
@@ -77,6 +82,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "plugin.artifacts",
         description: "List artifact files shipped with an installed plugin",
         destructive: false,
+        requires_admin: false,
         params: &[ParamSpec {
             name: "id",
             ty: "string",
@@ -89,6 +95,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "plugin.workspace",
         description: "Load or create an app-managed editable workspace mirror for a plugin",
         destructive: false,
+        requires_admin: false,
         params: &[ParamSpec {
             name: "id",
             ty: "string",
@@ -101,6 +108,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "plugin.save",
         description: "Save a file into the plugin workspace mirror",
         destructive: false,
+        requires_admin: false,
         params: &[
             ParamSpec {
                 name: "id",
@@ -127,6 +135,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "plugin.deploy",
         description: "Deploy the saved plugin workspace to the local Claude Code install target",
         destructive: true,
+        requires_admin: false,
         params: &[ParamSpec {
             name: "id",
             ty: "string",
@@ -139,6 +148,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "plugin.deploy.preview",
         description: "Preview changed, skipped, and removed files before deploying the workspace",
         destructive: false,
+        requires_admin: false,
         params: &[ParamSpec {
             name: "id",
             ty: "string",
@@ -151,6 +161,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "artifact.fork",
         description: "Fork artifact(s) or an entire plugin into your stash with upstream tracking.",
         destructive: false,
+        requires_admin: false,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -177,6 +188,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "artifact.list",
         description: "List forked marketplace artifact stashes with drift status.",
         destructive: false,
+        requires_admin: false,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -197,6 +209,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "artifact.unfork",
         description: "Remove fork tracking metadata for artifact(s) or a plugin stash.",
         destructive: true,
+        requires_admin: false,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -229,6 +242,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "artifact.reset",
         description: "Reset forked artifact(s) back to their upstream base snapshot.",
         destructive: true,
+        requires_admin: false,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -261,6 +275,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "artifact.diff",
         description: "Show diffs between forked artifact content and upstream/base snapshots.",
         destructive: false,
+        requires_admin: false,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -287,6 +302,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "artifact.patch",
         description: "Apply a patch to one forked artifact in the marketplace stash.",
         destructive: false,
+        requires_admin: false,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -325,6 +341,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "artifact.update.check",
         description: "Check whether a forked plugin artifact stash has an upstream update",
         destructive: false,
+        requires_admin: false,
         params: &[ParamSpec {
             name: "plugin_id",
             ty: "string",
@@ -337,6 +354,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "artifact.update.preview",
         description: "Preview artifact update changes and conflicts for a forked plugin stash",
         destructive: false,
+        requires_admin: false,
         params: &[ParamSpec {
             name: "plugin_id",
             ty: "string",
@@ -349,6 +367,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "artifact.update.apply",
         description: "Apply a pending upstream artifact update to a forked plugin stash",
         destructive: true,
+        requires_admin: false,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -375,6 +394,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "artifact.merge.suggest",
         description: "Request an AI merge suggestion for one conflicted artifact file",
         destructive: false,
+        requires_admin: false,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -395,6 +415,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "artifact.config.set",
         description: "Update artifact update preferences for a forked plugin stash",
         destructive: false,
+        requires_admin: false,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -421,6 +442,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "sources.add",
         description: "Register a new marketplace via `claude plugin marketplace add`",
         destructive: true,
+        requires_admin: false,
         params: &[
             ParamSpec {
                 name: "repo",
@@ -447,6 +469,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "plugin.install",
         description: "Install a plugin via `claude plugin install`",
         destructive: true,
+        requires_admin: false,
         params: &[ParamSpec {
             name: "id",
             ty: "string",
@@ -459,6 +482,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "plugin.uninstall",
         description: "Uninstall a plugin via `claude plugin uninstall`",
         destructive: true,
+        requires_admin: false,
         params: &[ParamSpec {
             name: "id",
             ty: "string",
@@ -474,6 +498,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "agent.list",
         description: "List ACP-compatible agents from the registry CDN",
         destructive: false,
+        requires_admin: false,
         returns: "Agent[]",
         params: &[],
     },
@@ -481,6 +506,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "agent.get",
         description: "Get details for a single ACP agent by id",
         destructive: false,
+        requires_admin: false,
         returns: "Agent",
         params: &[ParamSpec {
             name: "id",
@@ -493,6 +519,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "agent.install",
         description: "Install an ACP agent on one or more devices. Local installs write a provider entry to `~/.lab/acp-providers.json`; binary archives are downloaded only over HTTPS, SHA-256 verified, size-limited, and installed atomically.",
         destructive: true,
+        requires_admin: false,
         returns: "InstallResults",
         params: &[
             ParamSpec {
@@ -526,6 +553,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "plugin.cherry_pick",
         description: "Install selected components from a plugin to one or more devices",
         destructive: true,
+        requires_admin: false,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -570,6 +598,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "agent.uninstall",
         description: "Remove an installed ACP agent entry from `~/.lab/acp-providers.json`",
         destructive: true,
+        requires_admin: false,
         returns: "UninstallResult",
         params: &[
             ParamSpec {

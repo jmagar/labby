@@ -5,6 +5,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "help",
         description: "Show this action catalog",
         destructive: false,
+        requires_admin: false,
         returns: "Catalog",
         params: &[],
     },
@@ -12,6 +13,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "schema",
         description: "Return the parameter schema for a named action",
         destructive: false,
+        requires_admin: false,
         returns: "Schema",
         params: &[ParamSpec {
             name: "action",
@@ -24,6 +26,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "system.checks",
         description: "Run local system probes: env vars, Docker, disk, ports, config files",
         destructive: false,
+        requires_admin: false,
         returns: "DoctorReport",
         params: &[],
     },
@@ -31,6 +34,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "service.probe",
         description: "Probe a single named service via its health endpoint",
         destructive: false,
+        requires_admin: false,
         returns: "Finding",
         params: &[
             ParamSpec {
@@ -51,6 +55,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "audit.full",
         description: "Probe all configured services plus system checks; streams results",
         destructive: false,
+        requires_admin: false,
         returns: "stream<Finding>",
         params: &[],
     },
@@ -58,6 +63,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "auth.check",
         description: "Check auth/OAuth configuration: env vars, file presence, and Unix file permissions",
         destructive: false,
+        requires_admin: false,
         returns: "DoctorReport",
         params: &[],
     },
@@ -68,6 +74,7 @@ pub const ACTIONS: &[ActionSpec] = &[
                        wrong-path 404 behavior, and (when backend_url is provided) backend-leak \
                        redaction.",
         destructive: false,
+        requires_admin: false,
         returns: "DoctorReport",
         params: &[
             ParamSpec {

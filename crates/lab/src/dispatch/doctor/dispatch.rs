@@ -9,6 +9,7 @@ use crate::dispatch::error::ToolError;
 use crate::dispatch::helpers::{action_schema, help_payload, to_json};
 
 use super::catalog::ACTIONS;
+use super::gateway;
 use super::params::{parse_proxy_check, parse_service_probe};
 use super::proxy;
 use super::service;
@@ -40,6 +41,9 @@ pub async fn dispatch(action: &str, params: Value) -> Result<Value, ToolError> {
                     message: format!("auth.check task panicked: {e}"),
                 })?;
             return to_json(Report { findings });
+        }
+        "gateway.upstreams" => {
+            return to_json(gateway::check_gateway_upstreams().await);
         }
         "proxy.check" => {
             let p = parse_proxy_check(&params)?;
@@ -93,6 +97,7 @@ pub async fn dispatch_with_clients(
                 message: format!("auth.check task panicked: {e}"),
             }),
         },
+        "gateway.upstreams" => to_json(gateway::check_gateway_upstreams().await),
         "proxy.check" => {
             let p = parse_proxy_check(&params)?;
             to_json(proxy::check_proxy(p).await?)
@@ -105,6 +110,7 @@ pub async fn dispatch_with_clients(
         "audit.full" => {
             // Non-streaming path: collect all findings and return at once.
             // Streaming is handled by `api/services/doctor.rs` SSE endpoint.
+            // gateway.upstreams is included so the full audit surfaces pool state.
             let (tx, mut rx) = tokio::sync::mpsc::channel(64);
             let clients = clients.clone();
             tokio::spawn(async move {
@@ -114,6 +120,9 @@ pub async fn dispatch_with_clients(
             while let Some(f) = rx.recv().await {
                 findings.push(f);
             }
+            // Append gateway upstream findings to audit.full.
+            let gw_report = gateway::check_gateway_upstreams().await;
+            findings.extend(gw_report.findings);
             to_json(Report { findings })
         }
         unknown => Err(ToolError::UnknownAction {

@@ -12,15 +12,35 @@ pub fn routes(_state: AppState) -> Router<AppState> {
     Router::new().route("/", post(handle))
 }
 
-fn has_admin_scope(auth: Option<&Extension<AuthContext>>) -> bool {
-    auth.is_none_or(|ctx| ctx.0.scopes.iter().any(|scope| scope == "lab:admin"))
+/// Returns true when the action requires `lab:admin` scope.
+///
+/// Single source of truth: reads `ActionSpec.requires_admin` from the gateway
+/// catalog (A-H2/S5 fix). No bespoke match arm — adding a new action to the
+/// catalog automatically inherits the right scope gate.
+fn gateway_action_requires_admin(action: &str) -> bool {
+    // Universal built-ins are never admin-gated, whether the caller passes them
+    // bare (`help`) or service-prefixed (`gateway.help`). The catalog stores them
+    // bare, so strip any `gateway.` prefix before the discovery check.
+    let bare = action.strip_prefix("gateway.").unwrap_or(action);
+    if bare == "help" || bare == "schema" {
+        return false;
+    }
+    crate::dispatch::gateway::ACTIONS
+        .iter()
+        .find(|spec| spec.name == action)
+        .map(|spec| spec.requires_admin)
+        // Unknown actions default to admin-required (fail-safe).
+        .unwrap_or(true)
 }
 
-fn gateway_action_requires_admin(action: &str) -> bool {
-    !matches!(
-        action,
-        "help" | "schema" | "gateway.help" | "gateway.schema"
-    )
+/// Returns true when the authenticated context carries `lab:admin`.
+///
+/// T1 fix: when auth IS configured on the HTTP surface, `None` auth means the
+/// request arrived without credentials — it must be DENIED admin actions.
+/// `is_none_or(...)` is only safe for stdio (which is handled separately via
+/// the MCP surface and never reaches this API handler).
+fn has_admin_scope(auth: Option<&Extension<AuthContext>>) -> bool {
+    auth.is_some_and(|ctx| ctx.0.scopes.iter().any(|scope| scope == "lab:admin"))
 }
 
 fn require_gateway_admin(
@@ -129,6 +149,8 @@ mod tests {
     use crate::dispatch::gateway::manager::{GatewayManager, GatewayRuntimeHandle};
     use crate::registry::build_default_registry;
 
+    // ── Test fixtures ────────────────────────────────────────────────────────
+
     fn test_manager_with_path() -> (Arc<GatewayManager>, std::path::PathBuf) {
         static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
         let path = std::env::temp_dir().join(format!(
@@ -149,17 +171,65 @@ mod tests {
         test_manager_with_path().0
     }
 
+    /// Build a test app WITH bearer auth configured (gateway routes are mounted).
+    ///
+    /// T1 fix: `test_app()` previously used `build_router_with_bearer(state, None, None)`
+    /// which set `needs_auth=false` and, before the fix, mounted gateway routes without
+    /// any authentication gate.  Now gateway routes are only mounted when auth IS
+    /// configured.  Tests that exercise gateway actions must use an authenticated app.
+    fn test_app_with_manager(manager: Arc<GatewayManager>) -> Router {
+        let state = AppState::from_registry(build_default_registry()).with_gateway_manager(manager);
+        // Use a static bearer token so needs_auth=true and /v1/gateway is mounted.
+        build_router_with_bearer(state, Some("test-token".into()), None)
+    }
+
     fn test_app() -> Router {
         test_app_with_manager(test_manager())
     }
 
-    fn test_app_with_manager(manager: Arc<GatewayManager>) -> Router {
-        let state = AppState::from_registry(build_default_registry()).with_gateway_manager(manager);
-        build_router_with_bearer(state, None, None)
+    /// App with bearer auth + an injected AuthContext (for scope-gated tests).
+    fn test_app_with_auth_context(manager: Arc<GatewayManager>, auth: AuthContext) -> Router {
+        test_app_with_manager(manager).layer(Extension(auth))
     }
 
-    fn test_app_with_auth(auth: AuthContext) -> Router {
-        test_app().layer(Extension(auth))
+    /// Mount ONLY the gateway route group with a layered `AuthContext` and no
+    /// bearer-auth middleware — exercises the per-action scope gate in isolation.
+    ///
+    /// The full-router static bearer path always injects `lab:admin`, so it
+    /// cannot model a non-admin caller. Mounting `services::gateway::routes`
+    /// directly (mirroring `upstream_oauth_routes_require_admin_scope`) lets the
+    /// layered read-only context survive to the handler's scope gate.
+    fn gateway_routes_with_auth_context(manager: Arc<GatewayManager>, auth: AuthContext) -> Router {
+        let state = AppState::from_registry(build_default_registry()).with_gateway_manager(manager);
+        super::routes(state.clone())
+            .layer(Extension(auth))
+            .with_state(state)
+    }
+
+    /// POST to a directly-mounted gateway route group (no bearer header).
+    async fn post_gateway_routes(app: Router, body: serde_json::Value) -> axum::response::Response {
+        app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response")
+    }
+
+    fn admin_auth_context() -> AuthContext {
+        AuthContext {
+            sub: "admin-user".to_string(),
+            actor_key: None,
+            scopes: vec!["lab:admin".to_string()],
+            issuer: "test".to_string(),
+            via_session: false,
+            csrf_token: None,
+            email: Some("admin@example.com".to_string()),
+        }
     }
 
     fn read_only_auth_context() -> AuthContext {
@@ -174,12 +244,16 @@ mod tests {
         }
     }
 
+    // ── Request helpers ──────────────────────────────────────────────────────
+
     async fn post_gateway(app: Router, body: serde_json::Value) -> axum::response::Response {
         app.oneshot(
             Request::builder()
                 .method("POST")
                 .uri("/v1/gateway")
                 .header(header::CONTENT_TYPE, "application/json")
+                // Include the static bearer token so the auth middleware passes.
+                .header(header::AUTHORIZATION, "Bearer test-token")
                 .body(Body::from(body.to_string()))
                 .expect("request"),
         )
@@ -187,8 +261,13 @@ mod tests {
         .expect("response")
     }
 
-    async fn post_gateway_fresh(body: serde_json::Value) -> axum::response::Response {
-        post_gateway(test_app(), body).await
+    /// Post to /v1/gateway as admin (bearer token + lab:admin AuthContext injected).
+    async fn post_gateway_as_admin(
+        manager: Arc<GatewayManager>,
+        body: serde_json::Value,
+    ) -> axum::response::Response {
+        let app = test_app_with_auth_context(manager, admin_auth_context());
+        post_gateway(app, body).await
     }
 
     async fn get_gateway_actions(app: Router) -> axum::response::Response {
@@ -196,6 +275,7 @@ mod tests {
             Request::builder()
                 .method("GET")
                 .uri("/v1/gateway/actions")
+                .header(header::AUTHORIZATION, "Bearer test-token")
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -203,15 +283,195 @@ mod tests {
         .expect("response")
     }
 
+    // ── T1: Security posture tests ───────────────────────────────────────────
+
+    /// T1 (Critical): when auth IS configured, a request arriving with NO
+    /// AuthContext (no bearer token, no session) must be DENIED on all admin
+    /// gateway actions — not silently allowed.
+    #[tokio::test]
+    async fn gateway_admin_actions_refused_when_no_auth_context_present() {
+        // App has bearer auth configured (gateway IS mounted), but the request
+        // carries no Authorization header → no AuthContext in extensions.
+        let app = test_app();
+
+        for action in [
+            "gateway.list",
+            "gateway.get",
+            "gateway.status",
+            "gateway.add",
+            "gateway.reload",
+            "gateway.oauth.probe",
+            "gateway.mcp.cleanup",
+            "gateway.service_config.get",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/v1/gateway")
+                        .header(header::CONTENT_TYPE, "application/json")
+                        // No Authorization header → no AuthContext
+                        .body(Body::from(
+                            json!({
+                                "action": action,
+                                "params": {
+                                    "confirm": true,
+                                    "name": "fixture",
+                                    "spec": {"name": "fixture", "url": "https://fixture.example.com/mcp"}
+                                }
+                            })
+                            .to_string(),
+                        ))
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+            // Bearer auth middleware rejects unauthenticated requests before the
+            // gateway handler, so we accept either 401 (middleware) or 403 (handler).
+            let status = response.status();
+            assert!(
+                status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN,
+                "action `{action}` with no auth should be 401 or 403, got {status}"
+            );
+        }
+    }
+
+    /// T1: /v1/gateway must NOT be mounted when auth is not configured.
+    #[tokio::test]
+    async fn gateway_routes_not_mounted_when_auth_not_configured() {
+        // Build a router with NO bearer token and NO OAuth state → needs_auth=false
+        let state =
+            AppState::from_registry(build_default_registry()).with_gateway_manager(test_manager());
+        let app = build_router_with_bearer(state, None, None);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/gateway")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({"action": "gateway.list", "params": {}}).to_string(),
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        // Route is not mounted → 404 or 405, never 200.
+        assert_ne!(
+            response.status(),
+            StatusCode::OK,
+            "/v1/gateway must not be accessible when auth is not configured"
+        );
+        assert!(
+            response.status() == StatusCode::NOT_FOUND
+                || response.status() == StatusCode::METHOD_NOT_ALLOWED,
+            "expected 404/405 when gateway not mounted, got {}",
+            response.status()
+        );
+    }
+
+    // ── T5: Catalog-parametric scope test ───────────────────────────────────
+
+    /// T5: every gateway action that has requires_admin=true must return FORBIDDEN
+    /// on the API surface when the caller has only lab:read scope.
+    #[tokio::test]
+    async fn gateway_admin_actions_require_admin_scope_on_api() {
+        let admin_actions: Vec<&str> = crate::dispatch::gateway::ACTIONS
+            .iter()
+            .filter(|spec| spec.requires_admin)
+            .map(|spec| spec.name)
+            .collect();
+
+        assert!(
+            !admin_actions.is_empty(),
+            "no gateway admin actions found in catalog — catalog bug"
+        );
+
+        let manager = test_manager();
+        let app = gateway_routes_with_auth_context(manager, read_only_auth_context());
+
+        for action in admin_actions {
+            let response = post_gateway_routes(
+                app.clone(),
+                json!({
+                    "action": action,
+                    "params": {
+                        "confirm": true,
+                        "name": "fixture",
+                        "upstream": "fixture",
+                        "service": "plex",
+                        "url": "https://fixture.example.com/mcp",
+                        "spec": {"name":"fixture","url":"https://fixture.example.com/mcp"}
+                    }
+                }),
+            )
+            .await;
+            assert_eq!(
+                response.status(),
+                StatusCode::FORBIDDEN,
+                "action `{action}` should require lab:admin scope on API"
+            );
+        }
+    }
+
+    /// T5 (MCP surface): every gateway action that has requires_admin=true is
+    /// correctly identified by `builtin_action_requires_admin` in mcp/context.rs.
+    #[test]
+    fn gateway_catalog_requires_admin_matches_mcp_context_gate() {
+        use std::future::Future;
+
+        use crate::mcp::context::builtin_action_requires_admin;
+        use crate::registry::RegisteredService;
+
+        fn noop_dispatch(
+            _: String,
+            _: serde_json::Value,
+        ) -> std::pin::Pin<
+            Box<
+                dyn Future<Output = Result<serde_json::Value, crate::dispatch::error::ToolError>>
+                    + Send,
+            >,
+        > {
+            Box::pin(async { Ok(serde_json::Value::Null) })
+        }
+
+        let entry = RegisteredService {
+            name: "gateway",
+            description: "Gateway",
+            category: "bootstrap",
+            kind: crate::registry::RegisteredServiceKind::BootstrapOperator,
+            status: "available",
+            actions: crate::dispatch::gateway::ACTIONS,
+            dispatch: noop_dispatch,
+        };
+
+        for spec in crate::dispatch::gateway::ACTIONS {
+            let catalog_says = spec.requires_admin;
+            let mcp_says = builtin_action_requires_admin(&entry, spec.name);
+            assert_eq!(
+                catalog_says, mcp_says,
+                "mismatch for `{}`: catalog.requires_admin={catalog_says} but mcp gate={mcp_says}",
+                spec.name
+            );
+        }
+    }
+
+    // ── Existing functional tests (updated for authenticated app) ────────────
+
     #[tokio::test]
     async fn gateway_list_route_exists() {
-        let response = post_gateway_fresh(json!({"action":"gateway.list","params":{}})).await;
+        let response =
+            post_gateway_as_admin(test_manager(), json!({"action":"gateway.list","params":{}}))
+                .await;
         assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]
     async fn gateway_sensitive_actions_require_admin_when_authenticated() {
-        let app = test_app_with_auth(read_only_auth_context());
+        let app = gateway_routes_with_auth_context(test_manager(), read_only_auth_context());
 
         for action in [
             "gateway.list",
@@ -222,7 +482,7 @@ mod tests {
             "gateway.oauth.probe",
             "gateway.mcp.cleanup",
         ] {
-            let response = post_gateway(
+            let response = post_gateway_routes(
                 app.clone(),
                 json!({
                     "action": action,
@@ -264,11 +524,8 @@ mod tests {
             })
             .await;
 
-        let response = post_gateway(
-            test_app_with_manager(manager),
-            json!({"action":"gateway.list","params":{}}),
-        )
-        .await;
+        let response =
+            post_gateway_as_admin(manager, json!({"action":"gateway.list","params":{}})).await;
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -299,7 +556,7 @@ mod tests {
             },
         )
         .expect("write config");
-        let app = test_app_with_manager(manager);
+        let app = test_app_with_auth_context(manager.clone(), admin_auth_context());
 
         let reloaded = post_gateway(
             app.clone(),
@@ -324,25 +581,31 @@ mod tests {
 
     #[tokio::test]
     async fn gateway_get_returns_not_found_for_missing_gateway() {
-        let response =
-            post_gateway_fresh(json!({"action":"gateway.get","params":{"name":"fixture-http"}}))
-                .await;
+        let response = post_gateway_as_admin(
+            test_manager(),
+            json!({"action":"gateway.get","params":{"name":"fixture-http"}}),
+        )
+        .await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
     async fn gateway_test_accepts_proposed_spec() {
-        let response = post_gateway_fresh(json!({
-            "action":"gateway.test",
-            "params":{"confirm":true,"spec":{"name":"fixture-stdio","command":"echo","args":["hello"]}}
-        }))
+        let response = post_gateway_as_admin(
+            test_manager(),
+            json!({
+                "action":"gateway.test",
+                "params":{"confirm":true,"spec":{"name":"fixture-stdio","command":"echo","args":["hello"]}}
+            }),
+        )
         .await;
         assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]
     async fn gateway_add_update_remove_reload_routes_exist() {
-        let app = test_app();
+        let manager = test_manager();
+        let app = test_app_with_auth_context(manager, admin_auth_context());
 
         let added = post_gateway(app.clone(), json!({
             "action":"gateway.add",
@@ -399,8 +662,8 @@ mod tests {
             }])
             .await;
 
-        let response = post_gateway(
-            test_app_with_manager(manager),
+        let response = post_gateway_as_admin(
+            manager,
             json!({"action":"gateway.client_config.get","params":{"name":"fixture-http"}}),
         )
         .await;
@@ -417,10 +680,15 @@ mod tests {
 
     #[tokio::test]
     async fn gateway_destructive_routes_require_confirm() {
-        let response = post_gateway_fresh(json!({
-            "action":"gateway.add",
-            "params":{"spec":{"name":"fixture-http","url":"http://127.0.0.1:9001","bearer_token_env":"FIXTURE_HTTP_TOKEN"}}
-        }))
+        let manager = test_manager();
+        let app = test_app_with_auth_context(manager, admin_auth_context());
+        let response = post_gateway(
+            app,
+            json!({
+                "action":"gateway.add",
+                "params":{"spec":{"name":"fixture-http","url":"http://127.0.0.1:9001","bearer_token_env":"FIXTURE_HTTP_TOKEN"}}
+            }),
+        )
         .await;
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }

@@ -7,6 +7,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "help",
         description: "List deploy actions",
         destructive: false,
+        requires_admin: false,
         params: &[],
         returns: "Catalog",
     },
@@ -14,6 +15,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "schema",
         description: "Per-action JSON schema",
         destructive: false,
+        requires_admin: false,
         params: &[ParamSpec {
             name: "action",
             ty: "string",
@@ -28,6 +30,7 @@ pub const ACTIONS: &[ActionSpec] = &[
                       once at startup — restart the lab process to pick up changes to \
                       ~/.ssh/config or deploy preferences.",
         destructive: false,
+        requires_admin: false,
         params: &[],
         returns: "ConfigListing",
     },
@@ -35,6 +38,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "plan",
         description: "Dry-run: resolve targets, hash local artifact, show what would happen",
         destructive: false,
+        requires_admin: false,
         params: &[ParamSpec {
             name: "targets",
             ty: "string[]",
@@ -47,6 +51,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "run",
         description: "Build, transfer, install, restart, verify on targets (destructive)",
         destructive: true,
+        requires_admin: false,
         params: &[
             ParamSpec {
                 name: "targets",
@@ -79,6 +84,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "rollback",
         description: "Restore the most recent timestamped backup on the specified targets (destructive)",
         destructive: true,
+        requires_admin: false,
         params: &[
             ParamSpec {
                 name: "targets",

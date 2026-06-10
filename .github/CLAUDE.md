@@ -15,6 +15,7 @@ Every push and PR to `main` must pass all jobs:
 
 | Job | Command |
 |-----|---------|
+| secret-scan | `gitleaks/gitleaks-action@v2` — full-history secret scan (SAST) |
 | actionlint | `go run github.com/rhysd/actionlint/cmd/actionlint@latest` |
 | frontend-assets | `pnpm install --frozen-lockfile && pnpm build` in `apps/gateway-admin` |
 | check | `cargo check --workspace --all-features` |

@@ -1,7 +1,8 @@
 //! Param coercion and security guards for `mcp.*` actions in the marketplace dispatch.
 //!
-//! Security guards (SSRF, argv allowlist) are copied VERBATIM from
-//! `dispatch/mcpregistry/params.rs` — do NOT weaken them.
+//! Argv/env security guards delegate to the shared
+//! [`crate::dispatch::upstream::spawn_guard`] module — do NOT add local copies
+//! of those rules here.
 //!
 //! TODO(M1): DNS rebinding gap — SSRF guards check IP at validation time but DNS
 //! resolution happens at connect time. A hostname that resolves to an RFC1918 address
@@ -17,128 +18,58 @@ use lab_apis::mcpregistry::types::{
 use serde_json::Value;
 
 use crate::dispatch::error::ToolError;
-
-/// Runtime hints the registry is allowed to produce and we are willing to execute.
-const ALLOWED_RUNTIME_HINTS: &[&str] = &[
-    "npx", "uvx", "docker", "dnx", "pipx", "node", "python", "python3", "deno",
-];
-
-/// Environment variables that registry-provided packages may not write.
-const DENIED_ENV_NAMES: &[&str] = &[
-    "PATH",
-    "LD_PRELOAD",
-    "LD_LIBRARY_PATH",
-    "HOME",
-    "SHELL",
-    "IFS",
-    "USER",
-    "PWD",
-];
-
-/// Docker flags that grant broad host access.
-const DANGEROUS_DOCKER_FLAGS: &[&str] = &[
-    "--privileged",
-    "--cap-add",
-    "--volume",
-    "-v",
-    "--device",
-    "--network",
-    "--pid",
-    "--ipc",
-];
-
-/// Node-family flags that can preload/evaluate arbitrary code or expose debug surfaces.
-const DANGEROUS_NODE_FLAGS: &[&str] =
-    &["--inspect", "--require", "-r", "--experimental", "--allow"];
+use crate::dispatch::upstream::spawn_guard;
 
 /// Validate a `runtimeHint` string against the static allowlist.
 ///
-/// Returns an error if the hint is not in [`ALLOWED_RUNTIME_HINTS`].
+/// Returns `unsupported_runtime_hint` if the hint is not in the allowed list.
 pub fn validate_runtime_hint(hint: &str) -> Result<(), ToolError> {
-    if ALLOWED_RUNTIME_HINTS.contains(&hint) {
+    if spawn_guard::ALLOWED_RUNTIME_HINTS.contains(&hint) {
         Ok(())
     } else {
         Err(ToolError::Sdk {
             sdk_kind: "unsupported_runtime_hint".to_string(),
             message: format!(
                 "runtimeHint '{hint}' is not in the allowed list; must be one of: {}",
-                ALLOWED_RUNTIME_HINTS.join(", ")
+                spawn_guard::ALLOWED_RUNTIME_HINTS.join(", ")
             ),
         })
     }
 }
 
 /// Validate that none of the argv strings violates runtime-specific security policy.
+///
+/// Delegates to [`spawn_guard::validate_stdio_argv`]; re-wraps the `InvalidParam`
+/// error as `Sdk { sdk_kind: "invalid_param" }` to preserve the existing
+/// marketplace error shape.
 pub fn validate_stdio_argv(runtime_hint: &str, args: &[String]) -> Result<(), ToolError> {
-    for arg in args {
-        if arg.contains('\n') || arg.contains('\r') || arg.contains('\0') {
-            return Err(ToolError::Sdk {
-                sdk_kind: "invalid_param".to_string(),
-                message: "argv values must not contain newline, carriage return, or null bytes"
-                    .to_string(),
-            });
-        }
-        validate_runtime_argv_flag(runtime_hint, arg)?;
-    }
-    Ok(())
-}
-
-fn validate_runtime_argv_flag(runtime_hint: &str, arg: &str) -> Result<(), ToolError> {
-    let flag = arg.split('=').next().unwrap_or(arg);
-    let denied = match runtime_hint {
-        "docker" => {
-            DANGEROUS_DOCKER_FLAGS.contains(&flag)
-                || matches!(arg, "--network=host" | "--pid=host" | "--ipc=host")
-        }
-        "node" | "npx" => DANGEROUS_NODE_FLAGS
-            .iter()
-            .any(|prefix| flag == *prefix || flag.starts_with(*prefix)),
-        _ => false,
-    };
-
-    if denied {
-        Err(ToolError::Sdk {
-            sdk_kind: "invalid_param".to_string(),
-            message: format!("argv flag '{arg}' is not allowed for runtimeHint '{runtime_hint}'"),
-        })
-    } else {
-        Ok(())
-    }
+    spawn_guard::validate_stdio_argv(runtime_hint, args).map_err(rewrap_as_sdk_invalid_param)
 }
 
 /// Validate an environment variable name: must match `^[A-Z][A-Z0-9_]*$`.
+///
+/// Delegates to [`spawn_guard::validate_stdio_env_name`]; re-wraps the error
+/// as `Sdk { sdk_kind: "invalid_param" }` to preserve the existing shape.
 pub fn validate_env_var_name(name: &str) -> Result<(), ToolError> {
-    let valid = !name.is_empty()
-        && name.starts_with(|c: char| c.is_ascii_uppercase())
-        && name
-            .chars()
-            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
-
-    let denied = DENIED_ENV_NAMES.contains(&name) || name.starts_with("LAB_");
-
-    if valid && !denied {
-        Ok(())
-    } else {
-        Err(ToolError::Sdk {
-            sdk_kind: "invalid_param".to_string(),
-            message: format!(
-                "env var name '{name}' is invalid; must match ^[A-Z][A-Z0-9_]*$ and must not be a protected process or LAB_* variable"
-            ),
-        })
-    }
+    spawn_guard::validate_stdio_env_name(name).map_err(rewrap_as_sdk_invalid_param)
 }
 
 /// Validate an environment variable value: must not contain embedded control separators.
+///
+/// Delegates to [`spawn_guard::validate_stdio_env_value`]; re-wraps the error.
 pub fn validate_env_value(key: &str, value: &str) -> Result<(), ToolError> {
-    if value.contains('\n') || value.contains('\r') || value.contains('\0') {
-        Err(ToolError::Sdk {
-            sdk_kind: "invalid_param".to_string(),
-            message: format!(
-                "env var '{key}' value must not contain newline, carriage return, or null bytes"
-            ),
-        })
-    } else {
-        Ok(())
+    spawn_guard::validate_stdio_env_value(key, value).map_err(rewrap_as_sdk_invalid_param)
+}
+
+/// Re-wrap any `ToolError` as `Sdk { sdk_kind: "invalid_param" }`.
+///
+/// The marketplace surface historically used `Sdk` for all param errors;
+/// the shared spawn_guard uses `InvalidParam`. Both serialize identically
+/// (`kind: "invalid_param"`), so this is only a structural normalisation.
+fn rewrap_as_sdk_invalid_param(e: ToolError) -> ToolError {
+    ToolError::Sdk {
+        sdk_kind: "invalid_param".to_string(),
+        message: e.user_message().to_string(),
     }
 }
 

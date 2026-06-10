@@ -191,6 +191,7 @@ mod tests {
             name: "status.read",
             description: "Read status",
             destructive: false,
+            requires_admin: false,
             returns: "Value",
             params: &[],
         }];
@@ -271,6 +272,7 @@ mod tests {
             name: "status.read",
             description: "Read status",
             destructive: false,
+            requires_admin: false,
             returns: "Value",
             params: &[],
         }];

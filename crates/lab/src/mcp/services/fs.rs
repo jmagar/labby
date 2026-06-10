@@ -58,6 +58,7 @@ static MCP_ACTIONS: &[ActionSpec] = &[
         name: "fs.list",
         description: "List immediate entries of a directory inside the configured workspace root",
         destructive: false,
+        requires_admin: false,
         params: &[lab_apis::core::action::ParamSpec {
             name: "path",
             ty: "string",

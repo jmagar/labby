@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 use rmcp::transport::AuthClient;
+use rmcp::transport::streamable_http_client::StreamableHttpClient;
 use tokio::sync::Mutex;
 
 use crate::config::{UpstreamConfig, UpstreamOauthRegistration};
@@ -60,8 +61,12 @@ impl OauthClientCache {
         }
     }
 
-    /// Return a cached `AuthClient` for `(upstream, subject)`, building one
-    /// on first use.
+    /// Return a cached `AuthClient<reqwest::Client>` for `(upstream, subject)`,
+    /// building one on first use.
+    ///
+    /// Kept for callers that need a shared `Arc<AuthClient<reqwest::Client>>`
+    /// (e.g. status-check endpoints).  The MCP connection path uses
+    /// `get_or_build_capped` instead so the `BodyCappedHttpClient` cap applies.
     ///
     /// If a cached entry exists but was built from a different OAuth
     /// registration than the current `config`, the entry is evicted and
@@ -73,6 +78,7 @@ impl OauthClientCache {
     ///
     /// Concurrent first-request callers for the same key are serialised
     /// by a per-key mutex so only one token exchange runs.
+    #[allow(dead_code)]
     pub async fn get_or_build(
         &self,
         config: &UpstreamConfig,
@@ -117,6 +123,38 @@ impl OauthClientCache {
         .await
     }
 
+    /// Build an `AuthClient<C>` wrapping the supplied HTTP client and return it
+    /// WITHOUT caching it.
+    ///
+    /// This is the P-H4 entry point: callers that manage their own connection
+    /// cache (e.g. `UpstreamPool::acquire_or_connect_subject` via
+    /// `SubjectScopedConnection`) pass a pre-built `BodyCappedHttpClient` so
+    /// the OAuth path gets the same streaming response-size cap as the
+    /// non-OAuth path.  The caller caches the resulting `AuthClient` at the
+    /// pool level, so there is no double-caching here.
+    pub async fn get_or_build_capped<C>(
+        &self,
+        config: &UpstreamConfig,
+        subject: &str,
+        http_client: C,
+    ) -> Result<AuthClient<C>, OauthError>
+    where
+        C: StreamableHttpClient + Clone,
+    {
+        let manager = self
+            .managers
+            .get(&config.name)
+            .map(|r| r.clone())
+            .ok_or_else(|| {
+                OauthError::Internal(format!(
+                    "no oauth manager registered for upstream '{}'",
+                    config.name
+                ))
+            })?;
+        manager.build_auth_client_with(subject, http_client).await
+    }
+
+    #[allow(dead_code)]
     async fn get_or_insert_with<F, Fut>(
         &self,
         config: &UpstreamConfig,
@@ -233,6 +271,7 @@ impl OauthClientCache {
 /// `Preregistered` changes when `client_id` rotates; `ClientMetadataDocument`
 /// changes when its URL moves; `Dynamic` includes the stored per-subject
 /// `client_id` (lab-77y5.13) so a re-registration cycle evicts the stale entry.
+#[allow(dead_code)]
 fn registration_fingerprint(
     config: &UpstreamConfig,
     dynamic_client_id: Option<&str>,

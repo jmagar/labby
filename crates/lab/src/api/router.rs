@@ -1011,9 +1011,25 @@ fn build_v1_router(state: &AppState, api_auth_configured: bool) -> Router<AppSta
             );
         }
 
+        // SECURITY (T1): gateway admin actions spawn arbitrary local stdio commands
+        // with labby's full process environment. Refuse to mount /v1/gateway when
+        // auth is not configured — unauthenticated HTTP access to gateway admin
+        // actions is a critical vulnerability. Mirror the /v1/fs refusal pattern.
+        if api_auth_configured {
+            v1 = v1.nest("/gateway", services::gateway::routes(state.clone()));
+        } else {
+            tracing::warn!(
+                subsystem = "startup",
+                phase = "gateway.mount.skipped",
+                reason = "no_auth_configured",
+                "gateway service routes not mounted: HTTP API has no auth configured. \
+                 Set LAB_MCP_HTTP_TOKEN or LAB_AUTH_MODE=oauth to enable /v1/gateway. \
+                 Gateway admin actions can spawn arbitrary processes — never expose them unauthenticated."
+            );
+        }
+
         v1 = v1
             .nest("/acp", services::acp::routes(state.clone()))
-            .nest("/gateway", services::gateway::routes(state.clone()))
             .route(
                 "/openapi.json",
                 get(move || {

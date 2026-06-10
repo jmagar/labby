@@ -13,7 +13,6 @@ use crate::config::UpstreamConfig;
 
 use super::super::types::UpstreamCapability;
 use super::UpstreamPool;
-use super::connect::connect_upstream;
 use super::helpers::{estimate_response_size, max_response_bytes, upstream_transport};
 use super::logging::{
     UpstreamRequestLog, log_upstream_request_error, log_upstream_request_finish,
@@ -21,6 +20,11 @@ use super::logging::{
 };
 
 impl UpstreamPool {
+    /// Call a tool on an OAuth-subject-scoped upstream.
+    ///
+    /// P-C1 fix: uses `acquire_or_connect_subject` so the per-(upstream,subject)
+    /// connection is reused from cache instead of opening a fresh TLS connection
+    /// on every call.
     pub async fn subject_scoped_call_tool(
         &self,
         config: &UpstreamConfig,
@@ -32,16 +36,8 @@ impl UpstreamPool {
         let event = UpstreamRequestLog::tool(&config.name, &tool_name, true)
             .with_transport(upstream_transport(config));
         log_upstream_request_start(event);
-        let (conn, _) = match connect_upstream(
-            config,
-            Some(subject),
-            self.oauth_client_cache.as_ref(),
-            None,
-            None,
-        )
-        .await
-        {
-            Ok(conn) => conn,
+        let (peer, _tools) = match self.acquire_or_connect_subject(config, subject).await {
+            Ok(pair) => pair,
             Err(error) => {
                 self.record_failure_for(
                     &config.name,
@@ -61,7 +57,7 @@ impl UpstreamPool {
                 return Err(error.to_string());
             }
         };
-        match tokio::time::timeout(self.request_timeout, conn.peer.call_tool(params)).await {
+        match tokio::time::timeout(self.request_timeout, peer.call_tool(params)).await {
             Ok(Ok(result)) => {
                 let response_size = estimate_response_size(&result);
                 let max_bytes = max_response_bytes();
@@ -98,6 +94,7 @@ impl UpstreamPool {
                     format!("upstream call failed: {error}"),
                 )
                 .await;
+                self.evict_subject_connection(&config.name, subject).await;
                 let elapsed_ms = start.elapsed().as_millis();
                 log_upstream_request_error(
                     event,
@@ -116,6 +113,7 @@ impl UpstreamPool {
                 );
                 self.record_failure_for(&config.name, UpstreamCapability::Tools, message.clone())
                     .await;
+                self.evict_subject_connection(&config.name, subject).await;
                 let elapsed_ms = start.elapsed().as_millis();
                 log_upstream_request_error(event, elapsed_ms, "timeout", None, None, None);
                 Err(message)

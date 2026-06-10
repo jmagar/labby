@@ -17,7 +17,7 @@ use super::super::types;
 use super::super::types::UpstreamCapability;
 use super::super::types::UpstreamRuntimeOwner;
 use super::UpstreamPool;
-use super::connect::connect_upstream;
+use super::connect::connect_upstream_with_client;
 use super::connect::stable_jitter_seed;
 use super::helpers::{
     AUTH_FAILURE_REPROBE_ATTEMPT_FLOOR, DISCOVERY_TIMEOUT, auth_error_should_backoff_aggressively,
@@ -290,12 +290,13 @@ impl UpstreamPool {
 
         let subject = config.oauth.as_ref().and(oauth_subject);
         let runtime_owner = runtime_owner.or(self.runtime_owner.as_ref());
-        let (conn, tools) = connect_upstream(
+        let (conn, tools) = connect_upstream_with_client(
             config,
             subject,
             self.oauth_client_cache.as_ref(),
             self.runtime_origin.as_deref(),
             runtime_owner,
+            Some(&self.shared_http_client),
         )
         .await?;
         {

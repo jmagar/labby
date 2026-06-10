@@ -10,6 +10,7 @@ pub const ACP_ACTIONS: &[ActionSpec] = &[
         name: "agent.list",
         description: "List ACP-compatible agents from the registry CDN",
         destructive: false,
+        requires_admin: false,
         returns: "Agent[]",
         params: &[],
     },
@@ -17,6 +18,7 @@ pub const ACP_ACTIONS: &[ActionSpec] = &[
         name: "agent.get",
         description: "Get details for a single ACP agent by id",
         destructive: false,
+        requires_admin: false,
         returns: "Agent",
         params: &[ParamSpec {
             name: "id",
@@ -29,6 +31,7 @@ pub const ACP_ACTIONS: &[ActionSpec] = &[
         name: "agent.install",
         description: "Install an ACP agent on one or more devices. Local installs write a provider entry to `~/.lab/acp-providers.json`; binary archives are downloaded only over HTTPS, SHA-256 verified, size-limited, and installed atomically.",
         destructive: true,
+        requires_admin: false,
         returns: "InstallResults",
         params: &[
             ParamSpec {
@@ -61,6 +64,7 @@ pub const ACP_ACTIONS: &[ActionSpec] = &[
         name: "agent.uninstall",
         description: "Remove an installed ACP agent entry from `~/.lab/acp-providers.json`",
         destructive: true,
+        requires_admin: false,
         returns: "UninstallResult",
         params: &[
             ParamSpec {

@@ -17,6 +17,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "fs.list",
         description: "List immediate entries of a directory inside the configured workspace root",
         destructive: false,
+        requires_admin: false,
         params: &[ParamSpec {
             name: "path",
             ty: "string",
@@ -29,6 +30,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "fs.preview",
         description: "Stream a capped byte window from a workspace file (HTTP-only, admin-session gated)",
         destructive: false,
+        requires_admin: false,
         params: &[
             ParamSpec {
                 name: "path",

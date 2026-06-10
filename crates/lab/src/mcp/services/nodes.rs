@@ -9,6 +9,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "help",
         description: "Show this action catalog",
         destructive: false,
+        requires_admin: false,
         returns: "Catalog",
         params: &[],
     },
@@ -16,6 +17,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "schema",
         description: "Return the parameter schema for a named action",
         destructive: false,
+        requires_admin: false,
         returns: "Schema",
         params: &[ParamSpec {
             name: "action",
@@ -28,6 +30,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "enrollments.list",
         description: "List pending, approved, and denied node enrollments",
         destructive: false,
+        requires_admin: false,
         returns: "Value",
         params: &[],
     },
@@ -35,6 +38,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "enrollments.approve",
         description: "Approve a pending node enrollment",
         destructive: true,
+        requires_admin: false,
         returns: "Value",
         params: &[
             ParamSpec {
@@ -55,6 +59,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "enrollments.deny",
         description: "Deny a pending or approved node enrollment",
         destructive: true,
+        requires_admin: false,
         returns: "Value",
         params: &[
             ParamSpec {

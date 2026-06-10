@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
+use futures::StreamExt as _;
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::Instant;
 
@@ -263,6 +264,11 @@ pub struct BatchAddOutcome {
     pub errors: Vec<(String, ToolError)>,
 }
 
+/// How long a successful full-reprobe result is considered fresh.
+/// Back-to-back `refresh_code_mode_catalog` calls within this window
+/// return immediately without hitting upstreams again.
+const CATALOG_REFRESH_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
 #[derive(Debug, Clone)]
 struct CodeModeReprobeFailure {
     upstream: String,
@@ -290,6 +296,106 @@ pub struct GatewayManager {
     /// Propagated to each pool the manager creates so built-in services are
     /// reachable without an external HTTP/stdio connection.
     in_process_connector: Option<InProcessConnector>,
+    /// Wall-clock TTL guard for `refresh_code_mode_catalog`. Tracks the
+    /// last time a full reprobe completed; back-to-back calls within the
+    /// freshness window skip the reprobe and return immediately.
+    pub(super) code_mode_refresh_deadline: Arc<Mutex<Option<Instant>>>,
+    /// Single-flight guard: only one concurrent `refresh_code_mode_catalog`
+    /// runs at a time. Subsequent callers that arrive while a refresh is in
+    /// progress wait for it to finish rather than spawning a second reprobe.
+    pub(super) code_mode_refresh_inflight: Arc<Mutex<()>>,
+    /// Cached rendered Code Mode search catalog, keyed by a fingerprint of
+    /// the live healthy tool list. Avoids regenerating `CodeModeCatalogEntry`
+    /// structs (including TS `.signature`/`.dts` via `generate_tool_types`),
+    /// the serialized JSON blob, and the JS proxy string on every search when
+    /// the upstream catalog has not changed between calls.
+    pub(super) code_mode_catalog_render_cache:
+        Arc<Mutex<Option<crate::dispatch::gateway::code_mode::CatalogRenderCache>>>,
+}
+
+// ── Gateway manager factory (A-H3) ────────────────────────────────────────────
+
+/// All inputs needed to assemble a `GatewayManager` without repeating the
+/// `new().with_*()...seed_config()` builder chain at every call site.
+///
+/// Used by `GatewayManager::from_config`.  Callers that need MCP peer
+/// notifications should call `manager.set_notifier(...)` right after
+/// `from_config`, before the first `seed_config` call.
+pub struct GatewayManagerConfig {
+    /// Path to the `config.toml` the manager owns.
+    pub config_path: PathBuf,
+    /// Pre-built builtin-service registry.
+    pub registry: ToolRegistry,
+    /// Shared service clients (feature-gated, env-loaded at startup).
+    pub service_clients: SharedServiceClients,
+    /// Optional in-process MCP connector.  Required on the `serve` path;
+    /// optional for one-shot CLI commands that don't need in-process peers.
+    ///
+    /// `pub(crate)` because `InProcessConnector` is itself crate-private; the
+    /// field cannot be more visible than its type.
+    pub(crate) in_process_connector: Option<InProcessConnector>,
+    /// Optional upstream OAuth runtime.  `None` when OAuth is not configured.
+    pub oauth: Option<GatewayOauthConfig>,
+}
+
+/// OAuth components needed by the manager, bundled to avoid partial-move issues.
+pub struct GatewayOauthConfig {
+    pub managers: Arc<dashmap::DashMap<String, UpstreamOauthManager>>,
+    pub cache: OauthClientCache,
+    pub sqlite: lab_auth::sqlite::SqliteStore,
+    pub key: EncryptionKey,
+    pub redirect_uri: String,
+}
+
+impl GatewayManager {
+    /// Assemble a `GatewayManager` from a `GatewayManagerConfig` (A-H3).
+    ///
+    /// Collapses the duplicated builder chains in `cli/gateway.rs`,
+    /// `cli/serve.rs`, and test harnesses into one call site.
+    pub fn from_config(cfg: GatewayManagerConfig, runtime: GatewayRuntimeHandle) -> Self {
+        let mut manager = Self::new(cfg.config_path, runtime)
+            .with_builtin_service_registry(cfg.registry)
+            .with_service_clients(cfg.service_clients);
+
+        if let Some(connector) = cfg.in_process_connector {
+            manager = manager.with_in_process_connector(connector);
+        }
+        if let Some(oauth) = cfg.oauth {
+            manager = manager
+                .with_upstream_oauth_managers(oauth.managers)
+                .with_oauth_client_cache(oauth.cache)
+                .with_oauth_resources(oauth.sqlite, oauth.key, oauth.redirect_uri);
+        }
+        manager
+    }
+
+    /// Poll `gateway.oauth.status` until the given upstream is authenticated
+    /// for `subject`, or until `timeout` elapses (Q-H3).
+    ///
+    /// Returns `true` when authenticated within the deadline, `false` on
+    /// timeout.  Any status-check error is propagated.
+    ///
+    /// Moving this poll loop from `cli/gateway.rs` into shared dispatch means
+    /// every surface (CLI, API, MCP) shares the same orchestration logic.
+    pub async fn await_upstream_authorization(
+        &self,
+        upstream: &str,
+        subject: &str,
+        timeout: std::time::Duration,
+    ) -> Result<bool, ToolError> {
+        use tokio::time::{Instant, sleep};
+        let deadline = Instant::now() + timeout;
+        loop {
+            let status = super::oauth::status(self, upstream, subject).await?;
+            if status.authenticated {
+                return Ok(true);
+            }
+            if Instant::now() >= deadline {
+                return Ok(false);
+            }
+            sleep(std::time::Duration::from_secs(1)).await;
+        }
+    }
 }
 
 impl GatewayManager {
@@ -313,6 +419,9 @@ impl GatewayManager {
             protected_route_index: Arc::new(RwLock::new(ProtectedRouteIndex::default())),
             code_mode_history: Arc::new(Mutex::new(CodeModeHistory::default())),
             in_process_connector: None,
+            code_mode_refresh_deadline: Arc::new(Mutex::new(None)),
+            code_mode_refresh_inflight: Arc::new(Mutex::new(())),
+            code_mode_catalog_render_cache: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -2216,6 +2325,19 @@ impl GatewayManager {
     /// per-call catalog, while `UpstreamPool` only owns the connect/reprobe
     /// mechanics. Reprobe uses existing live peers when possible and reconnects
     /// when needed, so partial-but-healthy catalogs do not mask tool-list growth.
+    ///
+    /// **P-H1 improvements:**
+    /// - Single-flight + TTL coalescing: while one refresh is in flight, a
+    ///   concurrent caller that arrives within `CATALOG_REFRESH_TTL` of the last
+    ///   completed refresh skips its own reprobe and rides on the in-flight one.
+    ///   This bounds the cost of bursty back-to-back `search` calls **without**
+    ///   ever masking tool-list growth for a lone caller: an isolated
+    ///   `allow_cold_connect = true` call always reprobes, because reprobe is the
+    ///   system's growth-detection mechanism (see the read-only catalog expansion
+    ///   test). The TTL only suppresses *redundant concurrent* work, never the
+    ///   single-caller freshness contract.
+    /// - Parallel reprobe: all enabled upstreams are probed concurrently, bounded by
+    ///   `upstream_discovery_concurrency()` (default 3, env `LAB_UPSTREAM_DISCOVERY_CONCURRENCY`).
     pub async fn refresh_code_mode_catalog(
         &self,
         owner: Option<&UpstreamRuntimeOwner>,
@@ -2226,22 +2348,81 @@ impl GatewayManager {
             return Ok(());
         }
 
+        // --- Single-flight + TTL coalescing ---
+        // try_lock succeeds only when no other refresh is in progress. If a
+        // concurrent caller already holds the lock AND the last refresh
+        // completed within the freshness window, coalesce onto the in-flight
+        // refresh rather than queueing a redundant reprobe. Crucially this only
+        // fires under genuine concurrency: a lone caller always acquires the
+        // lock and reprobes, so tool-list growth is never masked.
+        let _inflight_guard = match self.code_mode_refresh_inflight.try_lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                let within_ttl = {
+                    let deadline_guard = self.code_mode_refresh_deadline.lock().await;
+                    deadline_guard.is_some_and(|deadline| Instant::now() < deadline)
+                };
+                if within_ttl {
+                    tracing::debug!(
+                        surface = "dispatch",
+                        service = "gateway",
+                        action = "code_mode.refresh_catalog",
+                        "concurrent refresh in flight within TTL, coalescing"
+                    );
+                    return Ok(());
+                }
+                // Concurrent refresh in flight but TTL expired — wait for the
+                // lock so this caller still observes a fresh catalog.
+                self.code_mode_refresh_inflight.lock().await
+            }
+        };
+
         let pool = self.ensure_lazy_upstream_pool(&cfg, owner).await;
+        // Mirror `pool/helpers.rs::upstream_discovery_concurrency()` — the
+        // function is pub(crate) inside a private module so we read the env var
+        // directly rather than reaching through an inaccessible module path.
+        let concurrency = std::env::var("LAB_UPSTREAM_DISCOVERY_CONCURRENCY")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(3);
+
+        // Clone context for async move blocks.
+        let owner_cloned = owner.cloned();
+        let oauth_subject_cloned = oauth_subject.map(ToOwned::to_owned);
+        let pool_arc = Arc::clone(&pool);
+
+        // Parallel reprobe — all enabled upstreams concurrently, bounded by concurrency.
+        let enabled_upstreams: Vec<_> =
+            cfg.upstream.iter().filter(|u| u.enabled).cloned().collect();
+
+        let results: Vec<_> = futures::stream::iter(enabled_upstreams.into_iter())
+            .map(|upstream| {
+                let pool = Arc::clone(&pool_arc);
+                let owner = owner_cloned.clone();
+                let oauth_subject = oauth_subject_cloned.clone();
+                async move {
+                    let subject = upstream.oauth.as_ref().and(oauth_subject.as_deref());
+                    let outcome = pool
+                        .reprobe_tools_for_upstream_as(&upstream, subject, owner.as_ref())
+                        .await;
+                    (upstream, outcome)
+                }
+            })
+            .buffer_unordered(concurrency)
+            .collect()
+            .await;
+
         let mut failures = Vec::new();
         let mut cache_updates = Vec::new();
-        for upstream in cfg.upstream.iter().filter(|u| u.enabled) {
-            let subject = upstream.oauth.as_ref().and(oauth_subject);
-            match pool
-                .reprobe_tools_for_upstream_as(upstream, subject, owner)
-                .await
-            {
+        for (upstream, outcome) in results {
+            match outcome {
                 Ok(_) => {
                     // Keep the one-shot CLI catalog cache warm from the
                     // long-lived surface so `gateway code exec` rarely has to
                     // cold-connect upstreams for proxy generation.
                     cache_updates.push(super::code_mode::catalog_cache::CatalogCacheUpdate {
                         upstream_name: upstream.name.clone(),
-                        fingerprint: super::code_mode::catalog_cache::fingerprint(upstream),
+                        fingerprint: super::code_mode::catalog_cache::fingerprint(&upstream),
                         tools: pool.healthy_tools_for_upstream(&upstream.name).await,
                     });
                 }
@@ -2267,7 +2448,45 @@ impl GatewayManager {
             });
         }
 
+        // Stamp the TTL deadline so a *concurrent* caller that arrives while a
+        // later refresh is in flight can coalesce within the freshness window.
+        {
+            let mut deadline_guard = self.code_mode_refresh_deadline.lock().await;
+            *deadline_guard = Some(Instant::now() + CATALOG_REFRESH_TTL);
+        }
+
         Ok(())
+    }
+
+    /// Store a freshly rendered catalog in the manager-level render cache.
+    ///
+    /// Called by `code_search_catalog` after a cache miss so subsequent searches
+    /// within the same healthy-tool fingerprint skip `generate_tool_types` per entry.
+    pub async fn store_catalog_render_cache(&self, cache: super::code_mode::CatalogRenderCache) {
+        let mut guard = self.code_mode_catalog_render_cache.lock().await;
+        *guard = Some(cache);
+    }
+
+    /// Return the cached catalog render if the fingerprint still matches.
+    ///
+    /// Returns `Some((entries, catalog_json, serialized_size))` on a hit,
+    /// `None` on a miss (caller must rebuild and call `store_catalog_render_cache`).
+    pub async fn cached_catalog_render(
+        &self,
+        fingerprint: &str,
+    ) -> Option<(Vec<super::code_mode::CodeModeCatalogEntry>, String, usize)> {
+        let guard = self.code_mode_catalog_render_cache.lock().await;
+        guard.as_ref().and_then(|cache| {
+            if cache.fingerprint == fingerprint {
+                Some((
+                    cache.entries.clone(),
+                    cache.catalog_json.clone(),
+                    cache.serialized_size,
+                ))
+            } else {
+                None
+            }
+        })
     }
 
     /// Fire-and-forget: spawn per-upstream connection tasks for exclusive code mode.
@@ -2856,7 +3075,7 @@ mod tests {
             name: name.to_string(),
             url: None,
             bearer_token_env: None,
-            command: Some("true".to_string()),
+            command: Some("npx".to_string()),
             args: Vec::new(),
             env: BTreeMap::new(),
             proxy_resources: false,

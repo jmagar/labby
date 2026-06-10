@@ -10,6 +10,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "help",
         description: "Show this action catalog",
         destructive: false,
+        requires_admin: false,
         returns: "Catalog",
         params: &[],
     },
@@ -17,6 +18,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "schema",
         description: "Return the parameter schema for a named action",
         destructive: false,
+        requires_admin: false,
         returns: "Schema",
         params: &[ParamSpec {
             name: "action",
@@ -29,6 +31,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "provider.list",
         description: "List available providers with health status",
         destructive: false,
+        requires_admin: false,
         returns: "Value",
         params: &[],
     },
@@ -36,6 +39,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "provider.get",
         description: "Get one provider's health and capabilities",
         destructive: false,
+        requires_admin: false,
         returns: "Value",
         params: &[ParamSpec {
             name: "provider",
@@ -48,6 +52,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "provider.select",
         description: "Validate a provider name (note: does not persist a default — planned feature)",
         destructive: false,
+        requires_admin: false,
         returns: "Value",
         params: &[ParamSpec {
             name: "provider",
@@ -60,6 +65,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "session.list",
         description: "List all sessions owned by the caller",
         destructive: false,
+        requires_admin: false,
         returns: "Value",
         params: &[ParamSpec {
             name: "principal",
@@ -72,6 +78,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "session.get",
         description: "Get one session's summary and state",
         destructive: false,
+        requires_admin: false,
         returns: "Value",
         params: &[ParamSpec {
             name: "session_id",
@@ -84,6 +91,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "session.start",
         description: "Create and start a new agent session",
         destructive: false,
+        requires_admin: false,
         returns: "Value",
         params: &[
             ParamSpec {
@@ -116,6 +124,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "session.start_and_prompt",
         description: "Atomically create an ACP session and queue its first prompt. Returns session metadata + SSE stream ticket. Closes the orphan-session window of separate create+prompt calls.",
         destructive: false,
+        requires_admin: false,
         returns: "Value",
         params: &[
             ParamSpec {
@@ -166,6 +175,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "session.prompt",
         description: "Send a prompt to a session. Optional provider switches the active runtime inside the same Lab session before dispatch.",
         destructive: false,
+        requires_admin: false,
         returns: "Value",
         params: &[
             ParamSpec {
@@ -210,6 +220,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "session.cancel",
         description: "Cancel a running session [destructive]",
         destructive: true,
+        requires_admin: false,
         returns: "Value",
         params: &[
             ParamSpec {
@@ -230,6 +241,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "session.permission.approve",
         description: "Approve a pending provider permission request [destructive]",
         destructive: true,
+        requires_admin: false,
         returns: "Value",
         params: &[
             ParamSpec {
@@ -268,6 +280,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "session.permission.reject",
         description: "Reject a pending provider permission request",
         destructive: false,
+        requires_admin: false,
         returns: "Value",
         params: &[
             ParamSpec {
@@ -294,6 +307,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "session.close",
         description: "Close a session permanently [destructive]",
         destructive: true,
+        requires_admin: false,
         returns: "Value",
         params: &[
             ParamSpec {
@@ -315,6 +329,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         description: "Bulk close sessions matching a typed selector. Self-service only — \
                       only the caller's own sessions are touched. [destructive]",
         destructive: true,
+        requires_admin: false,
         returns: r#"{ "closed": string[], "failed": [{ "id": string, "kind": string, "message": string }] }"#,
         params: &[
             ParamSpec {
@@ -339,6 +354,7 @@ pub const ACTIONS: &[ActionSpec] = &[
                      not inject it. ToolCallUpdate events carry merged '_meta' (outer wrapper \
                      wins over any '_meta' already present in raw_output).",
         destructive: false,
+        requires_admin: false,
         returns: r#"{ "events": AcpEvent[], "count": number }"#,
         params: &[
             ParamSpec {
@@ -359,6 +375,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "session.subscribe_ticket",
         description: "Issue a short-lived SSE auth ticket for browser EventSource clients",
         destructive: false,
+        requires_admin: false,
         returns: "Value",
         params: &[
             ParamSpec {

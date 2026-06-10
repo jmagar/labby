@@ -9,6 +9,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "help",
         description: "Show this action catalog",
         destructive: false,
+        requires_admin: false,
         params: &[],
         returns: "Catalog",
     },
@@ -16,6 +17,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "schema",
         description: "Return the parameter schema for a named action",
         destructive: false,
+        requires_admin: false,
         params: &[ParamSpec {
             name: "action",
             ty: "string",
@@ -28,6 +30,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "onboarding.audit",
         description: "Audit service onboarding against the current repo contract",
         destructive: false,
+        requires_admin: false,
         params: &[ParamSpec {
             name: "services",
             ty: "string[]",

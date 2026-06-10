@@ -10,6 +10,7 @@ pub const MCP_ACTIONS: &[ActionSpec] = &[
         name: "mcp.config",
         description: "Return the resolved MCP registry base URL",
         destructive: false,
+        requires_admin: false,
         returns: "RegistryConfig",
         params: &[],
     },
@@ -17,6 +18,7 @@ pub const MCP_ACTIONS: &[ActionSpec] = &[
         name: "mcp.list",
         description: "List MCP servers from the local registry mirror with optional search, owner filter, and bounded pagination.",
         destructive: false,
+        requires_admin: false,
         returns: "ServerListResponse",
         params: &[
             ParamSpec {
@@ -91,6 +93,7 @@ pub const MCP_ACTIONS: &[ActionSpec] = &[
         name: "mcp.get",
         description: "Get details for a single MCP server by its registry name from the registry client/store surface.",
         destructive: false,
+        requires_admin: false,
         returns: "ServerResponse",
         params: &[ParamSpec {
             name: "name",
@@ -103,6 +106,7 @@ pub const MCP_ACTIONS: &[ActionSpec] = &[
         name: "mcp.versions",
         description: "List available versions for a named MCP server from the registry client/store surface.",
         destructive: false,
+        requires_admin: false,
         returns: "ServerListResponse",
         params: &[ParamSpec {
             name: "name",
@@ -115,6 +119,7 @@ pub const MCP_ACTIONS: &[ActionSpec] = &[
         name: "mcp.validate",
         description: "Validate a ServerJSON document against the registry schema. Returns a ValidationResult with a boolean valid field and an errors array. Call before mcp.install to surface schema problems without creating a gateway.",
         destructive: false,
+        requires_admin: false,
         returns: "ValidationResult",
         params: &[ParamSpec {
             name: "server_json",
@@ -127,6 +132,7 @@ pub const MCP_ACTIONS: &[ActionSpec] = &[
         name: "mcp.install",
         description: "Install an MCP server from the registry to Lab gateway upstreams and/or Claude/Codex MCP clients on fleet devices. HTTP servers are added as remote URLs; stdio servers are added as command configs. Required env vars are written to ~/.lab/.env for gateway installs and embedded in the MCP client config for client installs.",
         destructive: true,
+        requires_admin: false,
         returns: "InstallResults",
         params: &[
             ParamSpec {
@@ -177,6 +183,7 @@ pub const MCP_ACTIONS: &[ActionSpec] = &[
         name: "mcp.uninstall",
         description: "Remove a previously installed MCP server gateway upstream by gateway name",
         destructive: true,
+        requires_admin: false,
         returns: "GatewayView",
         params: &[
             ParamSpec {
@@ -197,6 +204,7 @@ pub const MCP_ACTIONS: &[ActionSpec] = &[
         name: "mcp.meta.get",
         description: "Get Lab-owned local metadata for a stored registry server version from the local registry mirror.",
         destructive: false,
+        requires_admin: false,
         returns: "RegistryLocalMeta",
         params: &[
             ParamSpec {
@@ -217,6 +225,7 @@ pub const MCP_ACTIONS: &[ActionSpec] = &[
         name: "mcp.meta.set",
         description: "Set Lab-owned local metadata for a stored registry server version under `_meta[\"tv.tootie.lab/registry\"]`.",
         destructive: false,
+        requires_admin: false,
         returns: "RegistryLocalMeta",
         params: &[
             ParamSpec {
@@ -249,6 +258,7 @@ pub const MCP_ACTIONS: &[ActionSpec] = &[
         name: "mcp.meta.delete",
         description: "Delete Lab-owned local metadata for a stored registry server version under `_meta[\"tv.tootie.lab/registry\"]`.",
         destructive: false,
+        requires_admin: false,
         returns: "RegistryLocalMetaDeleteResult",
         params: &[
             ParamSpec {
@@ -269,6 +279,7 @@ pub const MCP_ACTIONS: &[ActionSpec] = &[
         name: "mcp.sync",
         description: "Trigger an immediate upstream sync of the local registry store. Rate-limited: returns rate_limited if called within 60 seconds of the last sync.",
         destructive: false,
+        requires_admin: false,
         returns: "SyncResult",
         params: &[],
     },

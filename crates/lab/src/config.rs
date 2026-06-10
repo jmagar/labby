@@ -399,9 +399,10 @@ fn default_code_mode_timeout_ms() -> u64 {
 }
 
 fn default_code_mode_max_tool_calls() -> usize {
-    // Cloudflare Code Mode parity: the 30s wall-clock timeout + fuel are the
-    // real bounds, not a small per-run call cap. This is a high safety ceiling
-    // that still stops a runaway loop without blocking legitimate fan-out.
+    // Cloudflare Code Mode parity: the 30s wall-clock timeout + 64 MiB memory
+    // cap are the real bounds, not a small per-run call cap. This is a high
+    // safety ceiling that still stops a runaway loop without blocking
+    // legitimate fan-out.
     1000
 }
 
@@ -1770,27 +1771,91 @@ pub fn write_service_creds(
     )
 }
 
-/// Copy `path` to `path.bak.<unix-seconds>`. No-op if `path` does not exist.
+/// Maximum number of `.env.bak.*` files to retain alongside a given `.env`.
 ///
-/// Returns the backup path (useful for messaging the user).
+/// Older backups are pruned after a new one is written. Keeping an unbounded
+/// set of backups accumulates world-readable copies of all tokens when the
+/// `.env` itself is corrected to 0o600 but the backup directory is not.
+const ENV_BACKUP_RETAIN: usize = 3;
+
+/// Copy `path` to `path.bak.<unix-seconds>`, restricted to mode 0o600.
+///
+/// After writing the new backup, prunes old `.env.bak.*` siblings so at most
+/// [`ENV_BACKUP_RETAIN`] backups exist. A no-op (synthetic path returned) when
+/// `path` does not exist.
 ///
 /// # Errors
-/// Returns an error if the copy fails.
+/// Returns an error if the backup write fails.
 pub fn backup_env(path: &Path) -> Result<PathBuf> {
     if !path.exists() {
         // Nothing to back up; return a synthetic path for display only.
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
-        return Ok(path.with_extension(format!("bak.{ts}")));
+        return Ok(PathBuf::from(format!("{}.bak.{ts}", path.display())));
     }
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     let backup = PathBuf::from(format!("{}.bak.{ts}", path.display()));
-    std::fs::copy(path, &backup)
-        .with_context(|| format!("backup {} → {}", path.display(), backup.display()))?;
+
+    // S2: write backup with 0o600 — never use std::fs::copy which inherits
+    // the umask and can produce world-readable secret copies.
+    {
+        let content =
+            std::fs::read(path).with_context(|| format!("read {} for backup", path.display()))?;
+        let mut file = open_secret_file(&backup)
+            .with_context(|| format!("create backup {}", backup.display()))?;
+        file.write_all(&content)
+            .with_context(|| format!("write backup {}", backup.display()))?;
+        file.sync_all()
+            .with_context(|| format!("sync backup {}", backup.display()))?;
+    }
+
+    // Prune old backups, keeping only ENV_BACKUP_RETAIN most recent.
+    prune_env_backups(path);
+
     Ok(backup)
+}
+
+/// Delete old `.env.bak.*` siblings of `env_path`, keeping the
+/// [`ENV_BACKUP_RETAIN`] most recent entries (sorted lexicographically by name,
+/// which sorts by timestamp since the suffix is a unix-second integer).
+fn prune_env_backups(env_path: &Path) {
+    let Some(parent) = env_path.parent() else {
+        return;
+    };
+    let Some(stem) = env_path.file_name().and_then(|n| n.to_str()) else {
+        return;
+    };
+    let prefix = format!("{stem}.bak.");
+
+    let Ok(mut entries) = std::fs::read_dir(parent).map(|rd| {
+        rd.filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .is_some_and(|n| n.starts_with(&prefix))
+            })
+            .map(|e| e.path())
+            .collect::<Vec<_>>()
+    }) else {
+        return;
+    };
+
+    entries.sort();
+
+    if entries.len() > ENV_BACKUP_RETAIN {
+        for old in &entries[..entries.len() - ENV_BACKUP_RETAIN] {
+            if let Err(e) = std::fs::remove_file(old) {
+                tracing::warn!(
+                    path = %old.display(),
+                    error = %e,
+                    "failed to prune old env backup"
+                );
+            }
+        }
+    }
 }
 
 /// Merge `new_creds` into the `.env` file at `path`.
@@ -1893,7 +1958,8 @@ pub fn write_env(path: &Path, new_creds: &[EnvCredential], force: bool) -> Resul
         }
     }
 
-    // Atomic write: write to .tmp, sync, rename.
+    // S2: Atomic write with 0o600 — write to .tmp (mode 0o600), sync, rename.
+    // The file is never world-readable even momentarily.
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("create dir {}", parent.display()))?;
@@ -1901,7 +1967,7 @@ pub fn write_env(path: &Path, new_creds: &[EnvCredential], force: bool) -> Resul
 
     let tmp_path = PathBuf::from(format!("{}.tmp", path.display()));
     {
-        let mut file = std::fs::File::create(&tmp_path)
+        let mut file = open_secret_file(&tmp_path)
             .with_context(|| format!("create {}", tmp_path.display()))?;
         for line in &out_lines {
             writeln!(file, "{line}").with_context(|| format!("write {}", tmp_path.display()))?;
@@ -1911,6 +1977,8 @@ pub fn write_env(path: &Path, new_creds: &[EnvCredential], force: bool) -> Resul
     }
     std::fs::rename(&tmp_path, path)
         .with_context(|| format!("rename {} → {}", tmp_path.display(), path.display()))?;
+    restrict_secret_file_permissions(path)
+        .with_context(|| format!("chmod 0o600 {}", path.display()))?;
 
     Ok(conflicts)
 }
@@ -2000,7 +2068,7 @@ pub fn write_env_pairs(
 
     let tmp_path = PathBuf::from(format!("{}.tmp", path.display()));
     {
-        let mut file = std::fs::File::create(&tmp_path)
+        let mut file = open_secret_file(&tmp_path)
             .with_context(|| format!("create {}", tmp_path.display()))?;
         for line in &out_lines {
             writeln!(file, "{line}").with_context(|| format!("write {}", tmp_path.display()))?;
@@ -2010,6 +2078,8 @@ pub fn write_env_pairs(
     }
     std::fs::rename(&tmp_path, path)
         .with_context(|| format!("rename {} → {}", tmp_path.display(), path.display()))?;
+    restrict_secret_file_permissions(path)
+        .with_context(|| format!("chmod 0o600 {}", path.display()))?;
 
     Ok(conflicts)
 }
@@ -2057,6 +2127,100 @@ pub fn env_is_up_to_date(path: &Path, new_creds: &[EnvCredential]) -> bool {
         }
     }
     true
+}
+
+// ── Secret file helpers (S2 / O-M4) ─────────────────────────────────────────
+
+/// Create (or truncate) a file at `path` with mode 0o600 from the start.
+///
+/// On non-Unix platforms falls back to a regular `File::create` (homelab
+/// is Linux-only; the chmod concern is moot on non-Unix).
+fn open_secret_file(path: &Path) -> std::io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+    }
+    #[cfg(not(unix))]
+    {
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)
+    }
+}
+
+/// Set `path` permissions to 0o600 (no-op on non-Unix).
+fn restrict_secret_file_permissions(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
+/// Startup self-heal: chmod `path` (and any `.bak.*` siblings) to 0o600 if
+/// they exist and are currently not restricted. Called once at gateway startup.
+/// Silently ignores files that do not exist or are already correctly permissioned.
+#[allow(dead_code)]
+pub fn heal_env_file_permissions(path: &Path) {
+    heal_one_file(path);
+
+    let Some(parent) = path.parent() else { return };
+    let Some(stem) = path.file_name().and_then(|n| n.to_str()) else {
+        return;
+    };
+    let prefix = format!("{stem}.bak.");
+    if let Ok(rd) = std::fs::read_dir(parent) {
+        for entry in rd.filter_map(|e| e.ok()) {
+            if entry
+                .file_name()
+                .to_str()
+                .is_some_and(|n| n.starts_with(&prefix))
+            {
+                heal_one_file(&entry.path());
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn heal_one_file(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path) {
+            let mode = meta.permissions().mode() & 0o777;
+            if mode != 0o600 {
+                if let Err(e) =
+                    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "failed to tighten permissions on secret file"
+                    );
+                } else {
+                    tracing::info!(
+                        path = %path.display(),
+                        old_mode = format!("{mode:04o}"),
+                        "tightened secret file to 0o600"
+                    );
+                }
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
 }
 
 /// Quote a value that contains shell-significant characters.
@@ -2906,5 +3070,128 @@ service_scope = "user"
 
         // Restore
         set_process_code_mode_enabled(prev_ts);
+    }
+
+    // ── T3: secret file permission tests (S2) ────────────────────────────────
+
+    #[cfg(unix)]
+    fn file_mode(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path)
+            .unwrap_or_else(|e| panic!("metadata {}: {e}", path.display()))
+            .permissions()
+            .mode()
+            & 0o777
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn write_env_creates_file_with_mode_0o600() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let env_path = dir.path().join(".env");
+
+        let creds = [EnvCredential {
+            service: "myservice".to_string(),
+            url: None,
+            secret: Some("supersecret".to_string()),
+            env_field: "MYSERVICE_TOKEN".to_string(),
+        }];
+
+        write_env(&env_path, &creds, false).expect("write_env");
+
+        assert_eq!(
+            file_mode(&env_path),
+            0o600,
+            ".env must be 0o600 after write_env"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn backup_env_creates_backup_with_mode_0o600() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let env_path = dir.path().join(".env");
+        std::fs::write(&env_path, "ORIGINAL_TOKEN=abc\n").expect("write source");
+
+        let backup = backup_env(&env_path).expect("backup_env");
+
+        assert!(backup.exists(), "backup file must exist");
+        assert_eq!(
+            file_mode(&backup),
+            0o600,
+            ".env.bak.* must be 0o600 after backup_env"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn backup_env_prunes_old_backups() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let env_path = dir.path().join(".env");
+        std::fs::write(&env_path, "TOKEN=x\n").expect("write");
+
+        // Pre-create ENV_BACKUP_RETAIN + 2 old backups.
+        for i in 0..ENV_BACKUP_RETAIN + 2 {
+            std::fs::write(dir.path().join(format!(".env.bak.{i}")), "old").expect("write old bak");
+        }
+
+        backup_env(&env_path).expect("backup_env");
+
+        let count = std::fs::read_dir(dir.path())
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .is_some_and(|n| n.starts_with(".env.bak."))
+            })
+            .count();
+
+        assert!(
+            count <= ENV_BACKUP_RETAIN,
+            "backup count {count} must be <= ENV_BACKUP_RETAIN ({ENV_BACKUP_RETAIN})"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn heal_env_file_permissions_tightens_loose_env() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let env_path = dir.path().join(".env");
+        std::fs::write(&env_path, "TOKEN=secret\n").expect("write");
+        std::fs::set_permissions(&env_path, std::fs::Permissions::from_mode(0o644))
+            .expect("chmod 644");
+
+        heal_env_file_permissions(&env_path);
+
+        assert_eq!(
+            file_mode(&env_path),
+            0o600,
+            "heal must tighten .env to 0o600"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn heal_env_file_permissions_tightens_backup_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let env_path = dir.path().join(".env");
+        let bak_path = dir.path().join(".env.bak.1234567890");
+
+        std::fs::write(&env_path, "TOKEN=secret\n").expect("write env");
+        std::fs::write(&bak_path, "TOKEN=oldsecret\n").expect("write bak");
+
+        for p in [&env_path, &bak_path] {
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o644)).expect("chmod 644");
+        }
+
+        heal_env_file_permissions(&env_path);
+
+        assert_eq!(file_mode(&env_path), 0o600, ".env must be healed");
+        assert_eq!(file_mode(&bak_path), 0o600, ".env.bak.* must be healed");
     }
 }

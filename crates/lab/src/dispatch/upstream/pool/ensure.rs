@@ -18,7 +18,7 @@ use super::super::types::{UpstreamCapability, UpstreamRuntimeOwner};
 #[cfg(test)]
 use super::TestUpstreamConnector;
 use super::UpstreamPool;
-use super::connect::connect_upstream;
+use super::connect::connect_upstream_with_client;
 use super::entries::{lazy_upstream_entry, resolve_exposure_policy};
 use super::helpers::{
     DISCOVERY_TIMEOUT, cached_upstream_tool, upstream_name_is_uri_safe, upstream_target_redacted,
@@ -137,12 +137,13 @@ impl UpstreamPool {
         let runtime_owner = runtime_owner.or(self.runtime_owner.as_ref());
         let connect_result = tokio::time::timeout(
             DISCOVERY_TIMEOUT,
-            connect_upstream(
+            connect_upstream_with_client(
                 config,
                 subject,
                 self.oauth_client_cache.as_ref(),
                 self.runtime_origin.as_deref(),
                 runtime_owner,
+                Some(&self.shared_http_client),
             ),
         )
         .await;

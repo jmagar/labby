@@ -33,6 +33,7 @@ use std::sync::Arc;
 use lab_auth::sqlite::SqliteStore;
 use lab_auth::types::UpstreamOauthCredentialRow;
 use rmcp::transport::auth::{AuthorizationMetadata, OAuthClientConfig};
+use rmcp::transport::streamable_http_client::StreamableHttpClient;
 use rmcp::transport::{AuthClient, AuthorizationManager};
 use serde::Deserialize;
 use tokio::sync::RwLock;
@@ -446,6 +447,90 @@ impl UpstreamOauthManager {
         }
 
         Ok(AuthClient::new(reqwest::Client::new(), manager))
+    }
+
+    /// Build an `AuthClient<C>` wrapping the supplied HTTP client (P-H4).
+    ///
+    /// Identical to `build_auth_client` except the caller provides the HTTP
+    /// transport, enabling `BodyCappedHttpClient` or any other
+    /// `StreamableHttpClient` to be used on the OAuth path.  The resulting
+    /// client is NOT cached — callers that need caching must do so themselves.
+    pub async fn build_auth_client_with<C>(
+        &self,
+        subject: &str,
+        http_client: C,
+    ) -> Result<AuthClient<C>, OauthError>
+    where
+        C: StreamableHttpClient,
+    {
+        let started = std::time::Instant::now();
+        let lock = self.locks.acquire(&self.upstream.name, subject);
+        let _guard = lock.lock().await;
+
+        let mut manager = self
+            .configured_authorization_manager(
+                subject,
+                DynamicClientRegistrationUse::StoredCredentials,
+            )
+            .await
+            .inspect_err(|e| {
+                tracing::warn!(
+                    upstream = %self.upstream.name,
+                    provider = %self.oauth_provider_label(),
+                    subject,
+                    scope = %self.oauth_scope_label(),
+                    kind = e.kind(),
+                    elapsed_ms = started.elapsed().as_millis(),
+                    fallback = "reauthorization_required",
+                    "upstream oauth: failed to build auth client manager (with_client)"
+                );
+            })?;
+        let initialized = manager.initialize_from_store().await.map_err(|e| {
+            tracing::warn!(
+                upstream = %self.upstream.name,
+                provider = %self.oauth_provider_label(),
+                subject,
+                scope = %self.oauth_scope_label(),
+                kind = "internal_error",
+                elapsed_ms = started.elapsed().as_millis(),
+                fallback = "reauthorization_required",
+                "upstream oauth: failed to initialize auth client from credential store (with_client)"
+            );
+            OauthError::Internal(format!("initialize from store: {e}"))
+        })?;
+
+        if !initialized {
+            tracing::warn!(
+                upstream = %self.upstream.name,
+                provider = %self.oauth_provider_label(),
+                subject,
+                scope = %self.oauth_scope_label(),
+                kind = "oauth_needs_reauth",
+                elapsed_ms = started.elapsed().as_millis(),
+                fallback = "reauthorization_required",
+                "upstream oauth: no stored credentials for auth client (with_client)"
+            );
+            return Err(OauthError::NeedsReauth(format!(
+                "no stored credentials for upstream '{}' subject '{subject}'",
+                self.upstream.name
+            )));
+        }
+
+        let credential_row = self.credential_row(subject).await?;
+        let refresh_state = credential_row
+            .as_ref()
+            .and_then(|row| TokenRefreshState::from_row(row, now_unix().ok()?));
+        if let Some(state) = refresh_state.as_ref() {
+            self.log_expiring_token(subject, state, started.elapsed().as_millis());
+            self.log_refresh_attempt(subject, state, started.elapsed().as_millis());
+        }
+
+        manager
+            .get_access_token()
+            .await
+            .map_err(|e| map_auth_error(e))?;
+
+        Ok(AuthClient::new(http_client, manager))
     }
 
     /// Force a refresh for stored credentials.

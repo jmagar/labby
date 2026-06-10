@@ -37,8 +37,56 @@ pub(super) async fn connect_stdio_upstream(
     use std::process::Stdio;
     use tokio::process::Command;
 
+    // SECURITY (S1): never inherit labby's full environment — it holds
+    // LAB_OAUTH_ENCRYPTION_KEY and every upstream credential. Start from a
+    // scrubbed allowlist of runtime essentials (so npx/uvx/docker/etc. can still
+    // find binaries, caches, and TLS roots), then layer the upstream's declared
+    // env (and bearer token, below) on top.
+    const STDIO_ENV_ALLOWLIST: &[&str] = &[
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "TERM",
+        "TZ",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "LANG",
+        "LANGUAGE",
+        "LC_ALL",
+        "LC_CTYPE",
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_RUNTIME_DIR",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "NODE_EXTRA_CA_CERTS",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "SYSTEMROOT",
+        "SYSTEMDRIVE",
+        "WINDIR",
+        "PATHEXT",
+        "COMSPEC",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PROGRAMDATA",
+        "PROGRAMFILES",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+    ];
+
     let mut cmd = Command::new(command);
     cmd.args(args);
+    cmd.env_clear();
+    for key in STDIO_ENV_ALLOWLIST {
+        if let Ok(value) = std::env::var(key) {
+            cmd.env(key, value);
+        }
+    }
     cmd.envs(config.env.iter());
 
     // Set bearer token env var on the child if configured

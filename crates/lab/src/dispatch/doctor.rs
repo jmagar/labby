@@ -7,6 +7,7 @@
 mod catalog;
 mod client;
 mod dispatch;
+pub mod gateway;
 mod params;
 pub mod proxy;
 pub mod service;

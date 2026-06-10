@@ -19,10 +19,14 @@ use rmcp::transport::streamable_http_server::{
 use tokio::sync::mpsc;
 
 use crate::api::AppState;
-use crate::config::{LabConfig, config_toml_path, resolve_auth_for_config};
+use crate::config::{
+    LabConfig, config_toml_path, dotenv_path, heal_env_file_permissions, resolve_auth_for_config,
+};
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::gateway::install_gateway_manager;
-use crate::dispatch::gateway::manager::{GatewayManager, GatewayRuntimeHandle};
+use crate::dispatch::gateway::manager::{
+    GatewayManager, GatewayManagerConfig, GatewayOauthConfig, GatewayRuntimeHandle,
+};
 use crate::dispatch::gateway::types::CatalogChangeNotifier;
 use crate::dispatch::logs::client::{
     bootstrap_running_log_system, resolve_queue_capacity, resolve_retention, resolve_store_path,
@@ -333,20 +337,32 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
     let notifier = PeerNotifier::default();
     let (notify_tx, notify_rx) = mpsc::unbounded_channel();
     let _catalog_notifier_task = tokio::spawn(notifier.clone().run(notify_rx));
-    let service_clients = SharedServiceClients::from_env();
-    let mut gateway_manager = GatewayManager::new(
-        config_toml_path().unwrap_or_else(|| "config.toml".into()),
-        gateway_runtime.clone(),
-    )
-    .with_builtin_service_registry(registry.clone())
-    .with_in_process_connector(crate::mcp::in_process_peer::connector())
-    .with_service_clients(service_clients);
-    if let Some(rt) = upstream_oauth_runtime {
-        gateway_manager = gateway_manager
-            .with_upstream_oauth_managers(rt.managers)
-            .with_oauth_client_cache(rt.cache)
-            .with_oauth_resources(rt.sqlite, rt.key, rt.redirect_uri);
+    // WIRING (SEC): tighten loose ~/.lab/.env permissions at every startup so a
+    // freshly-created file (which may be 0644) is corrected to 0600 before any
+    // secrets are read.  heal_env_file_permissions is idempotent and a no-op on
+    // non-Unix targets.  Do NOT call this after secrets are already in memory —
+    // only the on-disk file mode matters here.
+    if let Some(env_path) = dotenv_path() {
+        heal_env_file_permissions(&env_path);
     }
+
+    let service_clients = SharedServiceClients::from_env();
+    let mut gateway_manager = GatewayManager::from_config(
+        GatewayManagerConfig {
+            config_path: config_toml_path().unwrap_or_else(|| "config.toml".into()),
+            registry: registry.clone(),
+            service_clients,
+            in_process_connector: Some(crate::mcp::in_process_peer::connector()),
+            oauth: upstream_oauth_runtime.map(|rt| GatewayOauthConfig {
+                managers: rt.managers,
+                cache: rt.cache,
+                sqlite: rt.sqlite,
+                key: rt.key,
+                redirect_uri: rt.redirect_uri,
+            }),
+        },
+        gateway_runtime.clone(),
+    );
     gateway_manager.set_notifier(CatalogChangeNotifier::new(notify_tx));
     let gateway_manager = Arc::new(gateway_manager);
     // Seed config for both transports so MCP catalog visibility and code-mode

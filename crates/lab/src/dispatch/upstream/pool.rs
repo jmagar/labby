@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::future::BoxFuture;
 use rmcp::RoleClient;
@@ -50,6 +50,26 @@ pub use helpers::{UpstreamCachedSummary, in_process_upstream_name};
 #[allow(unused_imports)]
 pub use tools::{MAX_UPSTREAM_PROMPTS, MAX_UPSTREAM_RESOURCES, MAX_UPSTREAM_TOOLS};
 
+/// A cached subject-scoped connection entry.  Holds the live peer plus the
+/// tool list that was discovered when the connection was opened.  Protected
+/// by the `subject_connect_locks` single-flight gate so only one connect
+/// runs per `(upstream, subject)` key at a time.
+///
+/// See `connection.rs:acquire_or_connect_subject` for the full cache logic
+/// (P-C1 fix).
+pub(super) struct SubjectScopedConnection {
+    /// The full upstream connection (keeps the running service + server task alive).
+    pub(super) _connection: UpstreamConnection,
+    /// Cloned peer handle — pre-cloned so `acquire_or_connect_subject` can
+    /// return it on the cache-hit fast path without re-cloning under write lock.
+    pub(super) peer: rmcp::service::Peer<RoleClient>,
+    /// Tool list discovered at connect time (avoids a round-trip on
+    /// every owner-lookup call).
+    pub(super) tools: Vec<rmcp::model::Tool>,
+    /// Wall-clock instant when this entry was last used.
+    pub(super) last_used: Instant,
+}
+
 /// Upstream connection pool — holds live connections and discovered tool catalogs.
 #[derive(Clone)]
 pub struct UpstreamPool {
@@ -67,6 +87,16 @@ pub struct UpstreamPool {
     probe_tasks: Arc<RwLock<HashMap<String, CancellationToken>>>,
     /// Per-upstream lazy connection gates to prevent duplicate cold starts.
     lazy_connect_locks: Arc<RwLock<HashMap<String, Arc<Mutex<()>>>>>,
+    /// Per-`(upstream, subject)` cached connections for the OAuth / subject-scoped
+    /// proxy path.  Reused across calls for the same subject so we pay TLS +
+    /// `initialize` + `tools/list` only once per idle-TTL window (P-C1 fix).
+    ///
+    /// Keyed by `(upstream_name, subject)`.
+    subject_connections: Arc<RwLock<HashMap<(String, String), SubjectScopedConnection>>>,
+    /// Per-`(upstream, subject)` single-flight locks so concurrent first-requests
+    /// for the same key do not open duplicate OAuth connections (mirrors the
+    /// `lazy_connect_locks` gate used by the normal pool path).
+    subject_connect_locks: Arc<RwLock<HashMap<(String, String), Arc<Mutex<()>>>>>,
     /// Request/session identity stamped onto spawned stdio upstreams.
     runtime_origin: Option<String>,
     /// Structured owner metadata stamped onto spawned stdio upstreams.
@@ -76,6 +106,12 @@ pub struct UpstreamPool {
     /// Optional connector for in-process (built-in) service peers.
     /// When set, built-in lab services are reachable via the upstream pool.
     in_process_connector: Option<InProcessConnector>,
+    /// Shared `reqwest::Client` used for ALL non-OAuth HTTP upstream connections.
+    ///
+    /// `reqwest::Client` is internally `Arc`-wrapped and holds a connection pool:
+    /// sharing it means TLS sessions and keep-alive connections are reused across
+    /// upstreams rather than rebuilt on every `connect_http_upstream` call (P-M10).
+    pub(super) shared_http_client: Arc<reqwest::Client>,
 }
 
 /// A live connection to an upstream MCP server.
@@ -118,6 +154,15 @@ impl UpstreamPool {
     /// Create a new empty pool.
     #[must_use]
     pub fn new() -> Self {
+        // Build a shared reqwest::Client that lives for the pool's lifetime.
+        // All non-OAuth HTTP connects reuse this client so TLS sessions and
+        // keep-alive connections are pooled across upstreams (P-M10).
+        let shared_http_client = Arc::new(
+            reqwest::Client::builder()
+                .timeout(DEFAULT_REQUEST_TIMEOUT)
+                .build()
+                .unwrap_or_default(),
+        );
         Self {
             catalog: Arc::new(RwLock::new(HashMap::new())),
             connections: Arc::new(RwLock::new(HashMap::new())),
@@ -125,10 +170,13 @@ impl UpstreamPool {
             oauth_client_cache: None,
             probe_tasks: Arc::new(RwLock::new(HashMap::new())),
             lazy_connect_locks: Arc::new(RwLock::new(HashMap::new())),
+            subject_connections: Arc::new(RwLock::new(HashMap::new())),
+            subject_connect_locks: Arc::new(RwLock::new(HashMap::new())),
             runtime_origin: None,
             runtime_owner: None,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             in_process_connector: None,
+            shared_http_client,
         }
     }
 

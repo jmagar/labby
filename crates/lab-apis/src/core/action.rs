@@ -16,6 +16,17 @@ pub struct ActionSpec {
     /// True if this action mutates external state. Drives both MCP elicitation
     /// and CLI confirmation prompts — a single source of truth.
     pub destructive: bool,
+    /// True if this action requires the `lab:admin` scope on authenticated HTTP
+    /// and MCP transports. Defaults to `false` for all services except gateway,
+    /// which sets it to `true` on every action except `help` and `schema`.
+    ///
+    /// Mirrors `destructive` as the single source of truth for scope gating:
+    /// - API surface: `api/services/gateway.rs` reads this field instead of a
+    ///   bespoke match arm.
+    /// - MCP surface: `mcp/context.rs` reads this field instead of a bespoke
+    ///   match arm.
+    /// - Stdio transport: `None` auth is always trusted (admin by design).
+    pub requires_admin: bool,
     /// Declared parameter list.
     pub params: &'static [ParamSpec],
     /// Type-name hint for the return shape, e.g. `"Movie[]"`. Not a runtime

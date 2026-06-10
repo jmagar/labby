@@ -14,7 +14,6 @@ use super::super::types::{
     UpstreamToolExposureRow,
 };
 use super::UpstreamPool;
-use super::connect::connect_upstream;
 use super::helpers::UpstreamCachedSummary;
 
 /// Hard cap on the total number of tools returned by a single `healthy_tools()` call.
@@ -106,26 +105,23 @@ impl UpstreamPool {
         matches
     }
 
+    /// Return tool lists for all OAuth upstreams visible to `subject`.
+    ///
+    /// P-C1 fix: uses `acquire_or_connect_subject` so the per-(upstream,subject)
+    /// connection and tool list are cached — the expensive TLS + initialize +
+    /// tools/list is paid at most once per idle-TTL window, not on every call.
     pub async fn subject_scoped_tools(
         &self,
         configs: &[UpstreamConfig],
         subject: &str,
     ) -> Vec<(String, Vec<rmcp::model::Tool>)> {
         let mut futures = FuturesUnordered::new();
-        let oauth_client_cache = self.oauth_client_cache.clone();
         for config in configs.iter().filter(|config| config.oauth.is_some()) {
             let config = config.clone();
             let subject = subject.to_string();
-            let oauth_client_cache = oauth_client_cache.clone();
+            let pool = self.clone();
             futures.push(async move {
-                let result = connect_upstream(
-                    &config,
-                    Some(subject.as_str()),
-                    oauth_client_cache.as_ref(),
-                    None,
-                    None,
-                )
-                .await;
+                let result = pool.acquire_or_connect_subject(&config, &subject).await;
                 (config.name.clone(), result)
             });
         }
@@ -133,7 +129,7 @@ impl UpstreamPool {
         let mut discovered = Vec::new();
         while let Some((name, result)) = futures.next().await {
             match result {
-                Ok((_conn, tools)) => discovered.push((name, tools)),
+                Ok((_peer, tools)) => discovered.push((name, tools)),
                 Err(error) => {
                     tracing::warn!(
                         upstream = %name,
