@@ -49,7 +49,10 @@ Dependency direction:
 | `pool/prompts_get.rs` | `subject_scoped_prompts`, `get_prompt`, `subject_scoped_get_prompt`. |
 | `pool/testsupport.rs` | `#[cfg(test)]` shared fixtures + mock servers (`pub(super)`). |
 
-Hard rule preserved by this split: **no file exceeds 500 LOC (tests included).**
+**Target preserved by this split: no file should exceed 500 LOC (tests included).**
+Known exceptions: `http_client.rs` (~717 LOC) was not split during the initial
+refactor; it is the only file that currently violates the target and is tracked
+for a follow-up split. All *new* files added to `pool/` must stay under 500 LOC.
 
 ## Key Types
 
@@ -72,6 +75,16 @@ Hard rule preserved by this split: **no file exceeds 500 LOC (tests included).**
 
 - Do not read env vars outside `pool/helpers.rs` (`max_response_bytes()`, `upstream_discovery_concurrency()`) and the connect modules (`pool/connect.rs`, `pool/connect_stdio.rs`). Keep env reads confined to that small, named set of places.
 - Do not import MCP-specific types (envelopes, registry) from `mcp/`.
+  The `InProcessConnector` IoC seam (`pool.rs`) is the correct boundary: the
+  MCP layer (`crate::mcp::in_process_peer`) injects a connector at startup; the
+  pool calls it without knowing about `LabMcpServer`. As of A-M6, `connect_stdio.rs`
+  no longer has any `crate::mcp` import — the boundary is clean. Do not re-add
+  `mcp/` imports to any `dispatch/upstream/` file.
+  **PATH/basename-only spawn-guard caveat (S6):** the spawn-guard allowlist check
+  in `spawn_guard.rs` is basename-only — `/tmp/x/node` passes because its basename
+  is `node`. This is an accepted residual: the trust boundary is admin-write access
+  to the gateway config, and no further PATH resolution is performed at spawn time.
+  See `spawn_guard.rs` for the canonical comment.
 - Do not import API-specific types (router, state) from `api/`.
 - The pool is constructed in `cli/serve.rs` and injected into `AppState` and `LabMcpServer`.
 - Circuit breaker state is internal to the pool. Surfaces call `record_failure()` and `record_success()`.
