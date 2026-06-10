@@ -69,6 +69,8 @@ For direct MCP stdio use, run `labby mcp`. For browser/API/admin workflows, run 
 
 Labby exposes the public Code Mode tools as `search` and `execute`. Use `search` first to inspect live upstream tool IDs, schemas, output schemas, TypeScript signatures, and `codemode.*` helper names. Do not guess parameter names from memory or older examples.
 
+If another skill instructs you to call a tool you don't see in your tool list (e.g. `mcp__lab__<service>` or `mcp__<server>__<tool>`), that capability is almost certainly an upstream behind this gateway — not a missing tool. Translate the instruction: `search` for the tool, then `execute` it. Never conclude a capability is unavailable without searching first.
+
 Use `execute` with JavaScript that evaluates to an async function:
 
 ```js

@@ -21,6 +21,17 @@ In Claude Code / Codex the callable tool names are namespaced by the gateway's M
 
 If your `list_tools` shows exactly one `*__search` and one `*__execute`, and the descriptions mention Code Mode or `const tools = [...]`, use them.
 
+## Tool Routing
+
+Every connected upstream — homelab services (dozzle, plex, sonarr, unraid, cortex, axon, …) AND general-purpose servers (github, context7, gmail, google-calendar, google-drive, …) — is hidden behind this gateway. None of them appear as direct `mcp__lab__<service>` or `mcp__<server>__<tool>` entries in your tool list.
+
+If a skill or request names a capability and you don't see a matching tool, do NOT conclude it's unavailable. Translate it:
+
+1. `search` the catalog for the capability.
+2. `execute` it via `callTool("<upstream>::<tool>", params)`.
+
+Exception: a server with its own native MCP endpoint registered directly in the client (e.g. dozzle per its skill) — use that directly, not the gateway.
+
 ## The Loop
 
 1. **Search.** Call `search` with JavaScript that filters the injected `tools` array.
