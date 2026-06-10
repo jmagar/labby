@@ -190,6 +190,38 @@ mcp-token:
     fi
     echo "  $token"
 
+# Run the prod image locally with prod-like env (LAB_UPSTREAM_DISCOVERY_CONCURRENCY=3, no
+# bind-mounted binary). Useful for testing spawn-storm safeguards and discovery timeouts that
+# are masked by the dev stack's higher concurrency default (16). Starts detached, polls /health
+# for up to 60s, then prints the container ID. Stop with: docker stop lab-prod-test
+# See docs/OPERATIONS.md §Dev/Prod Container Drift for the full drift inventory.
+prod-run: build-release
+    #!/usr/bin/env bash
+    set -euo pipefail
+    docker stop lab-prod-test 2>/dev/null || true
+    docker rm   lab-prod-test 2>/dev/null || true
+    docker build -f config/Dockerfile.fast -t labby:prod-test .
+    docker run -d --name lab-prod-test \
+        -p 18765:8765 \
+        -v "${HOME}/.lab:/home/lab/.lab" \
+        -e LAB_MCP_HTTP_HOST=0.0.0.0 \
+        -e LAB_MCP_HTTP_PORT=8765 \
+        -e LAB_UPSTREAM_DISCOVERY_CONCURRENCY=3 \
+        labby:prod-test
+    echo "container started — polling http://localhost:18765/health (60s timeout)..."
+    deadline=$(( $(date +%s) + 60 ))
+    until curl -sf http://localhost:18765/health >/dev/null 2>&1; do
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo "TIMEOUT: /health did not return 200 within 60s" >&2
+            docker logs lab-prod-test >&2
+            docker stop lab-prod-test
+            exit 1
+        fi
+        sleep 2
+    done
+    echo "healthy — container: lab-prod-test (host port 18765)"
+    echo "stop with: docker stop lab-prod-test"
+
 # Smoke-test the lab-bg3e.3 setup wizard end-to-end against a throw-away
 # LAB_HOME. Used by CI to verify first-run detection + draft commit cycle
 # without touching the operator's real ~/.lab/.

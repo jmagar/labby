@@ -12,33 +12,22 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends nodejs zsh \
  && rm -rf /var/lib/apt/lists/*
 
-# Pre-install ACP adapters at known versions so each session spawn skips the
-# npx download/cache check and uses a deterministic binary. The claude-agent-sdk
-# version determines which Claude Code binary ships, which determines which
-# credentials.json formats it accepts. claude-agent-acp pins its SDK with `=`,
-# so we override the nested install via package.json overrides to float the
-# bundled Claude Code binary forward — matching newer host credential formats
-# (host Claude Code 2.1.132 + pinned SDK 0.2.126 → SIGILL).
-RUN mkdir -p /opt/acp-adapters \
- && cd /opt/acp-adapters \
- && cat > package.json <<'EOF'
-{
-  "name": "lab-acp-adapters",
-  "version": "0.0.0",
-  "private": true,
-  "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "^0.32.0",
-    "@anthropic-ai/claude-code": "2.1.132",
-    "@anthropic-ai/claude-agent-sdk": "^0.2.131",
-    "@openai/codex": "0.130.0",
-    "@zed-industries/codex-acp": "0.12.0",
-    "@google/gemini-cli": "0.40.0"
-  },
-  "overrides": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.131"
-  }
-}
-EOF
+# Pre-install ACP adapters at known exact versions so each session spawn skips
+# the npx download/cache check and uses a deterministic binary. All versions
+# are pinned exact (no caret/tilde) — npm install acts like npm ci against
+# a fixed manifest. The claude-agent-sdk version determines which Claude Code
+# binary ships and which credentials.json format it accepts; claude-agent-acp
+# pins its transitive SDK with `=`, so the overrides entry is required to hold
+# the bundled Claude Code binary forward to match the host credential format.
+#
+# UPGRADE PROCEDURE (bump adapter + SDK together):
+#   1. Update all version strings in config/acp-adapters.package.json to the
+#      new exact versions. Always bump claude-agent-acp and claude-agent-sdk
+#      together — the overrides entry must match the direct dep.
+#   2. docker build . -f config/Dockerfile.fast --no-cache -t labby:test
+#   3. docker run --rm labby:test claude --version  # verify no SIGILL
+#   4. Commit config/acp-adapters.package.json + Dockerfile.fast together.
+COPY config/acp-adapters.package.json /opt/acp-adapters/package.json
 RUN cd /opt/acp-adapters \
  && npm install --omit=dev --no-audit --no-fund \
  && ln -sf /opt/acp-adapters/node_modules/.bin/claude /usr/local/bin/claude \

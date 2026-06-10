@@ -2,23 +2,58 @@
 unmaintained = "all"
 yanked = "deny"
 ignore = [
-    # rand: unsound when log+thread_rng features are used with a custom logger (no patch yet)
-    { id = "RUSTSEC-2026-0097", reason = "rand: no patch available upstream yet" },
-    # rsa/rsa-der-parser: RSA timing side-channel — review if an upstream patch becomes available
-    { id = "RUSTSEC-2023-0071", reason = "RSA timing side-channel; no upstream patch yet - review when rsa crate ships a fix" },
-    # webpki: URI name constraints ignored (no API impact for our usage)
-    { id = "RUSTSEC-2026-0098", reason = "webpki: no API impact for our usage" },
-    # webpki: wildcard name constraint bypass (no API impact for our usage)
-    { id = "RUSTSEC-2026-0099", reason = "webpki: no API impact for our usage" },
-    # backoff: unmaintained transitive dependency from rust_socketio 0.6.0
-    { id = "RUSTSEC-2025-0012", reason = "backoff: unmaintained transitive dep from rust_socketio 0.6.0" },
-    # instant: unmaintained transitive dependency from rust_socketio -> backoff
-    { id = "RUSTSEC-2024-0384", reason = "instant: unmaintained transitive dep from rust_socketio -> backoff" },
-    # rustls-pemfile: unmaintained transitive dependency from neo4rs 0.9.0-rc.9
-    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile: unmaintained transitive dep from neo4rs 0.9.0-rc.9" },
-    # paste: unmaintained transitive macro dependency from boa_engine 0.21.1.
-    # Code Mode runs Boa in a short-lived child process with no ambient host APIs.
-    { id = "RUSTSEC-2024-0436", reason = "paste: unmaintained transitive dep from boa_engine 0.21.1; Code Mode uses Boa in isolated subprocess" },
+    # owner: jmagar
+    # reason: rand unsound when log+thread_rng features are used with a custom logger; we do not
+    #         use a custom global logger that intercepts rand's thread_rng path, so the unsound
+    #         codepath is unreachable in practice. No upstream patch available yet.
+    # re-review: 2026-09 — drop once rand ships a fix or we can upgrade the dep graph
+    { id = "RUSTSEC-2026-0097", reason = "rand: no patch available upstream yet; unsound path unreachable in our usage" },
+
+    # owner: jmagar
+    # reason: RSA PKCS#1 v1.5 timing side-channel (CRT blinding omitted). Lab does not perform
+    #         RSA signing or decryption at the TLS termination point — TLS is handled by SWAG/nginx
+    #         upstream. The rsa crate is a transitive dep; no upstream patch available.
+    # re-review: 2026-09 — drop once rsa upstream ships a fix or the dep is removed
+    { id = "RUSTSEC-2023-0071", reason = "RSA timing side-channel; no upstream patch yet — TLS offloaded to SWAG, not in our hot path" },
+
+    # owner: jmagar
+    # reason: webpki URI name constraints silently ignored. Lab does not issue or verify
+    #         certificates with URI SANs, so the constrained name type is not in our trust model.
+    # re-review: 2026-09 — drop once webpki upstream ships a fix
+    { id = "RUSTSEC-2026-0098", reason = "webpki: URI name constraints; no URI SAN usage in lab's trust model" },
+
+    # owner: jmagar
+    # reason: webpki wildcard name constraint bypass. Same scope as 2026-0098 — lab does not
+    #         issue or validate wildcard certificates with name constraints.
+    # re-review: 2026-09 — drop once webpki upstream ships a fix
+    { id = "RUSTSEC-2026-0099", reason = "webpki: wildcard constraint bypass; no wildcard cert validation in lab's trust model" },
+
+    # owner: jmagar
+    # reason: backoff crate unmaintained; pulled in transitively by rust_socketio 0.6.0.
+    #         rust_socketio is a gateway dependency for socket.io-backed MCP upstreams.
+    #         No patch available; tracking rust_socketio for an upgrade that drops backoff.
+    # re-review: 2026-09 — drop once rust_socketio upgrades or drops backoff
+    { id = "RUSTSEC-2025-0012", reason = "backoff: unmaintained transitive dep from rust_socketio 0.6.0; no direct exposure" },
+
+    # owner: jmagar
+    # reason: instant crate unmaintained; pulled in via rust_socketio -> backoff chain.
+    #         Same root cause as RUSTSEC-2025-0012 above. No separate patch path.
+    # re-review: 2026-09 — drops automatically when rust_socketio -> backoff chain is resolved
+    { id = "RUSTSEC-2024-0384", reason = "instant: unmaintained transitive dep from rust_socketio -> backoff; same root as -0012" },
+
+    # owner: jmagar
+    # reason: rustls-pemfile unmaintained; pulled in transitively by neo4rs 0.9.0-rc.9.
+    #         neo4rs is used for the Neo4j gateway integration. No patch available yet;
+    #         tracking neo4rs for a stable release that upgrades its TLS dep.
+    # re-review: 2026-09 — drop once neo4rs stable ships with an updated dep
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile: unmaintained transitive dep from neo4rs 0.9.0-rc.9; no direct exposure" },
+
+    # owner: jmagar
+    # reason: paste proc-macro crate unmaintained; pulled in by boa_engine 0.21.1 which is
+    #         used by Code Mode's JS sandbox. Boa runs in a short-lived child process with no
+    #         ambient host APIs, so a proc-macro compile-time-only dep has no runtime impact.
+    # re-review: 2026-09 — drop once boa_engine upgrades or Code Mode migrates to a newer engine
+    { id = "RUSTSEC-2024-0436", reason = "paste: unmaintained transitive dep from boa_engine; compile-time only, no runtime exposure" },
 ]
 
 [licenses]
