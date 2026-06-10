@@ -150,6 +150,32 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  test-windows:
+    name: Test (windows self-hosted)
+    runs-on: [self-hosted, windows-lab]
+    needs: frontend-assets
+    # Self-hosted runner on a PUBLIC repo: never run for pull_request events,
+    # so fork code can never reach the runner. Pushes to main, the weekly
+    # schedule, and manual dispatch only — Windows breakage surfaces on the
+    # post-merge run, mirroring the release-smoke policy.
+    #
+    # The runner is the agent-os sandbox VM (dookie-adjacent Windows 11) with
+    # rustup, cargo-nextest, NASM, and CMake preinstalled and a persistent
+    # warm target dir — no toolchain/cache actions needed.
+    if: github.event_name != 'pull_request'
+    timeout-minutes: 120
+    env:
+      # 4-thread / 8 GB VM — cap build parallelism so debug-test linking
+      # does not OOM.
+      CARGO_BUILD_JOBS: "2"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: gateway-admin-out
+          path: apps/gateway-admin/out
+      - run: cargo nextest run --workspace --all-features --profile ci
+
   release-smoke:
     name: Release smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
