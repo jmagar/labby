@@ -281,6 +281,45 @@ mod tests {
     }
 
     #[test]
+    fn argv_rejects_node_eval() {
+        for flag in ["-e", "--eval", "-p", "--print"] {
+            let err =
+                validate_stdio_argv("node", &[flag.to_string(), "process.exit()".to_string()])
+                    .unwrap_err();
+            assert_eq!(err.kind(), "invalid_param", "node {flag} must be rejected");
+        }
+    }
+
+    #[test]
+    fn argv_rejects_python_inline_code() {
+        for flag in ["-c", "--command", "-"] {
+            let err = validate_stdio_argv("python3", &[flag.to_string(), "import os".to_string()])
+                .unwrap_err();
+            assert_eq!(
+                err.kind(),
+                "invalid_param",
+                "python {flag} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn argv_accepts_python_module_run() {
+        // `python -m <module>` is the normal way MCP servers launch — must stay allowed.
+        assert!(
+            validate_stdio_argv("python3", &["-m".to_string(), "mcp_server".to_string()]).is_ok()
+        );
+    }
+
+    #[test]
+    fn argv_rejects_deno_eval_and_allow_all() {
+        for arg in ["eval", "--allow-all", "-A"] {
+            let err = validate_stdio_argv("deno", &[arg.to_string()]).unwrap_err();
+            assert_eq!(err.kind(), "invalid_param", "deno {arg} must be rejected");
+        }
+    }
+
+    #[test]
     fn argv_accepts_benign_args() {
         assert!(
             validate_stdio_argv(

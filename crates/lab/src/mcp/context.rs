@@ -146,6 +146,15 @@ pub(crate) fn tool_execute_builtin_action_allowed(
     if !builtin_action_requires_admin(entry, action) {
         return true;
     }
+    // INTENTIONAL ASYMMETRY with the HTTP API gate (`api/services/gateway.rs`,
+    // which uses `is_some_and` — absent auth = DENIED). Here `is_none_or` means
+    // absent auth = ALLOWED. That is the stdio trust model: a `None` AuthContext
+    // on the MCP surface means a local stdio caller (trusted), not an anonymous
+    // network request. Remote MCP-over-HTTP cannot reach here unauthenticated
+    // because `cli/serve.rs` refuses to bind a non-loopback address without auth
+    // configured, and the `/mcp` route carries the bearer/OAuth layer when auth
+    // is configured. Do NOT "align" this to `is_some_and` without also proving
+    // every reachable transport injects an AuthContext for authenticated callers.
     auth.is_none_or(|auth| auth.scopes.iter().any(|scope| scope == "lab:admin"))
 }
 
