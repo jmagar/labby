@@ -82,6 +82,7 @@ impl GatewayManager {
     pub fn new(path: PathBuf, runtime: GatewayRuntimeHandle) -> Self {
         Self {
             path,
+            env_path_override: None,
             runtime,
             config: Arc::new(RwLock::new(LabConfig::default())),
             config_mutation: Arc::new(Mutex::new(())),
@@ -103,6 +104,18 @@ impl GatewayManager {
             code_mode_refresh_inflight: Arc::new(Mutex::new(())),
             code_mode_catalog_render_cache: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Override the `.env` path used by config persistence helpers (test only).
+    ///
+    /// In production the path is always derived from the home directory.  Tests
+    /// call this to redirect writes beside the temp `config.toml` instead of
+    /// touching the developer's `~/.lab/.env`.
+    #[cfg(test)]
+    #[must_use]
+    pub fn with_env_path(mut self, path: PathBuf) -> Self {
+        self.env_path_override = Some(path);
+        self
     }
 
     /// Attach a connector for in-process (built-in) service peers.

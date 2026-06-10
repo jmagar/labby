@@ -107,7 +107,9 @@ async fn service_config_get_marks_service_configured_when_required_fields_are_pr
 async fn add_with_bearer_token_value_writes_env_and_references_generated_env_var() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
-    let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
+    let env_path = dir.path().join(".env");
+    let manager =
+        GatewayManager::new(path, GatewayRuntimeHandle::default()).with_env_path(env_path);
 
     let gateway = manager
         .add(
