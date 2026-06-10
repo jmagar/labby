@@ -57,8 +57,39 @@ const KNOWN_LAB_CONFIG_KEYS: &[&str] = &[
     "quarantined_virtual_servers",
     "deploy",
     "public_urls",
-    "code_mode",
 ];
+
+/// Compile-time assertion that KNOWN_LAB_CONFIG_KEYS contains no duplicate entries.
+///
+/// This check runs at compile time via a const evaluation. If you add a key,
+/// ensure it does not already appear in the list — the duplicate "code_mode"
+/// entry (A-L9) was the original motivation for this guard.
+const _: () = {
+    let keys = KNOWN_LAB_CONFIG_KEYS;
+    let mut i = 0;
+    while i < keys.len() {
+        let mut j = i + 1;
+        while j < keys.len() {
+            // const-safe byte-by-byte string comparison
+            let a = keys[i].as_bytes();
+            let b = keys[j].as_bytes();
+            if a.len() == b.len() {
+                let mut k = 0;
+                let mut equal = true;
+                while k < a.len() {
+                    if a[k] != b[k] {
+                        equal = false;
+                        break;
+                    }
+                    k += 1;
+                }
+                assert!(!equal, "KNOWN_LAB_CONFIG_KEYS contains a duplicate entry");
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+};
 
 /// Serialize `cfg` to TOML and atomically replace the file at `path`.
 pub fn write_gateway_config(path: &Path, cfg: &LabConfig) -> Result<(), ToolError> {
