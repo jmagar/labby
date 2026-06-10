@@ -1,11 +1,22 @@
 use std::sync::Arc;
+use std::time::Duration;
 
+use futures::future::join_all;
 use rmcp::RoleServer;
 use rmcp::service::Peer;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 
 use crate::dispatch::gateway::types::GatewayCatalogDiff;
+
+/// Per-peer notification timeout (P-L2 fix).
+///
+/// A slow or hung peer must not stall the entire fanout: one unresponsive
+/// client would block every other connected session if notifications were sent
+/// serially.  Notifications are now sent concurrently via `join_all`, and each
+/// peer's future is individually bounded by this timeout so a single stalled
+/// peer drops out without affecting the rest.
+const PEER_NOTIFY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// MCP-specific peer fanout that forwards catalog-change notifications to all
 /// connected `rmcp::Peer<RoleServer>` instances.
@@ -54,66 +65,95 @@ impl PeerNotifier {
             prompts_changed = diff.prompts_changed,
             "broadcasting catalog change to connected peers"
         );
-        let mut alive = Vec::with_capacity(peers.len());
-        for (index, peer) in peers.iter().enumerate() {
-            let peer = peer.clone();
-            let mut ok = true;
-            if diff.tools_changed {
-                ok = peer.notify_tool_list_changed().await.is_ok();
-                if !ok {
-                    tracing::warn!(
-                        surface = "mcp",
-                        service = "peers",
-                        action = "peer.disconnect",
-                        peer_index = index,
-                        phase = "tools",
-                        tools_changed = diff.tools_changed,
-                        resources_changed = diff.resources_changed,
-                        prompts_changed = diff.prompts_changed,
-                        "failed to notify peer about catalog change; pruning stale session"
-                    );
-                }
-            }
-            if ok && diff.resources_changed {
-                ok = peer.notify_resource_list_changed().await.is_ok();
-                if !ok {
-                    tracing::warn!(
-                        surface = "mcp",
-                        service = "peers",
-                        action = "peer.disconnect",
-                        peer_index = index,
-                        phase = "resources",
-                        tools_changed = diff.tools_changed,
-                        resources_changed = diff.resources_changed,
-                        prompts_changed = diff.prompts_changed,
-                        "failed to notify peer about catalog change; pruning stale session"
-                    );
-                }
-            }
-            if ok && diff.prompts_changed {
-                ok = peer.notify_prompt_list_changed().await.is_ok();
-                if !ok {
-                    tracing::warn!(
-                        surface = "mcp",
-                        service = "peers",
-                        action = "peer.disconnect",
-                        peer_index = index,
-                        phase = "prompts",
-                        tools_changed = diff.tools_changed,
-                        resources_changed = diff.resources_changed,
-                        prompts_changed = diff.prompts_changed,
-                        "failed to notify peer about catalog change; pruning stale session"
-                    );
-                }
-            }
-            if ok {
-                alive.push(peer);
-            }
-        }
 
-        let pruned = peers.len().saturating_sub(alive.len());
+        // P-L2 fix: notify all peers concurrently so one slow peer cannot
+        // stall the fanout.  Each peer future is bounded by PEER_NOTIFY_TIMEOUT
+        // so a hung session times out independently.
+        let notify_futures = peers.iter().enumerate().map(|(index, peer)| {
+            let peer = peer.clone();
+            let diff = diff.clone();
+            async move {
+                let result = tokio::time::timeout(PEER_NOTIFY_TIMEOUT, async {
+                    if diff.tools_changed && peer.notify_tool_list_changed().await.is_err() {
+                        tracing::warn!(
+                            surface = "mcp",
+                            service = "peers",
+                            action = "peer.disconnect",
+                            peer_index = index,
+                            phase = "tools",
+                            tools_changed = diff.tools_changed,
+                            resources_changed = diff.resources_changed,
+                            prompts_changed = diff.prompts_changed,
+                            "failed to notify peer about catalog change; pruning stale session"
+                        );
+                        return false;
+                    }
+                    if diff.resources_changed && peer.notify_resource_list_changed().await.is_err()
+                    {
+                        tracing::warn!(
+                            surface = "mcp",
+                            service = "peers",
+                            action = "peer.disconnect",
+                            peer_index = index,
+                            phase = "resources",
+                            tools_changed = diff.tools_changed,
+                            resources_changed = diff.resources_changed,
+                            prompts_changed = diff.prompts_changed,
+                            "failed to notify peer about catalog change; pruning stale session"
+                        );
+                        return false;
+                    }
+                    if diff.prompts_changed && peer.notify_prompt_list_changed().await.is_err() {
+                        tracing::warn!(
+                            surface = "mcp",
+                            service = "peers",
+                            action = "peer.disconnect",
+                            peer_index = index,
+                            phase = "prompts",
+                            tools_changed = diff.tools_changed,
+                            resources_changed = diff.resources_changed,
+                            prompts_changed = diff.prompts_changed,
+                            "failed to notify peer about catalog change; pruning stale session"
+                        );
+                        return false;
+                    }
+                    true
+                })
+                .await;
+                match result {
+                    Ok(alive) => alive,
+                    Err(_elapsed) => {
+                        tracing::warn!(
+                            surface = "mcp",
+                            service = "peers",
+                            action = "peer.disconnect",
+                            peer_index = index,
+                            timeout_ms = PEER_NOTIFY_TIMEOUT.as_millis(),
+                            tools_changed = diff.tools_changed,
+                            resources_changed = diff.resources_changed,
+                            prompts_changed = diff.prompts_changed,
+                            "peer notification timed out; pruning stale session"
+                        );
+                        false
+                    }
+                }
+            }
+        });
+
+        let snapshot_len = peers.len();
+        let results = join_all(notify_futures).await;
+        let alive: Vec<Peer<RoleServer>> = peers
+            .into_iter()
+            .zip(results)
+            .filter_map(|(peer, ok)| ok.then_some(peer))
+            .collect();
+
+        let pruned = snapshot_len.saturating_sub(alive.len());
+
         let mut guard = self.peers.write().await;
-        let added_since_snapshot = guard.split_off(peers.len());
+        // Preserve peers that connected after we took the snapshot so they are
+        // not incorrectly GC'd — identical to the original serial logic.
+        let added_since_snapshot = guard.split_off(snapshot_len);
         *guard = alive;
         guard.extend(added_since_snapshot);
         let total = guard.len();
