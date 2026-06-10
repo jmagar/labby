@@ -51,7 +51,7 @@ Windows uses the native GitHub-hosted Windows runner and the MSVC target.
 Linux-to-Windows GNU cross-builds are not the official support contract.
 aarch64 was removed from the matrix: rquickjs-sys (Code Mode QuickJS bindings)
 fails to cross-compile in the `cross` container (missing target stdbool.h) and
-no fleet host is aarch64 — restoring it is tracked in beads.
+no fleet host is aarch64 and the target was dropped deliberately (wontfix).
 
 Release builds use `--all-features`.
 

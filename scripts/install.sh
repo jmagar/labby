@@ -33,7 +33,8 @@ target_triple() {
         Linux)
             case "$arch" in
                 x86_64) echo "x86_64-unknown-linux-gnu" ;;
-                aarch64 | arm64) echo "aarch64-unknown-linux-gnu" ;;
+                # aarch64 has no prebuilt archive (rquickjs does not
+                # cross-compile); ARM falls through to the cargo fallback.
                 *) return 1 ;;
             esac
             ;;

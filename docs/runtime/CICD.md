@@ -82,7 +82,7 @@ Integration tests must be marked `#[ignore]` so `cargo nextest run` skips them w
 
 - **Surface:** GitHub Releases
 - **Container surface:** GitHub Container Registry (`ghcr.io/jmagar/lab`)
-- **Artifacts per release:** one binary archive per supported target (Linux x86_64, Windows x86_64; aarch64 removed — rquickjs-sys does not cross-compile, tracked in beads)
+- **Artifacts per release:** one binary archive per supported target (Linux x86_64, Windows x86_64; aarch64 dropped deliberately — rquickjs-sys does not cross-compile and no fleet host is ARM)
 - **Checksums:** every binary archive has a SHA-256 checksum file
 - **No package registry publishing** (crates.io, npm, etc.) unless explicitly decided
 
