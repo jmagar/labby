@@ -18,6 +18,7 @@ use tempfile::TempDir;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader as TokioBufReader;
 use tokio::process::{ChildStdin, Command};
+use tokio_util::codec::{FramedRead, LinesCodec};
 use ulid::Ulid;
 
 use crate::dispatch::error::ToolError;
@@ -240,7 +241,13 @@ impl CodeModeBroker<'_> {
         )
         .await?;
 
-        let mut lines = TokioBufReader::new(stdout).lines();
+        // The QuickJS runner is bounded to 64 MiB of heap, but a single
+        // protocol line (e.g. a large JSON result) could still reach that
+        // bound. Apply an explicit per-line cap: 64 MiB + framing headroom.
+        // Lines longer than this are a protocol violation; return a structured
+        // error rather than buffering an unbounded amount into a single String.
+        const MAX_LINE_BYTES: usize = 64 * 1024 * 1024 + 4 * 1024; // 64 MiB + 4 KiB
+        let mut lines = FramedRead::new(stdout, LinesCodec::new_with_max_length(MAX_LINE_BYTES));
         let deadline = tokio::time::Instant::now() + cfg.timeout;
         let artifact_run_id = Ulid::new().to_string();
         let mut state = DriveState::new(&artifact_run_id);
@@ -256,7 +263,7 @@ impl CodeModeBroker<'_> {
 
         loop {
             tokio::select! {
-                line = tokio::time::timeout_at(deadline, lines.next_line()) => {
+                line = tokio::time::timeout_at(deadline, lines.next()) => {
                     let line = match line {
                         Ok(line) => line,
                         Err(_) => {
@@ -264,11 +271,9 @@ impl CodeModeBroker<'_> {
                             return Err(code_mode_timeout_error(&state.calls));
                         }
                     };
-                    let Some(line) = line.map_err(|err| ToolError::Sdk {
-                        sdk_kind: "internal_error".to_string(),
-                        message: format!("failed to read Code Mode runner output: {err}"),
-                    })?
-                    else {
+                    // `FramedRead::next()` yields `Option<Result<String, LinesCodecError>>`.
+                    // `None` = EOF (runner exited); `Some(Err(_))` = I/O or line-too-long.
+                    let Some(line_result) = line else {
                         let status = child.wait().await.map_err(|err| ToolError::Sdk {
                             sdk_kind: "internal_error".to_string(),
                             message: format!("failed to wait for Code Mode runner: {err}"),
@@ -283,6 +288,30 @@ impl CodeModeBroker<'_> {
                             sorted_calls(&state.calls),
                         ));
                     };
+                    let line = line_result.map_err(|err| {
+                        // `LinesCodecError::MaxLineLengthExceeded` means the runner
+                        // emitted a line larger than MAX_LINE_BYTES — a protocol
+                        // violation. Surface it as a structured error so callers can
+                        // distinguish it from a plain I/O failure.
+                        use tokio_util::codec::LinesCodecError;
+                        let (sdk_kind, message) = match &err {
+                            LinesCodecError::MaxLineLengthExceeded => (
+                                "internal_error",
+                                format!(
+                                    "Code Mode runner emitted a protocol line exceeding the \
+                                     {MAX_LINE_BYTES}-byte safety cap; possible unbounded output"
+                                ),
+                            ),
+                            LinesCodecError::Io(io_err) => (
+                                "internal_error",
+                                format!("failed to read Code Mode runner output: {io_err}"),
+                            ),
+                        };
+                        ToolError::Sdk {
+                            sdk_kind: sdk_kind.to_string(),
+                            message,
+                        }
+                    })?;
 
                     let msg = serde_json::from_str::<CodeModeRunnerOutput>(&line).map_err(|err| {
                         ToolError::Sdk {
