@@ -651,6 +651,13 @@ Dynamic registration may require an initial access token; supply it via env
 (documented in [UPSTREAM.md](../services/UPSTREAM.md)). DCR-issued credentials are
 persisted alongside tokens and reused on restart.
 
+Some OAuth providers publish split endpoint origins while keeping a stable
+issuer. Lab still enforces issuer binding by default, but allows known provider
+deployments such as Google's `https://accounts.google.com` issuer with the
+`https://oauth2.googleapis.com` token endpoint. This supports Google-hosted MCP
+servers such as Google Drive MCP without weakening issuer checks for arbitrary
+upstreams.
+
 Setting `oauth` and `bearer_token_env` on the same upstream produces a
 validation error at startup and rejects gateway mutations that would create the
 same conflict:

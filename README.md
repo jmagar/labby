@@ -265,7 +265,10 @@ Lab's auth store and shared by the web UI, CLI, and MCP gateway actions under
 the shared Gateway subject `gateway`. Protected MCP routes can publish these
 OAuth upstreams at public paths such as `https://mcp.example.com/syslog` while
 Lab validates public clients with Lab OAuth and separately authenticates to the
-upstream server with the stored upstream OAuth credential.
+upstream server with the stored upstream OAuth credential. Upstream OAuth keeps
+strict issuer binding, with explicit provider exceptions for documented split
+endpoint deployments such as Google's `accounts.google.com` issuer and
+`oauth2.googleapis.com` token endpoint.
 
 Callback relay helpers cover split-browser/device flows:
 
