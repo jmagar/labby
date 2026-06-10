@@ -8,6 +8,23 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.23.0] - 2026-06-10
+
+### Highlights
+
+- **Gateway comprehensive review landed** (PR #106) — all Critical/High findings plus ~50 Medium/Low: stdio spawn hardening (`env_clear` + allowlist + eval-flag denials), 0o600 secret perms with self-heal, catalog-driven admin scope, OAuth connection caching (kills the N+1), diff-based pool reload, `GatewayManager` split into 13 modules, fuel-vocabulary purge, gitleaks CI, real `/ready`.
+- **Upstream stderr forwarding hardened and configurable** (PR #102) — DEBUG default with `LAB_GW_UPSTREAM_STDERR` level control, line/rate caps, redaction, UTF-8-safe truncation.
+- **The labby plugin no longer ships a binary** (PR #107) — plugin is skills + MCP config only; hooks are advisory PATH-based shims. Install explicitly via `scripts/install.sh` (release download, sha256-verified, cargo fallback), then `labby setup`. Marketplace generator de-bundled (`--binary` flag removed; generated plugins invoke `labby` from PATH).
+- **CI**: Windows release smoke skipped on PRs (runs on main/schedule/dispatch); container smoke job polls `/health`; ACP adapter versions pinned exactly; `RUSTC_WRAPPER` disabled in CI (fixes Windows builds).
+- **OAuth**: Google split token-endpoint origin (`accounts.google.com` → `oauth2.googleapis.com`) allowed under strict issuer binding.
+
+### Breaking
+
+- `labby marketplace generate` no longer accepts `--binary`; generated service plugins invoke `labby` from `PATH` instead of a bundled `lab-core/bin/labby`.
+- Stdio upstream children run with `env_clear` + allowlist: upstreams needing env vars outside `STDIO_ENV_ALLOWLIST` must declare them in the upstream `env` map.
+
+---
+
 ## [0.22.2] - 2026-06-06
 
 ### Highlights
