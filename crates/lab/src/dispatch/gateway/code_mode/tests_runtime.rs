@@ -1138,6 +1138,92 @@ fn runner_process_group_is_reaped_after_kill() {
     }
 }
 
+/// P-M5: binary-search log truncation produces valid output for a
+/// representative case. Asserts that:
+///  1. The truncated response is within budget.
+///  2. A sentinel is present.
+///  3. The drop boundary is tight: the truncated set fits, and adding back
+///     one more original line would exceed the budget.
+#[test]
+fn binary_search_log_truncation_boundary_is_tight() {
+    // 50 log lines of ~80 bytes each → ~4 KB of logs.
+    // The envelope (result, calls, artifacts) adds another ~200 bytes.
+    // Use a 2 KB budget so some lines are dropped but not all.
+    let line_count = 50usize;
+    let line_payload = "B".repeat(70);
+    let make_response = || CodeModeExecutionResponse {
+        result: Some(json!({"ok": true})),
+        calls: vec![CodeModeExecutedCall {
+            id: "test::ping".to_string(),
+            ok: true,
+            elapsed_ms: 1,
+            params: None,
+            error_kind: None,
+        }],
+        logs: (0..line_count)
+            .map(|i| format!("[line {i:02}] {line_payload}"))
+            .collect(),
+        artifacts: vec![],
+    };
+    let original = make_response();
+
+    // Pick a budget above the bare envelope (so some logs can fit) but well
+    // below the total log volume.
+    let bare_envelope_size = {
+        let mut bare = make_response();
+        bare.logs = Vec::new();
+        serde_json::to_vec(&bare).unwrap().len()
+    };
+    // Budget = bare envelope + sentinel + 4 log lines worth.
+    let one_line_bytes = format!("[line 00] {line_payload}").len();
+    let budget = bare_envelope_size + 80 /* sentinel */ + 4 * one_line_bytes;
+
+    let truncated = truncate_execution_response(original.clone(), budget, 100_000, 4);
+
+    // 1. Within budget.
+    let serialized_len = serde_json::to_vec(&truncated).unwrap().len();
+    assert!(
+        serialized_len <= budget,
+        "truncated response ({serialized_len} bytes) must be within the {budget}-byte budget"
+    );
+
+    // 2. Sentinel present (we dropped some lines).
+    let sentinel_present = truncated
+        .logs
+        .iter()
+        .any(|l| l.contains("logs truncated to fit response budget"));
+    assert!(
+        sentinel_present,
+        "sentinel must be present when lines were dropped; logs: {:?}",
+        truncated.logs
+    );
+
+    // 3. Boundary is tight: adding one more original line would exceed budget.
+    // The truncated logs are: [sentinel, kept_0, kept_1, …].
+    // kept_lines = everything after the sentinel.
+    if truncated.logs.len() >= 2 {
+        let kept_lines = &truncated.logs[1..];
+        let kept_count = kept_lines.len();
+        let drop_count = line_count - kept_count;
+        // The original lines that were kept start at index `drop_count`.
+        if drop_count > 0 {
+            let next_original_idx = drop_count - 1;
+            let next_original = &original.logs[next_original_idx];
+            let mut one_more = truncated.clone();
+            let mut new_logs = vec![truncated.logs[0].clone()]; // sentinel
+            new_logs.push(next_original.clone());
+            new_logs.extend_from_slice(kept_lines);
+            one_more.logs = new_logs;
+            let one_more_len = serde_json::to_vec(&one_more).unwrap().len();
+            assert!(
+                one_more_len > budget,
+                "adding one more line ({one_more_len} bytes) must exceed budget ({budget}); \
+                 boundary must be tight"
+            );
+        }
+    }
+}
+
 #[test]
 fn ensure_call_budget_blocks_at_limit() {
     // Budget gate shared by tool calls AND artifact writes: below the cap is Ok,
