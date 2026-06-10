@@ -186,6 +186,34 @@ impl UpstreamPool {
         owners
     }
 
+    /// Return the cached prompt ownership map (prompt_name -> upstream_name)
+    /// built from already-populated catalog data, without issuing any live RPCs.
+    ///
+    /// P-M8: used by `gateway.status` to avoid a live `prompts/list` fan-out on
+    /// every poll. The cache is populated whenever `list_upstream_prompts` or
+    /// `prompt_ownership_map` is called (e.g. on catalog reload). Falls back to
+    /// an empty map when the cache is cold, which is the same behavior the
+    /// previous live-RPC path would return when no upstreams are routable.
+    pub async fn cached_prompt_ownership_map(&self) -> HashMap<String, String> {
+        let catalog = self.catalog.read().await;
+        let mut owners = HashMap::new();
+        let mut entries: Vec<_> = catalog.values().collect();
+        // Sort by name for deterministic winner when two upstreams have the
+        // same prompt name — consistent with collect_upstream_prompts ordering.
+        entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+        for entry in entries {
+            if !entry.prompt_health.is_routable() {
+                continue;
+            }
+            for prompt_name in &entry.prompt_names {
+                owners
+                    .entry(prompt_name.clone())
+                    .or_insert_with(|| entry.name.to_string());
+            }
+        }
+        owners
+    }
+
     /// Resolve which upstream owns a given prompt name.
     ///
     /// Prefer `prompt_ownership_map()` when resolving ownership for multiple

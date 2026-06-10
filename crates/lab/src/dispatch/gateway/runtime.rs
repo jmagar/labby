@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
-use futures::stream::FuturesUnordered;
 #[cfg(unix)]
 use nix::errno::Errno;
+use tempfile::NamedTempFile;
 use tokio::sync::RwLock;
 
 use crate::config::{LabConfig, UpstreamConfig};
@@ -95,23 +95,52 @@ impl GatewayManager {
         state: &PersistedGatewayRuntimeState,
     ) -> Result<(), ToolError> {
         let path = self.runtime_state_path();
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent).await.map_err(|error| {
-                ToolError::internal_message(format!(
-                    "failed to create runtime state directory {}: {error}",
-                    parent.display()
-                ))
-            })?;
-        }
+        let parent = path
+            .parent()
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| PathBuf::from("."));
+        tokio::fs::create_dir_all(&parent).await.map_err(|error| {
+            ToolError::internal_message(format!(
+                "failed to create runtime state directory {}: {error}",
+                parent.display()
+            ))
+        })?;
         let body = serde_json::to_vec_pretty(state).map_err(|error| {
             ToolError::internal_message(format!("failed to serialize runtime state: {error}"))
         })?;
-        tokio::fs::write(&path, body).await.map_err(|error| {
-            ToolError::internal_message(format!(
-                "failed to write runtime state {}: {error}",
-                path.display()
-            ))
+        // O-M3: atomic write — NamedTempFile + sync_all + persist to avoid a
+        // corrupt runtime.json if the process crashes mid-write.
+        tokio::task::spawn_blocking(move || {
+            let mut tmp = NamedTempFile::new_in(&parent).map_err(|error| {
+                ToolError::internal_message(format!(
+                    "failed to create temp file in {}: {error}",
+                    parent.display()
+                ))
+            })?;
+            use std::io::Write as _;
+            tmp.write_all(&body).map_err(|error| {
+                ToolError::internal_message(format!(
+                    "failed to write runtime state temp file: {error}"
+                ))
+            })?;
+            tmp.as_file().sync_all().map_err(|error| {
+                ToolError::internal_message(format!(
+                    "failed to sync runtime state temp file: {error}"
+                ))
+            })?;
+            tmp.persist(&path).map_err(|error| {
+                ToolError::internal_message(format!(
+                    "failed to persist runtime state {}: {}",
+                    path.display(),
+                    error.error
+                ))
+            })?;
+            Ok(())
         })
+        .await
+        .map_err(|error| {
+            ToolError::internal_message(format!("runtime state write task panicked: {error}"))
+        })?
     }
 
     pub(super) async fn reconcile_runtime_state(
@@ -187,11 +216,16 @@ impl GatewayManager {
                 .iter()
                 .filter(|entry| Some(entry.pid) != live_pid)
                 .count();
+            // I-M2: likely_stale_process_group_count does a synchronous /proc
+            // scan; offload to a blocking thread so we don't stall the executor.
             let live_stale_count = if upstream.command.is_some() {
-                likely_stale_process_group_count(
-                    upstream,
-                    live_pid.zip(runtime.as_ref().and_then(|meta| meta.pgid)),
-                )
+                let upstream_clone = upstream.clone();
+                let live_runtime = live_pid.zip(runtime.as_ref().and_then(|meta| meta.pgid));
+                tokio::task::spawn_blocking(move || {
+                    likely_stale_process_group_count(&upstream_clone, live_runtime)
+                })
+                .await
+                .unwrap_or(0)
             } else {
                 0
             };
@@ -267,27 +301,41 @@ impl GatewayManager {
             return;
         };
 
-        let mut pending = FuturesUnordered::new();
-        for upstream in cfg
+        // P-M7: cap concurrency using the same LAB_UPSTREAM_DISCOVERY_CONCURRENCY
+        // setting the rest of the codebase uses (default 3) to avoid a stdio
+        // spawn storm when many upstreams are warming simultaneously.
+        let concurrency = std::env::var("LAB_UPSTREAM_DISCOVERY_CONCURRENCY")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&v| v > 0)
+            .unwrap_or(3);
+
+        // Collect owned values so the closure passed to buffer_unordered can
+        // satisfy the HRTB (`for<'a> FnOnce(&'a UpstreamConfig)`) required by
+        // futures::stream::iter — borrows from cfg would tie the lifetime to
+        // the caller's borrow and break the bound.
+        let upstreams: Vec<UpstreamConfig> = cfg
             .upstream
             .iter()
             .filter(|upstream| upstream.enabled && upstream.oauth.is_none())
-        {
-            pending.push(async move {
-                (
-                    upstream.name.as_str(),
-                    pool.ensure_tools_for_upstream(upstream, None, None).await,
-                )
-            });
-        }
+            .cloned()
+            .collect();
 
-        while let Some((upstream, result)) = pending.next().await {
+        let mut stream = futures::stream::iter(upstreams)
+            .map(|upstream| async move {
+                let name = upstream.name.clone();
+                let result = pool.ensure_tools_for_upstream(&upstream, None, None).await;
+                (name, result)
+            })
+            .buffer_unordered(concurrency);
+
+        while let Some((upstream, result)) = stream.next().await {
             if let Err(error) = result {
                 tracing::warn!(
                     surface = "dispatch",
                     service = "gateway",
                     action = "gateway.mcp.list",
-                    upstream,
+                    upstream = upstream.as_str(),
                     error = %error,
                     "gateway MCP runtime catalog warm failed"
                 );
@@ -322,12 +370,27 @@ impl GatewayManager {
             Vec::new()
         };
 
-        let gateway_matches = matching_processes(&gateway_patterns);
-        let local_matches = matching_processes(&local_patterns);
-        let aggressive_matches = if aggressive {
-            matching_processes(&aggressive_patterns)
-        } else {
-            Vec::new()
+        // I-M2: matching_processes does a synchronous /proc scan; offload to
+        // a blocking thread so we don't stall the async executor.
+        let (gateway_matches, local_matches, aggressive_matches) = {
+            let gp = gateway_patterns.clone();
+            let lp = local_patterns.clone();
+            let ap = aggressive_patterns.clone();
+            let do_aggressive = aggressive;
+            tokio::task::spawn_blocking(move || {
+                let g = matching_processes(&gp);
+                let l = matching_processes(&lp);
+                let a = if do_aggressive {
+                    matching_processes(&ap)
+                } else {
+                    Vec::new()
+                };
+                (g, l, a)
+            })
+            .await
+            .map_err(|error| {
+                ToolError::internal_message(format!("process scan task panicked: {error}"))
+            })?
         };
 
         let view = super::types::GatewayCleanupView {
@@ -639,7 +702,7 @@ fn kill_matched_processes(matches: &[GatewayCleanupMatch]) -> usize {
 enum ProcessKillTarget {
     Pid(u32),
     // constructed only on Linux; match arm retained for exhaustiveness on all platforms
-    #[allow(dead_code)]
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Group(u32),
 }
 

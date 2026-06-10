@@ -192,8 +192,11 @@ impl GatewayManager {
             .cloned()
             .collect();
         let pool = self.runtime.current_pool().await;
+        // P-M8: use the cached prompt-ownership snapshot instead of a live
+        // prompts/list fan-out on every status poll (mirrors the resources fix
+        // for lab-mzm2 — same pattern, same rationale).
         let prompt_owners = match pool.as_deref() {
-            Some(p) => Some(p.prompt_ownership_map(&[]).await),
+            Some(p) => Some(p.cached_prompt_ownership_map().await),
             None => None,
         };
         let mut items = Vec::new();
