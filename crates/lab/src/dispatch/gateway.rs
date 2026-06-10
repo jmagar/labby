@@ -13,7 +13,7 @@ mod projection;
 pub(crate) mod protected_routes;
 mod runtime;
 mod service_catalog;
-mod shared;
+pub(crate) mod shared;
 pub(crate) mod types;
 pub(crate) mod view_models;
 mod virtual_servers;

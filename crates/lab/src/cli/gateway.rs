@@ -848,21 +848,37 @@ fn read_code_mode_source(
     file: Option<std::path::PathBuf>,
     max_source_bytes: u64,
 ) -> Result<String> {
-    let code = match (code, file) {
-        (Some(code), None) => code,
+    match (code, file) {
+        (Some(code), None) => {
+            // Check the inline string length BEFORE any further buffering so we
+            // never allocate more than max_source_bytes for a too-large arg
+            // (Q-L7 fix: moved from post-allocation check).
+            if code.len() as u64 > max_source_bytes {
+                anyhow::bail!("Code Mode source exceeds {max_source_bytes} bytes");
+            }
+            Ok(code)
+        }
         (None, Some(path)) => {
+            // Check metadata BEFORE reading to avoid allocating the full file
+            // when it is already known to be too large (already correct; kept).
             let metadata = std::fs::metadata(&path)?;
             if metadata.len() > max_source_bytes {
                 anyhow::bail!("Code Mode source file exceeds {max_source_bytes} bytes");
             }
-            std::fs::read_to_string(path)?
+            // Use a capped reader so a file that grows between the stat and
+            // the read cannot exceed the budget by more than one byte.
+            use std::io::Read as _;
+            let mut buf = String::new();
+            std::fs::File::open(&path)?
+                .take(max_source_bytes + 1)
+                .read_to_string(&mut buf)?;
+            if buf.len() as u64 > max_source_bytes {
+                anyhow::bail!("Code Mode source file exceeds {max_source_bytes} bytes");
+            }
+            Ok(buf)
         }
         _ => anyhow::bail!("provide exactly one of --code or --file"),
-    };
-    if code.len() as u64 > max_source_bytes {
-        anyhow::bail!("Code Mode source exceeds {max_source_bytes} bytes");
     }
-    Ok(code)
 }
 
 async fn run_gateway_oauth_start(

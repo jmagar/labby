@@ -105,21 +105,19 @@ fn inject_gateway_owner(params: Value, subject: Option<&str>, request_id: Option
     let Some(mut object) = params.as_object().cloned() else {
         return params;
     };
-    let raw = match (subject, request_id) {
-        (Some(sub), Some(request_id)) => Some(format!("api:{sub}:{request_id}")),
-        (Some(sub), None) => Some(format!("api:{sub}")),
-        (None, Some(request_id)) => Some(format!("api:anonymous:{request_id}")),
-        (None, None) => Some("api:anonymous".to_string()),
-    };
+    let owner = crate::dispatch::gateway::shared::make_api_runtime_owner(subject, request_id);
+    let origin = owner.raw.clone();
+    // Serialize the owner struct into its JSON shape for the params object.
+    // The fields match the GatewayRuntimeOwnerParams shape consumed by dispatch.
     object.entry("owner".to_string()).or_insert_with(|| {
         serde_json::json!({
-            "surface": "api",
-            "subject": subject,
-            "request_id": request_id,
-            "raw": raw,
+            "surface": owner.surface,
+            "subject": owner.subject,
+            "request_id": owner.request_id,
+            "raw": owner.raw,
         })
     });
-    if let Some(origin) = raw {
+    if let Some(origin) = origin {
         object
             .entry("origin".to_string())
             .or_insert_with(|| Value::String(origin));

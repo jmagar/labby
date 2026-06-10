@@ -55,19 +55,8 @@ impl LabMcpServer {
         &self,
         context: &RequestContext<RoleServer>,
     ) -> UpstreamRuntimeOwner {
-        let subject = self.request_subject(context).map(ToOwned::to_owned);
-        let raw = subject
-            .as_ref()
-            .map(|subject| format!("mcp:{subject}"))
-            .unwrap_or_else(|| "mcp:anonymous".to_string());
-        UpstreamRuntimeOwner {
-            surface: "mcp".to_string(),
-            subject,
-            request_id: None,
-            session_id: None,
-            client_name: None,
-            raw: Some(raw),
-        }
+        let subject = self.request_subject(context);
+        crate::dispatch::gateway::shared::make_mcp_runtime_owner(subject)
     }
 
     pub(crate) async fn oauth_upstream_configs(&self) -> Vec<crate::config::UpstreamConfig> {

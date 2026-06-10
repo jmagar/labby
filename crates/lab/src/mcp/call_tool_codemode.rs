@@ -92,6 +92,9 @@ the sandbox before returning — that is the point of Code Mode.
 Budget:
 - Time: a 30 s wall-clock timeout bounds the whole run. Split work across \
 calls or reduce local computation if the `timeout` kind is returned.
+- Tool calls: the optional `max_tool_calls` param bounds how many upstream \
+callTool() invocations this run may make. It is capped at the server-side \
+configured maximum; omit it to use the server default.
 - Memory: 64 MiB heap limit enforced by the QuickJS runtime. Reduce the data \
 processed inside the sandbox if the runner exits with `server_error`.
 - Stack: QuickJS enforces a native stack depth limit; avoid deep recursion.
