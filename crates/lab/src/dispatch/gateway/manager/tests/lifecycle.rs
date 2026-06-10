@@ -230,3 +230,116 @@ fn quarantine_migration_is_noop_when_only_existing_quarantine_remains() {
     assert!(migrated.virtual_servers.is_empty());
     assert_eq!(migrated.quarantined_virtual_servers.len(), 1);
 }
+
+// T7 — reload availability: unaffected upstream catalog entry survives a
+// single-upstream config change.
+//
+// The reconciliation property: after a reload that only adds one new upstream,
+// the catalog entry for the *unchanged* upstream is still present in the fresh
+// pool.  We assert connection-object identity (by checking both pool snapshots
+// contain the same upstream name) rather than running concurrent calls, which
+// would require live MCP servers and be inherently flaky in CI.
+//
+// Why this captures the intent: `pool_lifecycle.rs` seeds ALL upstreams lazily
+// into the new pool.  If the reconciliation regresses to a selective rebuild
+// that drops entries for unchanged upstreams, this test will fail.
+#[tokio::test]
+async fn reload_unaffected_upstream_catalog_entry_survives_single_upstream_change() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+
+    // Start with two upstreams.
+    write_gateway_config(
+        &path,
+        &LabConfig {
+            upstream: vec![
+                fixture_http_upstream("alpha"),
+                fixture_http_upstream("bravo"),
+            ],
+            ..LabConfig::default()
+        },
+    )
+    .expect("write initial config");
+
+    let manager = GatewayManager::new(path.clone(), GatewayRuntimeHandle::default());
+    manager
+        .reload_with_origin(None, None)
+        .await
+        .expect("initial reload");
+
+    // Capture the pool pointer after the first reload.
+    let pool_after_first = manager
+        .current_pool()
+        .await
+        .expect("pool after first reload");
+    assert!(
+        pool_after_first
+            .cached_upstream_summary("alpha")
+            .await
+            .is_some(),
+        "alpha must be seeded after initial reload"
+    );
+    assert!(
+        pool_after_first
+            .cached_upstream_summary("bravo")
+            .await
+            .is_some(),
+        "bravo must be seeded after initial reload"
+    );
+
+    // Write a new config that adds a third upstream (charlie) — alpha and bravo
+    // are unchanged.
+    write_gateway_config(
+        &path,
+        &LabConfig {
+            upstream: vec![
+                fixture_http_upstream("alpha"),
+                fixture_http_upstream("bravo"),
+                fixture_http_upstream("charlie"),
+            ],
+            ..LabConfig::default()
+        },
+    )
+    .expect("write updated config");
+
+    manager
+        .reload_with_origin(None, None)
+        .await
+        .expect("second reload");
+
+    let pool_after_second = manager
+        .current_pool()
+        .await
+        .expect("pool after second reload");
+
+    // The reconciliation property: alpha and bravo are still present in the
+    // freshly built pool even though only charlie was added.
+    assert!(
+        pool_after_second
+            .cached_upstream_summary("alpha")
+            .await
+            .is_some(),
+        "alpha catalog entry must survive reload of unaffected upstream"
+    );
+    assert!(
+        pool_after_second
+            .cached_upstream_summary("bravo")
+            .await
+            .is_some(),
+        "bravo catalog entry must survive reload of unaffected upstream"
+    );
+    assert!(
+        pool_after_second
+            .cached_upstream_summary("charlie")
+            .await
+            .is_some(),
+        "charlie must be seeded in the new pool"
+    );
+
+    // The new pool is a fresh Arc — not the same object.  Confirm the swap
+    // happened so we know we tested the post-reload pool, not a stale one.
+    assert!(
+        !Arc::ptr_eq(&pool_after_first, &pool_after_second),
+        "reload must swap the pool (new Arc expected)"
+    );
+}

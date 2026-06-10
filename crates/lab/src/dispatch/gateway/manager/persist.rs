@@ -11,11 +11,8 @@ use super::GatewayManager;
 
 impl GatewayManager {
     pub(super) fn env_path(&self) -> PathBuf {
-        #[cfg(test)]
-        if let Some(parent) = self.path.parent() {
-            // Tests isolate canonical service-config writes beside the temp
-            // gateway config instead of touching the developer's ~/.lab/.env.
-            return parent.join(".env");
+        if let Some(override_path) = &self.env_path_override {
+            return override_path.clone();
         }
         crate::config::home_dir()
             .map(|h| h.join(".lab").join(".env"))

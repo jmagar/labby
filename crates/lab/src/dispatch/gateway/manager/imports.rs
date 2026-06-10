@@ -1,7 +1,7 @@
 //! Discovery import orchestration: auto-import, the pending-import queue, and
 //! import tombstone management.
 
-use crate::config::{UpstreamConfig, UpstreamImportTombstone};
+use crate::config::{LabConfig, UpstreamConfig, UpstreamImportTombstone};
 use crate::dispatch::error::ToolError;
 use crate::dispatch::gateway::config::{insert_upstream, write_gateway_config};
 use crate::dispatch::gateway::types::{
@@ -14,6 +14,51 @@ use super::GatewayManager;
 use super::import_matchers::{
     ImportTombstoneSelector, discovered_is_tombstoned, partition_discovered_for_import,
 };
+
+/// Maximum number of import tombstones retained in config.
+///
+/// When this limit is exceeded the oldest entries (by `removed_at` timestamp,
+/// or insertion order when timestamps are equal) are pruned at write time so
+/// the config file does not grow without bound.
+const MAX_IMPORT_TOMBSTONES: usize = 200;
+
+/// Maximum number of pending (unreviewed) upstream imports retained in config.
+///
+/// When this limit is exceeded the oldest entries (by insertion order) are
+/// dropped at write time.  Operators can always re-run discovery to surface
+/// them again.
+const MAX_PENDING_IMPORTS: usize = 200;
+
+/// Trim `cfg.upstream_import_tombstones` to at most [`MAX_IMPORT_TOMBSTONES`]
+/// entries, retaining the most recently tombstoned ones.
+///
+/// Tombstones are sorted by `removed_at` in ascending order (oldest first) so
+/// `drain(..excess)` removes the oldest entries.  Entries without a
+/// `removed_at` value sort before those that have one, ensuring they are
+/// pruned first when the list overflows.
+pub(super) fn cap_import_tombstones(cfg: &mut LabConfig) {
+    let len = cfg.upstream_import_tombstones.len();
+    if len <= MAX_IMPORT_TOMBSTONES {
+        return;
+    }
+    // Sort ascending by removed_at (None < Some) so oldest are at the front.
+    cfg.upstream_import_tombstones
+        .sort_by(|a, b| a.removed_at.cmp(&b.removed_at));
+    let excess = len - MAX_IMPORT_TOMBSTONES;
+    cfg.upstream_import_tombstones.drain(..excess);
+}
+
+/// Trim `cfg.upstream_pending` to at most [`MAX_PENDING_IMPORTS`] entries,
+/// keeping the most recently queued ones (tail of the vec, since discovery
+/// appends to the end).
+pub(super) fn cap_pending_imports(cfg: &mut LabConfig) {
+    let len = cfg.upstream_pending.len();
+    if len <= MAX_PENDING_IMPORTS {
+        return;
+    }
+    let excess = len - MAX_PENDING_IMPORTS;
+    cfg.upstream_pending.drain(..excess);
+}
 
 fn pending_import_view(upstream: &UpstreamConfig) -> PendingImportView {
     PendingImportView {
@@ -146,6 +191,7 @@ impl GatewayManager {
         }
 
         if queued > 0 {
+            cap_pending_imports(&mut cfg);
             let path = self.path.clone();
             let cfg_clone = cfg.clone();
             tokio::task::spawn_blocking(move || write_gateway_config(&path, &cfg_clone))
@@ -219,6 +265,7 @@ impl GatewayManager {
         if let Some(source) = spec.imported_from {
             cfg.upstream_import_tombstones
                 .push(UpstreamImportTombstone::now(spec.name, source));
+            cap_import_tombstones(&mut cfg);
         }
 
         let path = self.path.clone();

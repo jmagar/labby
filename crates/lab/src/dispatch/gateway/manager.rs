@@ -71,6 +71,13 @@ pub use self::pool_lifecycle::{GatewayCatalogSnapshot, diff_catalogs};
 #[derive(Clone)]
 pub struct GatewayManager {
     pub(super) path: PathBuf,
+    /// Override for the `.env` file path used by config persistence helpers.
+    ///
+    /// `None` in production — `env_path()` derives the canonical `~/.lab/.env`
+    /// location.  Set by the `with_env_path` builder in tests so each test
+    /// can write beside its temp `config.toml` without touching the developer's
+    /// home directory.
+    pub(super) env_path_override: Option<PathBuf>,
     pub(super) runtime: GatewayRuntimeHandle,
     pub(super) config: Arc<RwLock<LabConfig>>,
     pub(super) config_mutation: Arc<Mutex<()>>,
