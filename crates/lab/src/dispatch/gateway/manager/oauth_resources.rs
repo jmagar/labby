@@ -131,9 +131,10 @@ impl GatewayManager {
         }
     }
 
-    // Only exercised by tests today (a CLI test reads it via the manager); the
-    // accessor is kept on the public surface for symmetry with the other oauth
-    // resource getters, so it is legitimately dead in the production build.
+    // Called only from `#[cfg(test)]` blocks in `cli/gateway.rs`.  Kept on the
+    // public surface for API symmetry with the other OAuth resource getters;
+    // the allow is intentional — removing it would require adding cfg(test) to
+    // a method that conceptually belongs on the production type.
     #[allow(dead_code)]
     #[must_use]
     pub fn oauth_client_cache(&self) -> Option<OauthClientCache> {
