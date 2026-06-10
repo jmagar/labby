@@ -116,6 +116,56 @@ If you need public redirect URIs for a relay or browser-facing callback domain, 
 allowlist them in `lab-auth` with `LAB_AUTH_ALLOWED_REDIRECT_URIS` or
 `[auth].allowed_client_redirect_uris`.
 
+## Dev/Prod Container Drift
+
+The dev and prod Docker stacks intentionally differ in several places. This section documents
+the known drift points and the reasoning, so they are not silently "fixed" by accident.
+
+### Upstream discovery concurrency
+
+| Surface | Value | Why |
+|---------|-------|-----|
+| `docker-compose.yml` (dev) | `LAB_UPSTREAM_DISCOVERY_CONCURRENCY=16` | Fast local warmup; developer wants all ~20 upstreams ready quickly |
+| `docker-compose.prod.yml` (prod default) | `LAB_UPSTREAM_DISCOVERY_CONCURRENCY=3` | Conservative rate-limit budget; a misconfigured upstream causes one timeout slot, not a 16× fan-out storm |
+
+The 5× difference hides spawn-storm bugs in dev that only surface at scale. To test prod-like
+behavior locally, use `just prod-run` (see below) — it starts the image with prod defaults.
+
+### Binary source
+
+| Surface | Binary origin |
+|---------|---------------|
+| Dev | `./bin/labby` bind-mounted from the host (`just build-release` output) — no image rebuild needed for Rust changes |
+| Prod | Binary baked into the image at build time via `COPY bin/labby` |
+
+### Frontend assets
+
+| Surface | Assets source |
+|---------|---------------|
+| Dev | Bind-mounted from `apps/gateway-admin/out` on the host; `pnpm build` changes are reflected immediately |
+| Prod | Assets baked into the image or served from the embedded binary's include_dir |
+
+### Image
+
+| Surface | Image tag |
+|---------|-----------|
+| Dev | `labby:dev` (local build, `Dockerfile.fast`) |
+| Prod | `${LAB_IMAGE:-ghcr.io/jmagar/lab:latest}` |
+
+### Testing prod parity locally
+
+Run `just prod-run` to start the prod image (or a locally built equivalent) with prod-like
+env defaults. This validates that spawn-storm safeguards, discovery timeouts, and binary
+embedding all behave the same as in production before a merge.
+
+```bash
+just build-release     # build fresh binary
+just prod-run          # start prod-like container, prints health URL
+```
+
+The target runs detached, waits for `/health` to return 200, and prints the container ID.
+Stop it with `docker stop lab-prod-test`.
+
 ## Product-Level Health Tooling
 
 ### `labby doctor`
