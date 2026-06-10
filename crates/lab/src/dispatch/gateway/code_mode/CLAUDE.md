@@ -99,7 +99,8 @@ and include a comment explaining the intended vs. actual state.
 | `truncate.rs` | Output size limiting before returning to caller. |
 | `trace.rs` | Execution span helpers (`tracing`). |
 | `types.rs` | Shared Code Mode types: `CodeModeRequest`, `CodeModeResult`. |
-| `types_legacy.rs` | Backward-compat type shims; do not add new code here. |
+| `ts_signatures.rs` | **Live** TypeScript signature / `.d.ts` generator called by `types.rs::CodeModeCatalogEntry::upstream_tool`. NOT legacy shims. |
+| `types_legacy.rs` | Thin re-export alias for `ts_signatures`. Kept for backward compatibility — do not add new code here. |
 | `util.rs` | Small utilities: JS source wrapping, ID generation. |
 | `artifacts.rs` | Artifact write handler: path containment check, size cap, atomic write. |
 | `catalog_cache.rs` | Per-run catalog snapshot cache to avoid repeated pool reads. |

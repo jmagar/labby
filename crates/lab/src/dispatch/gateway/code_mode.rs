@@ -29,7 +29,12 @@ mod schema;
 mod search;
 mod trace;
 mod truncate;
+/// Live TypeScript signature / `.d.ts` generator for Code Mode catalog entries.
+/// Previously named `types_legacy` — renamed to reflect its actual role.
+pub mod ts_signatures;
 mod types;
+/// Backward-compat alias for `ts_signatures`. Previously the live generator
+/// lived here; the file now delegates entirely to `ts_signatures`.
 pub mod types_legacy;
 mod util;
 mod wrapper;
@@ -49,13 +54,21 @@ mod tests_ids_schema;
 mod tests_normalize;
 #[cfg(test)]
 mod tests_runtime;
+/// Tests for the live TypeScript signature generator (previously `tests_types_legacy`).
+#[cfg(test)]
+mod tests_ts_signatures;
+// Keep the old module name so `cargo test tests_types_legacy` still works —
+// the test module was renamed to `tests_ts_signatures` in Q-L2.
+// The old file `tests_types_legacy.rs` is now identical to `tests_ts_signatures.rs`
+// with updated module paths; both modules reference the same functions.
 #[cfg(test)]
 mod tests_types_legacy;
 
 pub use normalize::normalize_user_code;
 pub use runner::run_code_mode_runner_stdio;
 pub(crate) use trace::{code_mode_execute_trace, code_mode_search_trace};
-pub use types::{CodeModeCaller, CodeModeCapabilityFilter, CodeModeSurface, upstream_tool_id};
+pub(crate) use types::split_upstream_tool;
+pub use types::{CodeModeCaller, CodeModeCapabilityFilter, CodeModeSurface, upstream_tool_id}; // shared upstream::tool splitter
 // Re-export so `GatewayManager` (in `manager.rs`, a sibling of `code_mode.rs`)
 // can name the type in `cached_catalog_render`'s return signature without
 // reaching into the private `types` submodule.
