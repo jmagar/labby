@@ -212,8 +212,8 @@ fn gateway_stdio_child_does_not_inherit_secret_env() {
     }
 
     drop(child.stdin.take());
-    let _ = child.wait();
-    let _ = rt; // suppress unused warning
+    child.wait().ok();
+    drop(rt);
 }
 
 /// Regression test: `connect_stdio_upstream` must NOT forward parent `LAB_*`
@@ -230,8 +230,6 @@ fn gateway_stdio_child_does_not_inherit_secret_env() {
 #[test]
 #[cfg(target_os = "linux")]
 fn stdio_child_env_clear_does_not_leak_lab_vars_linux() {
-    use std::io::Read;
-
     // We can't set_var (unsafe in Rust 2024), so we check that an env var
     // that WOULD be present in a typical labby process (like LAB_LOG) is NOT
     // visible to a child spawned with env_clear().
@@ -275,7 +273,7 @@ fn stdio_child_env_clear_does_not_leak_lab_vars_linux() {
     // Read child environ from /proc while it's alive (cat exits fast, so
     // use a short window; on failure just skip the assertion).
     let env_bytes = std::fs::read(format!("/proc/{pid}/environ")).unwrap_or_default();
-    let _ = child.wait();
+    child.wait().ok();
 
     let env_str = String::from_utf8_lossy(&env_bytes);
 

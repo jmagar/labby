@@ -600,7 +600,7 @@
               "name": "spec",
               "ty": "json",
               "required": true,
-              "description": "Gateway config payload to persist"
+              "description": "Gateway config payload to persist. TRUST BOUNDARY: when `command` is set (stdio transport), the gateway will spawn that command as a local subprocess with labby's full process environment. Only operators with admin access may call this action; the command and its arguments are validated against a spawn allowlist before being persisted, but callers must treat this as an admin-level code-execution primitive."
             },
             {
               "name": "bearer_token_value",
@@ -626,7 +626,7 @@
               "name": "patch",
               "ty": "json",
               "required": true,
-              "description": "Partial gateway update payload"
+              "description": "Partial gateway update payload. TRUST BOUNDARY: if the patch sets or changes `command` (stdio transport), the gateway will spawn that command as a local subprocess. The command is validated against a spawn allowlist before being persisted, but this remains an admin-level code-execution primitive."
             },
             {
               "name": "bearer_token_value",
@@ -808,6 +808,32 @@
             }
           ],
           "returns": "ok"
+        },
+        {
+          "name": "gateway.oauth.wait",
+          "description": "Poll gateway.oauth.status until the upstream is authenticated or timeout elapses. Returns {authenticated: bool, timed_out: bool}. Moves the --wait poll loop out of the CLI into shared dispatch (Q-H3).",
+          "destructive": false,
+          "params": [
+            {
+              "name": "upstream",
+              "ty": "string",
+              "required": true,
+              "description": "Configured upstream name to wait on"
+            },
+            {
+              "name": "subject",
+              "ty": "string",
+              "required": false,
+              "description": "Optional credential owner key. Defaults to the shared gateway subject `gateway`."
+            },
+            {
+              "name": "timeout_secs",
+              "ty": "integer",
+              "required": false,
+              "description": "Maximum seconds to wait (default: 120)"
+            }
+          ],
+          "returns": "{authenticated: bool, timed_out: bool}"
         },
         {
           "name": "gateway.mcp.enable",

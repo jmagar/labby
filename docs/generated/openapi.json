@@ -1645,6 +1645,23 @@
           }
         }
       },
+      "GatewayGatewayOauthWaitParams": {
+        "type": "object",
+        "required": [
+          "upstream"
+        ],
+        "properties": {
+          "subject": {
+            "type": "string"
+          },
+          "timeout_secs": {
+            "type": "integer"
+          },
+          "upstream": {
+            "type": "string"
+          }
+        }
+      },
       "GatewayGatewayProtected_routeAddParams": {
         "type": "object",
         "required": [
@@ -1928,6 +1945,16 @@
             ],
             "description": "Process role: `\"master\"` or `\"node\"`."
           },
+          "pending": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Human-readable list of predicates not yet satisfied.\nPresent only on 503 responses."
+          },
           "pid": {
             "type": [
               "integer",
@@ -1939,7 +1966,7 @@
           },
           "status": {
             "type": "string",
-            "description": "Status string: `\"ok\"` for liveness, `\"ready\"` for readiness."
+            "description": "Status string: `\"ok\"` for liveness, `\"ready\"` or `\"not_ready\"` for\nreadiness."
           },
           "uptime_s": {
             "type": [

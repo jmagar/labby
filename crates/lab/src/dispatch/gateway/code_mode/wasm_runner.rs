@@ -6,7 +6,6 @@ use std::sync::{Arc, LazyLock, Mutex};
 use wasmtime::{Config, Engine, Instance, Module, Store, Trap};
 
 pub const DEFAULT_SEARCH_FUEL: u64 = 10_000_000;
-pub const DEFAULT_EXECUTE_FUEL: u64 = 50_000_000;
 static ENGINE: LazyLock<Result<Engine, String>> = LazyLock::new(|| {
     let mut config = Config::new();
     config.consume_fuel(true);

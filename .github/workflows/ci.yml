@@ -20,6 +20,11 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # .cargo/config.toml sets rustc-wrapper = "scripts/cargo-rustc-wrapper" for
+  # local dev (sccache delegation + labby binary sync). The wrapper is a shell
+  # script: Windows runners cannot exec it (os error 193) and its side effects
+  # are pointless in CI, so disable it for all CI jobs.
+  RUSTC_WRAPPER: ""
 
 jobs:
   secret-scan:
