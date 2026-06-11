@@ -94,7 +94,7 @@ The route above exposes only the listed upstreams, the listed built-in Lab servi
 
 The OAuth protected resource remains route-specific: `https://mcp.example.com/media`. A token for one protected route does not authorize another route with a different resource or scope set.
 
-Gateway-subset service mounts are built when `labby serve` starts. After adding, updating, or removing a `gateway_subset` protected route in config, restart the server so the route-specific MCP service and session manager are rebuilt. Legacy single-target proxy routes continue to use the live protected-route resolver.
+Gateway-subset service mounts are built when `labby serve` starts. Add, update, or remove `gateway_subset` protected routes in config and restart the server so the route-specific MCP service and session manager are rebuilt. Live `gateway.protected_route.add/update/remove` calls reject `gateway_subset` targets with `restart_required` instead of leaving a stale scoped service mounted. Legacy single-target proxy routes continue to use the live protected-route resolver.
 
 ## One Tool Per Service
 

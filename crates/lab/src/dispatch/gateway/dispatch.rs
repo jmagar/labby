@@ -1157,6 +1157,27 @@ mod tests {
         }
     }
 
+    fn protected_gateway_subset_route_fixture(name: &str) -> ProtectedMcpRouteConfig {
+        ProtectedMcpRouteConfig {
+            name: name.to_string(),
+            enabled: true,
+            public_host: "mcp.tootie.tv".to_string(),
+            public_path: "/media".to_string(),
+            upstream: None,
+            backend_url: String::new(),
+            backend_mcp_path: "/mcp".to_string(),
+            scopes: Vec::new(),
+            health_path: None,
+            target: Some(crate::config::ProtectedMcpRouteTarget::GatewaySubset(
+                crate::config::ProtectedGatewaySubsetTarget {
+                    upstreams: vec!["sonarr".to_string()],
+                    services: Vec::new(),
+                    expose_code_mode: false,
+                },
+            )),
+        }
+    }
+
     #[tokio::test]
     async fn protected_route_dispatch_add_list_and_test_share_gateway_actions() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1188,6 +1209,52 @@ mod tests {
             .expect("list routes");
         assert_eq!(listed.as_array().expect("array").len(), 1);
         assert_eq!(listed[0]["public_host"], "mcp.tootie.tv");
+    }
+
+    #[tokio::test]
+    async fn protected_gateway_subset_hot_crud_requires_restart() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manager = GatewayManager::new(
+            dir.path().join("config.toml"),
+            GatewayRuntimeHandle::default(),
+        );
+
+        let err = dispatch_with_manager(
+            &manager,
+            "gateway.protected_route.add",
+            json!({ "route": protected_gateway_subset_route_fixture("media") }),
+        )
+        .await
+        .expect_err("gateway_subset add must not pretend to hot-mount scoped service");
+        assert_eq!(err.kind(), "restart_required");
+
+        manager
+            .seed_config(crate::config::LabConfig {
+                protected_mcp_routes: vec![protected_gateway_subset_route_fixture("media")],
+                ..crate::config::LabConfig::default()
+            })
+            .await;
+
+        let err = dispatch_with_manager(
+            &manager,
+            "gateway.protected_route.update",
+            json!({
+                "name": "media",
+                "route": protected_gateway_subset_route_fixture("media")
+            }),
+        )
+        .await
+        .expect_err("gateway_subset update must not leave stale scoped service mounted");
+        assert_eq!(err.kind(), "restart_required");
+
+        let err = dispatch_with_manager(
+            &manager,
+            "gateway.protected_route.remove",
+            json!({ "name": "media" }),
+        )
+        .await
+        .expect_err("gateway_subset remove must not leave stale scoped service mounted");
+        assert_eq!(err.kind(), "restart_required");
     }
 
     #[tokio::test]

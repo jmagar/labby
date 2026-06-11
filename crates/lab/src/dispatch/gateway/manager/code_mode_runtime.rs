@@ -96,7 +96,12 @@ impl GatewayManager {
                     });
                 }
             }
-            if !failures.is_empty() && pool.healthy_tools().await.is_empty() {
+            if !failures.is_empty()
+                && pool
+                    .healthy_tools_allowed(allowed_upstreams)
+                    .await
+                    .is_empty()
+            {
                 let details = failures
                     .iter()
                     .map(|failure| format!("{}: {}", failure.upstream, failure.message))
@@ -424,7 +429,12 @@ impl GatewayManager {
         }
         crate::dispatch::gateway::code_mode::catalog_cache::merge_and_store(cache_updates);
 
-        if !failures.is_empty() && pool.healthy_tools().await.is_empty() {
+        if !failures.is_empty()
+            && pool
+                .healthy_tools_allowed(allowed_upstreams)
+                .await
+                .is_empty()
+        {
             let details = failures
                 .iter()
                 .map(|failure| format!("{}: {}", failure.upstream, failure.message))

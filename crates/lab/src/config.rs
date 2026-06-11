@@ -424,6 +424,7 @@ impl LabConfig {
             }
             route.backend_mcp_path = default_mcp_path();
         }
+        validate_gateway_subset_paths_are_unique(&self.protected_mcp_routes)?;
         Ok(())
     }
 
@@ -455,6 +456,28 @@ fn normalize_string_list(
         }
     }
     *values = normalized;
+    Ok(())
+}
+
+fn validate_gateway_subset_paths_are_unique(
+    routes: &[ProtectedMcpRouteConfig],
+) -> Result<(), ConfigError> {
+    let mut paths = std::collections::HashSet::new();
+    for route in routes
+        .iter()
+        .filter(|route| route.enabled && route.is_gateway_subset())
+    {
+        if !paths.insert(route.public_path.clone()) {
+            return Err(ConfigError::InvalidProtectedRoute {
+                name: route.name.clone(),
+                field: "public_path",
+                value: format!(
+                    "gateway_subset routes must use unique public_path values; `{}` is already mounted",
+                    route.public_path
+                ),
+            });
+        }
+    }
     Ok(())
 }
 
@@ -3209,6 +3232,37 @@ upstreams = ["sonarr", " "]
             err.to_string()
                 .contains("gateway_subset target entries must not be empty")
         );
+    }
+
+    #[test]
+    fn protected_route_rejects_duplicate_gateway_subset_public_paths() {
+        let toml = r#"
+[[protected_mcp_routes]]
+name = "media-a"
+public_host = "mcp-a.example.com"
+public_path = "/media"
+
+[protected_mcp_routes.target]
+kind = "gateway_subset"
+upstreams = ["sonarr"]
+
+[[protected_mcp_routes]]
+name = "media-b"
+public_host = "mcp-b.example.com"
+public_path = "/media"
+
+[protected_mcp_routes.target]
+kind = "gateway_subset"
+upstreams = ["radarr"]
+"#;
+
+        let mut cfg: LabConfig = toml::from_str(toml).expect("parse");
+        let err = cfg
+            .normalize_protected_mcp_routes()
+            .expect_err("duplicate gateway_subset public_path must fail");
+
+        assert!(err.to_string().contains("public_path"));
+        assert!(err.to_string().contains("gateway_subset"));
     }
 
     #[test]

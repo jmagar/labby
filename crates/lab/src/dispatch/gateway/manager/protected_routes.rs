@@ -54,6 +54,7 @@ impl GatewayManager {
         &self,
         route: ProtectedMcpRouteConfig,
     ) -> Result<ProtectedMcpRouteConfig, ToolError> {
+        reject_hot_gateway_subset_mutation(&route, "add")?;
         let _mutation_guard = self.config_mutation.lock().await;
         let mut cfg = self.config.read().await.clone();
         let route = insert_protected_mcp_route(&mut cfg, route)?;
@@ -82,6 +83,14 @@ impl GatewayManager {
     ) -> Result<ProtectedMcpRouteConfig, ToolError> {
         let _mutation_guard = self.config_mutation.lock().await;
         let mut cfg = self.config.read().await.clone();
+        if let Some(existing) = cfg
+            .protected_mcp_routes
+            .iter()
+            .find(|route| route.name == name)
+        {
+            reject_hot_gateway_subset_mutation(existing, "update")?;
+        }
+        reject_hot_gateway_subset_mutation(&route, "update")?;
         let route = update_protected_mcp_route(&mut cfg, name, route)?;
         self.persist_config(cfg).await?;
         tracing::info!(
@@ -108,6 +117,13 @@ impl GatewayManager {
     ) -> Result<ProtectedMcpRouteConfig, ToolError> {
         let _mutation_guard = self.config_mutation.lock().await;
         let mut cfg = self.config.read().await.clone();
+        if let Some(existing) = cfg
+            .protected_mcp_routes
+            .iter()
+            .find(|route| route.name == name)
+        {
+            reject_hot_gateway_subset_mutation(existing, "remove")?;
+        }
         let route = remove_protected_mcp_route(&mut cfg, name)?;
         self.persist_config(cfg).await?;
         tracing::info!(
@@ -156,4 +172,19 @@ impl GatewayManager {
             "metadata_url": metadata_url,
         }))
     }
+}
+
+fn reject_hot_gateway_subset_mutation(
+    route: &ProtectedMcpRouteConfig,
+    operation: &str,
+) -> Result<(), ToolError> {
+    if !route.is_gateway_subset() {
+        return Ok(());
+    }
+    Err(ToolError::Sdk {
+        sdk_kind: "restart_required".to_string(),
+        message: format!(
+            "gateway_subset protected routes are mounted when labby serve starts; edit config and restart before `{operation}` can take effect"
+        ),
+    })
 }

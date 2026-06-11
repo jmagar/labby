@@ -5,6 +5,8 @@
 //! `gateway_*` methods render the synthetic `lab://gateway/*` documents and
 //! resources. `cached_upstream_resource_uris` exposes the cached snapshot.
 
+use std::collections::BTreeSet;
+
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use rmcp::model::{AnnotateAble, RawResource, Resource};
@@ -40,10 +42,7 @@ impl UpstreamPool {
         self.gateway_servers_doc_allowed(None).await
     }
 
-    pub async fn gateway_servers_doc_allowed(
-        &self,
-        allowed: Option<&std::collections::BTreeSet<String>>,
-    ) -> Value {
+    pub async fn gateway_servers_doc_allowed(&self, allowed: Option<&BTreeSet<String>>) -> Value {
         let catalog = self.catalog.read().await;
         let mut servers: Vec<Value> = catalog
             .iter()
@@ -80,7 +79,7 @@ impl UpstreamPool {
     pub async fn gateway_server_schema_allowed(
         &self,
         name: &str,
-        allowed: Option<&std::collections::BTreeSet<String>>,
+        allowed: Option<&BTreeSet<String>>,
     ) -> Option<Value> {
         if allowed.is_some_and(|allowed| !allowed.contains(name)) {
             return None;
@@ -119,7 +118,7 @@ impl UpstreamPool {
 
     pub async fn gateway_synthetic_resources_allowed(
         &self,
-        allowed: Option<&std::collections::BTreeSet<String>>,
+        allowed: Option<&BTreeSet<String>>,
     ) -> Vec<Resource> {
         let mut out = vec![
             RawResource::new("lab://gateway/servers", "gateway/servers")
@@ -156,7 +155,7 @@ impl UpstreamPool {
 
     pub async fn list_upstream_resources_allowed(
         &self,
-        allowed: Option<&std::collections::BTreeSet<String>>,
+        allowed: Option<&BTreeSet<String>>,
     ) -> Vec<Resource> {
         let peers = routable_upstream_peers(self, UpstreamCapability::Resources, allowed).await;
         if peers.is_empty() {
