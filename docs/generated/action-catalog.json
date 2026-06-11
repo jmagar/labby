@@ -4150,6 +4150,24 @@
   },
   {
     "service": "setup",
+    "action": "bootstrap",
+    "description": "Create ~/.lab/.env with a generated token + loopback defaults when absent (first-run)",
+    "destructive": false,
+    "params": [],
+    "returns": "BootstrapOutcome",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
     "action": "check",
     "description": "Check local Lab setup prerequisites without mutating the filesystem",
     "destructive": false,

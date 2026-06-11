@@ -42,6 +42,21 @@ Value precedence at point of use (highest wins):
 3. `config.toml`
 4. Built-in defaults
 
+### First-run bootstrap
+
+On first run, `labby serve` detects a missing MCP token (no `LAB_MCP_HTTP_TOKEN`
+and `LAB_AUTH_MODE` != `oauth`) and self-bootstraps: it generates a 64-char hex
+bearer token, writes a minimal `~/.lab/.env` (token + loopback MCP defaults via
+the atomic `env_merge` path), reloads that file into the process environment via
+`dotenvy` so the token is visible process-wide, prints the token and the
+`http://<host>:<port>/setup` URL once, and continues startup. The web `/setup`
+wizard then owns all further configuration. Set `LAB_MCP_HTTP_TOKEN` or
+`LAB_AUTH_MODE=oauth` beforehand to opt out. The generated `~/.lab/.env` is
+written `0600` on Unix; **Windows ACL hardening is still pending**
+(`env_merge::set_secure_perms` is a no-op on non-unix), so on Windows the token
+file sits at default ACLs. The `setup.bootstrap` action exposes this primitive
+to the wizard and CLI.
+
 ## Config sections
 
 ### `[output]`
