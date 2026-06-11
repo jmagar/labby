@@ -54,41 +54,10 @@ impl UpstreamPool {
             return None;
         }
 
-        // Clone the peer handle out, then drop the lock before awaiting.
-        let peer = self
-            .acquire_peer(
-                upstream_name,
-                UpstreamCapability::Resources,
-                "resource.read",
-            )
-            .await?;
-
-        let redacted_uri = redact_resource_uri_for_logging(uri);
-        let event = UpstreamRequestLog::resource(upstream_name, redacted_uri, false);
-        log_upstream_request_start(event);
-
-        let params = rmcp::model::ReadResourceRequestParams::new(original_uri);
-        let gateway_uri = uri.to_string();
-        let timeout_ms = self.request_timeout.as_millis();
-
-        // Use timed_capability_call for timeout/size-cap/log skeleton, then
-        // normalize the URI in the success path.
-        Some(
-            timed_capability_call(
-                self,
-                upstream_name,
-                UpstreamCapability::Resources,
-                event,
-                start,
-                peer.read_resource(params),
-                estimate_resource_response_size,
-                None,
-                |e| format!("upstream resource read failed: {e}"),
-                format!("upstream resource read timed out after {timeout_ms}ms"),
-            )
+        // Send the original URI upstream; normalize content URIs back to the
+        // gateway-prefixed form the caller passed in.
+        self.read_resource_from_peer(upstream_name, original_uri, uri, start)
             .await
-            .map(|result| normalize_resource_result_uri(result, &gateway_uri)),
-        )
     }
 
     /// Read a native upstream `ui://…` resource by reverse-looking-up the
@@ -98,8 +67,8 @@ impl UpstreamPool {
     /// MCP Apps (mcp-ui) widget resources are referenced by their native
     /// `ui://<upstream>/…` URI — carried in a tool result's
     /// `_meta.ui.resourceUri` — so they must be routed by reverse-lookup and
-    /// returned without any URI rewriting. The success path normalizes content
-    /// URIs back to the same native URI so the host sees a self-consistent read.
+    /// returned without any URI rewriting. Content URIs are normalized back to
+    /// the same native URI so the host sees a self-consistent read.
     ///
     /// Returns `None` if no routable upstream lists the URI (caller falls
     /// through to a resource-not-found).
@@ -126,26 +95,43 @@ impl UpstreamPool {
                 .map(|(name, _)| name.clone())
         }?;
 
+        // Native `ui://` URI is both the request and the normalization target.
+        self.read_resource_from_peer(&upstream_name, uri, uri, start)
+            .await
+    }
+
+    /// Acquire the upstream peer and forward `read_resource(request_uri)` with
+    /// the shared timeout / size-cap / structured-log skeleton, normalizing
+    /// returned content URIs to `normalize_uri`. Returns `None` when the peer
+    /// cannot be acquired. `start` is threaded in so the caller's lookup time is
+    /// included in the measured elapsed.
+    async fn read_resource_from_peer(
+        &self,
+        upstream_name: &str,
+        request_uri: &str,
+        normalize_uri: &str,
+        start: Instant,
+    ) -> Option<Result<ReadResourceResult, String>> {
+        // Clone the peer handle out, then drop the lock before awaiting.
         let peer = self
             .acquire_peer(
-                &upstream_name,
+                upstream_name,
                 UpstreamCapability::Resources,
                 "resource.read",
             )
             .await?;
 
-        let redacted_uri = redact_resource_uri_for_logging(uri);
-        let event = UpstreamRequestLog::resource(&upstream_name, redacted_uri, false);
+        let redacted_uri = redact_resource_uri_for_logging(normalize_uri);
+        let event = UpstreamRequestLog::resource(upstream_name, redacted_uri, false);
         log_upstream_request_start(event);
 
-        let params = rmcp::model::ReadResourceRequestParams::new(uri);
-        let native_uri = uri.to_string();
+        let params = rmcp::model::ReadResourceRequestParams::new(request_uri);
         let timeout_ms = self.request_timeout.as_millis();
 
         Some(
             timed_capability_call(
                 self,
-                &upstream_name,
+                upstream_name,
                 UpstreamCapability::Resources,
                 event,
                 start,
@@ -156,7 +142,7 @@ impl UpstreamPool {
                 format!("upstream resource read timed out after {timeout_ms}ms"),
             )
             .await
-            .map(|result| normalize_resource_result_uri(result, &native_uri)),
+            .map(|result| normalize_resource_result_uri(result, normalize_uri)),
         )
     }
 

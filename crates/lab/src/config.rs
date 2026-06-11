@@ -52,6 +52,14 @@ pub(crate) fn process_code_mode_enabled() -> bool {
     PROCESS_CODE_MODE_ENABLED.load(Ordering::Acquire)
 }
 
+/// Parse a boolean env flag using the standard truthy set
+/// (`1` / `true` / `TRUE` / `yes` / `YES`). Absent or any other value is false.
+pub(crate) fn env_flag_enabled(name: &str) -> bool {
+    std::env::var(name)
+        .ok()
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+}
+
 /// Whether mcp-ui widget → host tool callbacks are permitted while the Code
 /// Mode synthetic surface (`search`/`execute`) is active.
 ///
@@ -63,9 +71,7 @@ pub(crate) fn process_code_mode_enabled() -> bool {
 /// opt in knowingly because it also lets any caller on the session (including
 /// the model) invoke a known upstream tool by name.
 pub(crate) fn code_mode_widget_callbacks_enabled() -> bool {
-    std::env::var("LAB_CODE_MODE_WIDGET_CALLBACKS")
-        .ok()
-        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+    env_flag_enabled("LAB_CODE_MODE_WIDGET_CALLBACKS")
 }
 
 use anyhow::{Context, Result};

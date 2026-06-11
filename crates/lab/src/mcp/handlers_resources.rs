@@ -171,8 +171,20 @@ impl LabMcpServer {
         // Any other `ui://` is an upstream MCP Apps (mcp-ui) widget resource
         // (referenced by a tool result's `_meta.ui.resourceUri`): reverse-look-up
         // the owning upstream peer via the pool and forward the read under the
-        // native `ui://` URI.
+        // native `ui://` URI. These widgets are surfaced through the Code Mode
+        // synthetic surface, so gate them behind the same read scope as Lab's own
+        // Code Mode app resources rather than leaving them ungated.
         if uri.starts_with("ui://") {
+            let auth = auth_context_from_extensions(&context.extensions);
+            if !code_mode_search_scope_allowed(auth) {
+                return Err(ErrorData::invalid_params(
+                    "UI resources require one of scopes: lab:read, lab, lab:admin",
+                    Some(json!({
+                        "kind": "forbidden",
+                        "required_scopes": ["lab:read", "lab", "lab:admin"],
+                    })),
+                ));
+            }
             if let Some(pool) = self.current_upstream_pool().await {
                 return self
                     .read_upstream_ui_resource_impl(&pool, uri, &subject, start, &context)

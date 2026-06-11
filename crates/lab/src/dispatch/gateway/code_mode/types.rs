@@ -142,11 +142,11 @@ impl CodeModeCatalogEntry {
 ///
 /// Recorded at the broker boundary when an upstream tool result carries
 /// `_meta.ui.resourceUri`, before `unwrap_code_mode_upstream_result` discards
-/// the envelope. `ui_meta` holds the upstream's `_meta.ui` object verbatim so
-/// the final `execute` `CallToolResult` can mirror the upstream identically.
+/// the envelope. `ui_meta` holds the upstream's `_meta.ui` object verbatim
+/// (including `resourceUri`) so the final `execute` `CallToolResult` can mirror
+/// the upstream identically.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct UiLink {
-    pub resource_uri: String,
     pub ui_meta: Value,
 }
 

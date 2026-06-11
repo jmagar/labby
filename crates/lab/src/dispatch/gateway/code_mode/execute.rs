@@ -394,9 +394,10 @@ impl CodeModeBroker<'_> {
 fn extract_ui_link(result: &CallToolResult) -> Option<UiLink> {
     let meta = result.meta.as_ref()?;
     let ui = meta.get("ui")?;
-    let resource_uri = ui.get("resourceUri")?.as_str()?.to_string();
+    // Require a string `resourceUri` to treat this as a renderable widget link;
+    // capture the whole `ui` object verbatim for identical mirroring.
+    ui.get("resourceUri")?.as_str()?;
     Some(UiLink {
-        resource_uri,
         ui_meta: ui.clone(),
     })
 }
@@ -423,7 +424,6 @@ mod tests {
             "mimeTypes": ["text/html;profile=mcp-app"],
         }));
         let link = extract_ui_link(&result).expect("ui link present");
-        assert_eq!(link.resource_uri, "ui://axon/status-dashboard");
         // The whole `ui` object is captured verbatim for identical mirroring.
         assert_eq!(link.ui_meta["resourceUri"], "ui://axon/status-dashboard");
         assert_eq!(link.ui_meta["mimeTypes"][0], "text/html;profile=mcp-app");
@@ -456,7 +456,6 @@ mod tests {
         let registry = ToolRegistry::new();
         let broker = CodeModeBroker::new(&registry, None);
         *broker.ui_capture.lock().unwrap() = Some(UiLink {
-            resource_uri: "ui://axon/status-dashboard".to_string(),
             ui_meta: json!({ "resourceUri": "ui://axon/status-dashboard" }),
         });
         let mut response = response_with_result(json!({ "__ui": { "degraded": false } }));
@@ -464,7 +463,7 @@ mod tests {
         // Inner payload is surfaced as `result`, wrapper removed.
         assert_eq!(response.result, Some(json!({ "degraded": false })));
         assert_eq!(
-            response.ui.as_ref().expect("widget attached").resource_uri,
+            response.ui.as_ref().expect("widget attached").ui_meta["resourceUri"],
             "ui://axon/status-dashboard"
         );
     }
@@ -475,8 +474,7 @@ mod tests {
         let broker = CodeModeBroker::new(&registry, None);
         // Even with a captured link, no `__ui` key means no widget is surfaced.
         *broker.ui_capture.lock().unwrap() = Some(UiLink {
-            resource_uri: "ui://x/y".to_string(),
-            ui_meta: json!({}),
+            ui_meta: json!({ "resourceUri": "ui://x/y" }),
         });
         let mut response = response_with_result(json!({ "degraded": false }));
         broker.apply_ui_opt_in(&mut response);

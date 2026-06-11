@@ -289,9 +289,7 @@ const ALWAYS_VISIBLE_SERVICES: &[&str] = &[
 
 #[must_use]
 pub fn lab_show_all_enabled() -> bool {
-    std::env::var("LAB_SHOW_ALL")
-        .ok()
-        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+    crate::config::env_flag_enabled("LAB_SHOW_ALL")
 }
 
 #[must_use]
