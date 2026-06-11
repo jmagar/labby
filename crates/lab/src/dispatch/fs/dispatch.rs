@@ -782,6 +782,9 @@ fn sanitize_filename(name: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+    // Unix-only: the symlink-behavior tests below are `#[cfg(unix)]`; the import
+    // is gated to match so Windows test builds don't pull in `std::os::unix`.
+    #[cfg(unix)]
     use std::os::unix::fs as unix_fs;
     use tempfile::tempdir;
 
@@ -873,6 +876,7 @@ mod tests {
         assert!(matches!(err, ToolError::UnknownAction { .. }), "{err:?}");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn list_symlink_escape_blocked_by_starts_with() {
         // Symlink pointing outside root must not leak targeted contents.
@@ -890,6 +894,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn list_dangling_symlink_reports_symlink_kind() {
         let tmp = tempdir().unwrap();
@@ -1002,6 +1007,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn preview_symlink_refused() {
         let tmp = tempdir().unwrap();
@@ -1100,6 +1106,7 @@ mod tests {
     /// returning the secret to the caller. Exercising
     /// `open_no_follow_fallback` directly covers the non-Linux / pre-5.6
     /// path that doesn't get the kernel-enforced NO_SYMLINKS behavior.
+    #[cfg(unix)]
     #[test]
     fn preview_fallback_rejects_symlink_to_denied_inside_root() {
         let tmp = tempdir().unwrap();
@@ -1152,6 +1159,7 @@ mod tests {
     /// refused, even when the final basename (`id_rsa`) is itself a regular
     /// file. The component walk catches the symlink at the prefix before
     /// any canonicalize step has a chance to silently follow it.
+    #[cfg(unix)]
     #[test]
     fn preview_fallback_rejects_intermediate_symlink() {
         let tmp = tempdir().unwrap();
