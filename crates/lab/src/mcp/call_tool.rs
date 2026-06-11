@@ -29,6 +29,11 @@ use crate::mcp::error::DispatchError;
 use crate::mcp::result_format::format_dispatch_result;
 use crate::mcp::server::LabMcpServer;
 
+fn route_scope_denied_result(service: &str, action: &str, message: String) -> CallToolResult {
+    let envelope = build_error(service, action, "route_scope_denied", &message);
+    CallToolResult::error(vec![Content::text(envelope.to_string())])
+}
+
 fn inject_gateway_origin_param(params: Value, subject: Option<&str>) -> Value {
     let raw = subject
         .map(|value| format!("mcp:{value}"))
@@ -75,15 +80,11 @@ impl LabMcpServer {
         // ── Gateway `search` tool: run caller's JS over the upstream catalog ──
         if service == CODE_MODE_SEARCH_TOOL_NAME {
             if !self.route_scope.exposes_code_mode() {
-                let envelope = build_error(
+                return Ok(route_scope_denied_result(
                     &service,
                     "call_tool",
-                    "route_scope_denied",
-                    "Code Mode is not exposed on this MCP route",
-                );
-                return Ok(CallToolResult::error(vec![Content::text(
-                    envelope.to_string(),
-                )]));
+                    "Code Mode is not exposed on this MCP route".to_string(),
+                ));
             }
             return self.call_code_mode_impl(&service, &args, &context).await;
         }
@@ -91,29 +92,21 @@ impl LabMcpServer {
         // ── Gateway `execute` tool: run caller's JS in the subprocess sandbox ─
         if service == TOOL_EXECUTE_TOOL_NAME {
             if !self.route_scope.exposes_code_mode() {
-                let envelope = build_error(
+                return Ok(route_scope_denied_result(
                     &service,
                     "call_tool",
-                    "route_scope_denied",
-                    "Code Mode is not exposed on this MCP route",
-                );
-                return Ok(CallToolResult::error(vec![Content::text(
-                    envelope.to_string(),
-                )]));
+                    "Code Mode is not exposed on this MCP route".to_string(),
+                ));
             }
             return self.call_tool_execute_impl(&service, &args, &context).await;
         }
 
         if svc.is_some() && !self.route_scope.allows_service(&service) {
-            let envelope = build_error(
+            return Ok(route_scope_denied_result(
                 &service,
                 &action,
-                "route_scope_denied",
-                &format!("service `{service}` is not exposed on this MCP route"),
-            );
-            return Ok(CallToolResult::error(vec![Content::text(
-                envelope.to_string(),
-            )]));
+                format!("service `{service}` is not exposed on this MCP route"),
+            ));
         }
 
         if svc.is_some() && !self.service_visible_on_mcp(&service).await {

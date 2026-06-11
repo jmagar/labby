@@ -28,6 +28,10 @@ struct CodeModeReprobeFailure {
     message: String,
 }
 
+fn upstream_allowed(upstream: &str, allowed_upstreams: Option<&BTreeSet<String>>) -> bool {
+    allowed_upstreams.is_none_or(|allowed| allowed.contains(upstream))
+}
+
 impl GatewayManager {
     pub async fn code_mode_config(&self) -> CodeModeConfig {
         self.config.read().await.code_mode.clone()
@@ -76,9 +80,11 @@ impl GatewayManager {
         let pool = self.ensure_lazy_upstream_pool(&cfg, owner).await;
         if wait_for_refresh {
             let mut failures = Vec::new();
-            for upstream in cfg.upstream.iter().filter(|u| {
-                u.enabled && allowed_upstreams.is_none_or(|allowed| allowed.contains(&u.name))
-            }) {
+            for upstream in cfg
+                .upstream
+                .iter()
+                .filter(|u| u.enabled && upstream_allowed(&u.name, allowed_upstreams))
+            {
                 let subject = upstream.oauth.as_ref().and(oauth_subject);
                 if let Err(err) = pool
                     .ensure_tools_for_upstream(upstream, subject, owner)
@@ -368,9 +374,7 @@ impl GatewayManager {
         let enabled_upstreams: Vec<_> = cfg
             .upstream
             .iter()
-            .filter(|u| {
-                u.enabled && allowed_upstreams.is_none_or(|allowed| allowed.contains(&u.name))
-            })
+            .filter(|u| u.enabled && upstream_allowed(&u.name, allowed_upstreams))
             .cloned()
             .collect();
 
@@ -495,9 +499,11 @@ impl GatewayManager {
     ) {
         let owner = owner.cloned();
         let oauth_subject = oauth_subject.map(ToOwned::to_owned);
-        for upstream in cfg.upstream.iter().filter(|u| {
-            u.enabled && allowed_upstreams.is_none_or(|allowed| allowed.contains(&u.name))
-        }) {
+        for upstream in cfg
+            .upstream
+            .iter()
+            .filter(|u| u.enabled && upstream_allowed(&u.name, allowed_upstreams))
+        {
             let pool = Arc::clone(&pool);
             let upstream = upstream.clone();
             let owner = owner.clone();

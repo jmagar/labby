@@ -12,6 +12,7 @@
 //! `notify_catalog_changes` around the broker call — preserved
 //! byte-identically. No behavior change.
 
+use std::collections::BTreeSet;
 use std::time::Instant;
 
 use rmcp::ErrorData;
@@ -127,6 +128,35 @@ pub(crate) fn string_array_arg(
                 })
         })
         .collect()
+}
+
+fn route_scoped_capability_filter(
+    args: &JsonObject,
+    route_allowed: Option<&BTreeSet<String>>,
+) -> Result<CodeModeCapabilityFilter, DispatchToolError> {
+    let requested_upstreams = string_array_arg(args, "upstreams")?;
+    if let Some(allowed) = route_allowed
+        && requested_upstreams
+            .iter()
+            .any(|name| !allowed.contains(name))
+    {
+        return Err(DispatchToolError::Sdk {
+            sdk_kind: "route_scope_denied".to_string(),
+            message: "Code Mode requested an upstream outside this protected route scope"
+                .to_string(),
+        });
+    }
+
+    let tools = string_array_arg(args, "tools")?;
+    let Some(allowed) = route_allowed else {
+        return Ok(CodeModeCapabilityFilter::new(requested_upstreams, tools));
+    };
+    let filter = if requested_upstreams.is_empty() {
+        CodeModeCapabilityFilter::scoped_upstreams(allowed.iter().cloned().collect(), tools)
+    } else {
+        CodeModeCapabilityFilter::scoped_upstreams(requested_upstreams, tools)
+    };
+    Ok(filter)
 }
 
 impl LabMcpServer {
@@ -339,45 +369,14 @@ impl LabMcpServer {
             .unwrap_or(config.max_tool_calls)
             .max(1)
             .min(config.max_tool_calls.max(1));
-        let requested_upstreams = match string_array_arg(args, "upstreams") {
-            Ok(upstreams) => upstreams,
-            Err(err) => {
-                let env = tool_error_envelope(service, "call_tool", &err);
-                return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
-            }
-        };
-        if let Some(route_allowed) = self.route_scope.allowed_upstreams()
-            && requested_upstreams
-                .iter()
-                .any(|name| !route_allowed.contains(name))
-        {
-            let err = DispatchToolError::Sdk {
-                sdk_kind: "route_scope_denied".to_string(),
-                message: "Code Mode requested an upstream outside this protected route scope"
-                    .to_string(),
+        let capability_filter =
+            match route_scoped_capability_filter(args, self.route_scope.allowed_upstreams()) {
+                Ok(filter) => filter,
+                Err(err) => {
+                    let env = tool_error_envelope(service, "call_tool", &err);
+                    return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
+                }
             };
-            let env = tool_error_envelope(service, "call_tool", &err);
-            return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
-        }
-        let tools = match string_array_arg(args, "tools") {
-            Ok(tools) => tools,
-            Err(err) => {
-                let env = tool_error_envelope(service, "call_tool", &err);
-                return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
-            }
-        };
-        let effective_upstreams = if let Some(route_allowed) = self.route_scope.allowed_upstreams()
-            && requested_upstreams.is_empty()
-        {
-            route_allowed.iter().cloned().collect()
-        } else {
-            requested_upstreams
-        };
-        let capability_filter = if self.route_scope.allowed_upstreams().is_some() {
-            CodeModeCapabilityFilter::scoped_upstreams(effective_upstreams, tools)
-        } else {
-            CodeModeCapabilityFilter::new(effective_upstreams, tools)
-        };
         let code_hash = hash_arguments(&Value::String(code.to_string()));
         tracing::info!(
             surface = "mcp",

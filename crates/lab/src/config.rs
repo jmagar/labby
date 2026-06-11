@@ -380,20 +380,20 @@ impl LabConfig {
                 .map(|name| name.trim().to_string())
                 .filter(|name| !name.is_empty());
             if let Some(ProtectedMcpRouteTarget::GatewaySubset(target)) = &mut route.target {
-                normalize_string_list(&mut target.upstreams).map_err(|field| {
-                    ConfigError::InvalidProtectedRoute {
+                normalize_string_list(&mut target.upstreams, "target.upstreams").map_err(
+                    |field| ConfigError::InvalidProtectedRoute {
                         name: route.name.clone(),
                         field,
                         value: "gateway_subset target entries must not be empty".to_string(),
-                    }
-                })?;
-                normalize_string_list(&mut target.services).map_err(|field| {
-                    ConfigError::InvalidProtectedRoute {
+                    },
+                )?;
+                normalize_string_list(&mut target.services, "target.services").map_err(
+                    |field| ConfigError::InvalidProtectedRoute {
                         name: route.name.clone(),
                         field,
                         value: "gateway_subset target entries must not be empty".to_string(),
-                    }
-                })?;
+                    },
+                )?;
             }
             if route.target.is_some()
                 && (route.upstream.is_some() || !route.backend_url.trim().is_empty())
@@ -440,12 +440,15 @@ impl LabConfig {
     }
 }
 
-fn normalize_string_list(values: &mut Vec<String>) -> Result<(), &'static str> {
+fn normalize_string_list(
+    values: &mut Vec<String>,
+    field: &'static str,
+) -> Result<(), &'static str> {
     let mut normalized = Vec::new();
     for value in std::mem::take(values) {
         let name = value.trim().to_string();
         if name.is_empty() {
-            return Err("target");
+            return Err(field);
         }
         if !normalized.contains(&name) {
             normalized.push(name);
@@ -2374,6 +2377,12 @@ fn quote_env_value(v: &str) -> String {
 mod tests {
     use super::*;
 
+    fn parse_normalized_config(toml: &str) -> LabConfig {
+        let mut cfg: LabConfig = toml::from_str(toml).expect("parse");
+        cfg.normalize_protected_mcp_routes().expect("normalize");
+        cfg
+    }
+
     fn vars<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Iterator<Item = (String, String)> + 'a {
         pairs
             .iter()
@@ -3123,8 +3132,7 @@ services = ["gateway"]
 expose_code_mode = true
 "#;
 
-        let mut cfg: LabConfig = toml::from_str(toml).expect("parse");
-        cfg.normalize_protected_mcp_routes().expect("normalize");
+        let cfg = parse_normalized_config(toml);
         let route = &cfg.protected_mcp_routes[0];
 
         assert_eq!(route.name, "media");
@@ -3147,8 +3155,7 @@ public_path = "/syslog"
 backend_url = "http://10.0.0.2:3100/mcp"
 "#;
 
-        let mut cfg: LabConfig = toml::from_str(toml).expect("parse");
-        cfg.normalize_protected_mcp_routes().expect("normalize");
+        let cfg = parse_normalized_config(toml);
         let route = &cfg.protected_mcp_routes[0];
 
         assert!(matches!(
@@ -3197,6 +3204,7 @@ upstreams = ["sonarr", " "]
         let err = cfg
             .normalize_protected_mcp_routes()
             .expect_err("empty upstream entry must fail");
+        assert!(err.to_string().contains("target.upstreams"));
         assert!(
             err.to_string()
                 .contains("gateway_subset target entries must not be empty")

@@ -310,7 +310,8 @@ impl UpstreamPool {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::{BTreeSet, HashMap};
+    use std::sync::Arc;
 
     use rmcp::model::{ReadResourceResult, ResourceContents};
 
@@ -318,6 +319,17 @@ mod tests {
     use super::super::entries::healthy_in_process_entry;
     use super::super::helpers::normalize_resource_result_uri;
     use super::*;
+
+    async fn pool_with_empty_upstreams(names: &[&str]) -> UpstreamPool {
+        let pool = UpstreamPool::new();
+        let mut catalog = pool.catalog.write().await;
+        for name in names {
+            let entry = healthy_in_process_entry(Arc::from(*name), HashMap::new());
+            catalog.insert((*name).to_string(), entry);
+        }
+        drop(catalog);
+        pool
+    }
 
     #[test]
     fn normalize_resource_result_uri_rewrites_all_contents() {
@@ -349,8 +361,6 @@ mod tests {
 
     #[tokio::test]
     async fn gateway_servers_doc_lists_one_healthy_upstream() {
-        use std::sync::Arc;
-
         let pool = UpstreamPool::new();
         let mut tools = HashMap::new();
         tools.insert(
@@ -390,8 +400,6 @@ mod tests {
 
     #[tokio::test]
     async fn gateway_server_schema_respects_exposure_policy() {
-        use std::sync::Arc;
-
         let make_tool = |name: &'static str| UpstreamTool {
             tool: rmcp::model::Tool::new(name, "desc", Arc::new(serde_json::Map::new())),
             input_schema: Some(serde_json::json!({"type": "object"})),
@@ -435,16 +443,7 @@ mod tests {
 
     #[tokio::test]
     async fn gateway_synthetic_resources_lists_index_and_per_upstream() {
-        use std::sync::Arc;
-
-        let pool = UpstreamPool::new();
-        let entry = healthy_in_process_entry(Arc::from("alpha"), HashMap::new());
-        pool.catalog
-            .write()
-            .await
-            .insert("alpha".to_string(), entry);
-        let entry = healthy_in_process_entry(Arc::from("beta"), HashMap::new());
-        pool.catalog.write().await.insert("beta".to_string(), entry);
+        let pool = pool_with_empty_upstreams(&["alpha", "beta"]).await;
 
         let resources = pool.gateway_synthetic_resources().await;
         let uris: Vec<String> = resources.iter().map(|r| r.uri.clone()).collect();
@@ -456,17 +455,7 @@ mod tests {
 
     #[tokio::test]
     async fn gateway_synthetic_resources_respect_allowed_upstreams() {
-        use std::collections::BTreeSet;
-        use std::sync::Arc;
-
-        let pool = UpstreamPool::new();
-        let entry = healthy_in_process_entry(Arc::from("alpha"), HashMap::new());
-        pool.catalog
-            .write()
-            .await
-            .insert("alpha".to_string(), entry);
-        let entry = healthy_in_process_entry(Arc::from("beta"), HashMap::new());
-        pool.catalog.write().await.insert("beta".to_string(), entry);
+        let pool = pool_with_empty_upstreams(&["alpha", "beta"]).await;
         let allowed = BTreeSet::from(["alpha".to_string()]);
 
         let resources = pool

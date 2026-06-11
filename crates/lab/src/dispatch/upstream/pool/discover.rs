@@ -7,8 +7,7 @@
 //! deterministic order and is `pub(super)` because the tools/resources/prompts
 //! modules call it across the module boundary.
 
-use std::collections::BTreeSet;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Instant;
 

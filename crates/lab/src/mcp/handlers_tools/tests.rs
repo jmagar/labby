@@ -16,6 +16,7 @@ use rmcp::model::CallToolRequestParams;
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Arc, atomic::AtomicU8};
 
 const TEST_ACTIONS_ONE: &[ActionSpec] = &[
     ActionSpec {
@@ -85,6 +86,42 @@ fn completion_test_registry() -> ToolRegistry {
     registry
 }
 
+fn test_server(
+    registry: ToolRegistry,
+    gateway_manager: Option<Arc<crate::dispatch::gateway::manager::GatewayManager>>,
+    route_scope: crate::mcp::route_scope::McpRouteScope,
+    logging_level: rmcp::model::LoggingLevel,
+) -> LabMcpServer {
+    LabMcpServer {
+        registry: Arc::new(registry),
+        gateway_manager,
+        node_role: None,
+        peers: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        logging_level: Arc::new(AtomicU8::new(logging_level_rank(logging_level))),
+        route_scope,
+    }
+}
+
+async fn code_mode_manager(
+    enabled: bool,
+) -> Arc<crate::dispatch::gateway::manager::GatewayManager> {
+    let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
+    let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+        std::path::PathBuf::from("config.toml"),
+        runtime,
+    ));
+    manager
+        .seed_config(crate::config::LabConfig {
+            code_mode: crate::config::CodeModeConfig {
+                enabled,
+                ..crate::config::CodeModeConfig::default()
+            },
+            ..crate::config::LabConfig::default()
+        })
+        .await;
+    manager
+}
+
 #[test]
 fn code_mode_tool_meta_points_to_canonical_ui_resource() {
     let search = code_mode_tool_meta(CODE_MODE_SEARCH_TOOL_NAME);
@@ -122,30 +159,12 @@ fn code_mode_trace_output_schema_advertises_structured_trace_kinds() {
 
 #[tokio::test]
 async fn list_tools_advertises_code_mode_output_schemas() {
-    let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
-    let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-        std::path::PathBuf::from("config.toml"),
-        runtime,
-    ));
-    manager
-        .seed_config(crate::config::LabConfig {
-            code_mode: crate::config::CodeModeConfig {
-                enabled: true,
-                ..crate::config::CodeModeConfig::default()
-            },
-            ..crate::config::LabConfig::default()
-        })
-        .await;
-    let server = LabMcpServer {
-        registry: std::sync::Arc::new(completion_test_registry()),
-        gateway_manager: Some(manager),
-        node_role: None,
-        peers: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
-        logging_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(logging_level_rank(
-            rmcp::model::LoggingLevel::Emergency,
-        ))),
-        route_scope: crate::mcp::route_scope::McpRouteScope::Root,
-    };
+    let server = test_server(
+        completion_test_registry(),
+        Some(code_mode_manager(true).await),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
     let (transport, _client_transport) = tokio::io::duplex(64);
     let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
         server, transport, None,
@@ -188,30 +207,12 @@ async fn list_tools_advertises_code_mode_output_schemas() {
 
 #[tokio::test]
 async fn snapshot_catalog_hides_builtin_tools_when_code_mode_is_enabled() {
-    let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
-    let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-        std::path::PathBuf::from("config.toml"),
-        runtime,
-    ));
-    manager
-        .seed_config(crate::config::LabConfig {
-            code_mode: crate::config::CodeModeConfig {
-                enabled: true,
-                ..crate::config::CodeModeConfig::default()
-            },
-            ..crate::config::LabConfig::default()
-        })
-        .await;
-    let server = LabMcpServer {
-        registry: std::sync::Arc::new(completion_test_registry()),
-        gateway_manager: Some(manager),
-        node_role: None,
-        peers: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
-        logging_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(logging_level_rank(
-            rmcp::model::LoggingLevel::Info,
-        ))),
-        route_scope: crate::mcp::route_scope::McpRouteScope::Root,
-    };
+    let server = test_server(
+        completion_test_registry(),
+        Some(code_mode_manager(true).await),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Info,
+    );
 
     let snapshot = server.snapshot_catalog().await;
 
@@ -241,30 +242,12 @@ async fn snapshot_catalog_shows_no_gateway_tools_when_surface_is_disabled() {
     // When code_mode.enabled=false, none of the gateway meta-tools
     // (search, execute, code, code_search, code_execute) should appear in
     // the snapshot.
-    let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
-    let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-        std::path::PathBuf::from("config.toml"),
-        runtime,
-    ));
-    manager
-        .seed_config(crate::config::LabConfig {
-            code_mode: crate::config::CodeModeConfig {
-                enabled: false,
-                ..crate::config::CodeModeConfig::default()
-            },
-            ..crate::config::LabConfig::default()
-        })
-        .await;
-    let server = LabMcpServer {
-        registry: std::sync::Arc::new(completion_test_registry()),
-        gateway_manager: Some(manager),
-        node_role: None,
-        peers: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
-        logging_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(logging_level_rank(
-            rmcp::model::LoggingLevel::Info,
-        ))),
-        route_scope: crate::mcp::route_scope::McpRouteScope::Root,
-    };
+    let server = test_server(
+        completion_test_registry(),
+        Some(code_mode_manager(false).await),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Info,
+    );
 
     let snapshot = server.snapshot_catalog().await;
 
@@ -279,35 +262,17 @@ async fn snapshot_catalog_shows_no_gateway_tools_when_surface_is_disabled() {
 
 #[tokio::test]
 async fn protected_scope_denies_direct_code_mode_calls_when_hidden() {
-    let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
-    let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-        std::path::PathBuf::from("config.toml"),
-        runtime,
-    ));
-    manager
-        .seed_config(crate::config::LabConfig {
-            code_mode: crate::config::CodeModeConfig {
-                enabled: true,
-                ..crate::config::CodeModeConfig::default()
-            },
-            ..crate::config::LabConfig::default()
-        })
-        .await;
-    let server = LabMcpServer {
-        registry: std::sync::Arc::new(completion_test_registry()),
-        gateway_manager: Some(manager),
-        node_role: None,
-        peers: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
-        logging_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(logging_level_rank(
-            rmcp::model::LoggingLevel::Info,
-        ))),
-        route_scope: crate::mcp::route_scope::McpRouteScope::protected_subset(
+    let server = test_server(
+        completion_test_registry(),
+        Some(code_mode_manager(true).await),
+        crate::mcp::route_scope::McpRouteScope::protected_subset(
             "media",
             ["sonarr"],
             ["radarr"],
             false,
         ),
-    };
+        rmcp::model::LoggingLevel::Info,
+    );
     let (transport, _client_transport) = tokio::io::duplex(64);
     let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
         server, transport, None,
@@ -335,17 +300,17 @@ async fn protected_scope_denies_direct_code_mode_calls_when_hidden() {
 #[tokio::test]
 async fn server_reads_current_pool_from_gateway_manager() {
     let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
-    let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+    let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
         std::path::PathBuf::from("config.toml"),
         runtime.clone(),
     ));
     let notifier = crate::mcp::peers::PeerNotifier::default();
     let server = LabMcpServer {
-        registry: std::sync::Arc::new(ToolRegistry::new()),
-        gateway_manager: Some(std::sync::Arc::clone(&manager)),
+        registry: Arc::new(ToolRegistry::new()),
+        gateway_manager: Some(Arc::clone(&manager)),
         node_role: None,
-        peers: std::sync::Arc::clone(&notifier.peers),
-        logging_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(logging_level_rank(
+        peers: Arc::clone(&notifier.peers),
+        logging_level: Arc::new(AtomicU8::new(logging_level_rank(
             rmcp::model::LoggingLevel::Info,
         ))),
         route_scope: crate::mcp::route_scope::McpRouteScope::Root,
@@ -353,17 +318,17 @@ async fn server_reads_current_pool_from_gateway_manager() {
 
     assert!(server.current_upstream_pool().await.is_none());
 
-    let pool = std::sync::Arc::new(crate::dispatch::upstream::pool::UpstreamPool::new());
-    runtime.swap(Some(std::sync::Arc::clone(&pool))).await;
+    let pool = Arc::new(crate::dispatch::upstream::pool::UpstreamPool::new());
+    runtime.swap(Some(Arc::clone(&pool))).await;
 
     let current = server.current_upstream_pool().await.expect("pool");
-    assert!(std::sync::Arc::ptr_eq(&current, &pool));
+    assert!(Arc::ptr_eq(&current, &pool));
 }
 
 #[tokio::test]
 async fn snapshot_catalog_hides_mcp_disabled_virtual_services() {
     let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
-    let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+    let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
         std::path::PathBuf::from("config.toml"),
         runtime,
     ));
@@ -385,16 +350,12 @@ async fn snapshot_catalog_hides_mcp_disabled_virtual_services() {
         })
         .await;
 
-    let server = LabMcpServer {
-        registry: std::sync::Arc::new(crate::registry::build_default_registry()),
-        gateway_manager: Some(manager),
-        node_role: None,
-        peers: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
-        logging_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(logging_level_rank(
-            rmcp::model::LoggingLevel::Info,
-        ))),
-        route_scope: crate::mcp::route_scope::McpRouteScope::Root,
-    };
+    let server = test_server(
+        crate::registry::build_default_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Info,
+    );
 
     let snapshot = server.snapshot_catalog().await;
     assert!(!snapshot.tools.contains("deploy"));
@@ -404,7 +365,7 @@ async fn snapshot_catalog_hides_mcp_disabled_virtual_services() {
 #[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
 async fn service_actions_json_filters_to_allowed_mcp_actions() {
     let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
-    let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+    let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
         std::path::PathBuf::from("config.toml"),
         runtime,
     ));
@@ -428,16 +389,12 @@ async fn service_actions_json_filters_to_allowed_mcp_actions() {
         })
         .await;
 
-    let server = LabMcpServer {
-        registry: std::sync::Arc::new(crate::registry::build_default_registry()),
-        gateway_manager: Some(manager),
-        node_role: None,
-        peers: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
-        logging_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(logging_level_rank(
-            rmcp::model::LoggingLevel::Info,
-        ))),
-        route_scope: crate::mcp::route_scope::McpRouteScope::Root,
-    };
+    let server = test_server(
+        crate::registry::build_default_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Info,
+    );
 
     let value = server
         .service_actions_json("deploy")
