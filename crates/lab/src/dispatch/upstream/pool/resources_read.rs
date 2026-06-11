@@ -79,12 +79,13 @@ impl UpstreamPool {
         uri: &str,
     ) -> Option<Result<ReadResourceResult, String>> {
         let start = Instant::now();
+        let redacted_uri = redact_resource_uri_for_logging(uri);
 
         // Reverse-lookup the owning upstream by scanning cached resource URIs,
         // mirroring the `find_tool` pattern. `resource_uris` is only populated
         // for resource-proxy-enabled upstreams (via `list_upstream_resources`),
         // so a routable match already implies resource proxying is enabled.
-        let upstream_name = {
+        let cached_owner = {
             let catalog = self.catalog.read().await;
             catalog
                 .iter()
@@ -93,7 +94,41 @@ impl UpstreamPool {
                         && entry.resource_uris.iter().any(|cached| cached == uri)
                 })
                 .map(|(name, _)| name.clone())
-        }?;
+        };
+
+        let (upstream_name, resolution) = if let Some(name) = cached_owner {
+            (name, "cached_resource_uri")
+        } else if let Some(name) = ui_uri_authority(uri)
+            && self.catalog.read().await.contains_key(name)
+        {
+            (name.to_string(), "uri_authority")
+        } else {
+            tracing::warn!(
+                surface = "dispatch",
+                service = "upstream.pool",
+                action = "resource.read",
+                event = "owner_lookup.empty",
+                operation = "resource.read",
+                capability = "resources",
+                resource_uri = %redacted_uri,
+                kind = "ui_resource_owner_not_found",
+                "no upstream owns native ui resource"
+            );
+            return None;
+        };
+
+        tracing::info!(
+            surface = "dispatch",
+            service = "upstream.pool",
+            action = "resource.read",
+            event = "owner_lookup.finish",
+            operation = "resource.read",
+            capability = "resources",
+            upstream = %upstream_name,
+            resource_uri = %redacted_uri,
+            resolution,
+            "resolved native ui resource owner"
+        );
 
         // Native `ui://` URI is both the request and the normalization target.
         self.read_resource_from_peer(&upstream_name, uri, uri, start)
@@ -217,6 +252,12 @@ impl UpstreamPool {
         .await
         .map(|result| normalize_resource_result_uri(result, &gateway_uri))
     }
+}
+
+fn ui_uri_authority(uri: &str) -> Option<&str> {
+    let rest = uri.strip_prefix("ui://")?;
+    let authority = rest.split('/').next()?;
+    (!authority.is_empty()).then_some(authority)
 }
 
 #[cfg(test)]
@@ -493,10 +534,93 @@ mod tests {
 
         // An unknown ui:// URI is owned by no upstream → None (caller 404s).
         assert!(
-            pool.read_upstream_ui_resource("ui://mock/missing")
+            pool.read_upstream_ui_resource("ui://missing/widget")
                 .await
                 .is_none(),
             "unknown ui:// must reverse-lookup to no owner"
         );
+    }
+
+    #[tokio::test]
+    async fn read_upstream_ui_resource_falls_back_to_uri_authority_owner() {
+        use std::collections::HashMap;
+
+        use rmcp::model::{
+            ErrorData, ReadResourceResult, ResourceContents, ServerCapabilities, ServerInfo,
+        };
+        use rmcp::{RoleClient, RoleServer, ServerHandler, ServiceExt};
+
+        use super::super::super::types::UpstreamRuntimeMetadata;
+        use super::super::entries::healthy_in_process_entry;
+        use super::super::helpers::IN_PROCESS_PEER_BUFFER_BYTES;
+        use super::super::{UpstreamConnection, UpstreamPool};
+
+        const WIDGET_URI: &str = "ui://mock/widget";
+        const WIDGET_HTML: &str = "<html><body>dashboard</body></html>";
+
+        struct UiResourceServer;
+        impl ServerHandler for UiResourceServer {
+            fn get_info(&self) -> ServerInfo {
+                ServerInfo::new(ServerCapabilities::builder().enable_resources().build())
+            }
+            async fn read_resource(
+                &self,
+                params: rmcp::model::ReadResourceRequestParams,
+                _: rmcp::service::RequestContext<RoleServer>,
+            ) -> Result<ReadResourceResult, ErrorData> {
+                Ok(ReadResourceResult::new(vec![
+                    ResourceContents::text(WIDGET_HTML, params.uri)
+                        .with_mime_type("text/html;profile=mcp-app"),
+                ]))
+            }
+        }
+
+        let upstream_name = "mock";
+        let (server_transport, client_transport) = tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
+        let _server_task = tokio::spawn(async move {
+            let running = UiResourceServer
+                .serve(server_transport)
+                .await
+                .expect("ui resource server starts");
+            running.waiting().await.ok();
+        });
+        let client_service: rmcp::service::RunningService<RoleClient, ()> = ()
+            .serve(client_transport)
+            .await
+            .expect("ui resource client starts");
+        let peer = client_service.peer().clone();
+
+        let pool = Arc::new(UpstreamPool::new());
+        let upstream_name_arc: Arc<str> = Arc::from(upstream_name);
+        let mut entry = healthy_in_process_entry(Arc::clone(&upstream_name_arc), HashMap::new());
+        entry.resource_count = 0;
+        entry.resource_uris.clear();
+        pool.catalog
+            .write()
+            .await
+            .insert(upstream_name.to_string(), entry);
+        pool.connections.write().await.insert(
+            upstream_name.to_string(),
+            UpstreamConnection {
+                _client_service: client_service,
+                _server_task: Some(_server_task),
+                peer,
+                runtime: UpstreamRuntimeMetadata::default(),
+            },
+        );
+
+        let result = pool
+            .read_upstream_ui_resource(WIDGET_URI)
+            .await
+            .expect("uri authority should resolve to upstream owner")
+            .expect("ui resource read succeeds");
+        let contents = result.contents.first().expect("one content block");
+        match contents {
+            ResourceContents::TextResourceContents { text, uri, .. } => {
+                assert_eq!(text, WIDGET_HTML);
+                assert_eq!(uri, WIDGET_URI, "native ui:// URI must be preserved");
+            }
+            other => panic!("expected text contents, got {other:?}"),
+        }
     }
 }

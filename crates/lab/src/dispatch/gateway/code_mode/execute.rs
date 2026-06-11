@@ -340,10 +340,40 @@ impl CodeModeBroker<'_> {
                 // Capture the mcp-ui widget link (if any) before the envelope is
                 // unwrapped and `_meta` is discarded. Last-wins across the run;
                 // surfaced only when the user opts in via `{ __ui: <result> }`.
-                if let Some(ui) = extract_ui_link(&result)
-                    && let Ok(mut sink) = self.ui_capture.lock()
-                {
-                    *sink = Some(ui);
+                if let Some(ui) = extract_ui_link(&result) {
+                    let resource_uri = ui_resource_uri(&ui.ui_meta).unwrap_or("<unknown>");
+                    tracing::info!(
+                        surface = "dispatch",
+                        service = "code_mode",
+                        action = "mcp_app.capture",
+                        upstream,
+                        tool,
+                        resource_uri,
+                        "captured upstream MCP App widget link"
+                    );
+                    if let Ok(mut sink) = self.ui_capture.lock() {
+                        *sink = Some(ui);
+                    } else {
+                        tracing::warn!(
+                            surface = "dispatch",
+                            service = "code_mode",
+                            action = "mcp_app.capture",
+                            upstream,
+                            tool,
+                            resource_uri,
+                            kind = "ui_capture_lock_poisoned",
+                            "failed to store upstream MCP App widget link"
+                        );
+                    }
+                } else {
+                    tracing::debug!(
+                        surface = "dispatch",
+                        service = "code_mode",
+                        action = "mcp_app.capture",
+                        upstream,
+                        tool,
+                        "upstream result did not include _meta.ui.resourceUri"
+                    );
                 }
                 Ok(unwrap_code_mode_upstream_result(result))
             }
@@ -382,6 +412,30 @@ impl CodeModeBroker<'_> {
         response.result = Some(inner);
         if let Ok(mut sink) = self.ui_capture.lock() {
             response.ui = sink.take();
+            match response.ui.as_ref() {
+                Some(ui) => tracing::info!(
+                    surface = "dispatch",
+                    service = "code_mode",
+                    action = "mcp_app.opt_in",
+                    resource_uri = ui_resource_uri(&ui.ui_meta).unwrap_or("<unknown>"),
+                    "attached captured MCP App widget to execute response"
+                ),
+                None => tracing::warn!(
+                    surface = "dispatch",
+                    service = "code_mode",
+                    action = "mcp_app.opt_in",
+                    kind = "ui_capture_missing",
+                    "Code Mode returned __ui but no upstream MCP App widget was captured"
+                ),
+            }
+        } else {
+            tracing::warn!(
+                surface = "dispatch",
+                service = "code_mode",
+                action = "mcp_app.opt_in",
+                kind = "ui_capture_lock_poisoned",
+                "Code Mode returned __ui but captured MCP App widget could not be read"
+            );
         }
     }
 }
@@ -400,6 +454,10 @@ fn extract_ui_link(result: &CallToolResult) -> Option<UiLink> {
     Some(UiLink {
         ui_meta: ui.clone(),
     })
+}
+
+fn ui_resource_uri(ui_meta: &Value) -> Option<&str> {
+    ui_meta.get("resourceUri").and_then(Value::as_str)
 }
 
 #[cfg(test)]

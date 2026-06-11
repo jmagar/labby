@@ -46,14 +46,20 @@ impl LabMcpServer {
         let mut upstream_tool_count = 0usize;
         let mut subject_scoped_tool_count = 0usize;
         let mut gateway_tool_count = 0usize;
+        let mut upstream_ui_tool_count = 0usize;
         let mut suppressed_builtin_tool_count = 0usize;
         let visibility = self.code_mode_visibility().await;
         let manager_code_mode_enabled = visibility.exposes_synthetic_tools();
         let process_code_mode_enabled = crate::config::process_code_mode_enabled();
         let hide_raw_tools = visibility.hides_raw_tools();
         let visibility_mode = visibility.mode_label();
+        let auth = auth_context_from_extensions(&context.extensions);
+        let oauth_subject =
+            oauth_upstream_subject_for_request(auth, self.request_subject(&context));
+        let mut builtin_names = Vec::new();
         for svc in self.registry.services() {
             if self.service_visible_on_mcp(svc.name).await {
+                builtin_names.push(svc.name);
                 if hide_raw_tools {
                     suppressed_builtin_tool_count += 1;
                 } else {
@@ -147,16 +153,33 @@ impl LabMcpServer {
         }
 
         // Merge upstream tools (healthy only, filtered for collisions with built-in services).
-        if !hide_raw_tools && let Some(pool) = self.current_upstream_pool().await {
-            let mut builtin_names = Vec::new();
-            for service in self.registry.services() {
-                if self.service_visible_on_mcp(service.name).await {
-                    builtin_names.push(service.name);
-                }
-            }
-            let upstream_tools = pool
-                .healthy_tools_allowed(self.route_scope.allowed_upstreams())
-                .await;
+        if hide_raw_tools
+            && let Some(manager) = self.gateway_manager.as_ref()
+            && let Err(error) = manager
+                .code_mode_catalog_tools_allowed(
+                    true,
+                    None,
+                    oauth_subject.as_deref(),
+                    self.route_scope.allowed_upstreams(),
+                )
+                .await
+        {
+            tracing::warn!(
+                surface = "mcp",
+                service = "labby",
+                action = "list_tools",
+                error = %error,
+                "failed to warm upstream catalog before listing MCP App tools"
+            );
+        }
+        if let Some(pool) = self.current_upstream_pool().await {
+            let upstream_tools = if hide_raw_tools {
+                pool.healthy_ui_tools_allowed(self.route_scope.allowed_upstreams())
+                    .await
+            } else {
+                pool.healthy_tools_allowed(self.route_scope.allowed_upstreams())
+                    .await
+            };
             for ut in upstream_tools {
                 let tool_name = ut.tool.name.as_ref();
                 if builtin_names.contains(&tool_name) {
@@ -170,12 +193,13 @@ impl LabMcpServer {
                     continue;
                 }
                 tools.push(ut.tool);
-                upstream_tool_count += 1;
+                if hide_raw_tools {
+                    upstream_ui_tool_count += 1;
+                } else {
+                    upstream_tool_count += 1;
+                }
             }
-            let auth = auth_context_from_extensions(&context.extensions);
-            if let Some(oauth_subject) =
-                oauth_upstream_subject_for_request(auth, self.request_subject(&context))
-            {
+            if !hide_raw_tools && let Some(oauth_subject) = oauth_subject.as_ref() {
                 let configs = self.route_scoped_oauth_upstream_configs().await;
                 for (_, upstream_tools) in pool
                     .subject_scoped_tools(&configs, oauth_subject.as_ref())
@@ -205,6 +229,7 @@ impl LabMcpServer {
             builtin_tool_count,
             gateway_tool_count,
             upstream_tool_count,
+            upstream_ui_tool_count,
             subject_scoped_tool_count,
             suppressed_builtin_tool_count,
             manager_code_mode_enabled,

@@ -5,6 +5,10 @@
 //! guidance).
 
 use crate::dispatch::error::ToolError;
+use crate::dispatch::upstream::pool::UpstreamPool;
+use crate::dispatch::upstream::types::{
+    ToolExposurePolicy, UpstreamEntry, UpstreamHealth, UpstreamTool,
+};
 use crate::mcp::catalog::{CODE_MODE_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME};
 use crate::mcp::handlers_resources::{CODE_MODE_EXECUTE_APP_URI, CODE_MODE_SEARCH_APP_URI};
 use crate::mcp::handlers_tools::{code_mode_tool_meta, code_mode_trace_output_schema};
@@ -12,8 +16,9 @@ use crate::mcp::logging::logging_level_rank;
 use crate::mcp::server::LabMcpServer;
 use crate::registry::{RegisteredService, ToolRegistry};
 use lab_apis::core::action::ActionSpec;
-use rmcp::model::CallToolRequestParams;
+use rmcp::model::{CallToolRequestParams, Meta, Tool};
 use serde_json::Value;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, atomic::AtomicU8};
@@ -122,6 +127,96 @@ async fn code_mode_manager(
     manager
 }
 
+async fn code_mode_manager_with_pool(
+    enabled: bool,
+    upstream: crate::config::UpstreamConfig,
+    pool: Arc<UpstreamPool>,
+) -> Arc<crate::dispatch::gateway::manager::GatewayManager> {
+    let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
+    runtime.swap(Some(pool)).await;
+    let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
+        std::path::PathBuf::from("config.toml"),
+        runtime,
+    ));
+    manager
+        .seed_config(crate::config::LabConfig {
+            code_mode: crate::config::CodeModeConfig {
+                enabled,
+                ..crate::config::CodeModeConfig::default()
+            },
+            upstream: vec![upstream],
+            ..crate::config::LabConfig::default()
+        })
+        .await;
+    manager
+}
+
+fn fixture_upstream_config(name: &str) -> crate::config::UpstreamConfig {
+    crate::config::UpstreamConfig {
+        enabled: true,
+        name: name.to_string(),
+        url: Some("http://127.0.0.1:9/mcp".to_string()),
+        bearer_token_env: None,
+        command: None,
+        args: Vec::new(),
+        env: BTreeMap::new(),
+        proxy_resources: true,
+        proxy_prompts: false,
+        expose_tools: None,
+        expose_resources: None,
+        expose_prompts: None,
+        oauth: None,
+        imported_from: None,
+        priority: 1.0,
+    }
+}
+
+fn fixture_upstream_entry(upstream: &str, tools: HashMap<String, UpstreamTool>) -> UpstreamEntry {
+    UpstreamEntry {
+        name: Arc::from(upstream),
+        tools,
+        exposure_policy: ToolExposurePolicy::All,
+        prompt_count: 0,
+        resource_count: 1,
+        prompt_names: Vec::new(),
+        resource_uris: vec![format!("ui://{upstream}/app.html")],
+        tool_health: UpstreamHealth::Healthy,
+        prompt_health: UpstreamHealth::Healthy,
+        resource_health: UpstreamHealth::Healthy,
+        tool_unhealthy_since: None,
+        prompt_unhealthy_since: None,
+        resource_unhealthy_since: None,
+        tool_last_error: None,
+        prompt_last_error: None,
+        resource_last_error: None,
+    }
+}
+
+fn fixture_upstream_tool(
+    upstream: &Arc<str>,
+    name: &str,
+    ui_resource: Option<&str>,
+) -> UpstreamTool {
+    let mut tool = Tool::new(
+        name.to_string(),
+        format!("{name} description"),
+        Arc::new(serde_json::Map::new()),
+    );
+    if let Some(resource_uri) = ui_resource {
+        tool.meta = Some(Meta(serde_json::Map::from_iter([(
+            "ui".to_string(),
+            serde_json::json!({ "resourceUri": resource_uri }),
+        )])));
+    }
+    UpstreamTool {
+        tool,
+        input_schema: None,
+        output_schema: None,
+        upstream_name: Arc::clone(upstream),
+        destructive: false,
+    }
+}
+
 #[test]
 fn code_mode_tool_meta_points_to_canonical_ui_resource() {
     let search = code_mode_tool_meta(CODE_MODE_SEARCH_TOOL_NAME);
@@ -203,6 +298,68 @@ async fn list_tools_advertises_code_mode_output_schemas() {
             vec!["code_mode_search_trace", "code_mode_execute_trace"]
         );
     }
+}
+
+#[tokio::test]
+async fn list_tools_promotes_upstream_mcp_app_tools_when_raw_tools_are_hidden() {
+    let upstream_name: Arc<str> = Arc::from("apps");
+    let ui_tool = fixture_upstream_tool(
+        &upstream_name,
+        "youtube_search_ui",
+        Some("ui://apps/youtube-search.html"),
+    );
+    let plain_tool = fixture_upstream_tool(&upstream_name, "youtube_probe", None);
+    let pool = Arc::new(UpstreamPool::new());
+    pool.insert_entry_for_test(
+        "apps",
+        fixture_upstream_entry(
+            "apps",
+            HashMap::from([
+                ("youtube_search_ui".to_string(), ui_tool),
+                ("youtube_probe".to_string(), plain_tool),
+            ]),
+        ),
+    )
+    .await;
+    let manager = code_mode_manager_with_pool(true, fixture_upstream_config("apps"), pool).await;
+    let server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = rmcp::service::RequestContext::new(
+        rmcp::model::NumberOrString::Number(1),
+        running.peer().clone(),
+    );
+
+    let result = running
+        .service()
+        .list_tools_impl(None, context)
+        .await
+        .expect("list tools");
+    let names = result
+        .tools
+        .iter()
+        .map(|tool| tool.name.as_ref())
+        .collect::<Vec<_>>();
+
+    assert!(
+        names.contains(&"youtube_search_ui"),
+        "MCP App upstream tools must stay visible to the host"
+    );
+    assert!(
+        !names.contains(&"youtube_probe"),
+        "ordinary raw upstream tools stay hidden in Code Mode"
+    );
+    assert!(
+        !names.contains(&"radarr"),
+        "built-in raw tools stay hidden in Code Mode"
+    );
 }
 
 #[tokio::test]
@@ -320,7 +477,7 @@ async fn server_reads_current_pool_from_gateway_manager() {
 
     assert!(server.current_upstream_pool().await.is_none());
 
-    let pool = Arc::new(crate::dispatch::upstream::pool::UpstreamPool::new());
+    let pool = Arc::new(UpstreamPool::new());
     runtime.swap(Some(Arc::clone(&pool))).await;
 
     let current = server.current_upstream_pool().await.expect("pool");

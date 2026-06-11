@@ -219,17 +219,18 @@ impl LabMcpServer {
         }
 
         if self.code_mode_visibility().await.hides_raw_tools() {
-            // mcp-ui widget callbacks: when the operator has explicitly enabled
-            // them, a raw call that names a known upstream tool is allowed to
-            // fall through to the upstream proxy so a rendered widget can drive
-            // its tool. The tool stays hidden from `list_tools` — this relaxes
-            // callability, never visibility. Default off (strict boundary); see
-            // `config::code_mode_widget_callbacks_enabled`.
+            // MCP App tools stay visible in `list_tools` even while Code Mode
+            // hides ordinary raw tools, so their host callbacks must be allowed
+            // through the same raw proxy path. Operators can still opt into the
+            // broader legacy callback bypass for non-UI tools with
+            // `LAB_CODE_MODE_WIDGET_CALLBACKS=1`.
             let widget_tool = if svc.is_none()
-                && crate::config::code_mode_widget_callbacks_enabled()
                 && let Some(pool) = self.current_upstream_pool().await
             {
-                pool.find_tool(&service).await
+                pool.find_tool(&service).await.filter(|(_, tool)| {
+                    crate::dispatch::upstream::pool::tool_has_mcp_app_ui_resource(tool)
+                        || crate::config::code_mode_widget_callbacks_enabled()
+                })
             } else {
                 None
             };
@@ -259,7 +260,7 @@ impl LabMcpServer {
                         service = %service,
                         action = %action,
                         route = "upstream_widget_callback",
-                        "code_mode raw-tool gate bypassed for enabled widget callback"
+                        "code_mode raw-tool gate bypassed for MCP App widget callback"
                     );
                 }
                 None => {

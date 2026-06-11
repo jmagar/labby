@@ -46,6 +46,7 @@ mod validate;
 use helpers::DEFAULT_REQUEST_TIMEOUT;
 pub(crate) use helpers::redact_resource_uri_for_logging;
 pub use helpers::{UpstreamCachedSummary, in_process_upstream_name};
+pub(crate) use tools::tool_has_mcp_app_ui_resource;
 // Catalog size caps are used by pool child modules directly via `super::tools::*`.
 // No external consumer references them through this path, so no `pub use` needed.
 

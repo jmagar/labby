@@ -496,6 +496,23 @@ impl LabMcpServer {
             map.insert("ui".to_string(), ui.ui_meta.clone());
             Meta(map)
         });
+        if let Some(ui) = response.ui.as_ref() {
+            tracing::info!(
+                surface = "mcp",
+                service = "code_execute",
+                action = "mcp_app.mirror",
+                subject,
+                actor_key,
+                actor_label = subject,
+                agent_kind = "agent",
+                resource_uri = ui
+                    .ui_meta
+                    .get("resourceUri")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("<unknown>"),
+                "mirroring upstream MCP App widget metadata onto execute result"
+            );
+        }
         let output = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
         let structured = code_mode_execute_trace(&response);
         let output_tokens = estimate_tokens(&output);

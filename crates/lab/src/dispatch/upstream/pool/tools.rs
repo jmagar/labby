@@ -74,6 +74,34 @@ impl UpstreamPool {
         tools
     }
 
+    pub async fn healthy_ui_tools_allowed(
+        &self,
+        allowed: Option<&BTreeSet<String>>,
+    ) -> Vec<UpstreamTool> {
+        let catalog = self.catalog.read().await;
+        let mut tools: Vec<UpstreamTool> = catalog
+            .iter()
+            .filter(|(name, _)| upstream_allowed(allowed, name))
+            .filter(|(_, entry)| entry.tool_health.is_routable())
+            .flat_map(|(_, entry)| {
+                entry.tools.values().filter_map(|tool| {
+                    (entry.exposure_policy.matches(tool.tool.name.as_ref())
+                        && tool_has_mcp_app_ui_resource(tool))
+                    .then(|| tool.clone())
+                })
+            })
+            .take(MAX_UPSTREAM_TOOLS + 1)
+            .collect();
+        if tools.len() > MAX_UPSTREAM_TOOLS {
+            tools.truncate(MAX_UPSTREAM_TOOLS);
+            tracing::warn!(
+                limit = MAX_UPSTREAM_TOOLS,
+                "upstream MCP App tool catalog exceeds limit — truncating to cap"
+            );
+        }
+        tools
+    }
+
     pub async fn healthy_tools_for_upstream(&self, upstream: &str) -> Vec<UpstreamTool> {
         let catalog = self.catalog.read().await;
         catalog
@@ -332,6 +360,16 @@ impl UpstreamPool {
         }
         names
     }
+}
+
+pub(crate) fn tool_has_mcp_app_ui_resource(tool: &UpstreamTool) -> bool {
+    tool.tool
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.0.get("ui"))
+        .and_then(|ui| ui.get("resourceUri"))
+        .and_then(Value::as_str)
+        .is_some_and(|uri| uri.starts_with("ui://"))
 }
 
 #[cfg(test)]
