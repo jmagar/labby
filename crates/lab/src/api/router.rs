@@ -1599,8 +1599,10 @@ pub fn build_router(
     };
     router = router.merge(dev_routes);
 
-    // Static-file fallback for the Next.js SPA. Protected MCP proxying is an
-    // outer middleware below so it bypasses the API timeout/compression stack.
+    // Static-file fallback for the Next.js SPA. Protected MCP virtual-host
+    // proxying is mounted as an inner middleware below so intercepted responses
+    // still pass through the shared request-id/trace/timeout/compression/CORS
+    // stack.
     if state.web_assets_enabled() {
         router = router.fallback(crate::api::web::serve_web_request);
     }
@@ -1608,6 +1610,10 @@ pub fn build_router(
     let protected_proxy_state = state.clone();
     router
         .with_state(state)
+        .layer(axum::middleware::from_fn_with_state(
+            protected_proxy_state,
+            protected_mcp_intercept,
+        ))
         .layer(build_cors_layer(config_cors_origins))
         .layer(CompressionLayer::new())
         .layer(TimeoutLayer::with_status_code(
@@ -1634,10 +1640,6 @@ pub fn build_router(
                 )
             }),
         )
-        .layer(axum::middleware::from_fn_with_state(
-            protected_proxy_state,
-            protected_mcp_intercept,
-        ))
         // SetRequestId generates a UUID for every request that lacks one.
         .layer(SetRequestIdLayer::new(x_request_id, MakeRequestUuid))
 }
@@ -2898,6 +2900,7 @@ mod tests {
                     .method("POST")
                     .uri("/media")
                     .header(header::HOST, "mcp.tootie.tv")
+                    .header("x-request-id", "protected-subset-test")
                     .header(header::AUTHORIZATION, format!("Bearer {token}"))
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(r#"{"jsonrpc":"2.0","method":"ping"}"#))
@@ -2907,6 +2910,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("x-request-id").unwrap(),
+            "protected-subset-test"
+        );
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
