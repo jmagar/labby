@@ -311,37 +311,46 @@ In `crates/lab/src/cli/serve.rs`, locate the existing lines (~493):
     let auth_configured = bearer_token.is_some() || matches!(auth_config.mode, AuthMode::OAuth);
 ```
 
-Immediately BEFORE that line, insert:
+Immediately BEFORE that line, insert (PR #112 review wave — loopback-gated + typed `BootstrapOutcome` + authoritative-token + dotenvy reload):
 
 ```rust
-    // First-run self-bootstrap (setup-wizard consolidation): when no MCP token
-    // is configured and OAuth is not active, generate a token + minimal
-    // ~/.lab/.env so the server can start and the operator can reach /setup.
-    // Closes the headless bootstrap circularity. The freshly written token is
-    // injected into this process so the auth layer below picks it up.
+    // First-run self-bootstrap: only when no MCP token is configured, OAuth is
+    // not active, AND the bind is loopback. The loopback gate (HIGH-1) is
+    // load-bearing — an explicit non-loopback bind with no auth must STILL hit
+    // the lab-319g safety gate below and bail; auto-minting a token must never
+    // silently enable a public bind. The generated token is made authoritative
+    // in-process (`bearer_token = Some(token)`) BEFORE the dotenvy reload, so
+    // the running server authenticates with the token it just wrote even if the
+    // reload fails (HIGH-2). The reload then propagates the token to downstream
+    // env readers (node master client, `logs`). dotenvy owns its own set_var,
+    // keeping this crate unsafe-free (the workspace forbids unsafe_code).
     if crate::dispatch::setup::should_bootstrap(
         bearer_token.is_some(),
         matches!(auth_config.mode, AuthMode::OAuth),
-    ) {
+    ) && is_loopback_host(&host)
+    {
         match crate::dispatch::setup::bootstrap() {
-            Ok(outcome) if outcome.get("created").and_then(serde_json::Value::as_bool) == Some(true) => {
-                if let Some(tok) = outcome.get("token").and_then(serde_json::Value::as_str) {
-                    // SAFETY: set before the server (and its auth layer) reads env.
-                    unsafe {
-                        std::env::set_var("LAB_MCP_HTTP_TOKEN", tok);
-                    }
-                    bearer_token = http_token();
-                    tracing::warn!(
+            Ok(crate::dispatch::setup::BootstrapOutcome::Created { env_path, token }) => {
+                bearer_token = Some(token.clone());
+                if let Err(error) = dotenvy::from_path(&env_path) {
+                    tracing::error!(
                         surface = "cli",
                         service = "serve",
-                        "first run: generated LAB_MCP_HTTP_TOKEN and wrote ~/.lab/.env"
+                        error = %error,
+                        "failed to reload generated ~/.lab/.env into process env; \
+                         in-process token is authoritative, downstream env readers may not see it"
                     );
-                    eprintln!("\n  Lab first-run setup");
-                    eprintln!("  MCP bearer token: {tok}");
-                    eprintln!("  Open http://{host}:{port}/setup to finish configuration\n");
                 }
+                tracing::warn!(
+                    surface = "cli",
+                    service = "serve",
+                    "first run: generated LAB_MCP_HTTP_TOKEN and wrote ~/.lab/.env"
+                );
+                eprintln!("\n  Lab first-run setup");
+                eprintln!("  MCP bearer token: {token}");
+                eprintln!("  Open http://{host}:{port}/setup to finish configuration\n");
             }
-            Ok(_) => {}
+            Ok(crate::dispatch::setup::BootstrapOutcome::AlreadyPresent { .. }) => {}
             Err(error) => {
                 tracing::warn!(surface = "cli", service = "serve", error = %error, "first-run bootstrap skipped");
             }
@@ -349,7 +358,7 @@ Immediately BEFORE that line, insert:
     }
 ```
 
-Note: `bearer_token` must be `let mut bearer_token = http_token();` at its declaration (serve.rs:275) — change its `let` to `let mut` so the reassignment compiles. `host`, `port`, and `auth_config` are already in scope (used by the bind guard just below). Verified: `crates/lab` has **no** `forbid(unsafe_code)` and `state.rs` already uses `unsafe { set_var }`, so the `unsafe` block compiles (eng-review LOW-3 cleared).
+Note: `bearer_token` must be `let mut bearer_token = http_token();` at its declaration (serve.rs:275) — change its `let` to `let mut` so the reassignment compiles. `host`, `port`, and `auth_config` are already in scope (used by the bind guard just below). The workspace sets `unsafe_code = "forbid"`, which `forbid` cannot be escaped via `#[allow]`; the dotenvy reload (dotenvy encapsulates its own `set_var`) replaces the originally planned `unsafe { std::env::set_var }`, keeping the crate unsafe-free. `bootstrap()` returns the typed `BootstrapOutcome` enum; the JSON envelope for the MCP/CLI route lives in `bootstrap_action()`.
 
 - [ ] **Step 1b: Allowlist `cli/serve.rs` in the orchestrator architecture test (REQUIRED — eng-review CRITICAL-1)**
 
@@ -372,32 +381,14 @@ Find the existing `let bearer_token = http_token();` (above line 493) and change
 - [ ] **Step 3: Verify it compiles + architecture + serve tests pass**
 
 Run: `cargo clippy -p labby --all-features -- -D warnings`
-Expected: exit 0. (`unsafe { set_var }` is accepted — `state.rs` already does the same under the Rust-2024 unsafe-env rule.)
+Expected: exit 0. (No `unsafe` — the dotenvy reload owns the env mutation.)
 
 Run: `cargo nextest run -p labby --all-features -E 'test(serve) or test(no_peer_service_imports_setup_dispatch)'`
 Expected: pass. The architecture test MUST be in this gate (eng-review CRITICAL-1) — without the Step 1b allowlist edit it fails here.
 
-- [ ] **Step 4: Add a focused decision-helper test in serve (guards the wiring intent)**
+- [ ] **Step 4: Decision-gate coverage lives in `bootstrap.rs`**
 
-The write path is covered by Task 2's `bootstrap_creates_env...`. Add one serve-level test asserting the decision gate, in the `#[cfg(test)] mod tests` block at the bottom of `serve.rs` (create the block if absent):
-
-```rust
-    #[test]
-    fn first_run_gate_matches_token_and_oauth_state() {
-        use crate::dispatch::setup::bootstrap::should_bootstrap;
-        // No token, bearer mode → bootstrap.
-        assert!(should_bootstrap(false, false));
-        // Token already present → never bootstrap.
-        assert!(!should_bootstrap(true, false));
-        // OAuth mode → never bootstrap (OAuth needs no static token).
-        assert!(!should_bootstrap(false, true));
-    }
-```
-
-- [ ] **Step 5: Run the new test**
-
-Run: `cargo nextest run -p labby --all-features -E 'test(first_run_gate_matches)'`
-Expected: 1 passed.
+No serve-level decision test is added. `bootstrap.rs::should_bootstrap_only_without_token_and_oauth` is the canonical coverage of the `should_bootstrap` gate (including the `(true, true)` case); a duplicate serve test would be redundant (PR #112 review wave).
 
 - [ ] **Step 6: Commit**
 
