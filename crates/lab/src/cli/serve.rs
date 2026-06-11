@@ -525,14 +525,25 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
                          in-process token is authoritative, downstream env readers may not see it"
                     );
                 }
-                tracing::warn!(
+                tracing::info!(
                     surface = "cli",
                     service = "serve",
                     "first run: generated LAB_MCP_HTTP_TOKEN and wrote ~/.lab/.env"
                 );
+                // Do NOT print the token itself — stderr is commonly captured
+                // by systemd/journald/Docker, which would persist the secret
+                // (the project forbids logging secrets). The token is in the
+                // 0600 .env; point the operator there instead.
                 eprintln!("\n  Lab first-run setup");
-                eprintln!("  MCP bearer token: {token}");
-                eprintln!("  Open http://{host}:{port}/setup to finish configuration\n");
+                eprintln!(
+                    "  Generated an MCP bearer token in {} (mode 0600).",
+                    env_path.display()
+                );
+                eprintln!("  Open http://{host}:{port}/setup to finish configuration.");
+                eprintln!(
+                    "  For remote clients, read the token from that file (e.g. `grep LAB_MCP_HTTP_TOKEN {}`).\n",
+                    env_path.display()
+                );
             }
             Ok(crate::dispatch::setup::BootstrapOutcome::AlreadyPresent { .. }) => {}
             Err(error) => {
