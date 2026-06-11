@@ -114,6 +114,29 @@ pub fn to_json<T: serde::Serialize>(v: T) -> Result<Value, ToolError> {
     })
 }
 
+/// Rough char-based token estimator for dispatch telemetry logs.
+///
+/// Uses the conventional ~4-chars-per-token heuristic — cheap, dependency-free,
+/// and accurate enough for capacity/cost tracking; do NOT use for LLM budget
+/// enforcement. Lives in this shared dispatch leaf so the MCP, HTTP, and CLI
+/// surfaces can all attribute tokens without crossing the `api -> mcp` boundary.
+#[must_use]
+pub fn estimate_tokens(s: &str) -> usize {
+    s.len().div_ceil(4)
+}
+
+/// Token estimate for a JSON value, computed against its serialized form.
+#[must_use]
+pub fn estimate_tokens_value(value: &Value) -> usize {
+    estimate_tokens(&serde_json::to_string(value).unwrap_or_default())
+}
+
+/// Token estimate for an MCP arguments map (`request.arguments`).
+#[must_use]
+pub fn estimate_tokens_args(arguments: &serde_json::Map<String, Value>) -> usize {
+    estimate_tokens(&serde_json::to_string(arguments).unwrap_or_default())
+}
+
 /// Extract a required string parameter from a JSON object.
 pub fn require_str<'a>(params: &'a Value, key: &str) -> Result<&'a str, ToolError> {
     params

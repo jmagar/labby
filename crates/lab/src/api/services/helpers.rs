@@ -20,6 +20,7 @@ use lab_apis::core::action::ActionSpec;
 use crate::api::ActionRequest;
 use crate::dispatch::error::ToolError;
 use crate::dispatch::gateway::current_gateway_manager;
+use crate::dispatch::helpers::estimate_tokens_value;
 
 /// Dispatch a service action request with unknown-action gate, confirmation gate, and logging.
 ///
@@ -172,17 +173,20 @@ where
         action = action_log,
         request_id
     );
+    let input_tokens = estimate_tokens_value(&params);
     let start = std::time::Instant::now();
     let result = dispatch(action, params).instrument(dispatch_span).await;
     let elapsed_ms = start.elapsed().as_millis();
 
     match &result {
-        Ok(_) => tracing::info!(
+        Ok(v) => tracing::info!(
             surface = surface,
             service,
             action = action_log.as_str(),
             request_id,
             elapsed_ms,
+            input_tokens,
+            output_tokens = estimate_tokens_value(v),
             destructive = is_destructive,
             "dispatch ok"
         ),
@@ -192,6 +196,8 @@ where
             action = action_log.as_str(),
             request_id,
             elapsed_ms,
+            input_tokens,
+            output_tokens = 0,
             kind = e.kind(),
             "dispatch error"
         ),
@@ -201,6 +207,8 @@ where
             action = action_log.as_str(),
             request_id,
             elapsed_ms,
+            input_tokens,
+            output_tokens = 0,
             kind = e.kind(),
             "dispatch error"
         ),

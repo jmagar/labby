@@ -40,25 +40,12 @@ pub(crate) fn hash_arguments(arguments: &Value) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
-/// Rough char-based token estimator for gateway telemetry logs.
-///
-/// Uses the conventional ~4 chars-per-token heuristic. Cheap, dependency-free,
-/// and accurate enough for capacity tracking; do NOT use for LLM budget
-/// enforcement — pull in `tiktoken-rs` if exact counts are required.
-pub(crate) fn estimate_tokens(s: &str) -> usize {
-    s.len().div_ceil(4)
-}
-
-/// Token count of a JSON value, computed against its serialized form.
-#[cfg(test)]
-pub(crate) fn estimate_tokens_value(value: &Value) -> usize {
-    estimate_tokens(&serde_json::to_string(value).unwrap_or_default())
-}
-
-/// Token count of an MCP arguments map (`request.arguments.unwrap_or_default()`).
-pub(crate) fn estimate_tokens_args(arguments: &serde_json::Map<String, Value>) -> usize {
-    estimate_tokens(&serde_json::to_string(arguments).unwrap_or_default())
-}
+// Token estimators live in the shared `dispatch::helpers` leaf so the HTTP/CLI
+// surfaces can attribute tokens without crossing the `api -> mcp` boundary.
+// Re-exported here to preserve the existing `crate::mcp::result_format::…` paths.
+pub(crate) use crate::dispatch::helpers::{
+    estimate_tokens, estimate_tokens_args, estimate_tokens_value,
+};
 
 /// Format the result of a dispatch operation into an MCP `CallToolResult`.
 pub(crate) fn format_dispatch_result(
@@ -68,9 +55,11 @@ pub(crate) fn format_dispatch_result(
     elapsed_ms: u128,
     subject: &str,
     actor_key: Option<&str>,
+    input_tokens: usize,
 ) -> (CallToolResult, DispatchLogOutcome) {
     match result {
         Ok(v) => {
+            let output_tokens = estimate_tokens_value(&v);
             tracing::info!(
                 surface = "mcp",
                 service,
@@ -79,6 +68,8 @@ pub(crate) fn format_dispatch_result(
                 actor_key,
                 tool = %service,
                 elapsed_ms,
+                input_tokens,
+                output_tokens,
                 "dispatch ok"
             );
             let envelope = build_success(service, action, &v);
@@ -99,6 +90,8 @@ pub(crate) fn format_dispatch_result(
                     actor_key,
                     tool = %service,
                     elapsed_ms,
+                    input_tokens,
+                    output_tokens = 0,
                     kind,
                     "dispatch error"
                 );
@@ -111,6 +104,8 @@ pub(crate) fn format_dispatch_result(
                     actor_key,
                     tool = %service,
                     elapsed_ms,
+                    input_tokens,
+                    output_tokens = 0,
                     kind,
                     "dispatch error"
                 );

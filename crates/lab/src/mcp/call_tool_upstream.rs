@@ -28,7 +28,9 @@ use crate::mcp::context::{auth_context_from_extensions, oauth_upstream_subject_f
 use crate::mcp::envelope::build_error;
 use crate::mcp::error::canonical_kind;
 use crate::mcp::logging::DispatchLogOutcome;
-use crate::mcp::result_format::{format_dispatch_result, tool_error_envelope};
+use crate::mcp::result_format::{
+    estimate_tokens_args, format_dispatch_result, tool_error_envelope,
+};
 use crate::mcp::server::LabMcpServer;
 use crate::mcp::upstream::normalize_upstream_result;
 
@@ -420,8 +422,16 @@ impl LabMcpServer {
         // Neither built-in nor upstream.
         let elapsed_ms = start.elapsed().as_millis();
         let err = anyhow::anyhow!("service `{service}` has no dispatcher wired");
-        let (result, outcome) =
-            format_dispatch_result(Err(err), service, action, elapsed_ms, subject, actor_key);
+        let input_tokens = raw_arguments.as_ref().map_or(0, estimate_tokens_args);
+        let (result, outcome) = format_dispatch_result(
+            Err(err),
+            service,
+            action,
+            elapsed_ms,
+            subject,
+            actor_key,
+            input_tokens,
+        );
         self.emit_dispatch_notification(context, service, action, elapsed_ms, outcome)
             .await;
         Ok(result)

@@ -84,6 +84,8 @@ Optional when applicable:
 - `instance`
 - `operation = "health"`
 - `kind` on failure
+- `input_tokens` / `output_tokens` — estimated request/response token counts
+  (≈chars/4 heuristic; `output_tokens = 0` on failure) on the dispatch finish event
 
 ### API Dispatch
 
@@ -102,6 +104,8 @@ Optional when applicable:
 - `instance`
 - `operation = "health"`
 - `kind` on failure
+- `input_tokens` / `output_tokens` — estimated request/response token counts
+  (≈chars/4 heuristic; `output_tokens = 0` on failure) on the dispatch finish event
 
 This same contract applies to auth-adjacent HTTP handlers that are part of the
 product surface, including:

@@ -26,7 +26,7 @@ use crate::mcp::context::{auth_context_from_extensions, tool_execute_builtin_act
 use crate::mcp::elicitation::{ElicitResult, elicit_confirm};
 use crate::mcp::envelope::{build_error, build_error_extra};
 use crate::mcp::error::DispatchError;
-use crate::mcp::result_format::format_dispatch_result;
+use crate::mcp::result_format::{estimate_tokens_args, format_dispatch_result};
 use crate::mcp::server::LabMcpServer;
 
 fn inject_gateway_origin_param(params: Value, subject: Option<&str>) -> Value {
@@ -241,8 +241,16 @@ impl LabMcpServer {
                 .await
                 .map_err(|te| anyhow::Error::from(DispatchError::from(te)));
             let elapsed_ms = start.elapsed().as_millis();
-            let (result, outcome) =
-                format_dispatch_result(result, &service, &action, elapsed_ms, &subject, actor_key);
+            let input_tokens = estimate_tokens_args(&args);
+            let (result, outcome) = format_dispatch_result(
+                result,
+                &service,
+                &action,
+                elapsed_ms,
+                &subject,
+                actor_key,
+                input_tokens,
+            );
             self.emit_dispatch_notification(&context, &service, &action, elapsed_ms, outcome)
                 .await;
             return Ok(result);
