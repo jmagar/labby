@@ -29,8 +29,10 @@ test('renders execute call rows with redacted params', async () => {
     />,
   )
 
-  assert.match(container.textContent ?? '', /Broker-observed execute calls/)
+  assert.match(container.textContent ?? '', /Execute calls/)
   assert.match(container.textContent ?? '', /github \/ search_issues/)
+  assert.doesNotMatch(container.textContent ?? '', /\bok\b/)
+  assert.ok(container.querySelector('[aria-label="success"]'))
   assert.match(container.textContent ?? '', /12ms/)
   assert.match(container.textContent ?? '', /\[redacted\]/)
   assert.doesNotMatch(container.textContent ?? '', /raw-secret-token/)
@@ -59,7 +61,7 @@ test('renders search match rows', async () => {
     />,
   )
 
-  assert.match(container.textContent ?? '', /Catalog-inferred search matches/)
+  assert.match(container.textContent ?? '', /Search matches/)
   assert.match(container.textContent ?? '', /axon \/ ask/)
   assert.match(container.textContent ?? '', /schema/)
   await unmount()

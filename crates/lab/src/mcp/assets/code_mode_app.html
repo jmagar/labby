@@ -5,31 +5,48 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Lab Code Mode Inspector</title>
 <style>
-:root{color-scheme:dark;background:#07131c;color:#e6f4fb;font-family:Inter,system-ui,sans-serif}
+:root{color-scheme:dark;--aurora-page-bg:#07131c;--aurora-panel-medium:#102330;--aurora-panel-strong:#13293a;--aurora-control-surface:#0c1a24;--aurora-border-default:#1d3d4e;--aurora-border-strong:#24536c;--aurora-text-primary:#e6f4fb;--aurora-text-muted:#a7bcc9;--aurora-accent-primary:#29b6f6;--aurora-accent-strong:#67cbfa;--aurora-success:#7dd3c7;--aurora-warn:#c6a36b;--aurora-error:#c78490;--aurora-shadow-strong:0 20px 38px rgba(0,0,0,.26);--aurora-highlight-strong:inset 0 1px 0 rgba(255,255,255,.05);--aurora-highlight-medium:inset 0 1px 0 rgba(255,255,255,.035);--aurora-active-glow:0 0 0 1px rgba(41,182,246,.18),0 0 16px rgba(41,182,246,.08);background:var(--aurora-page-bg);color:var(--aurora-text-primary);font-family:Inter,"Segoe UI",system-ui,sans-serif}
 *{box-sizing:border-box}
-body{margin:0;padding:14px;background:#07131c;color:#e6f4fb}
-main{display:grid;gap:12px}
-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border-bottom:1px solid #1d3d4e;padding-bottom:10px}
-h1{font-size:16px;line-height:1.25;margin:0;font-weight:700}
-.sub{color:#a7bcc9;font-size:12px;margin-top:3px}
-.badge{border:1px solid #1d3d4e;border-radius:999px;padding:3px 8px;color:#72c8f5;font-size:11px;white-space:nowrap}
+body{height:100dvh;margin:0;padding:12px;overflow:hidden;background:radial-gradient(circle at top left,rgba(41,182,246,.10),transparent 32%),radial-gradient(circle at top right,rgba(103,203,250,.08),transparent 26%),var(--aurora-page-bg);color:var(--aurora-text-primary)}
+main{display:grid;gap:10px;max-width:940px;height:calc(100dvh - 24px);margin:0 auto;overflow-y:auto;overscroll-behavior:contain;padding-right:2px}
+header{position:relative;overflow:visible;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;border:1px solid var(--aurora-border-strong);border-radius:16px;background:linear-gradient(180deg,var(--aurora-panel-strong),var(--aurora-panel-medium));padding:10px 12px;box-shadow:var(--aurora-shadow-strong),var(--aurora-highlight-strong)}
+header:before{content:"";position:absolute;inset:0 0 auto;height:1px;background:linear-gradient(90deg,transparent,rgba(41,182,246,.58),transparent)}
+.titleline{display:flex;gap:10px;min-width:0}
+.mark{display:grid;place-items:center;width:32px;height:32px;flex:0 0 auto;border:1px solid rgba(41,182,246,.38);border-radius:8px;background:color-mix(in srgb,var(--aurora-accent-primary) 14%,transparent);color:var(--aurora-accent-strong);box-shadow:var(--aurora-active-glow)}
+.eyebrow{display:flex;align-items:center;gap:6px;color:var(--aurora-text-muted);font-size:10px;font-weight:750;letter-spacing:.12em;text-transform:uppercase}
+h1{font-family:Manrope,Inter,system-ui,sans-serif;font-size:19px;line-height:1.06;margin:1px 0 0;font-weight:850}
+.sub{max-width:620px;color:var(--aurora-text-muted);font-size:11px;line-height:1.35;margin-top:3px}
+.badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--aurora-border-strong);border-radius:6px;background:var(--aurora-control-surface);padding:3px 8px;color:var(--aurora-text-muted);font-size:11px;font-weight:650;white-space:nowrap;box-shadow:var(--aurora-highlight-medium)}
+.badge.connected{border-color:rgba(125,211,199,.52);background:color-mix(in srgb,var(--aurora-success) 10%,transparent);color:var(--aurora-success)}
 .grid{display:grid;gap:8px}
-.card{border:1px solid #1d3d4e;border-radius:8px;background:#102330;padding:10px}
-.row{display:flex;gap:8px;align-items:center;justify-content:space-between}
-.name{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;color:#e6f4fb;overflow-wrap:anywhere}
-.meta{font-size:11px;color:#a7bcc9}
-.ok{color:#7dd3c7}.err{color:#c78490}.info{color:#72c8f5}
-details{margin-top:8px}
-summary{cursor:pointer;color:#67cbfa;font-size:12px}
-pre{margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #1d3d4e;border-radius:6px;background:#07131c;padding:8px;color:#e6f4fb;font-size:11px}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.stat{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;border:1px solid var(--aurora-border-strong);border-radius:14px;background:linear-gradient(180deg,rgba(18,40,56,.96),rgba(14,31,44,.98));padding:10px 11px;box-shadow:0 8px 16px rgba(0,0,0,.16),var(--aurora-highlight-medium)}
+.stat span:first-child{color:var(--aurora-text-muted);font-size:10px;font-weight:750;letter-spacing:.14em;text-transform:uppercase}
+.stat strong{font-family:Manrope,Inter,system-ui,sans-serif;font-size:17px;font-weight:850;font-variant-numeric:tabular-nums}
+.panel{overflow:hidden;border:1px solid var(--aurora-border-strong);border-radius:18px;background:linear-gradient(180deg,var(--aurora-panel-strong),var(--aurora-panel-medium));box-shadow:var(--aurora-shadow-strong),var(--aurora-highlight-strong)}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(29,61,78,.8);padding:12px 14px}
+.panel-title{font-family:Manrope,Inter,system-ui,sans-serif;font-size:15px;font-weight:850}
+.panel-body{display:grid;gap:8px;padding:10px}
+.card{border:1px solid var(--aurora-border-strong);border-radius:12px;background:linear-gradient(180deg,rgba(18,40,56,.96),rgba(14,31,44,.98));padding:9px;box-shadow:0 8px 16px rgba(0,0,0,.16),var(--aurora-highlight-medium)}
+.row{display:flex;gap:8px;align-items:flex-start;justify-content:space-between}
+.name{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;font-weight:700;color:var(--aurora-text-primary);overflow-wrap:anywhere}
+.meta{font-size:11px;line-height:1.45;color:var(--aurora-text-muted)}
+.pill{display:inline-flex;align-items:center;border:1px solid var(--aurora-border-strong);border-radius:6px;background:var(--aurora-control-surface);padding:3px 8px;font-size:11px;font-weight:700;white-space:nowrap}
+.ok{color:var(--aurora-success)}.err{color:var(--aurora-error)}.info{color:var(--aurora-accent-primary)}
+.pill.ok{border-color:rgba(125,211,199,.52);background:color-mix(in srgb,var(--aurora-success) 10%,transparent)}.pill.err{border-color:rgba(199,132,144,.52);background:color-mix(in srgb,var(--aurora-error) 10%,transparent)}.pill.info{border-color:rgba(41,182,246,.52);background:color-mix(in srgb,var(--aurora-accent-primary) 10%,transparent)}
+details{margin-top:6px}
+summary{cursor:pointer;color:var(--aurora-accent-strong);font-size:12px;font-weight:700}
+pre{margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid var(--aurora-border-default);border-radius:10px;background:var(--aurora-page-bg);padding:8px;color:var(--aurora-text-primary);font-size:11px}
+@media(max-width:620px){body{padding:10px}main{height:calc(100dvh - 20px);gap:10px}header{flex-direction:column}.sub{display:none}.stats{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.stat{gap:3px;border-radius:10px;padding:4px 6px}.stat span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:8px;letter-spacing:.06em}.stat strong{white-space:nowrap;font-size:12px}.row{flex-direction:column}.card{border-radius:12px;padding:8px}.meta{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}details{margin-top:5px}}
 </style>
 </head>
 <body>
 <main>
 <header>
-<div><h1>Code Mode Inspector</h1><div class="sub" id="summary">Waiting for a tool result</div></div>
+<div class="titleline"><div class="mark" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 3v18M3 12h18M6.7 6.7l10.6 10.6M17.3 6.7 6.7 17.3" stroke="currentColor" stroke-width="1.65" stroke-linecap="round"/></svg></div><div><div class="eyebrow">Code Mode trace</div><h1>Code Mode Inspector</h1><div class="sub" id="summary">Waiting for a tool result</div></div></div>
 <div class="badge" id="state">read only</div>
 </header>
+<section class="stats" id="stats" hidden></section>
 <section class="grid" id="content"></section>
 </main>
 <script>window.__LAB_CODE_MODE_INITIAL_TRACE__ = null;</script>
@@ -118,29 +135,37 @@ const { App } = globalThis.ExtApps;
 const content=document.getElementById("content");
 const summary=document.getElementById("summary");
 const state=document.getElementById("state");
+const stats=document.getElementById("stats");
 function esc(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
 function json(value){try{return JSON.stringify(value,null,2)}catch{return String(value)}}
 function shape(s){if(!s)return"";return [s.type,s.key_count&&`${s.key_count} keys`,s.length&&`${s.length} items`].filter(Boolean).join(" / ")}
 function card(body){return `<article class="card">${body}</article>`}
+function panel(title,count,body,meta=""){return `<section class="panel"><div class="panel-head"><div class="panel-title">${esc(title)}</div><div class="row"><span class="pill info">${esc(count)}</span>${meta?`<span class="pill err">${esc(meta)}</span>`:""}</div></div><div class="panel-body">${body}</div></section>`}
+function compactStatLabel(label){return String(label).replace("Execute calls","Calls").replace("Catalog matches","Matches").replace("History entries","History")}
+function compactStatValue(value){return String(value).replace(/\bof\b/g,"/").replace(/\s+/g,"")}
+function renderStats(values){if(!stats)return;stats.hidden=false;stats.innerHTML=values.map(([label,value])=>`<div class="stat"><span>${esc(compactStatLabel(label))}</span><strong>${esc(compactStatValue(value))}</strong></div>`).join("")}
+function clearStats(){if(!stats)return;stats.hidden=true;stats.innerHTML=""}
 function statusLabel(item){return item.ok?"ok":(item.error_kind||"error")}
 function callRow(call){
   const cls=call.ok?"ok":"err";
   const params=call.params?`<details><summary>Params</summary><pre>${esc(json(call.params))}</pre></details>`:"";
-  return card(`<div class="row"><div class="name">${esc(call.upstream||"upstream")} / ${esc(call.tool||"tool")}</div><div class="${cls}">${esc(statusLabel(call))}</div></div><div class="meta">${esc(call.elapsed_ms??0)} ms ${call.error_kind?` / ${esc(call.error_kind)}`:""}</div>${call.result_shape?`<div class="meta">${esc(shape(call.result_shape))}</div>`:""}${params}`);
+  const status=call.ok?`<span class="ok" role="img" aria-label="success">✓</span>`:`<span class="pill ${cls}">${esc(statusLabel(call))}</span>`;
+  return card(`<div class="name">${esc(call.upstream||"upstream")} / ${esc(call.tool||"tool")}</div><div class="meta">${esc(call.id||"call")} ${status} ${esc(call.elapsed_ms??0)} ms${call.result_shape?` / ${esc(shape(call.result_shape))}`:""}</div>${params}`);
 }
-function matchRow(match){return card(`<div class="row"><div class="name">${esc(match.id||match.name||"match")}</div><div class="info">${esc(match.upstream||"")}</div></div><div class="meta">${esc(match.description||"")}</div>`)}
+function matchRow(match){return card(`<div class="row"><div class="name">${esc(match.id||match.name||"match")}</div><div class="pill info">${esc(match.upstream||"")}</div></div><div class="meta">${esc(match.description||"")}</div>`)}
 function historyRow(entry){
   const count=Array.isArray(entry.calls)?entry.calls.length:0;
-  return card(`<div class="row"><div class="name">${esc(entry.kind||"entry")}</div><div class="${entry.ok?"ok":"err"}">${esc(statusLabel(entry))}</div></div><div class="meta">${esc(entry.elapsed_ms??0)} ms / ${count} calls${entry.match_count!==undefined?` / ${esc(entry.match_count)} matches`:""}</div>`);
+  const status=entry.ok?`<span class="ok" role="img" aria-label="success">✓</span>`:`<span class="pill err">${esc(statusLabel(entry))}</span>`;
+  return card(`<div class="row"><div class="name">${esc(entry.kind||"entry")}</div>${status}</div><div class="meta">${esc(entry.elapsed_ms??0)} ms / ${count} calls${entry.match_count!==undefined?` / ${esc(entry.match_count)} matches`:""}</div>`);
 }
 function searchCount(t){const displayed=t.displayed_count??(Array.isArray(t.matches)?t.matches.length:0);return (t.truncated||displayed!==t.match_count)?`${displayed} of ${t.match_count||0}`:`${t.match_count||0}`;}
 function render(trace){
   const t=trace&&trace.structuredContent?trace.structuredContent:trace;
-  if(!t||!t.kind){content.innerHTML=card('<div class="meta">Run Code Mode search or execute to populate the inspector.</div>');return;}
-  if(t.kind==="code_mode_execute_trace"){summary.textContent=`${t.call_count||0} broker calls captured`;content.innerHTML=(t.calls||[]).map(callRow).join("")||card('<div class="meta">No broker calls were made.</div>');return;}
-  if(t.kind==="code_mode_search_trace"){summary.textContent=`${searchCount(t)} catalog matches${t.truncated?" (truncated)":""}`;content.innerHTML=(t.matches||[]).map(matchRow).join("")||card('<div class="meta">No matches.</div>');return;}
-  if(t.kind==="code_mode_history"){summary.textContent=`${(t.entries||[]).length} bounded history entries`;content.innerHTML=(t.entries||[]).map(historyRow).join("")||card('<div class="meta">History is empty.</div>');return;}
-  content.innerHTML=card(`<pre>${esc(json(t))}</pre>`);
+  if(!t||!t.kind){clearStats();content.innerHTML=card('<div class="meta">Run Code Mode search or execute to populate the inspector.</div>');return;}
+  if(t.kind==="code_mode_execute_trace"){const rows=(t.calls||[]).map(callRow).join("")||card('<div class="meta">No calls were made.</div>');summary.textContent=`${t.call_count||0} calls captured`;renderStats([["Execute calls",t.call_count||0],["Catalog matches",0],["History entries",0]]);content.innerHTML=panel("Execute calls",t.call_count||0,rows);return;}
+  if(t.kind==="code_mode_search_trace"){const count=searchCount(t);const shown=`${(t.matches||[]).length} shown`;const rows=(t.matches||[]).map(matchRow).join("")||card('<div class="meta">No matches.</div>');summary.textContent=t.truncated?"Search matches truncated to the current display window":"Search matches from current search";renderStats([["Execute calls",0],["Catalog matches",count],["History entries",0]]);content.innerHTML=panel("Search matches",t.truncated?shown:count,rows);return;}
+  if(t.kind==="code_mode_history"){const rows=(t.entries||[]).map(historyRow).join("")||card('<div class="meta">History is empty.</div>');summary.textContent=`${(t.entries||[]).length} bounded history entries`;renderStats([["Execute calls",0],["Catalog matches",0],["History entries",(t.entries||[]).length]]);content.innerHTML=panel("Recent history",(t.entries||[]).length,rows);return;}
+  clearStats();content.innerHTML=card(`<pre>${esc(json(t))}</pre>`);
 }
 // Render immediately from the server-injected snapshot (history widget).
 render(window.__LAB_CODE_MODE_INITIAL_TRACE__);
@@ -148,10 +173,10 @@ render(window.__LAB_CODE_MODE_INITIAL_TRACE__);
 const app = new App({ name: "LabCodeModeInspector", version: "1.0.0" }, {});
 app.onhostcontextchanged = (ctx) => { if (ctx && ctx.theme) { document.documentElement.classList.toggle("dark", ctx.theme === "dark"); } };
 app.ontoolresult = (result) => render(result && result.structuredContent ? result.structuredContent : result);
-try { state.textContent = "connected"; } catch (_) {}
+try { state.textContent = "connected"; state.classList.add("connected"); } catch (_) {}
 // Fire-and-forget per the MCP Apps spec — resolves async after the host
 // postMessage handshake, which may be delayed or unavailable.
-app.connect().catch(() => { try { state.textContent = "read only"; } catch (_) {} });
+app.connect().catch(() => { try { state.textContent = "read only"; state.classList.remove("connected"); } catch (_) {} });
 })();
 </script>
 </body>
