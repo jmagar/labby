@@ -52,6 +52,37 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.24.0] - 2026-06-11
+
+### Highlights
+
+- **Gateway usage dashboard** (gateway-admin) — the operator landing page is now a usage dashboard: live fleet + windowed usage in one compact 8-up stat row (1h/24h/7d), tool-call volume + top-tools charts, most-active (agent/device/IP facets), Code Mode fan-out, least-used, and an analytics band (latency p50/p95/p99, failures-by-kind, calls-by-surface, tokens-by-tool, top-upstreams, throughput, activity-by-hour heat). Drill-downs: tool + agent detail drawers and a filterable `/usage` call explorer. Dismissable warning banner, squared/uniform Aurora radii (retuned `--radius` tokens to 6/8/10), light-mode-safe toggles, loading + error/retry states.
+- **Usage-metrics backend** — the gateway aggregates real usage from its own dispatch logs:
+  - Estimated `input_tokens` / `output_tokens` logged on every MCP + API dispatch-completion event (estimators moved to the shared `dispatch::helpers` leaf).
+  - `logs.metrics` — rolling-window aggregation: tool calls, tokens, latency percentiles, failures by kind, surfaces, tokens-by-tool, upstreams, throughput, hourly, timeseries.
+  - `logs.tool_detail` / `logs.agent_detail` / `logs.calls` — drill-down metrics + a filterable, paginated call log for the drawers and explorer.
+  - All reachable via the existing `/logs` route; the frontend consumes them once `NEXT_PUBLIC_MOCK_DATA` is off.
+
+### Notes
+
+- The dashboard ships against mock data by default; the backend endpoints are implemented and unit-tested but **not yet verified end-to-end against a live gateway**.
+- Tier-2 telemetry still pending (best-effort/empty for now): source IP per call, agent-vs-device classification, Code-Mode truncation/artifact counts, new-vs-returning agents.
+
+| Commit | Change |
+|--------|--------|
+| *(this)* | chore(release): v0.24.0 — usage dashboard + metrics endpoints, session log |
+| `2f2bf442` | feat(lab): logs drill-down endpoints — tool_detail, agent_detail, calls |
+| `d705adf1` | feat(lab): logs.metrics — usage aggregation endpoint for the dashboard |
+| `05fe1399` | feat(lab): log estimated tokens on MCP + API dispatch events |
+| `727fbcd3` | feat(gateway-admin): usage dashboard for the gateway overview (mock) |
+| `dc3c84de` | style: fix rustfmt 1.94.1 drift in 3 dispatch files |
+| `9d387a92` | docs: save session log |
+| `9a55ed40` | docs(plan): setup-wizard consolidation plan + eng-review fixes |
+| `c64099ef` | ci: run Windows test on same-repo PRs (still skips forks) |
+| `57a15d5a` | docs: document [gateway] spawn-guard config knobs |
+
+---
+
 ## [0.23.0] - 2026-06-10
 
 ### Highlights

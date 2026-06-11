@@ -87,9 +87,9 @@
   /* Aurora radius scale — token-backed per design-system-contract.md.
      New code should reach for rounded-aurora-1/2/3; legacy rounded-[…rem]
      variants are tolerated as tuned variants pending migration. */
-  --radius-1: 14px;
-  --radius-2: 18px;
-  --radius-3: 22px;
+  --radius-1: 6px;
+  --radius-2: 8px;
+  --radius-3: 10px;
 }
 
 .aurora-text-surface .cm-editor {

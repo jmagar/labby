@@ -2004,6 +2004,39 @@
           }
         }
       },
+      "LogsLogsAgent_detailParams": {
+        "type": "object",
+        "required": [
+          "agent"
+        ],
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "window": {
+            "type": "string"
+          }
+        }
+      },
+      "LogsLogsCallsParams": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        }
+      },
+      "LogsLogsMetricsParams": {
+        "type": "object",
+        "properties": {
+          "window": {
+            "type": "string"
+          }
+        }
+      },
       "LogsLogsSearchParams": {
         "type": "object",
         "properties": {
@@ -2022,6 +2055,20 @@
             "type": "integer"
           },
           "since_event_id": {
+            "type": "string"
+          }
+        }
+      },
+      "LogsLogsTool_detailParams": {
+        "type": "object",
+        "required": [
+          "tool"
+        ],
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "window": {
             "type": "string"
           }
         }

@@ -1335,6 +1335,74 @@
           "returns": "Value"
         },
         {
+          "name": "logs.metrics",
+          "description": "Aggregate usage metrics (tool calls, tokens, latency, surfaces, fan-out, …) over a rolling window",
+          "destructive": false,
+          "params": [
+            {
+              "name": "window",
+              "ty": "string",
+              "required": false,
+              "description": "Rolling window: 1h, 24h (default), or 7d"
+            }
+          ],
+          "returns": "Value"
+        },
+        {
+          "name": "logs.tool_detail",
+          "description": "Drill-down metrics for a single tool over a rolling window",
+          "destructive": false,
+          "params": [
+            {
+              "name": "tool",
+              "ty": "string",
+              "required": true,
+              "description": "Tool / service name"
+            },
+            {
+              "name": "window",
+              "ty": "string",
+              "required": false,
+              "description": "Rolling window: 1h, 24h (default), or 7d"
+            }
+          ],
+          "returns": "Value"
+        },
+        {
+          "name": "logs.agent_detail",
+          "description": "Drill-down metrics for a single agent / device over a rolling window",
+          "destructive": false,
+          "params": [
+            {
+              "name": "agent",
+              "ty": "string",
+              "required": true,
+              "description": "Agent / actor id"
+            },
+            {
+              "name": "window",
+              "ty": "string",
+              "required": false,
+              "description": "Rolling window: 1h, 24h (default), or 7d"
+            }
+          ],
+          "returns": "Value"
+        },
+        {
+          "name": "logs.calls",
+          "description": "Filterable, paginated tool-call log for the usage explorer",
+          "destructive": false,
+          "params": [
+            {
+              "name": "query",
+              "ty": "json",
+              "required": true,
+              "description": "ToolCallQuery: window + optional tool/agent/ip/outcome/surface/search/limit/offset"
+            }
+          ],
+          "returns": "Value"
+        },
+        {
           "name": "logs.stream",
           "description": "Live push is HTTP SSE only; dispatch returns guidance",
           "destructive": false,

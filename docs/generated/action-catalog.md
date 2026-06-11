@@ -104,10 +104,14 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `lab_admin` | `onboarding.audit` | false | false | `services*: string[]` | `AuditReport` | cli, mcp |
 | `lab_admin` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp |
 | `logs` | `help` | false | false |  | `Catalog` | cli, mcp, api, web |
+| `logs` | `logs.agent_detail` | false | false | `agent*: string`<br>`window: string` | `Value` | cli, mcp, api, web |
+| `logs` | `logs.calls` | false | false | `query*: json` | `Value` | cli, mcp, api, web |
+| `logs` | `logs.metrics` | false | false | `window: string` | `Value` | cli, mcp, api, web |
 | `logs` | `logs.search` | false | false | `query: json` | `Value` | cli, mcp, api, web |
 | `logs` | `logs.stats` | false | false |  | `Value` | cli, mcp, api, web |
 | `logs` | `logs.stream` | false | false |  | `Value` | cli, mcp, api, web |
 | `logs` | `logs.tail` | false | false | `after_ts: integer`<br>`since_event_id: string`<br>`limit: integer` | `Value` | cli, mcp, api, web |
+| `logs` | `logs.tool_detail` | false | false | `tool*: string`<br>`window: string` | `Value` | cli, mcp, api, web |
 | `logs` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api, web |
 | `marketplace` | `agent.get` | false | false | `id*: string` | `Agent` | cli, mcp, api, web |
 | `marketplace` | `agent.install` | false | true | `id*: string`<br>`node_ids*: array`<br>`platform: string`<br>`confirm*: boolean` | `InstallResults` | cli, mcp, api, web |
