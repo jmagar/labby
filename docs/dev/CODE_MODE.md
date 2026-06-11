@@ -180,24 +180,24 @@ An upstream tool can return a native MCP Apps (mcp-ui) widget by carrying
 `text/html;profile=mcp-app`). Inside `execute`, the unwrapped `callTool` payload
 drops that envelope metadata, so a widget would otherwise collapse to plain JSON.
 
-To render the widget through `execute`, the caller opts in explicitly by
-returning an object with a `__ui` key:
+When a snippet calls a widget-bearing upstream tool, `execute` surfaces the most
+recent captured widget metadata on the final tool result. The caller can also
+return an object with a `__ui` key to unwrap a specific payload shape while
+rendering the captured widget:
 
 ```ts
 async () => {
   const dashboard = await codemode.axon.status_dashboard({});
-  return { __ui: dashboard };   // render the widget; surface `dashboard` as the result
+  return { __ui: dashboard };   // optional: render the widget; surface `dashboard` as the result
 }
 ```
 
 Semantics:
 
-- **Opt-in only.** Without a `__ui` key the run behaves exactly as before — no
-  widget metadata is attached.
 - **Last-wins.** The broker records the most recent widget-bearing upstream call
-  during the run; that link is the one surfaced. `<result>` inside `{ __ui:
-  <result> }` is unwrapped into the execute `result` field so the model still
-  sees the payload.
+  during the run; that link is the one surfaced. If the final return value uses
+  `{ __ui: <result> }`, `<result>` is unwrapped into the execute `result` field
+  so the model still sees the payload.
 - **Native URIs.** The widget's `ui://<upstream>/...` URI is preserved verbatim.
   The gateway routes a `resources/read` of that URI to the owning upstream peer
   via catalog reverse-lookup (it is **not** rewritten to `lab://upstream/...`).
@@ -206,8 +206,8 @@ Semantics:
   `_meta.ui` object verbatim, so the host renders the widget identically to a
   direct connector. The widget itself is driven by the `ui://` resource read, not
   by inline content, so the execute trace content is left intact.
-- The `CodeModeExecutionResponse` gains an optional `ui` field that is `null`
-  unless the opt-in fired.
+- The `CodeModeExecutionResponse` gains an optional `ui` field when a
+  widget-bearing upstream result was captured.
 
 ### Widget → host callbacks (opt-in)
 

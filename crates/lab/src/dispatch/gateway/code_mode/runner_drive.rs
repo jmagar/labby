@@ -582,7 +582,7 @@ async fn finalize_done(
     sorted.sort_by_key(|(seq, _)| *seq);
     Ok(CodeModeExecutionResponse {
         result: result.into_response_result(),
-        // `__ui` opt-in detection + last-wins capture is applied later in
+        // Widget capture and optional `__ui` unwrapping are applied later in
         // `execute()`; the runner-level response always starts with `ui: None`.
         ui: None,
         calls: sorted.into_iter().map(|(_, call)| call).collect(),

@@ -487,10 +487,9 @@ impl LabMcpServer {
             })
             .await;
         // Mirror the upstream's `_meta.ui` verbatim onto the execute result so
-        // the host renders the native mcp-ui widget (last-wins, opt-in via
-        // `{ __ui: <result> }`). The widget itself is driven by the `ui://`
-        // resource read, not by inline content, so the execute trace content is
-        // left intact.
+        // the host renders the native mcp-ui widget (last-wins). The widget
+        // itself is driven by the `ui://` resource read, not by inline content,
+        // so the execute trace content is left intact.
         let ui_meta = response.ui.as_ref().map(|ui| {
             let mut map = serde_json::Map::new();
             map.insert("ui".to_string(), ui.ui_meta.clone());

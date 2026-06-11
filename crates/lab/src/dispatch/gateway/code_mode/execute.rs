@@ -19,8 +19,9 @@ use super::types::{
     CodeModeSurface, CodeModeToolId, CodeModeToolRef, UiLink, destructive_permitted,
 };
 
-/// Key a Code Mode `execute` snippet returns (`return { __ui: <result> }`) to
-/// request that the last-wins captured mcp-ui widget link be surfaced.
+/// Compatibility key a Code Mode `execute` snippet can return
+/// (`return { __ui: <result> }`) to unwrap the final result payload while using
+/// the last-wins captured mcp-ui widget link.
 const UI_OPT_IN_KEY: &str = "__ui";
 
 impl CodeModeBroker<'_> {
@@ -59,9 +60,10 @@ impl CodeModeBroker<'_> {
                 capability_filter,
             )
             .await?;
-        // `{ __ui: <result> }` opt-in: surface the last-wins captured mcp-ui
-        // widget link and unwrap the inner payload. Done before truncation so
-        // the (tiny) `ui` field is preserved while `result` may be capped.
+        // Surface any last-wins captured mcp-ui widget link. `{ __ui: <result> }`
+        // remains a compatibility form that also unwraps the inner payload.
+        // Done before truncation so the (tiny) `ui` field is preserved while
+        // `result` may be capped.
         self.apply_ui_opt_in(&mut response);
         let was_truncated = !response_within_budget(
             &response,
@@ -339,7 +341,7 @@ impl CodeModeBroker<'_> {
                 pool.record_success(upstream).await;
                 // Capture the mcp-ui widget link (if any) before the envelope is
                 // unwrapped and `_meta` is discarded. Last-wins across the run;
-                // surfaced only when the user opts in via `{ __ui: <result> }`.
+                // surfaced on the final execute response.
                 if let Some(ui) = extract_ui_link(&result) {
                     let resource_uri = ui_resource_uri(&ui.ui_meta).unwrap_or("<unknown>");
                     tracing::info!(
@@ -395,21 +397,23 @@ impl CodeModeBroker<'_> {
         }
     }
 
-    /// Apply the `{ __ui: <result> }` opt-in to a finished execution response.
+    /// Apply a captured upstream MCP App widget link to a finished response.
     ///
     /// When the user code's return value is an object with a `__ui` key, the
-    /// inner value is unwrapped into `result` (so the model sees the payload it
-    /// chose to surface) and the last-wins captured widget link is attached to
-    /// `ui`. A no-op when the user did not opt in.
+    /// inner value is unwrapped into `result` for compatibility with the older
+    /// wrapper convention. Either way, if the run captured a widget-bearing
+    /// upstream result, attach the last-wins link to `ui`.
     fn apply_ui_opt_in(&self, response: &mut CodeModeExecutionResponse) {
         // Clone the inner value out (ending the borrow of `response.result`)
-        // before reassigning. No `__ui` key → no-op.
+        // before reassigning. No `__ui` key → keep the result as-is.
         let inner = match response.result.as_ref() {
             Some(Value::Object(map)) => map.get(UI_OPT_IN_KEY).cloned(),
             _ => None,
         };
-        let Some(inner) = inner else { return };
-        response.result = Some(inner);
+        let had_ui_opt_in = inner.is_some();
+        if let Some(inner) = inner {
+            response.result = Some(inner);
+        }
         if let Ok(mut sink) = self.ui_capture.lock() {
             response.ui = sink.take();
             match response.ui.as_ref() {
@@ -420,13 +424,16 @@ impl CodeModeBroker<'_> {
                     resource_uri = ui_resource_uri(&ui.ui_meta).unwrap_or("<unknown>"),
                     "attached captured MCP App widget to execute response"
                 ),
-                None => tracing::warn!(
-                    surface = "dispatch",
-                    service = "code_mode",
-                    action = "mcp_app.opt_in",
-                    kind = "ui_capture_missing",
-                    "Code Mode returned __ui but no upstream MCP App widget was captured"
-                ),
+                None if had_ui_opt_in => {
+                    tracing::warn!(
+                        surface = "dispatch",
+                        service = "code_mode",
+                        action = "mcp_app.opt_in",
+                        kind = "ui_capture_missing",
+                        "Code Mode returned __ui but no upstream MCP App widget was captured"
+                    );
+                }
+                None => {}
             }
         } else {
             tracing::warn!(
@@ -530,13 +537,34 @@ mod tests {
     fn apply_ui_opt_in_without_optin_is_noop() {
         let registry = ToolRegistry::new();
         let broker = CodeModeBroker::new(&registry, None);
-        // Even with a captured link, no `__ui` key means no widget is surfaced.
-        *broker.ui_capture.lock().unwrap() = Some(UiLink {
-            ui_meta: json!({ "resourceUri": "ui://x/y" }),
-        });
         let mut response = response_with_result(json!({ "degraded": false }));
         broker.apply_ui_opt_in(&mut response);
         assert_eq!(response.result, Some(json!({ "degraded": false })));
-        assert!(response.ui.is_none(), "no opt-in → no widget attached");
+        assert!(
+            response.ui.is_none(),
+            "no captured widget → no widget attached"
+        );
+    }
+
+    #[test]
+    fn apply_ui_opt_in_surfaces_direct_ui_tool_result() {
+        let registry = ToolRegistry::new();
+        let broker = CodeModeBroker::new(&registry, None);
+        *broker.ui_capture.lock().unwrap() = Some(UiLink {
+            ui_meta: json!({ "resourceUri": "ui://ytdl-mcp/youtube-search.html" }),
+        });
+
+        let mut response = response_with_result(json!({
+            "query": "phish",
+            "limit": 1,
+            "results": []
+        }));
+
+        broker.apply_ui_opt_in(&mut response);
+
+        assert_eq!(
+            response.ui.as_ref().expect("widget attached").ui_meta["resourceUri"],
+            "ui://ytdl-mcp/youtube-search.html"
+        );
     }
 }

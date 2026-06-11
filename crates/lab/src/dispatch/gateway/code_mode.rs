@@ -134,9 +134,9 @@ pub struct CodeModeBroker<'a> {
     gateway_manager: Option<&'a GatewayManager>,
     /// Run-scoped sink for the last upstream MCP Apps (mcp-ui) widget link seen
     /// during this execution. Recorded at the `call_upstream_tool` boundary
-    /// (last-wins) before the envelope is unwrapped, then surfaced via the
-    /// `{ __ui: <result> }` opt-in in `execute()`. A fresh broker is constructed
-    /// per request, so this is naturally scoped to a single run.
+    /// (last-wins) before the envelope is unwrapped, then surfaced in
+    /// `execute()`. A fresh broker is constructed per request, so this is
+    /// naturally scoped to a single run.
     ui_capture: std::sync::Arc<std::sync::Mutex<Option<types::UiLink>>>,
 }
 

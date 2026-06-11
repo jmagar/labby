@@ -158,10 +158,9 @@ pub struct CodeModeExecutionResponse {
     /// serializes as `"result": null`; undefined omits the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<Value>,
-    /// Captured mcp-ui widget link surfaced via the `{ __ui: <result> }` opt-in
-    /// (last-wins across the run). The MCP boundary attaches this as `_meta.ui`
-    /// on the returned `CallToolResult` so the host renders the native widget.
-    /// `None` when the user code did not opt in or no widget-bearing call ran.
+    /// Captured mcp-ui widget link (last-wins across the run). The MCP boundary
+    /// attaches this as `_meta.ui` on the returned `CallToolResult` so the host
+    /// renders the native widget. `None` when no widget-bearing call ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ui: Option<UiLink>,
     pub calls: Vec<CodeModeExecutedCall>,
