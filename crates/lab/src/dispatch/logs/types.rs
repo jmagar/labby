@@ -454,6 +454,28 @@ impl LogSystem {
         Ok(stats)
     }
 
+    /// Aggregate dispatch-completion events over a rolling window into the
+    /// dashboard usage-metrics shape (see `super::metrics`).
+    pub async fn metrics(
+        &self,
+        window: super::metrics::MetricsWindow,
+    ) -> Result<super::metrics::DashboardMetrics, ToolError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let query: LogQuery = serde_json::from_value(serde_json::json!({
+            "after_ts": now - window.ms(),
+            "limit": 10_000,
+        }))
+        .map_err(|e| ToolError::Sdk {
+            sdk_kind: "internal_error".to_string(),
+            message: format!("build metrics query: {e}"),
+        })?;
+        let result = self.store.search(query).await?;
+        Ok(super::metrics::aggregate(&result.events, window, now))
+    }
+
     pub async fn subscribe(&self, sub: StreamSubscription) -> Result<LogStreamReceiver, ToolError> {
         Ok(self.hub.subscribe(sub))
     }

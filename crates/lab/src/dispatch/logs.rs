@@ -3,6 +3,7 @@ pub mod client;
 pub mod dispatch;
 pub mod forward;
 pub mod ingest;
+pub mod metrics;
 pub mod params;
 pub mod store;
 pub mod stream;

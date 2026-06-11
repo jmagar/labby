@@ -2,6 +2,7 @@
 
 use serde_json::Value;
 
+use super::metrics::MetricsWindow;
 use super::types::{LogQuery, LogTailRequest};
 use crate::dispatch::error::ToolError;
 
@@ -27,6 +28,17 @@ pub fn parse_tail_params(params: Value) -> Result<LogTailRequest, ToolError> {
     serde_json::from_value::<LogTailRequest>(inner).map_err(|e| ToolError::InvalidParam {
         message: format!("invalid LogTailRequest: {e}"),
         param: "params".to_string(),
+    })
+}
+
+pub fn parse_metrics_params(params: Value) -> Result<MetricsWindow, ToolError> {
+    let window = params
+        .get("window")
+        .and_then(Value::as_str)
+        .unwrap_or("24h");
+    MetricsWindow::parse(window).ok_or_else(|| ToolError::InvalidParam {
+        message: format!("invalid window `{window}` (expected 1h, 24h, or 7d)"),
+        param: "window".to_string(),
     })
 }
 

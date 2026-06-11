@@ -76,6 +76,19 @@ pub const ACTIONS: &[ActionSpec] = &[
         params: &[],
     },
     ActionSpec {
+        name: "logs.metrics",
+        description: "Aggregate usage metrics (tool calls, tokens, latency, surfaces, fan-out, …) over a rolling window",
+        destructive: false,
+        requires_admin: false,
+        returns: "Value",
+        params: &[ParamSpec {
+            name: "window",
+            ty: "string",
+            required: false,
+            description: "Rolling window: 1h, 24h (default), or 7d",
+        }],
+    },
+    ActionSpec {
         name: "logs.stream",
         description: "Live push is HTTP SSE only; dispatch returns guidance",
         destructive: false,
