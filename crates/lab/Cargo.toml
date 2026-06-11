@@ -90,6 +90,7 @@ strip-ansi-escapes = "0.2"
 agent-client-protocol = { version = "=0.13.1", features = ["unstable"] }
 
 hex = "0.4"
+getrandom = "0.4"
 ulid = "1"
 num_cpus = "1"
 

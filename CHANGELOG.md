@@ -4,7 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-(empty)
+### Added
+
+- **First-run `labby serve` self-bootstrap** — when no MCP token is configured
+  (`LAB_MCP_HTTP_TOKEN` unset and `LAB_AUTH_MODE` != `oauth`), `labby serve`
+  generates a 64-char hex bearer token and writes a minimal `~/.lab/.env`
+  (token + loopback MCP defaults via the atomic `env_merge` path), then prints
+  the token and the `http://<host>:<port>/setup` URL once, so a fresh headless
+  install is reachable without hand-editing config. A new non-destructive
+  `setup.bootstrap` dispatch action backs it.
 
 ---
 

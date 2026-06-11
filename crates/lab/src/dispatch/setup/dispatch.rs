@@ -65,6 +65,7 @@ async fn dispatch_inner(action: &str, params: &Value) -> Result<Value, ToolError
             action_schema(ACTIONS, a)
         }
         "state" => state_action(),
+        "bootstrap" => super::bootstrap_action(),
         "schema.get" => schema_get_action(params),
         "draft.get" => draft_get_action(),
         "draft.set" => draft_set_action(params).await,
@@ -610,7 +611,7 @@ fn audit_summary(audit: &Value) -> (usize, usize, bool) {
     (pass, total, pass == total)
 }
 
-fn map_merge_err(err: env_merge::MergeError) -> ToolError {
+pub(super) fn map_merge_err(err: env_merge::MergeError) -> ToolError {
     ToolError::Sdk {
         sdk_kind: err.kind().to_string(),
         message: err.to_string(),

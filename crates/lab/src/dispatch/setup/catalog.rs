@@ -33,6 +33,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         params: &[],
     },
     ActionSpec {
+        name: "bootstrap",
+        description: "Create ~/.lab/.env with a generated token + loopback defaults when absent (first-run)",
+        destructive: false,
+        requires_admin: false,
+        returns: "BootstrapOutcome",
+        params: &[],
+    },
+    ActionSpec {
         name: "schema.get",
         description: "UiSchema projection for all (or filtered) services",
         destructive: false,

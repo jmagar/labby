@@ -6,6 +6,7 @@
 //! single sanctioned cross-service dispatch call (see the orchestrator
 //! exception clause in `crates/lab/src/dispatch/CLAUDE.md`).
 
+mod bootstrap;
 mod catalog;
 mod claude_plugins;
 mod client;
@@ -15,6 +16,8 @@ mod params;
 mod plugin_hook;
 mod secret_mask;
 mod state;
+mod token;
 
+pub use bootstrap::{BootstrapOutcome, bootstrap, bootstrap_action, should_bootstrap};
 pub use catalog::ACTIONS;
 pub use dispatch::dispatch;

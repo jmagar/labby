@@ -32,6 +32,7 @@ const ALLOWED_PATHS: &[&str] = &[
     "dispatch/setup/",
     // Surfaces that mount the dispatch (CLI / API / registry):
     "cli/setup.rs",
+    "cli/serve.rs",
     "api/services/setup.rs",
     "registry.rs",
 ];

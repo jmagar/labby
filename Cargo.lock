@@ -2594,6 +2594,7 @@ dependencies = [
  "fd-lock",
  "fs4",
  "futures",
+ "getrandom 0.4.2",
  "globset",
  "hex",
  "hmac 0.13.0",

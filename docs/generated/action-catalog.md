@@ -149,6 +149,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `marketplace` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api, web |
 | `marketplace` | `sources.add` | false | true | `repo: string`<br>`url: string`<br>`autoUpdate: boolean` | `AddResult` | cli, mcp, api, web |
 | `marketplace` | `sources.list` | false | false |  | `Marketplace[]` | cli, mcp, api, web |
+| `setup` | `bootstrap` | false | false |  | `BootstrapOutcome` | cli, mcp, api, web |
 | `setup` | `check` | false | false |  | `SetupReport` | cli, mcp, api, web |
 | `setup` | `draft.commit` | false | true | `force: boolean` | `CommitOutcome` | cli, mcp, api, web |
 | `setup` | `draft.get` | false | false |  | `DraftEntry[]` | cli, mcp, api, web |

@@ -272,7 +272,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
     let spawn_depth = resolve_lab_spawn_depth(std::env::var("LAB_SPAWN_DEPTH").ok());
     let suppress_upstream_runtime = stdio_recursion_guard_active(stdio_mode, spawn_depth);
     let gateway_runtime = GatewayRuntimeHandle::default();
-    let bearer_token = http_token();
+    let mut bearer_token = http_token();
     let auth_config =
         resolve_auth_for_config(&config).context("invalid HTTP auth configuration")?;
     // SECURITY: Only log metadata — never resolved secret values.
@@ -490,6 +490,68 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
 
     crate::mcp::server::verify_upstream_subject_resolution_support()
         .context("verify upstream OAuth subject-resolution wiring")?;
+
+    // First-run self-bootstrap (setup-wizard consolidation): when no MCP token
+    // is configured, OAuth is not active, AND the bind is loopback, generate a
+    // token + minimal ~/.lab/.env so the server can start and the operator can
+    // reach /setup. Closes the headless bootstrap circularity.
+    //
+    // Loopback gate (HIGH-1): we deliberately do NOT auto-bootstrap on a
+    // non-loopback bind. An explicit `--host 0.0.0.0` with no auth must still
+    // hit the lab-319g safety gate below and bail — silently minting a token
+    // would turn a misconfiguration into a publicly reachable server.
+    //
+    // The generated token is made authoritative in-process immediately
+    // (`bearer_token = Some(token)`), so the running server always
+    // authenticates with the token it just wrote even if the env reload fails.
+    // We THEN reload the file via dotenvy so downstream LAB_MCP_HTTP_TOKEN
+    // readers (e.g. node master client, `logs`) also see it. dotenvy owns its
+    // own set_var, keeping this crate unsafe-free (the workspace forbids
+    // unsafe_code) and not overriding already-set vars.
+    if crate::dispatch::setup::should_bootstrap(
+        bearer_token.is_some(),
+        matches!(auth_config.mode, AuthMode::OAuth),
+    ) && is_loopback_host(&host)
+    {
+        match crate::dispatch::setup::bootstrap() {
+            Ok(crate::dispatch::setup::BootstrapOutcome::Created { env_path, token }) => {
+                bearer_token = Some(token.clone());
+                if let Err(error) = dotenvy::from_path(&env_path) {
+                    tracing::error!(
+                        surface = "cli",
+                        service = "serve",
+                        error = %error,
+                        "failed to reload generated ~/.lab/.env into process env; \
+                         in-process token is authoritative, downstream env readers may not see it"
+                    );
+                }
+                tracing::info!(
+                    surface = "cli",
+                    service = "serve",
+                    "first run: generated LAB_MCP_HTTP_TOKEN and wrote ~/.lab/.env"
+                );
+                // Do NOT print the token itself — stderr is commonly captured
+                // by systemd/journald/Docker, which would persist the secret
+                // (the project forbids logging secrets). The token is in the
+                // 0600 .env; point the operator there instead.
+                eprintln!("\n  Lab first-run setup");
+                eprintln!(
+                    "  Generated an MCP bearer token in {} (mode 0600).",
+                    env_path.display()
+                );
+                eprintln!("  Open http://{host}:{port}/setup to finish configuration.");
+                eprintln!(
+                    "  For remote clients, read the token from that file (e.g. `grep LAB_MCP_HTTP_TOKEN {}`).\n",
+                    env_path.display()
+                );
+            }
+            Ok(crate::dispatch::setup::BootstrapOutcome::AlreadyPresent { .. }) => {}
+            Err(error) => {
+                tracing::warn!(surface = "cli", service = "serve", error = %error, "first-run bootstrap skipped");
+            }
+        }
+    }
+
     let auth_configured = bearer_token.is_some() || matches!(auth_config.mode, AuthMode::OAuth);
 
     // Safety gate: refuse to bind on a non-localhost address without
