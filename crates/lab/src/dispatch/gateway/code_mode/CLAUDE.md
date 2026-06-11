@@ -90,7 +90,7 @@ and include a comment explaining the intended vs. actual state.
 | `runner.rs` | Subprocess lifecycle: `spawn_runner()`, read/write loop, graceful shutdown. |
 | `runner_drive.rs` | Higher-level driver: timeout wrapping, retry policy, `CodeModeHistory` tracking. |
 | `runner_io.rs` | Framed stdio line protocol with the child process. |
-| `execute.rs` | `execute()` entry point: build context, inject preamble, call driver, return result. |
+| `execute.rs` | `execute()` entry point: build context, inject preamble, call driver, return result. Also owns mcp-ui widget capture: `extract_ui_link` records an upstream result's `_meta.ui` (last-wins, into the per-run `CodeModeBroker::ui_capture` sink) before the envelope is unwrapped, and `apply_ui_opt_in` surfaces it when the user returns `{ __ui: <result> }`. |
 | `search.rs` | `search()` entry point: project catalog, call driver, return filtered tool list. |
 | `preamble.rs` | Injects the `callTool` bridge stub and catalog proxy into the JS environment. |
 | `protocol.rs` | Wire types for all parent↔runner messages (serialization-stable). |
@@ -114,7 +114,10 @@ and include a comment explaining the intended vs. actual state.
 - Do not call `wasm_runner.rs` from any live code path.
 - Do not add `code_mode_fuel_exhausted` to new match arms; the live kind is `"timeout"`.
 - Do not expose host network APIs to the runner child.
-- Keep `protocol.rs` as the single serialization-stable wire contract.
+- Keep `protocol.rs` as the single serialization-stable wire contract. The
+  mcp-ui `{ __ui: <result> }` opt-in is a **host-side return convention** detected
+  on the runner's returned `result` — it adds **no** new parent↔runner wire
+  fields.
 - Keep each file under 500 LOC; split following the existing pattern if a file grows.
 
 ---

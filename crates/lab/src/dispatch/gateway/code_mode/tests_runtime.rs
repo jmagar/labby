@@ -45,6 +45,7 @@ fn truncates_code_execute_final_result_when_oversized() {
     // result. An oversized final result is replaced with a truncation marker;
     // the calls metadata is preserved untouched.
     let response = CodeModeExecutionResponse {
+        ui: None,
         result: Some(json!({"payload": "x".repeat(5000)})),
         calls: vec![
             CodeModeExecutedCall {
@@ -88,6 +89,7 @@ fn truncates_code_execute_final_result_when_oversized() {
 #[test]
 fn does_not_truncate_when_final_result_within_budget() {
     let response = CodeModeExecutionResponse {
+        ui: None,
         result: Some(json!({"items": ["small"]})),
         calls: vec![CodeModeExecutedCall {
             id: "github::search_issues".to_string(),
@@ -110,6 +112,7 @@ fn truncates_oversized_logs_after_result() {
     // lines push the envelope over budget. After capping the (small) result,
     // logs must be trimmed until within budget, leaving a sentinel.
     let response = CodeModeExecutionResponse {
+        ui: None,
         result: Some(json!({"ok": true})),
         calls: vec![CodeModeExecutedCall {
             id: "test::ping".to_string(),
@@ -151,6 +154,7 @@ fn log_trimming_terminates_when_budget_unreachable() {
     // unreachable. The log-trimming loop must still terminate (best-effort),
     // collapsing logs to a single sentinel rather than looping forever.
     let response = CodeModeExecutionResponse {
+        ui: None,
         result: Some(json!({"ok": true})),
         calls: (0..200)
             .map(|i| CodeModeExecutedCall {
@@ -283,6 +287,7 @@ fn token_estimate_divisor_affects_truncation_decision() {
     // max_response_tokens=2000).  With divisor=1 → ~4000 tokens (exceeds 2000).
     let payload = "x".repeat(4000);
     let make_response = || CodeModeExecutionResponse {
+        ui: None,
         result: Some(json!({"payload": payload.clone()})),
         calls: vec![CodeModeExecutedCall {
             id: "test::large".to_string(),
@@ -470,6 +475,7 @@ fn runner_protocol_preserves_null_distinct_from_undefined() {
     );
 
     let explicit_null = serde_json::to_value(CodeModeExecutionResponse {
+        ui: None,
         result: Some(Value::Null),
         calls: Vec::new(),
         logs: Vec::new(),
@@ -477,6 +483,7 @@ fn runner_protocol_preserves_null_distinct_from_undefined() {
     })
     .unwrap();
     let undefined = serde_json::to_value(CodeModeExecutionResponse {
+        ui: None,
         result: None,
         calls: Vec::new(),
         logs: Vec::new(),
@@ -517,6 +524,7 @@ fn code_mode_execution_error_carries_partial_calls() {
 #[test]
 fn truncation_preserves_artifact_receipts() {
     let response = CodeModeExecutionResponse {
+        ui: None,
         result: Some(serde_json::json!({
             "markdown": "x".repeat(10_000),
             "artifact": {
@@ -1152,6 +1160,7 @@ fn binary_search_log_truncation_boundary_is_tight() {
     let line_count = 50usize;
     let line_payload = "B".repeat(70);
     let make_response = || CodeModeExecutionResponse {
+        ui: None,
         result: Some(json!({"ok": true})),
         calls: vec![CodeModeExecutedCall {
             id: "test::ping".to_string(),

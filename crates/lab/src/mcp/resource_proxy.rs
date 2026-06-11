@@ -273,6 +273,106 @@ impl LabMcpServer {
         }
     }
 
+    /// Upstream MCP Apps (mcp-ui) widget resource branch (`ui://<upstream>/…`).
+    ///
+    /// These are native `ui://` resources owned by an upstream peer (referenced
+    /// by a tool result's `_meta.ui.resourceUri`). The caller invokes this only
+    /// for non-local `ui://` URIs — `ui://lab/code-mode/*` stays on the local
+    /// Code Mode app handler. Reverse-lookup + forwarding lives in the pool;
+    /// this method stays envelope-only.
+    pub(crate) async fn read_upstream_ui_resource_impl(
+        &self,
+        pool: &Arc<UpstreamPool>,
+        uri: &str,
+        subject: &str,
+        start: Instant,
+        context: &RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResult, ErrorData> {
+        tracing::info!(
+            surface = "mcp",
+            service = "labby",
+            action = "read_resource",
+            resource_uri = redact_resource_uri_for_logging(uri),
+            route = "upstream_ui",
+            "dispatch route selected"
+        );
+        match pool.read_upstream_ui_resource(uri).await {
+            Some(Ok(result)) => {
+                let elapsed_ms = start.elapsed().as_millis();
+                tracing::info!(
+                    surface = "mcp",
+                    service = "labby",
+                    action = "read_resource",
+                    subject,
+                    resource_uri = redact_resource_uri_for_logging(uri),
+                    elapsed_ms,
+                    "ui resource proxy ok"
+                );
+                self.emit_dispatch_notification(
+                    context,
+                    "lab",
+                    "read_resource",
+                    elapsed_ms,
+                    DispatchLogOutcome::Success,
+                )
+                .await;
+                Ok(result)
+            }
+            Some(Err(message)) => {
+                let elapsed_ms = start.elapsed().as_millis();
+                tracing::warn!(
+                    surface = "mcp",
+                    service = "labby",
+                    action = "read_resource",
+                    resource_uri = redact_resource_uri_for_logging(uri),
+                    elapsed_ms,
+                    kind = "internal_error",
+                    error = %message,
+                    "ui resource proxy failed"
+                );
+                self.emit_dispatch_notification(
+                    context,
+                    "lab",
+                    "read_resource",
+                    elapsed_ms,
+                    DispatchLogOutcome::Failure {
+                        level: LoggingLevel::Error,
+                        kind: "internal_error",
+                    },
+                )
+                .await;
+                Err(ErrorData::internal_error(message, None))
+            }
+            None => {
+                let elapsed_ms = start.elapsed().as_millis();
+                tracing::warn!(
+                    surface = "mcp",
+                    service = "labby",
+                    action = "read_resource",
+                    resource_uri = redact_resource_uri_for_logging(uri),
+                    elapsed_ms,
+                    kind = "not_found",
+                    "no upstream owns ui resource"
+                );
+                self.emit_dispatch_notification(
+                    context,
+                    "lab",
+                    "read_resource",
+                    elapsed_ms,
+                    DispatchLogOutcome::Failure {
+                        level: LoggingLevel::Warning,
+                        kind: "not_found",
+                    },
+                )
+                .await;
+                Err(ErrorData::resource_not_found(
+                    format!("unknown UI resource: {uri}"),
+                    None,
+                ))
+            }
+        }
+    }
+
     /// Subject-scoped resource proxy branch. The caller passes the
     /// already-resolved `pool`, `config`, and `oauth_subject` and invokes
     /// this only when all guards matched.

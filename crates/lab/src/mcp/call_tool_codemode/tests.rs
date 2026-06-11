@@ -81,6 +81,7 @@ fn gateway_search_input_schema_is_code_only() {
 #[test]
 fn execute_trace_contains_redacted_params_and_compact_result_shape() {
     let response = CodeModeExecutionResponse {
+        ui: None,
         result: Some(json!({
             "items": ["raw payload that should not be copied into trace"],
             "secret": "result payloads are summarized, not previewed"

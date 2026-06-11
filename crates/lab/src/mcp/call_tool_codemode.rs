@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use rmcp::ErrorData;
 use rmcp::RoleServer;
-use rmcp::model::{CallToolResult, Content, JsonObject};
+use rmcp::model::{CallToolResult, Content, JsonObject, Meta};
 use rmcp::service::RequestContext;
 use serde_json::Value;
 
@@ -228,7 +228,8 @@ impl LabMcpServer {
                     output_tokens,
                     "gateway code search ok"
                 );
-                Ok(call_result_with_structured(output, structured))
+                // `search` never surfaces a widget — it runs pure catalog JS.
+                Ok(call_result_with_structured(output, structured, None))
             }
             Err(err) => {
                 let elapsed_ms = started.elapsed().as_millis();
@@ -408,6 +409,16 @@ impl LabMcpServer {
                 match_count: None,
             })
             .await;
+        // Mirror the upstream's `_meta.ui` verbatim onto the execute result so
+        // the host renders the native mcp-ui widget (last-wins, opt-in via
+        // `{ __ui: <result> }`). The widget itself is driven by the `ui://`
+        // resource read, not by inline content, so the execute trace content is
+        // left intact.
+        let ui_meta = response.ui.as_ref().map(|ui| {
+            let mut map = serde_json::Map::new();
+            map.insert("ui".to_string(), ui.ui_meta.clone());
+            Meta(map)
+        });
         let output = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
         let structured = code_mode_execute_trace(&response);
         let output_tokens = estimate_tokens(&output);
@@ -423,13 +434,18 @@ impl LabMcpServer {
             output_tokens,
             "gateway code execute ok"
         );
-        Ok(call_result_with_structured(output, structured))
+        Ok(call_result_with_structured(output, structured, ui_meta))
     }
 }
 
-fn call_result_with_structured(text: String, structured: Value) -> CallToolResult {
+fn call_result_with_structured(
+    text: String,
+    structured: Value,
+    ui_meta: Option<Meta>,
+) -> CallToolResult {
     let mut result = CallToolResult::success(vec![Content::text(text)]);
     result.structured_content = Some(structured);
+    result.meta = ui_meta;
     result
 }
 

@@ -115,15 +115,37 @@ impl LabMcpServer {
         }
 
         if self.code_mode_visibility().await.hides_raw_tools() {
-            let envelope = build_error(
-                &service,
-                &action,
-                "not_found",
-                &format!("tool `{service}` is hidden while code_mode mode is enabled"),
-            );
-            return Ok(CallToolResult::error(vec![Content::text(
-                envelope.to_string(),
-            )]));
+            // mcp-ui widget callbacks: when the operator has explicitly enabled
+            // them, a raw call that names a known upstream tool is allowed to
+            // fall through to the upstream proxy so a rendered widget can drive
+            // its tool. The tool stays hidden from `list_tools` — this relaxes
+            // callability, never visibility. Default off (strict boundary); see
+            // `config::code_mode_widget_callbacks_enabled`.
+            let widget_callback = svc.is_none()
+                && crate::config::code_mode_widget_callbacks_enabled()
+                && match self.current_upstream_pool().await {
+                    Some(pool) => pool.find_tool(&service).await.is_some(),
+                    None => false,
+                };
+            if widget_callback {
+                tracing::info!(
+                    surface = "mcp",
+                    service = %service,
+                    action = %action,
+                    route = "upstream_widget_callback",
+                    "code_mode raw-tool gate bypassed for enabled widget callback"
+                );
+            } else {
+                let envelope = build_error(
+                    &service,
+                    &action,
+                    "not_found",
+                    &format!("tool `{service}` is hidden while code_mode mode is enabled"),
+                );
+                return Ok(CallToolResult::error(vec![Content::text(
+                    envelope.to_string(),
+                )]));
+            }
         }
 
         if let Some(entry) = svc

@@ -169,7 +169,15 @@ impl UpstreamPool {
                             );
                             break;
                         }
-                        rewrite_resource_uri(&mut resource, &name);
+                        // MCP Apps (mcp-ui) widget resources keep their native
+                        // `ui://…` URI: a tool result's `_meta.ui.resourceUri`
+                        // references that exact URI, and the host reads it back
+                        // verbatim (routed via `read_upstream_ui_resource`).
+                        // Rewriting to the `lab://upstream/{name}/…` gateway form
+                        // would break that reference, so skip the rewrite here.
+                        if !resource.uri.starts_with("ui://") {
+                            rewrite_resource_uri(&mut resource, &name);
+                        }
                         resources.push(resource);
                     }
                 }

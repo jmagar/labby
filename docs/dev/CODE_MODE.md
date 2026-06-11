@@ -173,6 +173,55 @@ When the envelope is too large, the final `result` is replaced with a truncation
 marker containing `truncated`, `original_size`, `original_tokens`, `preview`, and
 `next_action`. Logs are trimmed after result truncation if needed.
 
+## MCP Apps (mcp-ui) widgets
+
+An upstream tool can return a native MCP Apps (mcp-ui) widget by carrying
+`_meta.ui.resourceUri` (a `ui://<upstream>/...` URI served as
+`text/html;profile=mcp-app`). Inside `execute`, the unwrapped `callTool` payload
+drops that envelope metadata, so a widget would otherwise collapse to plain JSON.
+
+To render the widget through `execute`, the caller opts in explicitly by
+returning an object with a `__ui` key:
+
+```ts
+async () => {
+  const dashboard = await codemode.axon.status_dashboard({});
+  return { __ui: dashboard };   // render the widget; surface `dashboard` as the result
+}
+```
+
+Semantics:
+
+- **Opt-in only.** Without a `__ui` key the run behaves exactly as before — no
+  widget metadata is attached.
+- **Last-wins.** The broker records the most recent widget-bearing upstream call
+  during the run; that link is the one surfaced. `<result>` inside `{ __ui:
+  <result> }` is unwrapped into the execute `result` field so the model still
+  sees the payload.
+- **Native URIs.** The widget's `ui://<upstream>/...` URI is preserved verbatim.
+  The gateway routes a `resources/read` of that URI to the owning upstream peer
+  via catalog reverse-lookup (it is **not** rewritten to `lab://upstream/...`).
+  `ui://lab/code-mode/*` remains reserved for Lab's own Code Mode app resources.
+- **Identical mirroring.** The execute `CallToolResult` carries the upstream's
+  `_meta.ui` object verbatim, so the host renders the widget identically to a
+  direct connector. The widget itself is driven by the `ui://` resource read, not
+  by inline content, so the execute trace content is left intact.
+- The `CodeModeExecutionResponse` gains an optional `ui` field that is `null`
+  unless the opt-in fired.
+
+### Widget → host callbacks (opt-in)
+
+While the synthetic `search`/`execute` surface is active, raw upstream tools are
+hidden from `list_tools` and are not callable by name — so an interactive
+widget's callback (`tools/call` for an upstream tool) is rejected by default.
+Operators who want interactive widgets can set
+`LAB_CODE_MODE_WIDGET_CALLBACKS=1` (or `true`/`yes`) to let a call that names a
+known upstream tool fall through to the upstream proxy. This relaxes
+**callability**, never **visibility** — the tool stays out of `list_tools`. It is
+**off by default** because, on the same MCP session, it also lets the model
+invoke a known upstream tool by name. Leave it off unless interactive widgets are
+required.
+
 ## Error Contract
 
 Tool errors reject with a JSON-encoded string that can be decoded in the sandbox:

@@ -158,9 +158,26 @@ impl LabMcpServer {
         // Branch 0: MCP Apps UI resources. This must precede all lab://
         // fallbacks so ui:// has its own exact lookup semantics.
         if uri.starts_with("ui://") {
-            return self
-                .read_code_mode_app_resource_impl(uri, &subject, start, &context)
-                .await;
+            // Local Code Mode app resources own the `ui://lab/code-mode/*`
+            // namespace and are served from the bundled HTML.
+            if uri.starts_with("ui://lab/code-mode/") {
+                return self
+                    .read_code_mode_app_resource_impl(uri, &subject, start, &context)
+                    .await;
+            }
+            // Any other `ui://` is an upstream MCP Apps (mcp-ui) widget resource
+            // (referenced by a tool result's `_meta.ui.resourceUri`): reverse-
+            // look-up the owning upstream peer via the pool and forward the read
+            // under the native `ui://` URI.
+            if let Some(pool) = self.current_upstream_pool().await {
+                return self
+                    .read_upstream_ui_resource_impl(&pool, uri, &subject, start, &context)
+                    .await;
+            }
+            return Err(ErrorData::resource_not_found(
+                format!("unknown UI resource: {uri}"),
+                None,
+            ));
         }
 
         // Branch 1: gateway-synthetic resources.

@@ -52,6 +52,22 @@ pub(crate) fn process_code_mode_enabled() -> bool {
     PROCESS_CODE_MODE_ENABLED.load(Ordering::Acquire)
 }
 
+/// Whether mcp-ui widget → host tool callbacks are permitted while the Code
+/// Mode synthetic surface (`search`/`execute`) is active.
+///
+/// Default: **off**. When the synthetic surface is on, raw upstream tools are
+/// hidden from `list_tools` and normally not callable by name. Setting
+/// `LAB_CODE_MODE_WIDGET_CALLBACKS=1` (or `true`/`yes`) lets a rendered widget's
+/// callback reach the upstream proxy by tool name — the tool stays out of
+/// `list_tools`, so this only relaxes callability, never visibility. Operators
+/// opt in knowingly because it also lets any caller on the session (including
+/// the model) invoke a known upstream tool by name.
+pub(crate) fn code_mode_widget_callbacks_enabled() -> bool {
+    std::env::var("LAB_CODE_MODE_WIDGET_CALLBACKS")
+        .ok()
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+}
+
 use anyhow::{Context, Result};
 use lab_auth::config as auth_config;
 use serde::{Deserialize, Serialize, Serializer};

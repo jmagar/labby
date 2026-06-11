@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use rmcp::model::CallToolRequestParams;
+use rmcp::model::{CallToolRequestParams, CallToolResult};
 use serde_json::{Map, Value};
 
 use crate::dispatch::error::ToolError;
@@ -16,7 +16,7 @@ use super::schema::{unwrap_code_mode_upstream_result, validate_code_mode_params_
 use super::truncate::{response_within_budget, truncate_execution_response};
 use super::types::{
     CodeModeCaller, CodeModeCapabilityFilter, CodeModeExecutionError, CodeModeExecutionResponse,
-    CodeModeSurface, CodeModeToolId, CodeModeToolRef, destructive_permitted,
+    CodeModeSurface, CodeModeToolId, CodeModeToolRef, UiLink, destructive_permitted,
 };
 
 impl CodeModeBroker<'_> {
@@ -42,7 +42,7 @@ impl CodeModeBroker<'_> {
             .into());
         }
         let started = std::time::Instant::now();
-        let response = self
+        let mut response = self
             .execute_sandboxed(
                 code,
                 max_tool_calls.max(1).min(config.max_tool_calls.max(1)),
@@ -55,6 +55,10 @@ impl CodeModeBroker<'_> {
                 capability_filter,
             )
             .await?;
+        // `{ __ui: <result> }` opt-in: surface the last-wins captured mcp-ui
+        // widget link and unwrap the inner payload. Done before truncation so
+        // the (tiny) `ui` field is preserved while `result` may be capped.
+        self.apply_ui_opt_in(&mut response);
         let was_truncated = !response_within_budget(
             &response,
             config.max_response_bytes,
@@ -329,6 +333,14 @@ impl CodeModeBroker<'_> {
                     });
                 }
                 pool.record_success(upstream).await;
+                // Capture the mcp-ui widget link (if any) before the envelope is
+                // unwrapped and `_meta` is discarded. Last-wins across the run;
+                // surfaced only when the user opts in via `{ __ui: <result> }`.
+                if let Some(ui) = extract_ui_link(&result)
+                    && let Ok(mut sink) = self.ui_capture.lock()
+                {
+                    *sink = Some(ui);
+                }
                 Ok(unwrap_code_mode_upstream_result(result))
             }
             Some(Err(err)) => {
@@ -347,5 +359,123 @@ impl CodeModeBroker<'_> {
                 })
             }
         }
+    }
+
+    /// Apply the `{ __ui: <result> }` opt-in to a finished execution response.
+    ///
+    /// When the user code's return value is an object with a `__ui` key, the
+    /// inner value is unwrapped into `result` (so the model sees the payload it
+    /// chose to surface) and the last-wins captured widget link is attached to
+    /// `ui`. A no-op when the user did not opt in.
+    fn apply_ui_opt_in(&self, response: &mut CodeModeExecutionResponse) {
+        let inner = match response.result.as_ref() {
+            Some(Value::Object(map)) if map.contains_key("__ui") => {
+                map.get("__ui").cloned().unwrap_or(Value::Null)
+            }
+            _ => return,
+        };
+        response.result = Some(inner);
+        if let Ok(mut sink) = self.ui_capture.lock() {
+            response.ui = sink.take();
+        }
+    }
+}
+
+/// Extract a UI link from an upstream `CallToolResult`'s `_meta.ui` object.
+///
+/// Returns `None` unless `_meta.ui.resourceUri` is present. The whole `ui`
+/// object is captured verbatim so the final `execute` `CallToolResult` mirrors
+/// the upstream's `_meta.ui` identically.
+fn extract_ui_link(result: &CallToolResult) -> Option<UiLink> {
+    let meta = result.meta.as_ref()?;
+    let ui = meta.get("ui")?;
+    let resource_uri = ui.get("resourceUri")?.as_str()?.to_string();
+    Some(UiLink {
+        resource_uri,
+        ui_meta: ui.clone(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::ToolRegistry;
+    use rmcp::model::{Content, Meta};
+    use serde_json::json;
+
+    fn result_with_meta_ui(ui: Value) -> CallToolResult {
+        let mut meta = Map::new();
+        meta.insert("ui".to_string(), ui);
+        let mut result = CallToolResult::success(vec![Content::text("{}")]);
+        result.meta = Some(Meta(meta));
+        result
+    }
+
+    #[test]
+    fn extract_ui_link_reads_meta_ui_resource_uri() {
+        let result = result_with_meta_ui(json!({
+            "resourceUri": "ui://axon/status-dashboard",
+            "mimeTypes": ["text/html;profile=mcp-app"],
+        }));
+        let link = extract_ui_link(&result).expect("ui link present");
+        assert_eq!(link.resource_uri, "ui://axon/status-dashboard");
+        // The whole `ui` object is captured verbatim for identical mirroring.
+        assert_eq!(link.ui_meta["resourceUri"], "ui://axon/status-dashboard");
+        assert_eq!(link.ui_meta["mimeTypes"][0], "text/html;profile=mcp-app");
+    }
+
+    #[test]
+    fn extract_ui_link_none_without_meta_ui() {
+        // No `_meta` at all.
+        assert!(extract_ui_link(&CallToolResult::success(vec![Content::text("{}")])).is_none());
+        // `_meta` present but no `ui` key.
+        let mut meta = Map::new();
+        meta.insert("other".to_string(), json!(1));
+        let mut result = CallToolResult::success(vec![Content::text("{}")]);
+        result.meta = Some(Meta(meta));
+        assert!(extract_ui_link(&result).is_none());
+    }
+
+    fn response_with_result(result: Value) -> CodeModeExecutionResponse {
+        CodeModeExecutionResponse {
+            result: Some(result),
+            ui: None,
+            calls: Vec::new(),
+            logs: Vec::new(),
+            artifacts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn apply_ui_opt_in_unwraps_and_attaches_captured_link() {
+        let registry = ToolRegistry::new();
+        let broker = CodeModeBroker::new(&registry, None);
+        *broker.ui_capture.lock().unwrap() = Some(UiLink {
+            resource_uri: "ui://axon/status-dashboard".to_string(),
+            ui_meta: json!({ "resourceUri": "ui://axon/status-dashboard" }),
+        });
+        let mut response = response_with_result(json!({ "__ui": { "degraded": false } }));
+        broker.apply_ui_opt_in(&mut response);
+        // Inner payload is surfaced as `result`, wrapper removed.
+        assert_eq!(response.result, Some(json!({ "degraded": false })));
+        assert_eq!(
+            response.ui.as_ref().expect("widget attached").resource_uri,
+            "ui://axon/status-dashboard"
+        );
+    }
+
+    #[test]
+    fn apply_ui_opt_in_without_optin_is_noop() {
+        let registry = ToolRegistry::new();
+        let broker = CodeModeBroker::new(&registry, None);
+        // Even with a captured link, no `__ui` key means no widget is surfaced.
+        *broker.ui_capture.lock().unwrap() = Some(UiLink {
+            resource_uri: "ui://x/y".to_string(),
+            ui_meta: json!({}),
+        });
+        let mut response = response_with_result(json!({ "degraded": false }));
+        broker.apply_ui_opt_in(&mut response);
+        assert_eq!(response.result, Some(json!({ "degraded": false })));
+        assert!(response.ui.is_none(), "no opt-in → no widget attached");
     }
 }

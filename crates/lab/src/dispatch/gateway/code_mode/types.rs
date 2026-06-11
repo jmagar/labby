@@ -138,6 +138,18 @@ impl CodeModeCatalogEntry {
     }
 }
 
+/// A captured upstream MCP Apps (mcp-ui) widget link.
+///
+/// Recorded at the broker boundary when an upstream tool result carries
+/// `_meta.ui.resourceUri`, before `unwrap_code_mode_upstream_result` discards
+/// the envelope. `ui_meta` holds the upstream's `_meta.ui` object verbatim so
+/// the final `execute` `CallToolResult` can mirror the upstream identically.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct UiLink {
+    pub resource_uri: String,
+    pub ui_meta: Value,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CodeModeExecutionResponse {
     /// The final return value of the async function. None when the function
@@ -146,6 +158,12 @@ pub struct CodeModeExecutionResponse {
     /// serializes as `"result": null`; undefined omits the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<Value>,
+    /// Captured mcp-ui widget link surfaced via the `{ __ui: <result> }` opt-in
+    /// (last-wins across the run). The MCP boundary attaches this as `_meta.ui`
+    /// on the returned `CallToolResult` so the host renders the native widget.
+    /// `None` when the user code did not opt in or no widget-bearing call ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui: Option<UiLink>,
     pub calls: Vec<CodeModeExecutedCall>,
     /// Captured console.log/warn/error lines from the runner. Sourced from the
     /// javy runner subprocess (drained from its stderr); the current javy path
