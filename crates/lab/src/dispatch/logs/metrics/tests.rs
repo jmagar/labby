@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::{MetricsWindow, aggregate};
+use super::{MetricsWindow, ToolCallQuery, agent_detail, aggregate, tool_calls, tool_detail};
 use crate::dispatch::logs::types::LogEvent;
 
 /// Build a dispatch-completion `LogEvent` via serde (LogEvent is a serde type).
@@ -132,4 +132,61 @@ fn empty_window_is_all_zero() {
     assert_eq!(m.tokens.avg_per_call, 0);
     assert_eq!(m.latency.p50, 0);
     assert!(m.surfaces.is_empty());
+}
+
+#[test]
+fn tool_detail_filters_and_ranks_callers() {
+    let now = 1_000_000_000_000;
+    let d = tool_detail(&sample(now), "radarr", MetricsWindow::H24, now);
+    assert_eq!(d.name, "radarr");
+    assert_eq!(d.calls, 2);
+    assert_eq!(d.failed, 0);
+    assert_eq!(d.total_tokens, (80 + 400) + (70 + 300));
+    assert_eq!(
+        d.top_callers.first().map(|c| c.id.as_str()),
+        Some("claude-code")
+    );
+    assert_eq!(d.recent.len(), 2);
+    assert!(d.recent.iter().all(|r| r.tool == "radarr"));
+}
+
+#[test]
+fn agent_detail_lists_tools_used() {
+    let now = 1_000_000_000_000;
+    let d = agent_detail(&sample(now), "claude-code", MetricsWindow::H24, now);
+    assert_eq!(d.calls, 4);
+    assert_eq!(d.failed, 1);
+    assert_eq!(d.tools_used.len(), 3);
+    assert_eq!(
+        d.tools_used.first().map(|t| t.name.as_str()),
+        Some("radarr")
+    ); // 2 calls
+}
+
+fn query(tool: Option<&str>, outcome: Option<&str>, limit: Option<usize>) -> ToolCallQuery {
+    ToolCallQuery {
+        window: "24h".to_string(),
+        tool: tool.map(ToOwned::to_owned),
+        agent: None,
+        ip: None,
+        outcome: outcome.map(ToOwned::to_owned),
+        surface: None,
+        search: None,
+        limit,
+        offset: None,
+    }
+}
+
+#[test]
+fn tool_calls_filters_and_paginates() {
+    let now = 1_000_000_000_000;
+    let page = tool_calls(&sample(now), &query(Some("radarr"), None, Some(1)));
+    assert_eq!(page.total, 4); // all completion events
+    assert_eq!(page.filtered, 2); // radarr only
+    assert_eq!(page.calls.len(), 1); // limit 1
+    assert!(page.calls.iter().all(|c| c.tool == "radarr"));
+
+    let failed = tool_calls(&sample(now), &query(None, Some("failed"), None));
+    assert_eq!(failed.filtered, 1);
+    assert!(failed.calls.iter().all(|c| c.outcome == "failed"));
 }

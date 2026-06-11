@@ -454,12 +454,12 @@ impl LogSystem {
         Ok(stats)
     }
 
-    /// Aggregate dispatch-completion events over a rolling window into the
-    /// dashboard usage-metrics shape (see `super::metrics`).
-    pub async fn metrics(
+    /// Fetch the dispatch-completion events in a rolling window. Returns
+    /// `(now_ms, events)`. Shared by all dashboard aggregation entry points.
+    async fn fetch_window(
         &self,
         window: super::metrics::MetricsWindow,
-    ) -> Result<super::metrics::DashboardMetrics, ToolError> {
+    ) -> Result<(i64, Vec<LogEvent>), ToolError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
@@ -473,7 +473,48 @@ impl LogSystem {
             message: format!("build metrics query: {e}"),
         })?;
         let result = self.store.search(query).await?;
-        Ok(super::metrics::aggregate(&result.events, window, now))
+        Ok((now, result.events))
+    }
+
+    /// Aggregate dispatch-completion events over a rolling window into the
+    /// dashboard usage-metrics shape (see `super::metrics`).
+    pub async fn metrics(
+        &self,
+        window: super::metrics::MetricsWindow,
+    ) -> Result<super::metrics::DashboardMetrics, ToolError> {
+        let (now, events) = self.fetch_window(window).await?;
+        Ok(super::metrics::aggregate(&events, window, now))
+    }
+
+    /// Single-tool drill-down over the window.
+    pub async fn tool_detail(
+        &self,
+        tool: String,
+        window: super::metrics::MetricsWindow,
+    ) -> Result<super::metrics::ToolDetail, ToolError> {
+        let (now, events) = self.fetch_window(window).await?;
+        Ok(super::metrics::tool_detail(&events, &tool, window, now))
+    }
+
+    /// Single-agent/device drill-down over the window.
+    pub async fn agent_detail(
+        &self,
+        agent: String,
+        window: super::metrics::MetricsWindow,
+    ) -> Result<super::metrics::AgentDetail, ToolError> {
+        let (now, events) = self.fetch_window(window).await?;
+        Ok(super::metrics::agent_detail(&events, &agent, window, now))
+    }
+
+    /// Filterable, paginated tool-call log for the explorer.
+    pub async fn tool_calls(
+        &self,
+        query: super::metrics::ToolCallQuery,
+    ) -> Result<super::metrics::ToolCallPage, ToolError> {
+        let window = super::metrics::MetricsWindow::parse(&query.window)
+            .unwrap_or(super::metrics::MetricsWindow::H24);
+        let (_now, events) = self.fetch_window(window).await?;
+        Ok(super::metrics::tool_calls(&events, &query))
     }
 
     pub async fn subscribe(&self, sub: StreamSubscription) -> Result<LogStreamReceiver, ToolError> {

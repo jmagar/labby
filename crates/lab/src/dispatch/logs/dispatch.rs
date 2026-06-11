@@ -4,7 +4,10 @@ use serde_json::Value;
 
 use super::catalog::ACTIONS;
 use super::client;
-use super::params::{parse_metrics_params, parse_search_params, parse_tail_params};
+use super::params::{
+    parse_agent_detail_params, parse_metrics_params, parse_search_params, parse_tail_params,
+    parse_tool_calls_params, parse_tool_detail_params,
+};
 use super::types::LogSystem;
 use crate::dispatch::error::ToolError;
 use crate::dispatch::helpers::{action_schema, help_payload, require_str, to_json};
@@ -47,6 +50,15 @@ pub async fn dispatch_with_system(
         "logs.tail" => to_json(system.tail(parse_tail_params(params)?).await?),
         "logs.stats" => to_json(system.stats().await?),
         "logs.metrics" => to_json(system.metrics(parse_metrics_params(params)?).await?),
+        "logs.tool_detail" => {
+            let (tool, window) = parse_tool_detail_params(params)?;
+            to_json(system.tool_detail(tool, window).await?)
+        }
+        "logs.agent_detail" => {
+            let (agent, window) = parse_agent_detail_params(params)?;
+            to_json(system.agent_detail(agent, window).await?)
+        }
+        "logs.calls" => to_json(system.tool_calls(parse_tool_calls_params(params)?).await?),
         "logs.stream" => Err(ToolError::Sdk {
             sdk_kind: "not_found".to_string(),
             message: "live push is HTTP SSE only; connect to GET /v1/logs/stream to receive events"

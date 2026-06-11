@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::types::LogEvent;
@@ -584,6 +584,294 @@ pub fn aggregate(events: &[LogEvent], window: MetricsWindow, now_ms: i64) -> Das
             returning: 0,
         },
         timeseries: series,
+    }
+}
+
+// ── Drill-down ─────────────────────────────────────────────────────────────
+
+/// One dispatched call, serialized for the explorer + recent-call lists.
+#[derive(Serialize)]
+pub struct ToolCallRecord {
+    pub id: String,
+    pub ts: i64,
+    pub tool: String,
+    pub action: Option<String>,
+    pub agent_id: String,
+    pub agent_label: String,
+    pub agent_kind: &'static str,
+    pub ip: String,
+    pub surface: String,
+    pub outcome: &'static str,
+    pub error_kind: Option<String>,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub elapsed_ms: u64,
+}
+
+#[derive(Serialize)]
+pub struct ToolDetail {
+    pub name: String,
+    pub window: String,
+    pub calls: u64,
+    pub failed: u64,
+    pub total_tokens: u64,
+    pub avg_tokens: u64,
+    pub avg_elapsed_ms: u64,
+    pub timeseries: Vec<MetricsBucket>,
+    pub top_callers: Vec<ActorUsageEntry>,
+    pub recent: Vec<ToolCallRecord>,
+}
+
+#[derive(Serialize)]
+pub struct AgentDetail {
+    pub id: String,
+    pub label: String,
+    pub kind: &'static str,
+    pub window: String,
+    pub calls: u64,
+    pub failed: u64,
+    pub total_tokens: u64,
+    pub tools_used: Vec<ToolUsageEntry>,
+    pub timeseries: Vec<MetricsBucket>,
+    pub recent: Vec<ToolCallRecord>,
+}
+
+#[derive(Deserialize)]
+pub struct ToolCallQuery {
+    pub window: String,
+    #[serde(default)]
+    pub tool: Option<String>,
+    #[serde(default)]
+    pub agent: Option<String>,
+    #[serde(default)]
+    pub ip: Option<String>,
+    #[serde(default)]
+    pub outcome: Option<String>,
+    #[serde(default)]
+    pub surface: Option<String>,
+    #[serde(default)]
+    pub search: Option<String>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub offset: Option<usize>,
+}
+
+#[derive(Serialize)]
+pub struct ToolCallPage {
+    pub calls: Vec<ToolCallRecord>,
+    pub total: usize,
+    pub filtered: usize,
+}
+
+/// Distill a completion `LogEvent` into a serializable call record.
+fn extract_record(event: &LogEvent) -> Option<ToolCallRecord> {
+    field(event, "input_tokens")?;
+    field(event, "output_tokens")?;
+    let tool = str_field(field(event, "service")).or_else(|| str_field(field(event, "tool")))?;
+    let ok = event.message.ends_with(" ok");
+    let actor = event
+        .actor_key
+        .clone()
+        .or_else(|| str_field(field(event, "subject")))
+        .unwrap_or_else(|| "unknown".to_string());
+    Some(ToolCallRecord {
+        id: event.event_id.clone(),
+        ts: event.ts,
+        tool,
+        action: event.action.clone(),
+        agent_id: actor.clone(),
+        agent_label: actor,
+        // Device/IP attribution is tier-2; classify everything as an agent for now.
+        agent_kind: "agent",
+        ip: String::new(),
+        surface: event.surface.as_str().to_string(),
+        outcome: if ok { "ok" } else { "failed" },
+        error_kind: if ok {
+            None
+        } else {
+            str_field(field(event, "kind"))
+        },
+        input_tokens: num_u64(field(event, "input_tokens")),
+        output_tokens: num_u64(field(event, "output_tokens")),
+        elapsed_ms: num_f64(field(event, "elapsed_ms")).round() as u64,
+    })
+}
+
+/// Bucket records into the window's call-volume series (oldest first).
+fn build_series(records: &[ToolCallRecord], window: MetricsWindow, now: i64) -> Vec<MetricsBucket> {
+    let since = now - window.ms();
+    let buckets = window.buckets();
+    let bucket_ms = window.ms() / buckets as i64;
+    let mut series: Vec<MetricsBucket> = (0..buckets)
+        .map(|i| MetricsBucket {
+            ts: since + bucket_ms * i as i64,
+            calls: 0,
+            failed: 0,
+        })
+        .collect();
+    for r in records {
+        let idx = (((r.ts - since) / bucket_ms).max(0) as usize).min(buckets - 1);
+        series[idx].calls += 1;
+        if r.outcome == "failed" {
+            series[idx].failed += 1;
+        }
+    }
+    series
+}
+
+fn recent_sorted(mut records: Vec<ToolCallRecord>, limit: usize) -> Vec<ToolCallRecord> {
+    records.sort_by(|a, b| b.ts.cmp(&a.ts));
+    records.truncate(limit);
+    records
+}
+
+/// Single-tool drill-down.
+pub fn tool_detail(events: &[LogEvent], name: &str, window: MetricsWindow, now: i64) -> ToolDetail {
+    let records: Vec<ToolCallRecord> = events
+        .iter()
+        .filter_map(extract_record)
+        .filter(|r| r.tool == name)
+        .collect();
+    let calls = records.len() as u64;
+    let failed = records.iter().filter(|r| r.outcome == "failed").count() as u64;
+    let total_tokens: u64 = records
+        .iter()
+        .map(|r| r.input_tokens + r.output_tokens)
+        .sum();
+    let total_elapsed: u64 = records.iter().map(|r| r.elapsed_ms).sum();
+
+    let mut callers: BTreeMap<String, u64> = BTreeMap::new();
+    for r in &records {
+        *callers.entry(r.agent_id.clone()).or_default() += 1;
+    }
+    let mut top_callers: Vec<ActorUsageEntry> = callers
+        .into_iter()
+        .map(|(id, c)| ActorUsageEntry {
+            id: id.clone(),
+            label: id,
+            kind: "agent",
+            calls: c,
+        })
+        .collect();
+    top_callers.sort_by(|a, b| b.calls.cmp(&a.calls).then_with(|| a.id.cmp(&b.id)));
+    top_callers.truncate(5);
+
+    let timeseries = build_series(&records, window, now);
+    ToolDetail {
+        name: name.to_string(),
+        window: window.label().to_string(),
+        calls,
+        failed,
+        total_tokens,
+        avg_tokens: if calls > 0 { total_tokens / calls } else { 0 },
+        avg_elapsed_ms: if calls > 0 { total_elapsed / calls } else { 0 },
+        timeseries,
+        top_callers,
+        recent: recent_sorted(records, 25),
+    }
+}
+
+/// Single-agent/device drill-down.
+pub fn agent_detail(events: &[LogEvent], id: &str, window: MetricsWindow, now: i64) -> AgentDetail {
+    let records: Vec<ToolCallRecord> = events
+        .iter()
+        .filter_map(extract_record)
+        .filter(|r| r.agent_id == id)
+        .collect();
+    let calls = records.len() as u64;
+    let failed = records.iter().filter(|r| r.outcome == "failed").count() as u64;
+    let total_tokens: u64 = records
+        .iter()
+        .map(|r| r.input_tokens + r.output_tokens)
+        .sum();
+    let label = records
+        .first()
+        .map_or_else(|| id.to_string(), |r| r.agent_label.clone());
+
+    let mut tally: BTreeMap<String, (u64, u64)> = BTreeMap::new();
+    for r in &records {
+        let t = tally.entry(r.tool.clone()).or_default();
+        t.0 += 1;
+        if r.outcome == "failed" {
+            t.1 += 1;
+        }
+    }
+    let tools_used: Vec<ToolUsageEntry> = ranked(tally)
+        .into_iter()
+        .map(|(name, calls, failed)| ToolUsageEntry {
+            name,
+            calls,
+            failed,
+        })
+        .collect();
+
+    let timeseries = build_series(&records, window, now);
+    AgentDetail {
+        id: id.to_string(),
+        label,
+        kind: "agent",
+        window: window.label().to_string(),
+        calls,
+        failed,
+        total_tokens,
+        tools_used,
+        timeseries,
+        recent: recent_sorted(records, 25),
+    }
+}
+
+/// Filterable, paginated tool-call log for the explorer.
+pub fn tool_calls(events: &[LogEvent], query: &ToolCallQuery) -> ToolCallPage {
+    let all: Vec<ToolCallRecord> = events.iter().filter_map(extract_record).collect();
+    let total = all.len();
+    let search = query.search.as_deref().map(str::to_lowercase);
+
+    let mut filtered: Vec<ToolCallRecord> = all
+        .into_iter()
+        .filter(|r| {
+            if query.tool.as_deref().is_some_and(|t| r.tool != t) {
+                return false;
+            }
+            if query.agent.as_deref().is_some_and(|a| r.agent_id != a) {
+                return false;
+            }
+            if query.ip.as_deref().is_some_and(|ip| r.ip != ip) {
+                return false;
+            }
+            if query.outcome.as_deref().is_some_and(|o| r.outcome != o) {
+                return false;
+            }
+            if query.surface.as_deref().is_some_and(|s| r.surface != s) {
+                return false;
+            }
+            if let Some(q) = &search {
+                let hay = format!(
+                    "{} {} {} {} {}",
+                    r.tool,
+                    r.action.as_deref().unwrap_or(""),
+                    r.agent_label,
+                    r.ip,
+                    r.error_kind.as_deref().unwrap_or(""),
+                )
+                .to_lowercase();
+                if !hay.contains(q) {
+                    return false;
+                }
+            }
+            true
+        })
+        .collect();
+    filtered.sort_by(|a, b| b.ts.cmp(&a.ts));
+
+    let filtered_count = filtered.len();
+    let offset = query.offset.unwrap_or(0);
+    let limit = query.limit.unwrap_or(50);
+    let calls = filtered.into_iter().skip(offset).take(limit).collect();
+    ToolCallPage {
+        calls,
+        total,
+        filtered: filtered_count,
     }
 }
 

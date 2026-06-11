@@ -89,6 +89,61 @@ pub const ACTIONS: &[ActionSpec] = &[
         }],
     },
     ActionSpec {
+        name: "logs.tool_detail",
+        description: "Drill-down metrics for a single tool over a rolling window",
+        destructive: false,
+        requires_admin: false,
+        returns: "Value",
+        params: &[
+            ParamSpec {
+                name: "tool",
+                ty: "string",
+                required: true,
+                description: "Tool / service name",
+            },
+            ParamSpec {
+                name: "window",
+                ty: "string",
+                required: false,
+                description: "Rolling window: 1h, 24h (default), or 7d",
+            },
+        ],
+    },
+    ActionSpec {
+        name: "logs.agent_detail",
+        description: "Drill-down metrics for a single agent / device over a rolling window",
+        destructive: false,
+        requires_admin: false,
+        returns: "Value",
+        params: &[
+            ParamSpec {
+                name: "agent",
+                ty: "string",
+                required: true,
+                description: "Agent / actor id",
+            },
+            ParamSpec {
+                name: "window",
+                ty: "string",
+                required: false,
+                description: "Rolling window: 1h, 24h (default), or 7d",
+            },
+        ],
+    },
+    ActionSpec {
+        name: "logs.calls",
+        description: "Filterable, paginated tool-call log for the usage explorer",
+        destructive: false,
+        requires_admin: false,
+        returns: "Value",
+        params: &[ParamSpec {
+            name: "query",
+            ty: "json",
+            required: true,
+            description: "ToolCallQuery: window + optional tool/agent/ip/outcome/surface/search/limit/offset",
+        }],
+    },
+    ActionSpec {
         name: "logs.stream",
         description: "Live push is HTTP SSE only; dispatch returns guidance",
         destructive: false,

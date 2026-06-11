@@ -2,9 +2,10 @@
 
 use serde_json::Value;
 
-use super::metrics::MetricsWindow;
+use super::metrics::{MetricsWindow, ToolCallQuery};
 use super::types::{LogQuery, LogTailRequest};
 use crate::dispatch::error::ToolError;
+use crate::dispatch::helpers::require_str;
 
 pub fn parse_search_params(params: Value) -> Result<LogQuery, ToolError> {
     // Accept both `{"query": {...}}` (wrapped) and `{...}` (flat); `null` too.
@@ -31,7 +32,7 @@ pub fn parse_tail_params(params: Value) -> Result<LogTailRequest, ToolError> {
     })
 }
 
-pub fn parse_metrics_params(params: Value) -> Result<MetricsWindow, ToolError> {
+fn window_of(params: &Value) -> Result<MetricsWindow, ToolError> {
     let window = params
         .get("window")
         .and_then(Value::as_str)
@@ -39,6 +40,33 @@ pub fn parse_metrics_params(params: Value) -> Result<MetricsWindow, ToolError> {
     MetricsWindow::parse(window).ok_or_else(|| ToolError::InvalidParam {
         message: format!("invalid window `{window}` (expected 1h, 24h, or 7d)"),
         param: "window".to_string(),
+    })
+}
+
+pub fn parse_metrics_params(params: Value) -> Result<MetricsWindow, ToolError> {
+    window_of(&params)
+}
+
+pub fn parse_tool_detail_params(params: Value) -> Result<(String, MetricsWindow), ToolError> {
+    let tool = require_str(&params, "tool")?.to_string();
+    Ok((tool, window_of(&params)?))
+}
+
+pub fn parse_agent_detail_params(params: Value) -> Result<(String, MetricsWindow), ToolError> {
+    let agent = require_str(&params, "agent")?.to_string();
+    Ok((agent, window_of(&params)?))
+}
+
+pub fn parse_tool_calls_params(params: Value) -> Result<ToolCallQuery, ToolError> {
+    // Accept both `{"query": {...}}` (wrapped) and `{...}` (flat).
+    let inner = match params {
+        Value::Object(mut map) => map.remove("query").unwrap_or(Value::Object(map)),
+        Value::Null => Value::Object(serde_json::Map::new()),
+        other => other,
+    };
+    serde_json::from_value::<ToolCallQuery>(inner).map_err(|e| ToolError::InvalidParam {
+        message: format!("invalid ToolCallQuery: {e}"),
+        param: "query".to_string(),
     })
 }
 
