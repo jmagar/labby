@@ -296,9 +296,10 @@ impl LabMcpServer {
             route = "upstream_ui",
             "dispatch route selected"
         );
-        match pool.read_upstream_ui_resource(uri).await {
+        let result = pool.read_upstream_ui_resource(uri).await;
+        let elapsed_ms = start.elapsed().as_millis();
+        let (outcome, response) = match result {
             Some(Ok(result)) => {
-                let elapsed_ms = start.elapsed().as_millis();
                 tracing::info!(
                     surface = "mcp",
                     service = "labby",
@@ -308,18 +309,9 @@ impl LabMcpServer {
                     elapsed_ms,
                     "ui resource proxy ok"
                 );
-                self.emit_dispatch_notification(
-                    context,
-                    "lab",
-                    "read_resource",
-                    elapsed_ms,
-                    DispatchLogOutcome::Success,
-                )
-                .await;
-                Ok(result)
+                (DispatchLogOutcome::Success, Ok(result))
             }
             Some(Err(message)) => {
-                let elapsed_ms = start.elapsed().as_millis();
                 tracing::warn!(
                     surface = "mcp",
                     service = "labby",
@@ -330,21 +322,15 @@ impl LabMcpServer {
                     error = %message,
                     "ui resource proxy failed"
                 );
-                self.emit_dispatch_notification(
-                    context,
-                    "lab",
-                    "read_resource",
-                    elapsed_ms,
+                (
                     DispatchLogOutcome::Failure {
                         level: LoggingLevel::Error,
                         kind: "internal_error",
                     },
+                    Err(ErrorData::internal_error(message, None)),
                 )
-                .await;
-                Err(ErrorData::internal_error(message, None))
             }
             None => {
-                let elapsed_ms = start.elapsed().as_millis();
                 tracing::warn!(
                     surface = "mcp",
                     service = "labby",
@@ -354,23 +340,21 @@ impl LabMcpServer {
                     kind = "not_found",
                     "no upstream owns ui resource"
                 );
-                self.emit_dispatch_notification(
-                    context,
-                    "lab",
-                    "read_resource",
-                    elapsed_ms,
+                (
                     DispatchLogOutcome::Failure {
                         level: LoggingLevel::Warning,
                         kind: "not_found",
                     },
+                    Err(ErrorData::resource_not_found(
+                        format!("unknown UI resource: {uri}"),
+                        None,
+                    )),
                 )
-                .await;
-                Err(ErrorData::resource_not_found(
-                    format!("unknown UI resource: {uri}"),
-                    None,
-                ))
             }
-        }
+        };
+        self.emit_dispatch_notification(context, "lab", "read_resource", elapsed_ms, outcome)
+            .await;
+        response
     }
 
     /// Subject-scoped resource proxy branch. The caller passes the

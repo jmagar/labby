@@ -19,6 +19,10 @@ use super::types::{
     CodeModeSurface, CodeModeToolId, CodeModeToolRef, UiLink, destructive_permitted,
 };
 
+/// Key a Code Mode `execute` snippet returns (`return { __ui: <result> }`) to
+/// request that the last-wins captured mcp-ui widget link be surfaced.
+const UI_OPT_IN_KEY: &str = "__ui";
+
 impl CodeModeBroker<'_> {
     pub(crate) async fn execute(
         &self,
@@ -368,12 +372,13 @@ impl CodeModeBroker<'_> {
     /// chose to surface) and the last-wins captured widget link is attached to
     /// `ui`. A no-op when the user did not opt in.
     fn apply_ui_opt_in(&self, response: &mut CodeModeExecutionResponse) {
+        // Clone the inner value out (ending the borrow of `response.result`)
+        // before reassigning. No `__ui` key → no-op.
         let inner = match response.result.as_ref() {
-            Some(Value::Object(map)) if map.contains_key("__ui") => {
-                map.get("__ui").cloned().unwrap_or(Value::Null)
-            }
-            _ => return,
+            Some(Value::Object(map)) => map.get(UI_OPT_IN_KEY).cloned(),
+            _ => None,
         };
+        let Some(inner) = inner else { return };
         response.result = Some(inner);
         if let Ok(mut sink) = self.ui_capture.lock() {
             response.ui = sink.take();
