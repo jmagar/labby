@@ -231,8 +231,11 @@ pub fn close_job(job: isize, pid: u32) {
 #[cfg(windows)]
 #[must_use]
 pub fn pid_is_alive(pid: u32) -> bool {
+    // `WAIT_OBJECT_0` is a `WAIT_EVENT` constant in `Win32::Foundation` (not
+    // `Threading`) in windows-sys 0.59; `WaitForSingleObject` returns it.
+    use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
     use windows_sys::Win32::System::Threading::{
-        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, WAIT_OBJECT_0, WaitForSingleObject,
+        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, WaitForSingleObject,
     };
 
     let handle = unsafe {

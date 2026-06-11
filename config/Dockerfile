@@ -48,6 +48,7 @@ RUN mkdir -p \
       crates/lab-apis/src \
       crates/lab-apis/tests \
       crates/lab-auth/src \
+      crates/lab-winjob/src \
       apps/gateway-admin/out \
  && echo 'fn main(){}' > crates/lab/src/main.rs \
  && touch \
@@ -58,10 +59,12 @@ RUN mkdir -p \
       crates/lab-apis/tests/openacp_client.rs \
       crates/lab-apis/tests/jellyfin_client.rs \
       crates/lab-auth/src/lib.rs \
+      crates/lab-winjob/src/lib.rs \
  && cargo build --workspace --all-features --release \
  && cargo clean -p labby \
  && cargo clean -p lab-apis \
  && cargo clean -p lab-auth \
+ && cargo clean -p lab-winjob \
  && rm -rf \
       crates/*/src \
       crates/lab-apis/tests \
