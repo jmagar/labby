@@ -192,6 +192,8 @@ fn gateway_stdio_child_does_not_inherit_secret_env() {
             return;
         }
     };
+    // Only read on Linux (via /proc/<pid>/environ); unused on other targets.
+    #[cfg(target_os = "linux")]
     let pid = child.id();
 
     // On Linux: /proc/<pid>/environ contains the child's actual environment
