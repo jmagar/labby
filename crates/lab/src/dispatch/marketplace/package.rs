@@ -352,11 +352,14 @@ fn component_from_layout_path(
     path: &Path,
     kind: PluginComponentKind,
 ) -> PluginComponent {
+    // Component paths are stable, cross-platform identifiers compared with
+    // forward slashes (e.g. `skills/review`). Normalize the OS-native separator
+    // so Windows backslashes don't produce `skills\review`.
     let rel = path
         .strip_prefix(root)
         .unwrap_or(path)
         .to_string_lossy()
-        .into_owned();
+        .replace('\\', "/");
     let mut name = path
         .file_name()
         .and_then(|name| name.to_str())

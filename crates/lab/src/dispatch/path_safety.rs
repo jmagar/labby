@@ -304,6 +304,10 @@ mod tests {
         assert!(reject_path_traversal("sub/path.txt").is_ok());
     }
 
+    // Unix-only: asserts unix-absolute operator paths (`/workspace`, `/home`,
+    // `/tmp`) are allowed. These are unix filesystem locations; the denylist
+    // logic itself is cross-platform.
+    #[cfg(unix)]
     #[test]
     fn system_path_check_allows_operator_workspace_paths() {
         assert!(canonicalize_and_reject_write_path(Path::new("/workspace")).is_ok());

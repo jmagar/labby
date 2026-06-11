@@ -342,8 +342,13 @@ fn collect_base_snapshots(
                 "base snapshot path is not valid UTF-8",
             ));
         };
-        validate_rel_path(relative)?;
-        out.insert(relative.to_string());
+        // Snapshot keys are canonical forward-slash relative paths (the same
+        // form `write_base_snapshot` accepts); normalize the OS-native
+        // separator so Windows backslashes are not rejected by
+        // `validate_rel_path` (which treats `\` as traversal).
+        let relative = relative.replace('\\', "/");
+        validate_rel_path(&relative)?;
+        out.insert(relative);
     }
     Ok(())
 }

@@ -31,11 +31,25 @@ fn code_mode_runner_wrapper_exposes_write_artifact() {
 #[test]
 fn code_mode_artifact_root_uses_run_id_under_lab_home() {
     let root = code_mode_artifact_root("01JTEST");
-    let text = root.display().to_string();
 
+    // Separator-agnostic: `Path::ends_with` matches whole components, so this
+    // holds on both `/`- and `\`-separated platforms.
     assert!(
-        text.ends_with(".lab/code-mode-artifacts/01JTEST")
-            || text.ends_with("lab/code-mode-artifacts/01JTEST")
+        root.ends_with(std::path::Path::new("code-mode-artifacts").join("01JTEST")),
+        "got {}",
+        root.display()
+    );
+    // The parent component must be a `.lab` / `lab` home dir.
+    let parent = root
+        .parent()
+        .and_then(std::path::Path::parent)
+        .and_then(std::path::Path::file_name)
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    assert!(
+        parent == ".lab" || parent == "lab",
+        "expected .lab/lab home parent, got {}",
+        root.display()
     );
 }
 

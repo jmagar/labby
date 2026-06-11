@@ -55,6 +55,11 @@ mod tests {
     /// Drive `discover_with_xdg` with an explicit XDG path under the test
     /// home so the test is immune to the runner's ambient XDG_CONFIG_HOME
     /// (CI runners may set it to an absolute path outside the TempDir).
+    ///
+    /// Unix-only: `candidate_paths` honors the XDG `.config` dir only on
+    /// non-Windows; on Windows it resolves `%APPDATA%/opencode` and ignores the
+    /// passed `xdg`, so this XDG-based fixture is meaningless there.
+    #[cfg(unix)]
     #[test]
     fn discovers_from_default_config_dir() {
         let dir = TempDir::new().unwrap();

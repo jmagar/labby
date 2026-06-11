@@ -979,6 +979,12 @@ mod tests {
         assert!(matches!(err, ToolError::MissingParam { .. }), "{err:?}");
     }
 
+    // Unix-only: on Linux/unix `open_no_follow` opens the directory fd and the
+    // metadata check surfaces `InvalidParam`. On Windows `File::open` on a
+    // directory fails earlier in the fallback with a different error kind
+    // (still refused, but not `InvalidParam`), so the specific error-kind
+    // assertion is unix-path-specific.
+    #[cfg(unix)]
     #[tokio::test]
     async fn preview_rejects_directory_target() {
         let tmp = tempdir().unwrap();

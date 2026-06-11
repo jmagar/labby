@@ -478,22 +478,22 @@ mod tests {
     fn controller_deploy_profile_path() {
         let controller = ArtifactProfile::controller();
         let p = expected_artifact_path_for_profile(&controller);
-        assert!(
-            p.ends_with("target/controller-deploy/labby"),
-            "got {}",
-            p.display()
+        // `expected_artifact_path_for_profile` appends `.exe` for windows host
+        // triples, so assert against the host's exe suffix to stay correct on
+        // both platforms.
+        let expected = format!(
+            "target/controller-deploy/labby{}",
+            std::env::consts::EXE_SUFFIX
         );
+        assert!(p.ends_with(&expected), "got {}", p.display());
     }
 
     #[test]
     fn node_deploy_profile_path() {
         let node = ArtifactProfile::node();
         let p = expected_artifact_path_for_profile(&node);
-        assert!(
-            p.ends_with("target/node-deploy/labby"),
-            "got {}",
-            p.display()
-        );
+        let expected = format!("target/node-deploy/labby{}", std::env::consts::EXE_SUFFIX);
+        assert!(p.ends_with(&expected), "got {}", p.display());
     }
 
     #[test]

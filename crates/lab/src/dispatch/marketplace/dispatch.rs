@@ -383,11 +383,14 @@ fn walk_artifacts_into(
         {
             continue;
         }
+        // Workspace file paths are stable, cross-platform identifiers (the same
+        // form the `save`/`deploy` actions accept as their `path` param), so
+        // normalize the OS-native separator to forward slashes.
         let rel = p
             .strip_prefix(root)
             .unwrap_or(&p)
             .to_string_lossy()
-            .into_owned();
+            .replace('\\', "/");
         let lang = detect_lang(&p);
         let bytes = match std::fs::read(&p) {
             Ok(bytes) => bytes,
@@ -1234,6 +1237,12 @@ mod tests {
         }
     }
 
+    // Unix-only: the fixture path `/tmp/evil-plugin` is absolute on unix (so it
+    // is detected as outside plugins_root) but RELATIVE on Windows, where
+    // `installed_target_for_plugin` correctly roots it under plugins_root via
+    // `Path::is_absolute()`. The "outside" rejection is therefore a unix-path
+    // scenario; the production logic itself is cross-platform.
+    #[cfg(unix)]
     #[test]
     fn installed_target_rejects_absolute_path_outside_plugins_root() {
         let dir = tempdir().unwrap();

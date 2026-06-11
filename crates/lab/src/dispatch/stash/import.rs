@@ -760,6 +760,9 @@ mod tests {
     // exercise the full async import path rather than the path-safety helpers
     // in isolation, which are already unit-tested in `dispatch/path_safety.rs`.
 
+    // Unix-only: asserts that the unix system path `/etc/shadow` is rejected.
+    // The denylist itself is cross-platform; these fixtures are unix paths.
+    #[cfg(unix)]
     #[tokio::test]
     async fn import_rejects_etc_shadow_source_path() {
         let (store, _dir) = make_store();
@@ -784,6 +787,8 @@ mod tests {
         );
     }
 
+    // Unix-only: `/etc/passwd` fixture (see shadow test above).
+    #[cfg(unix)]
     #[tokio::test]
     async fn import_rejects_etc_passwd_source_path() {
         let (store, _dir) = make_store();
@@ -801,6 +806,8 @@ mod tests {
         assert_eq!(err.kind(), "path_traversal");
     }
 
+    // Unix-only: `/proc/self/environ` fixture (see shadow test above).
+    #[cfg(unix)]
     #[tokio::test]
     async fn import_rejects_proc_environ_source_path() {
         let (store, _dir) = make_store();

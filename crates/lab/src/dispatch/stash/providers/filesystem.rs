@@ -326,6 +326,11 @@ mod tests {
     }
 
     /// A provider pointing to a sensitive system path must be rejected.
+    ///
+    /// Unix-only: `/etc` is a unix system path in `SENSITIVE_WRITE_PATH_DENYLIST`
+    /// that always exists on unix. The denylist mechanism is cross-platform; the
+    /// fixture is a unix path.
+    #[cfg(unix)]
     #[test]
     fn from_record_rejects_sensitive_system_path() {
         // /etc is in the SENSITIVE_WRITE_PATH_DENYLIST and always exists.

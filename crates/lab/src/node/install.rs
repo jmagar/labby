@@ -902,6 +902,11 @@ mod tests {
         assert_eq!(root.file_name(), Some(std::ffi::OsStr::new(".claude")));
     }
 
+    // Unix-only: `/abs/path` is absolute on unix but RELATIVE on Windows (which
+    // needs a drive prefix like `C:\`), so the `.is_ok()` branch only holds on
+    // unix. Production `resolve_write_root` uses cross-platform
+    // `Path::is_absolute()`; only the unix-style fixture is platform-specific.
+    #[cfg(unix)]
     #[test]
     fn resolve_write_root_project_requires_absolute() {
         assert!(resolve_write_root(InstallScope::Project, Some("relative/path")).is_err());
