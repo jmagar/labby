@@ -216,11 +216,11 @@
             "source": "./plugins/swag",
             "description": "SWAG reverse proxy configuration management via MCP. Create, edit, view, and manage nginx proxy configurations with auth integration."
         },
-        {
-            "name": "vibin",
-            "source": "./plugins/vibin",
-            "description": "Session, GitHub review, and CI workflow skills for quick push, session documentation, PR comments, and CI debugging."
-        },
+    {
+      "name": "vibin",
+      "source": "./plugins/vibin",
+      "description": "Session, repo status, GitHub review, and CI workflow skills for branch/worktree readiness audits, quick push, session documentation, PR comments, and CI debugging."
+    },
         {
             "name": "arrs",
             "source": "./plugins/arrs",

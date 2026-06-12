@@ -363,6 +363,62 @@ async fn list_tools_promotes_upstream_mcp_app_tools_when_raw_tools_are_hidden() 
 }
 
 #[tokio::test]
+async fn call_tool_allows_mcp_app_sibling_callbacks_when_raw_tools_are_hidden() {
+    let upstream_name: Arc<str> = Arc::from("apps");
+    let ui_tool = fixture_upstream_tool(
+        &upstream_name,
+        "youtube_search_ui",
+        Some("ui://apps/youtube-search.html"),
+    );
+    let plain_tool = fixture_upstream_tool(&upstream_name, "youtube_probe", None);
+    let pool = Arc::new(UpstreamPool::new());
+    pool.insert_entry_for_test(
+        "apps",
+        fixture_upstream_entry(
+            "apps",
+            HashMap::from([
+                ("youtube_search_ui".to_string(), ui_tool),
+                ("youtube_probe".to_string(), plain_tool),
+            ]),
+        ),
+    )
+    .await;
+    let manager = code_mode_manager_with_pool(true, fixture_upstream_config("apps"), pool).await;
+    let server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = rmcp::service::RequestContext::new(
+        rmcp::model::NumberOrString::Number(1),
+        running.peer().clone(),
+    );
+
+    let result = Box::pin(
+        running
+            .service()
+            .call_tool_impl(CallToolRequestParams::new("youtube_probe"), context),
+    )
+    .await
+    .expect("call tool result");
+    assert!(result.is_error.unwrap_or(false));
+    let text = result.content[0].as_text().expect("text").text.as_str();
+    assert!(
+        !text.contains("hidden while code_mode mode is enabled"),
+        "MCP App sibling callbacks should reach upstream proxy routing, got {text}"
+    );
+    assert!(
+        text.contains("upstream_error"),
+        "test fixture has no live peer, so allowed callbacks should fail at proxy call, got {text}"
+    );
+}
+
+#[tokio::test]
 async fn snapshot_catalog_hides_builtin_tools_when_code_mode_is_enabled() {
     let server = test_server(
         completion_test_registry(),

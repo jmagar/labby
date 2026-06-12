@@ -6,6 +6,18 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.24.1] - 2026-06-12
+
+### Fixed
+
+- **Code Mode MCP App callbacks** — MCP Apps rendered from an exposed upstream UI tool can now call exposed sibling tools from the same upstream through `callServerTool` while ordinary raw tools remain hidden from `list_tools`. Destructive sibling tools still require the `execute` confirmation path.
+
+### Changed
+
+- **Vibin repo-status skill** — moved the repo readiness audit skill into the Vibin plugin and refreshed Claude/Codex marketplace metadata so the skill ships with the plugin bundle.
+
+---
+
 ## [0.24.0] - 2026-06-11
 
 ### Added

@@ -1,0 +1,131 @@
+{
+  "schema": "repo-status.context.v2",
+  "generated_at": "2026-06-12T12:00:00Z",
+  "root": "/workspace/example",
+  "default_base": "origin/main",
+  "default_base_rationale": "origin/HEAD",
+  "no_fetch": true,
+  "branch_limit": 2,
+  "branches_total": 3,
+  "branches_collected": 2,
+  "branches_truncated": true,
+  "focus_branch": null,
+  "commands": [],
+  "branches": [
+    {
+      "name": "main",
+      "object": "1111111",
+      "upstream": "origin/main",
+      "upstream_track": "",
+      "committerdate": "2026-06-12 08:00:00 +0000",
+      "worktreepath": "/workspace/example",
+      "subject": "Merge pull request",
+      "base": "origin/main",
+      "base_rationale": "origin/HEAD",
+      "ahead_behind": {
+        "exit": 0,
+        "stdout": "0 0\n"
+      },
+      "risk_signals": {
+        "overlap_files": []
+      },
+      "stale_evidence": {
+        "merged_into_base": true,
+        "days_since_last_commit": 0,
+        "has_unique_commits": false,
+        "upstream_branch_exists": true,
+        "same_named_remote_exists": true,
+        "worktree_missing_or_prunable": false
+      }
+    },
+    {
+      "name": "feature/api",
+      "object": "2222222",
+      "upstream": "origin/feature/api",
+      "upstream_track": "[ahead 2]",
+      "committerdate": "2026-06-10 08:00:00 +0000",
+      "worktreepath": "/workspace/example/.worktrees/api",
+      "subject": "Add API feature",
+      "base": "origin/main",
+      "base_rationale": "PR base",
+      "ahead_behind": {
+        "exit": 0,
+        "stdout": "0 2\n"
+      },
+      "risk_signals": {
+        "test_files_changed": [
+          "tests/api.test.ts"
+        ],
+        "overlap_files": []
+      },
+      "stale_evidence": {
+        "merged_into_base": false,
+        "days_since_last_commit": 2,
+        "has_unique_commits": true,
+        "upstream_branch_exists": true,
+        "same_named_remote_exists": true,
+        "worktree_missing_or_prunable": false
+      }
+    },
+    {
+      "name": "old/experiment",
+      "object": "3333333",
+      "upstream": "",
+      "upstream_track": "",
+      "committerdate": "2026-01-01 08:00:00 +0000",
+      "worktreepath": "",
+      "subject": "Experiment",
+      "base": "origin/main",
+      "base_rationale": "not collected due to --max-branches",
+      "ahead_behind": null,
+      "risk_signals": {},
+      "stale_evidence": {
+        "merged_into_base": null,
+        "days_since_last_commit": 162,
+        "has_unique_commits": null,
+        "upstream_branch_exists": null,
+        "same_named_remote_exists": false,
+        "worktree_missing_or_prunable": false
+      },
+      "limited": true
+    }
+  ],
+  "worktrees": [
+    {
+      "path": "/workspace/example",
+      "branch": "main",
+      "exists": true,
+      "status_porcelain_v2": {
+        "stdout": ""
+      }
+    },
+    {
+      "path": "/workspace/example/.worktrees/api",
+      "branch": "feature/api",
+      "exists": true,
+      "status_porcelain_v2": {
+        "stdout": "# branch.oid 2222222\n# branch.head feature/api\n"
+      }
+    }
+  ],
+  "focused_branch": null,
+  "github": {
+    "branches": {
+      "feature/api": {
+        "pr_view": {
+          "exit": 0,
+          "stdout": "{\"number\":42,\"isDraft\":false,\"mergeable\":\"MERGEABLE\",\"reviewDecision\":\"APPROVED\"}"
+        },
+        "run_list": {
+          "exit": 0,
+          "stdout": "[{\"workflowName\":\"ci\",\"conclusion\":\"success\",\"headSha\":\"2222222\"}]"
+        },
+        "latest_run_for_head": {
+          "workflowName": "ci",
+          "conclusion": "success",
+          "headSha": "2222222"
+        }
+      }
+    }
+  }
+}

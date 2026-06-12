@@ -903,7 +903,7 @@
     },
     {
       "name": "vibin",
-      "description": "Session, GitHub review, and CI workflow skills for quick push, session documentation, PR comments, and CI debugging.",
+      "description": "Session, repo status, GitHub review, and CI workflow skills for branch/worktree readiness audits, quick push, session documentation, PR comments, and CI debugging.",
       "source": {
         "source": "local",
         "path": "./plugins/vibin"
@@ -915,8 +915,8 @@
       "category": "Developer Tools",
       "interface": {
         "displayName": "Vibin",
-        "shortDescription": "Session, GitHub review, CI, and agent workflow utilities.",
-        "longDescription": "Vibin bundles session documentation, quick-push, GitHub PR review, CI debugging, Windows VM, screenshot, clipboard, and homelab workflow skills.",
+        "shortDescription": "Session, repo status, GitHub review, CI, and agent workflow utilities.",
+        "longDescription": "Vibin bundles session documentation, repo status and branch/worktree readiness audits, quick-push, GitHub PR review, CI debugging, Windows VM, screenshot, clipboard, and homelab workflow skills.",
         "developerName": "Jacob Magar",
         "category": "Developer Tools",
         "capabilities": [
@@ -926,6 +926,7 @@
         ],
         "defaultPrompt": [
           "Use Vibin to quick-push this change.",
+          "Use Vibin to audit repo branch and worktree status.",
           "Use Vibin to address PR review comments.",
           "Save this session to Markdown."
         ],

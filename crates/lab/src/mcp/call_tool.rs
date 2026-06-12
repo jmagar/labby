@@ -220,27 +220,50 @@ impl LabMcpServer {
 
         if self.code_mode_visibility().await.hides_raw_tools() {
             // MCP App tools stay visible in `list_tools` even while Code Mode
-            // hides ordinary raw tools, so their host callbacks must be allowed
-            // through the same raw proxy path. Operators can still opt into the
-            // broader legacy callback bypass for non-UI tools with
+            // hides ordinary raw tools. The rendered app's host callbacks must
+            // still be able to reach exposed sibling tools on that same
+            // upstream; those siblings remain hidden from the model-facing tool
+            // list. Operators can still opt into the broader legacy callback
+            // bypass for any exposed non-UI tool with
             // `LAB_CODE_MODE_WIDGET_CALLBACKS=1`.
-            let widget_tool = if svc.is_none()
+            let widget_callback = if svc.is_none()
                 && let Some(pool) = self.current_upstream_pool().await
             {
-                pool.find_tool(&service).await.filter(|(_, tool)| {
-                    crate::dispatch::upstream::pool::tool_has_mcp_app_ui_resource(tool)
-                        || crate::config::code_mode_widget_callbacks_enabled()
-                })
+                let allowed = self.route_scope.allowed_upstreams();
+                if crate::config::code_mode_widget_callbacks_enabled() {
+                    pool.find_tool_allowed(&service, allowed)
+                        .await
+                        .map(|(_, tool)| ("upstream_widget_callback_legacy", Some(tool)))
+                } else if let Some((_, tool)) = pool
+                    .find_tool_allowed(&service, allowed)
+                    .await
+                    .filter(|(_, tool)| {
+                        crate::dispatch::upstream::pool::tool_has_mcp_app_ui_resource(tool)
+                    })
+                {
+                    Some(("upstream_widget_callback", Some(tool)))
+                } else {
+                    let candidates = pool
+                        .find_mcp_app_sibling_tool_candidates(&service, allowed)
+                        .await;
+                    if candidates.is_empty() {
+                        None
+                    } else {
+                        let tool = (candidates.len() == 1)
+                            .then(|| candidates.into_iter().next().expect("checked len").1);
+                        Some(("upstream_widget_sibling_callback", tool))
+                    }
+                }
             } else {
                 None
             };
-            match widget_tool {
+            match widget_callback {
                 // Destructive upstream effects are NOT reachable over the
                 // callback bypass: it has no confirmation channel, so unlike the
                 // `execute` path (which gates destructive upstream calls behind
                 // `confirm: true`) it could otherwise run a destructive tool
                 // unconfirmed. The sanctioned path for those is `execute`.
-                Some((_upstream, tool)) if tool.destructive => {
+                Some((_, Some(tool))) if tool.destructive => {
                     let envelope = build_error(
                         &service,
                         &action,
@@ -254,12 +277,12 @@ impl LabMcpServer {
                         envelope.to_string(),
                     )]));
                 }
-                Some(_) => {
+                Some((route, _)) => {
                     tracing::info!(
                         surface = "mcp",
                         service = %service,
                         action = %action,
-                        route = "upstream_widget_callback",
+                        route,
                         "code_mode raw-tool gate bypassed for MCP App widget callback"
                     );
                 }
