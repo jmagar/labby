@@ -4,7 +4,14 @@
 //! requests with a non-loopback Host header are rejected with 421 before
 //! reaching the dispatcher.
 
-use axum::{Extension, Json, Router, extract::State, http::HeaderMap, routing::post};
+use std::net::SocketAddr;
+
+use axum::{
+    Extension, Json, Router,
+    extract::{ConnectInfo, State},
+    http::HeaderMap,
+    routing::post,
+};
 use serde_json::Value;
 
 use crate::api::oauth::AuthContext;
@@ -19,6 +26,7 @@ pub fn routes(_state: AppState) -> Router<AppState> {
 
 async fn handle(
     State(state): State<AppState>,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     Json(req): Json<ActionRequest>,
@@ -39,7 +47,11 @@ async fn handle(
     handle_action_with_meta(
         "setup",
         "api",
-        dispatch_meta_from_headers(&headers, auth.as_ref().map(|value| &value.0)),
+        dispatch_meta_from_headers(
+            &headers,
+            auth.as_ref().map(|value| &value.0),
+            peer.map(|Extension(ConnectInfo(addr))| addr),
+        ),
         req,
         ACTIONS,
         |action, params| async move { crate::dispatch::setup::dispatch(&action, params).await },

@@ -1,8 +1,8 @@
-use std::convert::Infallible;
+use std::{convert::Infallible, net::SocketAddr};
 
 use axum::{
     Extension, Json, Router,
-    extract::{Path, Query, State},
+    extract::{ConnectInfo, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{
         IntoResponse, Response,
@@ -64,6 +64,7 @@ pub fn routes(_state: AppState) -> Router<AppState> {
 
 async fn handle(
     State(state): State<AppState>,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     Json(mut req): Json<ActionRequest>,
@@ -89,7 +90,11 @@ async fn handle(
     handle_action_with_meta(
         "acp",
         "api",
-        dispatch_meta_from_headers(&headers, auth.as_ref().map(|value| &value.0)),
+        dispatch_meta_from_headers(
+            &headers,
+            auth.as_ref().map(|value| &value.0),
+            peer.map(|Extension(ConnectInfo(addr))| addr),
+        ),
         req,
         ACTIONS,
         move |action, mut params| {

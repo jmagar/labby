@@ -1,6 +1,11 @@
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
-use axum::{Extension, Json, Router, extract::State, http::HeaderMap, routing::post};
+use axum::{
+    Extension, Json, Router,
+    extract::{ConnectInfo, State},
+    http::HeaderMap,
+    routing::post,
+};
 use serde_json::Value;
 
 use crate::api::oauth::AuthContext;
@@ -68,6 +73,7 @@ fn require_gateway_admin(
 
 async fn handle(
     State(state): State<AppState>,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     Json(req): Json<ActionRequest>,
@@ -86,7 +92,11 @@ async fn handle(
     handle_action_with_meta(
         "gateway",
         "api",
-        dispatch_meta_from_headers(&headers, auth.as_ref().map(|value| &value.0)),
+        dispatch_meta_from_headers(
+            &headers,
+            auth.as_ref().map(|value| &value.0),
+            peer.map(|Extension(ConnectInfo(addr))| addr),
+        ),
         req,
         crate::dispatch::gateway::ACTIONS,
         move |action, params| {

@@ -1,6 +1,13 @@
 //! HTTP route group for the `stash` service.
 
-use axum::{Extension, Json, Router, extract::State, http::HeaderMap, routing::post};
+use std::net::SocketAddr;
+
+use axum::{
+    Extension, Json, Router,
+    extract::{ConnectInfo, State},
+    http::HeaderMap,
+    routing::post,
+};
 use serde_json::Value;
 
 use crate::api::oauth::AuthContext;
@@ -29,6 +36,7 @@ pub fn routes(_state: AppState) -> Router<AppState> {
 
 async fn handle(
     State(_state): State<AppState>,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     Json(req): Json<ActionRequest>,
@@ -61,7 +69,11 @@ async fn handle(
     handle_action_with_meta(
         "stash",
         "api",
-        dispatch_meta_from_headers(&headers, auth.as_ref().map(|value| &value.0)),
+        dispatch_meta_from_headers(
+            &headers,
+            auth.as_ref().map(|value| &value.0),
+            peer.map(|Extension(ConnectInfo(addr))| addr),
+        ),
         req,
         ACTIONS,
         |action, params| async move {

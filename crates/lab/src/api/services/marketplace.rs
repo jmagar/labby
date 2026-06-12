@@ -1,11 +1,11 @@
 //! HTTP route group for the `marketplace` service.
 
-use std::convert::Infallible;
 use std::time::Duration;
+use std::{convert::Infallible, net::SocketAddr};
 
 use axum::{
     Extension, Json, Router,
-    extract::{Query, State},
+    extract::{ConnectInfo, Query, State},
     http::HeaderMap,
     response::sse::{Event, KeepAlive, Sse},
     routing::{get, post},
@@ -60,14 +60,22 @@ impl NodeRpcPort for WsNodeRpcPort {
 
 async fn handle(
     State(_state): State<AppState>,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     Json(req): Json<ActionRequest>,
 ) -> Result<Json<Value>, ToolError> {
-    handle_marketplace_action(headers, auth, req).await
+    handle_marketplace_action(
+        peer.map(|Extension(ConnectInfo(addr))| addr),
+        headers,
+        auth,
+        req,
+    )
+    .await
 }
 
 async fn handle_marketplace_action(
+    peer_addr: Option<SocketAddr>,
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     req: ActionRequest,
@@ -75,7 +83,7 @@ async fn handle_marketplace_action(
     handle_action_with_meta(
         "marketplace",
         "api",
-        dispatch_meta_from_headers(&headers, auth.as_ref().map(|value| &value.0)),
+        dispatch_meta_from_headers(&headers, auth.as_ref().map(|value| &value.0), peer_addr),
         req,
         crate::dispatch::marketplace::actions(),
         |action, params| async move {
@@ -171,6 +179,7 @@ async fn handle_artifact_path_action(
         .map(|Json(value)| value)
         .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
     handle_marketplace_action(
+        None,
         headers,
         None,
         ActionRequest {

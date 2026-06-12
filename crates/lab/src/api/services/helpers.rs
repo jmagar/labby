@@ -9,7 +9,7 @@
 //! IMPORTANT: Params are NEVER logged — they may contain credentials.
 //! See `docs/dev/OBSERVABILITY.md`.
 
-use std::future::Future;
+use std::{future::Future, net::SocketAddr};
 
 use axum::{Json, http::HeaderMap};
 use serde_json::Value;
@@ -22,25 +22,26 @@ use crate::dispatch::error::ToolError;
 use crate::dispatch::gateway::current_gateway_manager;
 use crate::dispatch::helpers::estimate_tokens_value;
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 pub struct ApiDispatchMeta<'a> {
     pub request_id: Option<&'a str>,
     pub actor_key: Option<&'a str>,
     pub actor_label: Option<&'a str>,
     pub agent_kind: Option<&'a str>,
-    pub ip: Option<&'a str>,
+    pub ip: Option<String>,
 }
 
 pub fn dispatch_meta_from_headers<'a>(
     headers: &'a HeaderMap,
     auth: Option<&'a AuthContext>,
+    peer_addr: Option<SocketAddr>,
 ) -> ApiDispatchMeta<'a> {
     ApiDispatchMeta {
         request_id: headers.get("x-request-id").and_then(|v| v.to_str().ok()),
         actor_key: auth.and_then(|ctx| ctx.actor_key.as_deref()),
         actor_label: None,
         agent_kind: auth.map(|ctx| if ctx.via_session { "device" } else { "agent" }),
-        ip: None,
+        ip: peer_addr.map(|addr| addr.ip().to_string()),
     }
 }
 
@@ -237,7 +238,7 @@ where
             actor_key = meta.actor_key,
             actor_label = meta.actor_label,
             agent_kind = meta.agent_kind,
-            ip = meta.ip,
+            ip = meta.ip.as_deref(),
             elapsed_ms,
             input_tokens,
             output_tokens = estimate_tokens_value(v),
@@ -252,7 +253,7 @@ where
             actor_key = meta.actor_key,
             actor_label = meta.actor_label,
             agent_kind = meta.agent_kind,
-            ip = meta.ip,
+            ip = meta.ip.as_deref(),
             elapsed_ms,
             input_tokens,
             output_tokens = 0,
@@ -267,7 +268,7 @@ where
             actor_key = meta.actor_key,
             actor_label = meta.actor_label,
             agent_kind = meta.agent_kind,
-            ip = meta.ip,
+            ip = meta.ip.as_deref(),
             elapsed_ms,
             input_tokens,
             output_tokens = 0,
@@ -827,7 +828,7 @@ mod tests {
     fn dispatch_meta_does_not_persist_raw_email_or_subject_as_actor_label() {
         let headers = HeaderMap::new();
         let auth = auth_context();
-        let meta = dispatch_meta_from_headers(&headers, Some(&auth));
+        let meta = dispatch_meta_from_headers(&headers, Some(&auth), None);
 
         assert_eq!(meta.actor_key, Some("actor_123456"));
         assert_eq!(meta.actor_label, None);
@@ -842,8 +843,18 @@ mod tests {
         headers.insert("x-real-ip", "203.0.113.100".parse().unwrap());
         headers.insert("cf-connecting-ip", "203.0.113.101".parse().unwrap());
 
-        let meta = dispatch_meta_from_headers(&headers, None);
+        let meta = dispatch_meta_from_headers(&headers, None, None);
 
         assert_eq!(meta.ip, None);
+    }
+
+    #[test]
+    fn dispatch_meta_uses_trusted_peer_socket_addr_for_ip() {
+        let headers = HeaderMap::new();
+        let addr = "198.51.100.42:54321".parse().unwrap();
+
+        let meta = dispatch_meta_from_headers(&headers, None, Some(addr));
+
+        assert_eq!(meta.ip.as_deref(), Some("198.51.100.42"));
     }
 }
