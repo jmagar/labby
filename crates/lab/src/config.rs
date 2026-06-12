@@ -1805,7 +1805,7 @@ static CONFIG_BACKUP_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 fn inline_table_to_table(inline: &toml_edit::InlineTable) -> toml_edit::Table {
     let mut table = toml_edit::Table::new();
-    for (key, value) in inline.iter() {
+    for (key, value) in inline {
         table[key] = toml_edit::Item::Value(value.clone());
     }
     table
@@ -1841,7 +1841,7 @@ fn set_toml_scalar_path(
     }
     if matches!(value, ConfigScalarValue::UnsetOptional) {
         if let Some(table) = item.as_table_mut() {
-            table.remove(*leaf);
+            table.remove(leaf);
             return Ok(());
         }
         anyhow::bail!("config parent for `{dotted_path}` is not a table");

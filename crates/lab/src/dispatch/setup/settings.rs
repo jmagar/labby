@@ -1063,7 +1063,7 @@ fn explicit_config_paths(config_path: &str) -> BTreeSet<String> {
 
 fn collect_toml_paths(item: &toml_edit::Item, prefix: &str, paths: &mut BTreeSet<String>) {
     if let Some(table) = item.as_table() {
-        for (key, value) in table.iter() {
+        for (key, value) in table {
             let next = if prefix.is_empty() {
                 key.to_string()
             } else {
@@ -1073,7 +1073,7 @@ fn collect_toml_paths(item: &toml_edit::Item, prefix: &str, paths: &mut BTreeSet
             collect_toml_paths(value, &next, paths);
         }
     } else if let Some(inline) = item.as_value().and_then(toml_edit::Value::as_inline_table) {
-        for (key, value) in inline.iter() {
+        for (key, value) in inline {
             let next = if prefix.is_empty() {
                 key.to_string()
             } else {
@@ -1087,7 +1087,7 @@ fn collect_toml_paths(item: &toml_edit::Item, prefix: &str, paths: &mut BTreeSet
 
 fn collect_toml_value_paths(value: &toml_edit::Value, prefix: &str, paths: &mut BTreeSet<String>) {
     if let Some(inline) = value.as_inline_table() {
-        for (key, child) in inline.iter() {
+        for (key, child) in inline {
             let next = format!("{prefix}.{key}");
             paths.insert(next.clone());
             collect_toml_value_paths(child, &next, paths);
