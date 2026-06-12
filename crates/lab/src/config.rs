@@ -1785,6 +1785,30 @@ pub struct ConfigPatchOutcome {
     pub backup_path: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ExpectedConfigScalar {
+    pub path: String,
+    pub value: serde_json::Value,
+    pub skip_if_env_present: Option<String>,
+}
+
+impl ExpectedConfigScalar {
+    #[must_use]
+    pub fn new(path: impl Into<String>, value: serde_json::Value) -> Self {
+        Self {
+            path: path.into(),
+            value,
+            skip_if_env_present: None,
+        }
+    }
+
+    #[must_use]
+    pub fn skip_if_env_present(mut self, env: Option<&str>) -> Self {
+        self.skip_if_env_present = env.map(ToOwned::to_owned);
+        self
+    }
+}
+
 static CONFIG_BACKUP_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 fn inline_table_to_table(inline: &toml_edit::InlineTable) -> toml_edit::Table {
@@ -1850,6 +1874,14 @@ pub fn patch_config_scalars(
     path: &Path,
     entries: &[ConfigScalarPatch],
 ) -> Result<ConfigPatchOutcome> {
+    patch_config_scalars_checked(path, entries, &[])
+}
+
+pub fn patch_config_scalars_checked(
+    path: &Path,
+    entries: &[ConfigScalarPatch],
+    expected: &[ExpectedConfigScalar],
+) -> Result<ConfigPatchOutcome> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -1877,6 +1909,31 @@ pub fn patch_config_scalars(
     let mut document = raw
         .parse::<toml_edit::DocumentMut>()
         .with_context(|| format!("failed to parse {}", path.display()))?;
+    if !expected.is_empty() {
+        let mut current_cfg = toml::from_str::<LabConfig>(&raw)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        current_cfg
+            .normalize_protected_mcp_routes()
+            .with_context(|| format!("invalid config {}", path.display()))?;
+        current_cfg
+            .validate()
+            .with_context(|| format!("invalid config {}", path.display()))?;
+        for item in expected {
+            if item
+                .skip_if_env_present
+                .as_deref()
+                .is_some_and(|name| std::env::var_os(name).is_some())
+            {
+                continue;
+            }
+            let current = config_json_value_for_path(&current_cfg, &item.path);
+            anyhow::ensure!(
+                current == item.value,
+                "setting `{}` changed since it was loaded",
+                item.path
+            );
+        }
+    }
     for entry in entries {
         set_toml_scalar_path(&mut document, &entry.path, entry.value.clone())
             .with_context(|| format!("failed to patch {}", entry.path))?;
@@ -1962,6 +2019,101 @@ fn backup_config_file(path: &Path, raw: &str) -> Result<PathBuf> {
         }
     }
     anyhow::bail!("failed to create unique backup for {}", path.display())
+}
+
+fn config_json_value_for_path(cfg: &LabConfig, path: &str) -> serde_json::Value {
+    match path {
+        "output.format" => serde_json::json!(cfg.output.format),
+        "mcp.transport" => serde_json::json!(cfg.mcp.transport),
+        "mcp.host" => serde_json::json!(cfg.mcp.host),
+        "mcp.port" => serde_json::json!(cfg.mcp.port),
+        "mcp.session_ttl_secs" => serde_json::json!(cfg.mcp.session_ttl_secs),
+        "mcp.stateful" => serde_json::json!(cfg.mcp.stateful),
+        "mcp.allowed_hosts" => serde_json::json!(cfg.mcp.allowed_hosts),
+        "log.filter" => serde_json::json!(cfg.log.filter),
+        "log.format" => serde_json::json!(cfg.log.format),
+        "local_logs.retention_days" => {
+            serde_json::json!(
+                cfg.local_logs
+                    .as_ref()
+                    .and_then(|value| value.retention_days)
+            )
+        }
+        "local_logs.max_bytes" => {
+            serde_json::json!(cfg.local_logs.as_ref().and_then(|value| value.max_bytes))
+        }
+        "local_logs.queue_capacity" => {
+            serde_json::json!(
+                cfg.local_logs
+                    .as_ref()
+                    .and_then(|value| value.queue_capacity)
+            )
+        }
+        "local_logs.subscriber_capacity" => {
+            serde_json::json!(
+                cfg.local_logs
+                    .as_ref()
+                    .and_then(|value| value.subscriber_capacity)
+            )
+        }
+        "api.cors_origins" => serde_json::json!(cfg.api.cors_origins),
+        "web.assets_dir" => {
+            serde_json::json!(
+                cfg.web
+                    .assets_dir
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+            )
+        }
+        "workspace.root" => {
+            serde_json::json!(
+                cfg.workspace
+                    .root
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+            )
+        }
+        "mcpregistry.url" => serde_json::json!(cfg.mcpregistry.url),
+        "public_urls.app" => {
+            serde_json::json!(cfg.public_urls.as_ref().and_then(|value| value.app.clone()))
+        }
+        "public_urls.mcp_gateway" => serde_json::json!(
+            cfg.public_urls
+                .as_ref()
+                .and_then(|value| value.mcp_gateway.clone())
+        ),
+        "services.built_in_upstream_apis_enabled" => {
+            serde_json::json!(cfg.services.built_in_upstream_apis_enabled)
+        }
+        "services.tailscale.tailnet" => serde_json::json!(cfg.services.tailscale.tailnet),
+        "code_mode.trace_params" => serde_json::json!(cfg.code_mode.trace_params),
+        "code_mode.timeout_ms" => serde_json::json!(cfg.code_mode.timeout_ms),
+        "code_mode.max_tool_calls" => serde_json::json!(cfg.code_mode.max_tool_calls),
+        "code_mode.max_response_bytes" => serde_json::json!(cfg.code_mode.max_response_bytes),
+        "code_mode.max_response_tokens" => serde_json::json!(cfg.code_mode.max_response_tokens),
+        "code_mode.token_estimate_divisor" => {
+            serde_json::json!(cfg.code_mode.token_estimate_divisor)
+        }
+        "code_mode.max_log_entries" => serde_json::json!(cfg.code_mode.max_log_entries),
+        "code_mode.max_log_bytes" => serde_json::json!(cfg.code_mode.max_log_bytes),
+        "upstream_request_timeout_ms" => serde_json::json!(cfg.upstream_request_timeout_ms),
+        "node.controller" => {
+            serde_json::json!(cfg.node.as_ref().and_then(|value| value.controller.clone()))
+        }
+        "node.log_retention_days" => {
+            serde_json::json!(cfg.node.as_ref().and_then(|value| value.log_retention_days))
+        }
+        "node.role" => serde_json::json!(cfg.node.as_ref().and_then(|value| value.role).map(
+            |role| match role {
+                NodeRuntimeRole::Controller => "controller",
+                NodeRuntimeRole::Node => "node",
+            }
+        )),
+        "device.master" => {
+            serde_json::json!(cfg.device.as_ref().and_then(|value| value.master.clone()))
+        }
+        _ => serde_json::Value::Null,
+    }
 }
 
 /// Patch the non-secret built-in upstream API preference without rewriting
@@ -2923,6 +3075,31 @@ future = "keep"
         )
         .unwrap();
         assert_eq!(outcome.backup_path, None);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
+    }
+
+    #[test]
+    fn patch_config_scalars_checked_rejects_stale_expected_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let raw = "[mcp]\nport = 8765\n";
+        std::fs::write(&path, raw).unwrap();
+        let err = patch_config_scalars_checked(
+            &path,
+            &[ConfigScalarPatch::new(
+                "mcp.port",
+                ConfigScalarValue::I64(8766),
+            )],
+            &[ExpectedConfigScalar::new(
+                "mcp.port",
+                serde_json::json!(9000),
+            )],
+        )
+        .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("changed since it was loaded"),
+            "unexpected error: {err:#}"
+        );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
     }
 

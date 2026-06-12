@@ -986,15 +986,18 @@ fn value_for_field(
     }
     let override_source = field
         .env_override
-        .and_then(|name| std::env::var(name).ok().map(|_| name.to_string()));
-    let mut value = config_value_for_key(cfg, field.key);
+        .and_then(|name| std::env::var(name).ok().map(|value| (name, value)));
+    let mut value = override_source.as_ref().map_or_else(
+        || config_value_for_key(cfg, field.key),
+        |(_, value)| env_override_value(field, value),
+    );
     if field.control == SettingsControl::ReadOnly {
         value = cap_readonly_value(value, 0);
     }
-    let source = if let Some(name) = override_source.clone() {
+    let source = if let Some((name, _)) = override_source.clone() {
         SettingsValueSource {
             source: SettingsSourceKind::Env,
-            overridden_by_env: Some(name),
+            overridden_by_env: Some(name.to_string()),
         }
     } else if !explicit_config_paths.contains(field.key) {
         SettingsValueSource {
@@ -1063,6 +1066,26 @@ fn env_process_value(field: &SettingsFieldSpec) -> Value {
             .map_or_else(|_| json!(value), |parsed| json!(parsed)),
         Ok(value) => json!(value),
         Err(_) => Value::Null,
+    }
+}
+
+fn env_override_value(field: &SettingsFieldSpec, value: &str) -> Value {
+    match field.control {
+        SettingsControl::Number => value
+            .parse::<i64>()
+            .map_or_else(|_| json!(value), |parsed| json!(parsed)),
+        SettingsControl::StringList => Value::Array(
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+                .map(|entry| json!(entry))
+                .collect(),
+        ),
+        SettingsControl::Bool => value
+            .parse::<bool>()
+            .map_or_else(|_| json!(value), |parsed| json!(parsed)),
+        _ => json!(value),
     }
 }
 
@@ -1286,11 +1309,11 @@ pub fn config_patches_from_entries(
     Ok(patches)
 }
 
-pub fn validate_config_previous(
+pub fn expected_config_scalars(
     entries: &[SettingsUpdateEntry],
-    cfg: &crate::config::LabConfig,
-) -> Result<(), ToolError> {
+) -> Vec<crate::config::ExpectedConfigScalar> {
     let fields = settings_fields_by_key();
+    let mut expected = Vec::new();
     for entry in entries {
         let Some(previous) = &entry.previous else {
             continue;
@@ -1298,21 +1321,12 @@ pub fn validate_config_previous(
         let Some(field) = fields.get(entry.key.as_str()) else {
             continue;
         };
-        if field
-            .env_override
-            .is_some_and(|name| std::env::var_os(name).is_some())
-        {
-            continue;
-        }
-        let current = config_value_for_key(cfg, field.key);
-        if &current != previous {
-            return Err(ToolError::InvalidParam {
-                message: format!("setting `{}` changed since it was loaded", entry.key),
-                param: entry.key.clone(),
-            });
-        }
+        expected.push(
+            crate::config::ExpectedConfigScalar::new(field.key, previous.clone())
+                .skip_if_env_present(field.env_override),
+        );
     }
-    Ok(())
+    expected
 }
 
 fn config_patch_for_field(
@@ -1743,6 +1757,15 @@ mod tests {
         assert_eq!(capped["truncated"], true);
         assert_eq!(capped["kind"], "array");
         assert_eq!(capped["total_items"], 90);
+    }
+
+    #[test]
+    fn env_override_values_are_coerced_to_field_control() {
+        let field = settings_fields()
+            .into_iter()
+            .find(|field| field.key == "mcp.port")
+            .unwrap();
+        assert_eq!(env_override_value(&field, "8766"), json!(8766));
     }
 
     #[test]

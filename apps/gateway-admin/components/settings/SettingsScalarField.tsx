@@ -31,6 +31,40 @@ export function SettingsScalarField({
   const sourceLabel = source?.source ?? 'default'
   const backendLabel = field.backend === 'env' ? '.env' : 'config.toml'
   const describedBy = error ? errorId : undefined
+  const controlProps = {
+    id,
+    disabled,
+    'aria-invalid': Boolean(error),
+    'aria-describedby': describedBy,
+  }
+
+  function renderControl(): React.ReactNode {
+    switch (field.control) {
+      case 'bool':
+        return <Switch {...controlProps} checked={Boolean(value)} onCheckedChange={(checked) => onChange(field.key, checked)} />
+      case 'enum':
+        return (
+          <Select value={inputValue} disabled={disabled} onValueChange={(next) => onChange(field.key, next)}>
+            <SelectTrigger {...controlProps}>
+              <SelectValue placeholder={field.example ?? 'Select'} />
+            </SelectTrigger>
+            <SelectContent>
+              {field.options.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )
+      case 'string_list':
+        return <Textarea {...controlProps} value={inputValue} className="min-h-24 font-mono text-xs" onChange={(event) => onChange(field.key, parseFieldInput(field, event.target.value))} />
+      case 'read_only':
+        return <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs">{JSON.stringify(value ?? null, null, 2)}</pre>
+      default:
+        return <Input {...controlProps} type={field.control === 'number' ? 'number' : 'text'} value={inputValue} onChange={(event) => onChange(field.key, parseFieldInput(field, event.target.value))} />
+    }
+  }
 
   return (
     <div className="grid gap-2 rounded-md border p-3">
@@ -54,28 +88,7 @@ export function SettingsScalarField({
       {hasEnvOverrideWarning(field, state) ? (
         <p className="text-xs text-amber-600">{envOverride} currently overrides this config.toml value.</p>
       ) : null}
-      {field.control === 'bool' ? (
-        <Switch id={id} checked={Boolean(value)} disabled={disabled} aria-invalid={Boolean(error)} aria-describedby={describedBy} onCheckedChange={(checked) => onChange(field.key, checked)} />
-      ) : field.control === 'enum' ? (
-        <Select value={inputValue} disabled={disabled} onValueChange={(next) => onChange(field.key, next)}>
-          <SelectTrigger id={id} aria-invalid={Boolean(error)} aria-describedby={describedBy}>
-            <SelectValue placeholder={field.example ?? 'Select'} />
-          </SelectTrigger>
-          <SelectContent>
-            {field.options.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : field.control === 'string_list' ? (
-        <Textarea id={id} value={inputValue} disabled={disabled} aria-invalid={Boolean(error)} aria-describedby={describedBy} className="min-h-24 font-mono text-xs" onChange={(event) => onChange(field.key, parseFieldInput(field, event.target.value))} />
-      ) : field.control === 'read_only' ? (
-        <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs">{JSON.stringify(value ?? null, null, 2)}</pre>
-      ) : (
-        <Input id={id} type={field.control === 'number' ? 'number' : 'text'} value={inputValue} disabled={disabled} aria-invalid={Boolean(error)} aria-describedby={describedBy} onChange={(event) => onChange(field.key, parseFieldInput(field, event.target.value))} />
-      )}
+      {renderControl()}
       {error ? <p id={errorId} className="text-xs text-destructive">{error}</p> : null}
     </div>
   )

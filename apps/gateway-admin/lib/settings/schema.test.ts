@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildDirtyEntries, parseFieldInput, valueAsInputString } from './schema'
+import { buildDirtyEntries, buildDirtyEntriesByBackend, parseFieldInput, valueAsInputString } from './schema'
 import type { SettingsFieldSpec } from '@/lib/api/setup-client'
 
 const numberField: SettingsFieldSpec = {
@@ -35,6 +35,18 @@ test('settings schema helpers build dirty entries only for changed keys', () => 
   assert.deepEqual(buildDirtyEntries([numberField], new Set(['mcp.port']), { 'mcp.port': 8766 }, { 'mcp.port': 8765 }), [
     { key: 'mcp.port', value: 8766, previous: 8765 },
   ])
+})
+
+test('settings schema helpers partition dirty entries by backend', () => {
+  const envField: SettingsFieldSpec = { ...numberField, key: 'LAB_MCP_HTTP_PORT', backend: 'env' }
+  const partitioned = buildDirtyEntriesByBackend(
+    [numberField, envField],
+    new Set(['mcp.port', 'LAB_MCP_HTTP_PORT']),
+    { 'mcp.port': 8766, LAB_MCP_HTTP_PORT: 8767 },
+    { 'mcp.port': 8765, LAB_MCP_HTTP_PORT: 8765 },
+  )
+  assert.deepEqual(partitioned.configEntries, [{ key: 'mcp.port', value: 8766, previous: 8765 }])
+  assert.deepEqual(partitioned.envEntries, [{ key: 'LAB_MCP_HTTP_PORT', value: 8767, previous: 8765 }])
 })
 
 test('settings schema helpers do not stringify arrays as objects', () => {

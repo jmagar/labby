@@ -7,8 +7,8 @@ import type { SettingsFieldSpec, SettingsState } from '@/lib/api/setup-client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
-import { setupApi } from '@/lib/api/setup-client'
-import { buildDirtyEntries, editableFields } from '@/lib/settings/schema'
+import { setupApi, SetupApiError } from '@/lib/api/setup-client'
+import { buildDirtyEntriesByBackend } from '@/lib/settings/schema'
 import { SettingsScalarField } from './SettingsScalarField'
 
 export function SettingsScalarSection({
@@ -47,10 +47,7 @@ export function SettingsScalarSection({
     setSaving(true)
     setErrors({})
     try {
-      const editable = editableFields(fields)
-      const entries = buildDirtyEntries(editable, changedKeys, values, initialValues)
-      const envEntries = entries.filter((entry) => editable.find((field) => field.key === entry.key)?.backend === 'env')
-      const configEntries = entries.filter((entry) => editable.find((field) => field.key === entry.key)?.backend === 'config_toml')
+      const { envEntries, configEntries } = buildDirtyEntriesByBackend(fields, changedKeys, values, initialValues)
       if (envEntries.length > 0 && configEntries.length > 0) {
         setErrors({ _form: 'Save .env and config.toml settings separately.' })
         return
@@ -65,7 +62,7 @@ export function SettingsScalarSection({
       onSaved(next)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'save failed'
-      const param = typeof (err as { param?: unknown }).param === 'string' ? (err as { param: string }).param : undefined
+      const param = err instanceof SetupApiError ? err.param : undefined
       if (param && fields.some((field) => field.key === param)) {
         setErrors({ [param]: message })
       } else {

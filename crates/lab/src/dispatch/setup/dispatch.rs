@@ -282,8 +282,8 @@ async fn settings_env_update_action(params: &Value) -> Result<Value, ToolError> 
     let entries = parse_update_entries(params)?;
     let env_entries = super::settings::env_entries_from_updates(&entries)?;
     let env = env_path();
-    super::settings::validate_env_previous(&entries, &env)?;
     let expected_mtime = snapshot_mtime(&env);
+    super::settings::validate_env_previous(&entries, &env)?;
     let outcome = env_merge::merge(
         &env,
         MergeRequest {
@@ -296,15 +296,6 @@ async fn settings_env_update_action(params: &Value) -> Result<Value, ToolError> 
         },
     )
     .map_err(map_merge_err)?;
-    if !outcome.skipped.is_empty() {
-        return Err(ToolError::InvalidParam {
-            message: format!(
-                "settings env update skipped conflicts: {}",
-                outcome.skipped.join("; ")
-            ),
-            param: "entries".into(),
-        });
-    }
     tracing::info!(
         surface = "dispatch",
         service = "setup",
@@ -322,9 +313,9 @@ fn settings_config_update_action(params: &Value) -> Result<Value, ToolError> {
         sdk_kind: "internal_error".into(),
         message: "HOME env var not set; cannot resolve config.toml path".into(),
     })?;
-    let cfg_before = load_settings_config(&path)?;
-    super::settings::validate_config_previous(&entries, &cfg_before)?;
-    let outcome = crate::config::patch_config_scalars(&path, &patches).map_err(config_io_error)?;
+    let expected = super::settings::expected_config_scalars(&entries);
+    let outcome = crate::config::patch_config_scalars_checked(&path, &patches, &expected)
+        .map_err(config_io_error)?;
     if patches
         .iter()
         .any(|patch| patch.path == "services.built_in_upstream_apis_enabled")
@@ -392,10 +383,23 @@ fn load_settings_config(path: &std::path::Path) -> Result<crate::config::LabConf
 }
 
 fn config_io_error(error: anyhow::Error) -> ToolError {
+    let detail = format!("{error:#}");
+    let param = stale_setting_param(&detail)
+        .unwrap_or("config.toml")
+        .to_string();
     ToolError::InvalidParam {
-        message: format!("invalid settings config: {error}"),
-        param: "config.toml".into(),
+        message: format!("invalid settings config: {detail}"),
+        param,
     }
+}
+
+fn stale_setting_param(message: &str) -> Option<&str> {
+    const PREFIX: &str = "setting `";
+    const SUFFIX: &str = "` changed since it was loaded";
+    let start = message.find(PREFIX)? + PREFIX.len();
+    let rest = &message[start..];
+    let end = rest.find(SUFFIX)?;
+    Some(&rest[..end])
 }
 
 fn parse_built_in_upstream_apis_enabled(params: &Value) -> Result<bool, ToolError> {
@@ -815,6 +819,17 @@ mod tests {
                 "duplicate setup action {}",
                 action.name
             );
+        }
+    }
+
+    #[test]
+    fn config_io_error_preserves_stale_setting_param() {
+        let err = config_io_error(anyhow::anyhow!(
+            "setting `mcp.port` changed since it was loaded"
+        ));
+        match err {
+            ToolError::InvalidParam { param, .. } => assert_eq!(param, "mcp.port"),
+            other => panic!("expected invalid_param, got {other:?}"),
         }
     }
 

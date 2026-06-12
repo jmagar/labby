@@ -51,6 +51,21 @@ export function buildDirtyEntries(
     }))
 }
 
+export function buildDirtyEntriesByBackend(
+  fields: SettingsFieldSpec[],
+  changedKeys: Set<string>,
+  values: Record<string, unknown>,
+  initialValues: Record<string, unknown>,
+): { envEntries: SettingsUpdateEntry[]; configEntries: SettingsUpdateEntry[] } {
+  const editable = editableFields(fields)
+  const backendByKey = new Map(editable.map((field) => [field.key, field.backend]))
+  const entries = buildDirtyEntries(editable, changedKeys, values, initialValues)
+  return {
+    envEntries: entries.filter((entry) => backendByKey.get(entry.key) === 'env'),
+    configEntries: entries.filter((entry) => backendByKey.get(entry.key) === 'config_toml'),
+  }
+}
+
 export function hasEnvOverrideWarning(field: SettingsFieldSpec, state: SettingsState): boolean {
   return Boolean(state.sources[field.key]?.overridden_by_env)
 }
