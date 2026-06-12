@@ -2482,7 +2482,7 @@ Options:
           [possible values: gateway, mcp_server, mcp_client, api, web, oauth_relay, auth_webui, auth_mcp, auth_upstream, core_runtime, syslog]
 
       --surface <SURFACES>
-          [possible values: cli, mcp, api, web, core_runtime]
+          [possible values: cli, mcp, api, web, acp, dispatch, node, core_runtime]
 
       --action <ACTION>
           Filter by dispatch action name

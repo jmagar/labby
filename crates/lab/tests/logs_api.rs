@@ -14,6 +14,8 @@ mod support;
 
 use support::log_system::{InstalledLogSystemGuard, test_lock};
 
+const TEST_BEARER_TOKEN: &str = "secret-token";
+
 fn logs_registry() -> labby::registry::ToolRegistry {
     let mut registry = labby::registry::ToolRegistry::new();
     registry.register(labby::registry::RegisteredService {
@@ -63,7 +65,7 @@ async fn test_app() -> (Router, Arc<labby::dispatch::logs::types::LogSystem>) {
     let state = labby::api::state::AppState::from_registry(logs_registry())
         .with_log_system(Arc::clone(&logs_system));
     (
-        labby::api::router::build_router_with_bearer(state, None, None),
+        labby::api::router::build_router_with_bearer(state, Some(TEST_BEARER_TOKEN.into()), None),
         logs_system,
     )
 }
@@ -116,6 +118,7 @@ async fn post_logs_search_route_exists() {
             Request::builder()
                 .method("POST")
                 .uri("/v1/logs")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_BEARER_TOKEN}"))
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
                     serde_json::json!({"action":"logs.search","params":{"query":{}}}).to_string(),
@@ -139,6 +142,7 @@ async fn logs_stream_sse_route_emits_event_stream_content_type() {
             Request::builder()
                 .method("GET")
                 .uri("/v1/logs/stream")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_BEARER_TOKEN}"))
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -168,6 +172,7 @@ async fn logs_sse_subscribers_receive_events_after_subscribe() {
             Request::builder()
                 .method("GET")
                 .uri("/v1/logs/stream")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_BEARER_TOKEN}"))
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -187,6 +192,7 @@ async fn logs_sse_subscribers_receive_events_after_subscribe() {
             Request::builder()
                 .method("GET")
                 .uri("/v1/logs/stream")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_BEARER_TOKEN}"))
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -225,6 +231,7 @@ async fn logs_mcp_tail_matches_api_query_semantics() {
             Request::builder()
                 .method("POST")
                 .uri("/v1/logs")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_BEARER_TOKEN}"))
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
                     serde_json::json!({
@@ -255,13 +262,15 @@ async fn logs_routes_respect_runtime_service_filtering() {
         .expect("log system");
     let state = labby::api::state::AppState::from_registry(labby::registry::ToolRegistry::new())
         .with_log_system(logs_system);
-    let app = labby::api::router::build_router_with_bearer(state, None, None);
+    let app =
+        labby::api::router::build_router_with_bearer(state, Some(TEST_BEARER_TOKEN.into()), None);
 
     let response = app
         .oneshot(
             Request::builder()
                 .method("POST")
                 .uri("/v1/logs")
+                .header(header::AUTHORIZATION, format!("Bearer {TEST_BEARER_TOKEN}"))
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
                     serde_json::json!({"action":"logs.search","params":{"query":{}}}).to_string(),
