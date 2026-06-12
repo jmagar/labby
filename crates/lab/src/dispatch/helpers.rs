@@ -3,11 +3,22 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Component, Path};
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
 
 use lab_apis::core::action::ActionSpec;
 use serde_json::Value;
 
 use crate::dispatch::error::ToolError;
+
+#[cfg(test)]
+static TEST_LAB_HOME: OnceLock<Mutex<Option<std::path::PathBuf>>> = OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn set_test_lab_home(path: Option<std::path::PathBuf>) {
+    let slot = TEST_LAB_HOME.get_or_init(|| Mutex::new(None));
+    *slot.lock().expect("test lab home lock") = path;
+}
 
 /// Resolve the lab home directory: `$LAB_HOME` if set, else `$HOME/.lab/`.
 ///
@@ -16,6 +27,15 @@ use crate::dispatch::error::ToolError;
 /// `dispatch/CLAUDE.md` § Orchestrator Exception.
 #[must_use]
 pub fn lab_home() -> std::path::PathBuf {
+    #[cfg(test)]
+    if let Some(path) = TEST_LAB_HOME
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("test lab home lock")
+        .clone()
+    {
+        return path;
+    }
     if let Ok(home) = std::env::var("LAB_HOME")
         && !home.is_empty()
     {

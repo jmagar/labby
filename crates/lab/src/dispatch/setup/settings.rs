@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use serde_json::{Map, Value, json};
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::OnceLock;
 
 use crate::dispatch::error::ToolError;
 
@@ -120,6 +121,8 @@ pub struct SettingsUpdateEntry {
     pub key: String,
     pub value: Value,
     #[serde(default)]
+    pub previous: Option<Value>,
+    #[serde(default)]
     pub unset: bool,
 }
 
@@ -141,6 +144,10 @@ pub struct EnvSettingSpec {
 }
 
 pub const SETTINGS_SCHEMA_VERSION: u32 = 1;
+const READONLY_MAX_DEPTH: usize = 6;
+const READONLY_MAX_OBJECT_KEYS: usize = 80;
+const READONLY_MAX_ARRAY_ITEMS: usize = 50;
+const READONLY_MAX_STRING_BYTES: usize = 4096;
 
 fn editable(
     section: &'static str,
@@ -226,6 +233,29 @@ fn enum_editable(
         example,
     );
     field.options = options;
+    field
+}
+
+fn enum_editable_with_env(
+    section: &'static str,
+    key: &'static str,
+    label: &'static str,
+    description: &'static str,
+    apply_mode: SettingsApplyMode,
+    options: Vec<SettingsOption>,
+    env_override: Option<&'static str>,
+    example: Option<&'static str>,
+) -> SettingsFieldSpec {
+    let mut field = enum_editable(
+        section,
+        key,
+        label,
+        description,
+        apply_mode,
+        options,
+        example,
+    );
+    field.env_override = env_override;
     field
 }
 
@@ -370,6 +400,36 @@ pub fn settings_fields() -> Vec<SettingsFieldSpec> {
                 },
             ],
             Some("json"),
+        ),
+        editable(
+            "core",
+            "log.filter",
+            "Log filter default",
+            "config.toml tracing filter directive; LAB_LOG overrides it.",
+            SettingsBackend::ConfigToml,
+            SettingsControl::Text,
+            SettingsApplyMode::Restart,
+            Some("LAB_LOG"),
+            Some("labby=info,lab_apis=warn"),
+        ),
+        enum_editable_with_env(
+            "core",
+            "log.format",
+            "Log format default",
+            "config.toml log format; LAB_LOG_FORMAT overrides it.",
+            SettingsApplyMode::Restart,
+            vec![
+                SettingsOption {
+                    value: "text",
+                    label: "Text",
+                },
+                SettingsOption {
+                    value: "json",
+                    label: "JSON",
+                },
+            ],
+            Some("LAB_LOG_FORMAT"),
+            Some("text"),
         ),
         editable(
             "core",
@@ -531,39 +591,6 @@ pub fn settings_fields() -> Vec<SettingsFieldSpec> {
             None,
             Some("true"),
         ),
-        enum_editable(
-            "features",
-            "gateway_import_mode",
-            "Gateway import mode",
-            "Controls external MCP config discovery on startup.",
-            SettingsApplyMode::Restart,
-            vec![
-                SettingsOption {
-                    value: "off",
-                    label: "Off",
-                },
-                SettingsOption {
-                    value: "pending",
-                    label: "Pending approval",
-                },
-                SettingsOption {
-                    value: "auto",
-                    label: "Auto import",
-                },
-            ],
-            Some("off"),
-        ),
-        editable(
-            "features",
-            "admin.enabled",
-            "Admin tool enabled",
-            "Enable the lab_admin MCP tool.",
-            SettingsBackend::ConfigToml,
-            SettingsControl::Bool,
-            SettingsApplyMode::Restart,
-            Some("LAB_ADMIN_ENABLED"),
-            Some("false"),
-        ),
         editable(
             "features",
             "code_mode.trace_params",
@@ -574,17 +601,6 @@ pub fn settings_fields() -> Vec<SettingsFieldSpec> {
             SettingsApplyMode::Partial,
             None,
             Some("false"),
-        ),
-        editable(
-            "features",
-            "gateway.extra_stdio_commands",
-            "Extra stdio commands",
-            "Additional commands allowed as stdio upstream programs.",
-            SettingsBackend::ConfigToml,
-            SettingsControl::StringList,
-            SettingsApplyMode::Restart,
-            None,
-            Some("labby,runarr"),
         ),
         editable(
             "services",
@@ -815,6 +831,30 @@ fn readonly_fields() -> Vec<SettingsFieldSpec> {
         ),
         readonly(
             "features",
+            "gateway_import_mode",
+            "Gateway import mode",
+            "External MCP config discovery can expose new upstreams and requires a dedicated dangerous settings flow.",
+            SettingsRisk::Dangerous,
+            SettingsWritePolicy::DangerousFlowRequired,
+        ),
+        readonly(
+            "features",
+            "admin.enabled",
+            "Admin tool enabled",
+            "Enabling the lab_admin MCP tool requires a dedicated dangerous settings flow.",
+            SettingsRisk::Dangerous,
+            SettingsWritePolicy::DangerousFlowRequired,
+        ),
+        readonly(
+            "features",
+            "gateway.extra_stdio_commands",
+            "Extra stdio commands",
+            "Additional stdio upstream commands require a dedicated dangerous settings flow.",
+            SettingsRisk::Dangerous,
+            SettingsWritePolicy::DangerousFlowRequired,
+        ),
+        readonly(
+            "features",
             "code_mode.enabled",
             "Code Mode enabled",
             "Enabling the synthetic Code Mode surface requires dedicated runtime exposure tests.",
@@ -902,13 +942,15 @@ pub fn state_response(
     env_path: String,
     section: &str,
 ) -> SettingsStateResponse {
+    let explicit_config_paths = explicit_config_paths(&config_path);
+    let env_path_ref = std::path::Path::new(&env_path);
     let mut values = BTreeMap::new();
     let mut sources = BTreeMap::new();
     for field in settings_fields()
         .into_iter()
         .filter(|field| field.section == section)
     {
-        let (value, source) = value_for_field(cfg, &field);
+        let (value, source) = value_for_field(cfg, &field, &explicit_config_paths, env_path_ref);
         values.insert(field.key.to_string(), value);
         sources.insert(field.key.to_string(), source);
     }
@@ -925,12 +967,19 @@ pub fn state_response(
 fn value_for_field(
     cfg: &crate::config::LabConfig,
     field: &SettingsFieldSpec,
+    explicit_config_paths: &BTreeSet<String>,
+    env_path: &std::path::Path,
 ) -> (Value, SettingsValueSource) {
     if field.backend == SettingsBackend::Env {
+        let value = env_file_value(env_path, field).unwrap_or_else(|| env_process_value(field));
         return (
-            env_value(field.key),
+            value.clone(),
             SettingsValueSource {
-                source: SettingsSourceKind::Env,
+                source: if value.is_null() {
+                    SettingsSourceKind::Default
+                } else {
+                    SettingsSourceKind::Env
+                },
                 overridden_by_env: None,
             },
         );
@@ -938,13 +987,16 @@ fn value_for_field(
     let override_source = field
         .env_override
         .and_then(|name| std::env::var(name).ok().map(|_| name.to_string()));
-    let value = config_value_for_key(cfg, field.key);
+    let mut value = config_value_for_key(cfg, field.key);
+    if field.control == SettingsControl::ReadOnly {
+        value = cap_readonly_value(value, 0);
+    }
     let source = if let Some(name) = override_source.clone() {
         SettingsValueSource {
             source: SettingsSourceKind::Env,
             overridden_by_env: Some(name),
         }
-    } else if value.is_null() {
+    } else if !explicit_config_paths.contains(field.key) {
         SettingsValueSource {
             source: SettingsSourceKind::Default,
             overridden_by_env: None,
@@ -958,9 +1010,55 @@ fn value_for_field(
     (value, source)
 }
 
-fn env_value(key: &str) -> Value {
-    match std::env::var(key) {
-        Ok(value) if key == "LAB_MCP_HTTP_PORT" => value
+fn explicit_config_paths(config_path: &str) -> BTreeSet<String> {
+    let Ok(raw) = std::fs::read_to_string(config_path) else {
+        return BTreeSet::new();
+    };
+    let Ok(document) = raw.parse::<toml_edit::DocumentMut>() else {
+        return BTreeSet::new();
+    };
+    let mut paths = BTreeSet::new();
+    collect_toml_paths(document.as_item(), "", &mut paths);
+    paths
+}
+
+fn collect_toml_paths(item: &toml_edit::Item, prefix: &str, paths: &mut BTreeSet<String>) {
+    if let Some(table) = item.as_table() {
+        for (key, value) in table.iter() {
+            let next = if prefix.is_empty() {
+                key.to_string()
+            } else {
+                format!("{prefix}.{key}")
+            };
+            paths.insert(next.clone());
+            collect_toml_paths(value, &next, paths);
+        }
+    } else if let Some(inline) = item.as_value().and_then(toml_edit::Value::as_inline_table) {
+        for (key, value) in inline.iter() {
+            let next = if prefix.is_empty() {
+                key.to_string()
+            } else {
+                format!("{prefix}.{key}")
+            };
+            paths.insert(next.clone());
+            collect_toml_value_paths(value, &next, paths);
+        }
+    }
+}
+
+fn collect_toml_value_paths(value: &toml_edit::Value, prefix: &str, paths: &mut BTreeSet<String>) {
+    if let Some(inline) = value.as_inline_table() {
+        for (key, child) in inline.iter() {
+            let next = format!("{prefix}.{key}");
+            paths.insert(next.clone());
+            collect_toml_value_paths(child, &next, paths);
+        }
+    }
+}
+
+fn env_process_value(field: &SettingsFieldSpec) -> Value {
+    match std::env::var(field.key) {
+        Ok(value) if field.control == SettingsControl::Number => value
             .parse::<i64>()
             .map_or_else(|_| json!(value), |parsed| json!(parsed)),
         Ok(value) => json!(value),
@@ -1096,13 +1194,68 @@ pub fn redact_value(value: Value) -> Value {
     }
 }
 
+fn cap_readonly_value(value: Value, depth: usize) -> Value {
+    if depth >= READONLY_MAX_DEPTH {
+        return json!({
+            "truncated": true,
+            "reason": "max_depth",
+        });
+    }
+
+    match value {
+        Value::String(text) if text.len() > READONLY_MAX_STRING_BYTES => {
+            let mut preview = text;
+            preview.truncate(READONLY_MAX_STRING_BYTES);
+            json!({
+                "truncated": true,
+                "kind": "string",
+                "bytes": preview.len(),
+                "preview": preview,
+            })
+        }
+        Value::Array(values) => {
+            let original_len = values.len();
+            let preview: Vec<Value> = values
+                .into_iter()
+                .take(READONLY_MAX_ARRAY_ITEMS)
+                .map(|value| cap_readonly_value(value, depth + 1))
+                .collect();
+            if original_len > READONLY_MAX_ARRAY_ITEMS {
+                json!({
+                    "truncated": true,
+                    "kind": "array",
+                    "total_items": original_len,
+                    "preview": preview,
+                })
+            } else {
+                Value::Array(preview)
+            }
+        }
+        Value::Object(map) => {
+            let original_len = map.len();
+            let mut preview = Map::new();
+            for (key, value) in map.into_iter().take(READONLY_MAX_OBJECT_KEYS) {
+                preview.insert(key, cap_readonly_value(value, depth + 1));
+            }
+            if original_len > READONLY_MAX_OBJECT_KEYS {
+                json!({
+                    "truncated": true,
+                    "kind": "object",
+                    "total_keys": original_len,
+                    "preview": Value::Object(preview),
+                })
+            } else {
+                Value::Object(preview)
+            }
+        }
+        other => other,
+    }
+}
+
 pub fn config_patches_from_entries(
     entries: &[SettingsUpdateEntry],
 ) -> Result<Vec<crate::config::ConfigScalarPatch>, ToolError> {
-    let fields: BTreeMap<&str, SettingsFieldSpec> = settings_fields()
-        .into_iter()
-        .map(|field| (field.key, field))
-        .collect();
+    let fields = settings_fields_by_key();
     let mut patches = Vec::new();
     for entry in entries {
         let Some(field) = fields.get(entry.key.as_str()) else {
@@ -1131,6 +1284,35 @@ pub fn config_patches_from_entries(
         patches.push(config_patch_for_field(field, entry)?);
     }
     Ok(patches)
+}
+
+pub fn validate_config_previous(
+    entries: &[SettingsUpdateEntry],
+    cfg: &crate::config::LabConfig,
+) -> Result<(), ToolError> {
+    let fields = settings_fields_by_key();
+    for entry in entries {
+        let Some(previous) = &entry.previous else {
+            continue;
+        };
+        let Some(field) = fields.get(entry.key.as_str()) else {
+            continue;
+        };
+        if field
+            .env_override
+            .is_some_and(|name| std::env::var_os(name).is_some())
+        {
+            continue;
+        }
+        let current = config_value_for_key(cfg, field.key);
+        if &current != previous {
+            return Err(ToolError::InvalidParam {
+                message: format!("setting `{}` changed since it was loaded", entry.key),
+                param: entry.key.clone(),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn config_patch_for_field(
@@ -1225,10 +1407,7 @@ fn validate_string_field(field: &SettingsFieldSpec, value: &str) -> Result<(), T
 pub fn env_entries_from_updates(
     entries: &[SettingsUpdateEntry],
 ) -> Result<Vec<lab_apis::setup::DraftEntry>, ToolError> {
-    let fields: BTreeMap<&str, SettingsFieldSpec> = settings_fields()
-        .into_iter()
-        .map(|field| (field.key, field))
-        .collect();
+    let fields = settings_fields_by_key();
     let mut out = Vec::new();
     for entry in entries {
         let Some(field) = fields.get(entry.key.as_str()) else {
@@ -1274,7 +1453,55 @@ pub fn env_entries_from_updates(
     Ok(out)
 }
 
+pub fn validate_env_previous(
+    entries: &[SettingsUpdateEntry],
+    env_path: &std::path::Path,
+) -> Result<(), ToolError> {
+    let fields = settings_fields_by_key();
+    for entry in entries {
+        let Some(previous) = &entry.previous else {
+            continue;
+        };
+        let Some(field) = fields.get(entry.key.as_str()) else {
+            continue;
+        };
+        let current = env_file_value(env_path, field).unwrap_or(Value::Null);
+        if &current != previous {
+            return Err(ToolError::InvalidParam {
+                message: format!("setting `{}` changed since it was loaded", entry.key),
+                param: entry.key.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn settings_fields_by_key() -> BTreeMap<&'static str, SettingsFieldSpec> {
+    settings_fields()
+        .into_iter()
+        .map(|field| (field.key, field))
+        .collect()
+}
+
+fn env_file_value(path: &std::path::Path, field: &SettingsFieldSpec) -> Option<Value> {
+    let iter = dotenvy::from_path_iter(path).ok()?;
+    let raw = iter
+        .filter_map(Result::ok)
+        .find_map(|(key, value)| (key == field.key).then_some(value))?;
+    if field.control == SettingsControl::Number {
+        return raw
+            .parse::<i64>()
+            .map_or_else(|_| Some(json!(raw)), |parsed| Some(json!(parsed)));
+    }
+    Some(json!(raw))
+}
+
 pub fn env_schema() -> Vec<EnvSettingSpec> {
+    static ENV_SCHEMA: OnceLock<Vec<EnvSettingSpec>> = OnceLock::new();
+    ENV_SCHEMA.get_or_init(build_env_schema).clone()
+}
+
+fn build_env_schema() -> Vec<EnvSettingSpec> {
     let mut by_key: BTreeMap<String, EnvSettingSpec> = BTreeMap::new();
     let generated: Value = serde_json::from_str(include_str!(
         "../../../../../docs/generated/env-reference.json"
@@ -1464,6 +1691,7 @@ mod tests {
         let entries = vec![SettingsUpdateEntry {
             key: "auth".into(),
             value: json!("********"),
+            previous: None,
             unset: false,
         }];
         let err = config_patches_from_entries(&entries).unwrap_err();
@@ -1475,6 +1703,7 @@ mod tests {
         let entries = vec![SettingsUpdateEntry {
             key: "LAB_MCP_HTTP_PORT".into(),
             value: json!(8766),
+            previous: None,
             unset: false,
         }];
         let parsed = env_entries_from_updates(&entries).unwrap();
@@ -1484,9 +1713,36 @@ mod tests {
         let rejected = vec![SettingsUpdateEntry {
             key: "LAB_MCP_HTTP_TOKEN".into(),
             value: json!("secret"),
+            previous: None,
             unset: false,
         }];
         assert!(env_entries_from_updates(&rejected).is_err());
+    }
+
+    #[test]
+    fn dangerous_exposure_fields_are_not_normal_editable_settings() {
+        let fields = settings_fields();
+        for key in [
+            "gateway_import_mode",
+            "admin.enabled",
+            "gateway.extra_stdio_commands",
+        ] {
+            let field = fields.iter().find(|field| field.key == key).unwrap();
+            assert_eq!(field.control, SettingsControl::ReadOnly);
+            assert_eq!(
+                field.write_policy,
+                SettingsWritePolicy::DangerousFlowRequired
+            );
+        }
+    }
+
+    #[test]
+    fn readonly_values_are_capped_for_advanced_state() {
+        let value = json!((0..90).collect::<Vec<i32>>());
+        let capped = cap_readonly_value(value, 0);
+        assert_eq!(capped["truncated"], true);
+        assert_eq!(capped["kind"], "array");
+        assert_eq!(capped["total_items"], 90);
     }
 
     #[test]

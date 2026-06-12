@@ -14,12 +14,14 @@ const USE_MOCK_DATA = process.env.NEXT_PUBLIC_MOCK_DATA === 'true'
 export class SetupApiError extends Error implements ServiceActionError {
   status: number
   code?: string
+  param?: string
 
-  constructor(message: string, status: number, code?: string) {
+  constructor(message: string, status: number, code?: string, param?: string) {
     super(message)
     this.name = 'SetupApiError'
     this.status = status
     this.code = code
+    this.param = param
   }
 }
 
@@ -34,7 +36,7 @@ async function setupAction<T>(
     signal,
     serviceLabel: 'Setup',
     url: setupActionUrl(),
-    createError: (message, status, code) => new SetupApiError(message, status, code),
+    createError: (message, status, code, param) => new SetupApiError(message, status, code, param),
   })
 }
 
@@ -312,6 +314,7 @@ export interface SettingsState {
 export interface SettingsUpdateEntry {
   key: string
   value: unknown
+  previous?: unknown
   unset?: boolean
 }
 

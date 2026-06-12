@@ -16,7 +16,7 @@
 
 pub mod env_merge;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
 use std::{
@@ -1785,6 +1785,16 @@ pub struct ConfigPatchOutcome {
     pub backup_path: Option<PathBuf>,
 }
 
+static CONFIG_BACKUP_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+fn inline_table_to_table(inline: &toml_edit::InlineTable) -> toml_edit::Table {
+    let mut table = toml_edit::Table::new();
+    for (key, value) in inline.iter() {
+        table[key] = toml_edit::Item::Value(value.clone());
+    }
+    table
+}
+
 fn set_toml_scalar_path(
     document: &mut toml_edit::DocumentMut,
     dotted_path: &str,
@@ -1801,7 +1811,15 @@ fn set_toml_scalar_path(
         if item[*part].is_none() {
             item[*part] = toml_edit::Item::Table(toml_edit::Table::new());
         } else if !item[*part].is_table() {
-            anyhow::bail!("config parent `{part}` is not a table");
+            let converted = item[*part]
+                .as_value()
+                .and_then(toml_edit::Value::as_inline_table)
+                .map(inline_table_to_table);
+            if let Some(table) = converted {
+                item[*part] = toml_edit::Item::Table(table);
+            } else {
+                anyhow::bail!("config parent `{part}` is not a table");
+            }
         }
         item = &mut item[*part];
     }
@@ -1871,6 +1889,13 @@ pub fn patch_config_scalars(
     cfg.validate()
         .with_context(|| format!("invalid patched config {}", path.display()))?;
 
+    if patched == raw {
+        return Ok(ConfigPatchOutcome {
+            config: cfg,
+            backup_path: None,
+        });
+    }
+
     let backup_path = if path.exists() {
         Some(backup_config_file(path, &raw)?)
     } else {
@@ -1906,10 +1931,37 @@ pub fn patch_config_scalars(
 }
 
 fn backup_config_file(path: &Path, raw: &str) -> Result<PathBuf> {
-    let stamp = jiff::Timestamp::now().strftime("%Y%m%d%H%M%S").to_string();
-    let backup = path.with_extension(format!("toml.bak.{stamp}"));
-    std::fs::write(&backup, raw).with_context(|| format!("write backup {}", backup.display()))?;
-    Ok(backup)
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let pid = std::process::id();
+    for _ in 0..10 {
+        let counter = CONFIG_BACKUP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let backup = path.with_extension(format!("toml.bak.{nanos}.{pid}.{counter}"));
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&backup) {
+            Ok(mut file) => {
+                file.write_all(raw.as_bytes())
+                    .with_context(|| format!("write backup {}", backup.display()))?;
+                file.sync_all()
+                    .with_context(|| format!("sync backup {}", backup.display()))?;
+                return Ok(backup);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => {
+                return Err(
+                    anyhow::Error::new(e).context(format!("create backup {}", backup.display()))
+                );
+            }
+        }
+    }
+    anyhow::bail!("failed to create unique backup for {}", path.display())
 }
 
 /// Patch the non-secret built-in upstream API preference without rewriting
@@ -2786,6 +2838,28 @@ future = "keep"
     }
 
     #[test]
+    fn patch_config_scalars_updates_inline_table_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "services = { built_in_upstream_apis_enabled = true }\n",
+        )
+        .unwrap();
+        let outcome = patch_config_scalars(
+            &path,
+            &[ConfigScalarPatch::new(
+                "services.built_in_upstream_apis_enabled",
+                ConfigScalarValue::Bool(false),
+            )],
+        )
+        .unwrap();
+        assert!(!outcome.config.services.built_in_upstream_apis_enabled);
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("built_in_upstream_apis_enabled = false"));
+    }
+
+    #[test]
     fn patch_config_scalars_unsets_optional_instead_of_empty_string() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
@@ -2815,10 +2889,41 @@ future = "keep"
             )],
         )
         .unwrap();
-        assert!(outcome.backup_path.unwrap().is_file());
+        let backup_path = outcome.backup_path.unwrap();
+        assert!(backup_path.is_file());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&backup_path)
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
         let raw = std::fs::read_to_string(&path).unwrap();
         assert!(raw.contains("# keep"));
         assert!(raw.contains("port = 8765"));
+    }
+
+    #[test]
+    fn patch_config_scalars_skips_backup_and_write_for_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let raw = "[mcp]\nport = 8765\n";
+        std::fs::write(&path, raw).unwrap();
+        let outcome = patch_config_scalars(
+            &path,
+            &[ConfigScalarPatch::new(
+                "mcp.port",
+                ConfigScalarValue::I64(8765),
+            )],
+        )
+        .unwrap();
+        assert_eq!(outcome.backup_path, None);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
     }
 
     #[test]

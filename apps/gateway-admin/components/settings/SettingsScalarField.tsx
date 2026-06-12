@@ -1,6 +1,7 @@
 'use client'
 
 import type { SettingsFieldSpec, SettingsState } from '@/lib/api/setup-client'
+import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -22,9 +23,14 @@ export function SettingsScalarField({
   onChange: (key: string, value: unknown) => void
 }): React.ReactElement {
   const id = `settings-${field.key.replaceAll('.', '-')}`
+  const errorId = `${id}-error`
   const disabled = field.write_policy !== 'editable'
   const inputValue = valueAsInputString(value)
-  const envOverride = state.sources[field.key]?.overridden_by_env
+  const source = state.sources[field.key]
+  const envOverride = source?.overridden_by_env
+  const sourceLabel = source?.source ?? 'default'
+  const backendLabel = field.backend === 'env' ? '.env' : 'config.toml'
+  const describedBy = error ? errorId : undefined
 
   return (
     <div className="grid gap-2 rounded-md border p-3">
@@ -38,14 +44,21 @@ export function SettingsScalarField({
           {field.apply_mode}
         </span>
       </div>
+      <div className="flex flex-wrap gap-1.5">
+        <Badge variant="secondary">{backendLabel}</Badge>
+        <Badge variant="outline">source: {sourceLabel}</Badge>
+        <Badge variant="outline">risk: {field.risk}</Badge>
+        {field.write_policy !== 'editable' ? <Badge variant="outline" status="warn">{field.write_policy}</Badge> : null}
+        {field.env_override ? <Badge variant="outline">env: {field.env_override}</Badge> : null}
+      </div>
       {hasEnvOverrideWarning(field, state) ? (
         <p className="text-xs text-amber-600">{envOverride} currently overrides this config.toml value.</p>
       ) : null}
       {field.control === 'bool' ? (
-        <Switch id={id} checked={Boolean(value)} disabled={disabled} onCheckedChange={(checked) => onChange(field.key, checked)} />
+        <Switch id={id} checked={Boolean(value)} disabled={disabled} aria-invalid={Boolean(error)} aria-describedby={describedBy} onCheckedChange={(checked) => onChange(field.key, checked)} />
       ) : field.control === 'enum' ? (
         <Select value={inputValue} disabled={disabled} onValueChange={(next) => onChange(field.key, next)}>
-          <SelectTrigger id={id}>
+          <SelectTrigger id={id} aria-invalid={Boolean(error)} aria-describedby={describedBy}>
             <SelectValue placeholder={field.example ?? 'Select'} />
           </SelectTrigger>
           <SelectContent>
@@ -57,13 +70,13 @@ export function SettingsScalarField({
           </SelectContent>
         </Select>
       ) : field.control === 'string_list' ? (
-        <Textarea id={id} value={inputValue} disabled={disabled} className="min-h-24 font-mono text-xs" onChange={(event) => onChange(field.key, parseFieldInput(field, event.target.value))} />
+        <Textarea id={id} value={inputValue} disabled={disabled} aria-invalid={Boolean(error)} aria-describedby={describedBy} className="min-h-24 font-mono text-xs" onChange={(event) => onChange(field.key, parseFieldInput(field, event.target.value))} />
       ) : field.control === 'read_only' ? (
         <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs">{JSON.stringify(value ?? null, null, 2)}</pre>
       ) : (
-        <Input id={id} type={field.control === 'number' ? 'number' : 'text'} value={inputValue} disabled={disabled} onChange={(event) => onChange(field.key, parseFieldInput(field, event.target.value))} />
+        <Input id={id} type={field.control === 'number' ? 'number' : 'text'} value={inputValue} disabled={disabled} aria-invalid={Boolean(error)} aria-describedby={describedBy} onChange={(event) => onChange(field.key, parseFieldInput(field, event.target.value))} />
       )}
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {error ? <p id={errorId} className="text-xs text-destructive">{error}</p> : null}
     </div>
   )
 }

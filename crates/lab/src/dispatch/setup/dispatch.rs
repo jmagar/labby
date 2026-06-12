@@ -282,6 +282,7 @@ async fn settings_env_update_action(params: &Value) -> Result<Value, ToolError> 
     let entries = parse_update_entries(params)?;
     let env_entries = super::settings::env_entries_from_updates(&entries)?;
     let env = env_path();
+    super::settings::validate_env_previous(&entries, &env)?;
     let expected_mtime = snapshot_mtime(&env);
     let outcome = env_merge::merge(
         &env,
@@ -290,11 +291,20 @@ async fn settings_env_update_action(params: &Value) -> Result<Value, ToolError> 
                 .into_iter()
                 .map(|entry| EnvEntry::new(entry.key, entry.value))
                 .collect(),
-            force: false,
+            force: true,
             expected_mtime,
         },
     )
     .map_err(map_merge_err)?;
+    if !outcome.skipped.is_empty() {
+        return Err(ToolError::InvalidParam {
+            message: format!(
+                "settings env update skipped conflicts: {}",
+                outcome.skipped.join("; ")
+            ),
+            param: "entries".into(),
+        });
+    }
     tracing::info!(
         surface = "dispatch",
         service = "setup",
@@ -312,6 +322,8 @@ fn settings_config_update_action(params: &Value) -> Result<Value, ToolError> {
         sdk_kind: "internal_error".into(),
         message: "HOME env var not set; cannot resolve config.toml path".into(),
     })?;
+    let cfg_before = load_settings_config(&path)?;
+    super::settings::validate_config_previous(&entries, &cfg_before)?;
     let outcome = crate::config::patch_config_scalars(&path, &patches).map_err(config_io_error)?;
     if patches
         .iter()
@@ -945,6 +957,76 @@ mod tests {
 
         crate::registry::set_runtime_built_in_upstream_apis_enabled(previous_runtime);
         crate::config::set_test_config_toml_path(None);
+    }
+
+    #[tokio::test]
+    async fn settings_env_update_overwrites_existing_key_when_previous_matches() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let temp = tempfile::tempdir().expect("tempdir");
+        let lab_dir = temp.path().join("lab-home");
+        std::fs::create_dir_all(&lab_dir).expect("lab dir");
+        let env_file = lab_dir.join(".env");
+        std::fs::write(&env_file, "LAB_LOG=labby=info\n").expect("write env");
+        crate::dispatch::helpers::set_test_lab_home(Some(lab_dir.clone()));
+
+        let updated = dispatch(
+            "settings.env.update",
+            json!({
+                "section": "core",
+                "confirm": true,
+                "entries": [{
+                    "key": "LAB_LOG",
+                    "value": "labby=debug",
+                    "previous": "labby=info"
+                }]
+            }),
+        )
+        .await
+        .expect("settings env update");
+
+        assert_eq!(updated["values"]["LAB_LOG"], "labby=debug");
+        assert!(
+            std::fs::read_to_string(&env_file)
+                .unwrap()
+                .contains("LAB_LOG=labby=debug")
+        );
+
+        crate::dispatch::helpers::set_test_lab_home(None);
+    }
+
+    #[tokio::test]
+    async fn settings_env_update_rejects_stale_previous_value() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let temp = tempfile::tempdir().expect("tempdir");
+        let lab_dir = temp.path().join("lab-home");
+        std::fs::create_dir_all(&lab_dir).expect("lab dir");
+        let env_file = lab_dir.join(".env");
+        std::fs::write(&env_file, "LAB_LOG=labby=warn\n").expect("write env");
+        crate::dispatch::helpers::set_test_lab_home(Some(lab_dir.clone()));
+
+        let err = dispatch(
+            "settings.env.update",
+            json!({
+                "section": "core",
+                "confirm": true,
+                "entries": [{
+                    "key": "LAB_LOG",
+                    "value": "labby=debug",
+                    "previous": "labby=info"
+                }]
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.kind(), "invalid_param");
+        assert!(
+            std::fs::read_to_string(&env_file)
+                .unwrap()
+                .contains("LAB_LOG=labby=warn")
+        );
+
+        crate::dispatch::helpers::set_test_lab_home(None);
     }
 
     #[tokio::test]

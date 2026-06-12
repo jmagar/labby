@@ -22,7 +22,10 @@ export function parseFieldInput(field: SettingsFieldSpec, raw: string | boolean)
   if (field.control === 'number') {
     if (text.trim() === '') return null
     const parsed = Number(text)
-    return Number.isFinite(parsed) ? parsed : null
+    if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) return null
+    if (field.min !== null && parsed < field.min) return null
+    if (field.max !== null && parsed > field.max) return null
+    return parsed
   }
   if (field.control === 'string_list') {
     return text
@@ -37,10 +40,15 @@ export function buildDirtyEntries(
   fields: SettingsFieldSpec[],
   changedKeys: Set<string>,
   values: Record<string, unknown>,
+  initialValues: Record<string, unknown>,
 ): SettingsUpdateEntry[] {
   return fields
     .filter((field) => changedKeys.has(field.key))
-    .map((field) => ({ key: field.key, value: values[field.key] ?? null }))
+    .map((field) => ({
+      key: field.key,
+      value: values[field.key] ?? null,
+      previous: initialValues[field.key] ?? null,
+    }))
 }
 
 export function hasEnvOverrideWarning(field: SettingsFieldSpec, state: SettingsState): boolean {
