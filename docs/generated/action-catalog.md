@@ -156,6 +156,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `setup` | `bootstrap` | false | false |  | `BootstrapOutcome` | cli, mcp, api, web |
 | `setup` | `check` | false | false |  | `SetupReport` | cli, mcp, api, web |
 | `setup` | `draft.commit` | false | true | `force: boolean` | `CommitOutcome` | cli, mcp, api, web |
+| `setup` | `draft.discard` | false | true |  | `DraftDiscardOutcome` | cli, mcp, api, web |
 | `setup` | `draft.get` | false | false |  | `DraftEntry[]` | cli, mcp, api, web |
 | `setup` | `draft.set` | false | false | `entries*: DraftEntry[]`<br>`force: boolean` | `DraftSetOutcome` | cli, mcp, api, web |
 | `setup` | `finalize` | false | true | `force: boolean` | `CommitOutcome` | cli, mcp, api, web |
@@ -179,6 +180,15 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `setup` | `settings.update` | false | true | `services.built_in_upstream_apis_enabled*: boolean` | `SettingsState` | cli, mcp, api, web |
 | `setup` | `state` | false | false |  | `SetupSnapshot` | cli, mcp, api, web |
 | `setup` | `uninstall_plugin` | false | true | `service*: string` | `PluginMutationResult` | cli, mcp, api, web |
+| `snippets` | `help` | false | false |  | `Catalog` | cli, mcp, api |
+| `snippets` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api |
+| `snippets` | `snippets.create` | false | false | `name*: string`<br>`body*: string`<br>`description: string`<br>`force: boolean` | `SnippetInfo` | cli, mcp, api |
+| `snippets` | `snippets.exec` | false | false | `name*: string`<br>`max_tool_calls: integer`<br>`params: object` | `CodeModeExecutionResponse` | cli, mcp, api |
+| `snippets` | `snippets.get` | false | false | `name*: string` | `ResolvedSnippet` | cli, mcp, api |
+| `snippets` | `snippets.list` | false | false |  | `SnippetList` | cli, mcp, api |
+| `snippets` | `snippets.remove` | false | true | `name*: string` | `SnippetRemoveResult` | cli, mcp, api |
+| `snippets` | `snippets.test` | false | false | `name: string`<br>`params: object`<br>`all: boolean` | `SnippetTestResult` | cli, mcp, api |
+| `snippets` | `snippets.validate` | false | false | `name: string`<br>`body: string` | `SnippetValidation` | cli, mcp, api |
 | `stash` | `component.create` | false | false | `kind*: string`<br>`name*: string`<br>`label: string` | `ComponentDetail` | cli, mcp, api |
 | `stash` | `component.deploy` | false | true | `id*: string`<br>`target_id*: string`<br>`revision_id: string` | `DeployResult` | cli, mcp, api |
 | `stash` | `component.export` | false | true | `id*: string`<br>`output_path*: string`<br>`include_secrets: boolean`<br>`force: boolean` | `ExportResult` | cli, mcp, api |

@@ -63,6 +63,8 @@ impl SetupModeArg {
 
 #[derive(Debug, Subcommand)]
 pub enum SetupCommand {
+    /// Manage the local setup draft.
+    Draft(DraftArgs),
     /// List installed Claude Code lab plugins.
     InstalledPlugins {
         /// Bypass the short in-process cache.
@@ -97,6 +99,28 @@ pub enum SetupCommand {
     InstallPlugin(PluginMutationArgs),
     /// Uninstall the Claude Code plugin for a service.
     UninstallPlugin(PluginMutationArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct DraftArgs {
+    #[command(subcommand)]
+    pub command: DraftCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DraftCommand {
+    /// Delete ~/.lab/.env.draft without modifying ~/.lab/.env.
+    Discard(DraftDiscardArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct DraftDiscardArgs {
+    /// Confirm discard without prompting.
+    #[arg(short = 'y', long, alias = "no-confirm")]
+    pub yes: bool,
+    /// Print what would be dispatched without executing.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Args)]
@@ -217,6 +241,9 @@ pub async fn run(args: SetupArgs, format: OutputFormat) -> Result<ExitCode> {
 
 async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<ExitCode> {
     match command {
+        SetupCommand::Draft(args) => {
+            run_draft_command(args, format).await?;
+        }
         SetupCommand::InstalledPlugins { force } => {
             let value =
                 crate::dispatch::setup::dispatch("installed_plugins", json!({ "force": force }))
@@ -292,6 +319,31 @@ async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<Exit
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+async fn run_draft_command(args: DraftArgs, format: OutputFormat) -> Result<()> {
+    match args.command {
+        DraftCommand::Discard(args) => {
+            let params = json!({});
+            if args.dry_run {
+                crate::cli::helpers::print_dry_run("setup", "draft.discard", &params, format);
+                return Ok(());
+            }
+            crate::cli::helpers::run_confirmable_action_command(
+                "setup",
+                crate::dispatch::setup::ACTIONS,
+                "draft.discard".to_string(),
+                params,
+                args.yes,
+                format,
+                |action, params| async move {
+                    crate::dispatch::setup::dispatch(&action, params).await
+                },
+            )
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 async fn run_plugin_mutation(
@@ -402,5 +454,21 @@ mod tests {
                 _ => panic!("unexpected setup subcommand for {command}"),
             }
         }
+    }
+
+    #[test]
+    fn parses_setup_draft_discard_subcommand() {
+        let cli =
+            crate::cli::Cli::try_parse_from(["labby", "setup", "draft", "discard", "-y"]).unwrap();
+        let crate::cli::Command::Setup(args) = cli.command else {
+            panic!("expected setup command");
+        };
+        let Some(SetupCommand::Draft(DraftArgs {
+            command: DraftCommand::Discard(discard),
+        })) = args.command
+        else {
+            panic!("expected setup draft discard subcommand");
+        };
+        assert!(discard.yes);
     }
 }

@@ -1087,6 +1087,7 @@ fn build_v1_router(state: &AppState, api_auth_configured: bool) -> Router<AppSta
             // actions is a critical vulnerability. Mirror the /v1/fs refusal pattern.
             if api_auth_configured {
                 v1 = v1.nest("/gateway", services::gateway::routes(state.clone()));
+                v1 = v1.nest("/snippets", services::snippets::routes(state.clone()));
             } else {
                 tracing::warn!(
                     subsystem = "startup",
@@ -1095,6 +1096,12 @@ fn build_v1_router(state: &AppState, api_auth_configured: bool) -> Router<AppSta
                     "gateway service routes not mounted: HTTP API has no auth configured. \
                      Set LAB_MCP_HTTP_TOKEN or LAB_AUTH_MODE=oauth to enable /v1/gateway. \
                      Gateway admin actions can spawn arbitrary processes — never expose them unauthenticated."
+                );
+                tracing::warn!(
+                    subsystem = "startup",
+                    phase = "snippets.mount.skipped",
+                    reason = "no_auth_configured",
+                    "snippets service routes not mounted: executable snippets require API auth"
                 );
             }
         }

@@ -1,3 +1,35 @@
+---
+name: repo-context-triage
+description: Quick repository context pass using filesystem, Lumen, Octocode, GitHub, and time
+tags: [repo, triage, research]
+inputs:
+  repo_path:
+    type: string
+    default: /home/jmagar/workspace/lab
+    required: false
+    description: Local repository path
+  owner:
+    type: string
+    default: jmagar
+    required: false
+    description: GitHub owner
+  repo:
+    type: string
+    default: lab
+    required: false
+    description: GitHub repository
+  topic:
+    type: string
+    default: Code Mode
+    required: false
+    description: Search topic
+  max_results:
+    type: integer
+    default: 5
+    required: false
+    description: Per-source result limit
+---
+
 # Repo Context Triage
 
 Use this snippet when you need a quick orientation pass for a repo topic. It combines local file reads, Lumen semantic search, Octocode local code search, and GitHub issue/file lookups.
@@ -18,15 +50,16 @@ labby gateway code exec --json --code "$(awk '/^```js$/{flag=1;next}/^```$/{if(f
 ```
 
 ```js
-async () => {
+async (overrides = {}) => {
   const input = {
-    repoPath: "/home/jmagar/workspace/lab",
-    owner: "jmagar",
-    repo: "lab",
-    topic: "Code Mode",
+    repoPath: overrides.repo_path ?? "/home/jmagar/workspace/lab",
+    owner: overrides.owner ?? "jmagar",
+    repo: overrides.repo ?? "lab",
+    topic: overrides.topic ?? "Code Mode",
     localDoc: "/home/jmagar/workspace/lab/docs/snippets/README.md",
     remoteDoc: "docs/snippets/README.md",
-    maxResults: 5
+    maxResults: overrides.max_results ?? 5,
+    ...overrides
   };
 
   const preview = (value, limit = 1400) => {

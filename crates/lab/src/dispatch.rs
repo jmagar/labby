@@ -17,6 +17,8 @@ pub mod path_safety;
 pub mod redact;
 pub mod security;
 pub mod setup;
+#[cfg(feature = "gateway")]
+pub mod snippets;
 pub mod stash;
 #[cfg(feature = "gateway")]
 pub mod upstream;

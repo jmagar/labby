@@ -283,6 +283,7 @@ const ALWAYS_VISIBLE_SERVICES: &[&str] = &[
     "audit",
     "marketplace",
     "logs",
+    "snippets",
     "device",
     "acp",
     "stash",
@@ -439,6 +440,15 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
         actions: crate::dispatch::logs::ACTIONS,
         dispatch: dispatch_fn!(crate::dispatch::logs::dispatch),
     });
+
+    #[cfg(feature = "gateway")]
+    reg.register(RegisteredService::bootstrap_operator(
+        "snippets",
+        "Manage executable Code Mode snippets",
+        "bootstrap",
+        crate::dispatch::snippets::ACTIONS,
+        dispatch_fn!(crate::dispatch::snippets::dispatch),
+    ));
 
     reg.register(RegisteredService {
         name: "device",
@@ -782,6 +792,8 @@ mod tests {
             s.insert("device");
             #[cfg(feature = "gateway")]
             s.insert("gateway");
+            #[cfg(feature = "gateway")]
+            s.insert("snippets");
             s.insert("logs");
             #[cfg(feature = "marketplace")]
             s.insert(lab_apis::marketplace::META.name);
@@ -975,6 +987,21 @@ mod tests {
 
         assert!(names.contains(&"fs.list"));
         assert!(!names.contains(&"fs.preview"));
+    }
+
+    #[cfg(feature = "gateway")]
+    #[test]
+    fn default_registry_exposes_snippets_as_mcp_service() {
+        let registry = build_default_registry();
+        let service = registry.service("snippets").expect("snippets registered");
+
+        assert_eq!(service.kind, RegisteredServiceKind::BootstrapOperator);
+        assert!(
+            service
+                .actions
+                .iter()
+                .any(|action| action.name == "snippets.exec")
+        );
     }
 
     #[test]

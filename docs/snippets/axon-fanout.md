@@ -1,3 +1,34 @@
+---
+name: axon-fanout
+description: Axon fan-out research workflows for briefs and smoke tests
+tags: [axon, research, docs]
+inputs:
+  topic:
+    type: string
+    default: implementing mcp-ui in rust
+    required: false
+    description: Research topic
+  focus:
+    type: string
+    default: Rust rmcp server with MCP Apps UI resources, concrete APIs, metadata keys, MIME types, and implementation steps
+    required: false
+    description: Specific evidence focus
+  seed_url:
+    type: json
+    required: false
+    description: Optional seed URL to scrape and summarize
+  max_evidence_urls:
+    type: integer
+    default: 4
+    required: false
+    description: Maximum evidence URLs to inspect
+  include_ask:
+    type: boolean
+    default: false
+    required: false
+    description: Include an Axon ask synthesis call
+---
+
 # Axon Fan-Out Snippets
 
 Reusable Axon workflow snippets. Treat these as the source of truth. MCP prompts should only expose a snippet name, arguments, and output expectations.
@@ -34,20 +65,21 @@ Output contract:
 Paste into Labby Code Mode `execute`. Edit the `input` object at the top.
 
 ```js
-async () => {
+async (overrides = {}) => {
   const input = {
-    topic: "implementing mcp-ui in rust",
+    topic: overrides.topic ?? "implementing mcp-ui in rust",
     focus:
-      "Rust rmcp server with MCP Apps UI resources, concrete APIs, metadata keys, MIME types, and implementation steps",
-    seedUrl: null,
-    maxEvidenceUrls: 4,
-    includeAsk: false,
+      overrides.focus ?? "Rust rmcp server with MCP Apps UI resources, concrete APIs, metadata keys, MIME types, and implementation steps",
+    seedUrl: overrides.seed_url ?? null,
+    maxEvidenceUrls: overrides.max_evidence_urls ?? 4,
+    includeAsk: overrides.include_ask ?? false,
     maxAnswerChars: 5000,
     maxSourceSummaryChars: 900,
     maxMarkdownChars: 12000,
     includeFollowupSnippet: true,
     includeSourceSummaries: false,
-    includeDebugFields: false
+    includeDebugFields: false,
+    ...overrides
   };
 
   const axon = (args) => callTool("axon::axon", args);

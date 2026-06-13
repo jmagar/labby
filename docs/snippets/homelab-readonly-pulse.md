@@ -1,3 +1,40 @@
+---
+name: homelab-readonly-pulse
+description: Read-only homelab pulse across time, containers, Unraid, Gotify, and Synapse2
+tags: [homelab, readonly, ops]
+inputs:
+  timezone:
+    type: string
+    default: America/New_York
+    required: false
+    description: IANA timezone for the timestamp call
+  log_query:
+    type: string
+    default: error
+    required: false
+    description: Cortex log search query
+  log_limit:
+    type: integer
+    default: 5
+    required: false
+    description: Maximum logs to include
+  notification_limit:
+    type: integer
+    default: 5
+    required: false
+    description: Maximum Unraid notifications to include
+  container_sample:
+    type: integer
+    default: 12
+    required: false
+    description: Maximum containers to sample
+  identity_hosts:
+    type: array
+    default: ["dookie", "squirts"]
+    required: false
+    description: Host aliases for read-only identity checks
+---
+
 # Homelab Read-Only Pulse
 
 Use this snippet for a small health pulse across the homelab. It avoids notification-send and state-changing actions. The Synapse2 `scout exec` checks use allowlisted read-only commands and require the local Labby upstream env override `SYNAPSE_MCP_ALLOW_DESTRUCTIVE=true`.
@@ -29,14 +66,15 @@ labby gateway code exec --json --code "$(awk '/^```js$/{flag=1;next}/^```$/{if(f
 ```
 
 ```js
-async () => {
+async (overrides = {}) => {
   const input = {
     timezone: "America/New_York",
-    logQuery: "error",
-    logLimit: 5,
-    notificationLimit: 5,
-    containerSample: 12,
-    identityHosts: ["dookie", "squirts"]
+    logQuery: overrides.log_query ?? "error",
+    logLimit: overrides.log_limit ?? 5,
+    notificationLimit: overrides.notification_limit ?? 5,
+    containerSample: overrides.container_sample ?? 12,
+    identityHosts: overrides.identity_hosts ?? ["dookie", "squirts"],
+    ...overrides
   };
 
   const timed = async (label, id, params, transform = (x) => x) => {

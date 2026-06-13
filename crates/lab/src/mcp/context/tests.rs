@@ -101,6 +101,43 @@ fn gateway_builtin_actions_require_admin_scope() {
 }
 
 #[test]
+#[cfg(feature = "gateway")]
+fn snippets_builtin_actions_require_catalog_admin_scope() {
+    let entry = RegisteredService {
+        name: "snippets",
+        description: "Snippets",
+        category: "bootstrap",
+        kind: crate::registry::RegisteredServiceKind::BootstrapOperator,
+        status: "available",
+        actions: crate::dispatch::snippets::ACTIONS,
+        dispatch: noop_dispatch,
+    };
+    let read_only = make_auth(&["lab:read"]);
+    let admin = make_auth(&["lab:admin"]);
+
+    for spec in crate::dispatch::snippets::ACTIONS {
+        assert_eq!(
+            spec.requires_admin,
+            super::builtin_action_requires_admin(&entry, spec.name),
+            "MCP admin gate must follow snippets catalog for `{}`",
+            spec.name
+        );
+        if spec.requires_admin {
+            assert!(
+                !tool_execute_builtin_action_allowed(&entry, spec.name, Some(&read_only)),
+                "`{}` should reject non-admin MCP callers",
+                spec.name
+            );
+            assert!(
+                tool_execute_builtin_action_allowed(&entry, spec.name, Some(&admin)),
+                "`{}` should allow admin MCP callers",
+                spec.name
+            );
+        }
+    }
+}
+
+#[test]
 fn code_mode_scope_allows_read_but_tool_execute_does_not() {
     let base = crate::api::oauth::AuthContext {
         sub: "alice".to_string(),

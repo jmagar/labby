@@ -12,6 +12,7 @@ export type AppCommandIconKey =
   | 'overview'
   | 'settings'
   | 'setup'
+  | 'snippets'
 
 export type AppCommandItem = {
   id: string
@@ -92,6 +93,18 @@ export const appCommandItems: AppCommandItem[] = [
     href: '/chat',
     actionHint: 'Open',
     priority: 88,
+  },
+  {
+    id: 'destination-snippets',
+    kind: 'destination',
+    title: 'Snippets',
+    description: 'Open executable Code Mode snippets with typed inputs, validation, and smoke checks.',
+    keywords: ['snippets', 'snippet', 'code mode', 'workflow', 'workflows', 'execute', 'validate', 'test'],
+    group: 'destinations',
+    icon: 'snippets',
+    href: '/snippets',
+    actionHint: 'Open',
+    priority: 87,
   },
   {
     id: 'destination-setup',

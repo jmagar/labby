@@ -23,6 +23,10 @@ export function marketplaceActionUrl(baseUrl?: string): string {
   return `${normalizeGatewayApiBase(baseUrl)}/marketplace`
 }
 
+export function snippetsActionUrl(baseUrl?: string): string {
+  return `${normalizeGatewayApiBase(baseUrl)}/snippets`
+}
+
 export function nodesUrl(baseUrl?: string): string {
   return `${normalizeGatewayApiBase(baseUrl)}/nodes`
 }

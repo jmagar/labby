@@ -63,6 +63,9 @@ export interface SetupSnapshot {
   last_completed_step: number
   draft_stale: boolean
   has_draft: boolean
+  draft_entry_count: number
+  env_mtime_unix_seconds: number | null
+  draft_mtime_unix_seconds: number | null
   state: SetupState
 }
 
@@ -194,6 +197,9 @@ function mockSetupSnapshot(): SetupSnapshot {
     last_completed_step: 3,
     draft_stale: false,
     has_draft: true,
+    draft_entry_count: MOCK_DRAFT_ENTRIES.length,
+    env_mtime_unix_seconds: null,
+    draft_mtime_unix_seconds: null,
     state: {
       kind: 'partially_configured',
       missing: ['SONARR_URL', 'SONARR_API_KEY', 'PLEX_URL', 'PLEX_TOKEN'],
@@ -213,6 +219,10 @@ export interface DraftSetOutcome {
   written: number
   skipped: string[]
   backup_path: string | null
+}
+
+export interface DraftDiscardOutcome {
+  removed: boolean
 }
 
 export interface CommitOutcome {
@@ -481,6 +491,14 @@ export const setupApi = {
       { entries, force: options?.force ?? false },
       signal,
     )
+  },
+
+  draftDiscard(signal?: AbortSignal): Promise<DraftDiscardOutcome> {
+    if (USE_MOCK_DATA) {
+      signal?.throwIfAborted?.()
+      return Promise.resolve({ removed: true })
+    }
+    return setupAction<DraftDiscardOutcome>('draft.discard', {}, signal)
   },
 
   draftCommit(

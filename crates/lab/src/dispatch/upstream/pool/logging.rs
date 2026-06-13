@@ -25,6 +25,7 @@ pub(super) fn is_capability_unsupported(error: &rmcp::ServiceError) -> bool {
         || msg.contains("method_not_found")
         || msg.contains("-32601")
         || msg.contains("Not implemented")
+        || (msg.contains("HTTP 404 Not Found") && msg.contains("Requested MCP method not found"))
 }
 
 pub(super) fn capability_name(capability: UpstreamCapability) -> &'static str {
@@ -161,7 +162,22 @@ pub(super) fn log_upstream_request_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rmcp::transport::DynamicTransportError;
     use tracing_subscriber::layer::SubscriberExt;
+
+    #[test]
+    fn google_http_404_method_not_found_is_capability_unsupported() {
+        let transport_error = DynamicTransportError::from_parts(
+            "test",
+            std::any::TypeId::of::<()>(),
+            Box::new(std::io::Error::other(
+                "unexpected server response: HTTP 404 Not Found: <html><p>The requested URL <code>/mcp/v1</code> was not found on this server. Requested MCP method not found.</p></html>",
+            )),
+        );
+        let error = rmcp::ServiceError::TransportSend(transport_error);
+
+        assert!(is_capability_unsupported(&error));
+    }
 
     /// O-L3: `request_id` propagates through the OAuth subject-scoped reconnect
     /// fan-out.  Every log event emitted during a subject-scoped call — including

@@ -76,6 +76,7 @@ async fn dispatch_inner(action: &str, params: &Value) -> Result<Value, ToolError
         "schema.get" => schema_get_action(params),
         "draft.get" => draft_get_action(),
         "draft.set" => draft_set_action(params).await,
+        "draft.discard" => draft_discard_action(),
         "draft.commit" => draft_commit_action(params).await,
         "settings.schema" => to_json(super::settings::schema_response()),
         "settings.state" => settings_state_action(params),
@@ -605,6 +606,15 @@ async fn draft_set_action(params: &Value) -> Result<Value, ToolError> {
     }))
 }
 
+fn draft_discard_action() -> Result<Value, ToolError> {
+    let path = draft_path();
+    let removed = draft::discard(&path).map_err(|e| ToolError::Sdk {
+        sdk_kind: "internal_error".to_string(),
+        message: format!("discard draft `{}` failed: {e}", path.display()),
+    })?;
+    Ok(json!({ "removed": removed }))
+}
+
 fn validate_against_registry(entries: &[DraftEntry]) -> Result<(), ToolError> {
     let index = cached_env_var_index();
     for entry in entries {
@@ -840,6 +850,7 @@ mod tests {
             "schema.get",
             "state",
             "draft.set",
+            "draft.discard",
             "draft.commit",
             "settings.schema",
             "settings.state",

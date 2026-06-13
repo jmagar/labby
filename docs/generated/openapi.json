@@ -744,6 +744,72 @@
         ]
       }
     },
+    "/v1/snippets": {
+      "post": {
+        "tags": [
+          "snippets"
+        ],
+        "summary": "Dispatch action to snippets",
+        "description": "Execute an action on the snippets service. Use `action: \"help\"` to list available actions.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful action response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request (unknown action, confirmation required)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnknownAction"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorSdk"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error (missing or invalid param)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorMissingParam"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/stash": {
       "post": {
         "tags": [
@@ -3130,6 +3196,106 @@
             "type": "boolean"
           },
           "service": {
+            "type": "string"
+          }
+        }
+      },
+      "SnippetsSchemaParams": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          }
+        }
+      },
+      "SnippetsSnippetsCreateParams": {
+        "type": "object",
+        "required": [
+          "name",
+          "body"
+        ],
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "force": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "SnippetsSnippetsExecParams": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "max_tool_calls": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object"
+          }
+        }
+      },
+      "SnippetsSnippetsGetParams": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "SnippetsSnippetsRemoveParams": {
+        "type": "object",
+        "required": [
+          "name",
+          "confirm"
+        ],
+        "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "SnippetsSnippetsTestParams": {
+        "type": "object",
+        "properties": {
+          "all": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object"
+          }
+        }
+      },
+      "SnippetsSnippetsValidateParams": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "name": {
             "type": "string"
           }
         }

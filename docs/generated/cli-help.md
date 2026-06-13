@@ -19,6 +19,7 @@ Commands:
   setup        Open the web-based first-run wizard (or settings) — lab-bg3e.3
   completions  Generate shell completions
   gateway      Manage proxied upstream MCP gateways
+  snippets     Manage executable Code Mode snippets
   oauth        Run local OAuth callback relay helpers
   logs         Search fleet logs on the configured master
   marketplace  Claude plugin marketplace manager
@@ -649,6 +650,7 @@ Open the web-based first-run wizard (or settings) — lab-bg3e.3
 Usage: setup [OPTIONS] [COMMAND]
 
 Commands:
+  draft                Manage the local setup draft
   installed-plugins    List installed Claude Code lab plugins
   services-status      Join service configuration, draft, and Claude plugin state
   plugin-hook          Run binary-owned local setup checks for Claude plugin hooks
@@ -689,6 +691,70 @@ Options:
 
   -h, --help
           Print help
+```
+
+## `labby setup draft`
+
+```text
+Manage the local setup draft
+
+Usage: draft [OPTIONS] <COMMAND>
+
+Commands:
+  discard  Delete ~/.lab/.env.draft without modifying ~/.lab/.env
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup draft discard`
+
+```text
+Delete ~/.lab/.env.draft without modifying ~/.lab/.env
+
+Usage: discard [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+  -y, --yes
+          Confirm discard without prompting
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --dry-run
+          Print what would be dispatched without executing
+
+  -h, --help
+          Print help
+```
+
+## `labby setup draft help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
 ```
 
 ## `labby setup installed-plugins`
@@ -2283,6 +2349,259 @@ Arguments:
 ```
 
 ## `labby gateway help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
+## `labby snippets`
+
+```text
+Manage executable Code Mode snippets
+
+Usage: snippets [OPTIONS] <COMMAND>
+
+Commands:
+  list      List built-in and user snippets
+  get       Show one snippet body and metadata
+  exec      Execute a snippet through gateway Code Mode
+  create    Create or update a user snippet
+  validate  Validate a snippet without saving or executing it
+  remove    Remove a user snippet
+  test      Execute a snippet and report pass/fail
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby snippets list`
+
+```text
+List built-in and user snippets
+
+Usage: list [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby snippets get`
+
+```text
+Show one snippet body and metadata
+
+Usage: get [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby snippets exec`
+
+```text
+Execute a snippet through gateway Code Mode
+
+Usage: exec [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --param <KEY=VALUE>
+          Input values passed to the snippet as key=value pairs
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --max-tool-calls <MAX_TOOL_CALLS>
+          Override the configured Code Mode max tool-call cap for this run
+
+  -h, --help
+          Print help
+```
+
+## `labby snippets create`
+
+```text
+Create or update a user snippet
+
+Usage: create [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+
+
+Options:
+      --file <FILE>
+          Read snippet body from a file
+
+      --json
+          Emit JSON instead of human-readable tables
+
+      --code <CODE>
+          Inline snippet body
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --description <DESCRIPTION>
+          Human-readable snippet description for generated frontmatter
+
+  -f, --force
+          Overwrite an existing user snippet
+
+  -h, --help
+          Print help
+```
+
+## `labby snippets validate`
+
+```text
+Validate a snippet without saving or executing it
+
+Usage: validate [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          Existing snippet name or filename stem for --file/--code validation
+
+Options:
+      --file <FILE>
+          Validate snippet body from a file instead of an existing snippet
+
+      --json
+          Emit JSON instead of human-readable tables
+
+      --code <CODE>
+          Validate inline snippet body instead of an existing snippet
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby snippets remove`
+
+```text
+Remove a user snippet
+
+Usage: remove [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+  -y, --yes
+          Confirm removal without prompting
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --no-confirm
+          Alias for --yes
+
+      --dry-run
+          Show what would be removed without deleting it
+
+  -h, --help
+          Print help
+```
+
+## `labby snippets test`
+
+```text
+Execute a snippet and report pass/fail
+
+Usage: test [OPTIONS] [NAME]
+
+Arguments:
+  [NAME]
+
+
+Options:
+      --all
+          Run every listed snippet with default params
+
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --param <KEY=VALUE>
+          Input values passed to the snippet as key=value pairs
+
+  -h, --help
+          Print help
+```
+
+## `labby snippets help`
 
 ```text
 Print this message or the help of the given subcommand(s)

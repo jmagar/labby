@@ -1104,6 +1104,13 @@
           "returns": "DraftSetOutcome"
         },
         {
+          "name": "draft.discard",
+          "description": "Discard .env.draft without modifying .env",
+          "destructive": true,
+          "params": [],
+          "returns": "DraftDiscardOutcome"
+        },
+        {
           "name": "draft.commit",
           "description": "Run audit and atomically merge .env.draft into .env",
           "destructive": true,
@@ -1464,6 +1471,175 @@
           "destructive": false,
           "params": [],
           "returns": "Value"
+        }
+      ]
+    },
+    {
+      "name": "snippets",
+      "description": "Manage executable Code Mode snippets",
+      "category": "bootstrap",
+      "status": "available",
+      "requires_http_subject": false,
+      "actions": [
+        {
+          "name": "help",
+          "description": "Show this action catalog",
+          "destructive": false,
+          "params": [],
+          "returns": "Catalog"
+        },
+        {
+          "name": "schema",
+          "description": "Return the parameter schema for a named action",
+          "destructive": false,
+          "params": [
+            {
+              "name": "action",
+              "ty": "string",
+              "required": true,
+              "description": "Action name to describe"
+            }
+          ],
+          "returns": "Schema"
+        },
+        {
+          "name": "snippets.list",
+          "description": "List built-in and user executable Code Mode snippets",
+          "destructive": false,
+          "params": [],
+          "returns": "SnippetList"
+        },
+        {
+          "name": "snippets.get",
+          "description": "Return one snippet body and metadata",
+          "destructive": false,
+          "params": [
+            {
+              "name": "name",
+              "ty": "string",
+              "required": true,
+              "description": "Snippet name"
+            }
+          ],
+          "returns": "ResolvedSnippet"
+        },
+        {
+          "name": "snippets.exec",
+          "description": "Execute a snippet through gateway Code Mode",
+          "destructive": false,
+          "params": [
+            {
+              "name": "name",
+              "ty": "string",
+              "required": true,
+              "description": "Snippet name"
+            },
+            {
+              "name": "max_tool_calls",
+              "ty": "integer",
+              "required": false,
+              "description": "Optional max tool-call cap for this run"
+            },
+            {
+              "name": "params",
+              "ty": "object",
+              "required": false,
+              "description": "Input object passed to the snippet async function"
+            }
+          ],
+          "returns": "CodeModeExecutionResponse"
+        },
+        {
+          "name": "snippets.create",
+          "description": "Create a user snippet under LAB_HOME/snippets",
+          "destructive": false,
+          "params": [
+            {
+              "name": "name",
+              "ty": "string",
+              "required": true,
+              "description": "Snippet name"
+            },
+            {
+              "name": "body",
+              "ty": "string",
+              "required": true,
+              "description": "Markdown or JavaScript snippet body"
+            },
+            {
+              "name": "description",
+              "ty": "string",
+              "required": false,
+              "description": "Description written to generated frontmatter"
+            },
+            {
+              "name": "force",
+              "ty": "boolean",
+              "required": false,
+              "description": "Overwrite an existing user snippet"
+            }
+          ],
+          "returns": "SnippetInfo"
+        },
+        {
+          "name": "snippets.validate",
+          "description": "Validate a snippet body or existing snippet without executing it",
+          "destructive": false,
+          "params": [
+            {
+              "name": "name",
+              "ty": "string",
+              "required": false,
+              "description": "Snippet name or filename stem"
+            },
+            {
+              "name": "body",
+              "ty": "string",
+              "required": false,
+              "description": "Markdown or JavaScript snippet body to validate"
+            }
+          ],
+          "returns": "SnippetValidation"
+        },
+        {
+          "name": "snippets.remove",
+          "description": "Remove a user snippet",
+          "destructive": true,
+          "params": [
+            {
+              "name": "name",
+              "ty": "string",
+              "required": true,
+              "description": "User snippet name"
+            }
+          ],
+          "returns": "SnippetRemoveResult"
+        },
+        {
+          "name": "snippets.test",
+          "description": "Execute one snippet and report pass/fail",
+          "destructive": false,
+          "params": [
+            {
+              "name": "name",
+              "ty": "string",
+              "required": false,
+              "description": "Snippet name"
+            },
+            {
+              "name": "params",
+              "ty": "object",
+              "required": false,
+              "description": "Input object passed to the snippet async function"
+            },
+            {
+              "name": "all",
+              "ty": "boolean",
+              "required": false,
+              "description": "Run every listed snippet with default params"
+            }
+          ],
+          "returns": "SnippetTestResult"
         }
       ]
     },

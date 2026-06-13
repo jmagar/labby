@@ -223,6 +223,7 @@ impl UpstreamOauthManager {
             );
             OauthError::Internal(format!("get authorization url: {e}"))
         })?;
+        let authorization_url = google_offline_access_url(&authorization_url)?;
 
         let _csrf = extract_state_param(&authorization_url).ok_or_else(|| {
             tracing::warn!(
@@ -1144,6 +1145,88 @@ fn extract_state_param(url: &str) -> Option<String> {
         .query_pairs()
         .find(|(k, _)| k == "state")
         .map(|(_, v)| v.into_owned())
+}
+
+fn google_offline_access_url(url: &str) -> Result<String, OauthError> {
+    let mut parsed = url::Url::parse(url).map_err(|error| {
+        OauthError::Internal(format!("authorization url generated invalid URL: {error}"))
+    })?;
+    let is_google_authorize = parsed
+        .host_str()
+        .is_some_and(|host| host.eq_ignore_ascii_case("accounts.google.com"));
+    if !is_google_authorize {
+        return Ok(url.to_string());
+    }
+
+    let existing: std::collections::HashSet<String> = parsed
+        .query_pairs()
+        .map(|(key, _)| key.into_owned())
+        .collect();
+    {
+        let mut query = parsed.query_pairs_mut();
+        if !existing.contains("access_type") {
+            query.append_pair("access_type", "offline");
+        }
+        if !existing.contains("prompt") {
+            query.append_pair("prompt", "consent");
+        }
+        if !existing.contains("include_granted_scopes") {
+            query.append_pair("include_granted_scopes", "true");
+        }
+    }
+    Ok(parsed.into())
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::google_offline_access_url;
+
+    #[test]
+    fn google_authorization_url_requests_offline_consent() {
+        let url = "https://accounts.google.com/o/oauth2/v2/auth?response_type=code&state=abc";
+        let updated = google_offline_access_url(url).expect("url");
+        let parsed = url::Url::parse(&updated).expect("updated url parses");
+        let params: std::collections::HashMap<_, _> = parsed.query_pairs().collect();
+
+        assert_eq!(
+            params.get("access_type").map(|v| v.as_ref()),
+            Some("offline")
+        );
+        assert_eq!(params.get("prompt").map(|v| v.as_ref()), Some("consent"));
+        assert_eq!(
+            params.get("include_granted_scopes").map(|v| v.as_ref()),
+            Some("true")
+        );
+        assert_eq!(params.get("state").map(|v| v.as_ref()), Some("abc"));
+    }
+
+    #[test]
+    fn non_google_authorization_url_is_unchanged() {
+        let url = "https://auth.example.test/authorize?response_type=code&state=abc";
+        let updated = google_offline_access_url(url).expect("url");
+        assert_eq!(updated, url);
+    }
+
+    #[test]
+    fn existing_google_authorization_params_are_preserved() {
+        let url = "https://accounts.google.com/o/oauth2/v2/auth?access_type=online&prompt=select_account&include_granted_scopes=false";
+        let updated = google_offline_access_url(url).expect("url");
+        let parsed = url::Url::parse(&updated).expect("updated url parses");
+        let params: std::collections::HashMap<_, _> = parsed.query_pairs().collect();
+
+        assert_eq!(
+            params.get("access_type").map(|v| v.as_ref()),
+            Some("online")
+        );
+        assert_eq!(
+            params.get("prompt").map(|v| v.as_ref()),
+            Some("select_account")
+        );
+        assert_eq!(
+            params.get("include_granted_scopes").map(|v| v.as_ref()),
+            Some("false")
+        );
+    }
 }
 
 struct TokenRefreshState {

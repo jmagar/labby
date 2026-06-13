@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+---
+
+## [0.25.0] - 2026-06-13
+
+### Added
+
+- **Snippets as a first-class workflow** — added schema-backed snippet dispatch, CLI/API/MCP surfaces, generated docs, and a gateway-admin sidebar entry so built-in snippets can be listed, inspected, tested, and run from shared dispatch rather than one-off shell glue.
+
+### Changed
+
+- **Built-in snippet docs** — expanded the four built-in snippets into more practical operator examples with clearer inputs, tool selections, and validation expectations.
+- **Setup draft handling** — stale setup drafts now expose entry counts and mtimes, can be discarded from both UI and `labby setup draft discard`, and no longer present the old conflict warning after the draft is removed.
+
 ### Fixed
 
 - **Code Mode MCP App callback — destructive bypass hardening** — the widget callback gate now fails closed when a requested tool name matches more than one allowed upstream (returns `ambiguous_tool` instead of proxying an arbitrary, hash-order-dependent upstream). This closes a hole where a destructive sibling tool exposed by multiple UI-bearing upstreams could be invoked unconfirmed because the multi-candidate case skipped the destructive gate. The three callback routes (legacy bypass, direct UI tool, hidden sibling) are now modeled as a single `CallbackDecision` so the destructive check always runs on the exact resolved tool.

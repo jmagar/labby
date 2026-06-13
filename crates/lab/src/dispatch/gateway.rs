@@ -19,6 +19,6 @@ pub(crate) mod view_models;
 mod virtual_servers;
 
 pub use catalog::ACTIONS;
-pub use client::{current_gateway_manager, install_gateway_manager};
+pub use client::{current_gateway_manager, install_gateway_manager, require_gateway_manager};
 pub use dispatch::{dispatch, dispatch_with_manager};
 pub(crate) use shared::SHARED_GATEWAY_OAUTH_SUBJECT;

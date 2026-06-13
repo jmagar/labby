@@ -388,7 +388,7 @@ struct GatewayOauthStartView {
     authorization_url: String,
 }
 
-async fn build_manager(
+pub(crate) async fn build_manager(
     config: &LabConfig,
     discover_upstreams: bool,
 ) -> Result<Arc<GatewayManager>> {

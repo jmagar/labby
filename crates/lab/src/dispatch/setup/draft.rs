@@ -51,6 +51,14 @@ pub fn merge_entries(
     )
 }
 
+pub fn discard(path: &Path) -> std::io::Result<bool> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,5 +88,16 @@ mod tests {
         assert_eq!(entries[0].value, "bar baz");
         assert_eq!(entries[1].key, "BAZ");
         assert_eq!(entries[1].value, "qux");
+    }
+
+    #[test]
+    fn discard_removes_existing_draft_and_reports_missing_as_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".env.draft");
+        fs::write(&path, "LAB_TEST=1\n").unwrap();
+
+        assert!(discard(&path).unwrap());
+        assert!(!path.exists());
+        assert!(!discard(&path).unwrap());
     }
 }

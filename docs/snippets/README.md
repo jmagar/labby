@@ -6,7 +6,19 @@ This document is only about snippets that run inside Code Mode.
 
 ## What A Snippet Is
 
-A snippet is an `async () => { ... }` JavaScript function passed to Code Mode `execute`.
+A snippet is a Markdown or JavaScript file that contains an async arrow function passed to Code Mode `execute`.
+
+Executable Markdown snippets should begin with frontmatter:
+
+```yaml
+---
+name: homelab-readonly-pulse
+description: Read-only homelab pulse across core services
+tags: [homelab, readonly, ops]
+---
+```
+
+The filename stem is the stable id. If frontmatter is present, `name` must match that id and `description` must be non-empty.
 
 Inside that function, the sandbox can call upstream MCP tools through:
 
@@ -46,15 +58,76 @@ The prompt can stay simple: name the snippet, collect arguments, and tell the mo
 
 ## Execution Contract
 
-Code Mode `execute` expects the submitted code to evaluate to a function:
+`labby snippets exec` and the MCP/API `snippets.exec` action expect snippet code to evaluate to an async arrow function:
 
 ```js
-async () => {
+async (input) => {
   return { ok: true };
 }
 ```
 
 The returned value must be JSON-serializable. The sandbox has `callTool` and, when proxy generation succeeds, `codemode`. The host validates `callTool` params against the upstream tool input schema before dispatching the call.
+
+CLI execution passes repeated `--param key=value` flags as the `input` object:
+
+```bash
+labby snippets exec homelab-readonly-pulse --param host=dookie
+```
+
+MCP and API callers pass the same shape through `params`:
+
+```json
+{
+  "action": "snippets.exec",
+  "params": {
+    "name": "homelab-readonly-pulse",
+    "params": { "host": "dookie" }
+  }
+}
+```
+
+Snippet code should provide defaults for omitted optional fields:
+
+```js
+async (input) => {
+  const host = input.host || "dookie";
+  return { ok: true, host };
+}
+```
+
+Snippets can also declare typed inputs in frontmatter. When inputs are declared,
+`snippets.exec` merges caller params with defaults, rejects unknown params,
+validates types, and fails fast when a required param is missing.
+
+```yaml
+inputs:
+  host:
+    type: string
+    default: dookie
+    required: false
+    description: Host alias to inspect
+  limit:
+    type: integer
+    default: 5
+    required: false
+```
+
+`labby snippets create` validates the body before saving. User-created Markdown gets frontmatter automatically when the input body does not already include it.
+
+Use `labby snippets validate <name>` to validate an existing snippet without
+executing it, or pass `--file` / `--code` to validate an unsaved body:
+
+```bash
+labby snippets validate draft --file draft-snippet.md
+```
+
+Use `labby snippets test <name>` to execute one snippet as a smoke test, or
+`labby snippets test --all` to run every listed snippet with its declared
+defaults. MCP/API callers use `snippets.test` with `{ "all": true }` for the
+same all-snippet check.
+
+`snippets.list`, `help`, and `schema` are read-only discovery actions. Actions
+that expose snippet bodies or execute/manage snippets require `lab:admin`.
 
 Successful upstream MCP results are unwrapped before reaching snippet code when possible. Structured content is returned as the value; all-text content is parsed as JSON when possible; mixed content keeps its MCP content shape.
 

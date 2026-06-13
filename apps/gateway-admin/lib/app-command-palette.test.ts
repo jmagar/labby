@@ -24,6 +24,7 @@ test('app command palette includes core admin destinations', () => {
     '/gateways',
     '/marketplace',
     '/chat',
+    '/snippets',
     '/setup',
     '/activity',
     '/logs',

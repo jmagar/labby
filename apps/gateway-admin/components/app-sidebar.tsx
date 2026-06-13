@@ -15,6 +15,7 @@ import {
   HelpCircle,
   WandSparkles,
   Server,
+  FileCode2,
 } from 'lucide-react'
 
 import {
@@ -63,6 +64,11 @@ export const primarySidebarNavigation = [
     title: 'Chat',
     url: '/chat',
     icon: MessageSquareText,
+  },
+  {
+    title: 'Snippets',
+    url: '/snippets',
+    icon: FileCode2,
   },
   {
     title: 'Setup',

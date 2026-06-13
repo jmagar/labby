@@ -6,6 +6,7 @@ import {
   Activity,
   BookOpen,
   Cable,
+  FileCode2,
   LayoutDashboard,
   Loader2,
   Logs,
@@ -71,6 +72,7 @@ const ICONS: Record<AppCommandIconKey, LucideIcon> = {
   overview: LayoutDashboard,
   settings: Settings,
   setup: WandSparkles,
+  snippets: FileCode2,
 }
 
 const KIND_LABELS: Record<AppCommandItem['kind'], string> = {

@@ -23,6 +23,7 @@ pub fn generate() -> Result<CheckOutcome> {
     let projection = build_docs_projection(&root)?;
     let artifacts = build_artifacts(&projection)?;
     validate_artifacts(&artifacts, &root)?;
+    validate_builtin_snippets(&root)?;
     for artifact in &artifacts {
         let path = root.join(artifact.path);
         if let Some(parent) = path.parent() {
@@ -53,6 +54,7 @@ pub fn check() -> Result<CheckOutcome> {
     }
     let artifacts = build_artifacts(&projection)?;
     validate_artifacts(&artifacts, &root)?;
+    validate_builtin_snippets(&root)?;
     let mut stale = Vec::new();
     for artifact in &artifacts {
         if let Some(path) = stale_path(&root, artifact)? {
@@ -189,6 +191,45 @@ fn contains_generic_absolute_path(content: &str) -> bool {
                     && token.as_bytes()[2] == b'\\'
                     && token.as_bytes()[0].is_ascii_alphabetic())
         })
+}
+
+#[cfg(feature = "gateway")]
+fn validate_builtin_snippets(root: &Path) -> Result<()> {
+    let snippet_dir = root.join("docs/snippets");
+    let entries = fs::read_dir(&snippet_dir)
+        .with_context(|| format!("failed to read {}", snippet_dir.display()))?;
+    let mut valid = 0usize;
+    for entry in entries {
+        let entry = entry.with_context(|| format!("failed to read {}", snippet_dir.display()))?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+            continue;
+        }
+        let body = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        if !body.starts_with("---\n") {
+            continue;
+        }
+        let name = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .ok_or_else(|| anyhow::anyhow!("invalid snippet filename `{}`", path.display()))?;
+        crate::dispatch::snippets::store::validate_snippet_body(name, &body)
+            .with_context(|| format!("invalid built-in snippet {}", path.display()))?;
+        valid += 1;
+    }
+    if valid == 0 {
+        bail!(
+            "no valid built-in snippets found in {}",
+            snippet_dir.display()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "gateway"))]
+fn validate_builtin_snippets(_root: &Path) -> Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]

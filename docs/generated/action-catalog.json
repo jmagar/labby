@@ -4323,6 +4323,24 @@
   },
   {
     "service": "setup",
+    "action": "draft.discard",
+    "description": "Discard .env.draft without modifying .env",
+    "destructive": true,
+    "params": [],
+    "returns": "DraftDiscardOutcome",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
     "action": "draft.get",
     "description": "Read .env.draft with secret values masked to '***'",
     "destructive": false,
@@ -4826,6 +4844,265 @@
       "mcp": true,
       "api": true,
       "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "snippets",
+    "action": "help",
+    "description": "Show this action catalog",
+    "destructive": false,
+    "params": [],
+    "returns": "Catalog",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "snippets",
+    "action": "schema",
+    "description": "Return the parameter schema for a named action",
+    "destructive": false,
+    "params": [
+      {
+        "name": "action",
+        "ty": "string",
+        "required": true,
+        "description": "Action name to describe"
+      }
+    ],
+    "returns": "Schema",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "snippets",
+    "action": "snippets.create",
+    "description": "Create a user snippet under LAB_HOME/snippets",
+    "destructive": false,
+    "params": [
+      {
+        "name": "name",
+        "ty": "string",
+        "required": true,
+        "description": "Snippet name"
+      },
+      {
+        "name": "body",
+        "ty": "string",
+        "required": true,
+        "description": "Markdown or JavaScript snippet body"
+      },
+      {
+        "name": "description",
+        "ty": "string",
+        "required": false,
+        "description": "Description written to generated frontmatter"
+      },
+      {
+        "name": "force",
+        "ty": "boolean",
+        "required": false,
+        "description": "Overwrite an existing user snippet"
+      }
+    ],
+    "returns": "SnippetInfo",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "snippets",
+    "action": "snippets.exec",
+    "description": "Execute a snippet through gateway Code Mode",
+    "destructive": false,
+    "params": [
+      {
+        "name": "name",
+        "ty": "string",
+        "required": true,
+        "description": "Snippet name"
+      },
+      {
+        "name": "max_tool_calls",
+        "ty": "integer",
+        "required": false,
+        "description": "Optional max tool-call cap for this run"
+      },
+      {
+        "name": "params",
+        "ty": "object",
+        "required": false,
+        "description": "Input object passed to the snippet async function"
+      }
+    ],
+    "returns": "CodeModeExecutionResponse",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "snippets",
+    "action": "snippets.get",
+    "description": "Return one snippet body and metadata",
+    "destructive": false,
+    "params": [
+      {
+        "name": "name",
+        "ty": "string",
+        "required": true,
+        "description": "Snippet name"
+      }
+    ],
+    "returns": "ResolvedSnippet",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "snippets",
+    "action": "snippets.list",
+    "description": "List built-in and user executable Code Mode snippets",
+    "destructive": false,
+    "params": [],
+    "returns": "SnippetList",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "snippets",
+    "action": "snippets.remove",
+    "description": "Remove a user snippet",
+    "destructive": true,
+    "params": [
+      {
+        "name": "name",
+        "ty": "string",
+        "required": true,
+        "description": "User snippet name"
+      }
+    ],
+    "returns": "SnippetRemoveResult",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "snippets",
+    "action": "snippets.test",
+    "description": "Execute one snippet and report pass/fail",
+    "destructive": false,
+    "params": [
+      {
+        "name": "name",
+        "ty": "string",
+        "required": false,
+        "description": "Snippet name"
+      },
+      {
+        "name": "params",
+        "ty": "object",
+        "required": false,
+        "description": "Input object passed to the snippet async function"
+      },
+      {
+        "name": "all",
+        "ty": "boolean",
+        "required": false,
+        "description": "Run every listed snippet with default params"
+      }
+    ],
+    "returns": "SnippetTestResult",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "snippets",
+    "action": "snippets.validate",
+    "description": "Validate a snippet body or existing snippet without executing it",
+    "destructive": false,
+    "params": [
+      {
+        "name": "name",
+        "ty": "string",
+        "required": false,
+        "description": "Snippet name or filename stem"
+      },
+      {
+        "name": "body",
+        "ty": "string",
+        "required": false,
+        "description": "Markdown or JavaScript snippet body to validate"
+      }
+    ],
+    "returns": "SnippetValidation",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
     },
     "requires_http_subject": false,
     "auth_posture": "uses the selected transport auth and gateway visibility policy",

@@ -22,6 +22,8 @@ pub mod oauth;
 pub mod params;
 pub mod serve;
 pub mod setup;
+#[cfg(feature = "gateway")]
+pub mod snippets;
 pub mod stash;
 pub mod style;
 
@@ -85,6 +87,9 @@ pub enum Command {
     /// Manage proxied upstream MCP gateways.
     #[cfg(feature = "gateway")]
     Gateway(gateway::GatewayArgs),
+    /// Manage executable Code Mode snippets.
+    #[cfg(feature = "gateway")]
+    Snippets(snippets::SnippetsArgs),
     /// Run local OAuth callback relay helpers.
     Oauth(oauth::OauthArgs),
     /// Search fleet logs on the configured master.
@@ -118,6 +123,8 @@ pub async fn dispatch(cli: Cli, config: LabConfig) -> Result<ExitCode> {
         Command::Completions(args) => completions::run(&args),
         #[cfg(feature = "gateway")]
         Command::Gateway(args) => gateway::run(args, format, &config).await,
+        #[cfg(feature = "gateway")]
+        Command::Snippets(args) => snippets::run(args, format, &config).await,
         Command::Oauth(args) => oauth::run(args, &config).await,
         Command::Logs(args) => logs::run(args, format, &config).await,
         #[cfg(feature = "marketplace")]
@@ -211,6 +218,49 @@ mod tests {
     fn cli_parses_completions_subcommand() {
         let cli = Cli::parse_from(["labby", "completions", "bash"]);
         assert!(matches!(cli.command, Command::Completions(_)));
+    }
+
+    #[cfg(feature = "gateway")]
+    #[test]
+    fn cli_parses_snippets_subcommands() {
+        let cli = Cli::parse_from(["labby", "snippets", "list"]);
+        assert!(matches!(cli.command, Command::Snippets(_)));
+
+        let cli = Cli::parse_from([
+            "labby",
+            "snippets",
+            "exec",
+            "homelab-readonly-pulse",
+            "--param",
+            "host=dookie",
+        ]);
+        assert!(matches!(cli.command, Command::Snippets(_)));
+
+        let cli = Cli::parse_from([
+            "labby",
+            "snippets",
+            "create",
+            "daily",
+            "--file",
+            "daily.md",
+            "--description",
+            "Daily check",
+        ]);
+        assert!(matches!(cli.command, Command::Snippets(_)));
+
+        let cli = Cli::parse_from(["labby", "snippets", "remove", "daily", "-y"]);
+        assert!(matches!(cli.command, Command::Snippets(_)));
+
+        let cli = Cli::parse_from([
+            "labby", "snippets", "validate", "daily", "--file", "daily.md",
+        ]);
+        assert!(matches!(cli.command, Command::Snippets(_)));
+
+        let cli = Cli::parse_from(["labby", "snippets", "test", "daily", "--param", "limit=3"]);
+        assert!(matches!(cli.command, Command::Snippets(_)));
+
+        let cli = Cli::parse_from(["labby", "snippets", "test", "--all"]);
+        assert!(matches!(cli.command, Command::Snippets(_)));
     }
 }
 

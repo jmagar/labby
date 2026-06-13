@@ -38,6 +38,12 @@ pub struct SetupSnapshot {
     pub draft_stale: bool,
     /// True when a `.env.draft` is present.
     pub has_draft: bool,
+    /// Number of key/value entries currently present in `.env.draft`.
+    pub draft_entry_count: usize,
+    /// Last modified time for `.env`, as Unix seconds.
+    pub env_mtime_unix_seconds: Option<u64>,
+    /// Last modified time for `.env.draft`, as Unix seconds.
+    pub draft_mtime_unix_seconds: Option<u64>,
     pub state: SetupState,
 }
 

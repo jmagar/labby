@@ -83,6 +83,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         ],
     },
     ActionSpec {
+        name: "draft.discard",
+        description: "Discard .env.draft without modifying .env",
+        destructive: true,
+        requires_admin: false,
+        returns: "DraftDiscardOutcome",
+        params: &[],
+    },
+    ActionSpec {
         name: "draft.commit",
         description: "Run audit and atomically merge .env.draft into .env",
         destructive: true,

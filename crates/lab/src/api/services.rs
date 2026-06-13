@@ -23,6 +23,8 @@ pub mod logs;
 #[cfg(feature = "marketplace")]
 pub mod marketplace;
 pub mod setup;
+#[cfg(feature = "gateway")]
+pub mod snippets;
 pub mod stash;
 
 #[cfg(feature = "marketplace")]

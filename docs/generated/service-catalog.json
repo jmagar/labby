@@ -252,6 +252,27 @@
     "metadata_source": "registry + PluginMeta"
   },
   {
+    "name": "snippets",
+    "display_name": "snippets",
+    "description": "Manage executable Code Mode snippets",
+    "category": "bootstrap",
+    "status": "available",
+    "feature": null,
+    "exposure": "always_on",
+    "surfaces": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "default_port": null,
+    "docs_url": null,
+    "coverage_doc": null,
+    "upstream_doc": null,
+    "supports_multi_instance": false,
+    "metadata_source": "registry synthetic metadata"
+  },
+  {
     "name": "stash",
     "display_name": "Stash",
     "description": "Component versioning and deployment — track, snapshot, and deploy Claude Code artefacts",

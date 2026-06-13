@@ -1,3 +1,30 @@
+---
+name: cross-server-docs-brief
+description: Build a compact docs brief from Context7, web search, GitHub, Axon, and time
+tags: [docs, research, cross-server]
+inputs:
+  topic:
+    type: string
+    default: Model Context Protocol Rust SDK
+    required: false
+    description: Main research topic
+  library_name:
+    type: string
+    default: tokio
+    required: false
+    description: Context7 library search name
+  library_id:
+    type: string
+    default: /websites/rs_tokio
+    required: false
+    description: Concrete Context7 library id
+  max_results:
+    type: integer
+    default: 3
+    required: false
+    description: Per-source result limit
+---
+
 # Cross-Server Docs Brief
 
 Use this snippet when you want a quick documentation brief from several independent sources. It combines Context7 library docs, SearXNG web search, Cloudflare docs, GitHub repository search, Axon search, and the time server.
@@ -19,15 +46,16 @@ labby gateway code exec --json --code "$(awk '/^```js$/{flag=1;next}/^```$/{if(f
 ```
 
 ```js
-async () => {
+async (overrides = {}) => {
   const input = {
-    topic: "Model Context Protocol Rust SDK",
-    libraryName: "tokio",
-    libraryId: "/websites/rs_tokio",
+    topic: overrides.topic ?? "Model Context Protocol Rust SDK",
+    libraryName: overrides.library_name ?? "tokio",
+    libraryId: overrides.library_id ?? "/websites/rs_tokio",
     libraryQuestion: "spawn blocking task",
     cloudflareQuery: "workers durable objects",
     githubRepoQuery: "modelcontextprotocol rust sdk",
-    maxResults: 3
+    maxResults: overrides.max_results ?? 3,
+    ...overrides
   };
 
   const preview = (value, limit = 1200) => {
