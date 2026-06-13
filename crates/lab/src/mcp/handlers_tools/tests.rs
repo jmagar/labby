@@ -234,7 +234,7 @@ fn code_mode_tool_meta_points_to_canonical_ui_resource() {
         Some(CODE_MODE_EXECUTE_APP_URI)
     );
     // OpenAI Apps hosts (ChatGPT / Codex) bind widgets via `openai/outputTemplate`
-    // and ignore `_meta.ui`. It points at the skybridge variant (same HTML, the
+    // rather than `_meta.ui`. It points at the skybridge variant (same HTML, the
     // `text/html+skybridge` MIME those hosts expect) so the Claude resource is
     // untouched.
     assert_eq!(

@@ -490,12 +490,28 @@ fn code_mode_app_resource(descriptor: &CodeModeAppResourceDescriptor) -> rmcp::m
         .no_annotation()
 }
 
-/// MIME a Code Mode app URI is served with (defaults to the MCP Apps MIME).
+/// MIME a Code Mode app URI is served with. Callers must pass a table URI;
+/// an un-tabled URI is a programming error (MIME here selects the host runtime,
+/// so a silent wrong default would mis-bind the widget) — assert in debug, warn
+/// and fall back to the MCP Apps MIME in release rather than serving nothing.
 fn code_mode_app_mime_for_uri(uri: &str) -> &'static str {
     CODE_MODE_APP_RESOURCE_DESCRIPTORS
         .iter()
         .find(|descriptor| descriptor.uri == uri)
-        .map_or(CODE_MODE_APP_MIME, |descriptor| descriptor.mime)
+        .map_or_else(
+            || {
+                debug_assert!(
+                    false,
+                    "code_mode_app_mime_for_uri called with un-tabled URI: {uri}"
+                );
+                tracing::warn!(
+                    resource_uri = uri,
+                    "unknown Code Mode URI; defaulting to MCP Apps MIME"
+                );
+                CODE_MODE_APP_MIME
+            },
+            |descriptor| descriptor.mime,
+        )
 }
 
 fn code_mode_app_resources_visible(
@@ -544,9 +560,9 @@ pub(crate) fn code_mode_app_resource_meta(uri: &str) -> Meta {
             "prefersBorder": false,
         }),
     );
-    // OpenAI Apps surfaces a model-facing description when the widget loads.
-    // Skybridge-only, so the Claude (`text/html;profile=mcp-app`) resource
-    // `_meta` stays byte-identical.
+    // OpenAI Apps exposes a model-facing description of the widget. Skybridge-
+    // only, so the Claude (`text/html;profile=mcp-app`) resource `_meta` stays
+    // byte-identical.
     if code_mode_app_mime_for_uri(uri) == CODE_MODE_APP_SKYBRIDGE_MIME {
         meta.insert(
             "openai/widgetDescription".to_string(),
@@ -777,6 +793,117 @@ mod tests {
             text.contains(r#""entries":[]"#),
             "protected scope should not see global history: {text}"
         );
+    }
+
+    #[tokio::test]
+    async fn skybridge_resource_is_readable_by_uri_despite_being_unlisted() {
+        let (transport, _client_transport) = tokio::io::duplex(64);
+        let running = rmcp::service::serve_directly::<RoleServer, _, _, std::io::Error, _>(
+            code_mode_server().await,
+            transport,
+            None,
+        );
+
+        // OpenAI hosts never see this URI in resources/list (`listed: false`);
+        // they reach it directly via the tool's `openai/outputTemplate`. Prove
+        // the full read path serves it under the skybridge MIME with the
+        // model-facing description attached.
+        let allowed = running
+            .service()
+            .read_resource_impl(
+                ReadResourceRequestParams::new(CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI),
+                scoped_context(running.peer().clone(), &["lab:read"]),
+            )
+            .await
+            .expect("read skybridge resource");
+        let ResourceContents::TextResourceContents {
+            uri,
+            mime_type,
+            text,
+            meta,
+        } = &allowed.contents[0]
+        else {
+            panic!("expected text resource");
+        };
+        assert_eq!(uri, CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI);
+        assert_eq!(mime_type.as_deref(), Some(CODE_MODE_APP_SKYBRIDGE_MIME));
+        assert!(text.contains("Lab Code Mode Inspector"));
+        assert!(
+            meta.as_ref()
+                .expect("resource metadata")
+                .0
+                .contains_key("openai/widgetDescription")
+        );
+
+        // The unlisted resource still honors the read scope gate.
+        let denied = running
+            .service()
+            .read_resource_impl(
+                ReadResourceRequestParams::new(CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI),
+                scoped_context(running.peer().clone(), &["profile"]),
+            )
+            .await
+            .expect_err("scope must be denied");
+        assert_eq!(
+            denied.data.as_ref().expect("error data")["kind"],
+            json!("forbidden")
+        );
+    }
+
+    #[test]
+    fn code_mode_app_descriptor_table_invariants_hold() {
+        for descriptor in CODE_MODE_APP_RESOURCE_DESCRIPTORS {
+            // MIME determines the runtime, which fixes listed-ness and which
+            // tool-binding channel is legal. These couplings live only in the
+            // const table by convention — assert them so a future row can't
+            // silently leak a skybridge resource into the Claude listing or
+            // cross-wire the two host runtimes.
+            if descriptor.mime == CODE_MODE_APP_MIME {
+                assert!(
+                    descriptor.listed && descriptor.openai_tool_name.is_none(),
+                    "mcp-app descriptor {} must be listed with no OpenAI binding",
+                    descriptor.uri
+                );
+            } else if descriptor.mime == CODE_MODE_APP_SKYBRIDGE_MIME {
+                assert!(
+                    !descriptor.listed && descriptor.mcp_tool_name.is_none(),
+                    "skybridge descriptor {} must be unlisted with no MCP binding",
+                    descriptor.uri
+                );
+            } else {
+                panic!(
+                    "descriptor {} has unknown MIME {}",
+                    descriptor.uri, descriptor.mime
+                );
+            }
+            assert!(
+                !(descriptor.mcp_tool_name.is_some() && descriptor.openai_tool_name.is_some()),
+                "descriptor {} binds both runtimes to one resource",
+                descriptor.uri
+            );
+        }
+
+        // Every Code Mode tool with an MCP widget must have exactly one MCP
+        // descriptor and exactly one skybridge variant — otherwise the tool
+        // silently loses OpenAI Apps support (no `openai/outputTemplate`).
+        for tool in [CODE_MODE_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME] {
+            assert_eq!(
+                CODE_MODE_APP_RESOURCE_DESCRIPTORS
+                    .iter()
+                    .filter(|descriptor| descriptor.mcp_tool_name == Some(tool))
+                    .count(),
+                1,
+                "tool {tool} must have exactly one MCP descriptor"
+            );
+            assert_eq!(
+                CODE_MODE_APP_RESOURCE_DESCRIPTORS
+                    .iter()
+                    .filter(|descriptor| descriptor.openai_tool_name == Some(tool))
+                    .count(),
+                1,
+                "tool {tool} is missing its skybridge (OpenAI) descriptor"
+            );
+        }
     }
 
     #[test]

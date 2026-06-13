@@ -140,11 +140,16 @@ export function CodeModeInspector({ initialTrace }: CodeModeInspectorProps) {
     // event.detail.globals; prefer that, falling back to the live snapshot.
     const sync = (event?: Event) => {
       const detail = (event as CustomEvent<{ globals?: { toolOutput?: unknown } }> | undefined)?.detail
-      const next = parseCodeModeTrace(detail?.globals?.toolOutput ?? window.openai?.toolOutput)
+      const raw = detail?.globals?.toolOutput ?? window.openai?.toolOutput
+      const next = parseCodeModeTrace(raw)
       if (next) {
         setTrace(next)
         setBridgeWarning(null)
         setBridgeState('connected')
+      } else if (raw != null) {
+        // Present but unparseable — surface it like the ExtApps path does
+        // instead of silently dropping the host's payload.
+        setBridgeWarning('Ignored malformed bridge payload.')
       }
     }
     sync()

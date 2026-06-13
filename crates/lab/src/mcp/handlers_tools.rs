@@ -266,7 +266,7 @@ fn code_mode_tool_meta(tool_name: &str) -> Meta {
         }),
     );
     // OpenAI Apps SDK binding: ChatGPT / Codex hosts bind the widget via
-    // `openai/outputTemplate` and ignore `_meta.ui`. It points at the skybridge
+    // `openai/outputTemplate` rather than `_meta.ui`. It points at the skybridge
     // variant of the same widget — identical HTML, served under the
     // `text/html+skybridge` MIME those hosts expect — so the Claude resource
     // stays untouched. The widget self-hydrates from `window.openai.toolOutput`.
