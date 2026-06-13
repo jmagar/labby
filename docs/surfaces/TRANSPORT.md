@@ -10,7 +10,7 @@ No authentication is required — security is provided by process-level isolatio
 
 ```bash
 labby mcp
-labby mcp --services plex
+labby mcp --services marketplace
 ```
 
 No network listener is opened. No host, port, or auth configuration is needed.
@@ -27,7 +27,7 @@ from `/`.
 
 ```bash
 labby serve
-labby serve --services plex
+labby serve --services gateway,marketplace
 ```
 
 ### Configuration
@@ -202,7 +202,7 @@ labby serve
 # → listening on 127.0.0.1:8765
 
 curl http://localhost:8765/health
-curl http://localhost:8765/v1/radarr -d '{"action":"help"}'
+curl http://localhost:8765/v1/marketplace -d '{"action":"help"}'
 # if exported Labby assets exist:
 open http://localhost:8765/
 ```
@@ -222,7 +222,7 @@ labby serve
 
 ```bash
 curl -H "Authorization: Bearer $LAB_MCP_HTTP_TOKEN" \
-     https://lab.example.com/v1/radarr \
+     https://lab.example.com/v1/marketplace \
      -d '{"action":"help"}'
 ```
 

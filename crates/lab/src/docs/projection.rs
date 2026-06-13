@@ -296,7 +296,9 @@ fn classify_lab_feature(
 ) -> FeatureClass {
     if matches!(feature, "all" | "default") {
         FeatureClass::AggregateDefault
-    } else if matches!(feature, "fs" | "lab-admin") {
+    } else if matches!(feature, "gateway" | "marketplace" | "fs" | "lab-admin") {
+        FeatureClass::ProductSlice
+    } else if matches!(feature, "node-runtime") {
         FeatureClass::BinaryOnly
     } else if deps.iter().any(|dep| dep == &format!("lab-apis/{feature}"))
         && api_features.contains_key(feature)
@@ -342,6 +344,7 @@ fn mapped_lab_feature(
 
 fn exception_reason(classification: FeatureClass) -> Option<&'static str> {
     match classification {
+        FeatureClass::ProductSlice => Some("standalone product slice"),
         FeatureClass::BinaryOnly => Some("binary-only Lab feature"),
         FeatureClass::HelperInternal => Some("helper/internal feature"),
         FeatureClass::AggregateDefault => Some("aggregate/default feature"),
@@ -359,7 +362,9 @@ fn service_feature(service: &str, matrix: &FeatureMatrix) -> Option<String> {
                 && feature.feature == service
                 && matches!(
                     feature.classification,
-                    FeatureClass::ServicePassthrough | FeatureClass::BinaryOnly
+                    FeatureClass::ServicePassthrough
+                        | FeatureClass::ProductSlice
+                        | FeatureClass::BinaryOnly
                 )
         })
         .map(|feature| feature.feature.clone())

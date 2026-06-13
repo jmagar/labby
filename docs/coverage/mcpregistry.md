@@ -32,8 +32,8 @@ Notes:
 
 ## Dispatch Actions (`crates/lab/src/dispatch/marketplace/mcp_catalog.rs`)
 
-MCP Registry discovery is exposed through the always-on `marketplace` service
-using `mcp.*` actions. Action shape is the standard `action + params` dispatch.
+MCP Registry discovery is exposed through the `marketplace` product slice using
+`mcp.*` actions. Action shape is the standard `action + params` dispatch.
 
 | Action | Params | Destructive | Returns |
 |--------|--------|-------------|---------|
@@ -153,7 +153,7 @@ registry sync that callers should retry later.
 ## SSRF Protection
 
 Any URL flowing from the registry into the gateway upstream layer is validated by
-`crate::dispatch::mcpregistry::validate_registry_url` before use. It rejects:
+the shared dispatch SSRF guard before use. It rejects:
 
 - non-HTTPS schemes (including `http`, `file`, `data`, `ftp`)
 - hosts resolving to RFC1918, loopback, link-local, ULA, or Tailscale/CGNAT

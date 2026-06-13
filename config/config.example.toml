@@ -225,14 +225,12 @@
 # enabled = false                         # default: false
 
 # ── Per-Service Preferences ──────────────────────────────────────────────────
-#
-# Non-secret, non-URL settings for individual services.
-# URLs and auth credentials still go in ~/.lab/.env.
 
-[services.tailscale]
-# Tailnet name for Tailscale API calls.
-# Override with TAILSCALE_TAILNET env var.
-# tailnet = "-"                           # default: "-" (auto-detect)
+[services]
+# Runtime exposure switch for compiled built-in upstream API integrations.
+# Currently retained for compatibility; this checkout does not ship the older
+# first-party upstream integration features.
+# built_in_upstream_apis_enabled = true    # default: true
 
 # ── Secrets (env-only) ───────────────────────────────────────────────────────
 #

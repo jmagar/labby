@@ -148,6 +148,8 @@ path = "src/lib.rs"
 # - Product slices must compile with `--no-default-features --features <slice> --all-targets`.
 # - Supported standalone product slices are: gateway, marketplace, fs, deploy, acp_registry.
 # - `mcpregistry` is owned by marketplace in this crate; do not treat it as standalone here.
+# - `doctor`, `setup`, `serve` base, `nodes`, `logs`, `stash`, and `acp` are base control-plane
+#   or UI-coupled capabilities, not standalone slices in this feature table.
 # - Helper/internal features are not standalone product slices unless this comment is updated.
 [features]
 acp_registry = ["lab-apis/acp_registry"]

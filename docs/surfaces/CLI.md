@@ -17,17 +17,16 @@ The CLI includes:
 - `nodes`
 - `logs`
 - `serve`
-- `gateway`
-- `marketplace`
+- `gateway` when compiled with `gateway`
+- `marketplace` when compiled with `marketplace`
 - `stash`
-- `plugins`
 - `setup`
 - `health`
 - `doctor`
-- `extract`
 - `oauth`
-- `help`
+- `docs`
 - `completions`
+- `deploy` when compiled with `deploy`
 
 Representative command tree:
 
@@ -40,14 +39,13 @@ labby
 ├── gateway
 ├── marketplace
 ├── stash
-├── plugins
 ├── setup
 ├── health
 ├── doctor
-├── extract
 ├── oauth
-├── help
-└── completions
+├── docs
+├── completions
+└── deploy
 ```
 
 ## Service Actions
@@ -61,7 +59,7 @@ Examples:
 
 - `labby help`
 - `labby marketplace mcp.meta.set --params '{"name":"io.github.user/server","metadata":{"curation":{"featured":true},"trust":{"reviewed":true}}}'`
-- MCP/API: `extract({ "action": "scan", "params": { "uri": "/mnt/appdata" } })`
+- MCP/API: `stash({ "action": "components.list", "params": {} })`
 
 The CLI must not invent a second semantic model that drifts from MCP, HTTP, or the SDK.
 
@@ -217,13 +215,15 @@ Rules:
 
 ## Install and Uninstall
 
-Top-level `labby install`, `labby uninstall`, and `labby init` are not part of
-the supported CLI surface. Use the owning surfaces instead:
+Top-level `labby install`, `labby uninstall`, `labby init`, and
+`labby registry` are not part of the supported CLI surface. Use the owning
+surfaces instead:
 
 - `labby setup` for first-run and local environment repair flows
 - `labby setup install-plugin <name>` for Lab plugin installation
 - `labby marketplace ...` for marketplace-managed plugin operations
-- `labby registry ...` for MCP Registry installs when the `mcpregistry` feature is enabled
+- `labby marketplace mcp.*` actions for MCP Registry search/install flows when
+  the `marketplace` feature is enabled
 
 These flows are operationally sensitive and must use atomic file writes and backup behavior.
 

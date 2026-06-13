@@ -32,8 +32,6 @@ This document captures the locked stack and tooling choices for `lab`.
 |---|---|
 | CLI | `clap` |
 | MCP server | `rmcp` |
-| TUI | `ratatui`, `crossterm` |
-| tabular output | `tabled` |
 | color | `owo-colors` |
 | TTY detection | `is-terminal` |
 | progress bars | `indicatif` |
@@ -44,8 +42,8 @@ This document captures the locked stack and tooling choices for `lab`.
 |---|---|
 | `.env` loading | `dotenvy` |
 | TOML config | `toml` |
-| SSH transport for extract | `russh`, `russh-keys` |
-| XML parsing for extract | `quick-xml` |
+| config loading | `dotenvy`, `toml` |
+| auth storage | `rusqlite` |
 
 ## Testing and Quality
 
@@ -62,7 +60,8 @@ This document captures the locked stack and tooling choices for `lab`.
 
 - dependency versions live at the workspace root
 - lints live at the workspace root
-- feature flags are mirrored from `lab-apis` into `lab`
+- feature flags are mirrored from `lab-apis` into `lab` only for real SDK
+  passthroughs; product-local slices are declared in `lab`
 - release profile is optimized and stripped
 - dev profile keeps faster local iteration
 - release-debug profile exists for profiling and diagnostics
@@ -70,14 +69,22 @@ This document captures the locked stack and tooling choices for `lab`.
 
 ## Feature Gating
 
-`lab-apis` owns the actual service feature flags. `lab` re-exports them one-for-one so a single feature selection controls both crates.
+`lab-apis` owns SDK feature flags. `lab` re-exports true SDK passthroughs and
+also owns product-local feature slices.
 
 The practical rules are:
 
-- `default` enables all service integrations
-- `all` enables every service integration
-- internal shared features like `servarr` stay implementation details
-- `extract` is always compiled
+- `labby/default` enables `all`
+- `labby/all` enables the release product surface: `gateway`, `marketplace`,
+  `fs`, `deploy`, `acp_registry`, and `lab-admin`
+- supported standalone product slices are `gateway`, `marketplace`, `fs`,
+  `deploy`, and `acp_registry`
+- `mcpregistry` is a compatibility alias for `marketplace` in `labby`
+- `services-all` is currently empty; removed first-party upstream integrations
+  are not modeled as Cargo features in this checkout
+- base control-plane services such as `doctor`, `setup`, `logs`, `device`,
+  `stash`, and `acp` are intentionally compiled without individual feature
+  flags
 
 ## Build and Verify
 

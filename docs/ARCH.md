@@ -7,9 +7,9 @@ It also includes a product-local device runtime subsystem. That subsystem is sep
 ## Core Shape
 
 - One workspace
-- Three crates
+- Four crates (`lab-apis`, `lab`, `lab-auth`, and `lab-winjob`)
 - One binary
-- Many feature-gated services
+- A small set of feature-gated product slices
 - One MCP tool per service
 
 ## Crate Split
@@ -27,7 +27,8 @@ It also includes a product-local device runtime subsystem. That subsystem is sep
 - plugin metadata
 - health-check contracts
 
-It does not own CLI parsing, MCP transport, TUI rendering, `.env` file loading, or shell-facing UX.
+It does not own CLI parsing, MCP transport, HTTP routing, `.env` file loading,
+or shell-facing UX.
 
 ### `crates/lab-auth`
 
@@ -38,7 +39,14 @@ It does not own CLI parsing, MCP transport, TUI rendering, `.env` file loading, 
 - SQLite-backed token and session storage
 - axum middleware and route handlers
 
-It is separated from `lab-apis` because it depends on `axum`, which is forbidden in the pure SDK crate. It does not own CLI parsing, MCP transport, or TUI rendering.
+It is separated from `lab-apis` because it depends on `axum`, which is
+forbidden in the pure SDK crate. It does not own CLI parsing or MCP transport.
+
+### `crates/lab-winjob`
+
+`lab-winjob` is the small Windows Job Object helper crate. It contains the
+platform FFI needed for process-tree reaping on Windows so the main `lab` crate
+can keep `unsafe_code = "forbid"`.
 
 ### `crates/lab`
 
@@ -46,7 +54,6 @@ It is separated from `lab-apis` because it depends on `axum`, which is forbidden
 
 - CLI commands
 - MCP server registration and dispatch
-- TUI plugin manager
 - config loading
 - output rendering
 - install/uninstall flows
@@ -61,8 +68,8 @@ If behavior is shared across product surfaces, it belongs in one shared executio
 
 That rule is structural, not aspirational:
 
-- `lab-apis` has no `clap`, `rmcp`, `ratatui`, or `axum`
-- `lab-auth` has no `clap`, `rmcp`, or `ratatui`
+- `lab-apis` has no `clap`, `rmcp`, or `axum`
+- `lab-auth` has no `clap` or `rmcp`
 - `lab` depends on `lab-apis` and `lab-auth` rather than duplicating service logic
 
 ## Module Layout
@@ -97,9 +104,11 @@ The architecture is anchored around a few cross-cutting contracts:
 - `ApiError`: normalized transport-layer error taxonomy
 - `HttpClient`: shared request/retry/logging/error-mapping layer
 - `ActionSpec` / `ParamSpec`: service action catalog schema
-- `PluginMeta`: service metadata for install/TUI/doctor flows
+- `PluginMeta`: service metadata for generated docs, install/setup flows, and
+  doctor checks
 
-These contracts keep service modules consistent and make CLI, MCP, TUI, and operator tooling compose cleanly.
+These contracts keep service modules consistent and make CLI, MCP, HTTP, web,
+and operator tooling compose cleanly.
 
 ### `ServiceClient`
 
@@ -109,7 +118,8 @@ Every service client implements a common health surface:
 - `service_type()`
 - `health()`
 
-That gives `labby health`, `labby doctor`, TUI status views, and MCP `status` surfaces a shared model without forcing all other service operations into one trait.
+That gives `labby health`, `labby doctor`, and MCP `status` surfaces a shared
+model without forcing all other service operations into one trait.
 
 ### `ServiceStatus`
 
@@ -137,12 +147,13 @@ Service identifiers must use service-local newtypes rather than raw integers eve
 
 ## Runtime Surfaces
 
-The same service logic is exposed through three product surfaces:
+The same service logic is exposed through the product surfaces that the service
+opts into:
 
-- CLI: `lab <service> <command>`
+- CLI: `labby <service-or-command> ...`
 - MCP stdio: `labby mcp`
 - MCP HTTP: `labby serve`
-- TUI: `lab plugins`
+- HTTP API and Labby web UI: `labby serve`
 
 All three consume the same service metadata and service clients.
 
@@ -177,7 +188,7 @@ Normal request flow:
 3. Dispatch through the shared `crates/lab/src/dispatch` layer
 4. Let `HttpClient` handle auth, retry, timeout, and error mapping for upstream-backed services
 5. Return typed or surface-neutral data to the caller surface
-6. Render via CLI, MCP envelope, API envelope, or TUI view
+6. Render via CLI, MCP envelope, API envelope, or web view
 
 ## Config Boundary
 
@@ -190,14 +201,25 @@ The binary resolves those inputs, then constructs clients explicitly.
 
 ## Service Model
 
-Each service gets:
+Feature-gated product slices currently are `gateway`, `marketplace`, `fs`,
+`deploy`, and `acp_registry`. Base control-plane services such as `doctor`,
+`setup`, `logs`, `device`, `stash`, and `acp` compile without an individual
+feature flag.
 
-- one feature flag
-- one service module in `lab-apis` for upstream-backed integrations
+For a first-class service or capability, add only the surfaces it actually
+supports:
+
+- a `lab-apis` module when the service needs pure data types, SDK clients, or
+  shared metadata
 - one shared dispatch entry in `crates/lab/src/dispatch`
-- one CLI entrypoint
-- one MCP dispatch entry
-- one `PluginMeta` when it participates in install/TUI/doctor flows
+- CLI, MCP, API, and web adapters only when the service exposes those surfaces
+- one `PluginMeta` when it participates in generated env/service metadata
 - one health-check implementation when it models a remotely configured service
 
-There are product-local exceptions. [`EXTRACT.md`](./EXTRACT.md) is a synthetic bootstrap service, `crates/lab-apis::marketplace` is a synthetic marketplace surface that exports only the pure types (`Marketplace`, `Plugin`, `Artifact`, `PluginSource`, `ArtifactLang`) while all dispatch and filesystem behavior lives under `crates/lab/src/dispatch/marketplace/`, [`GATEWAY.md`](./GATEWAY.md) is a product-local management surface for runtime upstream configuration, and [`DEVICE_RUNTIME.md`](./DEVICE_RUNTIME.md) describes the device runtime that turns every `labby serve` process into either the fleet `master` or a reporting non-master device.
+Product-local surfaces are explicit. `crates/lab-apis::marketplace` exports pure
+types while all dispatch and filesystem behavior lives under
+`crates/lab/src/dispatch/marketplace/`; [`GATEWAY.md`](./services/GATEWAY.md)
+documents the product-local management surface for runtime upstream
+configuration; and [`DEVICE_RUNTIME.md`](./runtime/DEVICE_RUNTIME.md) describes
+the device runtime that turns every `labby serve` process into either the fleet
+controller or a reporting non-controller node.

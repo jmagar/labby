@@ -103,6 +103,7 @@ pub struct FeatureDoc {
 pub enum FeatureClass {
     ServicePassthrough,
     SdkOnly,
+    ProductSlice,
     BinaryOnly,
     HelperInternal,
     AggregateDefault,

@@ -10,7 +10,7 @@ The docs are split by topic so contributors do not have to recover architecture,
 - Use [crate-extract/README.md](./crate-extract/README.md) for the reusable crate/package extraction spec, contract, execution strategy, and open questions.
 - Use [adr/README.md](./adr/README.md) for accepted architecture decision records.
 - Read [CONVENTIONS.md](./CONVENTIONS.md) before changing implementation patterns or core APIs.
-- Use [SERVICES.md](./dev/SERVICES.md), [CLI.md](./surfaces/CLI.md), [MCP.md](./surfaces/MCP.md), and [TUI.md](./surfaces/TUI.md) for surface-specific behavior.
+- Use [SERVICES.md](./dev/SERVICES.md), [CLI.md](./surfaces/CLI.md), and [MCP.md](./surfaces/MCP.md) for current surface-specific behavior. [TUI.md](./surfaces/TUI.md) records deferred TUI status.
 - Use [design/CLI_DESIGN_SYSTEM.md](./design/CLI_DESIGN_SYSTEM.md) for the human-readable CLI output language and shared color policy.
 - Use [design/component-development.md](./design/component-development.md) and [design/design-system-contract.md](./design/design-system-contract.md) when building or revising Labby web UI components.
 - Use [CONFIG.md](./runtime/CONFIG.md) and [OPERATIONS.md](./OPERATIONS.md) for setup and operator workflows.
@@ -29,11 +29,9 @@ The docs are split by topic so contributors do not have to recover architecture,
 - Use [ERRORS.md](./dev/ERRORS.md) for the shared error taxonomy, envelope shapes, and status mapping contract.
 - Use [design/SERIALIZATION.md](./design/SERIALIZATION.md) for the shared serde, envelope, and output-boundary contract.
 - Use [DISPATCH.md](./dev/DISPATCH.md) for the shared surface-neutral dispatch-layer contract and dependency rules.
-- Use [SERVICE_LAYER_MIGRATION.md](./dev/SERVICE_LAYER_MIGRATION.md) when executing the refactor from surface-coupled dispatch to the shared `services` layer.
+- Use [SERVICE_LAYER_MIGRATION.md](./dev/SERVICE_LAYER_MIGRATION.md) for the current status of the older service-layer migration plan.
 - Use [SERVICE_ONBOARDING.md](./dev/SERVICE_ONBOARDING.md) when you are bringing a new service online end to end.
-- Use [SCAFFOLD_AND_AUDIT.md](./dev/SCAFFOLD_AND_AUDIT.md) for the scaffold/audit contract, [DEPLOY_SERVICE.md](./runtime/DEPLOY_SERVICE.md) for deploy-service actions, and [FLEET_METHODS.md](./runtime/FLEET_METHODS.md) for fleet WebSocket methods.
-- Use `labby scaffold service` and `labby audit onboarding` when you are creating
-  or validating a new service onboarding path.
+- Use [SCAFFOLD_AND_AUDIT.md](./dev/SCAFFOLD_AND_AUDIT.md) for the deferred scaffold/audit command contract, [DEPLOY_SERVICE.md](./runtime/DEPLOY_SERVICE.md) for deploy-service actions, and [FLEET_METHODS.md](./runtime/FLEET_METHODS.md) for fleet WebSocket methods.
 
 ## Reading Paths
 
@@ -43,20 +41,20 @@ The docs are split by topic so contributors do not have to recover architecture,
 2. [CONVENTIONS.md](./CONVENTIONS.md)
 3. [SERVICES.md](./dev/SERVICES.md)
 4. Then the surface doc you are touching:
-   [CLI.md](./surfaces/CLI.md), [MCP.md](./surfaces/MCP.md), or [TUI.md](./surfaces/TUI.md)
+   [CLI.md](./surfaces/CLI.md), [MCP.md](./surfaces/MCP.md), or the relevant HTTP/web docs
 
 ### If You Are Working on Product Behavior
 
 1. [CLI.md](./surfaces/CLI.md) for command behavior
 2. [design/CLI_DESIGN_SYSTEM.md](./design/CLI_DESIGN_SYSTEM.md) for human-readable output language
 3. [MCP.md](./surfaces/MCP.md) for tool and envelope behavior
-4. [TUI.md](./surfaces/TUI.md) for plugin manager behavior
+4. [TRANSPORT.md](./surfaces/TRANSPORT.md) and the service docs for HTTP/web behavior
 5. [CONFIG.md](./runtime/CONFIG.md) for config and env implications
 6. [OBSERVABILITY.md](./dev/OBSERVABILITY.md) for logging, request tracing, and redaction rules
 7. [ERRORS.md](./dev/ERRORS.md) for stable kinds and structured error behavior
 8. [design/SERIALIZATION.md](./design/SERIALIZATION.md) for serde and output-boundary rules
 9. [DISPATCH.md](./dev/DISPATCH.md) for layer ownership and adapter direction
-10. [SERVICE_LAYER_MIGRATION.md](./dev/SERVICE_LAYER_MIGRATION.md) for the concrete migration phases and checklists
+10. [SERVICE_LAYER_MIGRATION.md](./dev/SERVICE_LAYER_MIGRATION.md) for the current status of the older migration plan
 
 ### If You Are Working on a Service Integration
 
@@ -151,7 +149,7 @@ The docs are split by topic so contributors do not have to recover architecture,
 - [SERVICE_ONBOARDING.md](./dev/SERVICE_ONBOARDING.md)
   End-to-end checklist for adding a new service, from upstream spec to verification.
 - [SCAFFOLD_AND_AUDIT.md](./dev/SCAFFOLD_AND_AUDIT.md)
-  `labby scaffold service` and `labby audit onboarding` contract.
+  Deferred scaffold/audit command contract.
 - [CLI.md](./surfaces/CLI.md)
   Command structure, output rules, confirmation rules, setup/install surfaces, operator commands, and `labby oauth relay-local`.
 - [design/CLI_DESIGN_SYSTEM.md](./design/CLI_DESIGN_SYSTEM.md)
@@ -159,7 +157,7 @@ The docs are split by topic so contributors do not have to recover architecture,
 - [design/CLI_OUTPUT_THEME_API.md](./design/CLI_OUTPUT_THEME_API.md)
   Proposed Rust API for CLI semantic styling, color policy resolution, and renderer integration.
 - [TUI.md](./surfaces/TUI.md)
-  Plugin manager scope, interaction model, `.mcp.json` behavior, and TUI state rules.
+  Deferred TUI status.
 - [CONFIG.md](./runtime/CONFIG.md)
   Env and TOML config ownership, load order, secrets handling, and instance naming.
 - [ENV.md](./runtime/ENV.md)
@@ -217,7 +215,7 @@ Use the smallest correct doc:
 - deployment topology and rollout guidance: [DEPLOY.md](./runtime/DEPLOY.md)
 - upstream MCP proxy, circuit breaker, resource proxying: [UPSTREAM.md](./services/UPSTREAM.md)
 - transport configuration, middleware, sessions: [TRANSPORT.md](./surfaces/TRANSPORT.md)
-- TUI behavior: [TUI.md](./surfaces/TUI.md)
+- deferred TUI status: [TUI.md](./surfaces/TUI.md)
 - config, env, secrets, instance naming: [CONFIG.md](./runtime/CONFIG.md)
 - observability, request tracing, redaction: [OBSERVABILITY.md](./dev/OBSERVABILITY.md)
 - error taxonomy and envelope rules: [ERRORS.md](./dev/ERRORS.md)

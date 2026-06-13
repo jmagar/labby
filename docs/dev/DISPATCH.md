@@ -349,9 +349,9 @@ crates/lab/src/
   dispatch/
     context.rs
     params.rs
-    radarr.rs
-    bytestash.rs
-    unifi.rs
+    gateway.rs
+    marketplace.rs
+    stash.rs
 ```
 
 The exact file breakdown may evolve, but every migrated service must start directory-first: thin `<service>.rs` entrypoint plus a `<service>/` directory with `catalog.rs`, `client.rs`, `params.rs`, and `dispatch.rs`, plus optional domain modules.

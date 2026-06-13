@@ -1,10 +1,13 @@
 # Services
 
-`lab` is built around feature-gated service integrations plus a small number of product-local surfaces. Most integrations follow the same structural contract so the CLI, MCP server, API, and TUI can treat them uniformly.
+`lab` is built around product-local control-plane services plus a small set of
+feature-gated product slices. Services follow the shared dispatch contract so
+CLI, MCP, HTTP API, and Labby web adapters can stay thin when a service opts
+into those surfaces.
 
 ## Per-Service Shape
 
-Most service integrations provide:
+Most first-class services or capabilities provide some combination of:
 
 - a `lab-apis` module
 - a typed client
@@ -33,26 +36,26 @@ The ACP/chat work should follow the capability-module pattern for ACP itself:
 
 ## Feature Gates
 
-Most upstream-backed service integrations are feature-gated in `lab-apis` and re-exported in `lab`.
+Current standalone product slices are:
 
-Categories currently include:
+- `gateway`
+- `marketplace`
+- `fs`
+- `deploy`
+- `acp_registry`
 
-- media
-- Servarr
-- indexers
-- downloads
-- notes and documents
-- network and infrastructure
-- notifications
-- AI and inference
+`mcpregistry` remains a `labby` compatibility alias for `marketplace`.
+`services-all` is currently empty because the older first-party upstream
+integrations are not present in this checkout's feature table.
 
 Default feature posture:
 
-- `lab-apis` defaults to no optional services
-- `lab` defaults to all service integrations
-- `all` enables every service integration
-- always-on exposed services are compiled into `lab` without feature flags
-- always-on SDK capability modules remain available where they are used by those exposed services
+- `lab-apis` defaults to no optional SDK modules
+- `labby` defaults to `all`
+- `labby/all` enables the release product surface
+- base services are compiled into `labby` without individual feature flags
+- SDK capability modules remain available where base or feature-gated services
+  use them
 
 ## Generated Inventories
 
@@ -72,6 +75,11 @@ an always-on SDK capability module, but the exposed registry service is
 
 ## Service Sources
 
+Historical upstream API specs and research notes may remain under
+`docs/upstream-api/`, but they do not imply a compiled service or Cargo feature.
+The generated feature matrix and service catalog are the current source of
+truth for what this checkout builds.
+
 ### Deferred Capability Boundaries
 
 - Radicale
@@ -88,7 +96,7 @@ Every service publishes `PluginMeta` alongside the service module.
 
 That metadata drives:
 
-- TUI grouping
+- generated docs and presentation
 - install/uninstall prompts
 - required env validation
 - doctor checks
@@ -164,6 +172,8 @@ The important rule is that the service client owns logic. CLI, MCP, and HTTP lay
 The project is intentionally broad but follows one rule: one binary, one consistent control plane, many integrations.
 
 The service set is grouped conceptually, not implemented as unrelated one-offs.
+Use the generated feature matrix rather than older coverage or upstream API
+notes to decide whether a service exists in the current codebase.
 
 Run `just docs-generate` after changing registry entries, `PluginMeta`,
 `ActionSpec`, API route metadata, Cargo features, or onboarding checks. Run
@@ -179,12 +189,13 @@ its adapters and registration live in `lab`.
 
 ## Chat / ACP Surface
 
-The `/chat` experience is currently a product-local UI surface rather than a first-class service integration:
+The `/chat` experience is currently a product-local UI surface over the
+first-class `acp` capability:
 
-- it is wired to the gateway backend and ACP bridge endpoints
+- it is wired to ACP provider/session endpoints
 - its behavior lives in `apps/gateway-admin` plus supporting Rust API routes
-- it does not yet have the full first-class `acp` service shape
-- the intended promotion path is `acp` as the first-class service and `chat` as
-  the UI over it
+- `acp` owns the service/capability behavior; `chat` is the UI over it
 
-If we promote chat to a service later, it should follow `SERVICE_ONBOARDING.md` and `DISPATCH.md` like any other first-class integration.
+If chat ever becomes an independent service rather than an ACP UI, it should
+follow `SERVICE_ONBOARDING.md` and `DISPATCH.md` like any other first-class
+integration.
