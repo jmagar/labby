@@ -159,24 +159,67 @@ function historyRow(entry){
   return card(`<div class="row"><div class="name">${esc(entry.kind||"entry")}</div>${status}</div><div class="meta">${esc(entry.elapsed_ms??0)} ms / ${count} calls${entry.match_count!==undefined?` / ${esc(entry.match_count)} matches`:""}</div>`);
 }
 function searchCount(t){const displayed=t.displayed_count??(Array.isArray(t.matches)?t.matches.length:0);return (t.truncated||displayed!==t.match_count)?`${displayed} of ${t.match_count||0}`:`${t.match_count||0}`;}
+// Returns true when `trace` matched a known Code Mode trace kind, false for the
+// empty placeholder or an unrecognized shape (rendered as a raw JSON dump).
 function render(trace){
   const t=trace&&trace.structuredContent?trace.structuredContent:trace;
-  if(!t||!t.kind){clearStats();content.innerHTML=card('<div class="meta">Run Code Mode search or execute to populate the inspector.</div>');return;}
-  if(t.kind==="code_mode_execute_trace"){const rows=(t.calls||[]).map(callRow).join("")||card('<div class="meta">No calls were made.</div>');summary.textContent=`${t.call_count||0} calls captured`;renderStats([["Execute calls",t.call_count||0],["Catalog matches",0],["History entries",0]]);content.innerHTML=panel("Execute calls",t.call_count||0,rows);return;}
-  if(t.kind==="code_mode_search_trace"){const count=searchCount(t);const shown=`${(t.matches||[]).length} shown`;const rows=(t.matches||[]).map(matchRow).join("")||card('<div class="meta">No matches.</div>');summary.textContent=t.truncated?"Search matches truncated to the current display window":"Search matches from current search";renderStats([["Execute calls",0],["Catalog matches",count],["History entries",0]]);content.innerHTML=panel("Search matches",t.truncated?shown:count,rows);return;}
-  if(t.kind==="code_mode_history"){const rows=(t.entries||[]).map(historyRow).join("")||card('<div class="meta">History is empty.</div>');summary.textContent=`${(t.entries||[]).length} bounded history entries`;renderStats([["Execute calls",0],["Catalog matches",0],["History entries",(t.entries||[]).length]]);content.innerHTML=panel("Recent history",(t.entries||[]).length,rows);return;}
-  clearStats();content.innerHTML=card(`<pre>${esc(json(t))}</pre>`);
+  if(!t||!t.kind){clearStats();content.innerHTML=card('<div class="meta">Run Code Mode search or execute to populate the inspector.</div>');return false;}
+  if(t.kind==="code_mode_execute_trace"){const rows=(t.calls||[]).map(callRow).join("")||card('<div class="meta">No calls were made.</div>');summary.textContent=`${t.call_count||0} calls captured`;renderStats([["Execute calls",t.call_count||0],["Catalog matches",0],["History entries",0]]);content.innerHTML=panel("Execute calls",t.call_count||0,rows);return true;}
+  if(t.kind==="code_mode_search_trace"){const count=searchCount(t);const shown=`${(t.matches||[]).length} shown`;const rows=(t.matches||[]).map(matchRow).join("")||card('<div class="meta">No matches.</div>');summary.textContent=t.truncated?"Search matches truncated to the current display window":"Search matches from current search";renderStats([["Execute calls",0],["Catalog matches",count],["History entries",0]]);content.innerHTML=panel("Search matches",t.truncated?shown:count,rows);return true;}
+  if(t.kind==="code_mode_history"){const rows=(t.entries||[]).map(historyRow).join("")||card('<div class="meta">History is empty.</div>');summary.textContent=`${(t.entries||[]).length} bounded history entries`;renderStats([["Execute calls",0],["Catalog matches",0],["History entries",(t.entries||[]).length]]);content.innerHTML=panel("Recent history",(t.entries||[]).length,rows);return true;}
+  clearStats();content.innerHTML=card(`<pre>${esc(json(t))}</pre>`);return false;
 }
-// Render immediately from the server-injected snapshot (history widget).
-render(window.__LAB_CODE_MODE_INITIAL_TRACE__);
-// MCP Apps bridge: live search/execute traces arrive via ontoolresult.
-const app = new App({ name: "LabCodeModeInspector", version: "1.0.0" }, {});
-app.onhostcontextchanged = (ctx) => { if (ctx && ctx.theme) { document.documentElement.classList.toggle("dark", ctx.theme === "dark"); } };
-app.ontoolresult = (result) => render(result && result.structuredContent ? result.structuredContent : result);
-try { state.textContent = "connected"; state.classList.add("connected"); } catch (_) {}
-// Fire-and-forget per the MCP Apps spec — resolves async after the host
-// postMessage handshake, which may be delayed or unavailable.
-app.connect().catch(() => { try { state.textContent = "read only"; state.classList.remove("connected"); } catch (_) {} });
+// Render immediately from the OpenAI Apps tool output (ChatGPT / Codex) when
+// present, otherwise the server-injected snapshot (history widget) / null seed.
+render(window.openai && window.openai.toolOutput != null ? window.openai.toolOutput : window.__LAB_CODE_MODE_INITIAL_TRACE__);
+if (window.openai) {
+  // OpenAI Apps runtime: there is no MCP Apps host to hand-shake with. The
+  // structured tool result is the tool's structuredContent, exposed as
+  // window.openai.toolOutput. It may be empty at first paint and arrive later
+  // via the openai:set_globals CustomEvent. The event's globals are
+  // authoritative for the changed key (including an explicit null clear); only
+  // without that key do we fall back to the live snapshot.
+  let hydrated = false;
+  const setState = (label, connected) => {
+    try { state.textContent = label; state.classList.toggle("connected", connected); } catch (_) {}
+  };
+  const syncOpenai = (event) => {
+    const globals = event && event.detail && event.detail.globals;
+    const hasKey = globals && Object.prototype.hasOwnProperty.call(globals, "toolOutput");
+    const out = hasKey ? globals.toolOutput : (window.openai && window.openai.toolOutput);
+    if (out != null) {
+      // Recognized trace -> connected; non-null-but-unparseable -> "malformed"
+      // (parity with the React inspector's bridge warning) rather than passing
+      // off a raw JSON blob as a healthy render.
+      const recognized = render(out);
+      hydrated = true;
+      setState(recognized ? "connected" : "malformed", recognized);
+    } else if (hasKey) {
+      // Host explicitly cleared the result — reflect "no data" instead of
+      // leaving a stale trace labeled connected.
+      hydrated = false;
+      render(null);
+      setState("waiting", false);
+    }
+  };
+  window.addEventListener("openai:set_globals", syncOpenai);
+  syncOpenai();
+  // Only claim "connected" once a payload has rendered. Until then show "waiting"
+  // so an empty widget isn't indistinguishable from a broken bridge — output may
+  // still arrive via a later openai:set_globals event.
+  if (!hydrated) {
+    setState("waiting", false);
+  }
+} else {
+  // MCP Apps bridge (Claude): live search/execute traces arrive via ontoolresult.
+  const app = new App({ name: "LabCodeModeInspector", version: "1.0.0" }, {});
+  app.onhostcontextchanged = (ctx) => { if (ctx && ctx.theme) { document.documentElement.classList.toggle("dark", ctx.theme === "dark"); } };
+  app.ontoolresult = (result) => render(result && result.structuredContent ? result.structuredContent : result);
+  try { state.textContent = "connected"; state.classList.add("connected"); } catch (_) {}
+  // Fire-and-forget per the MCP Apps spec — resolves async after the host
+  // postMessage handshake, which may be delayed or unavailable.
+  app.connect().catch(() => { try { state.textContent = "read only"; state.classList.remove("connected"); } catch (_) {} });
+}
 })();
 </script>
 </body>

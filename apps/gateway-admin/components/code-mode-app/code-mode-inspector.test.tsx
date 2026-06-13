@@ -252,3 +252,122 @@ test('renders empty state without bridge data', async () => {
   assert.match(container.textContent ?? '', /Waiting for an MCP Apps tool result/)
   await unmount()
 })
+
+test('hydrates from window.openai.toolOutput on first paint', async () => {
+  installChatTestDom()
+  globalThis.window.openai = {
+    toolOutput: {
+      kind: 'code_mode_search_trace',
+      query_kind: 'catalog_filter',
+      match_count: 1,
+      matches: [
+        {
+          id: 'axon::ask',
+          upstream: 'axon',
+          tool: 'ask',
+          description: 'Ask indexed docs',
+          has_schema: true,
+          has_output_schema: false,
+        },
+      ],
+    },
+  }
+  try {
+    const { container, unmount } = await renderClient(<CodeModeInspector />)
+    assert.match(container.textContent ?? '', /axon \/ ask/)
+    await unmount()
+  } finally {
+    globalThis.window.openai = undefined
+  }
+})
+
+test('updates from the openai:set_globals event detail.globals', async () => {
+  installChatTestDom()
+  globalThis.window.openai = { toolOutput: undefined }
+  try {
+    const { container, unmount } = await renderClient(<CodeModeInspector />)
+    // Empty until the host pushes tool output.
+    assert.match(container.textContent ?? '', /Waiting for an MCP Apps tool result/)
+
+    await act(async () => {
+      globalThis.window.dispatchEvent(
+        new globalThis.window.CustomEvent('openai:set_globals', {
+          detail: {
+            globals: {
+              toolOutput: {
+                kind: 'code_mode_execute_trace',
+                call_count: 1,
+                calls: [
+                  {
+                    id: 'github::search_issues',
+                    upstream: 'github',
+                    tool: 'search_issues',
+                    ok: true,
+                    elapsed_ms: 12,
+                  },
+                ],
+              },
+            },
+          },
+        }),
+      )
+    })
+
+    assert.match(container.textContent ?? '', /github \/ search_issues/)
+    await unmount()
+  } finally {
+    globalThis.window.openai = undefined
+  }
+})
+
+test('surfaces a warning for malformed window.openai payloads', async () => {
+  installChatTestDom()
+  globalThis.window.openai = { toolOutput: { kind: 'tool_explorer' } }
+  try {
+    const { container, unmount } = await renderClient(<CodeModeInspector />)
+    assert.match(container.textContent ?? '', /Ignored malformed bridge payload/)
+    await unmount()
+  } finally {
+    globalThis.window.openai = undefined
+  }
+})
+
+test('clears the trace when openai:set_globals carries a null toolOutput', async () => {
+  installChatTestDom()
+  globalThis.window.openai = {
+    toolOutput: {
+      kind: 'code_mode_search_trace',
+      query_kind: 'catalog_filter',
+      match_count: 1,
+      matches: [
+        {
+          id: 'axon::ask',
+          upstream: 'axon',
+          tool: 'ask',
+          description: 'Ask indexed docs',
+          has_schema: true,
+          has_output_schema: false,
+        },
+      ],
+    },
+  }
+  try {
+    const { container, unmount } = await renderClient(<CodeModeInspector />)
+    assert.match(container.textContent ?? '', /axon \/ ask/)
+
+    await act(async () => {
+      globalThis.window.dispatchEvent(
+        new globalThis.window.CustomEvent('openai:set_globals', {
+          detail: { globals: { toolOutput: null } },
+        }),
+      )
+    })
+
+    // Host cleared the result — the stale trace is dropped, not left as "connected".
+    assert.doesNotMatch(container.textContent ?? '', /axon \/ ask/)
+    assert.match(container.textContent ?? '', /Waiting for an MCP Apps tool result/)
+    await unmount()
+  } finally {
+    globalThis.window.openai = undefined
+  }
+})

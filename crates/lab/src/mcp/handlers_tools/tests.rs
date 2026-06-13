@@ -10,7 +10,10 @@ use crate::dispatch::upstream::types::{
     ToolExposurePolicy, UpstreamEntry, UpstreamHealth, UpstreamTool,
 };
 use crate::mcp::catalog::{CODE_MODE_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME};
-use crate::mcp::handlers_resources::{CODE_MODE_EXECUTE_APP_URI, CODE_MODE_SEARCH_APP_URI};
+use crate::mcp::handlers_resources::{
+    CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI, CODE_MODE_EXECUTE_APP_URI,
+    CODE_MODE_SEARCH_APP_SKYBRIDGE_URI, CODE_MODE_SEARCH_APP_URI,
+};
 use crate::mcp::handlers_tools::{code_mode_tool_meta, code_mode_trace_output_schema};
 use crate::mcp::logging::logging_level_rank;
 use crate::mcp::server::LabMcpServer;
@@ -287,9 +290,25 @@ fn code_mode_tool_meta_points_to_canonical_ui_resource() {
         execute.0["ui"]["resourceUri"].as_str(),
         Some(CODE_MODE_EXECUTE_APP_URI)
     );
-    assert!(
-        search.0.get("openai/outputTemplate").is_none(),
-        "compat aliases should not be added without host evidence"
+    // OpenAI Apps hosts (ChatGPT / Codex) bind widgets via `openai/outputTemplate`
+    // rather than `_meta.ui`. It points at the skybridge variant (same HTML, the
+    // `text/html+skybridge` MIME those hosts expect) so the Claude resource is
+    // untouched.
+    assert_eq!(
+        search
+            .0
+            .get("openai/outputTemplate")
+            .and_then(|value| value.as_str()),
+        Some(CODE_MODE_SEARCH_APP_SKYBRIDGE_URI),
+        "search tool must expose the OpenAI Apps output template"
+    );
+    assert_eq!(
+        execute
+            .0
+            .get("openai/outputTemplate")
+            .and_then(|value| value.as_str()),
+        Some(CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI),
+        "execute tool must expose the OpenAI Apps output template"
     );
 }
 

@@ -67,6 +67,8 @@ const AURORA_DARK_TOKENS = {
 declare global {
   interface Window {
     __LAB_CODE_MODE_INITIAL_TRACE__?: unknown
+    // OpenAI Apps runtime (ChatGPT / Codex) injects this; MCP Apps hosts do not.
+    openai?: { toolOutput?: unknown }
     ExtApps?: {
       App?: new (
         appInfo: { name: string; version: string },
@@ -126,6 +128,41 @@ export function CodeModeInspector({ initialTrace }: CodeModeInspectorProps) {
     return () => {
       void app.close?.()
     }
+  }, [])
+
+  // OpenAI Apps runtime (ChatGPT / Codex) bridge. These hosts bind the widget
+  // via the tool's `openai/outputTemplate` meta and expose the structured tool
+  // result on `window.openai.toolOutput` instead of driving the ExtApps
+  // `ontoolresult` path, so hydrate from it directly and track live updates.
+  useEffect(() => {
+    if (!window.openai) return
+    // The openai:set_globals CustomEvent carries changed values on
+    // event.detail.globals; prefer that, falling back to the live snapshot.
+    const sync = (event?: Event) => {
+      const globals = (event as CustomEvent<{ globals?: Record<string, unknown> }> | undefined)?.detail
+        ?.globals
+      // The event's globals are authoritative for the changed key (including an
+      // explicit null clear); only without it do we read the live snapshot.
+      const hasKey = globals != null && Object.prototype.hasOwnProperty.call(globals, 'toolOutput')
+      const raw = hasKey ? globals.toolOutput : window.openai?.toolOutput
+      const next = parseCodeModeTrace(raw)
+      if (next) {
+        setTrace(next)
+        setBridgeWarning(null)
+        setBridgeState('connected')
+      } else if (raw != null) {
+        // Present but unparseable — surface it like the ExtApps path does
+        // instead of silently dropping the host's payload.
+        setBridgeWarning('Ignored malformed bridge payload.')
+      } else if (hasKey) {
+        // Host explicitly cleared the result — drop the stale trace.
+        setTrace(null)
+        setBridgeWarning(null)
+      }
+    }
+    sync()
+    window.addEventListener('openai:set_globals', sync)
+    return () => window.removeEventListener('openai:set_globals', sync)
   }, [])
 
   const rows = flattenTraceRows(trace)
