@@ -60,6 +60,7 @@ mod virtual_servers;
 // monolith's public `manager::` paths; they currently have no callers outside
 // the manager tree, so the re-exports are allowed to be unused in non-test
 // builds (the test suite imports them through these paths).
+pub(crate) use self::code_mode_resolve::CallbackToolLookup;
 #[allow(unused_imports)]
 pub use self::config_ops::BatchAddOutcome;
 pub use self::core::{GatewayManagerConfig, GatewayOauthConfig};

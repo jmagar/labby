@@ -23,7 +23,10 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use serde_json::Value;
 
+use crate::dispatch::error::ToolError;
+use crate::dispatch::gateway::manager::CallbackToolLookup;
 use crate::dispatch::upstream::types::UpstreamTool;
+use crate::mcp::call_tool_upstream::PreResolvedUpstreamTool;
 use crate::mcp::catalog::{CODE_MODE_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME};
 use crate::mcp::context::{
     auth_context_from_extensions, tool_execute_builtin_action_allowed, tool_execute_scope_allowed,
@@ -31,14 +34,14 @@ use crate::mcp::context::{
 use crate::mcp::elicitation::{ElicitResult, elicit_confirm};
 use crate::mcp::envelope::{build_error, build_error_extra};
 use crate::mcp::error::DispatchError;
-use crate::mcp::result_format::{estimate_tokens_args, format_dispatch_result};
+use crate::mcp::result_format::{
+    estimate_tokens_args, format_dispatch_result, tool_error_envelope,
+};
 use crate::mcp::server::LabMcpServer;
 
 enum WidgetCallbackGate {
     Allowed {
-        route: &'static str,
-        upstream_name: String,
-        tool: Box<UpstreamTool>,
+        resolved: Box<PreResolvedUpstreamTool>,
         hidden_sibling: bool,
     },
     Ambiguous {
@@ -236,58 +239,14 @@ impl LabMcpServer {
 
         let mut resolved_upstream_tool = None;
         if self.code_mode_visibility().await.hides_raw_tools() {
-            let widget_callback = if svc.is_none()
-                && let Some(pool) = self.current_upstream_pool().await
-            {
-                let allowed = self.route_scope.allowed_upstreams();
-                if self.code_mode_widget_callbacks_enabled() {
-                    pool.find_tool_allowed(&service, allowed)
-                        .await
-                        .map(|(upstream_name, tool)| WidgetCallbackGate::Allowed {
-                            route: "upstream_widget_callback_legacy",
-                            upstream_name,
-                            tool: Box::new(tool),
-                            hidden_sibling: false,
-                        })
-                } else if let Some((upstream_name, tool)) = pool
-                    .find_tool_allowed(&service, allowed)
-                    .await
-                    .filter(|(_, tool)| {
-                        crate::dispatch::upstream::pool::tool_has_mcp_app_ui_resource(tool)
-                    })
-                {
-                    Some(WidgetCallbackGate::Allowed {
-                        route: "upstream_widget_callback",
-                        upstream_name,
-                        tool: Box::new(tool),
-                        hidden_sibling: false,
-                    })
-                } else {
-                    let candidates = pool
-                        .find_mcp_app_sibling_tool_candidates(&service, allowed)
-                        .await;
-                    if candidates.is_empty() {
-                        None
-                    } else if candidates.len() > 1 {
-                        let valid = candidates
-                            .iter()
-                            .map(|(upstream, tool)| format!("{upstream}::{}", tool.tool.name))
-                            .collect();
-                        Some(WidgetCallbackGate::Ambiguous { valid })
-                    } else if candidates
-                        .iter()
-                        .any(|(_, candidate)| candidate.destructive)
-                    {
-                        Some(WidgetCallbackGate::Destructive)
-                    } else {
-                        let (upstream_name, tool) =
-                            candidates.into_iter().next().expect("checked len");
-                        Some(WidgetCallbackGate::Allowed {
-                            route: "upstream_widget_sibling_callback",
-                            upstream_name,
-                            tool: Box::new(tool),
-                            hidden_sibling: true,
-                        })
+            let widget_callback = if svc.is_none() {
+                match self.resolve_widget_callback_gate(&service, &context).await {
+                    Ok(gate) => gate,
+                    Err(err) => {
+                        let envelope = tool_error_envelope(&service, "call_tool", &err);
+                        return Ok(CallToolResult::error(vec![Content::text(
+                            envelope.to_string(),
+                        )]));
                     }
                 }
             } else {
@@ -321,25 +280,9 @@ impl LabMcpServer {
                     )]));
                 }
                 Some(WidgetCallbackGate::Allowed {
-                    route,
-                    upstream_name,
-                    tool,
+                    resolved,
                     hidden_sibling,
                 }) => {
-                    if tool.destructive {
-                        let envelope = build_error(
-                            &service,
-                            &action,
-                            "confirmation_required",
-                            &format!(
-                                "destructive upstream tool `{service}` is not callable via the \
-                                 widget callback bypass — use the `execute` tool with confirm:true"
-                            ),
-                        );
-                        return Ok(CallToolResult::error(vec![Content::text(
-                            envelope.to_string(),
-                        )]));
-                    }
                     if hidden_sibling
                         && !tool_execute_scope_allowed(auth_context_from_extensions(
                             &context.extensions,
@@ -362,10 +305,11 @@ impl LabMcpServer {
                         surface = "mcp",
                         service = %service,
                         action = %action,
-                        route,
+                        upstream = %resolved.upstream_name,
+                        route = resolved.route,
                         "code_mode raw-tool gate bypassed for MCP App widget callback"
                     );
-                    resolved_upstream_tool = Some((upstream_name, *tool));
+                    resolved_upstream_tool = Some(*resolved);
                 }
                 None => {
                     let envelope = build_error(
@@ -527,6 +471,71 @@ impl LabMcpServer {
 }
 
 impl LabMcpServer {
+    async fn resolve_widget_callback_gate(
+        &self,
+        service: &str,
+        context: &RequestContext<RoleServer>,
+    ) -> Result<Option<WidgetCallbackGate>, ToolError> {
+        let Some(manager) = &self.gateway_manager else {
+            return Ok(None);
+        };
+        let owner = self.request_runtime_owner(context);
+        let oauth_subject = crate::mcp::context::oauth_upstream_subject_for_request(
+            auth_context_from_extensions(&context.extensions),
+            self.request_subject(context),
+        );
+        let allowed = self.route_scope.allowed_upstreams();
+
+        if self.code_mode_widget_callbacks_enabled() {
+            let candidates = manager
+                .resolve_widget_callback_tool_candidates_scoped(
+                    service,
+                    allowed,
+                    Some(&owner),
+                    oauth_subject.as_deref(),
+                    CallbackToolLookup::LegacyAnyExposed,
+                )
+                .await?;
+            return Ok(classify_widget_callback_candidates(
+                "upstream_widget_callback_legacy",
+                false,
+                candidates,
+            ));
+        }
+
+        let direct_candidates = manager
+            .resolve_widget_callback_tool_candidates_scoped(
+                service,
+                allowed,
+                Some(&owner),
+                oauth_subject.as_deref(),
+                CallbackToolLookup::DirectMcpApp,
+            )
+            .await?;
+        if !direct_candidates.is_empty() {
+            return Ok(classify_widget_callback_candidates(
+                "upstream_widget_callback",
+                false,
+                direct_candidates,
+            ));
+        }
+
+        let sibling_candidates = manager
+            .resolve_widget_callback_tool_candidates_scoped(
+                service,
+                allowed,
+                Some(&owner),
+                oauth_subject.as_deref(),
+                CallbackToolLookup::SiblingOfMcpApp,
+            )
+            .await?;
+        Ok(classify_widget_callback_candidates(
+            "upstream_widget_sibling_callback",
+            true,
+            sibling_candidates,
+        ))
+    }
+
     fn code_mode_widget_callbacks_enabled(&self) -> bool {
         #[cfg(test)]
         if self.code_mode_widget_callbacks_enabled_for_test {
@@ -535,4 +544,38 @@ impl LabMcpServer {
 
         crate::config::code_mode_widget_callbacks_enabled()
     }
+}
+
+fn classify_widget_callback_candidates(
+    route: &'static str,
+    hidden_sibling: bool,
+    candidates: Vec<(String, UpstreamTool)>,
+) -> Option<WidgetCallbackGate> {
+    if candidates.is_empty() {
+        return None;
+    }
+    if candidates.len() > 1 {
+        let valid = candidates
+            .iter()
+            .map(|(upstream, tool)| format!("{upstream}::{}", tool.tool.name))
+            .collect();
+        return Some(WidgetCallbackGate::Ambiguous { valid });
+    }
+    if candidates
+        .iter()
+        .any(|(_, candidate)| candidate.destructive)
+    {
+        return Some(WidgetCallbackGate::Destructive);
+    }
+
+    let (upstream_name, tool) = candidates.into_iter().next().expect("checked len");
+    Some(WidgetCallbackGate::Allowed {
+        resolved: PreResolvedUpstreamTool {
+            upstream_name,
+            tool,
+            route,
+        }
+        .into(),
+        hidden_sibling,
+    })
 }

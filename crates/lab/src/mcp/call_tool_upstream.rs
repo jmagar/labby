@@ -37,6 +37,13 @@ use crate::mcp::upstream::normalize_upstream_result;
 use crate::config::UpstreamConfig;
 use crate::dispatch::upstream::types::UpstreamTool;
 
+#[derive(Debug, Clone)]
+pub(crate) struct PreResolvedUpstreamTool {
+    pub(crate) upstream_name: String,
+    pub(crate) tool: UpstreamTool,
+    pub(crate) route: &'static str,
+}
+
 impl LabMcpServer {
     /// Upstream-proxy tail. Reached by fall-through from `call_tool_impl`
     /// when `svc.is_none()`. Owns raw + subject-scoped proxy branches and
@@ -47,7 +54,7 @@ impl LabMcpServer {
         service: &str,
         action: &str,
         raw_arguments: Option<JsonObject>,
-        resolved_upstream_tool: Option<(String, UpstreamTool)>,
+        resolved_upstream_tool: Option<PreResolvedUpstreamTool>,
         start: Instant,
         subject: &str,
         actor_key: Option<&str>,
@@ -65,7 +72,7 @@ impl LabMcpServer {
         );
         let pre_resolved_upstream = resolved_upstream_tool
             .as_ref()
-            .map(|(upstream_name, _)| upstream_name.clone());
+            .map(|resolved| resolved.upstream_name.clone());
         let route_scoped_oauth_configs = self.route_scoped_oauth_upstream_configs().await;
         let pre_resolved_oauth_config: Option<UpstreamConfig> = raw_oauth_subject
             .as_ref()
@@ -77,7 +84,7 @@ impl LabMcpServer {
                     .cloned()
             });
         let raw_resolved = if let Some(resolved) = resolved_upstream_tool {
-            Some(Ok(resolved))
+            Some(Ok((resolved.upstream_name, resolved.tool, resolved.route)))
         } else if let Some(manager) = &self.gateway_manager {
             Some(
                 manager
@@ -87,7 +94,8 @@ impl LabMcpServer {
                         Some(&raw_runtime_owner),
                         raw_oauth_subject.as_deref(),
                     )
-                    .await,
+                    .await
+                    .map(|(upstream_name, tool)| (upstream_name, tool, "upstream")),
             )
         } else {
             None
@@ -124,7 +132,7 @@ impl LabMcpServer {
             )]));
         }
         if let Some(pool) = self.current_upstream_pool().await
-            && let Some(Ok((upstream_name, _tool))) = raw_resolved
+            && let Some(Ok((upstream_name, _tool, route))) = raw_resolved
             && pre_resolved_oauth_config.is_none()
         {
             let before = self.snapshot_catalog().await;
@@ -134,7 +142,7 @@ impl LabMcpServer {
                 action = upstream_action,
                 tool = %service,
                 upstream = %upstream_name,
-                route = "upstream",
+                route,
                 "dispatch route selected"
             );
             tracing::debug!(

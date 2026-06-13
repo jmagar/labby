@@ -5,11 +5,61 @@ use std::collections::HashMap;
 
 use crate::dispatch::error::ToolError;
 use crate::dispatch::gateway::code_mode::split_upstream_tool;
+use crate::dispatch::upstream::pool::tool_has_mcp_app_ui_resource;
 use crate::dispatch::upstream::types::{UpstreamRuntimeOwner, UpstreamTool};
 
 use super::GatewayManager;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CallbackToolLookup {
+    LegacyAnyExposed,
+    DirectMcpApp,
+    SiblingOfMcpApp,
+}
+
 impl GatewayManager {
+    pub(crate) async fn resolve_widget_callback_tool_candidates_scoped(
+        &self,
+        tool: &str,
+        allowed_upstreams: Option<&std::collections::BTreeSet<String>>,
+        _owner: Option<&UpstreamRuntimeOwner>,
+        _oauth_subject: Option<&str>,
+        lookup: CallbackToolLookup,
+    ) -> Result<Vec<(String, UpstreamTool)>, ToolError> {
+        let cfg = self.config.read().await.clone();
+        let Some(pool) = self.current_pool().await else {
+            return Ok(Vec::new());
+        };
+
+        let mut matches = Vec::new();
+        for upstream in cfg.upstream.iter().filter(|upstream| {
+            upstream.enabled
+                && is_routable(upstream.priority)
+                && allowed_upstreams.is_none_or(|allowed| allowed.contains(&upstream.name))
+        }) {
+            let upstream_tools = pool.healthy_tools_for_upstream(&upstream.name).await;
+            let Some(candidate) = upstream_tools
+                .iter()
+                .find(|candidate| candidate.tool.name.as_ref() == tool)
+            else {
+                continue;
+            };
+
+            let matched = match lookup {
+                CallbackToolLookup::LegacyAnyExposed => true,
+                CallbackToolLookup::DirectMcpApp => tool_has_mcp_app_ui_resource(candidate),
+                CallbackToolLookup::SiblingOfMcpApp => {
+                    upstream_tools.iter().any(tool_has_mcp_app_ui_resource)
+                }
+            };
+            if matched {
+                matches.push((upstream.name.clone(), candidate.clone()));
+            }
+        }
+        matches.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(matches)
+    }
+
     pub async fn resolve_code_mode_upstream_tool(
         &self,
         upstream: &str,
