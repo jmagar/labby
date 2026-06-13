@@ -261,6 +261,7 @@ fn ui_uri_authority(uri: &str) -> Option<&str> {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::AtomicU8;

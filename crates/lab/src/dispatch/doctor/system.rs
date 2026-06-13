@@ -233,6 +233,7 @@ fn disk_check(findings: &mut Vec<Finding>) {
 fn disk_check(_findings: &mut Vec<Finding>) {}
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 

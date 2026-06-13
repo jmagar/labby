@@ -440,9 +440,7 @@ mod tests {
         );
         let mut request = GetPromptRequestParams::new("service-discover");
         request.arguments = Some(
-            [("service".to_string(), Value::String("deploy".to_string()))]
-                .into_iter()
-                .collect(),
+            std::iter::once(("service".to_string(), Value::String("deploy".to_string()))).collect(),
         );
 
         let err = running
@@ -471,8 +469,7 @@ mod tests {
         );
         let mut request = GetPromptRequestParams::new("service-discover");
         request.arguments = Some(
-            [("service".to_string(), Value::String("gateway".to_string()))]
-                .into_iter()
+            std::iter::once(("service".to_string(), Value::String("gateway".to_string())))
                 .collect(),
         );
 

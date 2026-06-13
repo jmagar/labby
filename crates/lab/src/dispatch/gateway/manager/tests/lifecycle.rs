@@ -90,7 +90,7 @@ async fn gateway_test_does_not_schedule_background_reprobes() {
 #[test]
 fn catalog_diff_detects_removed_tool_provider() {
     let before = GatewayCatalogSnapshot {
-        tools: ["fixture-http-echo".to_string()].into_iter().collect(),
+        tools: std::iter::once("fixture-http-echo".to_string()).collect(),
         resources: BTreeSet::new(),
         prompts: BTreeSet::new(),
     };

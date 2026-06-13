@@ -584,6 +584,7 @@ pub fn strip_quotes(value: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
 

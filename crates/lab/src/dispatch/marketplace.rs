@@ -38,6 +38,7 @@ pub use mcp_params::{resolve_search_for_rest, validate_registry_url};
 pub const LAB_REGISTRY_META_NAMESPACE: &str = "tv.tootie.lab/registry";
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use serde_json::json;
 

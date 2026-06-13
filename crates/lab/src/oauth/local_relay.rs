@@ -561,7 +561,7 @@ mod tests {
         );
         assert_eq!(
             suffix_path_for_request("/callback", "/callback"),
-            Ok("".to_string())
+            Ok(String::new())
         );
     }
 

@@ -905,6 +905,7 @@ fn invalid_param(param: &str, message: &str) -> ToolError {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
     use lab_apis::stash::types::{StashComponentKind, StashWorkspaceShape};

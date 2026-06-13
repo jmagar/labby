@@ -411,8 +411,7 @@ mod tests {
         // No entry in sender_registry; send should fail fast with not_found.
         let err = send_rpc_to_node("ghost-node", "nodes/ping", json!({}))
             .await
-            .err()
-            .expect("must error");
+            .expect_err("must error");
         assert_eq!(err.kind(), "not_found");
         // pending map must be empty (no leaked entry).
         // Note: other tests may run in parallel — just check no entries

@@ -1,5 +1,6 @@
 //! Tests: broker search/execute/call_tool over a live upstream catalog.
 #![cfg(test)]
+#![allow(clippy::panic)]
 
 use std::collections::HashMap;
 use std::sync::Arc;

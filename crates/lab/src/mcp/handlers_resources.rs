@@ -489,6 +489,7 @@ pub(crate) fn code_mode_app_resource_meta(uri: &str) -> Meta {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
     use rmcp::service::{Peer, RequestContext};

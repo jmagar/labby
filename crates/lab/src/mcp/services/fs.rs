@@ -99,6 +99,7 @@ pub async fn dispatch(action: &str, params: Value) -> Result<Value, ToolError> {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
 

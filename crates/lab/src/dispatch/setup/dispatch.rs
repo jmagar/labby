@@ -788,6 +788,8 @@ fn assert_action_count_const() {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::await_holding_lock, clippy::panic)]
+
     use super::*;
     use crate::registry::build_default_registry;
     use std::sync::Mutex;
@@ -861,19 +863,17 @@ mod tests {
 
     #[test]
     fn settings_update_accepts_flat_and_nested_toggle_param() {
-        assert_eq!(
-            parse_built_in_upstream_apis_enabled(
+        assert!(
+            !parse_built_in_upstream_apis_enabled(
                 &json!({"services.built_in_upstream_apis_enabled": false})
             )
-            .unwrap(),
-            false
+            .unwrap()
         );
-        assert_eq!(
+        assert!(
             parse_built_in_upstream_apis_enabled(
                 &json!({"services": {"built_in_upstream_apis_enabled": true}})
             )
-            .unwrap(),
-            true
+            .unwrap()
         );
     }
 
@@ -923,6 +923,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn settings_update_dispatch_persists_and_preserves_config_toml() {
         let _guard = ENV_LOCK.lock().expect("env lock");
         let previous_runtime = crate::registry::runtime_built_in_upstream_apis_enabled();

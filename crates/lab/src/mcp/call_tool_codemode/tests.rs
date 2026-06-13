@@ -91,16 +91,14 @@ fn code_execute_description_contains_protocol_contract() {
 
 #[test]
 fn gateway_search_input_schema_is_code_only() {
-    for schema in [serde_json::json!({
+    let schema = serde_json::json!({
         "type": "object",
         "properties": { "code": { "type": "string" } },
         "required": ["code"]
-    })] {
-        let props = schema["properties"].as_object().expect("properties object");
-        let prop_names: std::collections::BTreeSet<&str> =
-            props.keys().map(String::as_str).collect();
-        assert_eq!(prop_names, std::collections::BTreeSet::from(["code"]));
-    }
+    });
+    let props = schema["properties"].as_object().expect("properties object");
+    let prop_names: std::collections::BTreeSet<&str> = props.keys().map(String::as_str).collect();
+    assert_eq!(prop_names, std::collections::BTreeSet::from(["code"]));
 }
 
 #[test]

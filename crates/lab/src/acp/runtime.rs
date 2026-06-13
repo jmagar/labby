@@ -2637,6 +2637,7 @@ fn map_stop_reason(stop_reason: &StopReason) -> &'static str {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module, clippy::panic)]
 mod tests {
     use super::*;
     use agent_client_protocol::schema::{

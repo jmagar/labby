@@ -129,7 +129,7 @@ mod tests {
     fn test_key() -> EncryptionKey {
         load_key(&base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &[0u8; 32],
+            [0u8; 32],
         ))
         .unwrap()
     }
@@ -148,7 +148,7 @@ mod tests {
         let key1 = test_key();
         let key2 = load_key(&base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            &[1u8; 32],
+            [1u8; 32],
         ))
         .unwrap();
         let (ct, nonce) = seal(&key1, b"secret").unwrap();
@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn short_key_rejected() {
-        let short = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &[0u8; 16]);
+        let short = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 16]);
         assert!(load_key(&short).is_err());
     }
 

@@ -817,6 +817,7 @@ pub async fn dispatch(action: &str, params_value: Value) -> Result<Value, ToolEr
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use std::collections::HashSet;
 

@@ -1312,10 +1312,9 @@ mod tests {
             assert_eq!(err.kind(), "invalid_param");
         }
 
-        for url in ["https://192.168.1.20/agent.tar.gz"] {
-            let err = validate_archive_url(url).expect_err(url);
-            assert_eq!(err.kind(), "ssrf_blocked");
-        }
+        let url = "https://192.168.1.20/agent.tar.gz";
+        let err = validate_archive_url(url).expect_err(url);
+        assert_eq!(err.kind(), "ssrf_blocked");
     }
 
     #[test]

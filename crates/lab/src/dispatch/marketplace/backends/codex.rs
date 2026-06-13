@@ -419,7 +419,7 @@ mod tests {
         let _guard = TEST_CODEX_HOME_LOCK.lock().unwrap();
         let previous = {
             let mut slot = TEST_CODEX_HOME_OVERRIDE.lock().unwrap();
-            std::mem::replace(&mut *slot, Some(home.to_path_buf()))
+            (*slot).replace(home.to_path_buf())
         };
         let result = run();
         let mut slot = TEST_CODEX_HOME_OVERRIDE.lock().unwrap();

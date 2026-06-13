@@ -77,11 +77,10 @@ async fn non_master_runtime_uploads_discovered_ai_cli_inventory() {
         ".claude.json"
     );
     assert!(
-        drained[0].payload["discovered_configs"][0]["content_hash"]
+        !drained[0].payload["discovered_configs"][0]["content_hash"]
             .as_str()
             .unwrap()
-            .len()
-            > 0
+            .is_empty()
     );
 }
 

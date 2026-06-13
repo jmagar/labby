@@ -205,6 +205,7 @@ impl NodeRuntime {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     #[test]
     fn runtime_flush_loop_has_unexpected_exit_observability() {

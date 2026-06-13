@@ -34,7 +34,7 @@ command = "lab"
     assert!(inventory.iter().all(|entry| {
         entry.servers.values().all(|server| {
             !server.fingerprint.is_empty()
-                && !matches!(server.transport.as_deref(), Some("lab") | Some("serve"))
+                && !matches!(server.transport.as_deref(), Some("lab" | "serve"))
         })
     }));
 }

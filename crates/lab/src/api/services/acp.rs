@@ -291,7 +291,7 @@ mod tests {
             Some("claude".to_string())
         );
         assert_eq!(
-            preferred_model_param(Some("".to_string()), Some(" ".to_string())),
+            preferred_model_param(Some(String::new()), Some(" ".to_string())),
             None
         );
     }

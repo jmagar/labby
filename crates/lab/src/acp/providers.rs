@@ -220,7 +220,7 @@ mod tests {
                 "--config".to_string(),
                 "value with spaces".to_string(),
                 "--quoted=\"already-quoted\"".to_string(),
-                "".to_string(),
+                String::new(),
             ],
             cwd: Some(PathBuf::from("/var/lib/with spaces")),
             env,
