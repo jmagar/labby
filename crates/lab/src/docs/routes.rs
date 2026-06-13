@@ -175,7 +175,7 @@ pub fn build_route_docs(service_names: &[String]) -> Vec<RouteDoc> {
             "mcpregistry",
             "MCP Registry compatibility API",
         )
-        .feature("mcpregistry"),
+        .feature("marketplace"),
         browser("GET", "/auth/login", "browser login redirect"),
         browser("GET", "/auth/session", "browser session introspection"),
         browser("POST", "/auth/logout", "browser session logout"),

@@ -515,7 +515,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
     state = state.with_node_store(Arc::clone(&node_store));
     state = state.with_enrollment_store(Arc::clone(&enrollment_store));
     state = state.with_log_system(logs_system);
-    #[cfg(feature = "mcpregistry")]
+    #[cfg(feature = "marketplace")]
     let _registry_sync_keepalive = {
         let db_path = crate::config::registry_db_path();
         match crate::dispatch::marketplace::store::RegistryStore::open(&db_path).await {
@@ -1370,25 +1370,13 @@ fn build_mcp_service(
     mcp_config: &crate::config::McpPreferences,
     notifier: PeerNotifier,
 ) -> Result<StreamableHttpService<LabMcpServer, LocalSessionManager>> {
-    #[cfg(feature = "gateway")]
-    {
-        return build_mcp_service_with_scope(
-            state,
-            mcp_config,
-            notifier,
-            crate::mcp::route_scope::McpRouteScope::Root,
-            &[],
-        );
-    }
-    #[cfg(not(feature = "gateway"))]
-    {
-        return build_mcp_service_with_scope(
-            state,
-            mcp_config,
-            notifier,
-            crate::mcp::route_scope::McpRouteScope::Root,
-        );
-    }
+    build_mcp_service_with_scope(
+        state,
+        mcp_config,
+        notifier,
+        crate::mcp::route_scope::McpRouteScope::Root,
+        &[],
+    )
 }
 
 fn build_mcp_service_with_scope(
@@ -1396,7 +1384,7 @@ fn build_mcp_service_with_scope(
     mcp_config: &crate::config::McpPreferences,
     notifier: PeerNotifier,
     route_scope: crate::mcp::route_scope::McpRouteScope,
-    #[cfg(feature = "gateway")] extra_allowed_hosts: &[String],
+    extra_allowed_hosts: &[String],
 ) -> Result<StreamableHttpService<LabMcpServer, LocalSessionManager>> {
     let registry = Arc::clone(&state.registry);
     #[cfg(feature = "gateway")]
@@ -1426,12 +1414,9 @@ fn build_mcp_service_with_scope(
     );
     let mut seen_allowed_hosts: std::collections::HashSet<String> =
         allowed_hosts.iter().cloned().collect();
-    #[cfg(feature = "gateway")]
-    {
-        for host in extra_allowed_hosts {
-            if seen_allowed_hosts.insert(host.clone()) {
-                allowed_hosts.push(host.clone());
-            }
+    for host in extra_allowed_hosts {
+        if seen_allowed_hosts.insert(host.clone()) {
+            allowed_hosts.push(host.clone());
         }
     }
     let config = StreamableHttpServerConfig::default()

@@ -419,7 +419,7 @@ fn sdk_only_metas() -> Vec<&'static PluginMeta> {
     vec![
         #[cfg(feature = "acp_registry")]
         &lab_apis::acp_registry::META,
-        #[cfg(feature = "mcpregistry")]
+        #[cfg(feature = "marketplace")]
         &lab_apis::mcpregistry::META,
     ]
 }

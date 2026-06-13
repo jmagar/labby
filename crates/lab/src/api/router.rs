@@ -3372,7 +3372,7 @@ mod tests {
 
     /// `/v0.1/servers` requires bearer auth — unauthenticated requests must get 401,
     /// authenticated requests must reach the handler (200 or 503 if store uninitialized).
-    #[cfg(feature = "mcpregistry")]
+    #[cfg(feature = "marketplace")]
     #[tokio::test]
     async fn v01_servers_requires_auth() {
         let state = AppState::new();

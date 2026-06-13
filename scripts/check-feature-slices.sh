@@ -15,6 +15,7 @@ labby_features=(
   ""
   "gateway"
   "marketplace"
+  "mcpregistry" # compatibility alias for marketplace
   "fs"
   "deploy"
   "acp_registry"

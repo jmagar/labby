@@ -1,5 +1,4 @@
 #![allow(
-    clippy::await_holding_lock,
     clippy::bool_assert_comparison,
     clippy::err_expect,
     clippy::field_reassign_with_default,

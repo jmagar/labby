@@ -17,8 +17,6 @@ pub mod internal;
 pub mod logs;
 #[cfg(feature = "marketplace")]
 pub mod marketplace;
-#[cfg(feature = "mcpregistry")]
-pub mod mcpregistry;
 pub mod nodes;
 pub mod oauth;
 pub mod params;
@@ -94,9 +92,6 @@ pub enum Command {
     /// Claude plugin marketplace manager.
     #[cfg(feature = "marketplace")]
     Marketplace(marketplace::MarketplaceArgs),
-    /// MCP Registry — look up and install servers from registry.modelcontextprotocol.io.
-    #[cfg(feature = "mcpregistry")]
-    Registry(mcpregistry::RegistryArgs),
     /// Component versioning and deployment.
     Stash(stash::StashArgs),
     /// Deploy the local lab release binary to SSH targets.
@@ -127,8 +122,6 @@ pub async fn dispatch(cli: Cli, config: LabConfig) -> Result<ExitCode> {
         Command::Logs(args) => logs::run(args, format, &config).await,
         #[cfg(feature = "marketplace")]
         Command::Marketplace(args) => marketplace::run(args, format).await,
-        #[cfg(feature = "mcpregistry")]
-        Command::Registry(args) => mcpregistry::run(args, format).await,
         Command::Stash(args) => stash::run(args, format).await,
         #[cfg(feature = "deploy")]
         Command::Deploy(args) => dispatch_deploy(args, format, config.deploy.clone()).await,

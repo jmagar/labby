@@ -5,11 +5,14 @@
 //! must not claim that validation-time DNS pins the final connection target.
 
 use std::net::{IpAddr, ToSocketAddrs};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use crate::dispatch::error::ToolError;
+use tokio::sync::Semaphore;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_CONCURRENT_DNS_VALIDATIONS: usize = 8;
 
 /// Validate an externally supplied HTTPS URL using blocking DNS.
 ///
@@ -68,11 +71,30 @@ pub fn validate_external_https_url_blocking(url: &str) -> Result<(), ToolError> 
 
 /// Async wrapper for request/dispatch paths. Owns `spawn_blocking` and timeout
 /// so async callers do not accidentally block runtime workers forever.
+///
+/// The timeout bounds the caller's wait, not the OS resolver call itself:
+/// `getaddrinfo` cannot be cancelled once running. The semaphore is therefore
+/// held by the blocking worker until DNS returns, preventing slow-host attempts
+/// from growing the blocking pool without bound.
 pub async fn validate_external_https_url(url: &str) -> Result<(), ToolError> {
     let url = url.to_string();
+    let permit = tokio::time::timeout(
+        DEFAULT_TIMEOUT,
+        dns_validation_semaphore().clone().acquire_owned(),
+    )
+    .await
+    .map_err(|_| ToolError::Sdk {
+        sdk_kind: "ssrf_blocked".to_string(),
+        message: "URL validation timed out waiting for DNS validation capacity".to_string(),
+    })?
+    .map_err(|_| ToolError::internal_message("DNS validation semaphore closed"))?;
+
     tokio::time::timeout(
         DEFAULT_TIMEOUT,
-        tokio::task::spawn_blocking(move || validate_external_https_url_blocking(&url)),
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            validate_external_https_url_blocking(&url)
+        }),
     )
     .await
     .map_err(|_| ToolError::Sdk {
@@ -80,6 +102,11 @@ pub async fn validate_external_https_url(url: &str) -> Result<(), ToolError> {
         message: "URL validation timed out".to_string(),
     })?
     .map_err(|e| ToolError::internal_message(format!("SSRF validation task panicked: {e}")))?
+}
+
+fn dns_validation_semaphore() -> &'static Arc<Semaphore> {
+    static SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
+    SEMAPHORE.get_or_init(|| Arc::new(Semaphore::new(MAX_CONCURRENT_DNS_VALIDATIONS)))
 }
 
 fn check_ip_not_private(ip: IpAddr, redacted_url: &str) -> Result<(), ToolError> {

@@ -340,7 +340,7 @@
     "path": "/v0.1/*",
     "surface": "api",
     "handler_group": "mcpregistry",
-    "feature": "mcpregistry",
+    "feature": "marketplace",
     "runtime_condition": null,
     "auth_required": true,
     "bearer_only": true,

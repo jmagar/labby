@@ -84,7 +84,6 @@
         "lab-admin",
         "acp_registry",
         "deploy",
-        "mcpregistry",
         "gateway",
         "marketplace"
       ],
@@ -160,25 +159,25 @@
       "crate_name": "labby",
       "feature": "marketplace",
       "dependencies": [
-        "mcpregistry"
+        "lab-apis/mcpregistry"
       ],
       "included_in_default": true,
       "included_in_all": true,
       "classification": "intentional_exception",
-      "mapped_crate_feature": null,
+      "mapped_crate_feature": "lab-apis/mcpregistry",
       "exception_reason": "intentional crate-local exception"
     },
     {
       "crate_name": "labby",
       "feature": "mcpregistry",
       "dependencies": [
-        "lab-apis/mcpregistry"
+        "marketplace"
       ],
       "included_in_default": true,
       "included_in_all": true,
-      "classification": "service_passthrough",
+      "classification": "intentional_exception",
       "mapped_crate_feature": "lab-apis/mcpregistry",
-      "exception_reason": null
+      "exception_reason": "intentional crate-local exception"
     },
     {
       "crate_name": "labby",

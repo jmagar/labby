@@ -3,30 +3,30 @@
 //! These actions were absorbed from `dispatch/mcpregistry/` as part of lab-zxx5.2.
 //! The `dispatch/mcpregistry/` directory is retained until lab-zxx5.4.
 //!
-//! All `mcp.*` routing is feature-gated on `mcpregistry`. When the feature is
+//! All `mcp.*` routing is feature-gated on `marketplace`. When the feature is
 //! absent, every `mcp.*` action returns a structured `not_configured` error.
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 use std::time::Instant;
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 use lab_apis::mcpregistry::McpRegistryClient;
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 use lab_apis::mcpregistry::types::{EnvironmentVariable, ServerJSON};
 use serde_json::Value;
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 use crate::config::GatewayPreferences;
 use crate::dispatch::error::ToolError;
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 use crate::dispatch::helpers::to_json;
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 use crate::dispatch::marketplace::LAB_REGISTRY_META_NAMESPACE;
 use crate::dispatch::marketplace::mcp_catalog::MCP_ACTIONS;
 use crate::dispatch::marketplace::mcp_client;
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 use crate::dispatch::marketplace::mcp_params;
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 use crate::dispatch::node::send::send_rpc_to_node;
 
 /// Dispatch a `mcp.*` action using a freshly constructed client.
@@ -34,7 +34,7 @@ use crate::dispatch::node::send::send_rpc_to_node;
 /// Called from `marketplace/dispatch.rs` for any action with the `mcp.` prefix.
 pub async fn dispatch_mcp(action: &str, params: Value) -> Result<Value, ToolError> {
     // help and schema are built-in discovery actions; serve them regardless of
-    // whether the mcpregistry feature is compiled in.
+    // whether the marketplace feature is compiled in.
     match action {
         "help" => {
             return Ok(crate::dispatch::helpers::help_payload(
@@ -48,12 +48,12 @@ pub async fn dispatch_mcp(action: &str, params: Value) -> Result<Value, ToolErro
         }
         _ => {}
     }
-    #[cfg(feature = "mcpregistry")]
+    #[cfg(feature = "marketplace")]
     {
         let client = mcp_client::require_mcp_client()?;
         dispatch_mcp_with_client(client, action, params).await
     }
-    #[cfg(not(feature = "mcpregistry"))]
+    #[cfg(not(feature = "marketplace"))]
     {
         let _ = (action, params);
         Err(mcp_client::not_configured_error())
@@ -61,7 +61,7 @@ pub async fn dispatch_mcp(action: &str, params: Value) -> Result<Value, ToolErro
 }
 
 /// Dispatch a `mcp.*` action with a pre-built client (used by API handlers with AppState).
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 pub async fn dispatch_mcp_with_client(
     client: &McpRegistryClient,
     action: &str,
@@ -141,7 +141,7 @@ pub async fn dispatch_mcp_with_client(
     }
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 async fn dispatch_mcp_list(client: &McpRegistryClient, params: &Value) -> Result<Value, ToolError> {
     if let Some(param) = ["sort_by", "order"]
         .into_iter()
@@ -168,7 +168,7 @@ async fn dispatch_mcp_list(client: &McpRegistryClient, params: &Value) -> Result
     }))
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 async fn open_registry_store()
 -> Result<crate::dispatch::marketplace::store::RegistryStore, ToolError> {
     use crate::config;
@@ -177,7 +177,7 @@ async fn open_registry_store()
         .map_err(Into::into)
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 fn store_list_params_from_mcp_params(
     params: &lab_apis::mcpregistry::types::ListServersParams,
 ) -> crate::dispatch::marketplace::store::StoreListParams {
@@ -201,7 +201,7 @@ fn store_list_params_from_mcp_params(
     store_params
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 async fn ensure_registry_store_populated(
     store: &crate::dispatch::marketplace::store::RegistryStore,
     client: &McpRegistryClient,
@@ -234,7 +234,7 @@ async fn ensure_registry_store_populated(
 ///
 /// Takes `params.server_name`, optional `params.gateway_ids`, optional
 /// `params.client_targets`, optional `env_values`.
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 async fn dispatch_mcp_install(
     client: &McpRegistryClient,
     params: &Value,
@@ -257,7 +257,7 @@ async fn dispatch_mcp_install(
     result
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 async fn dispatch_mcp_install_inner(
     client: &McpRegistryClient,
     params: &Value,
@@ -392,7 +392,7 @@ async fn dispatch_mcp_install_inner(
     Ok(serde_json::json!({ "results": results }))
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 fn gateway_target_count(params: &Value) -> usize {
     params
         .get("gateway_ids")
@@ -400,7 +400,7 @@ fn gateway_target_count(params: &Value) -> usize {
         .map_or(0, Vec::len)
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 fn client_target_count(params: &Value) -> usize {
     params
         .get("client_targets")
@@ -408,7 +408,7 @@ fn client_target_count(params: &Value) -> usize {
         .map_or(0, Vec::len)
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 fn install_target_kind(params: &Value) -> &'static str {
     match (
         gateway_target_count(params) > 0,
@@ -421,7 +421,7 @@ fn install_target_kind(params: &Value) -> &'static str {
     }
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 fn install_server_name(params: &Value) -> &str {
     params
         .get("name")
@@ -429,7 +429,7 @@ fn install_server_name(params: &Value) -> &str {
         .unwrap_or("<missing>")
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 fn install_version(params: &Value) -> &str {
     params
         .get("version")
@@ -437,7 +437,7 @@ fn install_version(params: &Value) -> &str {
         .unwrap_or("latest")
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 fn result_counts(result: &Result<Value, ToolError>) -> (usize, usize) {
     let Some(results) = result
         .as_ref()
@@ -459,7 +459,7 @@ fn result_counts(result: &Result<Value, ToolError>) -> (usize, usize) {
         })
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 fn log_mcp_install_outcome(params: &Value, started: Instant, result: &Result<Value, ToolError>) {
     let elapsed_ms = started.elapsed().as_millis();
     let (installed_count, error_count) = result_counts(result);
@@ -514,14 +514,14 @@ fn log_mcp_install_outcome(params: &Value, started: Instant, result: &Result<Val
     }
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 #[derive(Debug, Clone)]
 struct McpClientTarget {
     node_id: String,
     client: String,
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 fn parse_mcp_client_targets(params: &Value) -> Result<Vec<McpClientTarget>, ToolError> {
     let Some(raw) = params.get("client_targets") else {
         return Ok(Vec::new());
@@ -578,7 +578,7 @@ fn parse_mcp_client_targets(params: &Value) -> Result<Vec<McpClientTarget>, Tool
 /// Returns `(hint, argv)` where `argv = runtime_arguments + identifier + package_arguments`.
 /// Used by both `mcp_client_config` (rendering a single-process MCP client config)
 /// and `install_stdio` (registering a stdio server with the gateway).
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 fn build_stdio_command<'a>(
     pkg: &'a lab_apis::mcpregistry::types::Package,
     server_name: &str,
@@ -620,7 +620,7 @@ fn build_stdio_command<'a>(
     Ok((hint, argv))
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 async fn mcp_client_config(
     server: &ServerJSON,
     params_value: &Value,
@@ -657,7 +657,7 @@ async fn mcp_client_config(
     Ok(config)
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 fn resolve_mcp_env_values(
     pkg: &lab_apis::mcpregistry::types::Package,
     params_value: &Value,
@@ -723,7 +723,7 @@ fn resolve_mcp_env_values(
 /// Build a gateway spec for an HTTP-transport server.
 ///
 /// Validates the URL against SSRF rules and probes for OAuth support.
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 async fn install_http(
     url: &str,
     gateway_name: &str,
@@ -770,7 +770,7 @@ async fn install_http(
 
 /// Build a gateway spec for a stdio-transport server, validate security constraints,
 /// and write any user-supplied env vars into `~/.lab/.env`.
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 fn install_stdio(
     pkg: &lab_apis::mcpregistry::types::Package,
     gateway_name: &str,
@@ -819,7 +819,7 @@ fn install_stdio(
     }))
 }
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 fn missing_env_metadata(ev: &EnvironmentVariable) -> Value {
     serde_json::json!({
         "name": ev.name,
@@ -832,7 +832,7 @@ fn missing_env_metadata(ev: &EnvironmentVariable) -> Value {
 }
 
 /// Dispatch `mcp.meta.*` actions that work against the local registry store.
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 async fn dispatch_mcp_local(action: &str, params: Value) -> Result<Value, ToolError> {
     use crate::config;
     match action {
@@ -941,7 +941,7 @@ async fn dispatch_mcp_local(action: &str, params: Value) -> Result<Value, ToolEr
     }
 }
 
-#[cfg(all(test, feature = "mcpregistry"))]
+#[cfg(all(test, feature = "marketplace"))]
 mod tests {
     use std::sync::atomic::Ordering;
 

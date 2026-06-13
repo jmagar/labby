@@ -15,7 +15,7 @@
         clippy::panic,
         clippy::single_char_pattern,
         clippy::single_element_loop,
-        clippy::zombie_processes
+        clippy::zombie_processes,
     )
 )]
 
