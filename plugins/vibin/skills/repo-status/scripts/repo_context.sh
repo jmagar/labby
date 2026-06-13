@@ -304,11 +304,11 @@ def github_context(branch_names):
             pr_base_by_branch[branch] = integration_ref(pr["baseRefName"])
     return gh, pr_base_by_branch
 
-TEST_RE = re.compile(r"(^|/)(tests?|spec|__tests__)/|(_test|\\.test|\\.spec)\\.")
-LOCK_RE = re.compile(r"(^|/)(Cargo\\.lock|package-lock\\.json|pnpm-lock\\.yaml|yarn\\.lock|uv\\.lock|poetry\\.lock|go\\.sum|Gemfile\\.lock)$")
-SENSITIVE_RE = re.compile(r"(^|/)(\\.env|.*secret.*|.*token.*|.*auth.*|config|configs|\\.github|deploy|deployment|migrations?)(/|$)", re.I)
-GENERATED_RE = re.compile(r"(^|/)(dist|build|target|generated|vendor|node_modules|\\.next)(/|$)")
-BINARY_RE = re.compile(r"\\.(png|jpg|jpeg|gif|webp|ico|pdf|zip|gz|tar|mp4|mov|wasm|jar|bin)$", re.I)
+TEST_RE = re.compile(r"(^|/)(tests?|spec|__tests__)/|(_test|\.test|\.spec)\.")
+LOCK_RE = re.compile(r"(^|/)(Cargo\.lock|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|uv\.lock|poetry\.lock|go\.sum|Gemfile\.lock)$")
+SENSITIVE_RE = re.compile(r"(^|/)(\.env|.*secret.*|.*token.*|.*auth.*|config|configs|\.github|deploy|deployment|migrations?)(/|$)", re.I)
+GENERATED_RE = re.compile(r"(^|/)(dist|build|target|generated|vendor|node_modules|\.next)(/|$)")
+BINARY_RE = re.compile(r"\.(png|jpg|jpeg|gif|webp|ico|pdf|zip|gz|tar|mp4|mov|wasm|jar|bin)$", re.I)
 
 def risk_signals(branch, base_ref, diff_names, diff_status):
     names = [line for line in diff_names["stdout"].splitlines() if line]

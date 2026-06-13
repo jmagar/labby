@@ -36,6 +36,94 @@ fn route_scope_denied_result(service: &str, action: &str, message: String) -> Ca
     CallToolResult::error(vec![Content::text(envelope.to_string())])
 }
 
+/// Outcome of resolving an MCP App host callback while Code Mode hides raw tools.
+///
+/// `Resolved` carries the single, unambiguously-resolved upstream tool that will
+/// actually be proxied, so the destructive gate inspects exactly the tool that
+/// executes. `Ambiguous` means the tool name matched more than one allowed
+/// upstream: we cannot prove which upstream the rendered app meant, nor that the
+/// resolved tool is non-destructive, so the callback is refused (fail closed)
+/// rather than proxying an arbitrary, hash-order-dependent upstream.
+enum CallbackDecision {
+    Resolved {
+        route: &'static str,
+        // Boxed: `UpstreamTool` is far larger than the `Ambiguous` variant, so
+        // box it to keep the enum small (clippy::large_enum_variant).
+        tool: Box<crate::dispatch::upstream::types::UpstreamTool>,
+    },
+    Ambiguous {
+        route: &'static str,
+        valid: Vec<String>,
+    },
+}
+
+impl CallbackDecision {
+    /// Classify one callback route's candidate list.
+    ///
+    /// `None` means the route did not match (no candidates). Exactly one
+    /// candidate resolves; more than one is reported as `Ambiguous` so the caller
+    /// fails closed instead of proxying an arbitrary upstream.
+    fn classify(
+        route: &'static str,
+        candidates: Vec<(String, crate::dispatch::upstream::types::UpstreamTool)>,
+    ) -> Option<Self> {
+        match candidates.len() {
+            0 => None,
+            1 => candidates
+                .into_iter()
+                .next()
+                .map(|(_, tool)| Self::Resolved {
+                    route,
+                    tool: Box::new(tool),
+                }),
+            _ => Some(Self::Ambiguous {
+                route,
+                valid: candidates
+                    .into_iter()
+                    .map(|(upstream, tool)| format!("{upstream}::{}", tool.tool.name))
+                    .collect(),
+            }),
+        }
+    }
+}
+
+/// Resolve an MCP App host callback while Code Mode hides ordinary raw tools.
+///
+/// Tries three routes in priority order — the legacy opt-in bypass, a direct UI
+/// tool, then a hidden sibling of a UI tool on the same upstream. Every route
+/// is route-scope-constrained (`allowed`) and fails closed when the tool name
+/// matches more than one allowed upstream, so an ambiguous name never reaches
+/// the upstream proxy (where the executor would otherwise re-resolve it to a
+/// non-deterministic upstream, skipping the destructive gate).
+async fn resolve_widget_callback(
+    pool: &crate::dispatch::upstream::pool::UpstreamPool,
+    service: &str,
+    allowed: Option<&std::collections::BTreeSet<String>>,
+) -> Option<CallbackDecision> {
+    // Legacy opt-in: ANY exposed tool on an allowed upstream is callable.
+    if crate::config::code_mode_widget_callbacks_enabled() {
+        let candidates = pool
+            .find_exposed_tool_candidates_allowed(service, allowed)
+            .await;
+        return CallbackDecision::classify("upstream_widget_callback_legacy", candidates);
+    }
+    // Direct UI tool: the requested tool itself carries an MCP App UI resource.
+    let ui_candidates: Vec<_> = pool
+        .find_exposed_tool_candidates_allowed(service, allowed)
+        .await
+        .into_iter()
+        .filter(|(_, tool)| crate::dispatch::upstream::pool::tool_has_mcp_app_ui_resource(tool))
+        .collect();
+    if let Some(decision) = CallbackDecision::classify("upstream_widget_callback", ui_candidates) {
+        return Some(decision);
+    }
+    // Sibling: a hidden tool whose upstream exposes an MCP App UI tool.
+    let siblings = pool
+        .find_mcp_app_sibling_tool_candidates(service, allowed)
+        .await;
+    CallbackDecision::classify("upstream_widget_sibling_callback", siblings)
+}
+
 fn inject_gateway_origin_param(params: Value, subject: Option<&str>) -> Value {
     let raw = subject
         .map(|value| format!("mcp:{value}"))
@@ -234,40 +322,45 @@ impl LabMcpServer {
                 && let Some(pool) = self.current_upstream_pool().await
             {
                 let allowed = self.route_scope.allowed_upstreams();
-                if crate::config::code_mode_widget_callbacks_enabled() {
-                    pool.find_tool_allowed(&service, allowed)
-                        .await
-                        .map(|(_, tool)| ("upstream_widget_callback_legacy", Some(tool)))
-                } else if let Some((_, tool)) = pool
-                    .find_tool_allowed(&service, allowed)
-                    .await
-                    .filter(|(_, tool)| {
-                        crate::dispatch::upstream::pool::tool_has_mcp_app_ui_resource(tool)
-                    })
-                {
-                    Some(("upstream_widget_callback", Some(tool)))
-                } else {
-                    let candidates = pool
-                        .find_mcp_app_sibling_tool_candidates(&service, allowed)
-                        .await;
-                    if candidates.is_empty() {
-                        None
-                    } else {
-                        let tool = (candidates.len() == 1)
-                            .then(|| candidates.into_iter().next().expect("checked len").1);
-                        Some(("upstream_widget_sibling_callback", tool))
-                    }
-                }
+                resolve_widget_callback(&pool, &service, allowed).await
             } else {
                 None
             };
             match widget_callback {
+                // Ambiguous callback: the tool name matched more than one allowed
+                // upstream. We cannot prove which upstream the rendered app meant,
+                // nor that the resolved tool is non-destructive, so refuse rather
+                // than proxy an arbitrary (hash-order-dependent) upstream. This
+                // keeps the destructive gate below from being skipped when the
+                // resolved tool would otherwise be unknown.
+                Some(CallbackDecision::Ambiguous { route, valid }) => {
+                    tracing::warn!(
+                        surface = "mcp",
+                        service = %service,
+                        action = %action,
+                        route,
+                        "code_mode MCP App widget callback refused: tool name matched multiple upstreams"
+                    );
+                    let envelope = build_error_extra(
+                        &service,
+                        &action,
+                        "ambiguous_tool",
+                        &format!(
+                            "tool `{service}` matched multiple upstreams via the MCP App widget \
+                             callback bypass — qualify the upstream or use the `execute` tool"
+                        ),
+                        &serde_json::json!({ "valid": valid }),
+                    );
+                    return Ok(CallToolResult::error(vec![Content::text(
+                        envelope.to_string(),
+                    )]));
+                }
                 // Destructive upstream effects are NOT reachable over the
                 // callback bypass: it has no confirmation channel, so unlike the
                 // `execute` path (which gates destructive upstream calls behind
                 // `confirm: true`) it could otherwise run a destructive tool
                 // unconfirmed. The sanctioned path for those is `execute`.
-                Some((_, Some(tool))) if tool.destructive => {
+                Some(CallbackDecision::Resolved { tool, .. }) if tool.destructive => {
                     let envelope = build_error(
                         &service,
                         &action,
@@ -281,7 +374,7 @@ impl LabMcpServer {
                         envelope.to_string(),
                     )]));
                 }
-                Some((route, _)) => {
+                Some(CallbackDecision::Resolved { route, .. }) => {
                     tracing::info!(
                         surface = "mcp",
                         service = %service,

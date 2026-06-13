@@ -216,3 +216,7 @@ A snippet is ready to reuse when:
 ## Current Snippets
 
 - [`axon-fanout.md`](./axon-fanout.md) defines reusable Axon research fan-out workflows for Code Mode.
+- [`cross-server-docs-brief.md`](./cross-server-docs-brief.md) combines Context7, SearXNG, Cloudflare docs, GitHub, Axon, and time into a compact documentation brief.
+- [`repo-context-triage.md`](./repo-context-triage.md) combines local file reads, Lumen semantic search, Octocode local search, and GitHub issue/file lookups for repo orientation.
+- [`homelab-readonly-pulse.md`](./homelab-readonly-pulse.md) combines Dozzle, Cortex, Unraid, Gotify, and time for a read-only homelab status pulse.
+- [`cross-server-smoke-tests.md`](./cross-server-smoke-tests.md) records the live catalog count and the tool/action smoke-test results used to choose the snippets.

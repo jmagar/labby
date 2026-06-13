@@ -132,6 +132,14 @@ async fn code_mode_manager_with_pool(
     upstream: crate::config::UpstreamConfig,
     pool: Arc<UpstreamPool>,
 ) -> Arc<crate::dispatch::gateway::manager::GatewayManager> {
+    code_mode_manager_with_pool_multi(enabled, vec![upstream], pool).await
+}
+
+async fn code_mode_manager_with_pool_multi(
+    enabled: bool,
+    upstreams: Vec<crate::config::UpstreamConfig>,
+    pool: Arc<UpstreamPool>,
+) -> Arc<crate::dispatch::gateway::manager::GatewayManager> {
     let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
     runtime.swap(Some(pool)).await;
     let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
@@ -144,7 +152,7 @@ async fn code_mode_manager_with_pool(
                 enabled,
                 ..crate::config::CodeModeConfig::default()
             },
-            upstream: vec![upstream],
+            upstream: upstreams,
             ..crate::config::LabConfig::default()
         })
         .await;
@@ -215,6 +223,12 @@ fn fixture_upstream_tool(
         upstream_name: Arc::clone(upstream),
         destructive: false,
     }
+}
+
+fn fixture_destructive_upstream_tool(upstream: &Arc<str>, name: &str) -> UpstreamTool {
+    let mut tool = fixture_upstream_tool(upstream, name, None);
+    tool.destructive = true;
+    tool
 }
 
 #[test]
@@ -415,6 +429,247 @@ async fn call_tool_allows_mcp_app_sibling_callbacks_when_raw_tools_are_hidden() 
     assert!(
         text.contains("upstream_error"),
         "test fixture has no live peer, so allowed callbacks should fail at proxy call, got {text}"
+    );
+}
+
+#[tokio::test]
+async fn call_tool_blocks_destructive_mcp_app_sibling_callback() {
+    // A destructive sibling of a UI tool must be refused with
+    // `confirmation_required` — the callback bypass has no confirmation channel.
+    let upstream_name: Arc<str> = Arc::from("apps");
+    let ui_tool = fixture_upstream_tool(
+        &upstream_name,
+        "youtube_search_ui",
+        Some("ui://apps/youtube-search.html"),
+    );
+    let destructive = fixture_destructive_upstream_tool(&upstream_name, "youtube_purge");
+    let pool = Arc::new(UpstreamPool::new());
+    pool.insert_entry_for_test(
+        "apps",
+        fixture_upstream_entry(
+            "apps",
+            HashMap::from([
+                ("youtube_search_ui".to_string(), ui_tool),
+                ("youtube_purge".to_string(), destructive),
+            ]),
+        ),
+    )
+    .await;
+    let manager = code_mode_manager_with_pool(true, fixture_upstream_config("apps"), pool).await;
+    let server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = rmcp::service::RequestContext::new(
+        rmcp::model::NumberOrString::Number(1),
+        running.peer().clone(),
+    );
+
+    let result = Box::pin(
+        running
+            .service()
+            .call_tool_impl(CallToolRequestParams::new("youtube_purge"), context),
+    )
+    .await
+    .expect("call tool result");
+    assert!(result.is_error.unwrap_or(false));
+    let text = result.content[0].as_text().expect("text").text.as_str();
+    assert!(
+        text.contains("confirmation_required"),
+        "destructive sibling callback must be gated, got {text}"
+    );
+    assert!(
+        !text.contains("upstream_error"),
+        "destructive sibling callback must not reach the upstream proxy, got {text}"
+    );
+}
+
+#[tokio::test]
+async fn call_tool_refuses_ambiguous_mcp_app_sibling_callback() {
+    // Two UI-bearing upstreams expose the same destructive probe name. The old
+    // code collapsed multi-candidate to `tool = None`, which skipped the
+    // destructive gate and proxied an arbitrary upstream. The callback must now
+    // fail closed with `ambiguous_tool` and never reach the proxy.
+    let a: Arc<str> = Arc::from("apps_a");
+    let b: Arc<str> = Arc::from("apps_b");
+    let pool = Arc::new(UpstreamPool::new());
+    pool.insert_entry_for_test(
+        "apps_a",
+        fixture_upstream_entry(
+            "apps_a",
+            HashMap::from([
+                (
+                    "youtube_search_ui".to_string(),
+                    fixture_upstream_tool(&a, "youtube_search_ui", Some("ui://apps_a/s.html")),
+                ),
+                (
+                    "youtube_purge".to_string(),
+                    fixture_destructive_upstream_tool(&a, "youtube_purge"),
+                ),
+            ]),
+        ),
+    )
+    .await;
+    pool.insert_entry_for_test(
+        "apps_b",
+        fixture_upstream_entry(
+            "apps_b",
+            HashMap::from([
+                (
+                    "calendar_ui".to_string(),
+                    fixture_upstream_tool(&b, "calendar_ui", Some("ui://apps_b/c.html")),
+                ),
+                (
+                    "youtube_purge".to_string(),
+                    fixture_destructive_upstream_tool(&b, "youtube_purge"),
+                ),
+            ]),
+        ),
+    )
+    .await;
+    let manager = code_mode_manager_with_pool_multi(
+        true,
+        vec![
+            fixture_upstream_config("apps_a"),
+            fixture_upstream_config("apps_b"),
+        ],
+        pool,
+    )
+    .await;
+    let server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = rmcp::service::RequestContext::new(
+        rmcp::model::NumberOrString::Number(1),
+        running.peer().clone(),
+    );
+
+    let result = Box::pin(
+        running
+            .service()
+            .call_tool_impl(CallToolRequestParams::new("youtube_purge"), context),
+    )
+    .await
+    .expect("call tool result");
+    assert!(result.is_error.unwrap_or(false));
+    let text = result.content[0].as_text().expect("text").text.as_str();
+    assert!(
+        text.contains("ambiguous_tool"),
+        "multi-upstream sibling callback must fail closed, got {text}"
+    );
+    assert!(
+        !text.contains("upstream_error"),
+        "ambiguous destructive callback must not reach the upstream proxy, got {text}"
+    );
+}
+
+#[tokio::test]
+async fn call_tool_rejects_hidden_tool_without_ui_sibling_in_code_mode() {
+    // A hidden raw tool whose upstream exposes no MCP App UI tool stays
+    // unreachable — Code Mode's confinement guarantee.
+    let upstream_name: Arc<str> = Arc::from("plain");
+    let plain = fixture_upstream_tool(&upstream_name, "plain_probe", None);
+    let pool = Arc::new(UpstreamPool::new());
+    pool.insert_entry_for_test(
+        "plain",
+        fixture_upstream_entry("plain", HashMap::from([("plain_probe".to_string(), plain)])),
+    )
+    .await;
+    let manager = code_mode_manager_with_pool(true, fixture_upstream_config("plain"), pool).await;
+    let server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = rmcp::service::RequestContext::new(
+        rmcp::model::NumberOrString::Number(1),
+        running.peer().clone(),
+    );
+
+    let result = Box::pin(
+        running
+            .service()
+            .call_tool_impl(CallToolRequestParams::new("plain_probe"), context),
+    )
+    .await
+    .expect("call tool result");
+    assert!(result.is_error.unwrap_or(false));
+    let text = result.content[0].as_text().expect("text").text.as_str();
+    assert!(
+        text.contains("hidden while code_mode mode is enabled"),
+        "hidden non-UI tool must be refused, got {text}"
+    );
+}
+
+#[tokio::test]
+async fn call_tool_allows_direct_mcp_app_ui_tool_in_code_mode() {
+    // The requested tool itself carrying a UI resource is callable over the
+    // bypass (the direct-UI route preserved by the refactor).
+    let upstream_name: Arc<str> = Arc::from("apps");
+    let ui_tool = fixture_upstream_tool(
+        &upstream_name,
+        "youtube_search_ui",
+        Some("ui://apps/youtube-search.html"),
+    );
+    let pool = Arc::new(UpstreamPool::new());
+    pool.insert_entry_for_test(
+        "apps",
+        fixture_upstream_entry(
+            "apps",
+            HashMap::from([("youtube_search_ui".to_string(), ui_tool)]),
+        ),
+    )
+    .await;
+    let manager = code_mode_manager_with_pool(true, fixture_upstream_config("apps"), pool).await;
+    let server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = rmcp::service::RequestContext::new(
+        rmcp::model::NumberOrString::Number(1),
+        running.peer().clone(),
+    );
+
+    let result = Box::pin(
+        running
+            .service()
+            .call_tool_impl(CallToolRequestParams::new("youtube_search_ui"), context),
+    )
+    .await
+    .expect("call tool result");
+    assert!(result.is_error.unwrap_or(false));
+    let text = result.content[0].as_text().expect("text").text.as_str();
+    assert!(
+        !text.contains("hidden while code_mode mode is enabled"),
+        "direct MCP App UI tool must be callable, got {text}"
+    );
+    assert!(
+        text.contains("upstream_error"),
+        "direct UI callback should reach the proxy (no live peer), got {text}"
     );
 }
 

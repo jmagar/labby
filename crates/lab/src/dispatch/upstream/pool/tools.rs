@@ -147,6 +147,35 @@ impl UpstreamPool {
         matches
     }
 
+    /// Like [`find_tool_candidates`](Self::find_tool_candidates) but constrained
+    /// to the route's allowed upstreams.
+    ///
+    /// Returns every exposed, routable, route-scope-allowed upstream that exposes
+    /// `tool_name`, sorted by upstream name. The Code Mode MCP App callback gate
+    /// uses this to detect ambiguity (a tool name exposed by more than one allowed
+    /// upstream) and fail closed instead of proxying an arbitrary, hash-order
+    /// dependent upstream.
+    pub async fn find_exposed_tool_candidates_allowed(
+        &self,
+        tool_name: &str,
+        allowed: Option<&BTreeSet<String>>,
+    ) -> Vec<(String, UpstreamTool)> {
+        let catalog = self.catalog.read().await;
+        let mut matches = Vec::new();
+        for (upstream_name, entry) in catalog.iter() {
+            if !upstream_allowed(allowed, upstream_name) || !entry.tool_health.is_routable() {
+                continue;
+            }
+            if let Some(tool) = entry.tools.get(tool_name)
+                && entry.exposure_policy.matches(tool.tool.name.as_ref())
+            {
+                matches.push((upstream_name.clone(), tool.clone()));
+            }
+        }
+        matches.sort_by(|a, b| a.0.cmp(&b.0));
+        matches
+    }
+
     /// Return exposed tools whose upstream also exposes at least one MCP App UI tool.
     ///
     /// Code Mode keeps ordinary raw tools out of `list_tools`, but a rendered MCP
@@ -519,6 +548,81 @@ mod tests {
                 .await
                 .is_empty(),
             "route scope must still constrain MCP App callback siblings"
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_app_sibling_lookup_returns_all_candidate_upstreams() {
+        // When a hidden tool name is exposed by more than one UI-bearing upstream,
+        // the lookup must surface every candidate so the call gate can detect the
+        // ambiguity and fail closed (rather than silently picking one).
+        let pool = UpstreamPool::new();
+        for upstream in ["apps_a", "apps_b"] {
+            let name: Arc<str> = Arc::from(upstream);
+            let mut tools = test_upstream_tools(&name, &["search_ui", "youtube_probe"]);
+            tools.get_mut("search_ui").expect("ui tool").tool.meta =
+                Some(Meta(serde_json::Map::from_iter([(
+                    "ui".to_string(),
+                    serde_json::json!({ "resourceUri": format!("ui://{upstream}/s.html") }),
+                )])));
+            let entry = healthy_in_process_entry(Arc::clone(&name), tools);
+            pool.catalog
+                .write()
+                .await
+                .insert(upstream.to_string(), entry);
+        }
+
+        let candidates = pool
+            .find_mcp_app_sibling_tool_candidates("youtube_probe", None)
+            .await;
+        let upstreams = candidates
+            .iter()
+            .map(|(upstream, _)| upstream.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            upstreams,
+            vec!["apps_a", "apps_b"],
+            "both UI-bearing upstreams must be returned so the gate can detect ambiguity"
+        );
+    }
+
+    #[tokio::test]
+    async fn find_exposed_tool_candidates_allowed_filters_by_scope_and_exposure() {
+        let pool = UpstreamPool::new();
+
+        // Upstream "a" exposes `probe`.
+        let a: Arc<str> = Arc::from("a");
+        let a_tools = test_upstream_tools(&a, &["probe"]);
+        pool.catalog.write().await.insert(
+            "a".to_string(),
+            healthy_in_process_entry(Arc::clone(&a), a_tools),
+        );
+
+        // Upstream "b" has `probe` but hides it via exposure policy.
+        let b: Arc<str> = Arc::from("b");
+        let b_tools = test_upstream_tools(&b, &["probe", "other"]);
+        let mut b_entry = healthy_in_process_entry(Arc::clone(&b), b_tools);
+        b_entry.exposure_policy =
+            ToolExposurePolicy::from_patterns(vec!["other".into()]).expect("policy");
+        pool.catalog.write().await.insert("b".to_string(), b_entry);
+
+        // No route scope: only "a" exposes `probe` ("b" hides it).
+        let all = pool
+            .find_exposed_tool_candidates_allowed("probe", None)
+            .await;
+        assert_eq!(
+            all.iter().map(|(u, _)| u.as_str()).collect::<Vec<_>>(),
+            vec!["a"],
+            "exposure policy must hide `probe` on upstream b"
+        );
+
+        // Route scope excluding "a" yields nothing.
+        let scoped = BTreeSet::from(["b".to_string()]);
+        assert!(
+            pool.find_exposed_tool_candidates_allowed("probe", Some(&scoped))
+                .await
+                .is_empty(),
+            "route scope must exclude `probe` on a non-allowed upstream"
         );
     }
 
