@@ -37,6 +37,9 @@ The live Code Mode proxy exposed 307 callable tools across 35 upstream namespace
 - `unrust::unraid` with `action: "info"`
 - `unrust::unraid` with `action: "notifications"`
 - `rustify::gotify` with `action: "health"`
+- `synapse2::scout` with `action: "nodes"`
+- `synapse2::flux` with `action: "host", subaction: "status"`
+- `synapse2::scout` with `action: "exec"` and allowlisted read-only `hostname`
 
 ## Passed But Not Used
 
@@ -63,6 +66,7 @@ The live Code Mode proxy exposed 307 callable tools across 35 upstream namespace
 - `arcane-mcp::arcane` with `action: "environment", subaction: "list"` failed because the API key lacked permission.
 - `octocode::localSearchCode` failed until `queries[].pattern` was supplied.
 - `shadcn::search_items_in_registries` executed but reported no configured registries, so it was not useful as a reusable cross-server snippet input.
+- `synapse2::scout` with `action: "exec"` initially failed until the Labby `synapse2` upstream env set `SYNAPSE_MCP_ALLOW_DESTRUCTIVE=true`; after that, allowlisted read-only exec checks passed through Code Mode.
 
 ## Verification Commands
 

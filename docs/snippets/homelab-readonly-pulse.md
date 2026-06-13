@@ -1,6 +1,6 @@
 # Homelab Read-Only Pulse
 
-Use this snippet for a small read-only health pulse across the homelab. It intentionally avoids write, notification-send, destructive, and permission-fragile actions.
+Use this snippet for a small health pulse across the homelab. It avoids notification-send and state-changing actions. The Synapse2 `scout exec` checks use allowlisted read-only commands and require the local Labby upstream env override `SYNAPSE_MCP_ALLOW_DESTRUCTIVE=true`.
 
 Live smoke-tested tools before authoring:
 
@@ -12,6 +12,9 @@ Live smoke-tested tools before authoring:
 - `unrust::unraid` with `action: "info"`
 - `unrust::unraid` with `action: "notifications"`
 - `rustify::gotify` with `action: "health"`
+- `synapse2::scout` with `action: "nodes"`
+- `synapse2::flux` with `action: "host", subaction: "status"`
+- `synapse2::scout` with `action: "exec"` and allowlisted read-only `hostname`
 
 Actions tested and deliberately excluded because they failed from Code Mode in this session:
 
@@ -32,7 +35,8 @@ async () => {
     logQuery: "error",
     logLimit: 5,
     notificationLimit: 5,
-    containerSample: 12
+    containerSample: 12,
+    identityHosts: ["dookie", "squirts"]
   };
 
   const timed = async (label, id, params, transform = (x) => x) => {
@@ -145,13 +149,77 @@ async () => {
         }
       })
     ),
-    timed("gotify_health", "rustify::gotify", { action: "health" })
+    timed("gotify_health", "rustify::gotify", { action: "health" }),
+    timed(
+      "synapse_nodes",
+      "synapse2::scout",
+      { action: "nodes" },
+      (result) => ({
+        total: result.hosts?.length || 0,
+        hosts: (result.hosts || []).map((host) => ({
+          name: host.name,
+          host: host.host,
+          protocol: host.protocol,
+          sshUser: host.sshUser,
+          sshPort: host.sshPort,
+          dockerSocketPath: host.dockerSocketPath
+        }))
+      })
+    ),
+    timed(
+      "synapse_host_status",
+      "synapse2::flux",
+      { action: "host", subaction: "status" },
+      (result) => ({
+        count: result.count,
+        partial: result.partial,
+        errors: result.errors || {},
+        status: (result.status || []).map((host) => ({
+          name: host.name,
+          connected: host.connected,
+          dockerVersion: host.dockerVersion,
+          containerCount: host.containerCount,
+          runningCount: host.runningCount,
+          failedServiceCount: host.failedServiceCount
+        }))
+      })
+    ),
+    ...(input.identityHosts || []).map((host) =>
+      timed(
+        `synapse_identity_${host}`,
+        "synapse2::scout",
+        { action: "exec", host, command: "hostname" },
+        (result) => ({
+          host: result.host,
+          command: result.command,
+          exit_code: result.exit_code,
+          stdout: String(result.stdout || "").trim(),
+          stderr: String(result.stderr || "").trim()
+        })
+      )
+    )
   ]);
+
+  const byLabel = Object.fromEntries(calls.map((call) => [call.label, call]));
+  const synapseStatus = byLabel.synapse_host_status?.result;
+  const dockerContainers = byLabel.docker_containers?.result;
+  const unraidNotifications = byLabel.unraid_notifications?.result;
 
   return {
     snippet: "homelab_readonly_pulse",
     input,
     ok: calls.every((call) => call.ok),
+    summary: {
+      docker_hosts: byLabel.docker_hosts?.result?.length,
+      docker_containers: dockerContainers?.total,
+      docker_container_states: dockerContainers?.byState,
+      synapse_hosts: byLabel.synapse_nodes?.result?.total,
+      synapse_partial: synapseStatus?.partial || false,
+      synapse_errors: synapseStatus?.errors || {},
+      unraid_unread_notifications: unraidNotifications?.overview?.unread?.total,
+      unraid_warning_notifications: unraidNotifications?.overview?.unread?.warning,
+      gotify_health: byLabel.gotify_health?.result?.health
+    },
     calls
   };
 }
