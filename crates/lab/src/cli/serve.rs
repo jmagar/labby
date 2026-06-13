@@ -1251,6 +1251,8 @@ async fn run_stdio(
             crate::mcp::logging::logging_level_rank(rmcp::model::LoggingLevel::Info),
         )),
         route_scope: crate::mcp::route_scope::McpRouteScope::Root,
+        #[cfg(test)]
+        code_mode_widget_callbacks_enabled_for_test: false,
     };
     let running = server.serve(rmcp::transport::stdio()).await?;
     tracing::info!(
@@ -1394,6 +1396,8 @@ fn build_mcp_service_with_scope(
                     crate::mcp::logging::logging_level_rank(rmcp::model::LoggingLevel::Info),
                 )),
                 route_scope,
+                #[cfg(test)]
+                code_mode_widget_callbacks_enabled_for_test: false,
             })
         },
         session_manager,

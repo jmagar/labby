@@ -240,7 +240,7 @@ impl LabMcpServer {
                 && let Some(pool) = self.current_upstream_pool().await
             {
                 let allowed = self.route_scope.allowed_upstreams();
-                if crate::config::code_mode_widget_callbacks_enabled() {
+                if self.code_mode_widget_callbacks_enabled() {
                     pool.find_tool_allowed(&service, allowed)
                         .await
                         .map(|(upstream_name, tool)| WidgetCallbackGate::Allowed {
@@ -268,17 +268,17 @@ impl LabMcpServer {
                         .await;
                     if candidates.is_empty() {
                         None
-                    } else if candidates
-                        .iter()
-                        .any(|(_, candidate)| candidate.destructive)
-                    {
-                        Some(WidgetCallbackGate::Destructive)
                     } else if candidates.len() > 1 {
                         let valid = candidates
                             .iter()
                             .map(|(upstream, tool)| format!("{upstream}::{}", tool.tool.name))
                             .collect();
                         Some(WidgetCallbackGate::Ambiguous { valid })
+                    } else if candidates
+                        .iter()
+                        .any(|(_, candidate)| candidate.destructive)
+                    {
+                        Some(WidgetCallbackGate::Destructive)
                     } else {
                         let (upstream_name, tool) =
                             candidates.into_iter().next().expect("checked len");
@@ -326,6 +326,20 @@ impl LabMcpServer {
                     tool,
                     hidden_sibling,
                 }) => {
+                    if tool.destructive {
+                        let envelope = build_error(
+                            &service,
+                            &action,
+                            "confirmation_required",
+                            &format!(
+                                "destructive upstream tool `{service}` is not callable via the \
+                                 widget callback bypass — use the `execute` tool with confirm:true"
+                            ),
+                        );
+                        return Ok(CallToolResult::error(vec![Content::text(
+                            envelope.to_string(),
+                        )]));
+                    }
                     if hidden_sibling
                         && !tool_execute_scope_allowed(auth_context_from_extensions(
                             &context.extensions,
@@ -509,5 +523,16 @@ impl LabMcpServer {
             &context,
         )
         .await
+    }
+}
+
+impl LabMcpServer {
+    fn code_mode_widget_callbacks_enabled(&self) -> bool {
+        #[cfg(test)]
+        if self.code_mode_widget_callbacks_enabled_for_test {
+            return true;
+        }
+
+        crate::config::code_mode_widget_callbacks_enabled()
     }
 }

@@ -317,6 +317,7 @@ mod tests {
             peers: Arc::new(RwLock::new(Vec::new())),
             logging_level: Arc::new(AtomicU8::new(logging_level_rank(LoggingLevel::Info))),
             route_scope: crate::mcp::route_scope::McpRouteScope::Root,
+            code_mode_widget_callbacks_enabled_for_test: false,
         };
 
         let snapshot = server.snapshot_catalog().await;

@@ -104,6 +104,7 @@ fn test_server(
         peers: Arc::new(tokio::sync::RwLock::new(Vec::new())),
         logging_level: Arc::new(AtomicU8::new(logging_level_rank(logging_level))),
         route_scope,
+        code_mode_widget_callbacks_enabled_for_test: false,
     }
 }
 
@@ -177,6 +178,20 @@ fn fixture_upstream_config(name: &str) -> crate::config::UpstreamConfig {
         imported_from: None,
         priority: 1.0,
     }
+}
+
+fn fixture_oauth_upstream_config(name: &str) -> crate::config::UpstreamConfig {
+    let mut config = fixture_upstream_config(name);
+    config.oauth = Some(crate::config::UpstreamOauthConfig {
+        mode: crate::config::UpstreamOauthMode::AuthorizationCodePkce,
+        registration: crate::config::UpstreamOauthRegistration::Preregistered {
+            client_id: "client-id".to_string(),
+            client_secret_env: None,
+        },
+        scopes: None,
+        prefer_client_metadata_document: None,
+    });
+    config
 }
 
 fn fixture_upstream_entry(upstream: &str, tools: HashMap<String, UpstreamTool>) -> UpstreamEntry {
@@ -568,6 +583,179 @@ async fn call_tool_requires_execute_scope_for_hidden_mcp_app_sibling_callbacks()
 }
 
 #[tokio::test]
+async fn call_tool_allows_execute_scope_for_hidden_mcp_app_sibling_callbacks() {
+    let upstream_name: Arc<str> = Arc::from("apps");
+    let ui_tool = fixture_upstream_tool(
+        &upstream_name,
+        "youtube_search_ui",
+        Some("ui://apps/youtube-search.html"),
+    );
+    let plain_tool = fixture_upstream_tool(&upstream_name, "youtube_probe", None);
+    let pool = Arc::new(UpstreamPool::new());
+    pool.insert_entry_for_test(
+        "apps",
+        fixture_upstream_entry(
+            "apps",
+            HashMap::from([
+                ("youtube_search_ui".to_string(), ui_tool),
+                ("youtube_probe".to_string(), plain_tool),
+            ]),
+        ),
+    )
+    .await;
+    let manager = code_mode_manager_with_pool(true, fixture_upstream_config("apps"), pool).await;
+    let server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+
+    let result = Box::pin(running.service().call_tool_impl(
+        CallToolRequestParams::new("youtube_probe"),
+        scoped_context(running.peer().clone(), &["lab"]),
+    ))
+    .await
+    .expect("call tool result");
+
+    assert!(result.is_error.unwrap_or(false));
+    let text = result.content[0].as_text().expect("text").text.as_str();
+    assert!(
+        !text.contains("\"kind\":\"forbidden\""),
+        "lab scope should pass the callback execute-scope gate, got {text}"
+    );
+    assert!(
+        text.contains("upstream `apps` is not connected"),
+        "allowed callback should reach selected upstream proxy routing, got {text}"
+    );
+}
+
+#[tokio::test]
+async fn call_tool_honors_route_scope_for_mcp_app_sibling_callbacks() {
+    let blocked_name: Arc<str> = Arc::from("blocked_apps");
+    let ui_tool = fixture_upstream_tool(
+        &blocked_name,
+        "youtube_search_ui",
+        Some("ui://blocked-apps/youtube-search.html"),
+    );
+    let blocked_probe = fixture_upstream_tool(&blocked_name, "youtube_probe", None);
+    let pool = Arc::new(UpstreamPool::new());
+    pool.insert_entry_for_test(
+        "blocked_apps",
+        fixture_upstream_entry(
+            "blocked_apps",
+            HashMap::from([
+                ("youtube_search_ui".to_string(), ui_tool),
+                ("youtube_probe".to_string(), blocked_probe),
+            ]),
+        ),
+    )
+    .await;
+    let manager = code_mode_manager_with_pool_and_upstreams(
+        true,
+        vec![
+            fixture_upstream_config("allowed_apps"),
+            fixture_upstream_config("blocked_apps"),
+        ],
+        pool,
+    )
+    .await;
+    let server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::protected_subset(
+            "allowed-only",
+            ["allowed_apps"],
+            ["gateway"],
+            true,
+        ),
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = rmcp::service::RequestContext::new(
+        rmcp::model::NumberOrString::Number(1),
+        running.peer().clone(),
+    );
+
+    let result = Box::pin(
+        running
+            .service()
+            .call_tool_impl(CallToolRequestParams::new("youtube_probe"), context),
+    )
+    .await
+    .expect("call tool result");
+
+    assert!(result.is_error.unwrap_or(false));
+    let text = result.content[0].as_text().expect("text").text.as_str();
+    let envelope: Value = serde_json::from_str(text).expect("error envelope");
+    assert_eq!(envelope["error"]["kind"], "not_found");
+    assert!(
+        !text.contains("blocked_apps"),
+        "route-scope denial should not reach the blocked upstream, got {text}"
+    );
+}
+
+#[tokio::test]
+async fn call_tool_uses_subject_scoped_route_for_oauth_mcp_app_sibling_callbacks() {
+    let upstream_name: Arc<str> = Arc::from("oauth_apps");
+    let ui_tool = fixture_upstream_tool(
+        &upstream_name,
+        "youtube_search_ui",
+        Some("ui://oauth-apps/youtube-search.html"),
+    );
+    let plain_tool = fixture_upstream_tool(&upstream_name, "youtube_probe", None);
+    let pool = Arc::new(UpstreamPool::new());
+    pool.insert_entry_for_test(
+        "oauth_apps",
+        fixture_upstream_entry(
+            "oauth_apps",
+            HashMap::from([
+                ("youtube_search_ui".to_string(), ui_tool),
+                ("youtube_probe".to_string(), plain_tool),
+            ]),
+        ),
+    )
+    .await;
+    let manager =
+        code_mode_manager_with_pool(true, fixture_oauth_upstream_config("oauth_apps"), pool).await;
+    let server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+
+    let result = Box::pin(running.service().call_tool_impl(
+        CallToolRequestParams::new("youtube_probe"),
+        scoped_context(running.peer().clone(), &["lab"]),
+    ))
+    .await
+    .expect("call tool result");
+
+    assert!(result.is_error.unwrap_or(false));
+    let text = result.content[0].as_text().expect("text").text.as_str();
+    assert!(
+        text.contains("upstream `oauth_apps` call failed"),
+        "OAuth callback should use subject-scoped call routing, got {text}"
+    );
+    assert!(
+        !text.contains("upstream `oauth_apps` is not connected"),
+        "OAuth callback must not use shared raw-pool routing, got {text}"
+    );
+}
+
+#[tokio::test]
 async fn call_tool_blocks_destructive_mcp_app_sibling_callbacks() {
     let upstream_name: Arc<str> = Arc::from("apps");
     let ui_tool = fixture_upstream_tool(
@@ -626,7 +814,100 @@ async fn call_tool_blocks_destructive_mcp_app_sibling_callbacks() {
 }
 
 #[tokio::test]
-async fn call_tool_blocks_ambiguous_destructive_mcp_app_sibling_callbacks() {
+async fn call_tool_blocks_destructive_direct_mcp_app_callbacks() {
+    let upstream_name: Arc<str> = Arc::from("apps");
+    let mut ui_tool = fixture_upstream_tool(
+        &upstream_name,
+        "youtube_delete_ui",
+        Some("ui://apps/youtube-delete.html"),
+    );
+    ui_tool.destructive = true;
+    let pool = Arc::new(UpstreamPool::new());
+    pool.insert_entry_for_test(
+        "apps",
+        fixture_upstream_entry(
+            "apps",
+            HashMap::from([("youtube_delete_ui".to_string(), ui_tool)]),
+        ),
+    )
+    .await;
+    let manager = code_mode_manager_with_pool(true, fixture_upstream_config("apps"), pool).await;
+    let server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = rmcp::service::RequestContext::new(
+        rmcp::model::NumberOrString::Number(1),
+        running.peer().clone(),
+    );
+
+    let result = Box::pin(
+        running
+            .service()
+            .call_tool_impl(CallToolRequestParams::new("youtube_delete_ui"), context),
+    )
+    .await
+    .expect("call tool result");
+
+    assert!(result.is_error.unwrap_or(false));
+    let text = result.content[0].as_text().expect("text").text.as_str();
+    let envelope: Value = serde_json::from_str(text).expect("error envelope");
+    assert_eq!(envelope["error"]["kind"], "confirmation_required");
+}
+
+#[tokio::test]
+async fn call_tool_blocks_destructive_legacy_widget_callbacks() {
+    let upstream_name: Arc<str> = Arc::from("apps");
+    let mut delete_tool = fixture_upstream_tool(&upstream_name, "youtube_delete", None);
+    delete_tool.destructive = true;
+    let pool = Arc::new(UpstreamPool::new());
+    pool.insert_entry_for_test(
+        "apps",
+        fixture_upstream_entry(
+            "apps",
+            HashMap::from([("youtube_delete".to_string(), delete_tool)]),
+        ),
+    )
+    .await;
+    let manager = code_mode_manager_with_pool(true, fixture_upstream_config("apps"), pool).await;
+    let mut server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    server.code_mode_widget_callbacks_enabled_for_test = true;
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = rmcp::service::RequestContext::new(
+        rmcp::model::NumberOrString::Number(1),
+        running.peer().clone(),
+    );
+
+    let result = Box::pin(
+        running
+            .service()
+            .call_tool_impl(CallToolRequestParams::new("youtube_delete"), context),
+    )
+    .await
+    .expect("call tool result");
+
+    assert!(result.is_error.unwrap_or(false));
+    let text = result.content[0].as_text().expect("text").text.as_str();
+    let envelope: Value = serde_json::from_str(text).expect("error envelope");
+    assert_eq!(envelope["error"]["kind"], "confirmation_required");
+}
+
+#[tokio::test]
+async fn call_tool_rejects_ambiguous_mcp_app_sibling_callbacks_when_one_candidate_is_destructive() {
     let safe_name: Arc<str> = Arc::from("safe_apps");
     let safe_ui_tool = fixture_upstream_tool(
         &safe_name,
@@ -668,8 +949,15 @@ async fn call_tool_blocks_ambiguous_destructive_mcp_app_sibling_callbacks() {
     )
     .await;
 
-    let manager =
-        code_mode_manager_with_pool(true, fixture_upstream_config("safe_apps"), pool).await;
+    let manager = code_mode_manager_with_pool_and_upstreams(
+        true,
+        vec![
+            fixture_upstream_config("safe_apps"),
+            fixture_upstream_config("destructive_apps"),
+        ],
+        pool,
+    )
+    .await;
     let server = test_server(
         completion_test_registry(),
         Some(manager),
@@ -695,13 +983,98 @@ async fn call_tool_blocks_ambiguous_destructive_mcp_app_sibling_callbacks() {
 
     assert!(result.is_error.unwrap_or(false));
     let text = result.content[0].as_text().expect("text").text.as_str();
-    assert!(
-        text.contains("\"kind\":\"confirmation_required\""),
-        "{text}"
+    let envelope: Value = serde_json::from_str(text).expect("error envelope");
+    assert_eq!(envelope["error"]["kind"], "ambiguous_tool");
+    assert_eq!(
+        envelope["error"]["valid"],
+        serde_json::json!([
+            "destructive_apps::youtube_probe",
+            "safe_apps::youtube_probe"
+        ])
     );
-    assert!(
-        text.contains("not callable via the widget callback bypass"),
-        "{text}"
+}
+
+#[tokio::test]
+async fn call_tool_rejects_ambiguous_non_destructive_mcp_app_sibling_callbacks() {
+    let alpha_name: Arc<str> = Arc::from("alpha_apps");
+    let alpha_ui_tool = fixture_upstream_tool(
+        &alpha_name,
+        "youtube_search_ui",
+        Some("ui://alpha-apps/youtube-search.html"),
+    );
+    let alpha_probe = fixture_upstream_tool(&alpha_name, "youtube_probe", None);
+
+    let beta_name: Arc<str> = Arc::from("beta_apps");
+    let beta_ui_tool = fixture_upstream_tool(
+        &beta_name,
+        "youtube_search_ui",
+        Some("ui://beta-apps/youtube-search.html"),
+    );
+    let beta_probe = fixture_upstream_tool(&beta_name, "youtube_probe", None);
+
+    let pool = Arc::new(UpstreamPool::new());
+    pool.insert_entry_for_test(
+        "alpha_apps",
+        fixture_upstream_entry(
+            "alpha_apps",
+            HashMap::from([
+                ("youtube_search_ui".to_string(), alpha_ui_tool),
+                ("youtube_probe".to_string(), alpha_probe),
+            ]),
+        ),
+    )
+    .await;
+    pool.insert_entry_for_test(
+        "beta_apps",
+        fixture_upstream_entry(
+            "beta_apps",
+            HashMap::from([
+                ("youtube_search_ui".to_string(), beta_ui_tool),
+                ("youtube_probe".to_string(), beta_probe),
+            ]),
+        ),
+    )
+    .await;
+
+    let manager = code_mode_manager_with_pool_and_upstreams(
+        true,
+        vec![
+            fixture_upstream_config("alpha_apps"),
+            fixture_upstream_config("beta_apps"),
+        ],
+        pool,
+    )
+    .await;
+    let server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = rmcp::service::RequestContext::new(
+        rmcp::model::NumberOrString::Number(1),
+        running.peer().clone(),
+    );
+
+    let result = Box::pin(
+        running
+            .service()
+            .call_tool_impl(CallToolRequestParams::new("youtube_probe"), context),
+    )
+    .await
+    .expect("call tool result");
+
+    assert!(result.is_error.unwrap_or(false));
+    let text = result.content[0].as_text().expect("text").text.as_str();
+    let envelope: Value = serde_json::from_str(text).expect("error envelope");
+    assert_eq!(envelope["error"]["kind"], "ambiguous_tool");
+    assert_eq!(
+        envelope["error"]["valid"],
+        serde_json::json!(["alpha_apps::youtube_probe", "beta_apps::youtube_probe"])
     );
 }
 
@@ -816,6 +1189,7 @@ async fn server_reads_current_pool_from_gateway_manager() {
             rmcp::model::LoggingLevel::Info,
         ))),
         route_scope: crate::mcp::route_scope::McpRouteScope::Root,
+        code_mode_widget_callbacks_enabled_for_test: false,
     };
 
     assert!(server.current_upstream_pool().await.is_none());

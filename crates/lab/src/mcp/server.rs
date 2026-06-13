@@ -39,6 +39,8 @@ pub struct LabMcpServer {
     pub logging_level: Arc<AtomicU8>,
     /// Visibility and dispatch constraints for this MCP route/session.
     pub(crate) route_scope: McpRouteScope,
+    #[cfg(test)]
+    pub(crate) code_mode_widget_callbacks_enabled_for_test: bool,
 }
 
 pub fn verify_upstream_subject_resolution_support() -> anyhow::Result<()> {
@@ -358,6 +360,7 @@ mod tests {
                 logging_level_rank(rmcp::model::LoggingLevel::Info),
             )),
             route_scope: crate::mcp::route_scope::McpRouteScope::Root,
+            code_mode_widget_callbacks_enabled_for_test: false,
         };
 
         let info = server.get_info();
