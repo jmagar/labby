@@ -1,551 +1,390 @@
-# lab
+# Lab
 
-`lab` is a Rust homelab control plane workspace. It contains a reusable SDK crate
-(`lab-apis`) and one product binary (`lab`) that exposes operator capabilities
-through the CLI, an MCP server, an HTTP API, and the Labby web UI.
+`lab` is the Rust workspace behind **Labby**, a local-first control plane for
+agent tooling and homelab operations. One binary, `labby`, exposes the same
+operator capabilities through a CLI, an MCP server, an HTTP API, and the Labby
+web UI.
 
-The root README is the public entrypoint. The topic docs in [docs/](./docs/README.md)
-are the source of truth for implementation contracts and operator workflows. If this
-file and a topic doc disagree, update the owning topic doc and then refresh this file.
+The root README is the public entrypoint. The topic docs in
+[docs/](./docs/README.md) own the detailed contracts; when this file and a topic
+doc disagree, fix the topic doc first and then refresh this summary.
 
-## What You Can Do
+## Contents
 
-Lab is not only a service SDK. It is an operator console for a homelab and an AI-tooling
-control plane.
+- [What Lab Does](#what-lab-does)
+- [Quick Start](#quick-start)
+- [Core Workflows](#core-workflows)
+- [Runtime Surfaces](#runtime-surfaces)
+- [Configuration](#configuration)
+- [Current Catalogs](#current-catalogs)
+- [Architecture](#architecture)
+- [Development](#development)
+- [Documentation](#documentation)
 
-| Feature Area | What Lab Provides |
-| --- | --- |
-| Marketplace browsing | Browse configured Claude Code and Codex plugin marketplaces, installed plugins, official MCP Registry servers, and ACP Registry agents from one catalog. Filter by type, inspect curated Lab metadata, sync the local MCP Registry mirror, and open installed artifact files from the web UI or API. |
-| Stash workspaces | Open a marketplace plugin into a Lab-managed stash workspace under `~/.lab/stash`, edit files through the Labby UI, save changes, preview deploy diffs, and deploy the saved workspace back to the Claude Code or Codex target with explicit confirmation. |
-| Artifact forks and updates | Track the marketplace artifact fork/update model in the action catalog: fork metadata, upstream/base snapshots, drift checks, update previews, update apply strategies, and AI merge suggestions. The lower-level direct `artifact.fork`, `artifact.diff`, and `artifact.patch` actions are present but still return `not_implemented` until that lifecycle is completed. |
-| Device deployment and cherry-pick | Install whole plugins or cherry-pick individual skills, agents, slash commands, MCP server configs, scripts, and other plugin artifacts to any selected enrolled device and scope instead of copying files by hand. |
-| MCP Registry search and install | Search, filter, validate, and install servers from the official MCP Registry. Installs can target Lab gateway upstreams or Claude/Codex MCP client configs on fleet devices, with required env values routed to the right config surface. |
-| MCP Registry aggregator | Serve Lab's local registry mirror on `/v0.1/*` as a drop-in replacement for the official MCP Registry API, while layering Lab-owned metadata such as featured/reviewed/recommended flags, tags, audit fields, and homelab-specific curation without mutating upstream registry data. |
-| ACP Registry agents | Search the ACP Registry for compatible agents, inspect agent details, and install or uninstall agent provider entries through the same marketplace service. ACP agent installs currently write controller-local provider config; remote ACP agent installation returns per-node errors until implemented. |
-| Upstream MCP proxy | Point MCP clients at Lab instead of every individual server. Lab connects to configured HTTP or stdio upstream MCP servers, discovers their tools, optionally proxies resources, normalizes errors, applies circuit-breaker health, and republishes the merged catalog behind Lab's authenticated `/mcp` endpoint. |
-| Gateway management | Add, test, reload, and remove upstream MCP servers without hand-editing config. Lab supports exposure filters, legacy `code_mode`/`tool_execute` helper mode, Code Mode `search`/`execute`, OAuth-backed upstream credentials, Gateway-managed protected MCP routes, and Labby/CLI/API controls for the proxy pool. |
-| Virtual Lab servers | Expose configured Lab-backed services as virtual gateway servers, toggle CLI/API/MCP/Web UI surfaces, inspect service action metadata, and set MCP action allowlists per virtual server. |
-| Authentication and OAuth | Protect hosted HTTP, MCP, Labby, registry, and gateway-management routes with static bearer auth or Lab's Google-backed OAuth mode. Lab also supports browser sessions, CSRF-protected web UI calls, OAuth metadata/JWKS endpoints, upstream MCP OAuth credential storage, and local or node-started OAuth callback relays. |
-| Fleet nodes | Run `labby serve` on multiple machines, enroll non-controller nodes, approve or deny devices, inspect node inventory and MCP client config metadata, run the local OAuth relay on a node, and route status/log events back to the controller over the fleet WebSocket. |
-| Logs and activity | Search persisted local runtime logs, tail bounded history, stream live logs to the Labby `/logs` page over SSE, and forward peer syslog batches into the controller when enabled. |
-| Labby web UI | Serve the admin UI from the same `labby serve` process as the API and MCP endpoint. The UI covers marketplace, gateway management, registry browsing, logs, setup, activity, settings, docs, and design-system/dev previews. |
-| Labby chat | Use the `/chat` web UI as a live ACP client: create/list/resume sessions, send prompts to configured providers, stream session events over SSE, inspect transcript and reasoning/activity lanes, and render tool calls, terminal output, file trees, diffs, code blocks, links, and web previews. |
-| Generated API docs and catalogs | Use `labby help --json`, MCP `lab://catalog`, per-service action resources, `/v1/{service}/actions`, `/v1/openapi.json`, and `/v1/docs` to discover the exact enabled action surface programmatically. |
-| Composable feature set | Pick what Lab exposes at each layer: build only selected product slices with Cargo features, start only selected runtime services with `labby serve --services`, expose only chosen virtual-server surfaces/actions, and deploy only the plugin components you choose to selected devices. |
-| Workspace filesystem browser | Browse and preview files under the configured workspace root through the guarded `fs` service for Labby attachment and editor workflows. |
-| Setup and health audits | Use `labby setup`, `labby doctor`, and `labby health` to bootstrap config and validate runtime health. |
-| Service operations | Use one action catalog across CLI, MCP, and HTTP for the currently compiled Lab services. First-party upstream service modules from older Lab versions have been removed; external service access now comes through configured upstream MCP gateways or installable MCP/plugin packages. |
-| Deployment and monitors | Build and push the Lab release binary to SSH targets, manage rollout policy, and use monitor definitions from `plugins/monitors/monitors.json` through `labby deploy monitor`. |
+## What Lab Does
 
-These features are exposed consistently:
+Labby is centered on the current gateway/operator surface:
 
-- **CLI:** operator commands such as `labby marketplace`, `labby gateway`, `labby nodes`, `labby logs`, `labby doctor`, `labby stash`, and `labby deploy` when the relevant feature is compiled.
-- **MCP:** compact one-tool-per-service access for agents, with generated action discovery and destructive-action confirmation.
-- **HTTP/API:** `/v1/<service>` action dispatch, OpenAPI docs, OAuth/browser sessions, and same-origin Labby integration.
-- **Web UI:** Labby pages for marketplace, gateways, logs, registry, setup, activity, and live ACP chat workflows.
+- **MCP gateway** - connect HTTP and stdio upstream MCP servers, inspect their
+  tools/resources/prompts, apply exposure filters, publish protected MCP routes,
+  and optionally collapse the upstream catalog into Code Mode `search` and
+  `execute`.
+- **Marketplace and registry** - browse Claude/Codex plugin marketplaces, the
+  official MCP Registry, and the ACP Agent Registry; install plugins, MCP
+  servers, and ACP providers through explicit target-aware workflows.
+- **Stash workspaces** - mirror installable artifacts into `~/.lab/stash`, edit
+  and version component snapshots, preview deployment diffs, and deploy saved
+  artifacts back to configured targets.
+- **ACP chat** - run provider-backed Agent Client Protocol sessions, stream and
+  persist events, expose the `/chat` web UI, and keep the backend service named
+  `acp`.
+- **Fleet, setup, logs, and deployment** - run `labby serve` as a controller or
+  node, enroll devices, search local/fleet logs, audit setup health, and deploy
+  the local release binary to SSH targets.
+- **Generated discovery** - publish code-owned service, action, environment,
+  API route, OpenAPI, MCP help, CLI help, and feature-matrix artifacts under
+  [docs/generated](./docs/generated/README.md).
 
-## Common Workflows
+Lab no longer exposes the old Radarr/Sonarr/Plex-style service catalog in this
+branch. Use the generated catalogs below for the current surface instead of
+copying command or action lists by hand.
 
-Browse and install from the official MCP Registry:
+## Quick Start
 
-```bash
-labby marketplace mcp.list --params '{"search":"github","limit":10}'
-labby marketplace mcp.install \
-  --params '{"name":"io.github.example/server","client_targets":[{"node_id":"local","client":"codex"}],"env_values":{"API_TOKEN":"..."},"confirm":true}' \
-  -y
-```
+### Install A Release
 
-Install or cherry-pick marketplace plugin components to devices:
+Linux/macOS:
 
 ```bash
-labby marketplace plugins.list --params '{"runtime":"claude"}'
-labby marketplace plugin.cherry_pick \
-  --params '{"plugin_id":"ops-pack@homelab","components":["skills/triage/SKILL.md","agents/reviewer.md","commands/deploy.md"],"node_ids":["local","dookie"],"scope":"global","confirm":true}' \
-  -y
-```
-
-Edit a plugin through the stash workspace and deploy the saved result:
-
-```bash
-labby marketplace plugin.workspace --params '{"id":"ops-pack@homelab"}'
-labby marketplace plugin.save --params '{"id":"ops-pack@homelab","path":"skills/triage/SKILL.md","content":"..."}'
-labby marketplace plugin.deploy.preview --params '{"id":"ops-pack@homelab"}'
-labby marketplace plugin.deploy --params '{"id":"ops-pack@homelab","confirm":true}' -y
-```
-
-Proxy another MCP server through Lab:
-
-```bash
-labby gateway add --name remote-lab --url https://lab2.example.com/mcp --bearer-token-env REMOTE_LAB_TOKEN
-labby gateway reload
+curl -fsSL https://raw.githubusercontent.com/jmagar/lab/main/scripts/install.sh | sh
+labby setup
 labby serve --host 127.0.0.1 --port 8765
 ```
 
-Start Labby and use the web UI:
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/jmagar/lab/main/scripts/install.ps1 | iex
+labby setup
+labby serve --host 127.0.0.1 --port 8765
+```
+
+The install scripts download the requested GitHub Release asset, verify its
+checksum, and install `labby` onto the user PATH. Override with
+`LAB_INSTALL_DIR`, `LAB_INSTALL_VERSION`, or `LAB_INSTALL_REPO`.
+
+### Build From Source
+
+Prerequisites:
+
+- Rust 1.92 or newer. CI/release currently verifies with Rust 1.94.1.
+- `just` for repo commands.
+- `cargo-nextest` for the main test suite.
+- `pnpm 9.15.9` for the Labby web UI. The repo pins this in
+  [.mise.toml](./.mise.toml) and
+  [apps/gateway-admin/package.json](./apps/gateway-admin/package.json).
+- `openssl` if you want to generate a bearer token manually.
 
 ```bash
+git clone https://github.com/jmagar/lab.git
+cd lab
+just install
 just web-build
 labby serve --host 127.0.0.1 --port 8765
 ```
 
-Then open `/marketplace`, `/registry`, `/gateway`, `/logs`, `/setup`, `/activity`,
-`/chat`, `/settings`, `/docs`, or `/design-system` on the hosted Lab origin.
+`just install` builds the all-features release binary and symlinks it to
+`~/.local/bin/labby`.
 
-Bootstrap and operate a fleet:
+### First Run
+
+For loopback development, `labby serve` can bootstrap a missing bearer token for
+you. If `LAB_MCP_HTTP_TOKEN` is absent and `LAB_AUTH_MODE` is not `oauth`, it
+generates a token, writes a minimal `~/.lab/.env`, reloads it into the running
+process, prints the setup URL, and continues. The token itself is stored in
+`~/.lab/.env` rather than printed.
+
+For explicit setup:
 
 ```bash
-labby doctor
-labby nodes enrollments list
+mkdir -p ~/.lab
+printf 'LAB_AUTH_MODE=bearer\nLAB_MCP_HTTP_TOKEN=%s\n' "$(openssl rand -hex 32)" > ~/.lab/.env
+chmod 600 ~/.lab/.env
+labby setup
+labby serve --host 127.0.0.1 --port 8765
+```
+
+Open `http://127.0.0.1:8765/setup` or `http://127.0.0.1:8765/`.
+Build static Labby assets with `just web-build` first when running from a source
+checkout.
+
+## Core Workflows
+
+### Start Labby
+
+```bash
+labby serve --host 127.0.0.1 --port 8765
+labby mcp
+```
+
+`labby serve` starts the hosted HTTP runtime: `/v1` product APIs, `/mcp`
+streamable HTTP MCP, auth routes, node runtime endpoints, and static Labby web
+assets when an export is available. `labby mcp` is the stdio MCP entrypoint for
+local MCP clients.
+
+### Manage Upstream MCP Gateways
+
+```bash
+labby gateway add \
+  --name github \
+  --url https://example.com/mcp \
+  --bearer-token-env GITHUB_MCP_TOKEN \
+  -y
+
+labby gateway reload
+labby gateway list
+```
+
+Stdio upstreams execute local commands when tested or reconciled, so gateway
+tests and config mutations use the shared destructive-action confirmation gate.
+The stdio spawn guard allows known runtimes such as `npx`, `uvx`, `docker`,
+`node`, `python`, `python3`, `deno`, `pipx`, and `dnx`; customize it in
+`[gateway]` inside `config.toml`.
+
+### Use Code Mode
+
+When `[code_mode].enabled = true`, Lab hides raw proxied upstream tools from MCP
+`list_tools()` and exposes the canonical synthetic tools `search` and `execute`.
+
+```bash
+labby gateway code status
+labby gateway code enable
+labby gateway code exec --code 'async () => tools.length'
+```
+
+MCP call shapes:
+
+```json
+{ "code": "async () => tools.filter(t => t.upstream === \"github\").map(t => ({ id: t.id, signature: t.signature }))" }
+```
+
+```json
+{ "code": "async () => callTool(\"github::search_issues\", {\"query\":\"repo:jmagar/lab gateway\"})" }
+```
+
+Code Mode can call exposed upstream MCP tools only. It cannot call Lab actions
+from inside the sandbox.
+
+### Browse And Install Agent Tooling
+
+```bash
+labby marketplace sources.list --json
+labby marketplace plugins.list --params '{"runtime":"claude"}'
+labby marketplace mcp.list --params '{"search":"postgres","limit":10}'
+labby marketplace agent.list
+```
+
+Destructive install/update/deploy operations require explicit confirmation:
+
+```bash
+labby marketplace mcp.install \
+  --params '{"name":"io.github.user/server","gateway_ids":["default"],"confirm":true}' \
+  -y
+```
+
+Marketplace actions cover Claude/Codex plugins, MCP Registry servers, ACP agents,
+artifact fork/update flows, and device-aware installation targets.
+
+### Work With Stash
+
+```bash
+labby stash help
+```
+
+The `stash` service manages versioned components, provider metadata, target
+config, import/export, diffs, and deploy previews for Lab-managed artifact
+workspaces.
+
+### Operate The Fleet And Logs
+
+```bash
+labby doctor system
+labby nodes list
 labby logs search dookie oauth
 labby deploy plan dookie
 ```
 
-## Current Limits
+Every supported node runs `labby serve`. One node acts as controller; other nodes
+report status, inventory, and logs back through `/v1/nodes/*`.
 
-- Direct `artifact.fork`, `artifact.diff`, and `artifact.patch` actions are cataloged but currently return `not_implemented`; the update/check/preview/apply model and metadata direction are present, but the lower-level fork/patch lifecycle is not complete.
-- ACP agent installs can write controller-local provider config; remote ACP agent installation is limited by the agent distribution and node runtime support, and unsupported remote cases return per-node errors.
-- The product HTTP API manages gateway config through `/v1/gateway`, but arbitrary proxied upstream MCP tool calls are exposed through MCP, not through `/v1/*`.
-- Labby is served by `labby serve` only when exported static assets exist or `LAB_WEB_ASSETS_DIR` points at them; use `just web-build` to create the export.
-- `lab_admin` is compiled by the default `all` feature but remains runtime-gated behind `LAB_ADMIN_ENABLED=1` or `[admin].enabled = true`.
+### Drive The API
 
-## Current State
-
-Current inventories are generated from code-owned metadata:
-
-- [service catalog](./docs/generated/service-catalog.md)
-- [action catalog](./docs/generated/action-catalog.md)
-- [environment reference](./docs/generated/env-reference.md)
-- [API routes](./docs/generated/api-routes.md)
-- [feature matrix](./docs/generated/feature-matrix.md)
-
-Refresh them with `just docs-generate` and verify them with `just docs-check`.
-`lab_admin` is compiled by the default `all` feature but only registers in the
-runtime registry when `LAB_ADMIN_ENABLED=1` or `[admin].enabled = true`; the
-generated docs registry lists it as runtime-conditional.
-
-## Workspace Layout
-
-| Path | Role |
-| --- | --- |
-| [crates/lab-apis](./crates/lab-apis) | Pure Rust SDK: typed clients, request/response models, auth, shared HTTP behavior, health contracts, plugin metadata |
-| [crates/lab](./crates/lab) | Product binary: CLI, MCP, HTTP API, Labby serving, config loading, dispatch, output rendering, catalog generation |
-| [crates/lab-auth](./crates/lab-auth) | HTTP/OAuth auth support used by the hosted runtime |
-| [apps/gateway-admin](./apps/gateway-admin/README.md) | Labby admin UI, exported and served by `labby serve` when static assets exist |
-| [docs](./docs/README.md) | Topic-based source-of-truth documentation |
-| [plugins](./plugins) | Lab plugin and monitor assets used by local workflows |
-
-Core boundary: shared service logic belongs in `lab-apis`; product surfaces and adapters
-belong in `lab`.
-
-## Quick Start
-
-### Install
-
-Prebuilt binary — downloads the latest [GitHub release](https://github.com/jmagar/lab/releases)
-for this platform (sha256-verified) into `~/.local/bin/labby`, falling back to
-`cargo install --git` when no release asset exists:
+Generic action dispatch:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jmagar/lab/main/scripts/install.sh | sh
+curl -s -X POST http://127.0.0.1:8765/v1/gateway \
+  -H "Authorization: Bearer $LAB_MCP_HTTP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"gateway.list","params":{}}'
 ```
 
-On Windows (PowerShell) — installs `labby.exe` into `%LOCALAPPDATA%\labby\bin`
-and adds it to the user PATH:
+Dedicated product routes also exist for catalog discovery, ACP sessions/events,
+setup, stash, logs, gateway OAuth, auth allowlists, OpenAPI, and compatibility
+routes. See [generated API routes](./docs/generated/api-routes.md) and
+[OpenAPI](./docs/generated/openapi.json).
 
-```powershell
-irm https://raw.githubusercontent.com/jmagar/lab/main/scripts/install.ps1 | iex
-```
+## Runtime Surfaces
 
-Release archives (`lab-x86_64-unknown-linux-gnu.tar.gz`,
-`lab-x86_64-pc-windows-msvc.zip`, each with a `.sha256` file) can also be
-downloaded directly from the [releases page](https://github.com/jmagar/lab/releases).
-Override the install script with `LAB_INSTALL_DIR`, `LAB_INSTALL_VERSION`
-(e.g. `v0.23.0`), or `LAB_INSTALL_REPO`.
-
-Or build from source. The workspace uses Rust 2024 and the root toolchain
-requirement currently resolves to Rust 1.90+:
-
-```bash
-git clone git@github.com:jmagar/lab.git
-cd lab
-cargo build --workspace --all-features
-cargo install --path crates/lab --bin labby --all-features
-```
-
-Then run `labby setup` for the first-run flow. The Claude Code plugin
-(`plugins/labby`) ships skills and MCP config only — it does **not** bundle
-the binary or auto-install anything; its session hook just reports setup
-status when `labby` is on `PATH`.
-
-Secrets and endpoint URLs belong in `~/.lab/.env`. Preferences belong in
-`config.toml`, searched in this order: `./config.toml`, `~/.lab/config.toml`,
-`~/.config/lab/config.toml`.
-
-Startup reads the first `config.toml`, initializes logging, then loads
-`~/.lab/.env` and a CWD `.env` if present. Runtime value precedence is still:
-
-Value precedence is:
-
-1. CLI flags
-2. Process environment, including values loaded from `~/.lab/.env`
-3. The first `config.toml` found
-4. Built-in defaults
-
-Minimal `~/.lab/.env`:
-
-```env
-LAB_MCP_HTTP_TOKEN=replace-with-openssl-rand-hex-32
-```
-
-Minimal `~/.lab/config.toml`:
-
-```toml
-[mcp]
-transport = "http"
-host = "127.0.0.1"
-port = 8765
-
-[api]
-cors_origins = []
-
-[auth]
-mode = "bearer"
-```
-
-Use [config.example.toml](./config/config.example.toml), [.env.example](./.env.example),
-[docs/CONFIG.md](./docs/runtime/CONFIG.md), and [docs/ENV.md](./docs/runtime/ENV.md) for the full
-configuration contract.
-
-## Runtime Commands
-
-```bash
-labby help
-labby help --json
-labby serve
-labby serve --host 127.0.0.1 --port 8765
-labby serve --services gateway,marketplace
-labby mcp
-labby doctor
-labby health
-```
-
-`labby serve` starts the hosted runtime path: the Axum HTTP server for the product API,
-OAuth/auth endpoints when configured, the HTTP MCP surface at `/mcp`, and the Labby web
-UI when exported assets exist. Use `labby mcp` for stdio MCP clients.
-
-To serve Labby from the same process, build the static export first:
-
-```bash
-just web-build
-labby serve --host 127.0.0.1 --port 8765
-```
-
-Main Labby routes are `/marketplace`, `/registry`, `/gateway`, `/logs`, `/setup`,
-`/activity`, `/chat`, `/settings`, `/docs`, and `/design-system`.
-
-`labby mcp` is the stdio-only MCP path for local editor and desktop clients.
-It does not start the hosted API or web UI.
-
-## Auth And OAuth
-
-Hosted Lab surfaces are protected by the same auth layer, with deliberately separate
-rules for local development, HTTP MCP clients, browser sessions, upstream gateways, and
-fleet node enrollment.
-
-HTTP auth modes:
-
-| Mode | Required config | Notes |
+| Surface | Entry Point | Notes |
 | --- | --- | --- |
-| Bearer | `LAB_AUTH_MODE=bearer` or default, plus `LAB_MCP_HTTP_TOKEN` for protected deployments | Uses constant-time static bearer-token comparison |
-| OAuth | `LAB_AUTH_MODE=oauth`, `LAB_PUBLIC_URL`, `LAB_GOOGLE_CLIENT_ID`, `LAB_GOOGLE_CLIENT_SECRET`, `LAB_AUTH_ADMIN_EMAIL` | Enables Lab's Google-backed auth server, JWT validation, metadata, browser sessions, and callback handling. `LAB_AUTH_ADMIN_EMAIL` is the bootstrap admin Google email; startup fails closed if unset so no Google account can authenticate without explicit permission. Additional users are granted through the SQLite-backed allowlist managed from Labby settings. |
+| CLI | `labby <command>` | Current commands are generated in [docs/generated/cli-help.md](./docs/generated/cli-help.md). Use `--json` for machine-readable output and `--color auto|plain|color` for human output styling. |
+| MCP stdio | `labby mcp` | Local editor/desktop MCP clients. |
+| MCP HTTP | `labby serve` plus `/mcp` | Streamable HTTP MCP with bearer or OAuth JWT auth. |
+| HTTP API | `labby serve` plus `/v1/*` | Generic `POST /v1/{service}` action dispatch plus dedicated product routes. |
+| Web UI | `labby serve` plus exported assets | Main routes include `/setup`, `/marketplace`, `/gateways`, `/logs`, `/activity`, `/chat`, `/settings`, `/docs`, and `/design-system`; `/registry` redirects to marketplace. |
 
-Protected route behavior:
-
-| Surface | Accepted auth | Notes |
-| --- | --- | --- |
-| `/v1/*` product API | Static bearer token, Lab OAuth JWT bearer token, or Labby browser session cookie | Browser session POSTs use CSRF protection. `LAB_WEB_UI_AUTH_DISABLED` bypasses `/v1` auth only for development. |
-| `/mcp` HTTP MCP | Static bearer token or Lab OAuth JWT bearer token | Browser session cookies are not accepted for MCP transport. |
-| `/v0.1/*` MCP Registry compatibility routes | Same as protected `/v1` routes | Mounted when the `marketplace` feature is enabled. |
-| Labby web UI | Browser session in OAuth mode, or the configured development bypass | Static assets and SPA paths are served by `labby serve`; data calls still use `/v1`. |
-| `/auth/session` (web UI bootstrap) | Browser session cookie OR static bearer token | When the request carries `Authorization: Bearer <LAB_MCP_HTTP_TOKEN>`, returns a synthetic admin session keyed by `static-bearer`. Lets automation tooling (e.g. `agent-browser --headers`) drive the UI alongside OAuth without disabling it. |
-| `/health`, `/ready` | No auth | Intended for probes. |
-| `/v1/nodes/hello`, `/v1/nodes/ws` | No bearer middleware | Node WebSocket `initialize` validates the enrolled `device_id` and device token before node methods run. |
-
-OAuth mode exposes `/.well-known/oauth-authorization-server`,
-`/.well-known/oauth-protected-resource`, `/jwks`, `/register`, `/authorize`,
-`/token`, `/auth/login`, `/auth/session`, `/auth/logout`, and
-`/auth/google/callback`. Lab stores Google tokens server-side and issues Lab JWTs for
-API/MCP clients.
-
-Gateway OAuth is separate from Lab login OAuth. Upstreams configured with
-`[upstream.oauth]` use `/v1/gateway/oauth/start`, `/auth/upstream/callback`,
-`/v1/gateway/oauth/status`, and `/v1/gateway/oauth/clear`; credentials are encrypted in
-Lab's auth store and shared by the web UI, CLI, and MCP gateway actions under
-the shared Gateway subject `gateway`. Protected MCP routes can publish these
-OAuth upstreams at public paths such as `https://mcp.example.com/syslog` while
-Lab validates public clients with Lab OAuth and separately authenticates to the
-upstream server with the stored upstream OAuth credential. Upstream OAuth keeps
-strict issuer binding, with explicit provider exceptions for documented split
-endpoint deployments such as Google's `accounts.google.com` issuer and
-`oauth2.googleapis.com` token endpoint.
-
-Callback relay helpers cover split-browser/device flows:
-
-```bash
-labby oauth relay-local --machine dookie --port 38935
-labby oauth relay-local --forward-base http://node.internal.example:38935/callback/dookie --port 38935
-```
-
-The same local relay can be started through the node runtime with
-`POST /v1/nodes/oauth/relay/start`. Relays forward the final callback request only; they
-do not mint tokens, store PKCE state, or complete the OAuth exchange.
-
-When binding HTTP to a non-loopback host, configure bearer or OAuth auth. The server warns
-and refuses unsafe exposed configurations. See [docs/OAUTH.md](./docs/runtime/OAUTH.md),
-[docs/TRANSPORT.md](./docs/surfaces/TRANSPORT.md), and [docs/GATEWAY.md](./docs/services/GATEWAY.md) for
-the full auth contract.
-
-## CLI
-
-Top-level commands are defined in [crates/lab/src/cli.rs](./crates/lab/src/cli.rs):
-
-| Command | Purpose |
-| --- | --- |
-| `labby serve` | Start the hosted HTTP runtime |
-| `labby mcp` | Start the stdio MCP server for local MCP clients |
-| `labby help` | Print the generated service and action catalog |
-| `labby doctor` | Run comprehensive health audits |
-| `labby health` | Run quick reachability checks |
-| `labby nodes` | Query nodes from the configured controller |
-| `labby logs` | Search fleet or local-master logs |
-| `labby marketplace` | Manage Claude Code, Codex, MCP Registry, and ACP Registry marketplace entries; compiled by the `marketplace` feature |
-| `labby gateway` | Manage proxied upstream MCP gateways; compiled by the `gateway` feature |
-| `labby oauth` | Run local OAuth callback relay helpers |
-| `labby docs` | Generate and check code-owned documentation artifacts |
-| `labby stash` | Manage component snapshots and deployment workspaces |
-| `labby deploy` | Deploy the local Lab release binary over SSH; compiled by the `deploy` feature |
-| `labby completions` | Generate shell completions |
-
-The current codebase does not ship first-party CLI subcommands such as
-`labby radarr`, `labby unifi`, or `labby qdrant`. Those older integrations were
-removed from the Cargo feature table; use MCP gateways or Marketplace-installed
-servers for those service domains.
-
-CLI output is human-readable by default. Use global `--json` for machine-readable output
-and `--color auto|always|never` for human output styling. See [docs/CLI.md](./docs/surfaces/CLI.md)
-and [docs/design/CLI_DESIGN_SYSTEM.md](./docs/design/CLI_DESIGN_SYSTEM.md).
-
-Destructive CLI operations require confirmation. Non-interactive callers use `-y` or
-`--yes` where the subcommand exposes it; dry-run capable paths document `--dry-run`.
-
-## MCP Server
-
-Core Lab services use one MCP tool per registered service. Gateway and upstream features
-can add healthy upstream tools plus optional legacy `code_mode`/`tool_execute` helpers
-or Code Mode `search`/`execute`.
-Core service tool input is:
+MCP service tools use the shared action shape:
 
 ```json
 {
   "action": "mcp.list",
-  "params": { "search": "github", "limit": 10 }
+  "params": { "search": "postgres", "limit": 10 }
 }
 ```
 
-Discovery surfaces:
+Every service tool also supports `help` and `schema` through the shared
+dispatcher. Destructive MCP actions use elicitation when the client supports it;
+headless clients pass `"confirm": true` inside `params`.
 
-| Surface | Purpose |
-| --- | --- |
-| `lab://catalog` MCP resource | Full generated catalog |
-| `lab://<service>/actions` MCP resource | Per-service action list |
-| `help` action | Per-tool action catalog |
-| `schema` action | Parameter schema for one action |
+## Configuration
 
-Upstream MCP resources may be merged into the resource list when upstream gateway
-proxying is configured.
+Configuration is split deliberately:
 
-Destructive MCP actions use elicitation when the client supports it. Headless clients pass
-`"confirm": true` inside `params`; otherwise the tool returns `confirmation_required`.
-
-See [docs/surfaces/MCP.md](./docs/surfaces/MCP.md), [docs/surfaces/RMCP.md](./docs/surfaces/RMCP.md), and
-[docs/surfaces/TRANSPORT.md](./docs/surfaces/TRANSPORT.md).
-
-## HTTP API
-
-`labby serve` mounts the HTTP API under `/v1` and MCP over HTTP at `/mcp` in hosted mode.
-Protected routes accept configured auth: static bearer tokens, OAuth JWT bearer tokens,
-and browser session cookies on `/v1` routes. Loopback development can run without auth
-when neither bearer nor OAuth auth is configured; non-loopback binds require configured auth.
-
-Unauthenticated routes include:
-
-| Method | Path | Purpose |
+| Data | Location | Examples |
 | --- | --- | --- |
-| `GET` | `/health` | Liveness |
-| `GET` | `/ready` | Readiness |
-| `POST` | `/v1/nodes/hello` | Public node self-registration |
-| `GET` | `/v1/nodes/ws` | Node WebSocket upgrade; JSON-RPC session validates enrollment |
-| `GET` | `/` and SPA paths | Labby web UI when exported assets are available |
-| `GET` / `POST` | OAuth metadata and auth paths | Mounted when OAuth auth state is configured |
+| Secrets and endpoint values | `~/.lab/.env` | `LAB_MCP_HTTP_TOKEN`, `LAB_GOOGLE_CLIENT_SECRET`, upstream bearer token env values |
+| Preferences | `config.toml` | transport, CORS, auth mode, workspace root, gateway spawn guard, registry URLs |
 
-Protected routes include:
+`config.toml` is searched in this order:
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/v1/{service}/actions` | List generated actions for a service |
-| `POST` | `/v1/{service}` | Dispatch one action with `action` and `params` |
-| `GET` | `/v1/openapi.json` | OpenAPI 3.1 spec |
-| `GET` | `/v1/docs` | Scalar API docs UI |
-| `GET` | `/v0.1/servers` and `/v0.1/servers/{name}/versions/*` | MCP Registry compatibility routes when the `marketplace` feature is enabled |
+1. `./config.toml`
+2. `~/.lab/config.toml`
+3. `~/.config/lab/config.toml`
 
-Example:
+Startup loads the first `config.toml`, initializes tracing, then loads
+`~/.lab/.env` and a CWD `.env` if present. Runtime precedence is:
 
-```bash
-curl -s -X POST http://127.0.0.1:8765/v1/marketplace \
-  -H "Authorization: Bearer $LAB_MCP_HTTP_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"mcp.list","params":{"search":"github","limit":10}}'
-```
+1. CLI flags
+2. Environment variables
+3. `config.toml`
+4. Built-in defaults
 
-Destructive HTTP actions require `"confirm": true` in `params`. Missing confirmation
-returns `422` with `kind: "confirmation_required"`. Error responses use the shared
-structured envelope and stable `kind` vocabulary from [docs/ERRORS.md](./docs/dev/ERRORS.md).
-
-Middleware order is request id, tracing, request-id propagation, timeout, compression, and
-CORS. Loopback origins are allowed by default; add more origins with `LAB_CORS_ORIGINS` or
-`[api].cors_origins`.
-
-See [docs/TRANSPORT.md](./docs/surfaces/TRANSPORT.md), [docs/OAUTH.md](./docs/runtime/OAUTH.md),
-[docs/ERRORS.md](./docs/dev/ERRORS.md), and [docs/OBSERVABILITY.md](./docs/dev/OBSERVABILITY.md).
-
-## Service Catalogs
-
-Do not maintain action lists by hand in this README. The source-of-truth catalog is generated
-from the registry and action specs:
-
-```bash
-labby help --json
-labby help
-curl -H "Authorization: Bearer $LAB_MCP_HTTP_TOKEN" \
-  http://127.0.0.1:8765/v1/marketplace/actions
-```
-
-Action-level coverage docs live under [docs/coverage](./docs/coverage). The
-complete coverage index is [docs/coverage/README.md](./docs/coverage/README.md):
-
-| Service | Coverage Doc |
-| --- | --- |
-| ACP Registry | [docs/coverage/acp_registry.md](./docs/coverage/acp_registry.md) |
-| MCP Registry | [docs/coverage/mcpregistry.md](./docs/coverage/mcpregistry.md) |
-| Stash | [docs/coverage/stash.md](./docs/coverage/stash.md) |
-
-## Environment Reference
-
-Service credentials are declared by the compiled services' `PluginMeta`.
-Legacy first-party upstream credentials such as `RADARR_URL` are not part of
-the current generated env inventory unless a service is reintroduced.
-
-The complete generated service env inventory is
-[docs/generated/env-reference.md](./docs/generated/env-reference.md). Its JSON
-contract is [docs/generated/env-reference.json](./docs/generated/env-reference.json).
-
-Server and runtime env:
+Useful environment variables:
 
 | Variable | Purpose |
 | --- | --- |
-| `LAB_MCP_HTTP_TOKEN` | Static bearer token for protected HTTP routes and HTTP MCP |
-| `LAB_MCP_TRANSPORT` | Default transport, `http` or `stdio` |
-| `LAB_MCP_HTTP_HOST` / `LAB_MCP_HTTP_PORT` | Hosted runtime bind address |
-| `LAB_MCP_SESSION_TTL_SECS` / `LAB_MCP_STATEFUL` | HTTP MCP session behavior |
-| `LAB_MCP_ALLOWED_HOSTS` | Additional DNS-rebinding allowed hosts |
-| `LAB_CORS_ORIGINS` | Additional browser CORS origins |
-| `LAB_AUTH_MODE` | `bearer` or `oauth` |
-| `LAB_PUBLIC_URL` | Public base URL for OAuth metadata, JWT issuer/audience, callback construction, and allowed-host derivation |
-| `LAB_GOOGLE_CLIENT_ID` / `LAB_GOOGLE_CLIENT_SECRET` | Google OAuth credentials for OAuth mode |
-| `LAB_GOOGLE_CALLBACK_PATH` | Optional Google callback path override |
-| `LAB_AUTH_ALLOWED_REDIRECT_URIS` | Optional non-loopback MCP OAuth callback allowlist |
-| `LAB_AUTH_ADMIN_EMAIL` | Bootstrap admin Google email; required for OAuth mode (fail-closed default) |
-| `LAB_WEB_ASSETS_DIR` | Static Labby export directory override |
-| `LAB_WEB_UI_AUTH_DISABLED` | Development-only bypass for Labby browser auth. `LAB_WEB_UI_DISABLE_AUTH` is accepted as a legacy alias. |
-| `LAB_LOG` / `LAB_LOG_FORMAT` | Tracing filter and text/json log format |
-| `LAB_ADMIN_ENABLED` | Runtime opt-in for the `lab_admin` MCP tool |
+| `LAB_MCP_HTTP_TOKEN` | Static bearer token for protected admin/API/MCP routes. |
+| `LAB_AUTH_MODE` | `bearer` or `oauth`. |
+| `LAB_PUBLIC_URL` | Public base URL for OAuth metadata, issuer/audience, callbacks, and allowed-host derivation. |
+| `LAB_GOOGLE_CLIENT_ID` / `LAB_GOOGLE_CLIENT_SECRET` | Google OAuth credentials for OAuth mode. |
+| `LAB_AUTH_ADMIN_EMAIL` | Bootstrap admin email; required in OAuth mode. |
+| `LAB_OAUTH_ENCRYPTION_KEY` | Base64 32-byte key required for encrypted upstream OAuth credentials. Rotation requires reauthorizing affected upstreams. |
+| `LAB_WEB_ASSETS_DIR` | Override static Labby export directory. |
+| `LAB_WEB_UI_AUTH_DISABLED` | Development-only browser auth bypass. |
+| `LAB_LOG` / `LAB_LOG_FORMAT` / `LAB_LOG_COLOR` | Tracing filter, text/json format, and non-TTY color policy. |
+| `LAB_LOG_DIR` | Optional rolling JSON file log directory. |
+| `LAB_LOCAL_LOGS_STORE_PATH` | SQLite store path for the local activity log service. |
+| `LAB_ACTOR_KEY_SECRET` | Stable secret for redacted actor correlation in logs. |
+| `LAB_ADMIN_ENABLED` | Runtime opt-in for the `lab_admin` tool. |
 
-## Feature Flags
+Bearer auth is an operator/admin shortcut for Lab routes. Public protected MCP
+routes validate route-scoped Lab OAuth JWTs; do not treat `LAB_MCP_HTTP_TOKEN` as
+a public resource credential.
 
-`labby` defaults to `all`. `lab-apis` defaults to no optional modules.
-
-Current standalone product slices:
-
-- `gateway`
-- `marketplace`
-- `fs`
-- `deploy`
-- `acp_registry`
-
-Additional feature flags:
-
-- `mcpregistry` is a compatibility alias for `marketplace` in `labby`.
-- `lab-admin` compiles the `lab_admin` service, which remains runtime-gated by
-  `LAB_ADMIN_ENABLED=1` or `[admin].enabled = true`.
-- `systemd`, `node-runtime`, and `test-utils` are helper/internal features, not
-  standalone product slices.
-- `services-all` is currently empty because the removed first-party upstream
-  service integrations are no longer modeled as Cargo features.
-
-Always-on base services include `doctor`, `setup`, `nodes`, `logs`, `stash`,
-and `acp`. They are part of the base control plane rather than independent
-Cargo slices.
-
-Build a subset:
+When driving the web UI with automation while OAuth is enabled, pass the bearer
+token as a same-origin header. `/auth/session` recognizes that token and returns a
+synthetic admin session:
 
 ```bash
-cargo build -p labby --no-default-features --features gateway
-cargo build -p labby --no-default-features --features marketplace
-cargo build -p labby --no-default-features --features fs
+TOKEN=$(awk -F= '/^LAB_MCP_HTTP_TOKEN=/{print $2}' ~/.lab/.env)
+agent-browser open http://127.0.0.1:8765/chat \
+  --headers "{\"Authorization\":\"Bearer $TOKEN\"}"
 ```
+
+See [runtime configuration](./docs/runtime/CONFIG.md),
+[environment variables](./docs/runtime/ENV.md), and
+[OAuth](./docs/runtime/OAUTH.md).
+
+## Current Catalogs
+
+Do not maintain action, feature, env, or coverage inventories by hand in this
+README. The generated artifacts are authoritative for the current branch:
+
+| Artifact | Purpose |
+| --- | --- |
+| [service-catalog.md](./docs/generated/service-catalog.md) | Registered services, exposure, features, categories, and surfaces. |
+| [action-catalog.md](./docs/generated/action-catalog.md) | Per-service actions and destructive metadata. |
+| [env-reference.md](./docs/generated/env-reference.md) | Env vars generated from service metadata. |
+| [api-routes.md](./docs/generated/api-routes.md) | Mounted HTTP routes. |
+| [openapi.json](./docs/generated/openapi.json) | OpenAPI 3.1 schema. |
+| [feature-matrix.md](./docs/generated/feature-matrix.md) | Cargo feature invariants. |
+| [mcp-help.md](./docs/generated/mcp-help.md) | MCP help projection. |
+| [cli-help.md](./docs/generated/cli-help.md) | Clap command help snapshot. |
+
+Refresh and verify them with:
+
+```bash
+just docs-generate
+just docs-check
+```
+
+`docs-check` verifies generated-artifact freshness and invariants. It is not a
+Markdown link checker, live health check, or onboarding policy audit.
+
+## Architecture
+
+The workspace uses Rust 2024, resolver 3, and a single workspace version.
+
+| Path | Role |
+| --- | --- |
+| [crates/lab-apis](./crates/lab-apis) | Pure SDK/domain crate for shared models, auth primitives, metadata, registry clients, ACP types, setup/doctor/stash/marketplace/device/deploy types. |
+| [crates/lab-auth](./crates/lab-auth) | OAuth/JWT/session middleware and route support for the hosted runtime. |
+| [crates/lab](./crates/lab) | Product binary crate: CLI, MCP, HTTP API, dispatch, config loading, Labby runtime, gateway, ACP orchestration, logs, setup, and output rendering. |
+| [crates/lab-winjob](./crates/lab-winjob) | Windows Job Object process-tree support, isolated so the main workspace can keep `unsafe_code = "forbid"`. |
+| [apps/gateway-admin](./apps/gateway-admin/README.md) | Labby web UI, statically exported and served by `labby serve`. |
+| [plugins](./plugins) | Claude/Codex plugin assets, skills, hooks, and monitor definitions. |
+| [docs](./docs/README.md) | Topic documentation and generated inventories. |
+
+Shared behavior belongs in the shared execution layer. Upstream/domain logic
+belongs in `lab-apis`; product dispatch belongs in `crates/lab/src/dispatch`;
+CLI, MCP, HTTP, and web adapters stay thin. See
+[Architecture](./docs/ARCH.md) and [Dispatch](./docs/dev/DISPATCH.md).
 
 ## Development
 
-Use the `just` aliases when possible:
+Prefer the `just` aliases:
 
 ```bash
 just check            # cargo check --workspace --all-features
 just test             # cargo nextest run --workspace --all-features
-just test-integration # cargo nextest run --workspace --all-features -- --ignored
-just lint             # cargo clippy --workspace --all-features -- -D warnings; cargo fmt --all -- --check
+just test-integration # cargo nextest run --workspace --all-features --run-ignored ignored-only
+just lint             # skill drift + cargo wrapper smoke + clippy -D warnings + fmt check
 just deny             # cargo deny check
 just build            # cargo build --workspace --all-features
-just build-release    # cargo build --workspace --all-features --release; install bin/labby (container bind-mount) + ~/.local/bin symlink
+just build-release    # release build, bin/labby install, ~/.local/bin symlink
 just web-build        # cd apps/gateway-admin && pnpm build
-just web-watch        # rebuild Labby static assets on frontend changes
+just web-watch        # rebuild web assets when frontend files change
 just run -- help      # cargo run --all-features -- <args>
-just chat-local       # local Labby chat workflow with auth disabled for development
-just dev-up           # bring up the docker dev container (first-time start)
-just dev              # release rebuild + hot-swap binary into the dev container
-just dev-debug        # nightly+cranelift debug rebuild + hot-swap (3x faster compile)
-just fmt              # cargo fmt --all
-just clean            # cargo clean
+just chat-local       # local Labby chat workflow with browser auth disabled
+just dev-up           # start the trusted local Docker dev stack
+just dev              # web build + release rebuild + dev-container restart
+just dev-debug        # nightly/cranelift debug rebuild + dev-container restart
 just install          # build-release + symlink ~/.local/bin/labby
-just prod-run         # build + run the prod image locally with prod-like env
+just prod-run         # local prod-like image smoke on port 18765
 just mcp-token        # rotate LAB_MCP_HTTP_TOKEN in .env
 ```
 
-Releases are cut by pushing a `vX.Y.Z` tag (bump the workspace `version` in
-`Cargo.toml` and add a `CHANGELOG.md` entry first). The tag triggers
-`release.yml`, which builds the Linux/Windows archives, publishes the GitHub
-Release, and pushes `ghcr.io/jmagar/lab:<tag>` + `:latest`.
-
-The dev container (`docker-compose.yml`) pre-installs the three ACP adapters (`claude-agent-acp`, `codex-acp`, `gemini`) into the image at fixed versions, with an npm `overrides` entry floating `@anthropic-ai/claude-agent-sdk` forward of the version `claude-agent-acp` pins. This eliminates per-spawn `npx` overhead and avoids credential/binary-version mismatches that otherwise SIGILL the bundled Claude Code binary. Bumping any adapter version requires rebuilding the image (`docker compose build labby-master`); changing only the labby binary uses `just dev` or `just dev-debug` and is immediate.
-
-Driving the UI as automation while OAuth is enabled: pass the static bearer token as a header. The `/auth/session` endpoint recognizes the same token and returns a synthetic admin session, so the AuthBootstrap treats the caller as logged in:
-
-```bash
-TOKEN=$(grep "LAB_MCP_HTTP_TOKEN" .env | cut -d= -f2)
-agent-browser open http://localhost:8765/chat \
-  --headers "{\"Authorization\":\"Bearer $TOKEN\"}"
-```
-
-Authoritative verification is all-features:
+Authoritative Rust verification is all-features:
 
 ```bash
 cargo check --workspace --all-features
@@ -554,84 +393,67 @@ cargo nextest run --workspace --all-features
 cargo build --workspace --all-features
 ```
 
-Use `cargo test` only for narrow local slices or when a tool specifically requires it.
-The repo-level test contract is [docs/TESTING.md](./docs/dev/TESTING.md).
+CI uses the same posture and runs nextest with its CI profile. Use `cargo test`
+only for narrow local slices or when a tool specifically requires it.
 
-## Docs Map
+Frontend changes should also run the relevant `pnpm` scripts under
+`apps/gateway-admin`, and `just web-build` when exported assets matter.
 
-Start at [docs/README.md](./docs/README.md). Topic ownership:
+### Dev Container
 
-| Doc | Owns |
-| --- | --- |
-| [docs/ARCH.md](./docs/ARCH.md) | Crate split, runtime surfaces, shared contracts, runtime flow |
-| [docs/TECH.md](./docs/TECH.md) | Stack choices, toolchain, feature posture, verification surfaces, release tooling |
-| [docs/CONVENTIONS.md](./docs/CONVENTIONS.md) | Locked engineering rules, async style, HTTP, testing, docs, privacy |
-| [docs/SERVICES.md](./docs/dev/SERVICES.md) | Service inventory, feature gates, metadata, multi-instance model |
-| [docs/SERVICE_ONBOARDING.md](./docs/dev/SERVICE_ONBOARDING.md) | End-to-end checklist for adding a service |
-| [docs/SCAFFOLD_AND_AUDIT.md](./docs/dev/SCAFFOLD_AND_AUDIT.md) | Deferred scaffold/audit command contract |
-| [docs/CLI.md](./docs/surfaces/CLI.md) | CLI behavior, command rules, confirmations, operator commands |
-| [docs/design/CLI_DESIGN_SYSTEM.md](./docs/design/CLI_DESIGN_SYSTEM.md) | Human-readable CLI output language and color policy |
-| [docs/design/CLI_OUTPUT_THEME_API.md](./docs/design/CLI_OUTPUT_THEME_API.md) | Proposed Rust API for CLI semantic styling |
-| [docs/surfaces/MCP.md](./docs/surfaces/MCP.md) | MCP transport model, one-tool-per-service design, discovery, envelopes |
-| [docs/surfaces/RMCP.md](./docs/surfaces/RMCP.md) | RMCP SDK integration contract |
-| [docs/surfaces/TRANSPORT.md](./docs/surfaces/TRANSPORT.md) | Stdio and streamable HTTP transport, sessions, CORS, DNS rebinding |
-| [docs/OAUTH.md](./docs/runtime/OAUTH.md) | Bearer vs OAuth auth, Google flow, JWTs, JWKS, metadata, callback forwarding |
-| [docs/CONFIG.md](./docs/runtime/CONFIG.md) | Env/TOML ownership, load order, secrets, instance naming |
-| [docs/ENV.md](./docs/runtime/ENV.md) | Deployment-ready env examples and auth mode variables |
-| [docs/ERRORS.md](./docs/dev/ERRORS.md) | Stable error taxonomy, envelopes, status mapping |
-| [docs/design/SERIALIZATION.md](./docs/design/SERIALIZATION.md) | Serde ownership, stable envelopes, output-boundary rules |
-| [docs/DISPATCH.md](./docs/dev/DISPATCH.md) | Surface-neutral dispatch ownership and adapter direction |
-| [docs/SERVICE_LAYER_MIGRATION.md](./docs/dev/SERVICE_LAYER_MIGRATION.md) | Migration phases for shared dispatch/service layer |
-| [docs/OBSERVABILITY.md](./docs/dev/OBSERVABILITY.md) | Logging boundaries, required fields, correlation, redaction, verification |
-| [docs/OPERATIONS.md](./docs/OPERATIONS.md) | Repo helpers, doctor/health workflows, CI, releases, updates |
-| [docs/CICD.md](./docs/runtime/CICD.md) | GitHub Actions check matrix and release behavior |
-| [docs/TESTING.md](./docs/dev/TESTING.md) | Test runner contract and verification expectations |
-| [docs/GATEWAY.md](./docs/services/GATEWAY.md) | Upstream MCP gateway CRUD, reload/test flows, exposure policy |
-| [docs/UPSTREAM.md](./docs/services/UPSTREAM.md) | Upstream MCP proxy setup, tool merging, circuit breaker, resources |
-| [docs/MARKETPLACE.md](./docs/services/MARKETPLACE.md) | Marketplace service, plugin workspace mirrors, save/deploy flows |
-| [docs/MCPREGISTRY_METADATA.md](./docs/services/MCPREGISTRY_METADATA.md) | Lab-owned metadata layered onto MCP Registry entries |
-| [docs/acp/README.md](./docs/acp/README.md) | ACP service architecture and chat boundary |
-| [docs/acp/design.md](./docs/acp/design.md) | ACP design details |
-| [docs/acp/research-findings.md](./docs/acp/research-findings.md) | ACP research notes |
-| [docs/DEVICE_RUNTIME.md](./docs/runtime/DEVICE_RUNTIME.md) | Master/non-master runtime roles and device inventory |
-| [docs/NODES.md](./docs/runtime/NODES.md) | Node-facing CLI/API behavior |
-| [docs/NODE_RUNTIME_CONTRACT.md](./docs/runtime/NODE_RUNTIME_CONTRACT.md) | Controller/node split and node artifact rules |
-| [docs/FLEET_METHODS.md](./docs/runtime/FLEET_METHODS.md) | Fleet WebSocket JSON-RPC method contract |
-| [docs/FLEET_LOGS.md](./docs/runtime/FLEET_LOGS.md) | Fleet log ingestion, queueing, search, storage limits |
-| [docs/LOCAL_LOGS.md](./docs/services/LOCAL_LOGS.md) | Local-master runtime log store, `/v1/logs`, SSE streaming |
-| [docs/DEPLOY.md](./docs/runtime/DEPLOY.md) | Device-runtime deployment topology and rollout guidance |
-| [docs/DEPLOY_SERVICE.md](./docs/runtime/DEPLOY_SERVICE.md) | Deploy service action/API contract |
-| [docs/MONITORS.md](./docs/services/MONITORS.md) | Claude Code monitor definitions and `labby deploy monitor` |
-| [docs/TUI.md](./docs/surfaces/TUI.md) | Deferred TUI status |
-| [apps/gateway-admin/README.md](./apps/gateway-admin/README.md) | Labby frontend workflow and static export model |
-| [docs/design/component-development.md](./docs/design/component-development.md) | Labby component workflow and browser verification |
-| [docs/design/design-system-contract.md](./docs/design/design-system-contract.md) | Labby Aurora design-system contract |
-| [docs/design/CLAUDE_CODE_AURORA_THEME.md](./docs/design/CLAUDE_CODE_AURORA_THEME.md) | Aurora theme mapping for Claude Code-like surfaces |
+The Compose stack is a trusted local operator environment, not a hardened
+generic deployment. It bind-mounts host Lab state, agent credentials/plugin
+caches, the repo, and built web assets; secrets are loaded from the mounted
+`/home/lab/.lab/.env`. The image pre-installs ACP adapters
+(`claude-agent-acp`, `codex-acp`, `gemini`) so session spawns use deterministic
+local binaries rather than repeated `npx` installs. Rebuild the image when
+changing Dockerfiles or adapter versions; use `just dev` or `just dev-debug`
+for ordinary Labby binary swaps.
 
-Supporting directories:
+### Releases
 
-| Path | Purpose |
-| --- | --- |
-| [docs/coverage](./docs/coverage) | Per-service coverage and action mapping |
-| [docs/upstream-api](./docs/upstream-api/README.md) | Upstream specs and reference material |
-| [docs/features](./docs/features/FEATURE_BRIEF.md) | Product feature briefs and implementation notes |
-| [docs/reviews](./docs/reviews) | Review artifacts |
-| [docs/reports](./docs/reports) | Verification and audit reports |
-| [docs/sessions](./docs/sessions) | Historical session notes |
-| [docs/superpowers/plans](./docs/superpowers/plans) | Historical implementation plans |
-| [docs/superpowers/specs](./docs/superpowers/specs) | Historical implementation specs |
-| [docs/mockups](./docs/mockups) | Static UI mockups |
+Release prep is version/changelog first, then tag:
 
-## Design Highlights
+1. Bump the workspace version in [Cargo.toml](./Cargo.toml).
+2. Update `CHANGELOG.md` when present.
+3. Regenerate docs and web assets when relevant.
+4. Push a `vX.Y.Z` tag.
 
-- One binary exposes many integrations without exploding the MCP tool list.
-- The generated action catalog drives CLI help, MCP discovery, HTTP action listings, and UI surfaces.
-- CLI, MCP, and HTTP dispatch share action semantics instead of duplicating business logic.
-- Destructive actions have a single metadata flag and separate confirmations per surface.
-- Structured error envelopes use stable `kind` tags across agent-facing surfaces.
-- Multi-instance service selection is a config-layer concern, not hardcoded per service.
-- Labby is served from the same hosted runtime when static assets exist; the separate Next dev server is only for frontend development.
-- No telemetry or analytics are built in; network calls are explicit service/API operations.
+The release workflow builds Linux and Windows archives with checksums, publishes
+the GitHub Release, pushes GHCR images, and includes the generated marketplace
+artifact.
+
+### ACP Runtime Notes
+
+The Rust ACP SDK is pinned exactly in
+[crates/lab/Cargo.toml](./crates/lab/Cargo.toml) as
+`agent-client-protocol = "=0.13.1"` with the `unstable` feature. Model/config
+discovery depends on reading `session_config_options()` from the raw
+`NewSessionResponse` before `attach_session`, and model switching uses
+`SetSessionConfigOptionRequest`. Re-check those APIs before upgrading the SDK.
+
+### Plugin Setup Hooks
+
+The `plugins/labby` plugin ships skills, commands, and MCP config, not a
+`labby` binary. SessionStart runs `labby setup plugin-hook --no-repair` when
+`labby` is on PATH and prints an install pointer otherwise. ConfigChange runs
+`labby setup plugin-hook` to sync settings. Hooks should stay advisory: no binary
+bundling, no auto-install, and no Docker/systemd bootstrap.
+
+## Documentation
+
+Start at [docs/README.md](./docs/README.md). High-value entrypoints:
+
+- [Architecture](./docs/ARCH.md)
+- [Configuration](./docs/runtime/CONFIG.md)
+- [Environment](./docs/runtime/ENV.md)
+- [OAuth](./docs/runtime/OAUTH.md)
+- [Transport](./docs/surfaces/TRANSPORT.md)
+- [Gateway](./docs/services/GATEWAY.md)
+- [Marketplace](./docs/services/MARKETPLACE.md)
+- [ACP](./docs/acp/README.md)
+- [Testing](./docs/dev/TESTING.md)
+- [Operations](./docs/OPERATIONS.md)
 
 ## License
 
