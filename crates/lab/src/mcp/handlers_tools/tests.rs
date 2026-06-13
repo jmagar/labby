@@ -348,18 +348,11 @@ async fn list_tools_promotes_upstream_mcp_app_tools_when_raw_tools_are_hidden() 
         .map(|tool| tool.name.as_ref())
         .collect::<Vec<_>>();
 
-    assert!(
-        names.contains(&"youtube_search_ui"),
-        "MCP App upstream tools must stay visible to the host"
-    );
-    assert!(
-        !names.contains(&"youtube_probe"),
-        "ordinary raw upstream tools stay hidden in Code Mode"
-    );
-    assert!(
-        !names.contains(&"radarr"),
-        "built-in raw tools stay hidden in Code Mode"
-    );
+    assert!(names.contains(&"youtube_search_ui"));
+    assert!(!names.contains(&"youtube_probe"));
+    assert!(names.contains(&CODE_MODE_SEARCH_TOOL_NAME));
+    assert!(names.contains(&TOOL_EXECUTE_TOOL_NAME));
+    assert!(!names.contains(&"radarr"));
 }
 
 #[tokio::test]
