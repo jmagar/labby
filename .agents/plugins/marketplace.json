@@ -69,6 +69,38 @@
       }
     },
     {
+      "name": "agent-browser",
+      "description": "Browser automation CLI for AI agents — navigate pages, fill forms, click, screenshot, scrape, and test web apps from your coding agent.",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/vercel-labs/agent-browser.git",
+        "sha": "2c7991c9eccca1c9db6eee1a26a713414778de5a"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Agent Browser",
+        "shortDescription": "Drive a real browser from your agent — navigate, fill, click, screenshot, scrape, and test.",
+        "longDescription": "Agent Browser is a browser automation CLI built for AI agents. It navigates pages, fills forms, clicks elements, captures screenshots, extracts data, and exercises web apps for exploratory testing and QA. Also automates Electron desktop apps and supports Vercel Sandbox microVMs and AWS Bedrock AgentCore cloud browsers.",
+        "developerName": "Vercel Labs",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write",
+          "Automation"
+        ],
+        "defaultPrompt": [
+          "Use Agent Browser to fill out and submit this web form.",
+          "Use Agent Browser to screenshot and verify this page.",
+          "Use Agent Browser to click through and test this web app."
+        ],
+        "brandColor": "#000000"
+      }
+    },
+    {
       "name": "agent-os",
       "description": "Drive the agent-os Windows 11 sandbox VM through its Windows-MCP server. Self-registers the windows-mcp MCP from your configured URL + bearer token, ships the agent-os skill, a /agent-os status command, and a SessionStart health check.",
       "source": {
@@ -931,6 +963,1237 @@
           "Save this session to Markdown."
         ],
         "brandColor": "#D946EF"
+      }
+    },
+    {
+      "name": "lumen",
+      "description": "Precise local semantic code search via MCP. Indexes your codebase with Go AST parsing and vector embeddings — Ollama, LM Studio, or HuggingFace TEI.",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/jmagar/lumen.git"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Lumen",
+        "shortDescription": "Precise local semantic code search over your indexed codebase.",
+        "longDescription": "Lumen indexes a codebase with Go AST parsing and vector embeddings (Ollama, LM Studio, or HuggingFace TEI) and serves fast semantic code search through MCP.",
+        "developerName": "Jacob Magar",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Use Lumen to find where this behavior is implemented.",
+          "Semantic-search the codebase for auth handling.",
+          "Locate the code that builds the catalog."
+        ],
+        "brandColor": "#38BDF8"
+      }
+    },
+    {
+      "name": "axon",
+      "description": "Skills and MCP configuration for the Axon crawl, ingest, embed, query, and RAG engine.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/jmagar/axon.git",
+        "path": "plugins/axon"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Research",
+      "interface": {
+        "displayName": "Axon",
+        "shortDescription": "Self-hosted crawl, scrape, embed, and RAG knowledge engine.",
+        "longDescription": "Axon drives a self-hosted RAG stack: crawl and scrape sites, ingest GitHub/Reddit/YouTube, embed into Qdrant, run hybrid semantic search, and answer questions with cited synthesis.",
+        "developerName": "Jacob Magar",
+        "category": "Research",
+        "capabilities": [
+          "Read",
+          "Write",
+          "Automation"
+        ],
+        "defaultPrompt": [
+          "Use Axon to research this topic and index the results.",
+          "Crawl these docs into the knowledge base.",
+          "Ask Axon what we know about the dispatch layer."
+        ],
+        "brandColor": "#A78BFA"
+      }
+    },
+    {
+      "name": "cortex",
+      "description": "Homelab syslog receiver plus MCP server for searching, tailing, and correlating logs across hosts.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/jmagar/cortex.git",
+        "path": "plugins/cortex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Operations",
+      "interface": {
+        "displayName": "Cortex",
+        "shortDescription": "Homelab log aggregation — search, tail, and correlate logs across hosts.",
+        "longDescription": "Cortex is a syslog receiver and MCP server that ingests logs across homelab hosts and exposes search, tail, correlation, and AI transcript analysis.",
+        "developerName": "Jacob Magar",
+        "category": "Operations",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Use Cortex to search recent errors across hosts.",
+          "Tail logs for the cortex container.",
+          "Correlate events around the last deploy."
+        ],
+        "brandColor": "#F97316"
+      }
+    },
+    {
+      "name": "unraid",
+      "description": "Unraid NAS/homelab monitoring via the unrust MCP server.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/jmagar/unrust.git",
+        "path": "plugins/unraid"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Operations",
+      "interface": {
+        "displayName": "Unraid",
+        "shortDescription": "Monitor Unraid NAS array, shares, and Docker via the unrust MCP server.",
+        "longDescription": "Unraid surfaces array health, disks, shares, and Docker state from an Unraid server through the unrust GraphQL MCP server.",
+        "developerName": "Jacob Magar",
+        "category": "Operations",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Use Unraid to check array and disk health.",
+          "List Docker containers on the Unraid box.",
+          "Show share usage on tootie."
+        ],
+        "brandColor": "#F15A2C"
+      }
+    },
+    {
+      "name": "rarcane",
+      "description": "Arcane Docker management via the rarcane MCP server (Rust port of arcane-mcp).",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/jmagar/rarcane.git",
+        "path": "plugins/rarcane"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Operations",
+      "interface": {
+        "displayName": "Arcane",
+        "shortDescription": "Manage Docker containers, images, and stacks via the rarcane MCP server.",
+        "longDescription": "Arcane (rarcane) manages Docker through the Arcane API: list and control containers, inspect images and networks, and operate compose stacks.",
+        "developerName": "Jacob Magar",
+        "category": "Operations",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Arcane to list running containers.",
+          "Restart the labby container.",
+          "Show logs for a stuck stack."
+        ],
+        "brandColor": "#06B6D4"
+      }
+    },
+    {
+      "name": "rtemplate",
+      "description": "Reference rmcp template/example MCP server — scaffold for building new Rust MCP servers.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/jmagar/rtemplate-mcp.git",
+        "path": "plugins/rtemplate"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "rmcp Template",
+        "shortDescription": "Canonical scaffold for building new Rust rmcp MCP servers.",
+        "longDescription": "rtemplate is the reference rmcp server: dual transport, dual auth, action-dispatched single tool, and CLI parity — clone it to start a new Rust MCP server.",
+        "developerName": "Jacob Magar",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Use the rmcp template to scaffold a new MCP server.",
+          "Show the rmcp action-dispatch pattern.",
+          "Explain the template's auth setup."
+        ],
+        "brandColor": "#64748B"
+      }
+    },
+    {
+      "name": "tailscale",
+      "description": "Tailscale network management via the rustscale MCP server — query devices, ACL, DNS, users, and API keys.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/jmagar/rustscale.git",
+        "path": "plugins/tailscale"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Network",
+      "interface": {
+        "displayName": "Tailscale",
+        "shortDescription": "Query Tailscale devices, ACLs, DNS, users, and keys via rustscale.",
+        "longDescription": "Tailscale (rustscale) manages a tailnet through the Tailscale REST API: enumerate devices, inspect ACLs and DNS, and manage users and API keys.",
+        "developerName": "Jacob Magar",
+        "category": "Network",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Use Tailscale to list devices on the tailnet.",
+          "Show the current ACL policy.",
+          "Check which hosts are online."
+        ],
+        "brandColor": "#242424"
+      }
+    },
+    {
+      "name": "gotify",
+      "description": "Gotify push notification server via the rustify MCP server.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/jmagar/rustify.git",
+        "path": "plugins/gotify"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Operations",
+      "interface": {
+        "displayName": "Gotify",
+        "shortDescription": "Send and manage Gotify push notifications via the rustify MCP server.",
+        "longDescription": "Gotify (rustify) sends push notifications and manages applications, clients, and messages on a self-hosted Gotify server.",
+        "developerName": "Jacob Magar",
+        "category": "Operations",
+        "capabilities": [
+          "Write",
+          "Automation"
+        ],
+        "defaultPrompt": [
+          "Use Gotify to send me a push notification.",
+          "List Gotify applications.",
+          "Notify homelab that the job finished."
+        ],
+        "brandColor": "#4CAF50"
+      }
+    },
+    {
+      "name": "unifi",
+      "description": "UniFi network management via the rustifi MCP server — monitor devices, clients, health, alarms, events, and WLANs.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/jmagar/rustifi.git",
+        "path": "plugins/unifi"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Network",
+      "interface": {
+        "displayName": "UniFi",
+        "shortDescription": "Monitor UniFi devices, clients, health, alarms, and WLANs via rustifi.",
+        "longDescription": "UniFi (rustifi) reads the UniFi Network controller API for devices, clients, health, alarms, events, and WLAN configuration.",
+        "developerName": "Jacob Magar",
+        "category": "Network",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Use UniFi to list connected clients.",
+          "Check network health and active alarms.",
+          "Show the configured WLANs."
+        ],
+        "brandColor": "#0559C9"
+      }
+    },
+    {
+      "name": "unifi-network",
+      "description": "UniFi Network MCP server (sirkirby/unifi-mcp) — manage network devices, clients, firewall, VPN, and more.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/sirkirby/unifi-mcp.git",
+        "path": "plugins/unifi-network"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Network",
+      "interface": {
+        "displayName": "UniFi Network",
+        "shortDescription": "Manage UniFi network devices, clients, firewall, and VPN.",
+        "longDescription": "UniFi Network (sirkirby/unifi-mcp) manages a UniFi Network controller: devices, clients, firewall rules, VPN, and related configuration.",
+        "developerName": "sirkirby",
+        "category": "Network",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use UniFi Network to review firewall rules.",
+          "List clients on the guest network.",
+          "Check VPN configuration."
+        ],
+        "brandColor": "#0559C9"
+      }
+    },
+    {
+      "name": "apprise",
+      "description": "Send push notifications via apprise-mcp — a Rust MCP bridge to the Apprise universal notification library.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/jmagar/apprise-mcp.git",
+        "path": "plugins/apprise"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Operations",
+      "interface": {
+        "displayName": "Apprise",
+        "shortDescription": "Dispatch notifications to 80+ backends via the Apprise MCP bridge.",
+        "longDescription": "Apprise (apprise-mcp) is a Rust MCP bridge to the Apprise universal notification library, fanning a single message out to 80+ notification backends.",
+        "developerName": "Jacob Magar",
+        "category": "Operations",
+        "capabilities": [
+          "Write",
+          "Automation"
+        ],
+        "defaultPrompt": [
+          "Use Apprise to notify the homelab tag.",
+          "Send this alert to all configured backends.",
+          "List available Apprise targets."
+        ],
+        "brandColor": "#2563EB"
+      }
+    },
+    {
+      "name": "labby",
+      "description": "Skills and MCP configuration for the Lab homelab control plane.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/labby"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Operations",
+      "interface": {
+        "displayName": "Labby",
+        "shortDescription": "Operate the Lab homelab control-plane gateway and services.",
+        "longDescription": "Labby packages skills and MCP configuration for the Lab control plane — the single binary fronting CLI, MCP, and HTTP surfaces over the homelab service fleet.",
+        "developerName": "Jacob Magar",
+        "category": "Operations",
+        "capabilities": [
+          "Read",
+          "Write",
+          "Automation"
+        ],
+        "defaultPrompt": [
+          "Use Labby to list connected gateway servers.",
+          "Search the Lab tool catalog.",
+          "Run a homelab action through the gateway."
+        ],
+        "brandColor": "#29B6F6"
+      }
+    },
+    {
+      "name": "ytdl-mcp",
+      "description": "Download audio/video from any yt-dlp-supported site, embed metadata and cover art, organize by artist, and rsync to an SSH remote with separate audio/video destinations.",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/jmagar/ytdl-mcp.git"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Media",
+      "interface": {
+        "displayName": "ytdl-mcp",
+        "shortDescription": "Download and organize media with yt-dlp, then rsync to an SSH remote.",
+        "longDescription": "ytdl-mcp downloads audio/video from any yt-dlp-supported site, embeds metadata and cover art, organizes by artist, and rsyncs to an SSH remote with separate audio/video destinations.",
+        "developerName": "Jacob Magar",
+        "category": "Media",
+        "capabilities": [
+          "Read",
+          "Write",
+          "Automation"
+        ],
+        "defaultPrompt": [
+          "Use ytdl-mcp to download this video.",
+          "Grab the audio from this playlist and tag it.",
+          "Sync downloaded media to the NAS."
+        ],
+        "brandColor": "#EF4444"
+      }
+    },
+    {
+      "name": "codex-plugin-cc",
+      "description": "OpenAI Codex plugin for Claude Code interoperability.",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/openai/codex-plugin-cc.git"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Codex Plugin (CC)",
+        "shortDescription": "OpenAI Codex interoperability plugin for Claude Code.",
+        "longDescription": "Codex Plugin (CC) bridges OpenAI Codex and Claude Code for cross-agent plugin interoperability.",
+        "developerName": "OpenAI",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Use the Codex plugin to interoperate with Claude Code.",
+          "Explain Codex plugin compatibility.",
+          "Set up Codex/Claude Code interop."
+        ],
+        "brandColor": "#10A37F"
+      }
+    },
+    {
+      "name": "agent-sdk-dev",
+      "description": "Development kit for working with the Claude Agent SDK",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/agent-sdk-dev"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Agent SDK Dev",
+        "shortDescription": "Scaffold and build apps on the Claude Agent SDK.",
+        "longDescription": "Agent SDK Dev provides skills for creating and configuring Claude Agent SDK applications, including project setup and verification.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Agent SDK Dev to scaffold a new SDK app.",
+          "Verify this Agent SDK project's configuration.",
+          "Explain the Agent SDK app structure."
+        ],
+        "brandColor": "#D97757"
+      }
+    },
+    {
+      "name": "claude-code-setup",
+      "description": "Analyze codebases and recommend tailored Claude Code automations such as hooks, skills, MCP servers, and subagents.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/claude-code-setup"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Claude Code Setup",
+        "shortDescription": "Recommend tailored Claude Code automations for a codebase.",
+        "longDescription": "Claude Code Setup analyzes a codebase and recommends hooks, skills, MCP servers, and subagents to optimize the Claude Code workflow for that project.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Recommend Claude Code automations for this repo.",
+          "What hooks should this project use?",
+          "Set up Claude Code for a new project."
+        ],
+        "brandColor": "#D97757"
+      }
+    },
+    {
+      "name": "claude-md-management",
+      "description": "Tools to maintain and improve CLAUDE.md files - audit quality, capture session learnings, and keep project memory current.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/claude-md-management"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "CLAUDE.md Management",
+        "shortDescription": "Audit and improve CLAUDE.md project memory files.",
+        "longDescription": "CLAUDE.md Management audits CLAUDE.md quality, captures session learnings, and keeps project memory current and accurate.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Audit and improve this repo's CLAUDE.md.",
+          "Update CLAUDE.md with learnings from this session.",
+          "Check CLAUDE.md quality."
+        ],
+        "brandColor": "#D97757"
+      }
+    },
+    {
+      "name": "code-review",
+      "description": "Automated code review for pull requests using multiple specialized agents with confidence-based scoring to filter false positives",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/code-review"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Code Review",
+        "shortDescription": "Multi-agent PR review with confidence-based scoring.",
+        "longDescription": "Code Review runs multiple specialized agents over a pull request and filters findings by confidence so only high-signal issues surface.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Review this pull request.",
+          "Code-review the current diff.",
+          "Find high-confidence issues in my changes."
+        ],
+        "brandColor": "#D97757"
+      }
+    },
+    {
+      "name": "code-simplifier",
+      "description": "Agent that simplifies and refines code for clarity, consistency, and maintainability while preserving functionality. Focuses on recently modified code.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/code-simplifier"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Code Simplifier",
+        "shortDescription": "Simplify recently changed code without altering behavior.",
+        "longDescription": "Code Simplifier refines recently modified code for clarity, consistency, and maintainability while preserving all functionality.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Simplify the code I just wrote.",
+          "Clean up this diff for clarity.",
+          "Refactor recent changes for maintainability."
+        ],
+        "brandColor": "#D97757"
+      }
+    },
+    {
+      "name": "comprehensive-review",
+      "description": "Multi-perspective code analysis covering architecture, security, and best practices",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/wshobson/agents.git",
+        "path": "plugins/comprehensive-review"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Comprehensive Review",
+        "shortDescription": "Multi-perspective review across architecture, security, and quality.",
+        "longDescription": "Comprehensive Review orchestrates specialized agents across architecture, security, performance, testing, and best practices for a holistic code review.",
+        "developerName": "wshobson",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Run a comprehensive review of these changes.",
+          "Review architecture and security together.",
+          "Do a multi-dimensional code review."
+        ],
+        "brandColor": "#6366F1"
+      }
+    },
+    {
+      "name": "discord",
+      "description": "Discord messaging bridge with built-in access control. Manage pairing, allowlists, and policy via /discord:access.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "external_plugins/discord"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Discord",
+        "shortDescription": "Discord messaging bridge with built-in access control.",
+        "longDescription": "Discord bridges agent notifications and chat to Discord, with pairing, allowlists, and policy managed via /discord:access.",
+        "developerName": "Anthropic",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Set up the Discord bridge.",
+          "Manage Discord access and allowlists.",
+          "Send a message to Discord."
+        ],
+        "brandColor": "#5865F2"
+      }
+    },
+    {
+      "name": "fakechat",
+      "description": "Localhost web chat for testing the channel notification flow. No tokens, no access control, no third-party service.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "external_plugins/fakechat"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Testing",
+      "interface": {
+        "displayName": "FakeChat",
+        "shortDescription": "Localhost web chat for testing the channel notification flow.",
+        "longDescription": "FakeChat is a tokenless localhost web chat for exercising the channel notification flow without any third-party service or access control.",
+        "developerName": "Anthropic",
+        "category": "Testing",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use FakeChat to test the notification flow.",
+          "Start the local fakechat server.",
+          "Verify channel notifications locally."
+        ],
+        "brandColor": "#64748B"
+      }
+    },
+    {
+      "name": "feature-dev",
+      "description": "Comprehensive feature development workflow with specialized agents for codebase exploration, architecture design, and quality review",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/feature-dev"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Feature Dev",
+        "shortDescription": "Guided feature development with exploration, design, and review agents.",
+        "longDescription": "Feature Dev runs a full feature workflow: codebase exploration, architecture design, and quality review through specialized agents.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Feature Dev to plan and build this feature.",
+          "Explore the codebase before implementing.",
+          "Design the architecture for this change."
+        ],
+        "brandColor": "#D97757"
+      }
+    },
+    {
+      "name": "frontend-design",
+      "description": "Create distinctive, production-grade frontend interfaces with high design quality. Generates creative, polished code that avoids generic AI aesthetics.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/frontend-design"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Frontend Design",
+        "shortDescription": "Build distinctive, production-grade frontend interfaces.",
+        "longDescription": "Frontend Design generates polished, creative frontend code that avoids generic AI aesthetics while staying production-grade.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Frontend Design to build this page.",
+          "Design a distinctive UI for this component.",
+          "Polish this interface to production quality."
+        ],
+        "brandColor": "#EC4899"
+      }
+    },
+    {
+      "name": "gopls-lsp",
+      "description": "Go language server for code intelligence and refactoring",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/gopls-lsp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "gopls (Go LSP)",
+        "shortDescription": "Go language server for code intelligence and refactoring.",
+        "longDescription": "gopls-lsp wires the Go language server into the agent for definitions, references, diagnostics, and refactoring.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Find references to this Go symbol.",
+          "Go to the definition of this function.",
+          "Refactor this Go code with gopls."
+        ],
+        "brandColor": "#00ADD8"
+      }
+    },
+    {
+      "name": "kotlin-lsp",
+      "description": "Kotlin language server for code intelligence",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/kotlin-lsp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Kotlin LSP",
+        "shortDescription": "Kotlin language server for code intelligence.",
+        "longDescription": "kotlin-lsp wires the Kotlin language server into the agent for definitions, references, and diagnostics.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Go to the definition of this Kotlin symbol.",
+          "Find usages of this class.",
+          "Check Kotlin diagnostics."
+        ],
+        "brandColor": "#7F52FF"
+      }
+    },
+    {
+      "name": "mcp-server-dev",
+      "description": "Skills for designing and building MCP servers that work seamlessly with Claude. Guides you through deployment models (remote HTTP, MCPB, local), tool design patterns, auth, and interactive MCP apps.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/mcp-server-dev"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "MCP Server Dev",
+        "shortDescription": "Design and build MCP servers, tools, and interactive apps.",
+        "longDescription": "MCP Server Dev guides deployment models (remote HTTP, MCPB, local), tool-design patterns, auth, and interactive MCP apps for building servers that work with Claude.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use MCP Server Dev to build an MCP server.",
+          "Design tools for this MCP integration.",
+          "Add an interactive MCP app/widget."
+        ],
+        "brandColor": "#D97757"
+      }
+    },
+    {
+      "name": "playground",
+      "description": "Creates interactive HTML playgrounds — self-contained single-file explorers with visual controls, live preview, and prompt output with copy button. Includes templates for design playgrounds, data explorers, concept maps, and document critique.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/playground"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Playground",
+        "shortDescription": "Create self-contained interactive HTML playgrounds.",
+        "longDescription": "Playground builds single-file HTML explorers with visual controls, live preview, and prompt output — templates for design, data exploration, concept maps, and document critique.",
+        "developerName": "Anthropic",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Playground to build an interactive explorer.",
+          "Create a design playground for these tokens.",
+          "Make a data explorer for this dataset."
+        ],
+        "brandColor": "#F59E0B"
+      }
+    },
+    {
+      "name": "plugin-dev",
+      "description": "Comprehensive toolkit for developing Claude Code plugins. Includes 7 expert skills covering hooks, MCP integration, commands, agents, and best practices. AI-assisted plugin creation and validation.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/plugin-dev"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Plugin Dev",
+        "shortDescription": "Toolkit for building and validating Claude Code plugins.",
+        "longDescription": "Plugin Dev bundles expert skills for hooks, MCP integration, commands, agents, and plugin structure, with AI-assisted creation and validation.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Plugin Dev to scaffold a new plugin.",
+          "Validate this plugin's structure.",
+          "Add a hook to my plugin."
+        ],
+        "brandColor": "#D97757"
+      }
+    },
+    {
+      "name": "pr-review-toolkit",
+      "description": "Comprehensive PR review agents specializing in comments, tests, error handling, type design, code quality, and code simplification",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/pr-review-toolkit"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "PR Review Toolkit",
+        "shortDescription": "Specialized PR review agents across many quality dimensions.",
+        "longDescription": "PR Review Toolkit provides agents specializing in comments, tests, error handling, type design, code quality, and simplification for thorough PR review.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Review this PR with the toolkit.",
+          "Check test coverage on these changes.",
+          "Hunt for silent failures in the diff."
+        ],
+        "brandColor": "#D97757"
+      }
+    },
+    {
+      "name": "pyright-lsp",
+      "description": "Python language server (Pyright) for type checking and code intelligence",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/pyright-lsp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Pyright (Python LSP)",
+        "shortDescription": "Python language server (Pyright) for type checking and intelligence.",
+        "longDescription": "pyright-lsp wires Pyright into the agent for Python type checking, definitions, references, and diagnostics.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Type-check this Python module.",
+          "Find references to this Python symbol.",
+          "Go to the definition of this function."
+        ],
+        "brandColor": "#3776AB"
+      }
+    },
+    {
+      "name": "ralph-loop",
+      "description": "Interactive self-referential AI loops for iterative development, implementing the Ralph Wiggum technique. Claude works on the same task repeatedly, seeing its previous work, until completion.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/ralph-loop"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Ralph Loop",
+        "shortDescription": "Self-referential iteration loops that retry a task until done.",
+        "longDescription": "Ralph Loop runs interactive self-referential loops: the agent repeatedly works the same task, seeing its prior output, until completion criteria are met.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write",
+          "Automation"
+        ],
+        "defaultPrompt": [
+          "Start a Ralph Loop on this task.",
+          "Iterate on this until tests pass.",
+          "Cancel the active Ralph Loop."
+        ],
+        "brandColor": "#F59E0B"
+      }
+    },
+    {
+      "name": "rust-analyzer-lsp",
+      "description": "Rust language server for code intelligence and analysis",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/rust-analyzer-lsp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "rust-analyzer (Rust LSP)",
+        "shortDescription": "Rust language server for code intelligence and analysis.",
+        "longDescription": "rust-analyzer-lsp wires rust-analyzer into the agent for definitions, references, diagnostics, and analysis.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Find references to this Rust symbol.",
+          "Go to the definition of this trait.",
+          "Check rust-analyzer diagnostics."
+        ],
+        "brandColor": "#DEA584"
+      }
+    },
+    {
+      "name": "serena",
+      "description": "Semantic code analysis MCP server providing intelligent code understanding, refactoring suggestions, and codebase navigation through language server protocol integration.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "external_plugins/serena"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Serena",
+        "shortDescription": "Semantic code analysis and navigation MCP server.",
+        "longDescription": "Serena is a semantic code-analysis MCP server offering intelligent code understanding, refactoring suggestions, and codebase navigation via LSP integration.",
+        "developerName": "Oraios AI",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Serena to navigate this codebase.",
+          "Suggest refactors for this module.",
+          "Find the symbol that defines this behavior."
+        ],
+        "brandColor": "#16A34A"
+      }
+    },
+    {
+      "name": "session-report",
+      "description": "Generate an explorable HTML report of Claude Code session usage — tokens, cache efficiency, subagents, skills, and the most expensive prompts — from local ~/.claude/projects transcripts.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/session-report"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Session Report",
+        "shortDescription": "Explorable HTML report of Claude Code session usage.",
+        "longDescription": "Session Report builds an interactive HTML report of session usage — tokens, cache efficiency, subagents, skills, and the most expensive prompts — from local transcripts.",
+        "developerName": "Anthropic",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Generate a session usage report.",
+          "Show me the most expensive prompts this session.",
+          "Report token and cache efficiency."
+        ],
+        "brandColor": "#29B6F6"
+      }
+    },
+    {
+      "name": "skill-creator",
+      "description": "Create new skills, improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, update or optimize an existing skill, run evals to test a skill, or benchmark skill performance with variance analysis.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/skill-creator"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Skill Creator",
+        "shortDescription": "Create, improve, and benchmark agent skills.",
+        "longDescription": "Skill Creator builds new skills, improves existing ones, optimizes descriptions for triggering, and runs evals to benchmark skill performance.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use Skill Creator to make a new skill.",
+          "Improve this skill's description.",
+          "Run evals on this skill."
+        ],
+        "brandColor": "#D97757"
+      }
+    },
+    {
+      "name": "telegram",
+      "description": "Telegram messaging bridge with built-in access control. Manage pairing, allowlists, and policy via /telegram:access.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "external_plugins/telegram"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity",
+      "interface": {
+        "displayName": "Telegram",
+        "shortDescription": "Telegram messaging bridge with built-in access control.",
+        "longDescription": "Telegram bridges agent notifications and chat to Telegram, with pairing, allowlists, and policy managed via /telegram:access.",
+        "developerName": "Anthropic",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Set up the Telegram bridge.",
+          "Manage Telegram access and allowlists.",
+          "Send a message to Telegram."
+        ],
+        "brandColor": "#26A5E4"
+      }
+    },
+    {
+      "name": "typescript-lsp",
+      "description": "TypeScript/JavaScript language server for enhanced code intelligence",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "path": "plugins/typescript-lsp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "TypeScript LSP",
+        "shortDescription": "TypeScript/JavaScript language server for code intelligence.",
+        "longDescription": "typescript-lsp wires the TypeScript/JavaScript language server into the agent for definitions, references, and diagnostics.",
+        "developerName": "Anthropic",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Go to the definition of this TypeScript symbol.",
+          "Find usages of this function.",
+          "Check TypeScript diagnostics."
+        ],
+        "brandColor": "#3178C6"
+      }
+    },
+    {
+      "name": "chrome-devtools-mcp",
+      "description": "Control and inspect a live Chrome browser from your coding agent. Record performance traces, analyze network requests, check console messages with source-mapped stack traces, and automate browser actions with Puppeteer.",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/ChromeDevTools/chrome-devtools-mcp.git",
+        "sha": "c2d8009ff75f76bce1ec4cf79c2467b50d81725e"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Chrome DevTools MCP",
+        "shortDescription": "Control and inspect a live Chrome browser via DevTools.",
+        "longDescription": "Chrome DevTools MCP drives a live Chrome through DevTools/Puppeteer: record performance traces, analyze network and console with source-mapped stacks, and automate browser actions.",
+        "developerName": "Chrome DevTools",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write",
+          "Automation"
+        ],
+        "defaultPrompt": [
+          "Use Chrome DevTools to inspect this page.",
+          "Record a performance trace for this site.",
+          "Check the console and network requests."
+        ],
+        "brandColor": "#4285F4"
+      }
+    },
+    {
+      "name": "zsh-tool",
+      "description": "Zsh shell for Claude Code - full terminal control, live output, PTY mode for interactive commands",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/ArkTechNWA/zsh-tool.git"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools",
+      "interface": {
+        "displayName": "Zsh Tool",
+        "shortDescription": "Full zsh terminal control with live output and PTY mode.",
+        "longDescription": "Zsh Tool gives the agent a real zsh shell with full terminal control, live streaming output, and PTY mode for interactive commands.",
+        "developerName": "ArkTechNWA",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read",
+          "Write",
+          "Automation"
+        ],
+        "defaultPrompt": [
+          "Run this command in a live zsh shell.",
+          "Use Zsh Tool for an interactive PTY session.",
+          "Stream output from a long-running command."
+        ],
+        "brandColor": "#4EAA25"
       }
     }
   ]

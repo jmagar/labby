@@ -79,6 +79,11 @@
             "description": "Browser automation plugin for agent-driven web app testing, inspection, and debugging."
         },
         {
+            "name": "agent-os",
+            "source": "./plugins/agent-os",
+            "description": "Drive the agent-os Windows 11 sandbox VM through its Windows-MCP server — desktop automation, Windows app testing, screenshots, shell commands, and VM health checks."
+        },
+        {
             "name": "axon",
             "source": {
                 "source": "git-subdir",
@@ -205,6 +210,11 @@
             "name": "notebooklm",
             "source": "./plugins/notebooklm",
             "description": "NotebookLM research, source, generation, and download workflows."
+        },
+        {
+            "name": "plexus",
+            "source": "./plugins/plexus",
+            "description": "Remote-device memory and live operating context for host-specific work — a CLAUDE.md-style memory file per host combined with live SSH, Tailscale, Docker, systemd, and log context."
         },
         {
             "name": "radicale",
