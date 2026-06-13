@@ -1,8 +1,23 @@
+#![allow(
+    clippy::await_holding_lock,
+    clippy::bool_assert_comparison,
+    clippy::err_expect,
+    clippy::field_reassign_with_default,
+    clippy::float_cmp,
+    clippy::len_zero,
+    clippy::manual_string_new,
+    clippy::needless_raw_string_hashes,
+    clippy::panic,
+    clippy::single_char_pattern,
+    clippy::unnested_or_patterns
+)]
 //! Architecture test: pins the `lab://gateway/*` URI scheme, the JSON
 //! shape of the synthetic documents, and exposure-policy filtering.
 //!
 //! Any change to a top-level key here is a contract change — update
 //! `docs/contracts/gateway-schema-resources.md` in the same PR.
+
+#![cfg(feature = "gateway")]
 
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -391,6 +391,7 @@ pub fn build_docs_registry() -> ToolRegistry {
 fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
     let mut reg = ToolRegistry::new();
 
+    #[cfg(feature = "gateway")]
     reg.register(RegisteredService {
         name: "gateway",
         description: "Manage proxied upstream MCP gateways",
@@ -448,7 +449,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
         dispatch: dispatch_fn!(crate::mcp::services::nodes::dispatch),
     });
 
-    // marketplace is always-on (synthetic service, no feature flag).
+    #[cfg(feature = "marketplace")]
     {
         let meta = lab_apis::marketplace::META;
         reg.register(RegisteredService {
@@ -671,7 +672,12 @@ mod tests {
             .iter()
             .map(|service| service.name)
             .collect();
-        for kept in ["setup", "doctor", "gateway", "marketplace", "acp", "stash"] {
+        let mut kept_services = vec!["setup", "doctor", "acp", "stash"];
+        #[cfg(feature = "gateway")]
+        kept_services.push("gateway");
+        #[cfg(feature = "marketplace")]
+        kept_services.push("marketplace");
+        for kept in kept_services {
             assert!(names.contains(kept), "{kept} should stay available");
         }
     }
@@ -701,6 +707,54 @@ mod tests {
         assert!(service_meta("gateway").is_none());
     }
 
+    #[cfg(not(feature = "gateway"))]
+    #[test]
+    fn default_registry_omits_gateway_without_feature() {
+        let registry = build_default_registry();
+        assert!(
+            registry
+                .services()
+                .iter()
+                .all(|service| service.name != "gateway")
+        );
+    }
+
+    #[cfg(feature = "gateway")]
+    #[test]
+    fn default_registry_includes_gateway_with_feature() {
+        let registry = build_default_registry();
+        assert!(
+            registry
+                .services()
+                .iter()
+                .any(|service| service.name == "gateway")
+        );
+    }
+
+    #[cfg(not(feature = "marketplace"))]
+    #[test]
+    fn default_registry_omits_marketplace_without_feature() {
+        let registry = build_default_registry();
+        assert!(
+            registry
+                .services()
+                .iter()
+                .all(|service| service.name != "marketplace")
+        );
+    }
+
+    #[cfg(feature = "marketplace")]
+    #[test]
+    fn default_registry_includes_marketplace_with_feature() {
+        let registry = build_default_registry();
+        assert!(
+            registry
+                .services()
+                .iter()
+                .any(|service| service.name == "marketplace")
+        );
+    }
+
     /// Guard that the MCP registry and the HTTP router mount identical service sets.
     ///
     /// Both sides are derived from the same authoritative source — `lab_apis::<service>::META.name`
@@ -725,9 +779,11 @@ mod tests {
             let mut s = std::collections::HashSet::new();
             s.insert(lab_apis::acp::META.name); // always-on
             s.insert("device");
+            #[cfg(feature = "gateway")]
             s.insert("gateway");
             s.insert("logs");
-            s.insert(lab_apis::marketplace::META.name); // always-on
+            #[cfg(feature = "marketplace")]
+            s.insert(lab_apis::marketplace::META.name);
             s.insert(lab_apis::doctor::META.name); // always-on
             s.insert(lab_apis::setup::META.name); // always-on
             s.insert(lab_apis::stash::META.name); // always-on

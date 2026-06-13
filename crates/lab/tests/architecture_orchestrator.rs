@@ -1,3 +1,16 @@
+#![allow(
+    clippy::await_holding_lock,
+    clippy::bool_assert_comparison,
+    clippy::err_expect,
+    clippy::field_reassign_with_default,
+    clippy::float_cmp,
+    clippy::len_zero,
+    clippy::manual_string_new,
+    clippy::needless_raw_string_hashes,
+    clippy::panic,
+    clippy::single_char_pattern,
+    clippy::unnested_or_patterns
+)]
 //! Architecture guard for the lab-bg3e.3 orchestrator-exception clause.
 //!
 //! `setup` is a Bootstrap orchestrator: it is the ONLY service that may

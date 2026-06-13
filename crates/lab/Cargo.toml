@@ -142,6 +142,13 @@ proptest = "1"
 [lib]
 path = "src/lib.rs"
 
+# Feature-slice contract:
+# - `default` keeps the production all-features binary.
+# - `all` is the authoritative development and release build.
+# - Product slices must compile with `--no-default-features --features <slice> --all-targets`.
+# - Supported standalone product slices are: gateway, marketplace, fs, deploy, acp_registry.
+# - `mcpregistry` is owned by marketplace in this crate; do not treat it as standalone here.
+# - Helper/internal features are not standalone product slices unless this comment is updated.
 [features]
 acp_registry = ["lab-apis/acp_registry"]
 node-runtime = []

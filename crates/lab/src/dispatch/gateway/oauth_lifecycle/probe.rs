@@ -324,23 +324,17 @@ pub async fn run(
     let (canonical_url, redacted_url, name, name_is_persisted) =
         resolve_probe_identity(manager, url, upstream_name).await?;
 
-    // SSRF validation (synchronous DNS) — must run in spawn_blocking.
-    // Also enforces https-only and rejects RFC 1918, loopback, and link-local.
-    let url_for_check = canonical_url.clone();
-    tokio::task::spawn_blocking(move || {
-        crate::dispatch::marketplace::validate_registry_url(&url_for_check)
-    })
-    .await
-    .map_err(|e| ToolError::internal_message(format!("SSRF validation task panicked: {e}")))
-    .inspect_err(|_| {
-        tracing::warn!(
-            service = "upstream_oauth",
-            action = "probe",
-            url = %redacted_url,
-            kind = "ssrf_blocked",
-            "upstream oauth probe: SSRF validation task error"
-        );
-    })??;
+    crate::dispatch::security::ssrf::validate_external_https_url(&canonical_url)
+        .await
+        .inspect_err(|_| {
+            tracing::warn!(
+                service = "upstream_oauth",
+                action = "probe",
+                url = %redacted_url,
+                kind = "ssrf_blocked",
+                "upstream oauth probe: SSRF validation task error"
+            );
+        })?;
 
     tracing::info!(
         service = "upstream_oauth",

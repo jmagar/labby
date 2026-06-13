@@ -9,6 +9,7 @@
 //!   `call_tool*`/resource helpers can call them — visibility change only,
 //!   no logic change).
 
+#[cfg(feature = "gateway")]
 use std::borrow::Cow;
 
 use axum::http::request::Parts;
@@ -16,8 +17,11 @@ use rmcp::RoleServer;
 use rmcp::service::RequestContext;
 use sha2::{Digest, Sha256};
 
+#[cfg(feature = "gateway")]
 use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
+#[cfg(feature = "gateway")]
 use crate::dispatch::gateway::code_mode::CodeModeSurface;
+#[cfg(feature = "gateway")]
 use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
 use crate::mcp::server::LabMcpServer;
 
@@ -27,6 +31,7 @@ pub(crate) fn redact_subject_for_logging(subject: &str) -> String {
 }
 
 impl LabMcpServer {
+    #[cfg(feature = "gateway")]
     pub(crate) fn code_mode_surface(&self) -> CodeModeSurface {
         CodeModeSurface::Mcp
     }
@@ -51,6 +56,7 @@ impl LabMcpServer {
         actor_key_from_extensions(&context.extensions)
     }
 
+    #[cfg(feature = "gateway")]
     pub(crate) fn request_runtime_owner(
         &self,
         context: &RequestContext<RoleServer>,
@@ -59,6 +65,7 @@ impl LabMcpServer {
         crate::dispatch::gateway::shared::make_mcp_runtime_owner(subject)
     }
 
+    #[cfg(feature = "gateway")]
     pub(crate) async fn oauth_upstream_configs(&self) -> Vec<crate::config::UpstreamConfig> {
         match &self.gateway_manager {
             Some(manager) => manager.oauth_upstream_configs().await,
@@ -66,6 +73,7 @@ impl LabMcpServer {
         }
     }
 
+    #[cfg(feature = "gateway")]
     pub(crate) async fn route_scoped_oauth_upstream_configs(
         &self,
     ) -> Vec<crate::config::UpstreamConfig> {
@@ -74,6 +82,7 @@ impl LabMcpServer {
         configs
     }
 
+    #[cfg(feature = "gateway")]
     pub(crate) async fn oauth_upstream_config(
         &self,
         upstream_name: &str,
@@ -100,6 +109,7 @@ pub(crate) fn auth_context_from_extensions(
     parts.extensions.get::<crate::api::oauth::AuthContext>()
 }
 
+#[cfg(feature = "gateway")]
 pub(crate) fn oauth_upstream_subject_for_request<'a>(
     auth: Option<&crate::api::oauth::AuthContext>,
     request_subject: Option<&'a str>,

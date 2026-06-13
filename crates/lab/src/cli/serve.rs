@@ -16,17 +16,22 @@ use rmcp::transport::streamable_http_server::{
     StreamableHttpServerConfig, StreamableHttpService,
     session::local::{LocalSessionManager, SessionConfig},
 };
+#[cfg(feature = "gateway")]
 use tokio::sync::mpsc;
 
 use crate::api::AppState;
 use crate::config::{
     LabConfig, config_toml_path, dotenv_path, heal_env_file_permissions, resolve_auth_for_config,
 };
+#[cfg(feature = "gateway")]
 use crate::dispatch::clients::SharedServiceClients;
+#[cfg(feature = "gateway")]
 use crate::dispatch::gateway::install_gateway_manager;
+#[cfg(feature = "gateway")]
 use crate::dispatch::gateway::manager::{
     GatewayManager, GatewayManagerConfig, GatewayOauthConfig, GatewayRuntimeHandle,
 };
+#[cfg(feature = "gateway")]
 use crate::dispatch::gateway::types::CatalogChangeNotifier;
 use crate::dispatch::logs::client::{
     bootstrap_running_log_system, resolve_queue_capacity, resolve_retention, resolve_store_path,
@@ -271,7 +276,6 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
     let stdio_mode = should_run_stdio(transport, args.command.as_ref());
     let spawn_depth = resolve_lab_spawn_depth(std::env::var("LAB_SPAWN_DEPTH").ok());
     let suppress_upstream_runtime = stdio_recursion_guard_active(stdio_mode, spawn_depth);
-    let gateway_runtime = GatewayRuntimeHandle::default();
     let mut bearer_token = http_token();
     let auth_config =
         resolve_auth_for_config(&config).context("invalid HTTP auth configuration")?;
@@ -285,58 +289,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         bearer_token_configured = bearer_token.is_some(),
         "http auth configuration resolved"
     );
-    let upstream_oauth_runtime = if suppress_upstream_runtime {
-        tracing::info!(
-            subsystem = "gateway_client",
-            phase = "oauth.runtime.disabled",
-            transport = ?transport,
-            spawn_depth,
-            "upstream oauth runtime skipped because stdio recursion guard is active"
-        );
-        None
-    } else {
-        crate::oauth::upstream::runtime::build_upstream_oauth_runtime(config, &auth_config).await?
-    };
-    tracing::info!(
-        subsystem = "gateway_client",
-        phase = "discovery.lazy.start",
-        upstream_count = config.upstream.len(),
-        oauth_upstream_count = config
-            .upstream
-            .iter()
-            .filter(|upstream| upstream.oauth.is_some())
-            .count(),
-        "preparing lazy upstream gateway catalog"
-    );
-    crate::config::set_process_code_mode_enabled(config.code_mode.enabled);
-    let mut pool_builder = crate::dispatch::upstream::pool::UpstreamPool::new()
-        .with_request_timeout(config.upstream_request_timeout())
-        .with_in_process_connector(crate::mcp::in_process_peer::connector());
-    if let Some(rt) = &upstream_oauth_runtime {
-        pool_builder = pool_builder.with_oauth_client_cache(rt.cache.clone());
-    }
-    let pool = Arc::new(pool_builder);
-    if !suppress_upstream_runtime {
-        pool.seed_lazy_upstreams(&config.upstream).await;
-        tracing::info!(
-            subsystem = "gateway_client",
-            phase = "discovery.lazy",
-            upstream_count = config.upstream.len(),
-            seeded_upstream_count = pool.upstream_count().await,
-            "upstream gateway discovery deferred until first use"
-        );
-        gateway_runtime.swap(Some(pool)).await;
-    } else {
-        tracing::info!(
-            subsystem = "gateway_client",
-            phase = "discovery.skipped",
-            spawn_depth,
-            "upstream discovery skipped because stdio recursion guard is active"
-        );
-    }
     let notifier = PeerNotifier::default();
-    let (notify_tx, notify_rx) = mpsc::unbounded_channel();
-    let _catalog_notifier_task = tokio::spawn(notifier.clone().run(notify_rx));
     // WIRING (SEC): tighten loose ~/.lab/.env permissions at every startup so a
     // freshly-created file (which may be 0644) is corrected to 0600 before any
     // secrets are read.  heal_env_file_permissions is idempotent and a no-op on
@@ -346,102 +299,19 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         heal_env_file_permissions(&env_path);
     }
 
-    let service_clients = SharedServiceClients::from_env();
-    let mut gateway_manager = GatewayManager::from_config(
-        GatewayManagerConfig {
-            config_path: config_toml_path().unwrap_or_else(|| "config.toml".into()),
-            registry: registry.clone(),
-            service_clients,
-            in_process_connector: Some(crate::mcp::in_process_peer::connector()),
-            oauth: upstream_oauth_runtime.map(|rt| GatewayOauthConfig {
-                managers: rt.managers,
-                cache: rt.cache,
-                sqlite: rt.sqlite,
-                key: rt.key,
-                redirect_uri: rt.redirect_uri,
-            }),
-        },
-        gateway_runtime.clone(),
-    );
-    gateway_manager.set_notifier(CatalogChangeNotifier::new(notify_tx));
-    let gateway_manager = Arc::new(gateway_manager);
-    // Seed config for both transports so MCP catalog visibility and code-mode
-    // settings match the persisted config. Normal stdio follows the same gateway
-    // runtime path as HTTP; only recursive stdio children suppress upstream
-    // spawning.
-    gateway_manager.seed_config(config.clone()).await;
-    install_gateway_manager(Arc::clone(&gateway_manager));
-    if !suppress_upstream_runtime {
-        match config.gateway_import_mode {
-            crate::config::GatewayImportMode::Off => {
-                tracing::info!(
-                    subsystem = "gateway_client",
-                    phase = "auto_import.skipped",
-                    reason = "gateway_import_mode=off",
-                    "external MCP config auto-import disabled"
-                );
-            }
-            crate::config::GatewayImportMode::Pending => {
-                match gateway_manager.discover_into_pending().await {
-                    Ok(result) => {
-                        tracing::info!(
-                            subsystem = "gateway_client",
-                            phase = "auto_import.pending",
-                            queued = result.queued,
-                            skipped = result.skipped,
-                            "discovered servers queued for approval"
-                        );
-                    }
-                    Err(error) => {
-                        tracing::warn!(
-                            subsystem = "gateway_client",
-                            phase = "auto_import.pending_failed",
-                            error = %error,
-                            "pending-mode discovery failed"
-                        );
-                    }
-                }
-            }
-            crate::config::GatewayImportMode::Auto => {
-                match gateway_manager.auto_import_discovered_configs().await {
-                    Ok(result) => {
-                        tracing::info!(
-                            subsystem = "gateway_client",
-                            phase = "auto_import.finish",
-                            imported = result.imported.len(),
-                            skipped = result.skipped.len(),
-                            errors = result.errors.len(),
-                            "external MCP configs auto-imported"
-                        );
-                    }
-                    Err(error) => {
-                        tracing::warn!(
-                            subsystem = "gateway_client",
-                            phase = "auto_import.failed",
-                            error = %error,
-                            "external MCP config auto-import failed"
-                        );
-                    }
-                }
-            }
-        }
-        tracing::info!(
-            subsystem = "gateway_client",
-            phase = "manager.ready",
-            transport = ?transport,
-            upstream_count = gateway_manager.current_config().await.upstream.len(),
-            "gateway manager installed"
-        );
-    } else {
-        tracing::info!(
-            subsystem = "gateway_client",
-            phase = "manager.ready",
-            transport = ?transport,
-            spawn_depth,
-            upstream_count = gateway_manager.current_config().await.upstream.len(),
-            "gateway manager installed with upstream spawning suppressed"
-        );
-    }
+    #[cfg(feature = "gateway")]
+    let gateway_manager = build_gateway_runtime(
+        config,
+        &auth_config,
+        transport,
+        spawn_depth,
+        suppress_upstream_runtime,
+        registry.clone(),
+        notifier.clone(),
+    )
+    .await?;
+    #[cfg(not(feature = "gateway"))]
+    reject_protected_routes_without_gateway(config)?;
     let logs_system = bootstrap_running_log_system(
         resolve_store_path(Some(config)),
         resolve_retention(Some(config)),
@@ -473,21 +343,36 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
             phase = "disabled",
             "web server disabled for stdio transport"
         );
-        return run_stdio(
-            Arc::new(registry),
-            Arc::clone(&gateway_manager),
-            node_role,
-            notifier,
-            spawn_depth,
-            suppress_upstream_runtime,
-        )
-        .await;
+        #[cfg(feature = "gateway")]
+        {
+            return run_stdio(
+                Arc::new(registry),
+                Arc::clone(&gateway_manager),
+                node_role,
+                notifier,
+                spawn_depth,
+                suppress_upstream_runtime,
+            )
+            .await;
+        }
+        #[cfg(not(feature = "gateway"))]
+        {
+            return run_stdio(
+                Arc::new(registry),
+                node_role,
+                notifier,
+                spawn_depth,
+                suppress_upstream_runtime,
+            )
+            .await;
+        }
     }
 
     if host.is_empty() {
         anyhow::bail!("HTTP host cannot be empty — set LAB_MCP_HTTP_HOST or mcp.host in config");
     }
 
+    #[cfg(feature = "gateway")]
     crate::mcp::server::verify_upstream_subject_resolution_support()
         .context("verify upstream OAuth subject-resolution wiring")?;
 
@@ -598,7 +483,10 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
             }
         }
     }
-    state = state.with_gateway_manager(Arc::clone(&gateway_manager));
+    #[cfg(feature = "gateway")]
+    {
+        state = state.with_gateway_manager(Arc::clone(&gateway_manager));
+    }
     state = state.with_auth_config(auth_config);
     let web_ui_auth_disabled = resolve_web_ui_auth_disabled(
         &config.web,
@@ -1010,6 +898,17 @@ async fn run_http(
         bearer_token_configured,
         "building http router"
     );
+    #[cfg(feature = "gateway")]
+    let router = build_http_router(
+        state,
+        bearer_token,
+        auth_state,
+        mcp_config,
+        config_cors_origins,
+        notifier,
+        mount_http_mcp,
+    )?;
+    #[cfg(not(feature = "gateway"))]
     let router = build_http_router(
         state,
         bearer_token,
@@ -1138,7 +1037,10 @@ fn build_http_router(
     } else {
         None
     };
+    #[cfg(feature = "gateway")]
     let protected_mcp_router = build_protected_mcp_router(&state, mcp_config, notifier)?;
+    #[cfg(not(feature = "gateway"))]
+    let protected_mcp_router: Option<axum::Router> = None;
     let state = if let Some(router) = protected_mcp_router {
         state.with_protected_mcp_router(router)
     } else {
@@ -1152,6 +1054,177 @@ fn build_http_router(
         mcp_router,
         config_cors_origins,
     ))
+}
+
+#[cfg(feature = "gateway")]
+async fn build_gateway_runtime(
+    config: &LabConfig,
+    auth_config: &lab_auth::config::AuthConfig,
+    transport: Transport,
+    spawn_depth: Option<u32>,
+    suppress_upstream_runtime: bool,
+    registry: ToolRegistry,
+    notifier: PeerNotifier,
+) -> Result<Arc<GatewayManager>> {
+    let gateway_runtime = GatewayRuntimeHandle::default();
+    let upstream_oauth_runtime = if suppress_upstream_runtime {
+        tracing::info!(
+            subsystem = "gateway_client",
+            phase = "oauth.runtime.disabled",
+            transport = ?transport,
+            spawn_depth,
+            "upstream oauth runtime skipped because stdio recursion guard is active"
+        );
+        None
+    } else {
+        crate::oauth::upstream::runtime::build_upstream_oauth_runtime(config, auth_config).await?
+    };
+    tracing::info!(
+        subsystem = "gateway_client",
+        phase = "discovery.lazy.start",
+        upstream_count = config.upstream.len(),
+        oauth_upstream_count = config
+            .upstream
+            .iter()
+            .filter(|upstream| upstream.oauth.is_some())
+            .count(),
+        "preparing lazy upstream gateway catalog"
+    );
+    crate::config::set_process_code_mode_enabled(config.code_mode.enabled);
+    let mut pool_builder = crate::dispatch::upstream::pool::UpstreamPool::new()
+        .with_request_timeout(config.upstream_request_timeout())
+        .with_in_process_connector(crate::mcp::in_process_peer::connector());
+    if let Some(rt) = &upstream_oauth_runtime {
+        pool_builder = pool_builder.with_oauth_client_cache(rt.cache.clone());
+    }
+    let pool = Arc::new(pool_builder);
+    if !suppress_upstream_runtime {
+        pool.seed_lazy_upstreams(&config.upstream).await;
+        tracing::info!(
+            subsystem = "gateway_client",
+            phase = "discovery.lazy",
+            upstream_count = config.upstream.len(),
+            seeded_upstream_count = pool.upstream_count().await,
+            "upstream gateway discovery deferred until first use"
+        );
+        gateway_runtime.swap(Some(pool)).await;
+    } else {
+        tracing::info!(
+            subsystem = "gateway_client",
+            phase = "discovery.skipped",
+            spawn_depth,
+            "upstream discovery skipped because stdio recursion guard is active"
+        );
+    }
+    let (notify_tx, notify_rx) = mpsc::unbounded_channel();
+    let _catalog_notifier_task = tokio::spawn(notifier.run(notify_rx));
+    let service_clients = SharedServiceClients::from_env();
+    let mut gateway_manager = GatewayManager::from_config(
+        GatewayManagerConfig {
+            config_path: config_toml_path().unwrap_or_else(|| "config.toml".into()),
+            registry,
+            service_clients,
+            in_process_connector: Some(crate::mcp::in_process_peer::connector()),
+            oauth: upstream_oauth_runtime.map(|rt| GatewayOauthConfig {
+                managers: rt.managers,
+                cache: rt.cache,
+                sqlite: rt.sqlite,
+                key: rt.key,
+                redirect_uri: rt.redirect_uri,
+            }),
+        },
+        gateway_runtime,
+    );
+    gateway_manager.set_notifier(CatalogChangeNotifier::new(notify_tx));
+    let gateway_manager = Arc::new(gateway_manager);
+    // Seed config for both transports so MCP catalog visibility and code-mode
+    // settings match the persisted config. Normal stdio follows the same gateway
+    // runtime path as HTTP; only recursive stdio children suppress upstream
+    // spawning.
+    gateway_manager.seed_config(config.clone()).await;
+    install_gateway_manager(Arc::clone(&gateway_manager));
+    if !suppress_upstream_runtime {
+        match config.gateway_import_mode {
+            crate::config::GatewayImportMode::Off => {
+                tracing::info!(
+                    subsystem = "gateway_client",
+                    phase = "auto_import.skipped",
+                    reason = "gateway_import_mode=off",
+                    "external MCP config auto-import disabled"
+                );
+            }
+            crate::config::GatewayImportMode::Pending => {
+                match gateway_manager.discover_into_pending().await {
+                    Ok(result) => {
+                        tracing::info!(
+                            subsystem = "gateway_client",
+                            phase = "auto_import.pending",
+                            queued = result.queued,
+                            skipped = result.skipped,
+                            "discovered servers queued for approval"
+                        );
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            subsystem = "gateway_client",
+                            phase = "auto_import.pending_failed",
+                            error = %error,
+                            "pending-mode discovery failed"
+                        );
+                    }
+                }
+            }
+            crate::config::GatewayImportMode::Auto => {
+                match gateway_manager.auto_import_discovered_configs().await {
+                    Ok(result) => {
+                        tracing::info!(
+                            subsystem = "gateway_client",
+                            phase = "auto_import.finish",
+                            imported = result.imported.len(),
+                            skipped = result.skipped.len(),
+                            errors = result.errors.len(),
+                            "external MCP configs auto-imported"
+                        );
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            subsystem = "gateway_client",
+                            phase = "auto_import.failed",
+                            error = %error,
+                            "external MCP config auto-import failed"
+                        );
+                    }
+                }
+            }
+        }
+        tracing::info!(
+            subsystem = "gateway_client",
+            phase = "manager.ready",
+            transport = ?transport,
+            upstream_count = gateway_manager.current_config().await.upstream.len(),
+            "gateway manager installed"
+        );
+    } else {
+        tracing::info!(
+            subsystem = "gateway_client",
+            phase = "manager.ready",
+            transport = ?transport,
+            spawn_depth,
+            upstream_count = gateway_manager.current_config().await.upstream.len(),
+            "gateway manager installed with upstream spawning suppressed"
+        );
+    }
+    Ok(gateway_manager)
+}
+
+#[cfg(not(feature = "gateway"))]
+fn reject_protected_routes_without_gateway(config: &LabConfig) -> Result<()> {
+    if !config.protected_mcp_routes.is_empty() {
+        anyhow::bail!(
+            "protected MCP routes are configured but this labby build does not include the gateway feature"
+        );
+    }
+    Ok(())
 }
 
 /// Run the minimal node-mode startup path.
@@ -1194,7 +1267,7 @@ async fn run_node_mode(
 
 async fn run_stdio(
     registry: Arc<ToolRegistry>,
-    gateway_manager: Arc<GatewayManager>,
+    #[cfg(feature = "gateway")] gateway_manager: Arc<GatewayManager>,
     node_role: crate::config::NodeRole,
     notifier: PeerNotifier,
     spawn_depth: Option<u32>,
@@ -1244,6 +1317,7 @@ async fn run_stdio(
     let service_count = registry.services().len();
     let server = LabMcpServer {
         registry,
+        #[cfg(feature = "gateway")]
         gateway_manager: Some(Arc::clone(&gateway_manager)),
         node_role: Some(node_role),
         peers: Arc::clone(&notifier.peers),
@@ -1296,13 +1370,25 @@ fn build_mcp_service(
     mcp_config: &crate::config::McpPreferences,
     notifier: PeerNotifier,
 ) -> Result<StreamableHttpService<LabMcpServer, LocalSessionManager>> {
-    build_mcp_service_with_scope(
-        state,
-        mcp_config,
-        notifier,
-        crate::mcp::route_scope::McpRouteScope::Root,
-        &[],
-    )
+    #[cfg(feature = "gateway")]
+    {
+        return build_mcp_service_with_scope(
+            state,
+            mcp_config,
+            notifier,
+            crate::mcp::route_scope::McpRouteScope::Root,
+            &[],
+        );
+    }
+    #[cfg(not(feature = "gateway"))]
+    {
+        return build_mcp_service_with_scope(
+            state,
+            mcp_config,
+            notifier,
+            crate::mcp::route_scope::McpRouteScope::Root,
+        );
+    }
 }
 
 fn build_mcp_service_with_scope(
@@ -1310,9 +1396,10 @@ fn build_mcp_service_with_scope(
     mcp_config: &crate::config::McpPreferences,
     notifier: PeerNotifier,
     route_scope: crate::mcp::route_scope::McpRouteScope,
-    extra_allowed_hosts: &[String],
+    #[cfg(feature = "gateway")] extra_allowed_hosts: &[String],
 ) -> Result<StreamableHttpService<LabMcpServer, LocalSessionManager>> {
     let registry = Arc::clone(&state.registry);
+    #[cfg(feature = "gateway")]
     let gateway_manager = state.gateway_manager.clone();
 
     let session_ttl_secs = resolve_session_ttl_secs(
@@ -1339,9 +1426,12 @@ fn build_mcp_service_with_scope(
     );
     let mut seen_allowed_hosts: std::collections::HashSet<String> =
         allowed_hosts.iter().cloned().collect();
-    for host in extra_allowed_hosts {
-        if seen_allowed_hosts.insert(host.clone()) {
-            allowed_hosts.push(host.clone());
+    #[cfg(feature = "gateway")]
+    {
+        for host in extra_allowed_hosts {
+            if seen_allowed_hosts.insert(host.clone()) {
+                allowed_hosts.push(host.clone());
+            }
         }
     }
     let config = StreamableHttpServerConfig::default()
@@ -1369,7 +1459,12 @@ fn build_mcp_service_with_scope(
     Ok(StreamableHttpService::new(
         move || {
             let reg = Arc::clone(&registry);
+            #[cfg(feature = "gateway")]
             let manager = gateway_manager.clone();
+            #[cfg(feature = "gateway")]
+            let gateway_manager_configured = manager.is_some();
+            #[cfg(not(feature = "gateway"))]
+            let gateway_manager_configured = false;
             let peers = Arc::clone(&shared_peers);
             let route_scope = route_scope.clone();
             tracing::info!(
@@ -1380,13 +1475,14 @@ fn build_mcp_service_with_scope(
                 phase = "session.init",
                 transport = "http",
                 services = reg.services().len(),
-                gateway_manager_configured = manager.is_some(),
+                gateway_manager_configured,
                 node_role = ?node_role,
                 route_scope = %route_scope_label,
                 "initializing HTTP MCP session handler"
             );
             Ok(LabMcpServer {
                 registry: reg,
+                #[cfg(feature = "gateway")]
                 gateway_manager: manager,
                 node_role,
                 peers,
@@ -1401,6 +1497,7 @@ fn build_mcp_service_with_scope(
     ))
 }
 
+#[cfg(feature = "gateway")]
 fn build_protected_mcp_router(
     state: &AppState,
     mcp_config: &crate::config::McpPreferences,
@@ -1651,7 +1748,9 @@ fn find_listening_inode(path: &str, hex_port: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "fs")]
     use std::ffi::OsString;
+    #[cfg(feature = "fs")]
     use std::path::PathBuf;
 
     use axum::body::Body;
@@ -1943,6 +2042,7 @@ mod tests {
         assert_ne!(response.status(), StatusCode::NOT_FOUND);
     }
 
+    #[cfg(feature = "gateway")]
     #[tokio::test]
     async fn protected_gateway_subset_builder_mounts_scoped_mcp_service() {
         let tempdir = tempfile::tempdir().expect("tempdir");

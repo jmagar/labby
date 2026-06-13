@@ -139,44 +139,47 @@ impl LabMcpServer {
 
         let svc = self.registry.services().iter().find(|s| s.name == service);
 
-        // ── Gateway `search` tool: run caller's JS over the upstream catalog ──
-        if service == CODE_MODE_SEARCH_TOOL_NAME {
-            if !self.route_scope.exposes_code_mode() {
-                let elapsed_ms = start.elapsed().as_millis();
-                self.log_route_scope_denial(
-                    &context,
-                    &service,
-                    "call_tool",
-                    "Code Mode is not exposed on this MCP route",
-                    elapsed_ms,
-                );
-                return Ok(route_scope_denied_result(
-                    &service,
-                    "call_tool",
-                    "Code Mode is not exposed on this MCP route".to_string(),
-                ));
+        #[cfg(feature = "gateway")]
+        {
+            // ── Gateway `search` tool: run caller's JS over the upstream catalog ──
+            if service == CODE_MODE_SEARCH_TOOL_NAME {
+                if !self.route_scope.exposes_code_mode() {
+                    let elapsed_ms = start.elapsed().as_millis();
+                    self.log_route_scope_denial(
+                        &context,
+                        &service,
+                        "call_tool",
+                        "Code Mode is not exposed on this MCP route",
+                        elapsed_ms,
+                    );
+                    return Ok(route_scope_denied_result(
+                        &service,
+                        "call_tool",
+                        "Code Mode is not exposed on this MCP route".to_string(),
+                    ));
+                }
+                return self.call_code_mode_impl(&service, &args, &context).await;
             }
-            return self.call_code_mode_impl(&service, &args, &context).await;
-        }
 
-        // ── Gateway `execute` tool: run caller's JS in the subprocess sandbox ─
-        if service == TOOL_EXECUTE_TOOL_NAME {
-            if !self.route_scope.exposes_code_mode() {
-                let elapsed_ms = start.elapsed().as_millis();
-                self.log_route_scope_denial(
-                    &context,
-                    &service,
-                    "call_tool",
-                    "Code Mode is not exposed on this MCP route",
-                    elapsed_ms,
-                );
-                return Ok(route_scope_denied_result(
-                    &service,
-                    "call_tool",
-                    "Code Mode is not exposed on this MCP route".to_string(),
-                ));
+            // ── Gateway `execute` tool: run caller's JS in the subprocess sandbox ─
+            if service == TOOL_EXECUTE_TOOL_NAME {
+                if !self.route_scope.exposes_code_mode() {
+                    let elapsed_ms = start.elapsed().as_millis();
+                    self.log_route_scope_denial(
+                        &context,
+                        &service,
+                        "call_tool",
+                        "Code Mode is not exposed on this MCP route",
+                        elapsed_ms,
+                    );
+                    return Ok(route_scope_denied_result(
+                        &service,
+                        "call_tool",
+                        "Code Mode is not exposed on this MCP route".to_string(),
+                    ));
+                }
+                return self.call_tool_execute_impl(&service, &args, &context).await;
             }
-            return self.call_tool_execute_impl(&service, &args, &context).await;
         }
 
         if svc.is_some() && !self.route_scope.allows_service(&service) {
@@ -218,6 +221,7 @@ impl LabMcpServer {
             )]));
         }
 
+        #[cfg(feature = "gateway")]
         if self.code_mode_visibility().await.hides_raw_tools() {
             // MCP App tools stay visible in `list_tools` even while Code Mode
             // hides ordinary raw tools. The rendered app's host callbacks must
@@ -429,17 +433,35 @@ impl LabMcpServer {
             return Ok(result);
         }
 
-        // Fall through to upstream proxy dispatch (raw + subject-scoped +
-        // no-dispatcher-wired fallback). The helper returns unconditionally.
-        self.call_tool_upstream_impl(
-            &service,
-            &action,
-            raw_arguments,
-            start,
-            &subject,
-            actor_key,
-            &context,
-        )
-        .await
+        #[cfg(feature = "gateway")]
+        {
+            // Fall through to upstream proxy dispatch (raw + subject-scoped +
+            // no-dispatcher-wired fallback). The helper returns unconditionally.
+            return self
+                .call_tool_upstream_impl(
+                    &service,
+                    &action,
+                    raw_arguments,
+                    start,
+                    &subject,
+                    actor_key,
+                    &context,
+                )
+                .await;
+        }
+        #[cfg(not(feature = "gateway"))]
+        {
+            let _ = raw_arguments;
+            let _ = start;
+            let envelope = build_error(
+                &service,
+                &action,
+                "not_found",
+                &format!("tool `{service}` is not available in this labby build"),
+            );
+            Ok(CallToolResult::error(vec![Content::text(
+                envelope.to_string(),
+            )]))
+        }
     }
 }

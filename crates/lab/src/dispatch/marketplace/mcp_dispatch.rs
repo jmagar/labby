@@ -91,22 +91,33 @@ pub async fn dispatch_mcp_with_client(
         }
         "mcp.install" => dispatch_mcp_install(client, &params).await,
         "mcp.uninstall" => {
-            let gateway_name = params["gateway_name"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| ToolError::MissingParam {
-                    message: "missing required parameter `gateway_name`".to_string(),
-                    param: "gateway_name".to_string(),
-                })?
-                .to_string();
+            #[cfg(not(feature = "gateway"))]
+            {
+                let _ = params;
+                return Err(ToolError::Sdk {
+                    sdk_kind: "not_supported".to_string(),
+                    message: "`mcp.uninstall` requires the gateway feature".to_string(),
+                });
+            }
+            #[cfg(feature = "gateway")]
+            {
+                let gateway_name = params["gateway_name"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| ToolError::MissingParam {
+                        message: "missing required parameter `gateway_name`".to_string(),
+                        param: "gateway_name".to_string(),
+                    })?
+                    .to_string();
 
-            // Delegate to gateway.remove — pass confirm:true since the caller already confirmed
-            // at the mcp.uninstall level (destructive:true is checked by handle_action).
-            crate::dispatch::gateway::dispatch(
-                "gateway.remove",
-                serde_json::json!({ "name": gateway_name, "confirm": true }),
-            )
-            .await
+                // Delegate to gateway.remove — pass confirm:true since the caller already confirmed
+                // at the mcp.uninstall level (destructive:true is checked by handle_action).
+                crate::dispatch::gateway::dispatch(
+                    "gateway.remove",
+                    serde_json::json!({ "name": gateway_name, "confirm": true }),
+                )
+                .await
+            }
         }
         "mcp.meta.get" => dispatch_mcp_local(action, params).await,
         "mcp.meta.set" => dispatch_mcp_local(action, params).await,
@@ -278,6 +289,13 @@ async fn dispatch_mcp_install_inner(
             message: "`gateway_ids` or `client_targets` must not be empty".to_string(),
         });
     }
+    #[cfg(not(feature = "gateway"))]
+    if !gateway_ids.is_empty() {
+        return Err(ToolError::Sdk {
+            sdk_kind: "not_supported".to_string(),
+            message: "`gateway_ids` install targets require the gateway feature".to_string(),
+        });
+    }
 
     let server_resp = client.get_server(&name, version).await?;
     let server = &server_resp.server;
@@ -286,6 +304,7 @@ async fn dispatch_mcp_install_inner(
 
     let mut results = Vec::new();
 
+    #[cfg(feature = "gateway")]
     for gateway_id in &gateway_ids {
         let spec = if let Some(url) = http_url {
             match install_http(url, gateway_id, params).await {
@@ -335,7 +354,7 @@ async fn dispatch_mcp_install_inner(
     }
 
     if !client_targets.is_empty() {
-        let client_config = mcp_client_config(server, params, &name, &prefs)?;
+        let client_config = mcp_client_config(server, params, &name, &prefs).await?;
         for target in &client_targets {
             let target_id = format!("{}:{}", target.node_id, target.client);
             let outcome = send_rpc_to_node(
@@ -602,15 +621,14 @@ fn build_stdio_command<'a>(
 }
 
 #[cfg(feature = "mcpregistry")]
-fn mcp_client_config(
+async fn mcp_client_config(
     server: &ServerJSON,
     params_value: &Value,
     server_name: &str,
     prefs: &GatewayPreferences,
 ) -> Result<Value, ToolError> {
     if let Some(url) = server.remotes.iter().find_map(|r| r.url.as_deref()) {
-        let url_for_check = url.to_string();
-        mcp_params::validate_registry_url(&url_for_check)?;
+        crate::dispatch::security::ssrf::validate_external_https_url(url).await?;
         return Ok(serde_json::json!({ "url": url }));
     }
 
@@ -713,15 +731,10 @@ async fn install_http(
 ) -> Result<Value, ToolError> {
     let url = url.to_string();
 
-    // SSRF validation (synchronous DNS) — must run in spawn_blocking.
-    let url_for_check = url.clone();
-    tokio::task::spawn_blocking(move || mcp_params::validate_registry_url(&url_for_check))
-        .await
-        .map_err(|e| {
-            ToolError::internal_message(format!("SSRF validation task panicked: {e}"))
-        })??;
+    crate::dispatch::security::ssrf::validate_external_https_url(&url).await?;
 
     // Probe for OAuth support — non-fatal, install proceeds without OAuth on failure.
+    #[cfg(feature = "gateway")]
     let discovered_oauth: Option<Value> =
         if let Some(manager) = crate::dispatch::gateway::current_gateway_manager() {
             match manager.probe_upstream_oauth(&url).await {
@@ -733,6 +746,8 @@ async fn install_http(
         } else {
             None
         };
+    #[cfg(not(feature = "gateway"))]
+    let discovered_oauth: Option<Value> = None;
 
     let bearer_token_env = params_value["bearer_token_env"].as_str();
 

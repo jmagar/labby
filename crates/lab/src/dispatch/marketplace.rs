@@ -34,7 +34,7 @@ mod update;
 pub use catalog::actions;
 pub use client::NodeRpcPort;
 pub use dispatch::{dispatch, dispatch_with_port};
-pub use mcp_params::{resolve_search_for_rest, validate_registry_url};
+pub use mcp_params::resolve_search_for_rest;
 pub const LAB_REGISTRY_META_NAMESPACE: &str = "tv.tootie.lab/registry";
 
 #[cfg(test)]

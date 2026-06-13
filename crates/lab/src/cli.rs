@@ -7,12 +7,15 @@
 pub mod completions;
 pub mod docs;
 pub mod doctor;
+#[cfg(feature = "gateway")]
 pub mod gateway;
 pub mod health;
 pub mod help;
 pub mod helpers;
+#[cfg(feature = "gateway")]
 pub mod internal;
 pub mod logs;
+#[cfg(feature = "marketplace")]
 pub mod marketplace;
 #[cfg(feature = "mcpregistry")]
 pub mod mcpregistry;
@@ -82,12 +85,14 @@ pub enum Command {
     /// Generate shell completions.
     Completions(completions::CompletionsArgs),
     /// Manage proxied upstream MCP gateways.
+    #[cfg(feature = "gateway")]
     Gateway(gateway::GatewayArgs),
     /// Run local OAuth callback relay helpers.
     Oauth(oauth::OauthArgs),
     /// Search fleet logs on the configured master.
     Logs(logs::LogsArgs),
     /// Claude plugin marketplace manager.
+    #[cfg(feature = "marketplace")]
     Marketplace(marketplace::MarketplaceArgs),
     /// MCP Registry — look up and install servers from registry.modelcontextprotocol.io.
     #[cfg(feature = "mcpregistry")]
@@ -98,6 +103,7 @@ pub enum Command {
     #[cfg(feature = "deploy")]
     Deploy(deploy::DeployArgs),
     /// Hidden internal process helpers.
+    #[cfg(feature = "gateway")]
     #[command(hide = true)]
     Internal(internal::InternalArgs),
     // [lab-scaffold: cli-variants]
@@ -115,15 +121,18 @@ pub async fn dispatch(cli: Cli, config: LabConfig) -> Result<ExitCode> {
         Command::Health => health::run(format).await,
         Command::Setup(args) => setup::run(args, format).await,
         Command::Completions(args) => completions::run(&args),
+        #[cfg(feature = "gateway")]
         Command::Gateway(args) => gateway::run(args, format, &config).await,
         Command::Oauth(args) => oauth::run(args, &config).await,
         Command::Logs(args) => logs::run(args, format, &config).await,
+        #[cfg(feature = "marketplace")]
         Command::Marketplace(args) => marketplace::run(args, format).await,
         #[cfg(feature = "mcpregistry")]
         Command::Registry(args) => mcpregistry::run(args, format).await,
         Command::Stash(args) => stash::run(args, format).await,
         #[cfg(feature = "deploy")]
         Command::Deploy(args) => dispatch_deploy(args, format, config.deploy.clone()).await,
+        #[cfg(feature = "gateway")]
         Command::Internal(args) => internal::run(args),
         // [lab-scaffold: cli-dispatch]
     }

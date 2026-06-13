@@ -8,19 +8,23 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Instant;
 
 use axum::http;
+#[cfg(feature = "gateway")]
+use rmcp::model::ExtensionCapabilities;
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, CompleteRequestParams, CompleteResult,
-    ExtensionCapabilities, GetPromptRequestParams, GetPromptResult, ListPromptsResult,
-    ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
-    ReadResourceResult, ServerCapabilities, ServerInfo, SetLevelRequestParams,
+    GetPromptRequestParams, GetPromptResult, ListPromptsResult, ListResourcesResult,
+    ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResult,
+    ServerCapabilities, ServerInfo, SetLevelRequestParams,
 };
 use rmcp::service::{NotificationContext, Peer, RequestContext};
 use rmcp::{ErrorData, RoleServer, ServerHandler};
 use tokio::sync::RwLock;
 
 use crate::config::NodeRole;
+#[cfg(feature = "gateway")]
 use crate::dispatch::gateway::manager::GatewayManager;
 use crate::mcp::completion::{complete_prompt_arg, completion_info};
+#[cfg(feature = "gateway")]
 use crate::mcp::context::subject_from_extensions;
 use crate::mcp::logging::{DispatchLogOutcome, logging_level_rank};
 use crate::mcp::route_scope::McpRouteScope;
@@ -30,6 +34,7 @@ use crate::registry::ToolRegistry;
 pub struct LabMcpServer {
     pub registry: Arc<ToolRegistry>,
     /// Shared gateway manager used to resolve the current live upstream pool.
+    #[cfg(feature = "gateway")]
     pub gateway_manager: Option<Arc<GatewayManager>>,
     /// Resolved role for the current device.
     pub node_role: Option<NodeRole>,
@@ -41,6 +46,7 @@ pub struct LabMcpServer {
     pub(crate) route_scope: McpRouteScope,
 }
 
+#[cfg(feature = "gateway")]
 pub fn verify_upstream_subject_resolution_support() -> anyhow::Result<()> {
     let (parts, _) = http::Request::new(()).into_parts();
     let auth = crate::api::oauth::AuthContext {
@@ -74,6 +80,7 @@ pub fn verify_upstream_subject_resolution_support() -> anyhow::Result<()> {
 /// so hosts like Claude.ai know to render the Code Mode inspector widgets served
 /// at `ui://lab/code-mode/{search,execute,history}`. The `mimeTypes` value mirrors
 /// the MIME the widget resources are published with (`text/html;profile=mcp-app`).
+#[cfg(feature = "gateway")]
 fn mcp_apps_ui_extension() -> ExtensionCapabilities {
     let mut extensions = ExtensionCapabilities::new();
     let mut ui_ext = serde_json::Map::new();
@@ -87,6 +94,10 @@ fn mcp_apps_ui_extension() -> ExtensionCapabilities {
 
 impl ServerHandler for LabMcpServer {
     fn get_info(&self) -> ServerInfo {
+        #[cfg(feature = "gateway")]
+        let gateway_manager_configured = self.gateway_manager.is_some();
+        #[cfg(not(feature = "gateway"))]
+        let gateway_manager_configured = false;
         tracing::info!(
             surface = "mcp",
             service = "labby",
@@ -94,23 +105,22 @@ impl ServerHandler for LabMcpServer {
             subsystem = "mcp_server",
             phase = "server.info",
             builtin_service_count = self.registry.services().len(),
-            gateway_manager_configured = self.gateway_manager.is_some(),
+            gateway_manager_configured,
             node_role = ?self.node_role,
             "advertising MCP server capabilities"
         );
-        ServerInfo::new(
-            ServerCapabilities::builder()
-                .enable_tools()
-                .enable_tool_list_changed()
-                .enable_resources()
-                .enable_resources_list_changed()
-                .enable_prompts()
-                .enable_prompts_list_changed()
-                .enable_logging()
-                .enable_completions()
-                .enable_extensions_with(mcp_apps_ui_extension())
-                .build(),
-        )
+        let builder = ServerCapabilities::builder()
+            .enable_tools()
+            .enable_tool_list_changed()
+            .enable_resources()
+            .enable_resources_list_changed()
+            .enable_prompts()
+            .enable_prompts_list_changed()
+            .enable_logging()
+            .enable_completions();
+        #[cfg(feature = "gateway")]
+        let builder = builder.enable_extensions_with(mcp_apps_ui_extension());
+        ServerInfo::new(builder.build())
     }
 
     async fn set_level(
@@ -343,7 +353,9 @@ impl LabMcpServer {
 
 #[cfg(test)]
 mod tests {
-    use super::{LabMcpServer, logging_level_rank, verify_upstream_subject_resolution_support};
+    #[cfg(feature = "gateway")]
+    use super::verify_upstream_subject_resolution_support;
+    use super::{LabMcpServer, logging_level_rank};
     use crate::registry::ToolRegistry;
     use rmcp::ServerHandler;
 
@@ -351,6 +363,7 @@ mod tests {
     fn server_capabilities_advertise_list_changed_support() {
         let server = LabMcpServer {
             registry: std::sync::Arc::new(ToolRegistry::new()),
+            #[cfg(feature = "gateway")]
             gateway_manager: None,
             node_role: None,
             peers: std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
@@ -382,22 +395,31 @@ mod tests {
             "RMCP completion capability must be advertised"
         );
 
-        // MCP Apps UI extension (SEP-1724) must be advertised so hosts render
-        // the Code Mode inspector widgets.
-        let extensions = info
-            .capabilities
-            .extensions
-            .expect("MCP Apps UI extension capability must be advertised");
-        let ui_ext = extensions
-            .get("io.modelcontextprotocol/ui")
-            .expect("io.modelcontextprotocol/ui extension must be present");
-        assert_eq!(
-            ui_ext.get("mimeTypes"),
-            Some(&serde_json::json!(["text/html;profile=mcp-app"])),
-            "UI extension must advertise the mcp-app widget MIME type"
+        #[cfg(feature = "gateway")]
+        {
+            // MCP Apps UI extension (SEP-1724) must be advertised so hosts render
+            // the Code Mode inspector widgets.
+            let extensions = info
+                .capabilities
+                .extensions
+                .expect("MCP Apps UI extension capability must be advertised");
+            let ui_ext = extensions
+                .get("io.modelcontextprotocol/ui")
+                .expect("io.modelcontextprotocol/ui extension must be present");
+            assert_eq!(
+                ui_ext.get("mimeTypes"),
+                Some(&serde_json::json!(["text/html;profile=mcp-app"])),
+                "UI extension must advertise the mcp-app widget MIME type"
+            );
+        }
+        #[cfg(not(feature = "gateway"))]
+        assert!(
+            info.capabilities.extensions.is_none(),
+            "no-gateway builds must not advertise MCP Apps UI"
         );
     }
 
+    #[cfg(feature = "gateway")]
     #[test]
     fn upstream_subject_resolution_self_test_passes_for_plan_a() {
         verify_upstream_subject_resolution_support().expect("self-test");

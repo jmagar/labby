@@ -4,6 +4,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use super::server::LabMcpServer;
+#[cfg(feature = "gateway")]
 use crate::dispatch::upstream::pool::UpstreamPool;
 use crate::mcp::prompts::list_all as list_builtin_prompts;
 
@@ -56,6 +57,7 @@ pub(crate) fn upstream_name_for_uri(uri: &str) -> Option<&str> {
 }
 
 impl LabMcpServer {
+    #[cfg(feature = "gateway")]
     pub(crate) async fn current_upstream_pool(&self) -> Option<Arc<UpstreamPool>> {
         match &self.gateway_manager {
             Some(manager) => manager.current_pool().await,
@@ -70,13 +72,17 @@ impl LabMcpServer {
         if matches!(self.node_role, Some(crate::config::NodeRole::NonMaster)) {
             return false;
         }
+        #[cfg(feature = "gateway")]
         match &self.gateway_manager {
             Some(manager) => manager.surface_enabled_for_service(service, "mcp").await,
             None => true,
         }
+        #[cfg(not(feature = "gateway"))]
+        true
     }
 
     pub(crate) async fn action_allowed_on_mcp(&self, service: &str, action: &str) -> bool {
+        #[cfg(feature = "gateway")]
         match &self.gateway_manager {
             Some(manager) => {
                 manager
@@ -85,37 +91,55 @@ impl LabMcpServer {
             }
             None => true,
         }
+        #[cfg(not(feature = "gateway"))]
+        {
+            let _ = (service, action);
+            true
+        }
     }
 
     pub(crate) async fn allowed_mcp_actions(&self, service: &str) -> Option<Vec<String>> {
+        #[cfg(feature = "gateway")]
         match &self.gateway_manager {
             Some(manager) => manager.allowed_mcp_actions_for_service(service).await,
             None => None,
         }
+        #[cfg(not(feature = "gateway"))]
+        {
+            let _ = service;
+            None
+        }
     }
 
     pub(crate) async fn code_mode_visibility(&self) -> CodeModeVisibility {
-        if !self.route_scope.exposes_code_mode() {
-            return CodeModeVisibility::Raw;
-        }
-        let manager_code_mode_enabled = if let Some(manager) = &self.gateway_manager {
-            manager.code_mode_enabled().await
-        } else {
-            false
-        };
-        if manager_code_mode_enabled {
-            return CodeModeVisibility::RootSynthetic;
-        }
-        if self.gateway_manager.is_none() && crate::config::process_code_mode_enabled() {
-            return CodeModeVisibility::InProcessPeer;
+        #[cfg(feature = "gateway")]
+        {
+            if !self.route_scope.exposes_code_mode() {
+                return CodeModeVisibility::Raw;
+            }
+            let manager_code_mode_enabled = if let Some(manager) = &self.gateway_manager {
+                manager.code_mode_enabled().await
+            } else {
+                false
+            };
+            if manager_code_mode_enabled {
+                return CodeModeVisibility::RootSynthetic;
+            }
+            if self.gateway_manager.is_none() && crate::config::process_code_mode_enabled() {
+                return CodeModeVisibility::InProcessPeer;
+            }
         }
         CodeModeVisibility::Raw
     }
 
     fn service_visible_by_env_or_gateway(&self, service: &str) -> bool {
+        #[cfg(feature = "gateway")]
+        let gateway_available = self.gateway_manager.is_some();
+        #[cfg(not(feature = "gateway"))]
+        let gateway_available = false;
         crate::registry::lab_show_all_enabled()
             || crate::registry::service_visible_with_env(service)
-            || self.gateway_manager.is_some()
+            || gateway_available
     }
 
     pub(crate) fn builtin_prompt_names(&self) -> Vec<String> {
@@ -138,8 +162,11 @@ impl LabMcpServer {
 
     pub(crate) async fn catalog_json(&self) -> anyhow::Result<Value> {
         let filtered;
-        let registry = if crate::registry::lab_show_all_enabled() || self.gateway_manager.is_some()
-        {
+        #[cfg(feature = "gateway")]
+        let show_all_for_gateway = self.gateway_manager.is_some();
+        #[cfg(not(feature = "gateway"))]
+        let show_all_for_gateway = false;
+        let registry = if crate::registry::lab_show_all_enabled() || show_all_for_gateway {
             &self.registry
         } else {
             filtered = crate::registry::filter_by_configured_env(&self.registry);
@@ -209,6 +236,7 @@ impl LabMcpServer {
             }
         }
 
+        #[cfg(feature = "gateway")]
         if !visibility.hides_raw_tools()
             && let Some(pool) = self.current_upstream_pool().await
         {
@@ -221,6 +249,7 @@ impl LabMcpServer {
         }
 
         let mut resources = self.builtin_resource_identifiers().await;
+        #[cfg(feature = "gateway")]
         if let Some(pool) = self.current_upstream_pool().await {
             for (upstream_name, uris) in pool.cached_upstream_resource_uris().await {
                 if !self.route_scope.allows_upstream(&upstream_name) {
@@ -236,6 +265,7 @@ impl LabMcpServer {
         let builtin_prompt_refs: Vec<&str> =
             builtin_prompt_names.iter().map(String::as_str).collect();
         let mut prompts: BTreeSet<String> = builtin_prompt_names.iter().cloned().collect();
+        #[cfg(feature = "gateway")]
         if let Some(pool) = self.current_upstream_pool().await {
             let owners = pool.cached_prompt_ownership_map().await;
             for prompt_name in pool
