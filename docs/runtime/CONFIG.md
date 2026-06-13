@@ -83,11 +83,12 @@ On first run, `labby serve` detects a missing MCP token (no `LAB_MCP_HTTP_TOKEN`
 and `LAB_AUTH_MODE` != `oauth`) and self-bootstraps: it generates a 64-char hex
 bearer token, writes a minimal `~/.lab/.env` (token + loopback MCP defaults via
 the atomic `env_merge` path), reloads that file into the process environment via
-`dotenvy` so the token is visible process-wide, prints the token and the
-`http://<host>:<port>/setup` URL once, and continues startup. The web `/setup`
-wizard then owns all further configuration. Set `LAB_MCP_HTTP_TOKEN` or
-`LAB_AUTH_MODE=oauth` beforehand to opt out. The generated `~/.lab/.env` is
-written `0600` on Unix; **Windows ACL hardening is still pending**
+`dotenvy` so the token is visible process-wide, prints the
+`http://<host>:<port>/setup` URL once, points the operator to the generated env
+file for the token, and continues startup. The web `/setup` wizard then owns all
+further configuration. Set `LAB_MCP_HTTP_TOKEN` or `LAB_AUTH_MODE=oauth`
+beforehand to opt out. The generated `~/.lab/.env` is written `0600` on Unix;
+**Windows ACL hardening is still pending**
 (`env_merge::set_secure_perms` is a no-op on non-unix), so on Windows the token
 file sits at default ACLs. The `setup.bootstrap` action exposes this primitive
 to the wizard and CLI.
@@ -772,7 +773,7 @@ surfaces as `oauth_needs_reauth`, never as an internal error.
 | `LAB_CORS_ORIGINS` | — | Comma-separated CORS origin allowlist. |
 | `LAB_WEB_ASSETS_DIR` | — | Override path to exported Labby assets for `labby serve`. |
 
-Full details in [TRANSPORT.md](./TRANSPORT.md).
+Full details in [TRANSPORT.md](../surfaces/TRANSPORT.md).
 
 ## Docker Deployment
 
