@@ -80,9 +80,12 @@ pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
     // upstream discovery pass. Orchestrators (Kubernetes, Compose health-checks)
     // should wait for this before routing traffic so that MCP tool listings are
     // non-empty on first request.
-    if let Some(manager) = &state.gateway_manager {
-        if manager.current_pool().await.is_none() {
-            pending.push("gateway pool not yet initialised".to_string());
+    #[cfg(feature = "gateway")]
+    {
+        if let Some(manager) = &state.gateway_manager {
+            if manager.current_pool().await.is_none() {
+                pending.push("gateway pool not yet initialised".to_string());
+            }
         }
     }
 
@@ -135,6 +138,7 @@ mod tests {
 
     /// When a gateway manager is wired but the pool has not yet loaded, `/ready`
     /// must return 503 with `pending` naming the unsatisfied predicate.
+    #[cfg(feature = "gateway")]
     #[tokio::test]
     async fn ready_returns_503_when_gateway_pool_absent() {
         use std::path::PathBuf;

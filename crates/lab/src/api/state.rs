@@ -56,6 +56,7 @@ pub struct AppState {
     /// Shared gateway manager for runtime upstream pool access and config mutation.
     ///
     /// `None` when gateway management is not wired for this process.
+    #[cfg(feature = "gateway")]
     pub gateway_manager: Option<Arc<crate::dispatch::gateway::manager::GatewayManager>>,
     /// Shared fleet state store for node runtime ingestion.
     pub node_store: Option<Arc<NodeStore>>,
@@ -89,8 +90,8 @@ pub struct AppState {
     pub http_bind_host: Option<Arc<String>>,
     /// Shared SQLite-backed MCP registry store for `/v0.1` read endpoints.
     ///
-    /// `None` when the `mcpregistry` feature is disabled or the store failed to open.
-    #[cfg(feature = "mcpregistry")]
+    /// `None` when the `marketplace` feature is disabled or the store failed to open.
+    #[cfg(feature = "marketplace")]
     pub registry_store: Option<Arc<crate::dispatch::marketplace::store::RegistryStore>>,
 }
 
@@ -139,6 +140,7 @@ impl AppState {
             config: Arc::new(LabConfig::default()),
             oauth_state: None,
             actor_key_deriver: None,
+            #[cfg(feature = "gateway")]
             gateway_manager: None,
             node_store: None,
             enrollment_store: None,
@@ -152,7 +154,7 @@ impl AppState {
             bearer_token: None,
             http_bind_host: None,
             server_start: std::time::Instant::now(),
-            #[cfg(feature = "mcpregistry")]
+            #[cfg(feature = "marketplace")]
             registry_store: None,
         }
     }
@@ -192,6 +194,7 @@ impl AppState {
     }
 
     /// Attach the shared gateway manager.
+    #[cfg(feature = "gateway")]
     #[must_use]
     #[allow(dead_code)] // Called by `labby serve` when gateway runtime is wired.
     pub fn with_gateway_manager(
@@ -318,7 +321,7 @@ impl AppState {
     }
 
     /// Attach the shared MCP registry store for `/v0.1` read endpoints.
-    #[cfg(feature = "mcpregistry")]
+    #[cfg(feature = "marketplace")]
     #[must_use]
     pub fn with_registry_store(
         mut self,

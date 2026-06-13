@@ -9,7 +9,9 @@
 //! reconnections.  Non-essential capability-discovery noise (prompts/resources
 //! not implemented) is filtered out so findings stay signal-rich.
 
+#[cfg(feature = "gateway")]
 use crate::dispatch::gateway::current_gateway_manager;
+#[cfg(feature = "gateway")]
 use crate::dispatch::upstream::types::UpstreamHealth;
 
 use super::types::{Finding, Report, Severity};
@@ -30,66 +32,82 @@ fn is_nonessential_capability_error(message: &str) -> bool {
 /// wired (e.g. a standalone `labby` process without gateway config), rather
 /// than an error, because that is a normal operating mode.
 pub async fn check_gateway_upstreams() -> Report {
-    let Some(manager) = current_gateway_manager() else {
+    #[cfg(not(feature = "gateway"))]
+    {
         return Report {
             findings: vec![Finding {
                 service: "gateway".to_string(),
                 check: "pool".to_string(),
                 severity: Severity::Warn,
-                message: "gateway manager not wired — no upstream pool to inspect".to_string(),
-            }],
-        };
-    };
-
-    let pool = manager.current_pool().await;
-    let Some(pool) = pool else {
-        return Report {
-            findings: vec![Finding {
-                service: "gateway".to_string(),
-                check: "pool".to_string(),
-                severity: Severity::Warn,
-                message: "gateway pool not yet initialised (no reload or first boot)".to_string(),
-            }],
-        };
-    };
-
-    let statuses = pool.upstream_status().await;
-
-    if statuses.is_empty() {
-        return Report {
-            findings: vec![Finding {
-                service: "gateway".to_string(),
-                check: "pool".to_string(),
-                severity: Severity::Ok,
-                message: "gateway pool is active but has no upstreams configured".to_string(),
+                message: "gateway feature is not compiled into this labby build".to_string(),
             }],
         };
     }
+    #[cfg(feature = "gateway")]
+    {
+        let Some(manager) = current_gateway_manager() else {
+            return Report {
+                findings: vec![Finding {
+                    service: "gateway".to_string(),
+                    check: "pool".to_string(),
+                    severity: Severity::Warn,
+                    message: "gateway manager not wired — no upstream pool to inspect".to_string(),
+                }],
+            };
+        };
 
-    let mut findings = Vec::with_capacity(statuses.len());
+        let pool = manager.current_pool().await;
+        let Some(pool) = pool else {
+            return Report {
+                findings: vec![Finding {
+                    service: "gateway".to_string(),
+                    check: "pool".to_string(),
+                    severity: Severity::Warn,
+                    message: "gateway pool not yet initialised (no reload or first boot)"
+                        .to_string(),
+                }],
+            };
+        };
 
-    for (name, health) in &statuses {
-        // Filter out non-essential capability-discovery noise (prompts/resources
-        // not implemented) — mirrors `projection::operator_visible_upstream_error`.
-        let last_error = pool
-            .upstream_last_error(name)
-            .await
-            .filter(|msg| !is_nonessential_capability_error(msg));
+        let statuses = pool.upstream_status().await;
 
-        let (severity, message) = upstream_finding(name, *health, last_error.as_deref());
-        findings.push(Finding {
-            service: "gateway".to_string(),
-            check: format!("upstream:{name}"),
-            severity,
-            message,
-        });
+        if statuses.is_empty() {
+            return Report {
+                findings: vec![Finding {
+                    service: "gateway".to_string(),
+                    check: "pool".to_string(),
+                    severity: Severity::Ok,
+                    message: "gateway pool is active but has no upstreams configured".to_string(),
+                }],
+            };
+        }
+
+        let mut findings = Vec::with_capacity(statuses.len());
+
+        for (name, health) in &statuses {
+            // Filter out non-essential capability-discovery noise (prompts/resources
+            // not implemented) — mirrors `projection::operator_visible_upstream_error`.
+            let last_error = pool
+                .upstream_last_error(name)
+                .await
+                .filter(|msg| !is_nonessential_capability_error(msg));
+
+            let (severity, message) = upstream_finding(name, *health, last_error.as_deref());
+            findings.push(Finding {
+                service: "gateway".to_string(),
+                check: format!("upstream:{name}"),
+                severity,
+                message,
+            });
+        }
+
+        Report { findings }
     }
-
-    Report { findings }
 }
 
 /// Derive severity + human message for one upstream from its health state and
 /// last recorded error.
+#[cfg(feature = "gateway")]
 fn upstream_finding(
     name: &str,
     health: UpstreamHealth,
@@ -129,6 +147,7 @@ fn upstream_finding(
 }
 
 #[cfg(test)]
+#[cfg(feature = "gateway")]
 mod tests {
     use super::*;
     use crate::dispatch::upstream::types::CIRCUIT_BREAKER_THRESHOLD;

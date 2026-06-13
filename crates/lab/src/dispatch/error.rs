@@ -225,7 +225,7 @@ impl ToolError {
 // impls are hand-written for the surviving feature-gated SDK error types.
 
 // mcpregistry has an InvalidInput variant in addition to the standard Api wrapper.
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 impl From<lab_apis::mcpregistry::error::RegistryError> for ToolError {
     fn from(e: lab_apis::mcpregistry::error::RegistryError) -> Self {
         use lab_apis::mcpregistry::error::RegistryError;
@@ -245,7 +245,7 @@ impl From<lab_apis::mcpregistry::error::RegistryError> for ToolError {
 // RegistryStore errors mostly represent persistence failures. Invalid cursors
 // remain caller-fixable `invalid_param`, and upstream fetch failures surface as
 // `network_error`.
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 impl From<crate::dispatch::marketplace::store::RegistryStoreError> for ToolError {
     fn from(e: crate::dispatch::marketplace::store::RegistryStoreError) -> Self {
         use crate::dispatch::marketplace::store::RegistryStoreError;

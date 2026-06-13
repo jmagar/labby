@@ -336,11 +336,11 @@
     "notes": "OAuth token endpoint"
   },
   {
-    "method": "POST",
-    "path": "/v0.1/*",
+    "method": "GET",
+    "path": "/v0.1/servers",
     "surface": "api",
     "handler_group": "mcpregistry",
-    "feature": "mcpregistry",
+    "feature": "marketplace",
     "runtime_condition": null,
     "auth_required": true,
     "bearer_only": true,
@@ -349,7 +349,39 @@
     "host_validation": false,
     "master_only": true,
     "cache_posture": "not cacheable",
-    "notes": "MCP Registry compatibility API"
+    "notes": "list MCP Registry compatibility servers"
+  },
+  {
+    "method": "GET",
+    "path": "/v0.1/servers/{serverName}/versions",
+    "surface": "api",
+    "handler_group": "mcpregistry",
+    "feature": "marketplace",
+    "runtime_condition": null,
+    "auth_required": true,
+    "bearer_only": true,
+    "session_cookie_allowed": false,
+    "csrf_required": false,
+    "host_validation": false,
+    "master_only": true,
+    "cache_posture": "not cacheable",
+    "notes": "list MCP Registry compatibility server versions"
+  },
+  {
+    "method": "GET",
+    "path": "/v0.1/servers/{serverName}/versions/{version}",
+    "surface": "api",
+    "handler_group": "mcpregistry",
+    "feature": "marketplace",
+    "runtime_condition": null,
+    "auth_required": true,
+    "bearer_only": true,
+    "session_cookie_allowed": false,
+    "csrf_required": false,
+    "host_validation": false,
+    "master_only": true,
+    "cache_posture": "not cacheable",
+    "notes": "get MCP Registry compatibility server version"
   },
   {
     "method": "POST",

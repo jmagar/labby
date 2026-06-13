@@ -1,11 +1,10 @@
 #![allow(dead_code)]
 
-#[cfg(any(feature = "mcpregistry", feature = "acp_registry"))]
+#[cfg(any(feature = "marketplace", feature = "acp_registry"))]
 use lab_apis::marketplace::PluginSource;
 use lab_apis::marketplace::{Artifact, Marketplace, MarketplaceRuntime, Plugin, PluginComponent};
 use serde_json::Value;
 
-#[cfg(feature = "mcpregistry")]
 use crate::config;
 use crate::dispatch::error::ToolError;
 use crate::dispatch::marketplace::backend::{MarketplaceBackend, PluginFilter};
@@ -78,7 +77,6 @@ pub async fn sources_list(
     .await
     .map_err(join_err)??;
 
-    #[cfg(feature = "mcpregistry")]
     append_mcp_registry_source(&mut sources).await;
     #[cfg(feature = "acp_registry")]
     append_acp_registry_source(&mut sources).await;
@@ -238,16 +236,13 @@ fn join_err(error: tokio::task::JoinError) -> ToolError {
     }
 }
 
-#[cfg(feature = "mcpregistry")]
 const MCP_REGISTRY_SOURCE_ID: &str = "mcp-registry";
-#[cfg(feature = "mcpregistry")]
 const MCP_REGISTRY_SOURCE_NAME: &str = "MCP Registry";
 #[cfg(feature = "acp_registry")]
 const ACP_REGISTRY_SOURCE_ID: &str = "acp-registry";
 #[cfg(feature = "acp_registry")]
 const ACP_REGISTRY_SOURCE_NAME: &str = "ACP Registry";
 
-#[cfg(feature = "mcpregistry")]
 async fn append_mcp_registry_source(sources: &mut Vec<Marketplace>) {
     if sources
         .iter()
@@ -277,7 +272,6 @@ async fn append_acp_registry_source(sources: &mut Vec<Marketplace>) {
     ));
 }
 
-#[cfg(feature = "mcpregistry")]
 fn configured_mcp_registry_url_or_default() -> String {
     match config::load_toml(&config::toml_candidates()) {
         Ok(cfg) => config::mcpregistry_url(&cfg).to_string(),
@@ -293,7 +287,6 @@ fn configured_mcp_registry_url_or_default() -> String {
     }
 }
 
-#[cfg(feature = "mcpregistry")]
 async fn local_mcp_registry_server_count() -> u32 {
     let db_path = config::registry_db_path();
     if !db_path.exists() {
@@ -329,7 +322,6 @@ async fn local_mcp_registry_server_count() -> u32 {
     }
 }
 
-#[cfg(feature = "mcpregistry")]
 fn mcp_registry_marketplace(url: &str, total_plugins: u32) -> Marketplace {
     Marketplace {
         id: MCP_REGISTRY_SOURCE_ID.to_string(),
@@ -400,7 +392,6 @@ fn acp_registry_marketplace(url: &str, total_plugins: u32) -> Marketplace {
 mod tests {
     use super::*;
 
-    #[cfg(feature = "mcpregistry")]
     #[test]
     fn mcp_registry_marketplace_uses_marketplace_source_identity() {
         let source = mcp_registry_marketplace("https://registry.modelcontextprotocol.io", 42);

@@ -26,7 +26,6 @@ pub fn print_dry_run(service: &str, action: &str, params: &Value, format: Output
     );
 }
 
-use crate::dispatch::gateway::current_gateway_manager;
 use crate::output::{OutputFormat, print};
 
 /// Run an action-style CLI command and emit the canonical dispatch log shape.
@@ -41,16 +40,19 @@ where
     F: FnOnce(String, Value) -> Fut,
     Fut: Future<Output = Result<Value, ToolError>>,
 {
-    if let Some(manager) = current_gateway_manager() {
-        if !manager.surface_enabled_for_service(service, "cli").await {
-            let error = ToolError::Sdk {
-                sdk_kind: "not_found".to_string(),
-                message: format!("service `{service}` is not enabled on the cli surface"),
-            };
-            return Err(anyhow::anyhow!(
-                "{}",
-                serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
-            ));
+    #[cfg(feature = "gateway")]
+    {
+        if let Some(manager) = crate::dispatch::gateway::current_gateway_manager() {
+            if !manager.surface_enabled_for_service(service, "cli").await {
+                let error = ToolError::Sdk {
+                    sdk_kind: "not_found".to_string(),
+                    message: format!("service `{service}` is not enabled on the cli surface"),
+                };
+                return Err(anyhow::anyhow!(
+                    "{}",
+                    serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
+                ));
+            }
         }
     }
 
@@ -102,16 +104,19 @@ where
     F: FnOnce(String, Value) -> Fut,
     Fut: Future<Output = Result<Value, ToolError>>,
 {
-    if let Some(manager) = current_gateway_manager() {
-        if !manager.surface_enabled_for_service(service, "cli").await {
-            let error = ToolError::Sdk {
-                sdk_kind: "not_found".to_string(),
-                message: format!("service `{service}` is not enabled on the cli surface"),
-            };
-            return Err(anyhow::anyhow!(
-                "{}",
-                serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
-            ));
+    #[cfg(feature = "gateway")]
+    {
+        if let Some(manager) = crate::dispatch::gateway::current_gateway_manager() {
+            if !manager.surface_enabled_for_service(service, "cli").await {
+                let error = ToolError::Sdk {
+                    sdk_kind: "not_found".to_string(),
+                    message: format!("service `{service}` is not enabled on the cli surface"),
+                };
+                return Err(anyhow::anyhow!(
+                    "{}",
+                    serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
+                ));
+            }
         }
     }
 

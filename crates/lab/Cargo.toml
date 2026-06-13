@@ -142,19 +142,28 @@ proptest = "1"
 [lib]
 path = "src/lib.rs"
 
+# Feature-slice contract:
+# - `default` keeps the production all-features binary.
+# - `all` is the authoritative development and release build.
+# - Product slices must compile with `--no-default-features --features <slice> --all-targets`.
+# - Supported standalone product slices are: gateway, marketplace, fs, deploy, acp_registry.
+# - `mcpregistry` is owned by marketplace in this crate; do not treat it as standalone here.
+# - `doctor`, `setup`, `serve` base, `nodes`, `logs`, `stash`, and `acp` are base control-plane
+#   or UI-coupled capabilities, not standalone slices in this feature table.
+# - Helper/internal features are not standalone product slices unless this comment is updated.
 [features]
 acp_registry = ["lab-apis/acp_registry"]
 node-runtime = []
-all = ["lab-apis/all", "lab-admin", "acp_registry", "deploy", "mcpregistry", "gateway", "marketplace"]
+all = ["lab-apis/all", "lab-admin", "acp_registry", "deploy", "gateway", "marketplace"]
 gateway = ["dep:javy", "dep:wasmtime"]
-marketplace = ["mcpregistry"]
+marketplace = ["lab-apis/mcpregistry"]
 services-all = [
 ]
 default = ["all"]
 deploy = ["lab-apis/deploy"]
 fs = ["dep:walkdir", "dep:globset", "dep:unicode-normalization", "dep:rustix"]
 lab-admin = []
-mcpregistry = ["lab-apis/mcpregistry"]
+mcpregistry = ["marketplace"]
 systemd = ["dep:sd-notify"]
 test-utils = []
 [lints]

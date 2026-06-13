@@ -25,8 +25,11 @@ use tower_http::{
 };
 use tracing::Level;
 
+#[cfg(feature = "gateway")]
 use crate::config::ProtectedMcpRouteEffectiveTarget;
+#[cfg(feature = "gateway")]
 use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
+#[cfg(feature = "gateway")]
 use crate::dispatch::upstream::auth::configured_bearer_token;
 use lab_auth::AuthLayer;
 use lab_auth::error::AuthError as LabAuthError;
@@ -46,6 +49,7 @@ fn lab_auth_deriver(
     })
 }
 
+#[cfg(feature = "marketplace")]
 const DEV_MARKETPLACE_READ_ACTIONS: &[&str] = &[
     "help",
     "schema",
@@ -116,6 +120,7 @@ async fn app_auth_state_with_protected_routes(
     state: &AppState,
 ) -> Result<lab_auth::state::AuthState, LabAuthError> {
     let auth_state = app_auth_state(state)?;
+    #[cfg(feature = "gateway")]
     if let Some(manager) = state.gateway_manager.as_ref() {
         let routes = manager.protected_route_list().await;
         tracing::debug!(
@@ -142,6 +147,7 @@ async fn auth_protected_resource_metadata(
     State(state): State<AppState>,
     request: Request<Body>,
 ) -> Result<impl IntoResponse, LabAuthError> {
+    #[cfg(feature = "gateway")]
     if let (Some(manager), Some(host)) = (state.gateway_manager.as_ref(), request_host(&request))
         && let Some(route) = manager
             .resolve_protected_route_metadata(&host, request.uri().path())
@@ -171,6 +177,7 @@ async fn auth_protected_resource_metadata(
     Ok(lab_auth::metadata::protected_resource_metadata(State(app_auth_state(&state)?)).await)
 }
 
+#[cfg(feature = "gateway")]
 async fn protected_route_resource_metadata(
     State(state): State<AppState>,
     request: Request<Body>,
@@ -201,6 +208,7 @@ async fn protected_route_resource_metadata(
     protected_route_metadata_response(&state, route).await
 }
 
+#[cfg(feature = "gateway")]
 async fn protected_route_metadata_response(
     state: &AppState,
     route: crate::config::ProtectedMcpRouteConfig,
@@ -474,6 +482,7 @@ async fn authenticate_protected_route_request(
     Ok(())
 }
 
+#[cfg(feature = "gateway")]
 async fn proxy_protected_mcp_route(
     state: &AppState,
     request: Request<Body>,
@@ -613,6 +622,7 @@ async fn proxy_protected_mcp_route(
         })
 }
 
+#[cfg(feature = "gateway")]
 async fn protected_route_upstream_target(
     state: &AppState,
     route: &crate::config::ProtectedMcpRouteConfig,
@@ -760,6 +770,7 @@ async fn protected_route_upstream_target(
     Ok((url, token, format!("upstream:{upstream_name}")))
 }
 
+#[cfg(feature = "gateway")]
 async fn protected_mcp_route_entry(
     state: AppState,
     mut request: Request<Body>,
@@ -839,6 +850,7 @@ async fn protected_mcp_route_entry(
     proxy_protected_mcp_route(&state, request, route).await
 }
 
+#[cfg(feature = "gateway")]
 async fn protected_mcp_intercept(
     State(state): State<AppState>,
     request: Request<Body>,
@@ -1058,30 +1070,33 @@ fn build_v1_router(state: &AppState, api_auth_configured: bool) -> Router<AppSta
         v1 = v1.route("/{service}/actions", get(service_actions));
         v1 = v1.nest("/catalog", services::catalog::routes(state.clone()));
 
-        // upstream oauth must be nested before /gateway so its more-specific prefix wins;
-        // only mount when the gateway manager is present (oauth requires it).
-        if state.gateway_manager.is_some() {
-            v1 = v1.nest(
-                "/gateway/oauth",
-                crate::api::upstream_oauth::gateway_routes(state.clone()),
-            );
-        }
+        #[cfg(feature = "gateway")]
+        {
+            // upstream oauth must be nested before /gateway so its more-specific prefix wins;
+            // only mount when the gateway manager is present (oauth requires it).
+            if state.gateway_manager.is_some() {
+                v1 = v1.nest(
+                    "/gateway/oauth",
+                    crate::api::upstream_oauth::gateway_routes(state.clone()),
+                );
+            }
 
-        // SECURITY (T1): gateway admin actions spawn arbitrary local stdio commands
-        // with labby's full process environment. Refuse to mount /v1/gateway when
-        // auth is not configured — unauthenticated HTTP access to gateway admin
-        // actions is a critical vulnerability. Mirror the /v1/fs refusal pattern.
-        if api_auth_configured {
-            v1 = v1.nest("/gateway", services::gateway::routes(state.clone()));
-        } else {
-            tracing::warn!(
-                subsystem = "startup",
-                phase = "gateway.mount.skipped",
-                reason = "no_auth_configured",
-                "gateway service routes not mounted: HTTP API has no auth configured. \
-                 Set LAB_MCP_HTTP_TOKEN or LAB_AUTH_MODE=oauth to enable /v1/gateway. \
-                 Gateway admin actions can spawn arbitrary processes — never expose them unauthenticated."
-            );
+            // SECURITY (T1): gateway admin actions spawn arbitrary local stdio commands
+            // with labby's full process environment. Refuse to mount /v1/gateway when
+            // auth is not configured — unauthenticated HTTP access to gateway admin
+            // actions is a critical vulnerability. Mirror the /v1/fs refusal pattern.
+            if api_auth_configured {
+                v1 = v1.nest("/gateway", services::gateway::routes(state.clone()));
+            } else {
+                tracing::warn!(
+                    subsystem = "startup",
+                    phase = "gateway.mount.skipped",
+                    reason = "no_auth_configured",
+                    "gateway service routes not mounted: HTTP API has no auth configured. \
+                     Set LAB_MCP_HTTP_TOKEN or LAB_AUTH_MODE=oauth to enable /v1/gateway. \
+                     Gateway admin actions can spawn arbitrary processes — never expose them unauthenticated."
+                );
+            }
         }
 
         v1 = v1
@@ -1110,12 +1125,6 @@ fn build_v1_router(state: &AppState, api_auth_configured: bool) -> Router<AppSta
             // Host headers are rejected before reaching the dispatcher (DNS
             // rebinding mitigation for the v1 wizard, lab-bg3e.3.3).
             .nest(
-                "/marketplace",
-                services::marketplace::routes(state.clone()).layer(axum::middleware::from_fn(
-                    crate::api::host_validation::host_validation_layer,
-                )),
-            )
-            .nest(
                 "/doctor",
                 services::doctor::routes(state.clone()).layer(axum::middleware::from_fn(
                     crate::api::host_validation::host_validation_layer,
@@ -1132,6 +1141,16 @@ fn build_v1_router(state: &AppState, api_auth_configured: bool) -> Router<AppSta
                 "/auth/allowed-emails",
                 services::auth_admin::routes(state.clone()),
             );
+
+        #[cfg(feature = "marketplace")]
+        {
+            v1 = v1.nest(
+                "/marketplace",
+                services::marketplace::routes(state.clone()).layer(axum::middleware::from_fn(
+                    crate::api::host_validation::host_validation_layer,
+                )),
+            );
+        }
 
         let has_logs_service = state
             .registry
@@ -1184,7 +1203,7 @@ fn build_v1_router(state: &AppState, api_auth_configured: bool) -> Router<AppSta
 /// Build the `/v0.1` sub-router with registry REST endpoints.
 ///
 /// Auth middleware is applied via `route_layer()` — same pattern as `/v1`.
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 fn build_v0_1_router() -> Router<AppState> {
     Router::new().nest("/v0.1", services::registry_v01::routes())
 }
@@ -1364,6 +1383,7 @@ async fn dev_nodeinfo(State(state): State<AppState>) -> axum::response::Response
     .into_response()
 }
 
+#[cfg(feature = "marketplace")]
 async fn dev_marketplace_readonly(
     headers: axum::http::HeaderMap,
     Json(req): Json<crate::api::ActionRequest>,
@@ -1469,7 +1489,7 @@ pub fn build_router(
         v1_router
     };
 
-    #[cfg(feature = "mcpregistry")]
+    #[cfg(feature = "marketplace")]
     let v0_1_protected = {
         let v0_1_router = build_v0_1_router();
         if needs_auth {
@@ -1527,10 +1547,11 @@ pub fn build_router(
             get(crate::api::nodes::fleet::websocket_upgrade),
         )
         .merge(v1_protected);
-    #[cfg(feature = "mcpregistry")]
+    #[cfg(feature = "marketplace")]
     {
         router = router.merge(v0_1_protected);
     }
+    #[cfg(feature = "gateway")]
     if is_master {
         router = router
             .merge(crate::api::upstream_oauth::browser_routes(state.clone()))
@@ -1551,10 +1572,6 @@ pub fn build_router(
                 get(auth_authorization_server_metadata),
             )
             .route(
-                "/.well-known/oauth-protected-resource/{*route}",
-                get(protected_route_resource_metadata),
-            )
-            .route(
                 "/.well-known/oauth-protected-resource",
                 get(auth_protected_resource_metadata),
             )
@@ -1572,6 +1589,13 @@ pub fn build_router(
             )
             .route("/auth/google/callback", get(auth_callback))
             .route("/token", post(auth_token));
+        #[cfg(feature = "gateway")]
+        {
+            router = router.route(
+                "/.well-known/oauth-protected-resource/{*route}",
+                get(protected_route_resource_metadata),
+            );
+        }
     }
 
     // Dev routes — registered BEFORE the Next.js static fallback so they win
@@ -1583,13 +1607,14 @@ pub fn build_router(
     //                     ~/.superpowers/brainstorm/content/{name}.html directly.
     //                     Keep this out of `/dev` so real Next.js dev pages can render.
     let dev_routes = Router::new()
-        .route("/dev/api/marketplace", post(dev_marketplace_readonly))
         .route("/dev/api/nodeinfo", get(dev_nodeinfo))
         // Mockup page routes — MUST stay before the static fallback (docs/design/component-development.md §5)
         .route("/dev/mockup", get(dev_mockup))
         .route("/dev/mockup/", get(dev_mockup))
         .route("/dev/mockup/{name}", get(dev_mockup_named))
         .route("/dev/mockup/{name}/", get(dev_mockup_named));
+    #[cfg(feature = "marketplace")]
+    let dev_routes = dev_routes.route("/dev/api/marketplace", post(dev_marketplace_readonly));
     let dev_routes = if needs_auth {
         dev_routes.route_layer(make_auth_layer(true))
     } else {
@@ -1605,13 +1630,15 @@ pub fn build_router(
         router = router.fallback(crate::api::web::serve_web_request);
     }
 
+    #[cfg(feature = "gateway")]
     let protected_proxy_state = state.clone();
+    let router = router.with_state(state);
+    #[cfg(feature = "gateway")]
+    let router = router.layer(axum::middleware::from_fn_with_state(
+        protected_proxy_state,
+        protected_mcp_intercept,
+    ));
     router
-        .with_state(state)
-        .layer(axum::middleware::from_fn_with_state(
-            protected_proxy_state,
-            protected_mcp_intercept,
-        ))
         .layer(build_cors_layer(config_cors_origins))
         .layer(CompressionLayer::new())
         .layer(TimeoutLayer::with_status_code(
@@ -2539,6 +2566,7 @@ mod tests {
         assert_eq!(json["token_endpoint"], "https://lab.example.com/token");
     }
 
+    #[cfg(feature = "gateway")]
     #[tokio::test]
     async fn protected_mcp_route_metadata_uses_host_and_path_resource() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -2575,6 +2603,7 @@ mod tests {
         assert_eq!(json["resource"], "https://mcp.tootie.tv/syslog");
     }
 
+    #[cfg(feature = "gateway")]
     #[tokio::test]
     async fn protected_mcp_route_metadata_compatibility_alias_matches_resource() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -2611,6 +2640,7 @@ mod tests {
         assert_eq!(json["resource"], "https://mcp.tootie.tv/syslog");
     }
 
+    #[cfg(feature = "gateway")]
     #[tokio::test]
     async fn protected_mcp_route_unauthorized_header_points_to_route_metadata() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -2646,6 +2676,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "gateway")]
     #[tokio::test]
     async fn protected_mcp_route_proxies_with_route_audience_token() {
         let backend = MockServer::start().await;
@@ -2703,6 +2734,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "gateway")]
     #[tokio::test]
     async fn protected_mcp_route_can_publish_named_upstream() {
         let backend = MockServer::start().await;
@@ -2791,6 +2823,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "gateway")]
     #[tokio::test]
     async fn protected_domain_mcp_route_intercepts_canonical_mcp_path_by_host() {
         let backend = MockServer::start().await;
@@ -2852,6 +2885,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "gateway")]
     #[tokio::test]
     async fn protected_gateway_subset_unauthorized_header_points_to_route_metadata() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -2886,6 +2920,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "gateway")]
     #[tokio::test]
     async fn protected_gateway_subset_dispatches_to_scoped_router_after_auth() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -2942,6 +2977,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "gateway")]
     #[tokio::test]
     async fn protected_route_invalid_backend_url_returns_structured_error() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -3006,6 +3042,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "gateway")]
     #[tokio::test]
     async fn gateway_oauth_routes_require_auth() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -3028,6 +3065,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
+    #[cfg(feature = "gateway")]
     #[tokio::test]
     async fn browser_oauth_callback_bypasses_bearer_auth() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -3234,6 +3272,7 @@ mod tests {
         issue_test_token(auth_state, "https://lab.example.com/mcp", "lab")
     }
 
+    #[cfg(feature = "gateway")]
     fn issue_test_route_token(auth_state: &lab_auth::state::AuthState, audience: &str) -> String {
         issue_test_token(auth_state, audience, "mcp:read mcp:write")
     }
@@ -3262,6 +3301,7 @@ mod tests {
             .unwrap()
     }
 
+    #[cfg(feature = "gateway")]
     fn protected_route_config(
         name: &str,
         host: &str,
@@ -3286,6 +3326,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "gateway")]
     fn protected_gateway_subset_config() -> crate::config::LabConfig {
         crate::config::LabConfig {
             protected_mcp_routes: vec![crate::config::ProtectedMcpRouteConfig {
@@ -3331,7 +3372,7 @@ mod tests {
 
     /// `/v0.1/servers` requires bearer auth — unauthenticated requests must get 401,
     /// authenticated requests must reach the handler (200 or 503 if store uninitialized).
-    #[cfg(feature = "mcpregistry")]
+    #[cfg(feature = "marketplace")]
     #[tokio::test]
     async fn v01_servers_requires_auth() {
         let state = AppState::new();
@@ -3387,6 +3428,7 @@ mod tests {
     }
 
     /// POST /dev/api/marketplace must accept whitelisted read-only actions after auth.
+    #[cfg(feature = "marketplace")]
     #[tokio::test]
     async fn dev_marketplace_allows_whitelisted_read_actions() {
         let state = AppState::new();

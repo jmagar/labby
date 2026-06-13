@@ -22,7 +22,6 @@ Commands:
   oauth        Run local OAuth callback relay helpers
   logs         Search fleet logs on the configured master
   marketplace  Claude plugin marketplace manager
-  registry     MCP Registry — look up and install servers from registry.modelcontextprotocol.io
   stash        Component versioning and deployment
   deploy       Deploy the local lab release binary to SSH targets
   help         Print this message or the help of the given subcommand(s)
@@ -2713,82 +2712,6 @@ Options:
 ```
 
 ## `labby marketplace help`
-
-```text
-Print this message or the help of the given subcommand(s)
-
-Usage: help [COMMAND]...
-
-Arguments:
-  [COMMAND]...
-          Print help for the subcommand(s)
-```
-
-## `labby registry`
-
-```text
-MCP Registry — look up and install servers from registry.modelcontextprotocol.io
-
-Usage: registry [OPTIONS] <COMMAND>
-
-Commands:
-  install  Fetch a server from the MCP registry and add it to the local gateway
-  help     Print this message or the help of the given subcommand(s)
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-  -h, --help
-          Print help
-```
-
-## `labby registry install`
-
-```text
-Fetch a server from the MCP registry and add it to the local gateway
-
-Usage: install [OPTIONS] <NAME>
-
-Arguments:
-  <NAME>
-          Qualified registry server name (e.g. `io.modelcontextprotocol/everything`)
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --version <VERSION>
-          Pinned version to install (default: latest)
-
-      --bearer-env <ENV_VAR>
-          Environment variable name that holds the bearer token for this gateway entry.
-
-          Must be a valid env var name (e.g. `MY_SERVICE_TOKEN`), not the raw token value.  If omitted, no bearer auth is configured on the new gateway entry.
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --gateway-name <GATEWAY_NAME>
-          Override the gateway entry name.  Defaults to the registry server name
-
-  -y, --yes
-          Skip the destructive-action confirmation prompt (required for non-interactive use)
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
-## `labby registry help`
 
 ```text
 Print this message or the help of the given subcommand(s)

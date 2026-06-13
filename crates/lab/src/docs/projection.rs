@@ -62,7 +62,7 @@ fn build_service_catalog(
             description: meta.description.to_string(),
             category: meta.category.as_str().to_string(),
             status: "sdk_only".to_string(),
-            feature: Some(meta.name.to_string()),
+            feature: sdk_only_feature(meta),
             exposure: ServiceExposure::SdkOnly,
             surfaces: SurfaceAvailability::none(),
             default_port: meta.default_port,
@@ -76,6 +76,13 @@ fn build_service_catalog(
 
     docs.sort_by(|a, b| a.name.cmp(&b.name));
     docs
+}
+
+fn sdk_only_feature(meta: &PluginMeta) -> Option<String> {
+    match meta.name {
+        "mcpregistry" => Some("marketplace".to_string()),
+        _ => Some(meta.name.to_string()),
+    }
 }
 
 fn service_doc(
@@ -289,7 +296,9 @@ fn classify_lab_feature(
 ) -> FeatureClass {
     if matches!(feature, "all" | "default") {
         FeatureClass::AggregateDefault
-    } else if matches!(feature, "fs" | "lab-admin") {
+    } else if matches!(feature, "gateway" | "marketplace" | "fs" | "lab-admin") {
+        FeatureClass::ProductSlice
+    } else if matches!(feature, "node-runtime") {
         FeatureClass::BinaryOnly
     } else if deps.iter().any(|dep| dep == &format!("lab-apis/{feature}"))
         && api_features.contains_key(feature)
@@ -335,6 +344,7 @@ fn mapped_lab_feature(
 
 fn exception_reason(classification: FeatureClass) -> Option<&'static str> {
     match classification {
+        FeatureClass::ProductSlice => Some("standalone product slice"),
         FeatureClass::BinaryOnly => Some("binary-only Lab feature"),
         FeatureClass::HelperInternal => Some("helper/internal feature"),
         FeatureClass::AggregateDefault => Some("aggregate/default feature"),
@@ -352,7 +362,9 @@ fn service_feature(service: &str, matrix: &FeatureMatrix) -> Option<String> {
                 && feature.feature == service
                 && matches!(
                     feature.classification,
-                    FeatureClass::ServicePassthrough | FeatureClass::BinaryOnly
+                    FeatureClass::ServicePassthrough
+                        | FeatureClass::ProductSlice
+                        | FeatureClass::BinaryOnly
                 )
         })
         .map(|feature| feature.feature.clone())
@@ -419,7 +431,7 @@ fn sdk_only_metas() -> Vec<&'static PluginMeta> {
     vec![
         #[cfg(feature = "acp_registry")]
         &lab_apis::acp_registry::META,
-        #[cfg(feature = "mcpregistry")]
+        #[cfg(feature = "marketplace")]
         &lab_apis::mcpregistry::META,
     ]
 }

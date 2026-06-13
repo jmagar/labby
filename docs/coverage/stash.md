@@ -82,7 +82,7 @@ All 16 actions are dispatched via the shared dispatch layer in `crates/lab/src/d
 | MCP tool | ✅ | `stash({ "action": "...", "params": {...} })` |
 | CLI subcommand | ✅ | `lab stash <action> [key=value ...]` |
 | HTTP API | ✅ | `POST /v1/stash` |
-| TUI plugin entry | ⬜ | Not yet wired in `tui/metadata.rs` |
+| TUI plugin entry | — | TUI surface is currently deferred |
 
 ## Observability
 

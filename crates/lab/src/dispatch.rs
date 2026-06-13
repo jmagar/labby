@@ -15,6 +15,7 @@ pub mod marketplace;
 pub mod node;
 pub mod path_safety;
 pub mod redact;
+pub mod security;
 pub mod setup;
 pub mod stash;
 #[cfg(feature = "gateway")]

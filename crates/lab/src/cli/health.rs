@@ -3,7 +3,6 @@
 use std::process::ExitCode;
 
 use anyhow::Result;
-use lab_apis::core::ServiceClient;
 use serde::Serialize;
 
 use crate::output::{OutputFormat, print};
@@ -24,8 +23,10 @@ pub async fn run(format: OutputFormat) -> Result<ExitCode> {
     let mut rows: Vec<HealthRow> = Vec::new();
 
     // Probe mcpregistry (uses configured or default public registry URL; no credentials required).
-    #[cfg(feature = "mcpregistry")]
+    #[cfg(feature = "marketplace")]
     {
+        use lab_apis::core::ServiceClient;
+
         use crate::dispatch::marketplace::mcp_client;
         let row = match mcp_client::require_mcp_client() {
             Ok(client) => match client.health().await {

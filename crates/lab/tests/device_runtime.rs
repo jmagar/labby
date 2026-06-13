@@ -1,3 +1,14 @@
+#![allow(
+    clippy::bool_assert_comparison,
+    clippy::err_expect,
+    clippy::field_reassign_with_default,
+    clippy::float_cmp,
+    clippy::len_zero,
+    clippy::manual_string_new,
+    clippy::needless_raw_string_hashes,
+    clippy::single_char_pattern,
+    clippy::unnested_or_patterns
+)]
 use labby::node::checkin::{NodeHello, NodeStatus};
 use labby::node::log_event::NodeLogEvent;
 use labby::node::queue::NodeOutboundQueue;
@@ -77,11 +88,10 @@ async fn non_master_runtime_uploads_discovered_ai_cli_inventory() {
         ".claude.json"
     );
     assert!(
-        drained[0].payload["discovered_configs"][0]["content_hash"]
+        !drained[0].payload["discovered_configs"][0]["content_hash"]
             .as_str()
             .unwrap()
-            .len()
-            > 0
+            .is_empty()
     );
 }
 

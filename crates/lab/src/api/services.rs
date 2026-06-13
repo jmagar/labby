@@ -17,13 +17,15 @@ pub mod acp;
 /// `GET /v1/catalog` — filtered service+action catalog for the ⌘K palette.
 pub mod catalog;
 pub mod doctor;
+#[cfg(feature = "gateway")]
 pub mod gateway;
 pub mod logs;
+#[cfg(feature = "marketplace")]
 pub mod marketplace;
 pub mod setup;
 pub mod stash;
 
-#[cfg(feature = "mcpregistry")]
+#[cfg(feature = "marketplace")]
 pub mod registry_v01;
 
 #[cfg(feature = "fs")]

@@ -2,7 +2,7 @@
 
 ## What is this?
 
-`lab` is a pluggable homelab CLI + MCP server SDK in Rust. One binary exposing three surfaces (CLI, MCP, HTTP API), feature-gated upstream integrations plus always-on operator tools like `gateway`, `logs`, `device`, `marketplace`, `acp`, `extract`, and `stash`; MCP dispatch still uses a single tool per runtime service with an `action` + `params` shape instead of hundreds of per-method tools.
+`lab` is a pluggable homelab CLI + MCP server SDK in Rust. One binary exposes CLI, MCP, HTTP API, and Labby web UI surfaces for product-local control-plane services. Standalone Cargo product slices currently include `gateway`, `marketplace`, `fs`, `deploy`, and `acp_registry`; base services include `doctor`, `setup`, `logs`, `device`, `stash`, and `acp`. MCP dispatch still uses a single tool per runtime service with an `action` + `params` shape instead of hundreds of per-method tools.
 
 Start with `docs/README.md` for the docs index. The topic docs in `docs/` are the source of truth; if this file disagrees with them, this file is stale.
 
@@ -10,13 +10,12 @@ Observability is governed by `docs/dev/OBSERVABILITY.md`. When adding or changin
 Errors are governed by `docs/dev/ERRORS.md`. Serialization and output-boundary rules are governed by `docs/design/SERIALIZATION.md`.
 Shared dispatch ownership and adapter direction are governed by `docs/dev/DISPATCH.md`.
 
-**Build assumption.** This repo is developed and verified as an **all-features** binary. Treat `cargo build --all-features`, `cargo nextest run --all-features`, and the equivalent `just` commands as the default truth. Do not delete or rewrite shared helpers just because they appear unused in a narrow feature slice; first verify whether they are used by other feature-gated services in the normal all-features build.
+**Build assumption.** This repo is developed and verified as an **all-features** binary. Treat `cargo build --all-features`, `cargo nextest run --all-features`, and the equivalent `just` commands as the default truth. Narrow feature-slice builds are supported for `gateway`, `marketplace`, `fs`, `deploy`, and `acp_registry`; use them to catch accidental cross-slice coupling, but check warning/removal decisions against the normal all-features build before deleting shared helpers.
 
-**Service onboarding rule.** When bringing a service online, prefer scaffold first, audit second, and all-features verification last. New onboarding work should be generated with `labby scaffold service`, checked with `labby audit onboarding`, and only then validated with the all-features test/build path.
+**Service onboarding rule.** When bringing a service online, follow the dispatch/module layout in `docs/dev/SERVICE_ONBOARDING.md`, update generated docs, then validate with the all-features test/build path. The older `labby scaffold service` / `labby audit onboarding` workflow is not part of the current CLI surface unless those commands are restored in code.
 
 **Nested guides.** Subdirectories carry their own `CLAUDE.md` with rules that don't belong at the root. Read the nearest one when working in:
 - `crates/lab-apis/src/core/` — trait contracts, error taxonomy, HttpClient invariants
-- `crates/lab-apis/src/extract/` — synthetic-service rules, `.env` merge algorithm
 - `crates/lab/src/dispatch/` — shared dispatch layer, required service layout, canonical templates
 - `crates/lab/src/dispatch/upstream/` — upstream MCP proxy pool, circuit breaker, layer contract
 - `crates/lab/src/mcp/` — dispatch, envelopes, elicitation, catalog
@@ -25,7 +24,10 @@ Shared dispatch ownership and adapter direction are governed by `docs/dev/DISPAT
 
 ## Repository Structure
 
-Two crates. Pure API clients live in `lab-apis`. Everything else (CLI, MCP, TUI, binary) lives in `lab`.
+Four crates. Pure API clients live in `lab-apis`. HTTP/OAuth auth middleware
+lives in `lab-auth`. Windows process-tree reaping lives in `lab-winjob`.
+Everything else (CLI, MCP, HTTP API, Labby serving, dispatch, binary) lives in
+`lab`.
 
 ```
 lab/
@@ -35,34 +37,20 @@ lab/
 │   │   └── src/
 │   │       ├── lib.rs                # re-exports, feature gates
 │   │       ├── core/                 # HttpClient, Auth, errors, traits
-│   │       ├── servarr/              # shared *arr primitives
-│   │       ├── radarr/               # { client.rs, types.rs, error.rs }
-│   │       ├── sonarr/
-│   │       ├── prowlarr/
-│   │       ├── plex/
-│   │       ├── tautulli/
-│   │       ├── sabnzbd/
-│   │       ├── qbittorrent/
-│   │       ├── tailscale/
-│   │       ├── linkding/
-│   │       ├── memos/
-│   │       ├── bytestash/
-│   │       ├── arcane/                # Docker management UI
-│   │       ├── unraid/                # Unraid GraphQL API
-│   │       ├── unifi/                 # UniFi Network Application local API
-│   │       ├── overseerr/              # Media request manager
-│   │       ├── gotify/                # Push notifications
-│   │       ├── openai/                # OpenAI API (+ OpenAI-compatible)
-│   │       ├── qdrant/                # Vector database
-│   │       ├── tei/                   # HF Text Embeddings Inference
-│   │       ├── apprise/               # Universal notification dispatcher
-│   │       ├── mcpregistry/           # MCP Registry v0.1 (server discovery + install)
+│   │       ├── acp/                   # ACP provider/session primitives
+│   │       ├── acp_registry/          # SDK-only ACP Registry client
+│   │       ├── mcpregistry/           # SDK-only MCP Registry v0.1 client
+│   │       ├── marketplace/            # marketplace pure data types
 │   │       ├── deploy/                # Deployment/runner primitives
 │   │       ├── device_runtime/        # ALWAYS-ON: local device runtime introspection
-│   │       └── extract/                # ALWAYS-ON synthetic service: scan local/SSH hosts for service creds
+│   │       ├── doctor/                # doctor pure data/client helpers
+│   │       ├── setup/                 # setup pure data/client helpers
+│   │       └── stash/                 # stash pure data types
 │   │
-│   └── lab/                          # BINARY: cli + mcp + tui + main
-│       ├── Cargo.toml                # deps: lab-apis, clap, rmcp, ratatui, anyhow, tabled
+│   ├── lab-auth/                     # HTTP/OAuth auth middleware and storage
+│   ├── lab-winjob/                   # Windows Job Object helper crate
+│   └── lab/                          # BINARY: cli + mcp + api + main
+│       ├── Cargo.toml                # deps: lab-apis, lab-auth, clap, rmcp, axum, anyhow
 │       └── src/
 │           ├── main.rs
 │           ├── api.rs                # axum surface module declaration
@@ -75,14 +63,12 @@ lab/
 │           │   ├── error.rs          # structured JSON errors
 │           │   └── services/         # one dispatch module per service
 │           ├── mcp.rs
-│           ├── api/                  # axum HTTP API (mirrors MCP action dispatch)
+│           ├── api/                  # axum HTTP API
 │           │   ├── state.rs          # AppState — Catalog + ToolRegistry (Arc-wrapped)
 │           │   ├── error.rs          # ApiError + IntoResponse mapping
 │           │   ├── router.rs         # build_router() + middleware stack
 │           │   ├── health.rs         # /health + /ready endpoints
-│           │   └── services/         # per-service route groups (feature-gated)
-│           ├── tui/                  # ratatui plugin manager
-│           ├── tui.rs
+│           │   └── services/         # per-service route groups
 │           ├── config.rs             # ~/.lab/.env + config.toml loading (CWD → ~/.lab/ → ~/.config/lab/)
 │           └── output.rs             # table/json formatting
 ├── Cargo.toml                        # workspace
@@ -129,10 +115,10 @@ The two-crate split enforces this structurally: `lab-apis` doesn't depend on `cl
 Each service exposes exactly **one** MCP tool, named after the service. Operations dispatch via a flat dotted `action` string + free-form `params` object. This keeps total MCP tool count near the service count, not hundreds.
 
 ```jsonc
-radarr({ "action": "movie.search", "params": { "query": "The Matrix" } })
-radarr({ "action": "queue.list" })
-radarr({ "action": "help" })                        // built-in discovery
-radarr({ "action": "schema", "params": { "action": "movie.add" } })  // per-action schema
+marketplace({ "action": "mcp.list", "params": { "search": "github", "limit": 10 } })
+gateway({ "action": "gateway.list" })
+marketplace({ "action": "help" })                        // built-in discovery
+marketplace({ "action": "schema", "params": { "action": "mcp.install" } })  // per-action schema
 ```
 
 - **Action naming:** `<resource>.<verb>`, lowercase, dot-separated.
@@ -148,7 +134,7 @@ radarr({ "action": "schema", "params": { "action": "movie.add" } })  // per-acti
 - **MCP:** elicitation — the dispatcher prompts the client to confirm before executing.
 - **CLI:** requires `-y` / `--yes` to run non-interactively. `--no-confirm` and `--dry-run` are also honored.
 
-Mark actions `destructive: true` whenever they delete, overwrite, or push state that can't be trivially reversed (`extract.apply`, `radarr.movie.delete`, `sabnzbd.queue.purge`, etc.).
+Mark actions `destructive: true` whenever they delete, overwrite, spawn local processes, or push state that can't be trivially reversed (`gateway.test`, `gateway.remove`, `marketplace.mcp.install`, `stash.component.export`, etc.).
 
 ### Structured error envelopes
 
@@ -210,15 +196,15 @@ Naming convention for env vars (read by `lab`, not `lab-apis`):
 
 **Multi-instance services:** append a label before the suffix — `UNRAID_URL` is the default instance, `UNRAID_NODE2_URL` / `UNRAID_NODE2_API_KEY` is an additional named instance `node2`. MCP callers select via `params.instance`; CLI selects via `--instance` or positional label. Never hardcode instance names — derive them from env at startup.
 
-Loaded from `~/.lab/.env`. **`extract.apply` writes to this file** using a strict merge algorithm (backup first, atomic write, dedupe by key, preserve order and comments, default conflict policy is skip-and-warn, `--force` overwrites). See `crates/lab-apis/src/extract/CLAUDE.md`.
+Loaded from `~/.lab/.env`. Product actions that mutate config or env files must use backup-first, atomic-write behavior and preserve unrelated keys/comments where the file format allows it.
 
 ### PluginMeta shape
 
-Every service entry-point file (e.g., `radarr.rs`) declares a `pub const META: PluginMeta` with:
+Every service entry-point file that participates in generated metadata declares a `pub const META: PluginMeta` with:
 
 - `category: Category` — one of 10 variants: `Media`, `Servarr`, `Indexer`, `Download`, `Notes`, `Documents`, `Network`, `Notifications`, `Ai`, `Bootstrap`.
-- `required_env: &[EnvVar]` / `optional_env: &[EnvVar]` — each `EnvVar { name, description, example, secret }`. `secret: true` marks values to mask in TUI/logs.
-- `default_port: Option<u16>` — used by `labby doctor` and the TUI for hints.
+- `required_env: &[EnvVar]` / `optional_env: &[EnvVar]` — each `EnvVar { name, description, example, secret }`. `secret: true` marks values to mask in logs, docs, and UI.
+- `default_port: Option<u16>` — used by generated docs and doctor/setup hints.
 
 ### Error Handling
 
@@ -280,7 +266,6 @@ All formatting lives in `crates/lab/src/output.rs`. `lab-apis` types are pure da
 
 `docs/design/SERIALIZATION.md` is the canonical source of truth for serde ownership, stable envelopes, and output boundaries.
 
-- Derive `Tabled` on wrapper types in `lab` (not on `lab-apis` types — keeps `tabled` out of the SDK)
 - Support `--json` by serializing the underlying `lab-apis` type with `serde_json`
 - Use `tracing` for debug/verbose output, never `println!` for debug info
 
@@ -295,7 +280,6 @@ All formatting lives in `crates/lab/src/output.rs`. `lab-apis` types are pure da
 | wiremock | HTTP mocking (tests) | lab-apis |
 | clap | CLI parsing (derive) | lab |
 | rmcp | MCP server | lab |
-| tabled | table rendering | lab |
 | dotenvy | .env loading | lab |
 | toml | config parsing | lab |
 | tracing | structured logging | lab |
@@ -363,7 +347,7 @@ Scoped to a single crate:
 
 ```bash
 cargo nextest run -p lab-apis        # client tests only (fast, wiremock-based)
-cargo nextest run --manifest-path crates/lab/Cargo.toml --all-features  # CLI/MCP/TUI tests
+cargo nextest run --manifest-path crates/lab/Cargo.toml --all-features  # CLI/MCP/API tests
 ```
 
 ## Testing
@@ -397,7 +381,7 @@ just test-integration
 - Treat all-features warnings as real; treat narrow feature-slice warnings as diagnostic only until confirmed in the normal all-features build
 - Prefer `impl Trait` over `Box<dyn Trait>` where possible
 - Prefer concrete types over generics unless sharing demands it
-- Never add `clap`, `rmcp`, `ratatui`, `anyhow`, or `tabled` to `lab-apis` — they belong in `lab` only
+- Never add `clap`, `rmcp`, `axum`, or `anyhow` to `lab-apis` — they belong in product/runtime crates only
 - **No `mod.rs` files.** Modern Rust module style only: a module `foo` is declared in `foo.rs` sibling to its `foo/` directory, never in `foo/mod.rs`
 
 ## Plugin setup hooks and install flow

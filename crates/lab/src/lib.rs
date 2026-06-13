@@ -1,4 +1,23 @@
 #![allow(clippy::multiple_crate_versions)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::await_holding_lock,
+        clippy::bool_assert_comparison,
+        clippy::err_expect,
+        clippy::float_cmp,
+        clippy::items_after_test_module,
+        clippy::iter_on_single_items,
+        clippy::manual_string_new,
+        clippy::mem_replace_option_with_some,
+        clippy::needless_borrows_for_generic_args,
+        clippy::needless_raw_string_hashes,
+        clippy::panic,
+        clippy::single_char_pattern,
+        clippy::single_element_loop,
+        clippy::zombie_processes,
+    )
+)]
 
 pub mod acp;
 #[allow(unreachable_pub)]

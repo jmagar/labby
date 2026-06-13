@@ -13,15 +13,15 @@ Feature invariant status: clean.
 | lab-apis | `mcpregistry` | ServicePassthrough | false | true | labby/mcpregistry |  |
 | lab-apis | `test-utils` | HelperInternal | false | false | labby/test-utils |  |
 | labby | `acp_registry` | ServicePassthrough | true | true | lab-apis/acp_registry | `lab-apis/acp_registry` |
-| labby | `all` | AggregateDefault | true | true | lab-apis/all | `lab-apis/all`<br>`lab-admin`<br>`acp_registry`<br>`deploy`<br>`mcpregistry`<br>`gateway`<br>`marketplace` |
+| labby | `all` | AggregateDefault | true | true | lab-apis/all | `lab-apis/all`<br>`lab-admin`<br>`acp_registry`<br>`deploy`<br>`gateway`<br>`marketplace` |
 | labby | `default` | AggregateDefault | false | false | lab-apis/default | `all` |
 | labby | `deploy` | ServicePassthrough | true | true | lab-apis/deploy | `lab-apis/deploy` |
-| labby | `fs` | BinaryOnly | false | false | - | `dep:walkdir`<br>`dep:globset`<br>`dep:unicode-normalization`<br>`dep:rustix` |
-| labby | `gateway` | HelperInternal | true | true | - | `dep:javy`<br>`dep:wasmtime` |
-| labby | `lab-admin` | BinaryOnly | true | true | - |  |
-| labby | `marketplace` | IntentionalException | true | true | - | `mcpregistry` |
-| labby | `mcpregistry` | ServicePassthrough | true | true | lab-apis/mcpregistry | `lab-apis/mcpregistry` |
-| labby | `node-runtime` | IntentionalException | false | false | - |  |
+| labby | `fs` | ProductSlice | false | false | - | `dep:walkdir`<br>`dep:globset`<br>`dep:unicode-normalization`<br>`dep:rustix` |
+| labby | `gateway` | ProductSlice | true | true | - | `dep:javy`<br>`dep:wasmtime` |
+| labby | `lab-admin` | ProductSlice | true | true | - |  |
+| labby | `marketplace` | ProductSlice | true | true | lab-apis/mcpregistry | `lab-apis/mcpregistry` |
+| labby | `mcpregistry` | IntentionalException | true | true | lab-apis/mcpregistry | `marketplace` |
+| labby | `node-runtime` | BinaryOnly | false | false | - |  |
 | labby | `services-all` | IntentionalException | false | false | - |  |
 | labby | `systemd` | HelperInternal | false | false | - | `dep:sd-notify` |
 | labby | `test-utils` | IntentionalException | false | false | lab-apis/test-utils |  |

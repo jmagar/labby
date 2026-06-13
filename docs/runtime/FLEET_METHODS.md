@@ -138,7 +138,7 @@ Reports discovered service configuration on the node.
 {
   "node_id": "<node_id>",
   "discovered_configs": [
-    { "service": "radarr", "url": "http://localhost:7878", ... }
+    { "service": "gateway", "url": "http://localhost:8765/mcp", ... }
   ]
 }
 ```

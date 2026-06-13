@@ -317,11 +317,11 @@ Canonical MCP error envelope:
 ```json
 {
   "ok": false,
-  "service": "radarr",
-  "action": "movie.add",
+  "service": "marketplace",
+  "action": "mcp.install",
   "error": {
     "kind": "missing_param",
-    "message": "missing parameter: root_folder"
+    "message": "missing parameter: name"
   }
 }
 ```

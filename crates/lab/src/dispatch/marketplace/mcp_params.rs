@@ -1,24 +1,16 @@
 //! Param coercion and security guards for `mcp.*` actions in the marketplace dispatch.
 //!
 //! Argv/env security guards delegate to the shared
-//! [`crate::dispatch::upstream::spawn_guard`] module — do NOT add local copies
+//! [`crate::dispatch::security::spawn_guard`] module — do NOT add local copies
 //! of those rules here.
 //!
-//! TODO(M1): DNS rebinding gap — SSRF guards check IP at validation time but DNS
-//! resolution happens at connect time. A hostname that resolves to an RFC1918 address
-//! after validation bypasses these guards. Full mitigation requires IP-at-connect-time
-//! validation intercepting at the reqwest layer. Deferred.
-
-use std::net::IpAddr;
-
-#[cfg(feature = "mcpregistry")]
 use lab_apis::mcpregistry::types::{
     LabRegistryMetadata, LabRegistrySetupDifficulty, LabRegistryTransportScore, ListServersParams,
 };
 use serde_json::Value;
 
 use crate::dispatch::error::ToolError;
-use crate::dispatch::upstream::spawn_guard;
+use crate::dispatch::security::spawn_guard;
 
 /// Validate a `runtimeHint` string against the spawn-guard allowlist.
 ///
@@ -142,7 +134,6 @@ fn optional_bool_param(params: &Value, key: &str) -> Result<Option<bool>, ToolEr
 }
 
 /// Extract `mcp.list` params from the dispatch params object.
-#[cfg(feature = "mcpregistry")]
 pub fn list_servers_params(params: &Value) -> Result<ListServersParams, ToolError> {
     Ok(ListServersParams {
         search: resolve_search(params)?,
@@ -158,7 +149,6 @@ pub fn list_servers_params(params: &Value) -> Result<ListServersParams, ToolErro
     })
 }
 
-#[cfg(feature = "mcpregistry")]
 pub fn parse_lab_metadata(value: &Value) -> Result<LabRegistryMetadata, ToolError> {
     let metadata: LabRegistryMetadata =
         serde_json::from_value(value.clone()).map_err(|e| ToolError::Sdk {
@@ -169,7 +159,6 @@ pub fn parse_lab_metadata(value: &Value) -> Result<LabRegistryMetadata, ToolErro
     Ok(normalize_lab_metadata(metadata))
 }
 
-#[cfg(feature = "mcpregistry")]
 fn validate_lab_metadata(metadata: &LabRegistryMetadata) -> Result<(), ToolError> {
     if metadata.audit.is_some() {
         return Err(ToolError::Sdk {
@@ -217,7 +206,6 @@ fn validate_lab_metadata(metadata: &LabRegistryMetadata) -> Result<(), ToolError
     Ok(())
 }
 
-#[cfg(feature = "mcpregistry")]
 fn normalize_lab_metadata(mut metadata: LabRegistryMetadata) -> LabRegistryMetadata {
     if let Some(curation) = metadata.curation.as_mut() {
         curation.tags = curation
@@ -246,7 +234,6 @@ fn normalize_lab_metadata(mut metadata: LabRegistryMetadata) -> LabRegistryMetad
     metadata
 }
 
-#[cfg(feature = "mcpregistry")]
 fn normalize_optional_string(value: Option<String>) -> Option<String> {
     value
         .as_deref()
@@ -255,7 +242,6 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
         .map(str::to_string)
 }
 
-#[cfg(feature = "mcpregistry")]
 fn validate_timestamp(value: Option<&str>, field: &str) -> Result<(), ToolError> {
     let Some(value) = value else {
         return Ok(());
@@ -266,104 +252,11 @@ fn validate_timestamp(value: Option<&str>, field: &str) -> Result<(), ToolError>
     Ok(())
 }
 
-#[cfg(feature = "mcpregistry")]
 fn invalid_metadata(message: &str) -> ToolError {
     ToolError::Sdk {
         sdk_kind: "invalid_param".to_string(),
         message: message.to_string(),
     }
-}
-
-/// Validate that a URL from the registry is safe to use as a gateway upstream.
-///
-/// Rejects non-HTTPS schemes and hosts that resolve to RFC1918, loopback, or
-/// link-local addresses (SSRF protection).
-///
-/// # Blocking
-/// Uses synchronous `ToSocketAddrs` DNS — must be called via `spawn_blocking`.
-pub fn validate_registry_url(url: &str) -> Result<(), ToolError> {
-    use std::net::ToSocketAddrs;
-
-    let ssrf_err = |msg: String| ToolError::Sdk {
-        sdk_kind: "ssrf_blocked".to_string(),
-        message: msg,
-    };
-
-    let parsed = url::Url::parse(url).map_err(|_| ToolError::Sdk {
-        sdk_kind: "invalid_param".to_string(),
-        message: format!("invalid registry URL: {url}"),
-    })?;
-
-    if parsed.scheme() != "https" {
-        return Err(ToolError::Sdk {
-            sdk_kind: "invalid_param".to_string(),
-            message: format!(
-                "registry URL must use HTTPS, got '{}': {url}",
-                parsed.scheme()
-            ),
-        });
-    }
-
-    let host = parsed.host_str().ok_or_else(|| ToolError::Sdk {
-        sdk_kind: "invalid_param".to_string(),
-        message: format!("registry URL has no host: {url}"),
-    })?;
-
-    let port = parsed.port_or_known_default().unwrap_or(443);
-
-    if let Ok(addr) = host.parse::<IpAddr>() {
-        return check_ip_not_private(addr, url);
-    }
-
-    let addrs: Vec<_> = format!("{host}:{port}")
-        .to_socket_addrs()
-        .map_err(|e| ssrf_err(format!("failed to resolve host '{host}': {e}")))?
-        .collect();
-
-    for sock_addr in addrs {
-        check_ip_not_private(sock_addr.ip(), url)?;
-    }
-
-    Ok(())
-}
-
-fn check_ip_not_private(ip: IpAddr, url: &str) -> Result<(), ToolError> {
-    let blocked = match ip {
-        IpAddr::V4(v4) => {
-            let o = v4.octets();
-            v4.is_loopback()
-                || o[0] == 10
-                || (o[0] == 172 && (16..=31).contains(&o[1]))
-                || (o[0] == 192 && o[1] == 168)
-                || (o[0] == 169 && o[1] == 254)
-                // 100.64.0.0/10 — Tailscale/CGNAT shared address space.
-                // On a Tailscale node these addresses reach internal services.
-                || (o[0] == 100 && (64..=127).contains(&o[1]))
-        }
-        IpAddr::V6(v6) => {
-            v6.is_loopback()
-                || (v6.segments()[0] & 0xfe00) == 0xfc00 // fc00::/7 ULA
-                || (v6.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
-                || v6.to_ipv4_mapped().is_some_and(|v4| {
-                    let o = v4.octets();
-                    v4.is_loopback()
-                        || o[0] == 10
-                        || (o[0] == 172 && (16..=31).contains(&o[1]))
-                        || (o[0] == 192 && o[1] == 168)
-                        || (o[0] == 169 && o[1] == 254)
-                        || (o[0] == 100 && (64..=127).contains(&o[1]))
-                })
-        }
-    };
-    if blocked {
-        return Err(ToolError::Sdk {
-            sdk_kind: "ssrf_blocked".to_string(),
-            message: format!(
-                "registry URL {url} resolves to private/loopback address {ip} — blocked to prevent SSRF"
-            ),
-        });
-    }
-    Ok(())
 }
 
 /// Extract a required `name` string param.

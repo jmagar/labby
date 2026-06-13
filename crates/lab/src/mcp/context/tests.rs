@@ -1,9 +1,11 @@
 //! Tests for request-context auth/subject + scope/admin gate helpers.
 //! Distributed from `server.rs` (bead `lab-kvji.24.1.6`).
 
+#[cfg(feature = "gateway")]
+use super::oauth_upstream_subject_for_request;
 use super::{
-    actor_key_from_extensions, code_mode_search_scope_allowed, oauth_upstream_subject_for_request,
-    subject_from_extensions, tool_execute_builtin_action_allowed, tool_execute_scope_allowed,
+    actor_key_from_extensions, code_mode_search_scope_allowed, subject_from_extensions,
+    tool_execute_builtin_action_allowed, tool_execute_scope_allowed,
 };
 use crate::dispatch::error::ToolError;
 use crate::registry::RegisteredService;
@@ -51,6 +53,7 @@ fn server_reads_subject_scoped_upstream_pool_from_request_extensions() {
 }
 
 #[test]
+#[cfg(feature = "gateway")]
 fn gateway_builtin_actions_require_admin_scope() {
     let entry = RegisteredService {
         name: "gateway",
@@ -178,6 +181,7 @@ fn setup_destructive_builtin_actions_require_admin_scope() {
 }
 
 #[test]
+#[cfg(feature = "gateway")]
 fn oauth_upstream_subject_uses_shared_gateway_for_admin_and_trusted_callers() {
     assert_eq!(
         oauth_upstream_subject_for_request(None, None).as_deref(),
@@ -196,6 +200,7 @@ fn oauth_upstream_subject_uses_shared_gateway_for_admin_and_trusted_callers() {
 }
 
 #[test]
+#[cfg(feature = "gateway")]
 fn oauth_upstream_subject_preserves_non_admin_request_subjects() {
     let lab = make_auth(&["lab"]);
     assert_eq!(

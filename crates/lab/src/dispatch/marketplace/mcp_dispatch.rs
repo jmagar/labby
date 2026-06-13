@@ -3,38 +3,27 @@
 //! These actions were absorbed from `dispatch/mcpregistry/` as part of lab-zxx5.2.
 //! The `dispatch/mcpregistry/` directory is retained until lab-zxx5.4.
 //!
-//! All `mcp.*` routing is feature-gated on `mcpregistry`. When the feature is
-//! absent, every `mcp.*` action returns a structured `not_configured` error.
+//! All `mcp.*` routing is feature-gated on `marketplace`.
 
-#[cfg(feature = "mcpregistry")]
 use std::time::Instant;
 
-#[cfg(feature = "mcpregistry")]
 use lab_apis::mcpregistry::McpRegistryClient;
-#[cfg(feature = "mcpregistry")]
 use lab_apis::mcpregistry::types::{EnvironmentVariable, ServerJSON};
 use serde_json::Value;
 
-#[cfg(feature = "mcpregistry")]
 use crate::config::GatewayPreferences;
 use crate::dispatch::error::ToolError;
-#[cfg(feature = "mcpregistry")]
 use crate::dispatch::helpers::to_json;
-#[cfg(feature = "mcpregistry")]
 use crate::dispatch::marketplace::LAB_REGISTRY_META_NAMESPACE;
 use crate::dispatch::marketplace::mcp_catalog::MCP_ACTIONS;
 use crate::dispatch::marketplace::mcp_client;
-#[cfg(feature = "mcpregistry")]
 use crate::dispatch::marketplace::mcp_params;
-#[cfg(feature = "mcpregistry")]
 use crate::dispatch::node::send::send_rpc_to_node;
 
 /// Dispatch a `mcp.*` action using a freshly constructed client.
 ///
 /// Called from `marketplace/dispatch.rs` for any action with the `mcp.` prefix.
 pub async fn dispatch_mcp(action: &str, params: Value) -> Result<Value, ToolError> {
-    // help and schema are built-in discovery actions; serve them regardless of
-    // whether the mcpregistry feature is compiled in.
     match action {
         "help" => {
             return Ok(crate::dispatch::helpers::help_payload(
@@ -48,20 +37,11 @@ pub async fn dispatch_mcp(action: &str, params: Value) -> Result<Value, ToolErro
         }
         _ => {}
     }
-    #[cfg(feature = "mcpregistry")]
-    {
-        let client = mcp_client::require_mcp_client()?;
-        dispatch_mcp_with_client(client, action, params).await
-    }
-    #[cfg(not(feature = "mcpregistry"))]
-    {
-        let _ = (action, params);
-        Err(mcp_client::not_configured_error())
-    }
+    let client = mcp_client::require_mcp_client()?;
+    dispatch_mcp_with_client(client, action, params).await
 }
 
 /// Dispatch a `mcp.*` action with a pre-built client (used by API handlers with AppState).
-#[cfg(feature = "mcpregistry")]
 pub async fn dispatch_mcp_with_client(
     client: &McpRegistryClient,
     action: &str,
@@ -91,22 +71,33 @@ pub async fn dispatch_mcp_with_client(
         }
         "mcp.install" => dispatch_mcp_install(client, &params).await,
         "mcp.uninstall" => {
-            let gateway_name = params["gateway_name"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| ToolError::MissingParam {
-                    message: "missing required parameter `gateway_name`".to_string(),
-                    param: "gateway_name".to_string(),
-                })?
-                .to_string();
+            #[cfg(not(feature = "gateway"))]
+            {
+                let _ = params;
+                return Err(ToolError::Sdk {
+                    sdk_kind: "not_supported".to_string(),
+                    message: "`mcp.uninstall` requires the gateway feature".to_string(),
+                });
+            }
+            #[cfg(feature = "gateway")]
+            {
+                let gateway_name = params["gateway_name"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| ToolError::MissingParam {
+                        message: "missing required parameter `gateway_name`".to_string(),
+                        param: "gateway_name".to_string(),
+                    })?
+                    .to_string();
 
-            // Delegate to gateway.remove — pass confirm:true since the caller already confirmed
-            // at the mcp.uninstall level (destructive:true is checked by handle_action).
-            crate::dispatch::gateway::dispatch(
-                "gateway.remove",
-                serde_json::json!({ "name": gateway_name, "confirm": true }),
-            )
-            .await
+                // Delegate to gateway.remove — pass confirm:true since the caller already confirmed
+                // at the mcp.uninstall level (destructive:true is checked by handle_action).
+                crate::dispatch::gateway::dispatch(
+                    "gateway.remove",
+                    serde_json::json!({ "name": gateway_name, "confirm": true }),
+                )
+                .await
+            }
         }
         "mcp.meta.get" => dispatch_mcp_local(action, params).await,
         "mcp.meta.set" => dispatch_mcp_local(action, params).await,
@@ -130,7 +121,6 @@ pub async fn dispatch_mcp_with_client(
     }
 }
 
-#[cfg(feature = "mcpregistry")]
 async fn dispatch_mcp_list(client: &McpRegistryClient, params: &Value) -> Result<Value, ToolError> {
     if let Some(param) = ["sort_by", "order"]
         .into_iter()
@@ -157,7 +147,6 @@ async fn dispatch_mcp_list(client: &McpRegistryClient, params: &Value) -> Result
     }))
 }
 
-#[cfg(feature = "mcpregistry")]
 async fn open_registry_store()
 -> Result<crate::dispatch::marketplace::store::RegistryStore, ToolError> {
     use crate::config;
@@ -166,7 +155,6 @@ async fn open_registry_store()
         .map_err(Into::into)
 }
 
-#[cfg(feature = "mcpregistry")]
 fn store_list_params_from_mcp_params(
     params: &lab_apis::mcpregistry::types::ListServersParams,
 ) -> crate::dispatch::marketplace::store::StoreListParams {
@@ -190,7 +178,6 @@ fn store_list_params_from_mcp_params(
     store_params
 }
 
-#[cfg(feature = "mcpregistry")]
 async fn ensure_registry_store_populated(
     store: &crate::dispatch::marketplace::store::RegistryStore,
     client: &McpRegistryClient,
@@ -223,7 +210,6 @@ async fn ensure_registry_store_populated(
 ///
 /// Takes `params.server_name`, optional `params.gateway_ids`, optional
 /// `params.client_targets`, optional `env_values`.
-#[cfg(feature = "mcpregistry")]
 async fn dispatch_mcp_install(
     client: &McpRegistryClient,
     params: &Value,
@@ -246,7 +232,6 @@ async fn dispatch_mcp_install(
     result
 }
 
-#[cfg(feature = "mcpregistry")]
 async fn dispatch_mcp_install_inner(
     client: &McpRegistryClient,
     params: &Value,
@@ -278,6 +263,13 @@ async fn dispatch_mcp_install_inner(
             message: "`gateway_ids` or `client_targets` must not be empty".to_string(),
         });
     }
+    #[cfg(not(feature = "gateway"))]
+    if !gateway_ids.is_empty() {
+        return Err(ToolError::Sdk {
+            sdk_kind: "not_supported".to_string(),
+            message: "`gateway_ids` install targets require the gateway feature".to_string(),
+        });
+    }
 
     let server_resp = client.get_server(&name, version).await?;
     let server = &server_resp.server;
@@ -286,6 +278,7 @@ async fn dispatch_mcp_install_inner(
 
     let mut results = Vec::new();
 
+    #[cfg(feature = "gateway")]
     for gateway_id in &gateway_ids {
         let spec = if let Some(url) = http_url {
             match install_http(url, gateway_id, params).await {
@@ -335,7 +328,7 @@ async fn dispatch_mcp_install_inner(
     }
 
     if !client_targets.is_empty() {
-        let client_config = mcp_client_config(server, params, &name, &prefs)?;
+        let client_config = mcp_client_config(server, params, &name, &prefs).await?;
         for target in &client_targets {
             let target_id = format!("{}:{}", target.node_id, target.client);
             let outcome = send_rpc_to_node(
@@ -373,7 +366,6 @@ async fn dispatch_mcp_install_inner(
     Ok(serde_json::json!({ "results": results }))
 }
 
-#[cfg(feature = "mcpregistry")]
 fn gateway_target_count(params: &Value) -> usize {
     params
         .get("gateway_ids")
@@ -381,7 +373,6 @@ fn gateway_target_count(params: &Value) -> usize {
         .map_or(0, Vec::len)
 }
 
-#[cfg(feature = "mcpregistry")]
 fn client_target_count(params: &Value) -> usize {
     params
         .get("client_targets")
@@ -389,7 +380,6 @@ fn client_target_count(params: &Value) -> usize {
         .map_or(0, Vec::len)
 }
 
-#[cfg(feature = "mcpregistry")]
 fn install_target_kind(params: &Value) -> &'static str {
     match (
         gateway_target_count(params) > 0,
@@ -402,7 +392,6 @@ fn install_target_kind(params: &Value) -> &'static str {
     }
 }
 
-#[cfg(feature = "mcpregistry")]
 fn install_server_name(params: &Value) -> &str {
     params
         .get("name")
@@ -410,7 +399,6 @@ fn install_server_name(params: &Value) -> &str {
         .unwrap_or("<missing>")
 }
 
-#[cfg(feature = "mcpregistry")]
 fn install_version(params: &Value) -> &str {
     params
         .get("version")
@@ -418,7 +406,6 @@ fn install_version(params: &Value) -> &str {
         .unwrap_or("latest")
 }
 
-#[cfg(feature = "mcpregistry")]
 fn result_counts(result: &Result<Value, ToolError>) -> (usize, usize) {
     let Some(results) = result
         .as_ref()
@@ -440,7 +427,6 @@ fn result_counts(result: &Result<Value, ToolError>) -> (usize, usize) {
         })
 }
 
-#[cfg(feature = "mcpregistry")]
 fn log_mcp_install_outcome(params: &Value, started: Instant, result: &Result<Value, ToolError>) {
     let elapsed_ms = started.elapsed().as_millis();
     let (installed_count, error_count) = result_counts(result);
@@ -495,14 +481,12 @@ fn log_mcp_install_outcome(params: &Value, started: Instant, result: &Result<Val
     }
 }
 
-#[cfg(feature = "mcpregistry")]
 #[derive(Debug, Clone)]
 struct McpClientTarget {
     node_id: String,
     client: String,
 }
 
-#[cfg(feature = "mcpregistry")]
 fn parse_mcp_client_targets(params: &Value) -> Result<Vec<McpClientTarget>, ToolError> {
     let Some(raw) = params.get("client_targets") else {
         return Ok(Vec::new());
@@ -559,7 +543,6 @@ fn parse_mcp_client_targets(params: &Value) -> Result<Vec<McpClientTarget>, Tool
 /// Returns `(hint, argv)` where `argv = runtime_arguments + identifier + package_arguments`.
 /// Used by both `mcp_client_config` (rendering a single-process MCP client config)
 /// and `install_stdio` (registering a stdio server with the gateway).
-#[cfg(feature = "mcpregistry")]
 fn build_stdio_command<'a>(
     pkg: &'a lab_apis::mcpregistry::types::Package,
     server_name: &str,
@@ -601,16 +584,14 @@ fn build_stdio_command<'a>(
     Ok((hint, argv))
 }
 
-#[cfg(feature = "mcpregistry")]
-fn mcp_client_config(
+async fn mcp_client_config(
     server: &ServerJSON,
     params_value: &Value,
     server_name: &str,
     prefs: &GatewayPreferences,
 ) -> Result<Value, ToolError> {
     if let Some(url) = server.remotes.iter().find_map(|r| r.url.as_deref()) {
-        let url_for_check = url.to_string();
-        mcp_params::validate_registry_url(&url_for_check)?;
+        crate::dispatch::security::ssrf::validate_external_https_url(url).await?;
         return Ok(serde_json::json!({ "url": url }));
     }
 
@@ -639,7 +620,6 @@ fn mcp_client_config(
     Ok(config)
 }
 
-#[cfg(feature = "mcpregistry")]
 fn resolve_mcp_env_values(
     pkg: &lab_apis::mcpregistry::types::Package,
     params_value: &Value,
@@ -705,7 +685,6 @@ fn resolve_mcp_env_values(
 /// Build a gateway spec for an HTTP-transport server.
 ///
 /// Validates the URL against SSRF rules and probes for OAuth support.
-#[cfg(feature = "mcpregistry")]
 async fn install_http(
     url: &str,
     gateway_name: &str,
@@ -713,15 +692,10 @@ async fn install_http(
 ) -> Result<Value, ToolError> {
     let url = url.to_string();
 
-    // SSRF validation (synchronous DNS) — must run in spawn_blocking.
-    let url_for_check = url.clone();
-    tokio::task::spawn_blocking(move || mcp_params::validate_registry_url(&url_for_check))
-        .await
-        .map_err(|e| {
-            ToolError::internal_message(format!("SSRF validation task panicked: {e}"))
-        })??;
+    crate::dispatch::security::ssrf::validate_external_https_url(&url).await?;
 
     // Probe for OAuth support — non-fatal, install proceeds without OAuth on failure.
+    #[cfg(feature = "gateway")]
     let discovered_oauth: Option<Value> =
         if let Some(manager) = crate::dispatch::gateway::current_gateway_manager() {
             match manager.probe_upstream_oauth(&url).await {
@@ -733,6 +707,8 @@ async fn install_http(
         } else {
             None
         };
+    #[cfg(not(feature = "gateway"))]
+    let discovered_oauth: Option<Value> = None;
 
     let bearer_token_env = params_value["bearer_token_env"].as_str();
 
@@ -755,7 +731,6 @@ async fn install_http(
 
 /// Build a gateway spec for a stdio-transport server, validate security constraints,
 /// and write any user-supplied env vars into `~/.lab/.env`.
-#[cfg(feature = "mcpregistry")]
 fn install_stdio(
     pkg: &lab_apis::mcpregistry::types::Package,
     gateway_name: &str,
@@ -804,7 +779,6 @@ fn install_stdio(
     }))
 }
 
-#[cfg(feature = "mcpregistry")]
 fn missing_env_metadata(ev: &EnvironmentVariable) -> Value {
     serde_json::json!({
         "name": ev.name,
@@ -817,7 +791,6 @@ fn missing_env_metadata(ev: &EnvironmentVariable) -> Value {
 }
 
 /// Dispatch `mcp.meta.*` actions that work against the local registry store.
-#[cfg(feature = "mcpregistry")]
 async fn dispatch_mcp_local(action: &str, params: Value) -> Result<Value, ToolError> {
     use crate::config;
     match action {
@@ -926,7 +899,7 @@ async fn dispatch_mcp_local(action: &str, params: Value) -> Result<Value, ToolEr
     }
 }
 
-#[cfg(all(test, feature = "mcpregistry"))]
+#[cfg(all(test, feature = "marketplace"))]
 mod tests {
     use std::sync::atomic::Ordering;
 

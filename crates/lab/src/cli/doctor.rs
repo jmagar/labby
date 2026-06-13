@@ -20,9 +20,6 @@ use crate::dispatch::doctor::{Finding, Report, Severity, run_auth_checks, run_sy
 use crate::output::OutputFormat;
 use crate::output::theme::CliTheme;
 
-#[cfg(test)]
-pub use crate::dispatch::doctor::service_env_checks;
-
 #[derive(Debug, Args)]
 pub struct DoctorArgs {
     #[command(subcommand)]

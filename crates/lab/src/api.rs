@@ -26,6 +26,7 @@ pub mod health;
 pub mod oauth;
 
 /// Browser-facing upstream OAuth routes.
+#[cfg(feature = "gateway")]
 pub mod upstream_oauth;
 
 /// Browser-session endpoints for the hosted UI.

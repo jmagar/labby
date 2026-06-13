@@ -20,7 +20,10 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use serde_json::Value;
 
-use crate::mcp::context::{auth_context_from_extensions, oauth_upstream_subject_for_request};
+#[cfg(feature = "gateway")]
+use crate::mcp::context::auth_context_from_extensions;
+#[cfg(feature = "gateway")]
+use crate::mcp::context::oauth_upstream_subject_for_request;
 use crate::mcp::logging::DispatchLogOutcome;
 use crate::mcp::server::LabMcpServer;
 
@@ -41,6 +44,7 @@ impl LabMcpServer {
         );
         let mut prompts = crate::mcp::prompts::list_all().prompts;
 
+        #[cfg(feature = "gateway")]
         if let Some(pool) = self.current_upstream_pool().await {
             let builtin_names: Vec<String> = prompts
                 .iter()
@@ -179,6 +183,7 @@ impl LabMcpServer {
             return Ok(prompt);
         }
 
+        #[cfg(feature = "gateway")]
         if let Some(pool) = self.current_upstream_pool().await
             && let Some(upstream_name) = pool
                 .find_prompt_owner_allowed(&request.name, self.route_scope.allowed_upstreams())
@@ -275,7 +280,9 @@ impl LabMcpServer {
             return outcome;
         }
 
+        #[cfg(feature = "gateway")]
         let auth = auth_context_from_extensions(&context.extensions);
+        #[cfg(feature = "gateway")]
         if let Some(oauth_subject) =
             oauth_upstream_subject_for_request(auth, self.request_subject(&context))
             && let Some(pool) = self.current_upstream_pool().await
@@ -414,6 +421,7 @@ mod tests {
     fn prompt_test_server(route_scope: McpRouteScope) -> LabMcpServer {
         LabMcpServer {
             registry: Arc::new(build_default_registry()),
+            #[cfg(feature = "gateway")]
             gateway_manager: None,
             node_role: None,
             peers: Arc::new(tokio::sync::RwLock::new(Vec::new())),

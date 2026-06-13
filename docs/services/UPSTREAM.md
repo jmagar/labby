@@ -107,7 +107,7 @@ name = "remote-lab"
 url = "https://lab2.example.com/mcp"
 bearer_token_env = "REMOTE_LAB_TOKEN"
 proxy_resources = true
-expose_tools = ["radarr", "search_*"]
+expose_tools = ["gateway", "search_*"]
 
 [[upstream]]
 name = "filesystem"
@@ -338,7 +338,7 @@ This internal precedence rule does not make upstream tools second-class. It is j
 
 When upstream tools are merged into the lab tool catalog:
 
-1. **Built-in lab services always take precedence.** If an upstream exposes a tool named `radarr`, the upstream tool is silently dropped (with a warning logged).
+1. **Built-in lab services always take precedence.** If an upstream exposes a tool named `gateway`, the upstream tool is silently dropped (with a warning logged).
 2. **Cross-upstream duplicates: first discovered wins.** If two upstreams expose a tool named `my-tool`, the second is skipped with a warning.
 
 Upstream tools appear alongside built-in tools in `list_tools()`. Callers do not need to know whether a tool is built-in or proxied.
@@ -411,10 +411,10 @@ Upstream resources are prefixed to avoid URI collisions with lab's own resources
 lab://upstream/{name}/{original_uri}
 ```
 
-For example, if upstream `remote-lab` exposes a resource `lab://radarr/actions`, it appears as:
+For example, if upstream `remote-lab` exposes a resource `lab://gateway/actions`, it appears as:
 
 ```text
-lab://upstream/remote-lab/lab://radarr/actions
+lab://upstream/remote-lab/lab://gateway/actions
 ```
 
 ### Operations

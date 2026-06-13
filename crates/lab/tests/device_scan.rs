@@ -1,3 +1,14 @@
+#![allow(
+    clippy::bool_assert_comparison,
+    clippy::err_expect,
+    clippy::field_reassign_with_default,
+    clippy::float_cmp,
+    clippy::len_zero,
+    clippy::manual_string_new,
+    clippy::needless_raw_string_hashes,
+    clippy::single_char_pattern,
+    clippy::unnested_or_patterns
+)]
 #[test]
 fn scans_claude_codex_and_gemini_configs_when_present() {
     let temp = tempfile::tempdir().unwrap();
@@ -34,7 +45,7 @@ command = "lab"
     assert!(inventory.iter().all(|entry| {
         entry.servers.values().all(|server| {
             !server.fingerprint.is_empty()
-                && !matches!(server.transport.as_deref(), Some("lab") | Some("serve"))
+                && !matches!(server.transport.as_deref(), Some("lab" | "serve"))
         })
     }));
 }

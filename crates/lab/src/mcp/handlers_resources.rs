@@ -23,10 +23,9 @@ use rmcp::service::RequestContext;
 use serde_json::{Value, json};
 
 use crate::mcp::catalog::{CODE_MODE_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME};
-use crate::mcp::context::{
-    auth_context_from_extensions, code_mode_search_scope_allowed,
-    oauth_upstream_subject_for_request,
-};
+#[cfg(feature = "gateway")]
+use crate::mcp::context::oauth_upstream_subject_for_request;
+use crate::mcp::context::{auth_context_from_extensions, code_mode_search_scope_allowed};
 use crate::mcp::logging::DispatchLogOutcome;
 use crate::mcp::server::LabMcpServer;
 
@@ -106,6 +105,7 @@ impl LabMcpServer {
             }
         }
 
+        #[cfg(feature = "gateway")]
         if let Some(pool) = self.current_upstream_pool().await {
             resources.extend(
                 pool.gateway_synthetic_resources_allowed(self.route_scope.allowed_upstreams())
@@ -162,12 +162,17 @@ impl LabMcpServer {
         let start = Instant::now();
         let subject = self.request_subject_log_tag(&context);
         let uri = &request.uri;
+        #[cfg(feature = "gateway")]
+        let resource_uri_log =
+            crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri);
+        #[cfg(not(feature = "gateway"))]
+        let resource_uri_log = uri.to_string();
         tracing::info!(
             surface = "mcp",
             service = "labby",
             action = "read_resource",
             subject,
-            resource_uri = crate::dispatch::upstream::pool::redact_resource_uri_for_logging(uri),
+            resource_uri = %resource_uri_log,
             "dispatch start"
         );
 
@@ -187,6 +192,7 @@ impl LabMcpServer {
         // native `ui://` URI. These widgets are surfaced through the Code Mode
         // synthetic surface, so gate them behind the same read scope as Lab's own
         // Code Mode app resources rather than leaving them ungated.
+        #[cfg(feature = "gateway")]
         if uri.starts_with("ui://") {
             let auth = auth_context_from_extensions(&context.extensions);
             if !code_mode_search_scope_allowed(auth) {
@@ -210,6 +216,7 @@ impl LabMcpServer {
         }
 
         // Branch 1: gateway-synthetic resources.
+        #[cfg(feature = "gateway")]
         if uri.starts_with("lab://gateway/") {
             return self
                 .read_gateway_resource_impl(uri, &subject, start, &context)
@@ -217,6 +224,7 @@ impl LabMcpServer {
         }
 
         // Branch 2: raw upstream resource proxy.
+        #[cfg(feature = "gateway")]
         if let Some(pool) = self.current_upstream_pool().await
             && uri.starts_with("lab://upstream/")
         {
@@ -226,7 +234,9 @@ impl LabMcpServer {
         }
 
         // Branch 3: subject-scoped upstream resource proxy.
+        #[cfg(feature = "gateway")]
         let auth = auth_context_from_extensions(&context.extensions);
+        #[cfg(feature = "gateway")]
         if let Some(oauth_subject) =
             oauth_upstream_subject_for_request(auth, self.request_subject(&context))
             && let Some(pool) = self.current_upstream_pool().await
@@ -376,6 +386,7 @@ impl LabMcpServer {
             ));
         }
         let history = if uri == CODE_MODE_HISTORY_APP_URI {
+            #[cfg(feature = "gateway")]
             match &self.gateway_manager {
                 Some(manager) if self.route_scope.protected_history_label().is_some() => {
                     let label = self.route_scope.protected_history_label();
@@ -389,6 +400,10 @@ impl LabMcpServer {
                     "entries": manager.code_mode_history_snapshot().await,
                 })),
                 None => Some(json!({ "kind": "code_mode_history", "entries": [] })),
+            }
+            #[cfg(not(feature = "gateway"))]
+            {
+                Some(json!({ "kind": "code_mode_history", "entries": [] }))
             }
         } else {
             None
@@ -488,7 +503,7 @@ pub(crate) fn code_mode_app_resource_meta(uri: &str) -> Meta {
     Meta(meta)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "gateway"))]
 mod tests {
     use super::*;
     use rmcp::service::{Peer, RequestContext};

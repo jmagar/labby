@@ -378,7 +378,7 @@ Additional rules:
 - do not log full request headers unless explicitly sanitized
 - do not log request bodies by default
 - do not log query parameters when they contain secrets
-- do not echo secrets in doctor output, prompts, or TUI flows
+- do not echo secrets in doctor output, prompts, logs, generated docs, or UI flows
 - do not log raw discovered MCP config file contents; only metadata such as path, source, and hash are acceptable
 - do not persist bearer tokens, cookies, authorization headers, or raw secret material in the local log store
 - do not fan out unredacted structured fields to live SSE subscribers
@@ -463,12 +463,12 @@ Illustrative success fields:
 ```json
 {
   "surface": "http",
-  "service": "unifi",
-  "action": "sites.list",
+  "service": "marketplace",
+  "action": "mcp.list",
   "request_id": "req-123",
   "method": "GET",
-  "path": "/proxy/network/integration/v1/sites",
-  "host": "unifi.local",
+  "path": "/v0.1/servers",
+  "host": "registry.modelcontextprotocol.io",
   "status": 200,
   "elapsed_ms": 42
 }
@@ -479,13 +479,13 @@ Illustrative failure fields:
 ```json
 {
   "surface": "cli",
-  "service": "unifi",
-  "action": "sites.list",
+  "service": "marketplace",
+  "action": "mcp.list",
   "method": "GET",
-  "path": "/proxy/network/integration/v1/sites",
-  "host": "unifi.local",
+  "path": "/v0.1/servers",
+  "host": "registry.modelcontextprotocol.io",
   "kind": "network_error",
-  "message": "tls validation failed: self-signed certificate",
+  "message": "registry request failed",
   "elapsed_ms": 311
 }
 ```

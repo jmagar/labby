@@ -32,7 +32,6 @@ const AUDIT_TIMEOUT: Duration = Duration::from_secs(30);
 /// `value` parameter or commits the draft must be listed here.
 const REDACTED_LOG_ACTIONS: &[&str] = &["draft.set", "draft.commit", "finalize"];
 use crate::dispatch::error::ToolError;
-use crate::dispatch::gateway::current_gateway_manager;
 use crate::dispatch::helpers::{action_schema, help_payload, to_json};
 use crate::registry::{
     RegisteredService, RegisteredServiceKind, bootstrap_operator_services,
@@ -255,11 +254,16 @@ fn settings_update_action(params: &Value) -> Result<Value, ToolError> {
     };
     if changed {
         crate::registry::set_runtime_built_in_upstream_apis_enabled(enabled);
-        if let Some(manager) = current_gateway_manager() {
-            manager.set_builtin_service_registry(crate::registry::filter_built_in_upstream_apis(
-                crate::registry::build_default_registry(),
-                enabled,
-            ));
+        #[cfg(feature = "gateway")]
+        {
+            if let Some(manager) = crate::dispatch::gateway::current_gateway_manager() {
+                manager.set_builtin_service_registry(
+                    crate::registry::filter_built_in_upstream_apis(
+                        crate::registry::build_default_registry(),
+                        enabled,
+                    ),
+                );
+            }
         }
     }
     let restart_required = false;

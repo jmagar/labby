@@ -1,4 +1,17 @@
+#![allow(
+    clippy::bool_assert_comparison,
+    clippy::err_expect,
+    clippy::field_reassign_with_default,
+    clippy::float_cmp,
+    clippy::len_zero,
+    clippy::manual_string_new,
+    clippy::needless_raw_string_hashes,
+    clippy::panic,
+    clippy::single_char_pattern,
+    clippy::unnested_or_patterns
+)]
 use clap::Parser;
+#[cfg(feature = "deploy")]
 use labby::cli::nodes::NodesCommand;
 use labby::cli::{Cli, Command};
 use labby::config::{LabConfig, NodePreferences};
@@ -137,6 +150,7 @@ async fn master_client_applies_bearer_token_to_master_requests() {
 }
 
 #[test]
+#[cfg(feature = "deploy")]
 fn nodes_update_parses_all_flag() {
     let cli = Cli::try_parse_from(["lab", "nodes", "update", "--all"]).expect("parse nodes update");
     match cli.command {
@@ -152,6 +166,7 @@ fn nodes_update_parses_all_flag() {
 }
 
 #[test]
+#[cfg(feature = "deploy")]
 fn nodes_update_parses_explicit_targets() {
     let cli =
         Cli::try_parse_from(["lab", "nodes", "update", "mini1", "mini2"]).expect("parse targets");

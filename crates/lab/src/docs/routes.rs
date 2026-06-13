@@ -170,12 +170,26 @@ pub fn build_route_docs(service_names: &[String]) -> Vec<RouteDoc> {
         bearer_only("POST", "/mcp", "mcp", "MCP streamable HTTP endpoint"),
         bearer_only("GET", "/mcp", "mcp", "MCP streamable HTTP endpoint"),
         bearer_only(
-            "POST",
-            "/v0.1/*",
+            "GET",
+            "/v0.1/servers",
             "mcpregistry",
-            "MCP Registry compatibility API",
+            "list MCP Registry compatibility servers",
         )
-        .feature("mcpregistry"),
+        .feature("marketplace"),
+        bearer_only(
+            "GET",
+            "/v0.1/servers/{serverName}/versions",
+            "mcpregistry",
+            "list MCP Registry compatibility server versions",
+        )
+        .feature("marketplace"),
+        bearer_only(
+            "GET",
+            "/v0.1/servers/{serverName}/versions/{version}",
+            "mcpregistry",
+            "get MCP Registry compatibility server version",
+        )
+        .feature("marketplace"),
         browser("GET", "/auth/login", "browser login redirect"),
         browser("GET", "/auth/session", "browser session introspection"),
         browser("POST", "/auth/logout", "browser session logout"),

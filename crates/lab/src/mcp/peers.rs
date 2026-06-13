@@ -5,8 +5,10 @@ use futures::future::join_all;
 use rmcp::RoleServer;
 use rmcp::service::Peer;
 use tokio::sync::RwLock;
+#[cfg(feature = "gateway")]
 use tokio::sync::mpsc;
 
+#[cfg(feature = "gateway")]
 use crate::dispatch::gateway::types::GatewayCatalogDiff;
 
 /// Per-peer notification timeout (P-L2 fix).
@@ -29,6 +31,7 @@ pub struct PeerNotifier {
 }
 
 impl PeerNotifier {
+    #[cfg(feature = "gateway")]
     pub async fn run(self, mut rx: mpsc::UnboundedReceiver<GatewayCatalogDiff>) {
         tracing::info!(
             surface = "mcp",
@@ -51,6 +54,7 @@ impl PeerNotifier {
         );
     }
 
+    #[cfg(feature = "gateway")]
     async fn notify_catalog_changes(&self, diff: &GatewayCatalogDiff) {
         let peers = self.peers.read().await.clone();
         tracing::info!(

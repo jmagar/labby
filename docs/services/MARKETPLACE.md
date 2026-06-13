@@ -6,10 +6,10 @@
 - the official MCP Registry (`mcp.*`)
 - the ACP Agent Registry (`agent.*`)
 
-It is always compiled and exposed through the normal Lab dispatch paths: CLI,
-MCP, HTTP API, and the web UI. The generated service catalog must show
-`marketplace` as `available` while `mcpregistry` and `acp_registry` remain
-`sdk_only`.
+It is compiled by the `marketplace` feature and exposed through the normal Lab
+dispatch paths: CLI, MCP, HTTP API, and the web UI. The generated service
+catalog must show `marketplace` as feature-gated/available when compiled, while
+`mcpregistry` and `acp_registry` remain SDK-only entries.
 
 ## Ownership
 

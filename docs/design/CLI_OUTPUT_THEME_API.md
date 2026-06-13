@@ -319,13 +319,13 @@ Example output intent:
 
 ```text
 Service Health
-(14 total)
+(3 total)
 
 Status  Service  Auth  Version  Latency  Message
 ──────  ───────  ────  ───────  ───────  ───────
-ok      plex     yes   1.41.0   24 ms    reachable
-warn    radarr   no    5.3.1    412 ms   auth failed
-fail    sonarr   no    -        -        timeout
+ok      gateway      yes   -        24 ms    reachable
+warn    marketplace  yes   -        412 ms   registry sync delayed
+fail    logs         yes   -        -        store unavailable
 ```
 
 In styled mode:

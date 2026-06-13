@@ -131,8 +131,8 @@
     "description": "Manage proxied upstream MCP gateways",
     "category": "bootstrap",
     "status": "available",
-    "feature": null,
-    "exposure": "always_on",
+    "feature": "gateway",
+    "exposure": "feature_gated",
     "surfaces": {
       "cli": true,
       "mcp": true,
@@ -194,8 +194,8 @@
     "description": "Browse Claude Code/Codex marketplaces, MCP Registry servers, ACP agents, and installable components",
     "category": "marketplace",
     "status": "available",
-    "feature": null,
-    "exposure": "always_on",
+    "feature": "marketplace",
+    "exposure": "feature_gated",
     "surfaces": {
       "cli": true,
       "mcp": true,
@@ -215,7 +215,7 @@
     "description": "MCP Registry v0.1 — discover and validate MCP servers",
     "category": "marketplace",
     "status": "sdk_only",
-    "feature": "mcpregistry",
+    "feature": "marketplace",
     "exposure": "sdk_only",
     "surfaces": {
       "cli": false,

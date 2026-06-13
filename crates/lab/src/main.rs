@@ -6,6 +6,25 @@
 
 #![allow(clippy::multiple_crate_versions)]
 #![allow(unreachable_pub)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::await_holding_lock,
+        clippy::bool_assert_comparison,
+        clippy::err_expect,
+        clippy::float_cmp,
+        clippy::items_after_test_module,
+        clippy::iter_on_single_items,
+        clippy::manual_string_new,
+        clippy::mem_replace_option_with_some,
+        clippy::needless_borrows_for_generic_args,
+        clippy::needless_raw_string_hashes,
+        clippy::panic,
+        clippy::single_char_pattern,
+        clippy::single_element_loop,
+        clippy::zombie_processes,
+    )
+)]
 // binary crate — `pub` items are crate-internal by design
 
 mod acp;
@@ -384,10 +403,17 @@ async fn main() -> ExitCode {
         Cli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit())
     };
 
-    if matches!(
-        cli.command,
-        cli::Command::Docs(_) | cli::Command::Internal(_)
-    ) {
+    let uses_default_config = matches!(cli.command, cli::Command::Docs(_)) || {
+        #[cfg(feature = "gateway")]
+        {
+            matches!(cli.command, cli::Command::Internal(_))
+        }
+        #[cfg(not(feature = "gateway"))]
+        {
+            false
+        }
+    };
+    if uses_default_config {
         return match cli::dispatch(cli, config::LabConfig::default()).await {
             Ok(code) => code,
             Err(err) => {

@@ -407,7 +407,7 @@ Call a protected endpoint with a `lab` access token:
 
 ```bash
 curl -H "Authorization: Bearer eyJhbG..." \
-     https://lab.example.com/v1/radarr \
+     https://lab.example.com/v1/marketplace \
      -d '{"action":"help"}'
 ```
 

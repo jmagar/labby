@@ -1,10 +1,11 @@
 # Scaffold And Audit
 
-`labby scaffold service` and `labby audit onboarding` are the preferred guardrails
-for service onboarding.
+`labby scaffold service` and `labby audit onboarding` are a deferred guardrail
+contract, not commands in the current CLI surface.
 
-Use scaffold to create the expected module skeleton, then use audit to verify
-that the service is wired into every required surface and registry.
+If these commands are restored, scaffold should create the expected module
+skeleton, then audit should verify that the service is wired into every
+declared surface and registry.
 
 ```bash
 labby scaffold service <service>
@@ -32,5 +33,13 @@ The onboarding audit should catch missing or drifted wiring across:
 - MCP/API registration
 - generated docs and service coverage docs
 
-Run the audit before all-features verification. A service is not online until
-the scaffold/audit checks and the normal all-features build path pass.
+Until the commands exist again, use manual review plus generated-doc checks:
+
+```bash
+cargo run -p labby --all-features -- docs generate
+cargo run -p labby --all-features -- docs check
+cargo check --workspace --all-features
+```
+
+A service is not online until its declared surfaces, generated docs, and the
+normal all-features build path pass.
