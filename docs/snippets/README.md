@@ -8,6 +8,15 @@ This document is only about snippets that run inside Code Mode.
 
 A snippet is a Markdown or JavaScript file that contains an async arrow function passed to Code Mode `execute`.
 
+The simple version:
+
+1. Pick one or more gateway tools.
+2. Fill in the parameters those tools already declare in their typed schemas.
+3. Decide whether the calls run in parallel or one after another.
+4. Return the useful parts of each tool result as JSON.
+
+That is it. A snippet is not a new plugin system, a new MCP server, or a special agent language. It is a saved recipe for calling existing MCP tools with known arguments.
+
 Executable Markdown snippets should begin with frontmatter:
 
 ```yaml
@@ -39,6 +48,84 @@ await callTool("axon::axon", { action: "search", query: "mcp-ui rust" })
 ```
 
 Before writing or running a snippet, use Code Mode `search` to inspect the live catalog. Search returns tool ids, descriptions, input schemas, output schemas, TypeScript signatures, and focused DTS blocks. A snippet should be written against those returned ids and schemas, not against guessed tool names.
+
+## How Users Should Build Snippets
+
+The snippet builder should make authoring feel like assembling a small checklist, not writing JavaScript.
+
+### 1. Search the live gateway tools
+
+The gateway already knows every connected upstream tool. Each catalog entry includes:
+
+- `id`, such as `time::get_current_time` or `axon::axon`
+- `upstream`, such as `time` or `axon`
+- `name`, such as `get_current_time` or `axon`
+- `description`
+- input `schema`
+- output schema when the upstream provides one
+- generated TypeScript signature and DTS help text
+
+The user should search this live catalog by service, tool name, or description, then select the tools they want the snippet to call.
+
+### 2. Render a form from each selected tool schema
+
+For each selected tool, the builder should read the upstream JSON schema and render the available fields:
+
+- strings become text inputs
+- booleans become toggles
+- numbers and integers become numeric inputs
+- enums become selects
+- arrays and objects become structured editors
+- required fields are clearly marked
+- descriptions and defaults are shown inline
+
+The user should not need to know the parameter names ahead of time. The schema tells Labby what fields exist and what values are valid.
+
+### 3. Validate before saving
+
+Every call step should be validated against the same upstream schema that Code Mode uses at runtime. Invalid params should fail before a snippet is saved or executed.
+
+Example validation failures should be concrete:
+
+```text
+axon::axon.params.action is required
+time::get_current_time.params.timezone must be a string
+github::search_repositories.params.perPage must be an integer
+```
+
+### 4. Choose parallel or chained execution
+
+Most snippets are one of two shapes:
+
+- **Parallel:** call independent tools at the same time, then combine results.
+- **Chained:** call one tool, use its result to fill parameters for the next tool.
+
+The first builder pass can make parallel snippets easy and reserve advanced chaining for a later step. Even a parallel-only builder covers many useful workflows: health pulses, docs briefs, repo triage, and multi-source search.
+
+### 5. Save a readable Markdown snippet
+
+The saved file should still be plain Markdown. A user should be able to open it, understand the selected tools and parameters, and edit it by hand if they want.
+
+The builder can generate the JavaScript body, but the source of truth stays simple:
+
+```yaml
+---
+name: my-docs-brief
+description: Search docs and GitHub for one topic
+tags: [docs, research]
+inputs:
+  topic:
+    type: string
+    default: Model Context Protocol Rust SDK
+    required: false
+tools:
+  - time::get_current_time
+  - context7::query-docs
+  - github::search_repositories
+---
+```
+
+Then the code is just the generated call plan: call each selected tool with validated params and return the results.
 
 ## Why Snippets Matter
 

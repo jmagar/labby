@@ -33,6 +33,51 @@ inputs:
 
 Reusable Axon workflow snippets. Treat these as the source of truth. MCP prompts should only expose a snippet name, arguments, and output expectations.
 
+## Tutorial: How This Snippet Is Built
+
+This snippet uses one upstream tool, `axon::axon`, several times with different `action` values. That is common for action-dispatched MCP servers: the selected tool is the same, but the parameters choose the operation.
+
+| Step | Tool | Action | Why it is included | Parameters the user fills |
+|---|---|---|---|---|
+| Fresh search | `axon::axon` | `search` | Finds current web results and starts passive indexing | `query` |
+| Research synthesis | `axon::axon` | `research` | Runs search, extraction, and an evidence summary | `query` |
+| Vector search | `axon::axon` | `query` | Searches already indexed knowledge | `query` |
+| Seed scrape | `axon::axon` | `scrape` | Reads one known URL when supplied | `url` |
+| Seed summary | `axon::axon` | `summarize` | Summarizes one known URL when supplied | `url` |
+| RAG answer | `axon::axon` | `ask` | Optional slower synthesis over indexed context | `query` |
+| Evidence scrape | `axon::axon` | `scrape` | Reads selected high-score URLs | `url` |
+| Evidence summary | `axon::axon` | `summarize` | Produces compact notes for selected URLs | `url` |
+
+The snippet has two phases:
+
+1. **Fan-out:** run independent first-pass Axon actions in parallel.
+2. **Chaining:** score URLs from the first pass, then scrape/summarize the selected evidence URLs.
+
+This is the most advanced built-in snippet because it shows both shapes. The builder can still make it understandable by presenting the first phase as selected tool calls and the second phase as "use URLs from step 1 as the `url` field for step 2."
+
+## Why The Inputs Exist
+
+- `topic` becomes the base query for `search`, `research`, and `query`.
+- `focus` sharpens the optional `ask` prompt and the evidence scoring terms.
+- `seed_url` adds known evidence to the first pass without requiring search to find it.
+- `max_evidence_urls` bounds how many URLs are selected for the second pass.
+- `include_ask` keeps the slower `ask` call opt-in.
+
+Defaults are intentionally useful. A user can run the snippet unchanged for a smoke test, or change only `topic` and get a relevant research pass.
+
+## What Validation Should Catch
+
+Because every call uses `axon::axon`, validation has to look at the `action` field and the action-specific parameters:
+
+- `action: "search"` requires a string `query`.
+- `action: "research"` requires a string `query`.
+- `action: "query"` requires a string `query`.
+- `action: "scrape"` and `action: "summarize"` require a string `url`.
+- `include_ask` must be boolean.
+- `max_evidence_urls` must be an integer.
+
+The builder should make action-dispatched tools feel like normal tools by showing the selected action first, then showing only the fields that action needs.
+
 ## `axon_research_brief`
 
 Purpose: turn a topic into a useful engineering brief by combining fresh web discovery, Axon's indexed knowledge, and targeted page summaries.

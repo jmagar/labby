@@ -39,6 +39,48 @@ inputs:
 
 Use this snippet for a small health pulse across the homelab. It avoids notification-send and state-changing actions. The Synapse2 `scout exec` checks use allowlisted read-only commands and require the local Labby upstream env override `SYNAPSE_MCP_ALLOW_DESTRUCTIVE=true`.
 
+## Tutorial: How This Snippet Is Built
+
+This snippet is a read-only operations dashboard assembled from existing MCP tools. It does not invent new checks; it chooses safe tool actions and normalizes their outputs into one pulse.
+
+| Step | Tool | Why it is included | Parameters the user fills |
+|---|---|---|---|
+| Timestamp | `time::get_current_time` | Anchors the report in local time | `timezone` |
+| Docker hosts | `dozzle::list_hosts` | Shows which Docker hosts are visible | none |
+| Docker containers | `dozzle::list_containers` | Counts container states and samples names/images | none; snippet input controls sample size |
+| Logs | `cortex::cortex` | Pulls recent matching logs | `action`, `params.query`, `params.limit` |
+| Unraid server | `unrust::unraid` | Checks Unraid server reachability | `action` |
+| Unraid info | `unrust::unraid` | Adds host/OS/CPU summary | `action` |
+| Unraid notifications | `unrust::unraid` | Captures warning/alert counts | `action`, `params.limit` |
+| Gotify health | `rustify::gotify` | Confirms notification service health without sending | `action` |
+| Synapse nodes | `synapse2::scout` | Lists configured Synapse hosts | `action` |
+| Synapse host status | `synapse2::flux` | Gets per-host Docker/system status | `action`, `subaction` |
+| Synapse identity | `synapse2::scout` | Runs allowlisted `hostname` checks | `action`, `host`, `command` |
+
+The authoring pattern is still simple: pick read-only tools, fill their schema fields, then decide which result fields are worth keeping. The snippet intentionally drops noisy raw payload fields and returns summaries like container counts, Synapse host status, Unraid notification counts, and per-call timings.
+
+## Why The Inputs Exist
+
+- `timezone` feeds the timestamp tool.
+- `log_query` and `log_limit` feed the Cortex `search` action.
+- `notification_limit` limits Unraid notification detail.
+- `container_sample` controls how many containers are included in the sample after counting all containers.
+- `identity_hosts` expands into one read-only Synapse `hostname` command per host.
+
+These defaults let the snippet run with no arguments. Users only change inputs when they want to focus the pulse, for example `--param log_query=oauth` or `--param identity_hosts='["dookie","squirts","tootie"]'`.
+
+## What Validation Should Catch
+
+The builder should catch type and action-shape mistakes before execution:
+
+- `time::get_current_time.timezone` must be a string.
+- `cortex::cortex.params.limit` must be an integer.
+- `unrust::unraid.action` must be one of the supported action strings.
+- `synapse2::scout.host` must be a string when creating per-host exec calls.
+- `identity_hosts` must be an array before expanding it into multiple calls.
+
+This is also where read-only intent should be obvious in the UI. The selected actions should be shown with destructive metadata from the gateway catalog, and the builder should make it clear that this snippet avoids send/delete/mutate actions.
+
 Live smoke-tested tools before authoring:
 
 - `time::get_current_time`

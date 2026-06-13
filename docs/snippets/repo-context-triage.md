@@ -34,6 +34,47 @@ inputs:
 
 Use this snippet when you need a quick orientation pass for a repo topic. It combines local file reads, Lumen semantic search, Octocode local code search, and GitHub issue/file lookups.
 
+## Tutorial: How This Snippet Is Built
+
+This snippet is a repository-orientation checklist. It collects local context, semantic context, code-search hits, GitHub issues, and one remote file in one run.
+
+| Step | Tool | Why it is included | Parameters the user fills |
+|---|---|---|---|
+| Timestamp | `time::get_current_time` | Records when the triage pass ran | `timezone` |
+| Local doc | `filesystem::read_file` | Reads the local snippet docs as context | `path` |
+| Semantic search | `lumen::semantic_search` | Finds related indexed workspace knowledge | `query`, `limit` |
+| Local code search | `octocode::localSearchCode` | Finds exact code/text matches in the repo | `queries[].path`, `queries[].pattern`, `maxResults` |
+| GitHub issues | `github::search_issues` | Finds remote issue context | `query`, `perPage` |
+| GitHub file | `github::get_file_contents` | Compares or retrieves a canonical remote file | `owner`, `repo`, `path` |
+
+The calls are independent, so they run in parallel. The only transformation logic is output cleanup: long tool responses are previewed, GitHub issues are reduced to title/state/URL, and the result keeps enough handles for follow-up work.
+
+## Why The Inputs Exist
+
+- `repo_path` tells Octocode where to search locally.
+- `owner` and `repo` are used by GitHub calls.
+- `topic` becomes the semantic/code/issues search target.
+- `max_results` bounds Lumen, Octocode, and GitHub output.
+
+The snippet also has two fixed internal paths:
+
+- `localDoc` defaults to the local snippets README.
+- `remoteDoc` defaults to the same path in GitHub.
+
+Those are normal builder defaults: the generated snippet can include fixed params where a workflow always wants the same file.
+
+## What Validation Should Catch
+
+The builder should validate both simple and nested schemas:
+
+- `filesystem::read_file.path` must be a string.
+- `lumen::semantic_search.limit` must be an integer.
+- `octocode::localSearchCode.queries` must be an array of objects with `path` and `pattern`.
+- `github::search_issues.perPage` must be an integer.
+- `github::get_file_contents.owner`, `repo`, and `path` must be strings.
+
+This example is useful for teaching nested fields: users should be able to add an Octocode query row in the UI instead of hand-writing `queries: [{ path, pattern }]`.
+
 Live smoke-tested tools before authoring:
 
 - `time::get_current_time`

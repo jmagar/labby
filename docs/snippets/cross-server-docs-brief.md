@@ -29,6 +29,44 @@ inputs:
 
 Use this snippet when you want a quick documentation brief from several independent sources. It combines Context7 library docs, SearXNG web search, Cloudflare docs, GitHub repository search, Axon search, and the time server.
 
+## Tutorial: How This Snippet Is Built
+
+This snippet is a small parallel research checklist. Each selected tool answers a different evidence question:
+
+| Step | Tool | Why it is included | Parameters the user fills |
+|---|---|---|---|
+| Timestamp | `time::get_current_time` | Marks when the brief was generated | `timezone` |
+| Library discovery | `context7::resolve-library-id` | Finds matching Context7 library ids | `libraryName`, `query` |
+| Library docs | `context7::query-docs` | Pulls focused docs from a known library id | `libraryId`, `query`, `tokens` |
+| Web search | `searxng::searxng_web_search` | Finds fresh public pages | `query`, `count` |
+| Cloudflare docs | `docs-mcp-cloudflare-com::search_cloudflare_documentation` | Adds a concrete vendor-doc example | `query`, `limit` |
+| GitHub repos | `github::search_repositories` | Finds related code and libraries | `query`, `perPage` |
+| Axon search | `axon::axon` | Searches and indexes through the local RAG stack | `action`, `query`, `limit` |
+
+In the builder, a user should not write these parameter objects manually. They should search for each tool, select it, and get a form generated from that tool's schema. For example, selecting `github::search_repositories` should show `query` and `perPage`; selecting `context7::query-docs` should show `libraryId`, `query`, and `tokens`.
+
+The calls are independent, so the snippet runs them with `Promise.all`. Nothing in the GitHub query depends on the Context7 result, and nothing in the time call depends on Axon. That is the main authoring decision.
+
+## Why The Inputs Exist
+
+- `topic` becomes the generic docs/web/Axon search query.
+- `library_name` is used only for Context7 library discovery.
+- `library_id` is the exact Context7 id used for the docs query. The default is concrete because `query-docs` needs an id, not just a search phrase.
+- `max_results` bounds the web, Cloudflare, GitHub, and Axon result volume.
+
+If a user omits every input, the snippet still runs with defaults. If they only change `topic`, most calls follow that new topic while Context7 still uses the default library until `library_name` / `library_id` are changed.
+
+## What Validation Should Catch
+
+The builder should validate every selected call against its schema before saving:
+
+- `context7::query-docs.libraryId` must be a string.
+- `context7::query-docs.tokens` must be numeric when provided.
+- `searxng::searxng_web_search.count` and `github::search_repositories.perPage` must be integers.
+- `axon::axon.action` must be present because Axon is an action-dispatched tool.
+
+That validation is what makes the workflow approachable: the user picks fields from forms instead of remembering tool-specific argument names.
+
 Live smoke-tested tools before authoring:
 
 - `time::get_current_time`
