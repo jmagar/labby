@@ -1119,7 +1119,35 @@
         },
         {
           "name": "settings.state",
-          "description": "Return non-secret operator settings and runtime service policy state",
+          "description": "Return section-scoped safe settings values and source metadata",
+          "destructive": false,
+          "params": [
+            {
+              "name": "section",
+              "ty": "string",
+              "required": false,
+              "description": "Settings section id; defaults to core"
+            }
+          ],
+          "returns": "SettingsState"
+        },
+        {
+          "name": "settings.schema",
+          "description": "Return the safe settings schema with risk and write-policy metadata",
+          "destructive": false,
+          "params": [],
+          "returns": "SettingsSchema"
+        },
+        {
+          "name": "settings.env_schema",
+          "description": "Return generated and registry-derived environment variable inventory",
+          "destructive": false,
+          "params": [],
+          "returns": "EnvSettingSpec[]"
+        },
+        {
+          "name": "settings.advanced_state",
+          "description": "Return redacted advanced settings state",
           "destructive": false,
           "params": [],
           "returns": "SettingsState"
@@ -1134,6 +1162,34 @@
               "ty": "boolean",
               "required": true,
               "description": "Enable built-in upstream API service integrations"
+            }
+          ],
+          "returns": "SettingsState"
+        },
+        {
+          "name": "settings.config.update",
+          "description": "Admin-only scalar config.toml settings update",
+          "destructive": true,
+          "params": [
+            {
+              "name": "entries",
+              "ty": "SettingsUpdateEntry[]",
+              "required": true,
+              "description": "Schema-approved config scalar updates"
+            }
+          ],
+          "returns": "SettingsMutationOutcome"
+        },
+        {
+          "name": "settings.env.update",
+          "description": "Admin-only targeted .env settings update for known low-risk LAB_* keys",
+          "destructive": true,
+          "params": [
+            {
+              "name": "entries",
+              "ty": "SettingsUpdateEntry[]",
+              "required": true,
+              "description": "Schema-approved env scalar updates"
             }
           ],
           "returns": "SettingsState"

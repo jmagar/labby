@@ -66,8 +66,7 @@ async fn durability_survives_store_drop_and_reopen() {
             .ingest(test_event("node-1", "hello after restart", 1_000))
             .await
             .expect("ingest");
-        // Give the batch writer time to flush (25ms timeout + margin).
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        store.wait_for_flushed_for_test(1).await.expect("flush");
     }
 
     // Reopen and search.
@@ -102,8 +101,10 @@ async fn search_50k_events_under_200ms() {
             .await
             .expect("ingest");
     }
-    // Wait for all batches to flush.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    store
+        .wait_for_flushed_for_test(50_000)
+        .await
+        .expect("flush");
 
     let start = Instant::now();
     let results = store
@@ -154,7 +155,7 @@ async fn ttl_retention_removes_rows_older_than_retention_days() {
         .ingest(test_event("ttl-node", "fresh-message", fresh_ts))
         .await
         .expect("ingest fresh");
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    store.wait_for_flushed_for_test(2).await.expect("flush");
 
     // Run a retention sweep synchronously via the exposed test helper.
     store.run_retention_for_test().await;
@@ -198,7 +199,10 @@ async fn retention_convergence_guard_clears_large_backlog() {
             .await
             .expect("ingest");
     }
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    store
+        .wait_for_flushed_for_test(12_000)
+        .await
+        .expect("flush");
 
     // Run retention — the convergence guard must loop until all old rows are gone.
     store.run_retention_for_test().await;
@@ -308,8 +312,6 @@ async fn oversized_fields_are_rejected_at_ingest() {
         .await
         .expect("ingest returns Ok even on drop");
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
     // The event must NOT appear in search results (was dropped).
     let results = store
         .search(
@@ -347,7 +349,7 @@ async fn like_wildcards_in_query_are_escaped_and_treated_as_literals() {
         .ingest(test_event("esc-node", "other message", 2))
         .await
         .expect("ingest other");
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    store.wait_for_flushed_for_test(2).await.expect("flush");
 
     // Search for the literal "%" — must match only the first event.
     let results = store
@@ -396,7 +398,7 @@ async fn search_with_time_range_filters_correctly() {
         .ingest(test_event("range-node", "late", 3_000))
         .await
         .expect("ingest late");
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    store.wait_for_flushed_for_test(3).await.expect("flush");
 
     // since_ms=1500 should exclude "early".
     let results = store

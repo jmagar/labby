@@ -7,18 +7,21 @@ import {
 export interface ServiceActionError extends Error {
   status: number
   code?: string
+  param?: string
 }
 
 interface ActionErrorBody {
   kind?: string
   code?: string
   message?: string
+  param?: string
 }
 
 type ActionErrorFactory<TError extends ServiceActionError> = (
   message: string,
   status: number,
   code?: string,
+  param?: string,
 ) => TError
 
 export function isAbortError(error: unknown): boolean {
@@ -55,6 +58,7 @@ async function parseActionResponse<T, TError extends ServiceActionError>(
       error.message || 'An error occurred',
       response.status,
       error.kind || error.code,
+      error.param,
     )
   }
 

@@ -14,12 +14,14 @@ const USE_MOCK_DATA = process.env.NEXT_PUBLIC_MOCK_DATA === 'true'
 export class SetupApiError extends Error implements ServiceActionError {
   status: number
   code?: string
+  param?: string
 
-  constructor(message: string, status: number, code?: string) {
+  constructor(message: string, status: number, code?: string, param?: string) {
     super(message)
     this.name = 'SetupApiError'
     this.status = status
     this.code = code
+    this.param = param
   }
 }
 
@@ -34,7 +36,7 @@ async function setupAction<T>(
     signal,
     serviceLabel: 'Setup',
     url: setupActionUrl(),
-    createError: (message, status, code) => new SetupApiError(message, status, code),
+    createError: (message, status, code, param) => new SetupApiError(message, status, code, param),
   })
 }
 
@@ -200,25 +202,6 @@ function mockSetupSnapshot(): SetupSnapshot {
   }
 }
 
-function mockSettingsSurfaces(): SettingsState['surfaces'] {
-  return {
-    mcp: {
-      transport: 'http',
-      host: '127.0.0.1',
-      port: 8765,
-      stateful: null,
-    },
-    web: {
-      auth_disabled: false,
-      assets_dir: null,
-    },
-    auth: {
-      mode: 'bearer',
-      public_url: null,
-    },
-  }
-}
-
 // ─── Drafts ─────────────────────────────────────────────────────────────
 
 export interface DraftEntry {
@@ -270,42 +253,129 @@ export interface ServicesStatusResponse {
   plugins: InstalledPlugin[]
 }
 
+export type SettingsBackend = 'env' | 'config_toml'
+export type SettingsControl = 'text' | 'url' | 'bool' | 'number' | 'enum' | 'string_list' | 'read_only'
+export type SettingsRisk = 'low' | 'restart' | 'security_sensitive' | 'dangerous'
+export type SettingsWritePolicy = 'editable' | 'read_only' | 'dangerous_flow_required' | 'secret_write_only_future'
+export type SettingsApplyMode = 'immediate' | 'restart' | 'partial' | 'read_only'
+export type SettingsSourceKind = 'env' | 'config_toml' | 'default'
+
+export interface SettingsOption {
+  value: string
+  label: string
+}
+
+export interface SettingsFieldSpec {
+  key: string
+  label: string
+  description: string
+  section: string
+  backend: SettingsBackend
+  control: SettingsControl
+  risk: SettingsRisk
+  write_policy: SettingsWritePolicy
+  apply_mode: SettingsApplyMode
+  secret: boolean
+  required: boolean
+  env_override: string | null
+  min: number | null
+  max: number | null
+  options: SettingsOption[]
+  example: string | null
+}
+
+export interface SettingsSectionSpec {
+  id: string
+  label: string
+  description: string
+  advanced: boolean
+}
+
+export interface SettingsSchemaResponse {
+  schema_version: number
+  sections: SettingsSectionSpec[]
+  fields: SettingsFieldSpec[]
+}
+
+export interface SettingsValueSource {
+  source: SettingsSourceKind
+  overridden_by_env: string | null
+}
+
 export interface SettingsState {
+  schema_version: number
   config_path: string
-  changed: boolean
-  previous: {
-    services: {
-      built_in_upstream_apis_enabled: boolean | null
-    }
-  }
-  restart_required: boolean
-  restart_note: string
-  services: {
-    built_in_upstream_apis_enabled: boolean
-    built_in_upstream_api_services: string[]
-    bootstrap_services: string[]
-  }
-  surfaces: {
-    mcp: {
-      transport: string
-      host: string
-      port: number
-      stateful: boolean | null
-    }
-    web: {
-      auth_disabled: boolean
-      assets_dir: string | null
-    }
-    auth: {
-      mode: string
-      public_url: string | null
-    }
-  }
+  env_path: string
+  section: string
+  values: Record<string, unknown>
+  sources: Record<string, SettingsValueSource>
+}
+
+export interface SettingsUpdateEntry {
+  key: string
+  value: unknown
+  previous: unknown
+  unset?: boolean
+}
+
+export interface SettingsMutationOutcome {
+  state: SettingsState
+  backup_path: string | null
+}
+
+export interface EnvSettingSpec {
+  service: string
+  key: string
+  required: boolean
+  secret: boolean
+  description: string
+  example: string
+  editable: boolean
 }
 
 export interface SettingsUpdate {
   services: {
     built_in_upstream_apis_enabled: boolean
+  }
+}
+
+export const MOCK_SETTINGS_SCHEMA: SettingsSchemaResponse = {
+  schema_version: 1,
+  sections: [
+    { id: 'core', label: 'Core', description: 'Env-backed process defaults.', advanced: false },
+    { id: 'features', label: 'Features', description: 'Runtime feature gates.', advanced: false },
+    { id: 'advanced', label: 'Advanced', description: 'Advanced settings.', advanced: true },
+  ],
+  fields: [
+    { key: 'LAB_LOG', label: 'Log filter', description: 'Tracing filter directive.', section: 'core', backend: 'env', control: 'text', risk: 'restart', write_policy: 'editable', apply_mode: 'restart', secret: false, required: false, env_override: null, min: null, max: null, options: [], example: 'labby=info' },
+    { key: 'services.built_in_upstream_apis_enabled', label: 'Built-in upstream API services', description: 'Enable bundled external API integrations.', section: 'features', backend: 'config_toml', control: 'bool', risk: 'low', write_policy: 'editable', apply_mode: 'immediate', secret: false, required: false, env_override: null, min: null, max: null, options: [], example: 'true' },
+    { key: 'auth', label: 'Auth config', description: 'Redacted auth settings.', section: 'advanced', backend: 'config_toml', control: 'read_only', risk: 'security_sensitive', write_policy: 'secret_write_only_future', apply_mode: 'read_only', secret: true, required: false, env_override: null, min: null, max: null, options: [], example: null },
+  ],
+}
+
+export const MOCK_ENV_SCHEMA: EnvSettingSpec[] = [
+  { service: 'lab', key: 'LAB_LOG', required: false, secret: false, description: 'Tracing filter directive.', example: 'labby=info', editable: true },
+  { service: 'setup', key: 'LAB_MCP_HTTP_TOKEN', required: true, secret: true, description: 'Bearer token.', example: '<token>', editable: false },
+]
+
+function mockSettingsState(section: string, updates: SettingsUpdateEntry[] = []): SettingsState {
+  const values: Record<string, unknown> = {
+    LAB_LOG: 'labby=info,lab_apis=warn',
+    'services.built_in_upstream_apis_enabled': true,
+    auth: { google_client_secret: { has_value: true } },
+  }
+  for (const update of updates) values[update.key] = update.value
+  return {
+    schema_version: 1,
+    config_path: '~/.config/lab/config.toml',
+    env_path: '~/.lab/.env',
+    section,
+    values,
+    sources: {
+      LAB_LOG: { source: 'env', overridden_by_env: null },
+      'services.built_in_upstream_apis_enabled': { source: 'config_toml', overridden_by_env: null },
+      auth: { source: 'config_toml', overridden_by_env: null },
+    },
   }
 }
 
@@ -335,57 +405,58 @@ export const setupApi = {
     return setupAction<SchemaGetResponse>('schema.get', services ? { services } : {}, signal)
   },
 
-  settingsState(signal?: AbortSignal): Promise<SettingsState> {
+  settingsSchema(signal?: AbortSignal): Promise<SettingsSchemaResponse> {
     if (USE_MOCK_DATA) {
       signal?.throwIfAborted?.()
-      return Promise.resolve({
-        config_path: '~/.config/lab/config.toml',
-        changed: false,
-        previous: {
-          services: {
-            built_in_upstream_apis_enabled: null,
-          },
-        },
-        restart_required: false,
-        restart_note: 'Changes to built-in upstream API services take effect after restarting labby serve.',
-        services: {
-          built_in_upstream_apis_enabled: true,
-          built_in_upstream_api_services: Object.keys(MOCK_SERVICES),
-          bootstrap_services: ['setup', 'doctor', 'extract', 'gateway'],
-        },
-        surfaces: mockSettingsSurfaces(),
-      })
+      return Promise.resolve(structuredClone(MOCK_SETTINGS_SCHEMA))
     }
-    return setupAction<SettingsState>('settings.state', {}, signal)
+    return setupAction<SettingsSchemaResponse>('settings.schema', {}, signal)
+  },
+
+  settingsState(section = 'core', signal?: AbortSignal): Promise<SettingsState> {
+    if (USE_MOCK_DATA) {
+      signal?.throwIfAborted?.()
+      return Promise.resolve(mockSettingsState(section))
+    }
+    return setupAction<SettingsState>('settings.state', { section }, signal)
+  },
+
+  settingsConfigUpdate(section: string, entries: SettingsUpdateEntry[], confirm: boolean, signal?: AbortSignal): Promise<SettingsMutationOutcome> {
+    if (USE_MOCK_DATA) {
+      signal?.throwIfAborted?.()
+      return Promise.resolve({ state: mockSettingsState(section, entries), backup_path: '~/.config/lab/config.toml.bak.mock' })
+    }
+    return setupAction<SettingsMutationOutcome>('settings.config.update', { section, entries, confirm }, signal)
+  },
+
+  settingsEnvUpdate(section: string, entries: SettingsUpdateEntry[], confirm: boolean, signal?: AbortSignal): Promise<SettingsState> {
+    if (USE_MOCK_DATA) {
+      signal?.throwIfAborted?.()
+      return Promise.resolve(mockSettingsState(section, entries))
+    }
+    return setupAction<SettingsState>('settings.env.update', { section, entries, confirm }, signal)
+  },
+
+  settingsEnvSchema(signal?: AbortSignal): Promise<EnvSettingSpec[]> {
+    if (USE_MOCK_DATA) {
+      signal?.throwIfAborted?.()
+      return Promise.resolve(structuredClone(MOCK_ENV_SCHEMA))
+    }
+    return setupAction<EnvSettingSpec[]>('settings.env_schema', {}, signal)
   },
 
   settingsUpdate(patch: SettingsUpdate, signal?: AbortSignal): Promise<SettingsState> {
     if (USE_MOCK_DATA) {
       signal?.throwIfAborted?.()
-      const enabled = patch.services.built_in_upstream_apis_enabled
-      return Promise.resolve({
-        config_path: '~/.config/lab/config.toml',
-        changed: true,
-        previous: {
-          services: {
-            built_in_upstream_apis_enabled: !enabled,
-          },
+      return Promise.resolve(mockSettingsState('features', [
+        {
+          key: 'services.built_in_upstream_apis_enabled',
+          value: patch.services.built_in_upstream_apis_enabled,
+          previous: null,
         },
-        restart_required: true,
-        restart_note: 'Changes to built-in upstream API services take effect after restarting labby serve.',
-        services: {
-          built_in_upstream_apis_enabled: enabled,
-          built_in_upstream_api_services: Object.keys(MOCK_SERVICES),
-          bootstrap_services: ['setup', 'doctor', 'extract', 'gateway'],
-        },
-        surfaces: mockSettingsSurfaces(),
-      })
+      ]))
     }
-    return setupAction<SettingsState>(
-      'settings.update',
-      { services: patch.services, confirm: true },
-      signal,
-    )
+    return setupAction<SettingsState>('settings.update', { ...patch, confirm: true }, signal)
   },
 
   draftGet(signal?: AbortSignal): Promise<{ entries: DraftEntry[] }> {

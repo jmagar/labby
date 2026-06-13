@@ -4637,10 +4637,121 @@
   },
   {
     "service": "setup",
-    "action": "settings.state",
-    "description": "Return non-secret operator settings and runtime service policy state",
+    "action": "settings.advanced_state",
+    "description": "Return redacted advanced settings state",
     "destructive": false,
     "params": [],
+    "returns": "SettingsState",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "settings.config.update",
+    "description": "Admin-only scalar config.toml settings update",
+    "destructive": true,
+    "params": [
+      {
+        "name": "entries",
+        "ty": "SettingsUpdateEntry[]",
+        "required": true,
+        "description": "Schema-approved config scalar updates"
+      }
+    ],
+    "returns": "SettingsMutationOutcome",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "settings.env.update",
+    "description": "Admin-only targeted .env settings update for known low-risk LAB_* keys",
+    "destructive": true,
+    "params": [
+      {
+        "name": "entries",
+        "ty": "SettingsUpdateEntry[]",
+        "required": true,
+        "description": "Schema-approved env scalar updates"
+      }
+    ],
+    "returns": "SettingsState",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "settings.env_schema",
+    "description": "Return generated and registry-derived environment variable inventory",
+    "destructive": false,
+    "params": [],
+    "returns": "EnvSettingSpec[]",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "settings.schema",
+    "description": "Return the safe settings schema with risk and write-policy metadata",
+    "destructive": false,
+    "params": [],
+    "returns": "SettingsSchema",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "settings.state",
+    "description": "Return section-scoped safe settings values and source metadata",
+    "destructive": false,
+    "params": [
+      {
+        "name": "section",
+        "ty": "string",
+        "required": false,
+        "description": "Settings section id; defaults to core"
+      }
+    ],
     "returns": "SettingsState",
     "surface_availability": {
       "cli": true,

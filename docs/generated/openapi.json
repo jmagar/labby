@@ -850,9 +850,13 @@
         "type": "object",
         "required": [
           "selector",
-          "principal"
+          "principal",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "principal": {
             "type": "string"
           },
@@ -864,9 +868,13 @@
       "AcpSessionCancelParams": {
         "type": "object",
         "required": [
-          "session_id"
+          "session_id",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "principal": {
             "type": "string"
           },
@@ -878,9 +886,13 @@
       "AcpSessionCloseParams": {
         "type": "object",
         "required": [
-          "session_id"
+          "session_id",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "principal": {
             "type": "string"
           },
@@ -928,6 +940,7 @@
           "session_id",
           "request_id",
           "option_id",
+          "confirm",
           "confirm"
         ],
         "properties": {
@@ -1086,6 +1099,7 @@
         "type": "object",
         "required": [
           "targets",
+          "confirm",
           "confirm"
         ],
         "properties": {
@@ -1104,6 +1118,7 @@
         "type": "object",
         "required": [
           "targets",
+          "confirm",
           "confirm"
         ],
         "properties": {
@@ -1138,9 +1153,13 @@
       "DeviceEnrollmentsApproveParams": {
         "type": "object",
         "required": [
-          "node_id"
+          "node_id",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "node_id": {
             "type": "string"
           },
@@ -1152,9 +1171,13 @@
       "DeviceEnrollmentsDenyParams": {
         "type": "object",
         "required": [
-          "node_id"
+          "node_id",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "node_id": {
             "type": "string"
           },
@@ -1347,11 +1370,15 @@
       "GatewayGatewayAddParams": {
         "type": "object",
         "required": [
-          "spec"
+          "spec",
+          "confirm"
         ],
         "properties": {
           "bearer_token_value": {
             "type": "string"
+          },
+          "confirm": {
+            "type": "boolean"
           },
           "spec": {
             "type": "string"
@@ -1371,7 +1398,13 @@
       },
       "GatewayGatewayCode_modeSetParams": {
         "type": "object",
+        "required": [
+          "confirm"
+        ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -1461,6 +1494,9 @@
       },
       "GatewayGatewayImportParams": {
         "type": "object",
+        "required": [
+          "confirm"
+        ],
         "properties": {
           "all": {
             "type": "boolean"
@@ -1470,6 +1506,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "confirm": {
+            "type": "boolean"
           },
           "names": {
             "type": "array",
@@ -1482,9 +1521,13 @@
       "GatewayGatewayImport_pendingApproveParams": {
         "type": "object",
         "required": [
-          "name"
+          "name",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           }
@@ -1493,9 +1536,13 @@
       "GatewayGatewayImport_pendingRejectParams": {
         "type": "object",
         "required": [
-          "name"
+          "name",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           }
@@ -1504,9 +1551,13 @@
       "GatewayGatewayImport_tombstonesClearParams": {
         "type": "object",
         "required": [
-          "name"
+          "name",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           },
@@ -1527,9 +1578,13 @@
       "GatewayGatewayImport_tombstonesRestoreParams": {
         "type": "object",
         "required": [
-          "name"
+          "name",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           },
@@ -1550,10 +1605,14 @@
       "GatewayGatewayMcpCleanupParams": {
         "type": "object",
         "required": [
-          "name"
+          "name",
+          "confirm"
         ],
         "properties": {
           "aggressive": {
+            "type": "boolean"
+          },
+          "confirm": {
             "type": "boolean"
           },
           "dry_run": {
@@ -1567,13 +1626,17 @@
       "GatewayGatewayMcpDisableParams": {
         "type": "object",
         "required": [
-          "name"
+          "name",
+          "confirm"
         ],
         "properties": {
           "aggressive": {
             "type": "boolean"
           },
           "cleanup": {
+            "type": "boolean"
+          },
+          "confirm": {
             "type": "boolean"
           },
           "name": {
@@ -1584,9 +1647,13 @@
       "GatewayGatewayMcpEnableParams": {
         "type": "object",
         "required": [
-          "name"
+          "name",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           }
@@ -1595,9 +1662,13 @@
       "GatewayGatewayOauthClearParams": {
         "type": "object",
         "required": [
-          "upstream"
+          "upstream",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "subject": {
             "type": "string"
           },
@@ -1609,9 +1680,13 @@
       "GatewayGatewayOauthProbeParams": {
         "type": "object",
         "required": [
-          "url"
+          "url",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "url": {
             "type": "string"
           }
@@ -1665,9 +1740,13 @@
       "GatewayGatewayProtected_routeAddParams": {
         "type": "object",
         "required": [
-          "route"
+          "route",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "route": {
             "type": "string"
           }
@@ -1687,9 +1766,13 @@
       "GatewayGatewayProtected_routeRemoveParams": {
         "type": "object",
         "required": [
-          "name"
+          "name",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           }
@@ -1710,9 +1793,13 @@
         "type": "object",
         "required": [
           "name",
-          "route"
+          "route",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           },
@@ -1724,9 +1811,13 @@
       "GatewayGatewayRemoveParams": {
         "type": "object",
         "required": [
-          "name"
+          "name",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           }
@@ -1780,9 +1871,13 @@
         "type": "object",
         "required": [
           "service",
-          "values"
+          "values",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "service": {
             "type": "string"
           },
@@ -1801,7 +1896,13 @@
       },
       "GatewayGatewayTestParams": {
         "type": "object",
+        "required": [
+          "confirm"
+        ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           },
@@ -1814,11 +1915,15 @@
         "type": "object",
         "required": [
           "name",
-          "patch"
+          "patch",
+          "confirm"
         ],
         "properties": {
           "bearer_token_value": {
             "type": "string"
+          },
+          "confirm": {
+            "type": "boolean"
           },
           "name": {
             "type": "string"
@@ -1831,9 +1936,13 @@
       "GatewayGatewayVirtual_serverDisableParams": {
         "type": "object",
         "required": [
-          "id"
+          "id",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           }
@@ -1842,9 +1951,13 @@
       "GatewayGatewayVirtual_serverEnableParams": {
         "type": "object",
         "required": [
-          "id"
+          "id",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           }
@@ -1864,9 +1977,13 @@
       "GatewayGatewayVirtual_serverQuarantineRestoreParams": {
         "type": "object",
         "required": [
-          "id"
+          "id",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           }
@@ -1875,9 +1992,13 @@
       "GatewayGatewayVirtual_serverRemoveParams": {
         "type": "object",
         "required": [
-          "id"
+          "id",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           }
@@ -1887,7 +2008,8 @@
         "type": "object",
         "required": [
           "id",
-          "allowed_actions"
+          "allowed_actions",
+          "confirm"
         ],
         "properties": {
           "allowed_actions": {
@@ -1895,6 +2017,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "confirm": {
+            "type": "boolean"
           },
           "id": {
             "type": "string"
@@ -1906,9 +2031,13 @@
         "required": [
           "id",
           "surface",
-          "enabled"
+          "enabled",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -2100,6 +2229,7 @@
         "required": [
           "id",
           "node_ids",
+          "confirm",
           "confirm"
         ],
         "properties": {
@@ -2124,6 +2254,7 @@
         "type": "object",
         "required": [
           "id",
+          "confirm",
           "confirm"
         ],
         "properties": {
@@ -2244,6 +2375,7 @@
         "type": "object",
         "required": [
           "plugin_id",
+          "confirm",
           "confirm"
         ],
         "properties": {
@@ -2268,6 +2400,7 @@
         "type": "object",
         "required": [
           "plugin_id",
+          "confirm",
           "confirm"
         ],
         "properties": {
@@ -2292,6 +2425,7 @@
         "type": "object",
         "required": [
           "plugin_id",
+          "confirm",
           "confirm"
         ],
         "properties": {
@@ -2340,6 +2474,7 @@
         "type": "object",
         "required": [
           "name",
+          "confirm",
           "confirm"
         ],
         "properties": {
@@ -2463,6 +2598,7 @@
         "type": "object",
         "required": [
           "gateway_name",
+          "confirm",
           "confirm"
         ],
         "properties": {
@@ -2514,6 +2650,7 @@
           "components",
           "node_ids",
           "scope",
+          "confirm",
           "confirm"
         ],
         "properties": {
@@ -2546,9 +2683,13 @@
       "MarketplacePluginDeployParams": {
         "type": "object",
         "required": [
-          "id"
+          "id",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           }
@@ -2579,9 +2720,13 @@
       "MarketplacePluginInstallParams": {
         "type": "object",
         "required": [
-          "id"
+          "id",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           }
@@ -2609,9 +2754,13 @@
       "MarketplacePluginUninstallParams": {
         "type": "object",
         "required": [
-          "id"
+          "id",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           }
@@ -2658,8 +2807,14 @@
       },
       "MarketplaceSourcesAddParams": {
         "type": "object",
+        "required": [
+          "confirm"
+        ],
         "properties": {
           "autoUpdate": {
+            "type": "boolean"
+          },
+          "confirm": {
             "type": "boolean"
           },
           "repo": {
@@ -2672,7 +2827,13 @@
       },
       "SetupDraftCommitParams": {
         "type": "object",
+        "required": [
+          "confirm"
+        ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "force": {
             "type": "boolean"
           }
@@ -2694,7 +2855,13 @@
       },
       "SetupFinalizeParams": {
         "type": "object",
+        "required": [
+          "confirm"
+        ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "force": {
             "type": "boolean"
           }
@@ -2703,9 +2870,13 @@
       "SetupInstall_pluginParams": {
         "type": "object",
         "required": [
-          "service"
+          "service",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "service": {
             "type": "string"
           }
@@ -2729,7 +2900,13 @@
       },
       "SetupPlugin_hookParams": {
         "type": "object",
+        "required": [
+          "confirm"
+        ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "repair": {
             "type": "boolean"
           }
@@ -2757,12 +2934,186 @@
           }
         }
       },
+      "SetupSettingsConfigUpdateParams": {
+        "type": "object",
+        "required": [
+          "entries",
+          "confirm"
+        ],
+        "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "key",
+                "value",
+                "previous"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "previous": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "array"
+                    },
+                    {
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "unset": {
+                  "type": "boolean"
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "array"
+                    },
+                    {
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "SetupSettingsEnvUpdateParams": {
+        "type": "object",
+        "required": [
+          "entries",
+          "confirm"
+        ],
+        "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "key",
+                "value",
+                "previous"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "previous": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "array"
+                    },
+                    {
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "unset": {
+                  "type": "boolean"
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "array"
+                    },
+                    {
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "SetupSettingsStateParams": {
+        "type": "object",
+        "properties": {
+          "section": {
+            "type": "string"
+          }
+        }
+      },
       "SetupSettingsUpdateParams": {
         "type": "object",
         "required": [
-          "services.built_in_upstream_apis_enabled"
+          "services.built_in_upstream_apis_enabled",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "services.built_in_upstream_apis_enabled": {
             "type": "boolean"
           }
@@ -2771,9 +3122,13 @@
       "SetupUninstall_pluginParams": {
         "type": "object",
         "required": [
-          "service"
+          "service",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "service": {
             "type": "string"
           }
@@ -2801,9 +3156,13 @@
         "type": "object",
         "required": [
           "id",
-          "target_id"
+          "target_id",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           },
@@ -2819,9 +3178,13 @@
         "type": "object",
         "required": [
           "id",
-          "output_path"
+          "output_path",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "force": {
             "type": "boolean"
           },
@@ -2851,9 +3214,13 @@
         "type": "object",
         "required": [
           "id",
-          "source_path"
+          "source_path",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           },
@@ -2907,11 +3274,15 @@
           "id",
           "kind",
           "label",
-          "config"
+          "config",
+          "confirm"
         ],
         "properties": {
           "config": {
             "type": "object"
+          },
+          "confirm": {
+            "type": "boolean"
           },
           "id": {
             "type": "string"
@@ -2928,9 +3299,13 @@
         "type": "object",
         "required": [
           "id",
-          "provider_id"
+          "provider_id",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           },
@@ -2943,9 +3318,13 @@
         "type": "object",
         "required": [
           "id",
-          "provider_id"
+          "provider_id",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           },
@@ -2989,9 +3368,13 @@
       "StashTargetRemoveParams": {
         "type": "object",
         "required": [
-          "id"
+          "id",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           }

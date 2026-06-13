@@ -33,7 +33,7 @@ export default function ServicesIndex(): React.ReactElement {
       setupApi.schemaGet(undefined, controller.signal),
       setupApi.state(controller.signal),
       setupApi.servicesStatus(controller.signal),
-      setupApi.settingsState(controller.signal),
+      setupApi.settingsState('features', controller.signal),
     ])
       .then(([schemaResponse, snap, statusResponse, settingsResponse]) => {
         if (controller.signal.aborted) return
@@ -73,6 +73,7 @@ export default function ServicesIndex(): React.ReactElement {
       pluginInstalled: statusByName.get(schema.name)?.plugin_installed ?? false,
     }))
   }, [services, snapshot, statuses])
+  const builtInsEnabled = settings?.values['services.built_in_upstream_apis_enabled']
 
   return (
     <>
@@ -92,12 +93,12 @@ export default function ServicesIndex(): React.ReactElement {
               <div className="space-y-1">
                 <p className="text-sm font-medium">Built-in upstream API services</p>
                 <p className="text-sm text-muted-foreground">
-                  {settings.services.built_in_upstream_apis_enabled
+                  {builtInsEnabled === true
                     ? 'Enabled from Features settings.'
                     : 'Disabled from Features settings; saved credentials are preserved.'}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {settings.services.built_in_upstream_api_services.length} services classified as upstream API integrations.
+                  Service credentials remain managed on individual service pages; the full env inventory is available in Advanced.
                 </p>
               </div>
             </div>

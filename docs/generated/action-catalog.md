@@ -170,7 +170,12 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `setup` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api, web |
 | `setup` | `schema.get` | false | false | `services: string[]` | `ServiceSchemaMap` | cli, mcp, api, web |
 | `setup` | `services_status` | false | false |  | `ServiceStatus[]` | cli, mcp, api, web |
-| `setup` | `settings.state` | false | false |  | `SettingsState` | cli, mcp, api, web |
+| `setup` | `settings.advanced_state` | false | false |  | `SettingsState` | cli, mcp, api, web |
+| `setup` | `settings.config.update` | false | true | `entries*: SettingsUpdateEntry[]` | `SettingsMutationOutcome` | cli, mcp, api, web |
+| `setup` | `settings.env.update` | false | true | `entries*: SettingsUpdateEntry[]` | `SettingsState` | cli, mcp, api, web |
+| `setup` | `settings.env_schema` | false | false |  | `EnvSettingSpec[]` | cli, mcp, api, web |
+| `setup` | `settings.schema` | false | false |  | `SettingsSchema` | cli, mcp, api, web |
+| `setup` | `settings.state` | false | false | `section: string` | `SettingsState` | cli, mcp, api, web |
 | `setup` | `settings.update` | false | true | `services.built_in_upstream_apis_enabled*: boolean` | `SettingsState` | cli, mcp, api, web |
 | `setup` | `state` | false | false |  | `SetupSnapshot` | cli, mcp, api, web |
 | `setup` | `uninstall_plugin` | false | true | `service*: string` | `PluginMutationResult` | cli, mcp, api, web |

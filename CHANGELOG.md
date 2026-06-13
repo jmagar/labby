@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.24.1] - 2026-06-13
+
+### Fixed
+
+- Hardened schema-backed settings writes after PR review: env-shadowed config fields now use the target `.env` file and process env consistently, generated OpenAPI documents settings update arrays and destructive `confirm`, and invalid numeric UI input no longer turns into an accidental unset.
+
+---
+
 ## [0.24.0] - 2026-06-11
 
 ### Added

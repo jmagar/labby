@@ -78,6 +78,7 @@ RUN mkdir -p \
 # (.dockerignore excludes apps/gateway-admin/{node_modules,.next,...} — only
 # apps/gateway-admin/out is sent in the build context.)
 COPY apps/gateway-admin/out apps/gateway-admin/out
+COPY docs/generated/env-reference.json docs/generated/env-reference.json
 COPY crates/ crates/
 # BuildKit normalizes COPYed file mtimes to a fixed past epoch. That timestamp is
 # older than the stub rlibs built in the dep-cache layer above, so cargo's

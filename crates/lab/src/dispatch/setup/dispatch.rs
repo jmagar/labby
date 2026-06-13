@@ -30,7 +30,14 @@ const AUDIT_TIMEOUT: Duration = Duration::from_secs(30);
 /// prevent secret-bearing draft values from leaking into log sinks.
 /// Keep this in sync with the catalog — every action that accepts a
 /// `value` parameter or commits the draft must be listed here.
-const REDACTED_LOG_ACTIONS: &[&str] = &["draft.set", "draft.commit", "finalize"];
+const REDACTED_LOG_ACTIONS: &[&str] = &[
+    "draft.set",
+    "draft.commit",
+    "finalize",
+    "settings.update",
+    "settings.env.update",
+    "settings.config.update",
+];
 use crate::dispatch::error::ToolError;
 use crate::dispatch::gateway::current_gateway_manager;
 use crate::dispatch::helpers::{action_schema, help_payload, to_json};
@@ -70,8 +77,13 @@ async fn dispatch_inner(action: &str, params: &Value) -> Result<Value, ToolError
         "draft.get" => draft_get_action(),
         "draft.set" => draft_set_action(params).await,
         "draft.commit" => draft_commit_action(params).await,
-        "settings.state" => settings_state_action(),
+        "settings.schema" => to_json(super::settings::schema_response()),
+        "settings.state" => settings_state_action(params),
         "settings.update" => settings_update_action(params),
+        "settings.env.update" => settings_env_update_action(params).await,
+        "settings.config.update" => settings_config_update_action(params),
+        "settings.advanced_state" => settings_advanced_state_action(params),
+        "settings.env_schema" => settings_env_schema_action(),
         "plugin_hook" => plugin_hook_action(params).await,
         "plugin_sync" => plugin_sync_action(),
         "plugin_export" => plugin_export_action(),
@@ -222,21 +234,107 @@ fn service_schema(entry: &RegisteredService, meta: &PluginMeta) -> Value {
     })
 }
 
-fn settings_state_action() -> Result<Value, ToolError> {
+fn settings_state_action(params: &Value) -> Result<Value, ToolError> {
+    let section = requested_section(params)?;
     let path = config_toml_path().ok_or_else(|| ToolError::Sdk {
         sdk_kind: "internal_error".into(),
         message: "HOME env var not set; cannot resolve config.toml path".into(),
     })?;
     let cfg = load_settings_config(&path)?;
-    let restart_required = cfg.services.built_in_upstream_apis_enabled
-        != crate::registry::runtime_built_in_upstream_apis_enabled();
-    Ok(settings_state_json(
+    to_json(super::settings::state_response(
         &cfg,
         path.display().to_string(),
-        restart_required,
-        false,
-        None,
+        env_path().display().to_string(),
+        &section,
     ))
+}
+
+fn settings_advanced_state_action(params: &Value) -> Result<Value, ToolError> {
+    let mut params = params.clone();
+    if let Some(map) = params.as_object_mut() {
+        map.insert("section".into(), Value::String("advanced".into()));
+    } else {
+        params = json!({ "section": "advanced" });
+    }
+    settings_state_action(&params)
+}
+
+fn requested_section(params: &Value) -> Result<String, ToolError> {
+    Ok(params
+        .get("section")
+        .and_then(Value::as_str)
+        .unwrap_or("core")
+        .to_string())
+}
+
+fn parse_update_entries(
+    params: &Value,
+) -> Result<Vec<super::settings::SettingsUpdateEntry>, ToolError> {
+    serde_json::from_value(params.get("entries").cloned().unwrap_or(Value::Null)).map_err(|_| {
+        ToolError::InvalidParam {
+            message: "entries must be an array of settings updates".into(),
+            param: "entries".into(),
+        }
+    })
+}
+
+async fn settings_env_update_action(params: &Value) -> Result<Value, ToolError> {
+    let entries = parse_update_entries(params)?;
+    let env_entries = super::settings::env_entries_from_updates(&entries)?;
+    let env = env_path();
+    let expected_mtime = snapshot_mtime(&env);
+    super::settings::validate_env_previous(&entries, &env)?;
+    let outcome = env_merge::merge(
+        &env,
+        MergeRequest {
+            entries: env_entries
+                .into_iter()
+                .map(|entry| EnvEntry::new(entry.key, entry.value))
+                .collect(),
+            force: true,
+            expected_mtime,
+        },
+    )
+    .map_err(map_merge_err)?;
+    tracing::info!(
+        surface = "dispatch",
+        service = "setup",
+        action = "settings.env.update.success",
+        written = outcome.written,
+        "settings env update success"
+    );
+    settings_state_action(params)
+}
+
+fn settings_config_update_action(params: &Value) -> Result<Value, ToolError> {
+    let entries = parse_update_entries(params)?;
+    let patches = super::settings::config_patches_from_entries(&entries)?;
+    let path = config_toml_path().ok_or_else(|| ToolError::Sdk {
+        sdk_kind: "internal_error".into(),
+        message: "HOME env var not set; cannot resolve config.toml path".into(),
+    })?;
+    let expected = super::settings::expected_config_scalars(&entries)?;
+    let outcome = crate::config::patch_config_scalars_checked(&path, &patches, &expected)
+        .map_err(config_io_error)?;
+    if patches
+        .iter()
+        .any(|patch| patch.path == "services.built_in_upstream_apis_enabled")
+    {
+        refresh_built_in_upstream_registry(outcome.config.services.built_in_upstream_apis_enabled);
+    }
+    to_json(super::settings::SettingsMutationOutcome {
+        state: super::settings::state_response(
+            &outcome.config,
+            path.display().to_string(),
+            env_path().display().to_string(),
+            requested_section(params)?.as_str(),
+        ),
+        backup_path: outcome.backup_path.map(|path| path.display().to_string()),
+    })
+}
+
+fn settings_env_schema_action() -> Result<Value, ToolError> {
+    to_json(super::settings::env_schema())
 }
 
 fn settings_update_action(params: &Value) -> Result<Value, ToolError> {
@@ -254,13 +352,7 @@ fn settings_update_action(params: &Value) -> Result<Value, ToolError> {
         current
     };
     if changed {
-        crate::registry::set_runtime_built_in_upstream_apis_enabled(enabled);
-        if let Some(manager) = current_gateway_manager() {
-            manager.set_builtin_service_registry(crate::registry::filter_built_in_upstream_apis(
-                crate::registry::build_default_registry(),
-                enabled,
-            ));
-        }
+        refresh_built_in_upstream_registry(enabled);
     }
     let restart_required = false;
     Ok(settings_state_json(
@@ -272,15 +364,38 @@ fn settings_update_action(params: &Value) -> Result<Value, ToolError> {
     ))
 }
 
+fn refresh_built_in_upstream_registry(enabled: bool) {
+    crate::registry::set_runtime_built_in_upstream_apis_enabled(enabled);
+    if let Some(manager) = current_gateway_manager() {
+        manager.set_builtin_service_registry(crate::registry::filter_built_in_upstream_apis(
+            crate::registry::build_default_registry(),
+            enabled,
+        ));
+    }
+}
+
 fn load_settings_config(path: &std::path::Path) -> Result<crate::config::LabConfig, ToolError> {
     crate::config::load_toml(&[path.to_path_buf()]).map_err(config_io_error)
 }
 
 fn config_io_error(error: anyhow::Error) -> ToolError {
+    let detail = format!("{error:#}");
+    let param = stale_setting_param(&detail)
+        .unwrap_or("config.toml")
+        .to_string();
     ToolError::InvalidParam {
-        message: format!("invalid settings config: {error}"),
-        param: "config.toml".into(),
+        message: format!("invalid settings config: {detail}"),
+        param,
     }
+}
+
+fn stale_setting_param(message: &str) -> Option<&str> {
+    const PREFIX: &str = "setting `";
+    const SUFFIX: &str = "` changed since it was loaded";
+    let start = message.find(PREFIX)? + PREFIX.len();
+    let rest = &message[start..];
+    let end = rest.find(SUFFIX)?;
+    Some(&rest[..end])
 }
 
 fn parse_built_in_upstream_apis_enabled(params: &Value) -> Result<bool, ToolError> {
@@ -704,6 +819,17 @@ mod tests {
     }
 
     #[test]
+    fn config_io_error_preserves_stale_setting_param() {
+        let err = config_io_error(anyhow::anyhow!(
+            "setting `mcp.port` changed since it was loaded"
+        ));
+        match err {
+            ToolError::InvalidParam { param, .. } => assert_eq!(param, "mcp.port"),
+            other => panic!("expected invalid_param, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn setup_catalog_covers_dispatch_actions() {
         let names: std::collections::BTreeSet<&str> =
             ACTIONS.iter().map(|action| action.name).collect();
@@ -713,8 +839,13 @@ mod tests {
             "state",
             "draft.set",
             "draft.commit",
+            "settings.schema",
             "settings.state",
             "settings.update",
+            "settings.env.update",
+            "settings.config.update",
+            "settings.advanced_state",
+            "settings.env_schema",
             "finalize",
             "installed_plugins",
             "services_status",
@@ -766,12 +897,29 @@ mod tests {
             .find(|action| action.name == "settings.update")
             .expect("settings.update action");
         assert!(action.destructive);
+        assert!(action.requires_admin);
         let param = action
             .params
             .iter()
             .find(|param| param.name == "services.built_in_upstream_apis_enabled")
             .expect("toggle param");
         assert!(param.required);
+    }
+
+    #[test]
+    fn setup_settings_mutations_require_admin_scope() {
+        for action_name in [
+            "settings.update",
+            "settings.config.update",
+            "settings.env.update",
+        ] {
+            let action = ACTIONS
+                .iter()
+                .find(|action| action.name == action_name)
+                .expect(action_name);
+            assert!(action.requires_admin, "{action_name} must require admin");
+            assert!(action.destructive, "{action_name} must be destructive");
+        }
     }
 
     #[tokio::test]
@@ -810,14 +958,196 @@ mod tests {
         assert!(persisted.contains("[plugin_owned]"));
         assert!(persisted.contains("built_in_upstream_apis_enabled = false"));
 
-        let state = dispatch("settings.state", json!({}))
+        let state = dispatch("settings.state", json!({"section": "features"}))
             .await
             .expect("settings state");
-        assert_eq!(state["services"]["built_in_upstream_apis_enabled"], false);
-        assert_eq!(state["restart_required"], false);
+        assert_eq!(
+            state["values"]["services.built_in_upstream_apis_enabled"],
+            false
+        );
 
         crate::registry::set_runtime_built_in_upstream_apis_enabled(previous_runtime);
         crate::config::set_test_config_toml_path(None);
+    }
+
+    #[tokio::test]
+    async fn settings_config_update_dispatch_persists_and_rejects_stale_previous() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_dir = temp.path().join(".config/lab");
+        std::fs::create_dir_all(&config_dir).expect("config dir");
+        let config_path = config_dir.join("config.toml");
+        let original = "# keep me\n[mcp]\nport = 8765\n[plugin_owned]\nfuture = \"keep\"\n";
+        std::fs::write(&config_path, original).expect("write config");
+        crate::config::set_test_config_toml_path(Some(config_path.clone()));
+
+        let updated = dispatch(
+            "settings.config.update",
+            json!({
+                "section": "surfaces",
+                "confirm": true,
+                "entries": [{
+                    "key": "mcp.port",
+                    "value": 8766,
+                    "previous": 8765
+                }]
+            }),
+        )
+        .await
+        .expect("settings config update");
+
+        assert_eq!(updated["state"]["values"]["mcp.port"], 8766);
+        assert!(
+            updated["backup_path"]
+                .as_str()
+                .is_some_and(|path| path.contains("config.toml.bak."))
+        );
+        let persisted = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(persisted.contains("# keep me"));
+        assert!(persisted.contains("[plugin_owned]"));
+        assert!(persisted.contains("port = 8766"));
+
+        let err = dispatch(
+            "settings.config.update",
+            json!({
+                "section": "surfaces",
+                "confirm": true,
+                "entries": [{
+                    "key": "mcp.port",
+                    "value": 8767,
+                    "previous": 8765
+                }]
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind(), "invalid_param");
+        match err {
+            ToolError::InvalidParam { param, .. } => assert_eq!(param, "mcp.port"),
+            other => panic!("expected invalid_param, got {other:?}"),
+        }
+        assert!(
+            std::fs::read_to_string(&config_path)
+                .expect("read config")
+                .contains("port = 8766")
+        );
+
+        crate::config::set_test_config_toml_path(None);
+    }
+
+    #[tokio::test]
+    async fn settings_config_update_rejects_env_file_shadowed_config_field() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_dir = temp.path().join(".config/lab");
+        std::fs::create_dir_all(&config_dir).expect("config dir");
+        let config_path = config_dir.join("config.toml");
+        std::fs::write(&config_path, "[mcp]\nport = 8765\n").expect("write config");
+        crate::config::set_test_config_toml_path(Some(config_path.clone()));
+
+        let lab_dir = temp.path().join("lab-home");
+        std::fs::create_dir_all(&lab_dir).expect("lab dir");
+        std::fs::write(lab_dir.join(".env"), "LAB_MCP_HTTP_PORT=9999\n").expect("write env");
+        crate::dispatch::helpers::set_test_lab_home(Some(lab_dir));
+
+        let err = dispatch(
+            "settings.config.update",
+            json!({
+                "section": "surfaces",
+                "confirm": true,
+                "entries": [{
+                    "key": "mcp.port",
+                    "value": 8766,
+                    "previous": 8765
+                }]
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.kind(), "invalid_param");
+        match err {
+            ToolError::InvalidParam { param, .. } => assert_eq!(param, "mcp.port"),
+            other => panic!("expected invalid_param, got {other:?}"),
+        }
+        assert!(
+            std::fs::read_to_string(&config_path)
+                .expect("read config")
+                .contains("port = 8765")
+        );
+
+        crate::dispatch::helpers::set_test_lab_home(None);
+        crate::config::set_test_config_toml_path(None);
+    }
+
+    #[tokio::test]
+    async fn settings_env_update_overwrites_existing_key_when_previous_matches() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let temp = tempfile::tempdir().expect("tempdir");
+        let lab_dir = temp.path().join("lab-home");
+        std::fs::create_dir_all(&lab_dir).expect("lab dir");
+        let env_file = lab_dir.join(".env");
+        std::fs::write(&env_file, "LAB_LOG=labby=info\n").expect("write env");
+        crate::dispatch::helpers::set_test_lab_home(Some(lab_dir.clone()));
+
+        let updated = dispatch(
+            "settings.env.update",
+            json!({
+                "section": "core",
+                "confirm": true,
+                "entries": [{
+                    "key": "LAB_LOG",
+                    "value": "labby=debug",
+                    "previous": "labby=info"
+                }]
+            }),
+        )
+        .await
+        .expect("settings env update");
+
+        assert_eq!(updated["values"]["LAB_LOG"], "labby=debug");
+        assert!(
+            std::fs::read_to_string(&env_file)
+                .unwrap()
+                .contains("LAB_LOG=labby=debug")
+        );
+
+        crate::dispatch::helpers::set_test_lab_home(None);
+    }
+
+    #[tokio::test]
+    async fn settings_env_update_rejects_stale_previous_value() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let temp = tempfile::tempdir().expect("tempdir");
+        let lab_dir = temp.path().join("lab-home");
+        std::fs::create_dir_all(&lab_dir).expect("lab dir");
+        let env_file = lab_dir.join(".env");
+        std::fs::write(&env_file, "LAB_LOG=labby=warn\n").expect("write env");
+        crate::dispatch::helpers::set_test_lab_home(Some(lab_dir.clone()));
+
+        let err = dispatch(
+            "settings.env.update",
+            json!({
+                "section": "core",
+                "confirm": true,
+                "entries": [{
+                    "key": "LAB_LOG",
+                    "value": "labby=debug",
+                    "previous": "labby=info"
+                }]
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.kind(), "invalid_param");
+        assert!(
+            std::fs::read_to_string(&env_file)
+                .unwrap()
+                .contains("LAB_LOG=labby=warn")
+        );
+
+        crate::dispatch::helpers::set_test_lab_home(None);
     }
 
     #[tokio::test]

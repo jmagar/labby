@@ -84,7 +84,7 @@ pub struct ErrorSdk {
 ///
 /// Handles the 10 known type labels plus unknown fallback:
 /// - `"string"`, `"integer"`, `"number"`, `"boolean"`, `"object"`, `"array"`
-/// - `"string[]"`, `"integer[]"`
+/// - `"string[]"`, `"integer[]"`, `"SettingsUpdateEntry[]"`
 /// - `"string|null"`
 /// - Enum literals like `"queued|running|done"` (pipe-separated, no `null`)
 /// - Unknown → string fallback
@@ -119,6 +119,10 @@ pub fn param_type_to_schema(ty: &str) -> Schema {
             .items(ObjectBuilder::new().schema_type(SchemaType::Type(Type::Integer)))
             .build()
             .into(),
+        "SettingsUpdateEntry[]" => utoipa::openapi::ArrayBuilder::new()
+            .items(settings_update_entry_schema())
+            .build()
+            .into(),
         "string|null" => utoipa::openapi::schema::AnyOfBuilder::new()
             .item(
                 ObjectBuilder::new()
@@ -150,6 +154,65 @@ pub fn param_type_to_schema(ty: &str) -> Schema {
             .build()
             .into(),
     }
+}
+
+fn settings_update_entry_schema() -> ObjectBuilder {
+    ObjectBuilder::new()
+        .schema_type(SchemaType::Type(Type::Object))
+        .property(
+            "key",
+            ObjectBuilder::new().schema_type(SchemaType::Type(Type::String)),
+        )
+        .required("key")
+        .property("value", settings_update_value_schema())
+        .required("value")
+        .property("previous", settings_update_value_schema())
+        .required("previous")
+        .property(
+            "unset",
+            ObjectBuilder::new().schema_type(SchemaType::Type(Type::Boolean)),
+        )
+}
+
+fn settings_update_value_schema() -> Schema {
+    utoipa::openapi::schema::AnyOfBuilder::new()
+        .item(
+            ObjectBuilder::new()
+                .schema_type(SchemaType::Type(Type::String))
+                .build(),
+        )
+        .item(
+            ObjectBuilder::new()
+                .schema_type(SchemaType::Type(Type::Integer))
+                .build(),
+        )
+        .item(
+            ObjectBuilder::new()
+                .schema_type(SchemaType::Type(Type::Number))
+                .build(),
+        )
+        .item(
+            ObjectBuilder::new()
+                .schema_type(SchemaType::Type(Type::Boolean))
+                .build(),
+        )
+        .item(
+            ObjectBuilder::new()
+                .schema_type(SchemaType::Type(Type::Array))
+                .build(),
+        )
+        .item(
+            ObjectBuilder::new()
+                .schema_type(SchemaType::Type(Type::Object))
+                .build(),
+        )
+        .item(
+            ObjectBuilder::new()
+                .schema_type(SchemaType::Type(Type::Null))
+                .build(),
+        )
+        .build()
+        .into()
 }
 
 // ── PascalCase conversion ───────────────────────────────────────────────
@@ -196,6 +259,14 @@ pub fn build_action_schemas(services: &[RegisteredService]) -> Vec<(String, RefO
                 if p.required {
                     builder = builder.required(p.name);
                 }
+            }
+            if action.destructive {
+                builder = builder
+                    .property(
+                        "confirm",
+                        ObjectBuilder::new().schema_type(SchemaType::Type(Type::Boolean)),
+                    )
+                    .required("confirm");
             }
             schemas.push((name, RefOr::T(builder.build().into())));
         }
@@ -670,6 +741,28 @@ mod tests {
     }
 
     #[test]
+    fn param_type_settings_update_entry_array() {
+        let schema = param_type_to_schema("SettingsUpdateEntry[]");
+        let json = serde_json::to_value(&schema).unwrap();
+        assert_eq!(json["type"], "array");
+        assert_eq!(json["items"]["type"], "object");
+        assert_eq!(json["items"]["properties"]["key"]["type"], "string");
+        assert!(json["items"]["properties"]["value"].get("anyOf").is_some());
+        assert!(
+            json["items"]["properties"]["previous"]
+                .get("anyOf")
+                .is_some()
+        );
+        assert_eq!(json["items"]["properties"]["unset"]["type"], "boolean");
+        assert!(
+            json["items"]["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("previous"))
+        );
+    }
+
+    #[test]
     fn param_type_nullable_string() {
         let schema = param_type_to_schema("string|null");
         let json = serde_json::to_value(&schema).unwrap();
@@ -778,6 +871,21 @@ mod tests {
             "missing ErrorMissingParam schema"
         );
         assert!(schemas.contains_key("ErrorSdk"), "missing ErrorSdk schema");
+        let setup_update = schemas
+            .get("SetupSettingsConfigUpdateParams")
+            .expect("missing settings config update params");
+        assert_eq!(setup_update["properties"]["entries"]["type"], "array");
+        assert_eq!(
+            setup_update["properties"]["entries"]["items"]["type"],
+            "object"
+        );
+        assert_eq!(setup_update["properties"]["confirm"]["type"], "boolean");
+        assert!(
+            setup_update["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("confirm"))
+        );
 
         // Security scheme
         let security_schemes = spec["components"]["securitySchemes"]

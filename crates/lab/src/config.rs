@@ -16,7 +16,7 @@
 
 pub mod env_merge;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
 use std::{
@@ -1754,13 +1754,126 @@ pub fn load_toml(candidates: &[PathBuf]) -> Result<LabConfig> {
     Ok(LabConfig::default())
 }
 
-/// Patch the non-secret built-in upstream API preference without rewriting
-/// unrelated TOML content.
-///
-/// This intentionally edits only `[services].built_in_upstream_apis_enabled`.
-/// It preserves comments, unknown keys, and plugin-owned sections that the
-/// full typed `LabConfig` serializer cannot round-trip.
-pub fn patch_built_in_upstream_apis_enabled(path: &Path, enabled: bool) -> Result<LabConfig> {
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConfigScalarValue {
+    Bool(bool),
+    I64(i64),
+    String(String),
+    StringList(Vec<String>),
+    UnsetOptional,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConfigScalarPatch {
+    pub path: String,
+    pub value: ConfigScalarValue,
+}
+
+impl ConfigScalarPatch {
+    #[must_use]
+    pub fn new(path: impl Into<String>, value: ConfigScalarValue) -> Self {
+        Self {
+            path: path.into(),
+            value,
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ConfigPatchOutcome {
+    pub config: LabConfig,
+    pub backup_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExpectedConfigScalar {
+    pub path: String,
+    pub value: serde_json::Value,
+}
+
+impl ExpectedConfigScalar {
+    #[must_use]
+    pub fn new(path: impl Into<String>, value: serde_json::Value) -> Self {
+        Self {
+            path: path.into(),
+            value,
+        }
+    }
+}
+
+static CONFIG_BACKUP_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+fn inline_table_to_table(inline: &toml_edit::InlineTable) -> toml_edit::Table {
+    let mut table = toml_edit::Table::new();
+    for (key, value) in inline {
+        table[key] = toml_edit::Item::Value(value.clone());
+    }
+    table
+}
+
+fn set_toml_scalar_path(
+    document: &mut toml_edit::DocumentMut,
+    dotted_path: &str,
+    value: ConfigScalarValue,
+) -> Result<()> {
+    let parts: Vec<&str> = dotted_path
+        .split('.')
+        .filter(|part| !part.is_empty())
+        .collect();
+    anyhow::ensure!(!parts.is_empty(), "config path must not be empty");
+    let (leaf, parents) = parts.split_last().expect("non-empty parts");
+    let mut item = document.as_item_mut();
+    for part in parents {
+        if item[*part].is_none() {
+            item[*part] = toml_edit::Item::Table(toml_edit::Table::new());
+        } else if !item[*part].is_table() {
+            let converted = item[*part]
+                .as_value()
+                .and_then(toml_edit::Value::as_inline_table)
+                .map(inline_table_to_table);
+            if let Some(table) = converted {
+                item[*part] = toml_edit::Item::Table(table);
+            } else {
+                anyhow::bail!("config parent `{part}` is not a table");
+            }
+        }
+        item = &mut item[*part];
+    }
+    if matches!(value, ConfigScalarValue::UnsetOptional) {
+        if let Some(table) = item.as_table_mut() {
+            table.remove(leaf);
+            return Ok(());
+        }
+        anyhow::bail!("config parent for `{dotted_path}` is not a table");
+    }
+    item[*leaf] = toml_edit::Item::Value(match value {
+        ConfigScalarValue::Bool(value) => toml_edit::Value::from(value),
+        ConfigScalarValue::I64(value) => toml_edit::Value::from(value),
+        ConfigScalarValue::String(value) => toml_edit::Value::from(value),
+        ConfigScalarValue::StringList(values) => {
+            let mut array = toml_edit::Array::default();
+            for value in values {
+                array.push(value);
+            }
+            toml_edit::Value::Array(array)
+        }
+        ConfigScalarValue::UnsetOptional => unreachable!("handled above"),
+    });
+    Ok(())
+}
+
+pub fn patch_config_scalars(
+    path: &Path,
+    entries: &[ConfigScalarPatch],
+) -> Result<ConfigPatchOutcome> {
+    patch_config_scalars_checked(path, entries, &[])
+}
+
+pub fn patch_config_scalars_checked(
+    path: &Path,
+    entries: &[ConfigScalarPatch],
+    expected: &[ExpectedConfigScalar],
+) -> Result<ConfigPatchOutcome> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -1788,14 +1901,51 @@ pub fn patch_built_in_upstream_apis_enabled(path: &Path, enabled: bool) -> Resul
     let mut document = raw
         .parse::<toml_edit::DocumentMut>()
         .with_context(|| format!("failed to parse {}", path.display()))?;
-
-    document["services"]["built_in_upstream_apis_enabled"] = toml_edit::value(enabled);
+    if !expected.is_empty() {
+        let mut current_cfg = toml::from_str::<LabConfig>(&raw)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        current_cfg
+            .normalize_protected_mcp_routes()
+            .with_context(|| format!("invalid config {}", path.display()))?;
+        current_cfg
+            .validate()
+            .with_context(|| format!("invalid config {}", path.display()))?;
+        for item in expected {
+            let current = config_json_value_for_path(&current_cfg, &item.path);
+            anyhow::ensure!(
+                current == item.value,
+                "setting `{}` changed since it was loaded",
+                item.path
+            );
+        }
+    }
+    for entry in entries {
+        set_toml_scalar_path(&mut document, &entry.path, entry.value.clone())
+            .with_context(|| format!("failed to patch {}", entry.path))?;
+    }
     let patched = document.to_string();
-    let cfg = toml::from_str::<LabConfig>(&patched)
+    let mut cfg = toml::from_str::<LabConfig>(&patched)
         .with_context(|| format!("failed to parse patched {}", path.display()))?;
+    cfg.normalize_protected_mcp_routes()
+        .with_context(|| format!("invalid patched config {}", path.display()))?;
     cfg.validate()
         .with_context(|| format!("invalid patched config {}", path.display()))?;
 
+    if patched == raw {
+        return Ok(ConfigPatchOutcome {
+            config: cfg,
+            backup_path: None,
+        });
+    }
+
+    let backup_path = if path.exists() {
+        Some(backup_config_file(path, &raw)?)
+    } else {
+        None
+    };
+    let old_mode = std::fs::metadata(path)
+        .ok()
+        .map(|metadata| metadata.permissions());
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let mut tmp = NamedTempFile::new_in(parent)
         .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
@@ -1804,11 +1954,194 @@ pub fn patch_built_in_upstream_apis_enabled(path: &Path, enabled: bool) -> Resul
     tmp.as_file()
         .sync_all()
         .context("failed to sync temp config")?;
+    if let Some(mode) = old_mode {
+        tmp.as_file()
+            .set_permissions(mode)
+            .context("failed to preserve config mode")?;
+    }
     tmp.persist(path)
         .map_err(|e| anyhow::Error::new(e.error))
         .with_context(|| format!("failed to persist {}", path.display()))?;
+    if let Ok(parent_dir) = OpenOptions::new().read(true).open(parent) {
+        drop(parent_dir.sync_all());
+    }
 
-    Ok(cfg)
+    Ok(ConfigPatchOutcome {
+        config: cfg,
+        backup_path,
+    })
+}
+
+fn backup_config_file(path: &Path, raw: &str) -> Result<PathBuf> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let pid = std::process::id();
+    for _ in 0..10 {
+        let counter = CONFIG_BACKUP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let backup = path.with_extension(format!("toml.bak.{nanos}.{pid}.{counter}"));
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&backup) {
+            Ok(mut file) => {
+                file.write_all(raw.as_bytes())
+                    .with_context(|| format!("write backup {}", backup.display()))?;
+                file.sync_all()
+                    .with_context(|| format!("sync backup {}", backup.display()))?;
+                return Ok(backup);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => {
+                return Err(
+                    anyhow::Error::new(e).context(format!("create backup {}", backup.display()))
+                );
+            }
+        }
+    }
+    anyhow::bail!("failed to create unique backup for {}", path.display())
+}
+
+pub(crate) fn config_json_value_for_path(cfg: &LabConfig, path: &str) -> serde_json::Value {
+    match path {
+        "output.format" => serde_json::json!(cfg.output.format),
+        "mcp.transport" => serde_json::json!(cfg.mcp.transport),
+        "mcp.host" => serde_json::json!(cfg.mcp.host),
+        "mcp.port" => serde_json::json!(cfg.mcp.port),
+        "mcp.session_ttl_secs" => serde_json::json!(cfg.mcp.session_ttl_secs),
+        "mcp.stateful" => serde_json::json!(cfg.mcp.stateful),
+        "mcp.allowed_hosts" => serde_json::json!(cfg.mcp.allowed_hosts),
+        "log.filter" => serde_json::json!(cfg.log.filter),
+        "log.format" => serde_json::json!(cfg.log.format),
+        "local_logs.retention_days" => {
+            serde_json::json!(
+                cfg.local_logs
+                    .as_ref()
+                    .and_then(|value| value.retention_days)
+            )
+        }
+        "local_logs.max_bytes" => {
+            serde_json::json!(cfg.local_logs.as_ref().and_then(|value| value.max_bytes))
+        }
+        "local_logs.queue_capacity" => {
+            serde_json::json!(
+                cfg.local_logs
+                    .as_ref()
+                    .and_then(|value| value.queue_capacity)
+            )
+        }
+        "local_logs.subscriber_capacity" => {
+            serde_json::json!(
+                cfg.local_logs
+                    .as_ref()
+                    .and_then(|value| value.subscriber_capacity)
+            )
+        }
+        "api.cors_origins" => serde_json::json!(cfg.api.cors_origins),
+        "web.assets_dir" => {
+            serde_json::json!(
+                cfg.web
+                    .assets_dir
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+            )
+        }
+        "workspace.root" => {
+            serde_json::json!(
+                cfg.workspace
+                    .root
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+            )
+        }
+        "mcpregistry.url" => serde_json::json!(cfg.mcpregistry.url),
+        "public_urls.app" => {
+            serde_json::json!(cfg.public_urls.as_ref().and_then(|value| value.app.clone()))
+        }
+        "public_urls.mcp_gateway" => serde_json::json!(
+            cfg.public_urls
+                .as_ref()
+                .and_then(|value| value.mcp_gateway.clone())
+        ),
+        "services.built_in_upstream_apis_enabled" => {
+            serde_json::json!(cfg.services.built_in_upstream_apis_enabled)
+        }
+        "services.tailscale.tailnet" => serde_json::json!(cfg.services.tailscale.tailnet),
+        "admin.enabled" => serde_json::json!(cfg.admin.enabled),
+        "code_mode.trace_params" => serde_json::json!(cfg.code_mode.trace_params),
+        "code_mode.timeout_ms" => serde_json::json!(cfg.code_mode.timeout_ms),
+        "code_mode.max_tool_calls" => serde_json::json!(cfg.code_mode.max_tool_calls),
+        "code_mode.max_response_bytes" => serde_json::json!(cfg.code_mode.max_response_bytes),
+        "code_mode.max_response_tokens" => serde_json::json!(cfg.code_mode.max_response_tokens),
+        "code_mode.token_estimate_divisor" => {
+            serde_json::json!(cfg.code_mode.token_estimate_divisor)
+        }
+        "code_mode.max_log_entries" => serde_json::json!(cfg.code_mode.max_log_entries),
+        "code_mode.max_log_bytes" => serde_json::json!(cfg.code_mode.max_log_bytes),
+        "gateway_import_mode" => serde_json::json!(cfg.gateway_import_mode),
+        "gateway.extra_stdio_commands" => serde_json::json!(cfg.gateway.extra_stdio_commands),
+        "upstream_request_timeout_ms" => serde_json::json!(cfg.upstream_request_timeout_ms),
+        "node.controller" => {
+            serde_json::json!(cfg.node.as_ref().and_then(|value| value.controller.clone()))
+        }
+        "node.log_retention_days" => {
+            serde_json::json!(cfg.node.as_ref().and_then(|value| value.log_retention_days))
+        }
+        "node.role" => serde_json::json!(cfg.node.as_ref().and_then(|value| value.role).map(
+            |role| match role {
+                NodeRuntimeRole::Controller => "controller",
+                NodeRuntimeRole::Node => "node",
+            }
+        )),
+        "device.master" => {
+            serde_json::json!(cfg.device.as_ref().and_then(|value| value.master.clone()))
+        }
+        "web.disable_auth" => serde_json::json!(cfg.web.disable_auth),
+        "auth" => serde_json::to_value(&cfg.auth).unwrap_or(serde_json::Value::Null),
+        "code_mode.enabled" => serde_json::json!(cfg.code_mode.enabled),
+        "gateway.disable_spawn_guard" => serde_json::json!(cfg.gateway.disable_spawn_guard),
+        "oauth.machines" => {
+            serde_json::to_value(&cfg.oauth.machines).unwrap_or(serde_json::Value::Null)
+        }
+        "deploy" => serde_json::to_value(&cfg.deploy).unwrap_or(serde_json::Value::Null),
+        "upstream" => serde_json::to_value(&cfg.upstream).unwrap_or(serde_json::Value::Null),
+        "upstream_pending" => {
+            serde_json::to_value(&cfg.upstream_pending).unwrap_or(serde_json::Value::Null)
+        }
+        "upstream_import_tombstones" => {
+            serde_json::to_value(&cfg.upstream_import_tombstones).unwrap_or(serde_json::Value::Null)
+        }
+        "protected_mcp_routes" => {
+            serde_json::to_value(&cfg.protected_mcp_routes).unwrap_or(serde_json::Value::Null)
+        }
+        "virtual_servers" => {
+            serde_json::to_value(&cfg.virtual_servers).unwrap_or(serde_json::Value::Null)
+        }
+        "quarantined_virtual_servers" => serde_json::to_value(&cfg.quarantined_virtual_servers)
+            .unwrap_or(serde_json::Value::Null),
+        _ => serde_json::Value::Null,
+    }
+}
+
+/// Patch the non-secret built-in upstream API preference without rewriting
+/// unrelated TOML content.
+///
+/// This intentionally edits only `[services].built_in_upstream_apis_enabled`.
+/// It preserves comments, unknown keys, and plugin-owned sections that the
+/// full typed `LabConfig` serializer cannot round-trip.
+pub fn patch_built_in_upstream_apis_enabled(path: &Path, enabled: bool) -> Result<LabConfig> {
+    Ok(patch_config_scalars(
+        path,
+        &[ConfigScalarPatch::new(
+            "services.built_in_upstream_apis_enabled",
+            ConfigScalarValue::Bool(enabled),
+        )],
+    )?
+    .config)
 }
 
 fn config_lock_path(path: &Path) -> PathBuf {
@@ -2645,6 +2978,140 @@ future = "keep"
         assert!(raw.contains("[plugin_owned]"));
         assert!(raw.contains("future = \"keep\""));
         assert!(raw.contains("built_in_upstream_apis_enabled = false"));
+    }
+
+    #[test]
+    fn patch_config_scalars_rejects_non_table_parent_without_mutating() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "mcp = \"bad\"\n").unwrap();
+        let err = patch_config_scalars(
+            &path,
+            &[ConfigScalarPatch::new(
+                "mcp.port",
+                ConfigScalarValue::I64(8765),
+            )],
+        )
+        .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("not a table"),
+            "unexpected error: {err:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "mcp = \"bad\"\n");
+    }
+
+    #[test]
+    fn patch_config_scalars_updates_inline_table_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "services = { built_in_upstream_apis_enabled = true }\n",
+        )
+        .unwrap();
+        let outcome = patch_config_scalars(
+            &path,
+            &[ConfigScalarPatch::new(
+                "services.built_in_upstream_apis_enabled",
+                ConfigScalarValue::Bool(false),
+            )],
+        )
+        .unwrap();
+        assert!(!outcome.config.services.built_in_upstream_apis_enabled);
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("built_in_upstream_apis_enabled = false"));
+    }
+
+    #[test]
+    fn patch_config_scalars_unsets_optional_instead_of_empty_string() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[mcp]\nport = 8765\n").unwrap();
+        let outcome = patch_config_scalars(
+            &path,
+            &[ConfigScalarPatch::new(
+                "mcp.port",
+                ConfigScalarValue::UnsetOptional,
+            )],
+        )
+        .unwrap();
+        assert_eq!(outcome.config.mcp.port, None);
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("port"));
+    }
+
+    #[test]
+    fn patch_config_scalars_creates_backup_and_preserves_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "# keep\n[mcp]\nhost = \"127.0.0.1\"\n").unwrap();
+        let outcome = patch_config_scalars(
+            &path,
+            &[ConfigScalarPatch::new(
+                "mcp.port",
+                ConfigScalarValue::I64(8765),
+            )],
+        )
+        .unwrap();
+        let backup_path = outcome.backup_path.unwrap();
+        assert!(backup_path.is_file());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&backup_path)
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("# keep"));
+        assert!(raw.contains("port = 8765"));
+    }
+
+    #[test]
+    fn patch_config_scalars_skips_backup_and_write_for_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let raw = "[mcp]\nport = 8765\n";
+        std::fs::write(&path, raw).unwrap();
+        let outcome = patch_config_scalars(
+            &path,
+            &[ConfigScalarPatch::new(
+                "mcp.port",
+                ConfigScalarValue::I64(8765),
+            )],
+        )
+        .unwrap();
+        assert_eq!(outcome.backup_path, None);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
+    }
+
+    #[test]
+    fn patch_config_scalars_checked_rejects_stale_expected_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let raw = "[mcp]\nport = 8765\n";
+        std::fs::write(&path, raw).unwrap();
+        let err = patch_config_scalars_checked(
+            &path,
+            &[ConfigScalarPatch::new(
+                "mcp.port",
+                ConfigScalarValue::I64(8766),
+            )],
+            &[ExpectedConfigScalar::new(
+                "mcp.port",
+                serde_json::json!(9000),
+            )],
+        )
+        .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("changed since it was loaded"),
+            "unexpected error: {err:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
     }
 
     #[test]

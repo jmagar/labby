@@ -12,6 +12,41 @@ Configuration is intentionally split between secrets and preferences.
 
 All `config.toml` values can still be overridden by env vars. Env always wins.
 
+## `/settings` source-aware editor
+
+The Labby `/settings` UI is schema-backed by Rust. It exposes configuration
+from three layers, highest precedence first:
+
+1. CLI flags and process environment variables.
+2. `~/.lab/.env`.
+3. `config.toml`, searched from current directory, `~/.lab/config.toml`, then
+   `~/.config/lab/config.toml`.
+
+When an environment variable overrides a `config.toml` field, the UI shows the
+override source. Changing the TOML value is still allowed for safe scalar fields,
+but it will not affect the current runtime until the env override is removed and
+the relevant process is restarted or reloaded.
+
+### Settings write policy
+
+- Low-risk env keys are updated through `setup.settings.env.update`, which
+  performs a targeted atomic merge without committing unrelated draft entries.
+- Low-risk scalar TOML keys are updated through `setup.settings.config.update`,
+  which is admin-only, schema-approved, backed up before write, validated with
+  `LabConfig::validate`, and written atomically.
+- Complex sections such as `upstream`, `protected_mcp_routes`,
+  `virtual_servers`, and `deploy` are read-only in `/settings` until typed
+  editors exist.
+- Secrets are never returned raw. Config-backed secret writes require a future
+  write-only flow and are not part of the scalar settings editor.
+
+### Settings apply modes
+
+- `immediate`: runtime behavior is updated in-process by the settings action.
+- `partial`: config is updated, but only some runtime readers observe it without restart.
+- `restart`: restart `labby serve` for the setting to fully apply.
+- `read_only`: visible but not editable from this settings slice.
+
 ## Sources
 
 Secrets and service instance endpoints live in:

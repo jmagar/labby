@@ -18,6 +18,7 @@ pub fn set_runtime_built_in_upstream_apis_enabled(enabled: bool) {
 }
 
 #[must_use]
+#[allow(dead_code)]
 pub fn runtime_built_in_upstream_apis_enabled() -> bool {
     RUNTIME_BUILT_IN_UPSTREAM_APIS_ENABLED.load(Ordering::Relaxed)
 }

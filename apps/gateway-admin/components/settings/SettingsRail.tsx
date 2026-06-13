@@ -23,17 +23,16 @@ interface RailEntry {
   href: string
   label: string
   icon: React.ComponentType<{ className?: string }>
-  stub?: boolean
 }
 
 const ENTRIES: RailEntry[] = [
   { href: '/settings/core/', label: 'Core', icon: Cog },
   { href: '/settings/services/', label: 'Services', icon: Server },
-  { href: '/settings/surfaces/', label: 'Surfaces', icon: PlugZap, stub: true },
-  { href: '/settings/features/', label: 'Features', icon: Layers, stub: true },
+  { href: '/settings/surfaces/', label: 'Surfaces', icon: PlugZap },
+  { href: '/settings/features/', label: 'Features', icon: Layers },
   { href: '/settings/doctor/', label: 'Doctor', icon: Activity },
   { href: '/settings/extract/', label: 'Extract', icon: FileSearch },
-  { href: '/settings/advanced/', label: 'Advanced', icon: Shield, stub: true },
+  { href: '/settings/advanced/', label: 'Advanced', icon: Shield },
 ]
 
 export function SettingsRail(): React.ReactElement {
@@ -63,7 +62,7 @@ export function SettingsRail(): React.ReactElement {
       >
         {entries.map((entry) => (
           <option key={entry.href} value={entry.href}>
-            {entry.stub ? `${entry.label} v2` : entry.label}
+            {entry.label}
           </option>
         ))}
       </select>
@@ -88,11 +87,6 @@ export function SettingsRail(): React.ReactElement {
             >
               <Icon className="h-4 w-4" />
               <span className="whitespace-nowrap">{entry.label}</span>
-              {entry.stub ? (
-                <span className="ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase">
-                  v2
-                </span>
-              ) : null}
             </Link>
           )
         })}

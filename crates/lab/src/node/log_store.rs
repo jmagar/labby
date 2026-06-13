@@ -94,6 +94,9 @@ pub struct SqliteNodeLogStore {
     dropped_events: Arc<AtomicU64>,
     /// Count of ingest sends that observed a saturated or near-saturated channel.
     saturation_events: Arc<AtomicU64>,
+    /// Count of events successfully flushed by the background writer.
+    #[cfg_attr(not(test), allow(dead_code))]
+    flushed_events: Arc<AtomicU64>,
     /// Dedicated writer connection shared with the background task (Arc for test access).
     #[cfg_attr(not(test), allow(dead_code))]
     writer_conn: Arc<Mutex<Connection>>,
@@ -234,10 +237,12 @@ impl SqliteNodeLogStore {
         let (event_tx, event_rx) = mpsc::channel::<NodeLogEvent>(4096);
 
         let writer_conn = Arc::new(Mutex::new(writer_task_conn));
+        let flushed_events = Arc::new(AtomicU64::new(0));
         tokio::spawn(writer_task(
             Arc::clone(&writer_conn),
             event_rx,
             retention_days,
+            Arc::clone(&flushed_events),
         ));
 
         tracing::info!(
@@ -256,6 +261,7 @@ impl SqliteNodeLogStore {
             event_tx,
             dropped_events: Arc::new(AtomicU64::new(0)),
             saturation_events: Arc::new(AtomicU64::new(0)),
+            flushed_events,
             writer_conn,
             retention_days,
         })
@@ -362,6 +368,24 @@ impl SqliteNodeLogStore {
     pub(crate) async fn run_retention_for_test(&self) {
         run_retention(&self.writer_conn, self.retention_days).await;
     }
+
+    /// Wait until the background writer has persisted at least `expected` events.
+    #[cfg(test)]
+    pub(crate) async fn wait_for_flushed_for_test(&self, expected: u64) -> Result<(), String> {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let flushed = self.flushed_events.load(Ordering::Acquire);
+            if flushed >= expected {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(format!(
+                    "timed out waiting for node log flush: flushed {flushed}, expected {expected}"
+                ));
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
 }
 
 // ── Background writer task ─────────────────────────────────────────────────────
@@ -370,9 +394,9 @@ async fn writer_task(
     conn: Arc<Mutex<Connection>>,
     mut rx: mpsc::Receiver<NodeLogEvent>,
     retention_days: u32,
+    flushed_events: Arc<AtomicU64>,
 ) {
     let mut batch: Vec<NodeLogEvent> = Vec::with_capacity(BATCH_SIZE);
-    let mut flushed_events: u64 = 0;
     let mut retention_ticker = tokio::time::interval(RETENTION_INTERVAL);
     // Skip the first tick (fires immediately on creation).
     retention_ticker.tick().await;
@@ -398,12 +422,15 @@ async fn writer_task(
                         }
                         Ok(None) => {
                             // Channel closed — flush remaining and exit.
-                            flushed_events += flush_batch(&conn, &mut batch).await as u64;
+                            let flushed = flush_batch(&conn, &mut batch).await as u64;
+                            if flushed > 0 {
+                                flushed_events.fetch_add(flushed, Ordering::Release);
+                            }
                             tracing::warn!(
                                 surface = "node",
                                 service = "log_store",
                                 action = "writer.exit",
-                                flushed_events,
+                                flushed_events = flushed_events.load(Ordering::Acquire),
                                 "node log writer task exited; all senders dropped",
                             );
                             return;
@@ -417,7 +444,10 @@ async fn writer_task(
                 _ = retention_ticker.tick() => {
                     // Run retention inline, using the same dedicated connection.
                     // Flush pending batch first so retention sees all recent events.
-                    flushed_events += flush_batch(&conn, &mut batch).await as u64;
+                    let flushed = flush_batch(&conn, &mut batch).await as u64;
+                    if flushed > 0 {
+                        flushed_events.fetch_add(flushed, Ordering::Release);
+                    }
                     run_retention(&conn, retention_days).await;
                     break 'collect;
                 }
@@ -425,7 +455,10 @@ async fn writer_task(
         }
 
         if !batch.is_empty() {
-            flushed_events += flush_batch(&conn, &mut batch).await as u64;
+            let flushed = flush_batch(&conn, &mut batch).await as u64;
+            if flushed > 0 {
+                flushed_events.fetch_add(flushed, Ordering::Release);
+            }
         }
     }
 }

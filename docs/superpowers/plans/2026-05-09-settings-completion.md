@@ -1,5 +1,7 @@
 # Settings Completion Implementation Plan
 
+> Superseded for safe schema-backed settings by `docs/superpowers/plans/2026-06-12-settings-full-configuration.md`. The May plan implemented the first backed settings slice; use the June plan for source-aware scalar editing and read-only complex config visibility.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Finish the Lab settings surface so operators can safely inspect and change backed settings, including one master switch for all built-in upstream API integrations.
