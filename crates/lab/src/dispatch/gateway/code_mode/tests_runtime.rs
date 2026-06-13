@@ -1,5 +1,6 @@
 //! Tests: response-budget truncation, wasm runner smoke, token estimate.
 #![cfg(test)]
+#![allow(clippy::panic)]
 
 use std::collections::HashSet;
 
@@ -1114,7 +1115,7 @@ fn runner_process_group_is_reaped_after_kill() {
     // the `process_group(0)` call in `runner_drive.rs`.
     // `process_group(0)` is a safe method on `std::process::Command` (stable
     // since Rust 1.64) — no `pre_exec` or `unsafe` needed.
-    let child = std::process::Command::new("/bin/sleep")
+    let mut child = std::process::Command::new("/bin/sleep")
         .arg("60")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -1150,6 +1151,7 @@ fn runner_process_group_is_reaped_after_kill() {
             panic!("unexpected waitpid result after killpg: {other:?}");
         }
     }
+    drop(child.wait());
 
     // On Linux, verify the process is gone from /proc as an extra check.
     #[cfg(target_os = "linux")]

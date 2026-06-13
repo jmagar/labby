@@ -1091,6 +1091,7 @@ pub(crate) fn set_file_permissions_600(path: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use crate::config::{LabConfig, ProtectedMcpRouteConfig, UpstreamConfig};
 

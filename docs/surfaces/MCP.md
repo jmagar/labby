@@ -185,6 +185,13 @@ build verification for the richer Next route lives under
 The history resource is process-local inspection state, not a durable audit log
 or a hard quota guarantee.
 
+For upstream MCP Apps, Code Mode keeps widget-bearing tools host-visible so the
+host can render their `_meta.ui.resourceUri` resources. Ordinary sibling tools
+remain hidden from `tools/list`, but a rendered app's `callServerTool` callback
+may call an exposed, non-destructive sibling tool on the same routable upstream.
+The exemption is scoped to callback callability and route scope; it does not
+expand the model-facing catalog.
+
 ## Top-Level Catalog
 
 `lab://catalog` is generated from the same action metadata that powers

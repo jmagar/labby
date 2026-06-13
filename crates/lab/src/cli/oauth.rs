@@ -63,6 +63,7 @@ async fn run_relay_local(args: RelayLocalArgs, config: &LabConfig) -> Result<Exi
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
     use clap::{CommandFactory, Parser};

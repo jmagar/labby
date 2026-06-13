@@ -96,6 +96,7 @@ fn bootstrap_at(env: &Path) -> Result<BootstrapOutcome, ToolError> {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use super::{BootstrapOutcome, bootstrap_at, should_bootstrap};
 

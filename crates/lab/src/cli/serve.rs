@@ -1251,6 +1251,8 @@ async fn run_stdio(
             crate::mcp::logging::logging_level_rank(rmcp::model::LoggingLevel::Info),
         )),
         route_scope: crate::mcp::route_scope::McpRouteScope::Root,
+        #[cfg(test)]
+        code_mode_widget_callbacks_enabled_for_test: false,
     };
     let running = server.serve(rmcp::transport::stdio()).await?;
     tracing::info!(
@@ -1394,6 +1396,8 @@ fn build_mcp_service_with_scope(
                     crate::mcp::logging::logging_level_rank(rmcp::model::LoggingLevel::Info),
                 )),
                 route_scope,
+                #[cfg(test)]
+                code_mode_widget_callbacks_enabled_for_test: false,
             })
         },
         session_manager,
@@ -1650,6 +1654,7 @@ fn find_listening_inode(path: &str, hex_port: &str) -> Option<u64> {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use std::ffi::OsString;
     use std::path::PathBuf;
@@ -1816,7 +1821,7 @@ mod tests {
     fn lab_spawn_depth_resolution_tolerates_bad_env() {
         assert_eq!(resolve_lab_spawn_depth(Some("2".into())), Some(2));
         assert_eq!(resolve_lab_spawn_depth(Some(" 3 ".into())), Some(3));
-        assert_eq!(resolve_lab_spawn_depth(Some("".into())), None);
+        assert_eq!(resolve_lab_spawn_depth(Some(String::new())), None);
         assert_eq!(resolve_lab_spawn_depth(Some("not-a-number".into())), None);
         assert_eq!(resolve_lab_spawn_depth(None), None);
     }

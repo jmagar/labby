@@ -515,6 +515,7 @@ impl StreamableHttpClient for BodyCappedHttpClient {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
     use wiremock::matchers::{method, path};

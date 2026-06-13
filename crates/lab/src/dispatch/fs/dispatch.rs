@@ -779,6 +779,7 @@ fn sanitize_filename(name: &str) -> String {
 }
 
 #[cfg(all(test, feature = "fs"))]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
     use serde_json::json;

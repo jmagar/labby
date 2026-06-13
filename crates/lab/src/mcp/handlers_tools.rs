@@ -58,7 +58,9 @@ impl LabMcpServer {
             oauth_upstream_subject_for_request(auth, self.request_subject(&context));
         let mut builtin_names = Vec::new();
         for svc in self.registry.services() {
-            if self.service_visible_on_mcp(svc.name).await {
+            if self.route_scope.allows_service(svc.name)
+                && self.service_visible_on_mcp(svc.name).await
+            {
                 builtin_names.push(svc.name);
                 if hide_raw_tools {
                     suppressed_builtin_tool_count += 1;

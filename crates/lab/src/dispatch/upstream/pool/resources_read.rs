@@ -261,6 +261,7 @@ fn ui_uri_authority(uri: &str) -> Option<&str> {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::AtomicU8;
@@ -316,6 +317,7 @@ mod tests {
             peers: Arc::new(RwLock::new(Vec::new())),
             logging_level: Arc::new(AtomicU8::new(logging_level_rank(LoggingLevel::Info))),
             route_scope: crate::mcp::route_scope::McpRouteScope::Root,
+            code_mode_widget_callbacks_enabled_for_test: false,
         };
 
         let snapshot = server.snapshot_catalog().await;

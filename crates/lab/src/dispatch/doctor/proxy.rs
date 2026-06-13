@@ -287,6 +287,7 @@ fn join_url(base: &str, path: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
     use wiremock::matchers::{method, path};

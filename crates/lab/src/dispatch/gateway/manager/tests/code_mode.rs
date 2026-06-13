@@ -1,4 +1,5 @@
 //! Code Mode runtime readiness + tool resolution tests.
+#![allow(clippy::panic)]
 
 use crate::dispatch::error::ToolError;
 

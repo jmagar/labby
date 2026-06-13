@@ -1,5 +1,6 @@
 //! Tests: tool-id parsing, capability filter, upstream error/result, schema validation, catalog entry.
 #![cfg(test)]
+#![allow(clippy::panic)]
 
 use rmcp::model::{CallToolResult, Content};
 use serde_json::json;

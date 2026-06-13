@@ -1,3 +1,5 @@
+#![allow(clippy::panic)]
+
 use clap::Parser;
 use labby::cli::nodes::NodesCommand;
 use labby::cli::{Cli, Command};
@@ -180,11 +182,13 @@ fn serve_role_controller_parses() {
 
 fn config_for_master(uri: &str) -> LabConfig {
     let parsed = Url::parse(uri).unwrap();
-    let mut config = LabConfig::default();
-    config.node = Some(NodePreferences {
-        controller: parsed.host_str().map(str::to_string),
+    let mut config = LabConfig {
+        node: Some(NodePreferences {
+            controller: parsed.host_str().map(str::to_string),
+            ..Default::default()
+        }),
         ..Default::default()
-    });
+    };
     config.mcp.port = parsed.port();
     config
 }

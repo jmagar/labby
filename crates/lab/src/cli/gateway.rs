@@ -1265,6 +1265,7 @@ fn render_gateway_list_human(
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use clap::CommandFactory;
     use clap::Parser;

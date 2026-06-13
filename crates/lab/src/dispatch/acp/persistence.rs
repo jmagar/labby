@@ -985,6 +985,7 @@ fn generate_ephemeral_hmac_key(pid: u32, now_nanos: u128) -> Vec<u8> {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod db_load_events_tests {
     use super::*;
 

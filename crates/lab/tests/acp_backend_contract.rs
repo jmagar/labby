@@ -1,3 +1,5 @@
+#![allow(clippy::panic)]
+
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, OnceLock};

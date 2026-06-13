@@ -504,7 +504,7 @@ pub(super) fn with_test_plugins_root<T>(home: &Path, run: impl FnOnce() -> T) ->
         let mut slot = TEST_PLUGINS_ROOT_OVERRIDE
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        std::mem::replace(&mut *slot, Some(plugins_root))
+        (*slot).replace(plugins_root)
     };
 
     // RAII guard: restore the override slot in `Drop` so that a panicking

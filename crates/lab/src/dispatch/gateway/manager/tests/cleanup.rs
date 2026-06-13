@@ -1,4 +1,5 @@
 //! Upstream process cleanup pattern + matcher tests.
+#![allow(clippy::panic)]
 
 #[cfg(target_os = "linux")]
 use crate::dispatch::gateway::runtime::process_matches_patterns;

@@ -489,6 +489,7 @@ pub(crate) fn code_mode_app_resource_meta(uri: &str) -> Meta {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
     use rmcp::service::{Peer, RequestContext};
@@ -523,6 +524,7 @@ mod tests {
                 crate::mcp::logging::logging_level_rank(LoggingLevel::Emergency),
             )),
             route_scope,
+            code_mode_widget_callbacks_enabled_for_test: false,
         }
     }
 

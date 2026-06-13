@@ -41,6 +41,8 @@ async fn connect_in_process_service_peer(
         peers: Arc::new(RwLock::new(Vec::new())),
         logging_level: Arc::new(AtomicU8::new(logging_level_rank(LoggingLevel::Emergency))),
         route_scope: crate::mcp::route_scope::McpRouteScope::Root,
+        #[cfg(test)]
+        code_mode_widget_callbacks_enabled_for_test: false,
     };
     let service_name = service.name;
     let server_task = tokio::spawn(async move {

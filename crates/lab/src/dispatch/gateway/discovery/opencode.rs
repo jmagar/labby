@@ -42,6 +42,7 @@ fn discover_with_xdg(home: &Path, xdg: Option<&Path>) -> Vec<DiscoveredServer> {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use std::path::Path;
     use tempfile::TempDir;

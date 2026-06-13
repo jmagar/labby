@@ -34,6 +34,16 @@ use crate::mcp::result_format::{
 use crate::mcp::server::LabMcpServer;
 use crate::mcp::upstream::normalize_upstream_result;
 
+use crate::config::UpstreamConfig;
+use crate::dispatch::upstream::types::UpstreamTool;
+
+#[derive(Debug, Clone)]
+pub(crate) struct PreResolvedUpstreamTool {
+    pub(crate) upstream_name: String,
+    pub(crate) tool: UpstreamTool,
+    pub(crate) route: &'static str,
+}
+
 impl LabMcpServer {
     /// Upstream-proxy tail. Reached by fall-through from `call_tool_impl`
     /// when `svc.is_none()`. Owns raw + subject-scoped proxy branches and
@@ -44,6 +54,7 @@ impl LabMcpServer {
         service: &str,
         action: &str,
         raw_arguments: Option<JsonObject>,
+        resolved_upstream_tool: Option<PreResolvedUpstreamTool>,
         start: Instant,
         subject: &str,
         actor_key: Option<&str>,
@@ -59,7 +70,22 @@ impl LabMcpServer {
             auth_context_from_extensions(&context.extensions),
             self.request_subject(context),
         );
-        let raw_resolved = if let Some(manager) = &self.gateway_manager {
+        let pre_resolved_upstream = resolved_upstream_tool
+            .as_ref()
+            .map(|resolved| resolved.upstream_name.clone());
+        let route_scoped_oauth_configs = self.route_scoped_oauth_upstream_configs().await;
+        let pre_resolved_oauth_config: Option<UpstreamConfig> = raw_oauth_subject
+            .as_ref()
+            .and(pre_resolved_upstream.as_ref())
+            .and_then(|upstream_name| {
+                route_scoped_oauth_configs
+                    .iter()
+                    .find(|config| config.name == *upstream_name && config.oauth.is_some())
+                    .cloned()
+            });
+        let raw_resolved = if let Some(resolved) = resolved_upstream_tool {
+            Some(Ok((resolved.upstream_name, resolved.tool, resolved.route)))
+        } else if let Some(manager) = &self.gateway_manager {
             Some(
                 manager
                     .resolve_raw_upstream_tool_scoped(
@@ -68,7 +94,8 @@ impl LabMcpServer {
                         Some(&raw_runtime_owner),
                         raw_oauth_subject.as_deref(),
                     )
-                    .await,
+                    .await
+                    .map(|(upstream_name, tool)| (upstream_name, tool, "upstream")),
             )
         } else {
             None
@@ -105,7 +132,8 @@ impl LabMcpServer {
             )]));
         }
         if let Some(pool) = self.current_upstream_pool().await
-            && let Some(Ok((upstream_name, _tool))) = raw_resolved
+            && let Some(Ok((upstream_name, _tool, route))) = raw_resolved
+            && pre_resolved_oauth_config.is_none()
         {
             let before = self.snapshot_catalog().await;
             tracing::info!(
@@ -114,7 +142,7 @@ impl LabMcpServer {
                 action = upstream_action,
                 tool = %service,
                 upstream = %upstream_name,
-                route = "upstream",
+                route,
                 "dispatch route selected"
             );
             tracing::debug!(
@@ -290,22 +318,28 @@ impl LabMcpServer {
             oauth_upstream_subject_for_request(auth, self.request_subject(context))
             && let Some(pool) = self.current_upstream_pool().await
         {
-            let configs = self.route_scoped_oauth_upstream_configs().await;
-            let mut owner = None;
-            for (upstream_name, tools) in pool
-                .subject_scoped_tools(&configs, oauth_subject.as_ref())
-                .await
-            {
-                if tools.iter().any(|tool| tool.name.as_ref() == service) {
-                    owner = Some(upstream_name);
-                    break;
+            let mut owner = pre_resolved_oauth_config
+                .as_ref()
+                .map(|config| config.name.clone());
+            if owner.is_none() {
+                for (upstream_name, tools) in pool
+                    .subject_scoped_tools(&route_scoped_oauth_configs, oauth_subject.as_ref())
+                    .await
+                {
+                    if tools.iter().any(|tool| tool.name.as_ref() == service) {
+                        owner = Some(upstream_name);
+                        break;
+                    }
                 }
             }
 
             if let Some(upstream_name) = owner
-                && let Some(config) = configs
-                    .into_iter()
-                    .find(|config| config.name == upstream_name)
+                && let Some(config) = pre_resolved_oauth_config.or_else(|| {
+                    route_scoped_oauth_configs
+                        .iter()
+                        .find(|config| config.name == upstream_name)
+                        .cloned()
+                })
             {
                 tracing::info!(
                     surface = "mcp",

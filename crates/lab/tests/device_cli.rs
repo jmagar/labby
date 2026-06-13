@@ -135,12 +135,14 @@ async fn master_client_applies_bearer_token_to_master_requests() {
 
 fn config_for_master(uri: &str) -> LabConfig {
     let parsed = Url::parse(uri).unwrap();
-    let mut config = LabConfig::default();
-    config.node = Some(NodePreferences {
-        controller: parsed.host_str().map(str::to_string),
-        log_retention_days: None,
-        role: None,
-    });
+    let mut config = LabConfig {
+        node: Some(NodePreferences {
+            controller: parsed.host_str().map(str::to_string),
+            log_retention_days: None,
+            role: None,
+        }),
+        ..LabConfig::default()
+    };
     config.mcp.port = parsed.port();
     config
 }

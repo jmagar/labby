@@ -209,18 +209,31 @@ Semantics:
 - The `CodeModeExecutionResponse` gains an optional `ui` field when a
   widget-bearing upstream result was captured.
 
-### Widget → host callbacks (opt-in)
+### Widget → host callbacks
 
-While the synthetic `search`/`execute` surface is active, raw upstream tools are
-hidden from `list_tools` and are not callable by name — so an interactive
-widget's callback (`tools/call` for an upstream tool) is rejected by default.
-Operators who want interactive widgets can set
-`LAB_CODE_MODE_WIDGET_CALLBACKS=1` (or `true`/`yes`) to let a call that names a
-known upstream tool fall through to the upstream proxy. This relaxes
-**callability**, never **visibility** — the tool stays out of `list_tools`. It is
-**off by default** because, on the same MCP session, it also lets the model
-invoke a known upstream tool by name. Leave it off unless interactive widgets are
-required.
+While the synthetic `search`/`execute` surface is active, raw upstream tools stay
+hidden from `list_tools`. MCP App tools that carry `_meta.ui.resourceUri` may
+still be advertised so the host can render the widget.
+
+A rendered MCP App can call back to its server only through host
+`callServerTool` / `tools/call`. Lab allows those callback calls through Code
+Mode's raw-tool gate only when all of these are true:
+
+- the requested tool is an exposed upstream tool, not a Lab built-in service;
+- the upstream is routable and allowed by the current protected route scope;
+- the same upstream exposes at least one MCP App UI tool;
+- the requested tool is not destructive.
+
+The callback exemption changes callability only. It does not put sibling tools
+back into `list_tools`, so the model-facing surface remains collapsed.
+Destructive sibling callbacks return `confirmation_required`; callers should use
+the `execute` tool with `confirm:true` for destructive upstream actions.
+
+`LAB_CODE_MODE_WIDGET_CALLBACKS=1` remains as a broader legacy operator bypass.
+With that variable set, any known exposed non-destructive upstream tool may pass
+the raw-tool gate while Code Mode is enabled. It does not bypass destructive
+confirmation. Leave it off unless a legacy widget depends on callbacks that
+cannot be represented by the same-upstream MCP App sibling rule.
 
 ## Error Contract
 

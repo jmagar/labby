@@ -1,3 +1,5 @@
+#![allow(clippy::panic)]
+
 use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;

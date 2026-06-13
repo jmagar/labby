@@ -146,6 +146,7 @@ impl Drop for JobObjectGuard {
 }
 
 #[cfg(all(test, unix))]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
     use std::process::{Command as StdCommand, Stdio};

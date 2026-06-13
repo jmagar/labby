@@ -854,7 +854,7 @@ mod tests {
         assert!(out.contains("radarr"));
         assert!(out.contains("unifi"));
         assert!(out.contains("✓") || out.contains("ok"));
-        assert!(out.contains("✗") || out.contains("x"));
+        assert!(out.contains("✗") || out.contains('x'));
     }
 
     #[test]
@@ -872,7 +872,7 @@ mod tests {
         assert!(out.contains("radarr"));
         assert!(out.contains("env"));
         assert!(out.contains("✓") || out.contains("ok"));
-        assert!(out.contains("✗") || out.contains("x"));
+        assert!(out.contains("✗") || out.contains('x'));
         // Per-check detail is hidden in default (grouped) mode.
         assert!(!out.contains("is set"));
         assert!(!out.contains("is missing"));

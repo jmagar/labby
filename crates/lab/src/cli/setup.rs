@@ -316,6 +316,7 @@ async fn run_plugin_mutation(
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
     use clap::Parser as _;

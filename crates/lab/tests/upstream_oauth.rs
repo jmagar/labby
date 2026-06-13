@@ -478,6 +478,7 @@ async fn subject_lookup_survives_restart_for_saved_state() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+#[allow(clippy::await_holding_lock)]
 async fn build_auth_client_logs_near_expiry_refresh_lifecycle_without_secrets() {
     let _tracing_lock = TRACING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let buf = SharedBuf::default();

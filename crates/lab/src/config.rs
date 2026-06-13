@@ -2919,6 +2919,7 @@ fn quote_env_value(v: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
 
@@ -3649,13 +3650,13 @@ url = "https://acme.example.com/mcp"
         assert_eq!(default_cfg.code_mode.max_response_tokens, 6000);
 
         let cfg = toml::from_str::<LabConfig>(
-            r#"
+            r"
 [code_mode]
 timeout_ms = 2500
 max_tool_calls = 3
 max_response_bytes = 12000
 max_response_tokens = 3000
-"#,
+",
         )
         .expect("root code_mode parses");
 
@@ -3674,9 +3675,9 @@ max_response_tokens = 3000
         );
 
         let cfg = toml::from_str::<LabConfig>(
-            r#"
+            r"
 upstream_request_timeout_ms = 60000
-"#,
+",
         )
         .expect("root upstream request timeout parses");
 
@@ -3691,11 +3692,11 @@ upstream_request_timeout_ms = 60000
     #[test]
     fn code_mode_validation_rejects_unbounded_execution_settings() {
         let cfg = toml::from_str::<LabConfig>(
-            r#"
+            r"
 [code_mode]
 timeout_ms = 0
 max_tool_calls = 8
-"#,
+",
         )
         .expect("code_mode parses");
         assert!(matches!(
@@ -3704,11 +3705,11 @@ max_tool_calls = 8
         ));
 
         let cfg = toml::from_str::<LabConfig>(
-            r#"
+            r"
 [code_mode]
 timeout_ms = 5000
 max_tool_calls = 0
-"#,
+",
         )
         .expect("code_mode parses");
         assert!(matches!(
@@ -3717,12 +3718,12 @@ max_tool_calls = 0
         ));
 
         let cfg = toml::from_str::<LabConfig>(
-            r#"
+            r"
 [code_mode]
 timeout_ms = 5000
 max_tool_calls = 8
 max_response_bytes = 100
-"#,
+",
         )
         .expect("code_mode parses");
         assert!(matches!(
@@ -3731,12 +3732,12 @@ max_response_bytes = 100
         ));
 
         let cfg = toml::from_str::<LabConfig>(
-            r#"
+            r"
 [code_mode]
 timeout_ms = 5000
 max_tool_calls = 8
 max_response_tokens = 100
-"#,
+",
         )
         .expect("code_mode parses");
         assert!(matches!(

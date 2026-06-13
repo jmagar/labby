@@ -1198,6 +1198,7 @@ fn stable_seed(node_id: &str, attempt: u32) -> u64 {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use std::sync::Arc;
 
@@ -1871,18 +1872,14 @@ mod tests {
         use base64::Engine as _;
         drop(base64::engine::general_purpose::STANDARD.encode(b"x"));
         let files = vec![json!({ "path": "a.md", "content": "hi" })];
-        let err = decode_component_files(Some(&files))
-            .err()
-            .expect("must reject");
+        let err = decode_component_files(Some(&files)).expect_err("must reject");
         assert_eq!(err.kind, "invalid_encoding");
     }
 
     #[test]
     fn decode_component_files_rejects_unknown_encoding() {
         let files = vec![json!({ "path": "a.md", "content": "hi", "encoding": "rot13" })];
-        let err = decode_component_files(Some(&files))
-            .err()
-            .expect("must reject");
+        let err = decode_component_files(Some(&files)).expect_err("must reject");
         assert_eq!(err.kind, "invalid_encoding");
     }
 
@@ -1890,9 +1887,8 @@ mod tests {
     fn decode_component_files_rejects_per_file_oversize() {
         let big = "a".repeat(17);
         let files = vec![json!({ "path": "big.bin", "content": big, "encoding": "utf8" })];
-        let err = decode_component_files_with_limits(Some(&files), 16, 64)
-            .err()
-            .expect("must reject");
+        let err =
+            decode_component_files_with_limits(Some(&files), 16, 64).expect_err("must reject");
         assert_eq!(err.kind, "content_too_large");
     }
 
@@ -1904,9 +1900,8 @@ mod tests {
         let files: Vec<Value> = (0..7)
             .map(|i| json!({ "path": format!("f{i}.bin"), "content": chunk, "encoding": "utf8" }))
             .collect();
-        let err = decode_component_files_with_limits(Some(&files), 16, 64)
-            .err()
-            .expect("must reject");
+        let err =
+            decode_component_files_with_limits(Some(&files), 16, 64).expect_err("must reject");
         assert_eq!(err.kind, "content_too_large");
     }
 
@@ -1927,18 +1922,14 @@ mod tests {
     #[test]
     fn decode_component_files_rejects_missing_path() {
         let files = vec![json!({ "content": "hi", "encoding": "utf8" })];
-        let err = decode_component_files(Some(&files))
-            .err()
-            .expect("must reject");
+        let err = decode_component_files(Some(&files)).expect_err("must reject");
         assert_eq!(err.kind, "invalid_param");
     }
 
     #[test]
     fn decode_component_files_rejects_missing_content() {
         let files = vec![json!({ "path": "a.md", "encoding": "utf8" })];
-        let err = decode_component_files(Some(&files))
-            .err()
-            .expect("must reject");
+        let err = decode_component_files(Some(&files)).expect_err("must reject");
         assert_eq!(err.kind, "invalid_param");
     }
 
@@ -1946,9 +1937,7 @@ mod tests {
     fn decode_component_files_rejects_malformed_base64() {
         let files =
             vec![json!({ "path": "a.bin", "content": "!!!not-b64!!!", "encoding": "base64" })];
-        let err = decode_component_files(Some(&files))
-            .err()
-            .expect("must reject");
+        let err = decode_component_files(Some(&files)).expect_err("must reject");
         assert_eq!(err.kind, "invalid_encoding");
     }
 }

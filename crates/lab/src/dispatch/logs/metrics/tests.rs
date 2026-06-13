@@ -377,7 +377,7 @@ fn tier_two_fields_populate_actor_ip_and_code_mode_metrics() {
     assert_eq!(m.actors.ip.top[0].id, "10.0.0.8");
     assert_eq!(m.fan_out.runs, 1);
     assert_eq!(m.fan_out.total_calls, 3);
-    assert_eq!(m.fan_out.truncation_rate, 1.0);
+    assert!((m.fan_out.truncation_rate - 1.0).abs() < f64::EPSILON);
     assert_eq!(m.fan_out.artifact_writes, 2);
     assert_eq!(m.agents_seen.new, 1);
     assert_eq!(m.agents_seen.returning, 1);

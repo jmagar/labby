@@ -884,6 +884,7 @@ fn validate_node_install_result(result: &Value) -> Result<(), &'static str> {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
     use serde_json::json;

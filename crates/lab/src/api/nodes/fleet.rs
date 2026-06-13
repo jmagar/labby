@@ -1226,6 +1226,7 @@ struct InitializedDevice {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use std::sync::Arc;
 
@@ -1915,7 +1916,7 @@ mod tests {
 
         let result = require_master_store(&state);
         assert!(result.is_err(), "NonMaster must be rejected");
-        let err = result.err().expect("err");
+        let err = result.expect_err("err");
         assert_eq!(
             err.kind(),
             "not_found",
