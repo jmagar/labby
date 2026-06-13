@@ -139,8 +139,12 @@ export function CodeModeInspector({ initialTrace }: CodeModeInspectorProps) {
     // The openai:set_globals CustomEvent carries changed values on
     // event.detail.globals; prefer that, falling back to the live snapshot.
     const sync = (event?: Event) => {
-      const detail = (event as CustomEvent<{ globals?: { toolOutput?: unknown } }> | undefined)?.detail
-      const raw = detail?.globals?.toolOutput ?? window.openai?.toolOutput
+      const globals = (event as CustomEvent<{ globals?: Record<string, unknown> }> | undefined)?.detail
+        ?.globals
+      // The event's globals are authoritative for the changed key (including an
+      // explicit null clear); only without it do we read the live snapshot.
+      const hasKey = globals != null && Object.prototype.hasOwnProperty.call(globals, 'toolOutput')
+      const raw = hasKey ? globals.toolOutput : window.openai?.toolOutput
       const next = parseCodeModeTrace(raw)
       if (next) {
         setTrace(next)
@@ -150,6 +154,10 @@ export function CodeModeInspector({ initialTrace }: CodeModeInspectorProps) {
         // Present but unparseable — surface it like the ExtApps path does
         // instead of silently dropping the host's payload.
         setBridgeWarning('Ignored malformed bridge payload.')
+      } else if (hasKey) {
+        // Host explicitly cleared the result — drop the stale trace.
+        setTrace(null)
+        setBridgeWarning(null)
       }
     }
     sync()

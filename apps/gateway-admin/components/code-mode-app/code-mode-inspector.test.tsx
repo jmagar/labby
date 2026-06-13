@@ -331,3 +331,43 @@ test('surfaces a warning for malformed window.openai payloads', async () => {
     globalThis.window.openai = undefined
   }
 })
+
+test('clears the trace when openai:set_globals carries a null toolOutput', async () => {
+  installChatTestDom()
+  globalThis.window.openai = {
+    toolOutput: {
+      kind: 'code_mode_search_trace',
+      query_kind: 'catalog_filter',
+      match_count: 1,
+      matches: [
+        {
+          id: 'axon::ask',
+          upstream: 'axon',
+          tool: 'ask',
+          description: 'Ask indexed docs',
+          has_schema: true,
+          has_output_schema: false,
+        },
+      ],
+    },
+  }
+  try {
+    const { container, unmount } = await renderClient(<CodeModeInspector />)
+    assert.match(container.textContent ?? '', /axon \/ ask/)
+
+    await act(async () => {
+      globalThis.window.dispatchEvent(
+        new globalThis.window.CustomEvent('openai:set_globals', {
+          detail: { globals: { toolOutput: null } },
+        }),
+      )
+    })
+
+    // Host cleared the result — the stale trace is dropped, not left as "connected".
+    assert.doesNotMatch(container.textContent ?? '', /axon \/ ask/)
+    assert.match(container.textContent ?? '', /Waiting for an MCP Apps tool result/)
+    await unmount()
+  } finally {
+    globalThis.window.openai = undefined
+  }
+})
