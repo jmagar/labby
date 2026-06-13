@@ -172,9 +172,7 @@ impl UpstreamPool {
                 continue;
             }
             let has_ui_sibling = entry.tools.values().any(|candidate| {
-                entry
-                    .exposure_policy
-                    .matches(candidate.tool.name.as_ref())
+                entry.exposure_policy.matches(candidate.tool.name.as_ref())
                     && tool_has_mcp_app_ui_resource(candidate)
             });
             if has_ui_sibling {
@@ -537,19 +535,16 @@ mod tests {
             .expect("ui tool")
             .tool
             .meta = Some(Meta(serde_json::Map::from_iter([(
-                "ui".to_string(),
-                serde_json::json!({ "resourceUri": "ui://apps/youtube-search.html" }),
-            )])));
+            "ui".to_string(),
+            serde_json::json!({ "resourceUri": "ui://apps/youtube-search.html" }),
+        )])));
         let mut entry = healthy_in_process_entry(Arc::clone(&upstream_name), tools);
         entry.exposure_policy = ToolExposurePolicy::from_patterns(vec![
             "youtube_search_ui".to_string(),
             "youtube_probe".to_string(),
         ])
         .expect("policy");
-        pool.catalog
-            .write()
-            .await
-            .insert("apps".to_string(), entry);
+        pool.catalog.write().await.insert("apps".to_string(), entry);
 
         assert_eq!(
             pool.find_mcp_app_sibling_tool_candidates("youtube_probe", None)

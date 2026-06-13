@@ -227,12 +227,12 @@ impl LabMcpServer {
                     pool.find_tool_allowed(&service, allowed)
                         .await
                         .map(|(_, tool)| ("upstream_widget_callback_legacy", Some(tool)))
-                } else if let Some((_, tool)) =
-                    pool.find_tool_allowed(&service, allowed)
-                        .await
-                        .filter(|(_, tool)| {
-                            crate::dispatch::upstream::pool::tool_has_mcp_app_ui_resource(tool)
-                        })
+                } else if let Some((_, tool)) = pool
+                    .find_tool_allowed(&service, allowed)
+                    .await
+                    .filter(|(_, tool)| {
+                        crate::dispatch::upstream::pool::tool_has_mcp_app_ui_resource(tool)
+                    })
                 {
                     Some(("upstream_widget_callback", Some(tool)))
                 } else {
@@ -241,6 +241,11 @@ impl LabMcpServer {
                         .await;
                     if candidates.is_empty() {
                         None
+                    } else if let Some((_, tool)) = candidates
+                        .iter()
+                        .find(|(_, candidate)| candidate.destructive)
+                    {
+                        Some(("upstream_widget_sibling_callback", Some(tool.clone())))
                     } else {
                         let tool = (candidates.len() == 1)
                             .then(|| candidates.into_iter().next().expect("checked len").1);

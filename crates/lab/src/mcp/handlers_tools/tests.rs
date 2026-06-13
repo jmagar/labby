@@ -460,7 +460,90 @@ async fn call_tool_blocks_destructive_mcp_app_sibling_callbacks() {
 
     assert!(result.is_error.unwrap_or(false));
     let text = result.content[0].as_text().expect("text").text.as_str();
-    assert!(text.contains("\"kind\":\"confirmation_required\""), "{text}");
+    assert!(
+        text.contains("\"kind\":\"confirmation_required\""),
+        "{text}"
+    );
+    assert!(
+        text.contains("not callable via the widget callback bypass"),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn call_tool_blocks_ambiguous_destructive_mcp_app_sibling_callbacks() {
+    let safe_name: Arc<str> = Arc::from("safe_apps");
+    let safe_ui_tool = fixture_upstream_tool(
+        &safe_name,
+        "youtube_search_ui",
+        Some("ui://safe-apps/youtube-search.html"),
+    );
+    let safe_probe = fixture_upstream_tool(&safe_name, "youtube_probe", None);
+
+    let destructive_name: Arc<str> = Arc::from("destructive_apps");
+    let destructive_ui_tool = fixture_upstream_tool(
+        &destructive_name,
+        "youtube_search_ui",
+        Some("ui://destructive-apps/youtube-search.html"),
+    );
+    let mut destructive_probe = fixture_upstream_tool(&destructive_name, "youtube_probe", None);
+    destructive_probe.destructive = true;
+
+    let pool = Arc::new(UpstreamPool::new());
+    pool.insert_entry_for_test(
+        "safe_apps",
+        fixture_upstream_entry(
+            "safe_apps",
+            HashMap::from([
+                ("youtube_search_ui".to_string(), safe_ui_tool),
+                ("youtube_probe".to_string(), safe_probe),
+            ]),
+        ),
+    )
+    .await;
+    pool.insert_entry_for_test(
+        "destructive_apps",
+        fixture_upstream_entry(
+            "destructive_apps",
+            HashMap::from([
+                ("youtube_search_ui".to_string(), destructive_ui_tool),
+                ("youtube_probe".to_string(), destructive_probe),
+            ]),
+        ),
+    )
+    .await;
+
+    let manager =
+        code_mode_manager_with_pool(true, fixture_upstream_config("safe_apps"), pool).await;
+    let server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = rmcp::service::RequestContext::new(
+        rmcp::model::NumberOrString::Number(1),
+        running.peer().clone(),
+    );
+
+    let result = Box::pin(
+        running
+            .service()
+            .call_tool_impl(CallToolRequestParams::new("youtube_probe"), context),
+    )
+    .await
+    .expect("call tool result");
+
+    assert!(result.is_error.unwrap_or(false));
+    let text = result.content[0].as_text().expect("text").text.as_str();
+    assert!(
+        text.contains("\"kind\":\"confirmation_required\""),
+        "{text}"
+    );
     assert!(
         text.contains("not callable via the widget callback bypass"),
         "{text}"
