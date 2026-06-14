@@ -15,6 +15,7 @@ import {
 import { AppHeader } from '@/components/app-header'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { SafeMarkdown } from '@/components/markdown/safe-markdown'
 import {
   AURORA_CARD_TITLE,
   AURORA_DENSE_META,
@@ -27,7 +28,7 @@ import {
   AURORA_STRONG_PANEL,
 } from '@/components/aurora/tokens'
 import { snippetsApi } from '@/lib/api/snippets-client'
-import type { SnippetInfo } from '@/lib/types/snippets'
+import type { ResolvedSnippet, SnippetInfo } from '@/lib/types/snippets'
 import { cn } from '@/lib/utils'
 
 type ActionState =
@@ -35,6 +36,10 @@ type ActionState =
   | { kind: 'loading'; label: string }
   | { kind: 'success'; label: string; detail: string }
   | { kind: 'error'; label: string; detail: string }
+
+function snippetKey(snippet: Pick<SnippetInfo, 'source' | 'name'>) {
+  return `${snippet.source}:${snippet.name}`
+}
 
 function inputEntries(snippet: SnippetInfo | null) {
   return Object.entries(snippet?.inputs ?? {})
@@ -51,9 +56,33 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown snippets error'
 }
 
+function tutorialText(snippet: ResolvedSnippet | null): string | null {
+  if (!snippet?.body) return null
+  const withoutFrontmatter = snippet.body.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n*/, '')
+  const beforeCode = withoutFrontmatter.split(/\r?\n```(?:js|javascript|ts|typescript)\b/)[0]?.trim()
+  return beforeCode || null
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function actionResultFailed(result: unknown): boolean {
+  if (!isObject(result)) return false
+  if (typeof result.valid === 'boolean') return !result.valid
+  if (typeof result.passed === 'boolean') return !result.passed
+  if (Array.isArray(result.results)) {
+    return result.results.some((entry) => isObject(entry) && entry.passed === false)
+  }
+  if (isObject(result.result) && typeof result.result.ok === 'boolean') return !result.result.ok
+  return false
+}
+
 export function SnippetsPageContent() {
   const [snippets, setSnippets] = React.useState<SnippetInfo[]>([])
-  const [selectedName, setSelectedName] = React.useState<string | null>(null)
+  const [selectedKey, setSelectedKey] = React.useState<string | null>(null)
+  const [selectedDetail, setSelectedDetail] = React.useState<ResolvedSnippet | null>(null)
+  const [detailError, setDetailError] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [actionState, setActionState] = React.useState<ActionState>({ kind: 'idle' })
@@ -63,9 +92,9 @@ export function SnippetsPageContent() {
     try {
       const next = await snippetsApi.list()
       setSnippets(next)
-      setSelectedName((current) => {
-        if (current && next.some((snippet) => snippet.name === current)) return current
-        return next[0]?.name ?? null
+      setSelectedKey((current) => {
+        if (current && next.some((snippet) => snippetKey(snippet) === current)) return current
+        return next[0] ? snippetKey(next[0]) : null
       })
       setError(null)
     } catch (err) {
@@ -82,7 +111,7 @@ export function SnippetsPageContent() {
       .list(controller.signal)
       .then((next) => {
         setSnippets(next)
-        setSelectedName(next[0]?.name ?? null)
+        setSelectedKey(next[0] ? snippetKey(next[0]) : null)
         setError(null)
       })
       .catch((err) => {
@@ -94,10 +123,40 @@ export function SnippetsPageContent() {
     return () => controller.abort()
   }, [])
 
+  React.useEffect(() => {
+    const selected = snippets.find((snippet) => snippetKey(snippet) === selectedKey) ?? null
+    if (!selected) {
+      setSelectedDetail(null)
+      setDetailError(null)
+      return
+    }
+
+    const controller = new AbortController()
+    snippetsApi
+      .get(selected.name, controller.signal)
+      .then((detail) => {
+        setSelectedDetail(detail)
+        setDetailError(null)
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return
+        setSelectedDetail(null)
+        setDetailError(errorMessage(err))
+      })
+
+    return () => controller.abort()
+  }, [selectedKey, snippets])
+
   const selected = React.useMemo(
-    () => snippets.find((snippet) => snippet.name === selectedName) ?? snippets[0] ?? null,
-    [selectedName, snippets],
+    () =>
+      snippets.find((snippet) => snippetKey(snippet) === selectedKey) ??
+      snippets[0] ??
+      null,
+    [selectedKey, snippets],
   )
+  const selectedDetailLoaded = selectedDetail?.name === selected?.name
+  const selectedTutorial =
+    selectedDetailLoaded ? tutorialText(selectedDetail) : null
   const builtinCount = snippets.filter((snippet) => snippet.source === 'builtin').length
   const inputCount = snippets.reduce((sum, snippet) => sum + inputEntries(snippet).length, 0)
 
@@ -107,9 +166,9 @@ export function SnippetsPageContent() {
       const result = await fn()
       const detail =
         typeof result === 'object' && result !== null
-          ? JSON.stringify(result).slice(0, 240)
+          ? JSON.stringify(result, null, 2).slice(0, 2000)
           : String(result)
-      setActionState({ kind: 'success', label, detail })
+      setActionState({ kind: actionResultFailed(result) ? 'error' : 'success', label, detail })
     } catch (err) {
       setActionState({ kind: 'error', label, detail: errorMessage(err) })
     }
@@ -176,10 +235,10 @@ export function SnippetsPageContent() {
                     <button
                       key={`${snippet.source}:${snippet.name}`}
                       type="button"
-                      onClick={() => setSelectedName(snippet.name)}
+                      onClick={() => setSelectedKey(snippetKey(snippet))}
                       className={cn(
                         'flex w-full items-start gap-3 px-5 py-4 text-left transition hover:bg-aurora-hover-bg/60',
-                        selected?.name === snippet.name && 'border-l-2 border-aurora-accent-primary bg-aurora-hover-bg/70 shadow-[var(--aurora-active-glow)]',
+                        selected && snippetKey(selected) === snippetKey(snippet) && 'border-l-2 border-aurora-accent-primary bg-aurora-hover-bg/70 shadow-[var(--aurora-active-glow)]',
                       )}
                     >
                       <FileCode2 className="mt-0.5 size-4 shrink-0 text-aurora-accent-primary" />
@@ -238,6 +297,28 @@ export function SnippetsPageContent() {
                       </div>
                     </div>
                   </div>
+
+                  {selectedDetailLoaded || detailError ? (
+                    <div className="border-b border-aurora-border-strong p-5">
+                      <div className={cn(AURORA_MEDIUM_PANEL, 'max-h-[420px] overflow-auto p-4')}>
+                        <p className={AURORA_MUTED_LABEL}>Tutorial</p>
+                        {detailError ? (
+                          <p className="mt-4 text-sm leading-6 text-aurora-error">
+                            Failed to load snippet body: {detailError}
+                          </p>
+                        ) : selectedTutorial ? (
+                          <SafeMarkdown
+                            text={selectedTutorial}
+                            className="mt-4 text-sm leading-6 text-aurora-text-muted [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:text-aurora-text-primary [&_h2]:mt-5 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-aurora-text-primary [&_h3]:mt-4 [&_h3]:font-semibold [&_h3]:text-aurora-text-primary [&_li]:my-1 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_pre]:my-3 [&_pre]:rounded-[0.75rem] [&_pre]:border [&_pre]:border-aurora-border-strong [&_pre]:bg-aurora-control-surface [&_pre]:p-3 [&_table]:my-3 [&_td]:border [&_td]:border-aurora-border-strong [&_td]:px-2 [&_td]:py-1.5 [&_th]:border [&_th]:border-aurora-border-strong [&_th]:px-2 [&_th]:py-1.5 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5"
+                          />
+                        ) : (
+                          <p className="mt-4 text-sm leading-6 text-aurora-text-muted">
+                            No tutorial markdown found before the executable code block.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
 
                   <div className="grid gap-4 p-5 xl:grid-cols-[minmax(0,1fr)_320px]">
                     <div className={cn(AURORA_MEDIUM_PANEL, 'min-w-0 overflow-hidden p-4')}>

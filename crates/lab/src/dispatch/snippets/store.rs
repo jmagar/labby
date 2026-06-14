@@ -785,6 +785,29 @@ mod tests {
     }
 
     #[test]
+    fn repo_status_gh_pulse_builtin_is_discoverable_and_executable() {
+        let lab_home = tempfile::tempdir().expect("temp lab home");
+        let builtin_dir = builtin_snippet_dir();
+        let snippets = list_snippets(lab_home.path(), &builtin_dir).expect("list snippets");
+        let info = snippets
+            .iter()
+            .find(|snippet| snippet.name == "repo-status-gh-pulse")
+            .expect("repo-status-gh-pulse listed");
+
+        assert_eq!(info.source, SnippetSource::Builtin);
+        assert!(info.inputs.contains_key("owner"));
+        assert!(info.inputs.contains_key("repo"));
+        assert!(info.inputs.contains_key("include_workflow_runs"));
+
+        let resolved = resolve_snippet(lab_home.path(), &builtin_dir, "repo-status-gh-pulse")
+            .expect("resolve builtin snippet");
+        let code = code_for_snippet(&resolved).expect("extract executable code");
+
+        assert!(code.contains("github::search_issues"));
+        assert!(!code.contains("github::list_workflow_runs"));
+    }
+
+    #[test]
     fn merge_snippet_input_rejects_unknown_declared_inputs() {
         let body = "---\nname: demo\ndescription: Demo snippet\ninputs:\n  host:\n    type: string\n    default: dookie\n---\n\n```js\nasync (input) => input\n```\n";
         let metadata = frontmatter(body)
