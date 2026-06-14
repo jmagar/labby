@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import {
   deployPluginWorkspace,
+  forkMarketplaceArtifact,
   getPluginWorkspace,
   previewPluginWorkspaceDeploy,
   savePluginWorkspaceFile,
@@ -356,6 +357,7 @@ export function PluginFilesPanel({ pluginId, artifacts }: PluginFilesPanelProps)
   const [preview, setPreview] = useState<DeployPluginWorkspacePreviewResult | null>(null)
   const [previewSelection, setPreviewSelection] = useState<string | null>(null)
   const [isPreviewing, setIsPreviewing] = useState(false)
+  const [forkingPath, setForkingPath] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -490,6 +492,27 @@ export function PluginFilesPanel({ pluginId, artifacts }: PluginFilesPanelProps)
     }
   }
 
+  async function handleForkSelectedFile() {
+    if (!activeFile) return
+    setForkingPath(activeFile.path)
+    try {
+      await forkMarketplaceArtifact({ pluginId, artifacts: [activeFile.path] })
+      setStatus({
+        tone: 'success',
+        message: 'Forked to Stash',
+        detail: activeFile.path,
+      })
+    } catch (error) {
+      setStatus({
+        tone: 'error',
+        message: 'Fork failed',
+        detail: error instanceof Error ? error.message : 'Unable to fork artifact into Stash.',
+      })
+    } finally {
+      setForkingPath(null)
+    }
+  }
+
   if (!activeFile) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 text-sm text-aurora-text-muted">
@@ -536,6 +559,16 @@ export function PluginFilesPanel({ pluginId, artifacts }: PluginFilesPanelProps)
             className="rounded-aurora-1 border border-aurora-border-default bg-aurora-control-surface px-3 py-1.5 font-semibold text-aurora-text-primary hover:bg-aurora-hover-bg"
           >
             {isPreviewing ? 'Previewing...' : 'Preview deploy'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void handleForkSelectedFile()
+            }}
+            disabled={!activeFile || forkingPath === activeFile.path}
+            className="rounded-aurora-1 border border-aurora-border-strong bg-aurora-control-surface px-3 py-1.5 font-semibold text-aurora-text-primary hover:bg-aurora-hover-bg disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {forkingPath === activeFile.path ? 'Forking...' : 'Fork to Stash'}
           </button>
         </div>
 

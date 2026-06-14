@@ -28,6 +28,7 @@ test('renders marketplace file tree and shared editor actions', () => {
   assert.match(markup, /plugin\.json/)
   assert.match(markup, /Save/)
   assert.match(markup, /Deploy/)
+  assert.match(markup, /Fork to Stash/)
   assert.match(markup, /aurora-text-surface/)
 })
 
