@@ -11,23 +11,12 @@ use crate::dispatch::marketplace::params::{
 };
 
 pub(super) async fn artifact_fork(params: ForkParams) -> Result<Value, ToolError> {
-    Err(not_implemented_error(
-        "artifact.fork",
-        format!(
-            "fork lifecycle is not implemented yet for `{}`",
-            params.plugin_id
-        ),
-    ))
+    crate::dispatch::marketplace::stash_bridge::fork_artifacts(&params.plugin_id, params.artifacts)
+        .await
 }
 
 pub(super) async fn artifact_list(params: ArtifactListParams) -> Result<Value, ToolError> {
-    Err(not_implemented_error(
-        "artifact.list",
-        params
-            .plugin_id
-            .map(|plugin_id| format!("fork listing is not implemented yet for `{plugin_id}`"))
-            .unwrap_or_else(|| "fork listing is not implemented yet".to_string()),
-    ))
+    crate::dispatch::marketplace::stash_bridge::list_forks(params.plugin_id).await
 }
 
 pub(super) async fn artifact_unfork(params: UnforkParams) -> Result<Value, ToolError> {
@@ -36,15 +25,9 @@ pub(super) async fn artifact_unfork(params: UnforkParams) -> Result<Value, ToolE
         service = "marketplace",
         action = "artifact.unfork",
         plugin_id = %params.plugin_id,
-        "destructive action intent: removing fork metadata"
+        "destructive action intent: removing marketplace fork from stash"
     );
-    Err(not_implemented_error(
-        "artifact.unfork",
-        format!(
-            "fork lifecycle removal is not implemented yet for `{}`",
-            params.plugin_id
-        ),
-    ))
+    crate::dispatch::marketplace::stash_bridge::unfork(&params.plugin_id, params.artifacts).await
 }
 
 pub(super) async fn artifact_reset(params: ArtifactResetParams) -> Result<Value, ToolError> {
@@ -53,20 +36,47 @@ pub(super) async fn artifact_reset(params: ArtifactResetParams) -> Result<Value,
         service = "marketplace",
         action = "artifact.reset",
         plugin_id = %params.plugin_id,
-        "destructive action intent: resetting forked artifacts"
+        "destructive action intent: resetting forked artifact from base snapshot"
     );
-    Err(not_implemented_error(
-        "artifact.reset",
-        format!(
-            "fork reset is not implemented yet for `{}`",
-            params.plugin_id
-        ),
-    ))
+    crate::dispatch::marketplace::stash_bridge::reset(&params.plugin_id, params.artifacts).await
 }
 
-fn not_implemented_error(action: &'static str, detail: String) -> ToolError {
-    ToolError::Sdk {
-        sdk_kind: "not_implemented".to_string(),
-        message: format!("{action}: {detail}"),
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dispatch::marketplace::params::{
+        parse_artifact_reset_params, parse_unfork_params, parse_update_apply_params,
+    };
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn artifact_list_empty_when_no_forks_exist() {
+        let result = artifact_list(ArtifactListParams {
+            plugin_id: None,
+            instance: None,
+        })
+        .await
+        .unwrap();
+        let rows = result.as_array().unwrap();
+        assert!(rows.is_empty());
+    }
+
+    #[tokio::test]
+    async fn destructive_marketplace_actions_are_confirmed_before_dispatch() {
+        let actions = crate::dispatch::marketplace::actions();
+        for name in ["artifact.unfork", "artifact.reset", "artifact.update.apply"] {
+            let spec = actions
+                .iter()
+                .find(|action| action.name == name)
+                .expect(name);
+            assert!(spec.destructive, "{name} must remain cataloged destructive");
+        }
+    }
+
+    #[test]
+    fn destructive_artifact_parsers_do_not_require_confirm_after_surface_gate() {
+        assert!(parse_unfork_params(&json!({"plugin_id": "demo@labby"})).is_ok());
+        assert!(parse_artifact_reset_params(&json!({"plugin_id": "demo@labby"})).is_ok());
+        assert!(parse_update_apply_params(&json!({"plugin_id": "demo@labby"})).is_ok());
     }
 }

@@ -74,6 +74,13 @@ We want to reduce the friction of making changes to plugin files, and then being
 3. Easily keep track of the changes you've made to plugin files, and also easily apply those
 changes on top of new versions of the plugin that you forked from.
 
+## Implementation Boundary
+
+Forked marketplace artifacts are durable stash components. The Marketplace
+surface is the user-facing upstream workflow: fork, list, update preview, update
+apply, reset, and unfork. The Stash surface is the durable artifact library:
+workspace, immutable revisions, provider sync, export, and deploy handoff.
+
 
 ## Bonus Points
 1. Push notifications

@@ -2,6 +2,29 @@
 
 use lab_apis::core::action::{ActionSpec, ParamSpec};
 
+/// Plugin-lifecycle action names — canonical dotted forms paired with their
+/// deprecated snake_case aliases. **Single source of truth** for the HTTP
+/// loopback restriction enforced in `crate::api::services::setup`.
+///
+/// Invariant: every name here MUST have (a) a catalog `ActionSpec` below and
+/// (b) a dispatch arm in `dispatch.rs`. The gate consumes this list directly,
+/// so a name that the dispatcher can route but that is missing here would be a
+/// loopback-restriction bypass. The `plugin_lifecycle_actions_*` tests enforce
+/// the catalog membership and the dispatch routing so the three locations
+/// cannot silently drift.
+///
+/// Pairs are ordered (canonical, alias) so tests can assert metadata parity.
+pub const PLUGIN_LIFECYCLE_ACTIONS: &[&str] = &[
+    "plugins.installed",
+    "installed_plugins",
+    "services.status",
+    "services_status",
+    "plugin.install",
+    "install_plugin",
+    "plugin.uninstall",
+    "uninstall_plugin",
+];
+
 pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "help",
@@ -235,12 +258,24 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "repair",
         description: "Repair missing local Lab setup prerequisites without contacting external services",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         returns: "SetupReport",
         params: &[],
     },
+    // -- Plugin-lifecycle actions ------------------------------------------
+    //
+    // These actions are HTTP loopback-gated in
+    // `crate::api::services::setup::plugin_lifecycle_action`, which reads its
+    // name set from `PLUGIN_LIFECYCLE_ACTIONS` above. The canonical names are
+    // the dotted `<resource>.<verb>` forms below; the snake_case entries that
+    // follow each one are deprecated aliases retained only for backward
+    // compatibility with external callers using the historical names — no
+    // in-tree caller depends on them (the CLI uses the dotted forms). Both
+    // forms route to the same handler in `dispatch.rs`. Every name in
+    // `PLUGIN_LIFECYCLE_ACTIONS` must have an entry here and a dispatch arm;
+    // the `plugin_lifecycle_actions_*` tests enforce that lockstep.
     ActionSpec {
-        name: "installed_plugins",
+        name: "plugins.installed",
         description: "List installed Claude Code lab plugins",
         destructive: false,
         requires_admin: false,
@@ -252,16 +287,39 @@ pub const ACTIONS: &[ActionSpec] = &[
             description: "Bypass the short in-process cache",
         }],
     },
+    // Deprecated alias for `plugins.installed`.
     ActionSpec {
-        name: "services_status",
+        name: "installed_plugins",
+        description: "Deprecated alias for `plugins.installed`",
+        destructive: false,
+        requires_admin: false,
+        returns: "InstalledPlugin[]",
+        params: &[ParamSpec {
+            name: "force",
+            ty: "boolean",
+            required: false,
+            description: "Bypass the short in-process cache",
+        }],
+    },
+    ActionSpec {
+        name: "services.status",
         description: "Join service configuration, draft, and Claude plugin state",
         destructive: false,
         requires_admin: false,
         returns: "ServiceStatus[]",
         params: &[],
     },
+    // Deprecated alias for `services.status`.
     ActionSpec {
-        name: "install_plugin",
+        name: "services_status",
+        description: "Deprecated alias for `services.status`",
+        destructive: false,
+        requires_admin: false,
+        returns: "ServiceStatus[]",
+        params: &[],
+    },
+    ActionSpec {
+        name: "plugin.install",
         description: "Install the Claude Code plugin for one configured service",
         destructive: true,
         requires_admin: false,
@@ -273,9 +331,37 @@ pub const ACTIONS: &[ActionSpec] = &[
             description: "Registered service name",
         }],
     },
+    // Deprecated alias for `plugin.install`.
+    ActionSpec {
+        name: "install_plugin",
+        description: "Deprecated alias for `plugin.install`",
+        destructive: true,
+        requires_admin: false,
+        returns: "PluginMutationResult",
+        params: &[ParamSpec {
+            name: "service",
+            ty: "string",
+            required: true,
+            description: "Registered service name",
+        }],
+    },
+    ActionSpec {
+        name: "plugin.uninstall",
+        description: "Uninstall the Claude Code plugin for one service",
+        destructive: true,
+        requires_admin: false,
+        returns: "PluginMutationResult",
+        params: &[ParamSpec {
+            name: "service",
+            ty: "string",
+            required: true,
+            description: "Registered service name",
+        }],
+    },
+    // Deprecated alias for `plugin.uninstall`.
     ActionSpec {
         name: "uninstall_plugin",
-        description: "Uninstall the Claude Code plugin for one service",
+        description: "Deprecated alias for `plugin.uninstall`",
         destructive: true,
         requires_admin: false,
         returns: "PluginMutationResult",
@@ -299,93 +385,4 @@ pub const ACTIONS: &[ActionSpec] = &[
             description: "Overwrite conflicting .env keys (default false)",
         }],
     },
-    // ---- Dotted canonical aliases (Arch-M3) ----
-    // The flat snake_case actions above predate the `<resource>.<verb>` naming
-    // rule and remain working as deprecated aliases. These dotted entries are
-    // the canonical names; both route to the same handlers in dispatch.rs.
-    // The catalog lint exempts the flat forms via DEPRECATED_ACTION_ALIASES in
-    // tests/architecture_orchestrator.rs. Prefer the dotted forms in new code.
-    ActionSpec {
-        name: "setup.state",
-        description: "First-run + draft snapshot for the wizard / settings UI",
-        destructive: false,
-        requires_admin: false,
-        returns: "SetupSnapshot",
-        params: &[],
-    },
-    ActionSpec {
-        name: "setup.bootstrap",
-        description: "Create ~/.lab/.env with a generated token + loopback defaults when absent (first-run)",
-        destructive: false,
-        requires_admin: false,
-        returns: "BootstrapOutcome",
-        params: &[],
-    },
-    ActionSpec {
-        name: "setup.plugin.hook",
-        description: "Run binary-owned local setup checks for Claude plugin hooks; in repair mode also syncs CLAUDE_PLUGIN_OPTION_* and probes server connectivity",
-        destructive: true,
-        requires_admin: false,
-        returns: "PluginHookReport",
-        params: &[ParamSpec {
-            name: "repair",
-            ty: "boolean",
-            required: false,
-            description: "Create missing local Lab setup files and sync plugin env; defaults to true",
-        }],
-    },
-    ActionSpec {
-        name: "setup.plugin.sync",
-        description: "Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.lab/.env as LAB_* vars",
-        destructive: true,
-        requires_admin: false,
-        returns: "PluginSyncOutcome",
-        params: &[],
-    },
-    ActionSpec {
-        name: "setup.plugin.export",
-        description: "Read ~/.lab/.env and return current values keyed by userConfig field name",
-        destructive: false,
-        requires_admin: false,
-        returns: "PluginExportOutcome",
-        params: &[],
-    },
-    ActionSpec {
-        name: "setup.plugin.connectivity",
-        description: "Validate connectivity to the lab MCP server at {server_url}/health",
-        destructive: false,
-        requires_admin: false,
-        returns: "ConnectivityOutcome",
-        params: &[ParamSpec {
-            name: "server_url",
-            ty: "string",
-            required: false,
-            description: "Override server URL; defaults to CLAUDE_PLUGIN_OPTION_SERVER_URL or http://localhost:8765",
-        }],
-    },
-    ActionSpec {
-        name: "setup.check",
-        description: "Check local Lab setup prerequisites without mutating the filesystem",
-        destructive: false,
-        requires_admin: false,
-        returns: "SetupReport",
-        params: &[],
-    },
-    ActionSpec {
-        name: "setup.repair",
-        description: "Repair missing local Lab setup prerequisites without contacting external services",
-        destructive: true,
-        requires_admin: false,
-        returns: "SetupReport",
-        params: &[],
-    },
-    // NOTE: the four plugin-lifecycle actions (installed_plugins,
-    // services_status, install_plugin, uninstall_plugin) intentionally do NOT
-    // have dotted aliases yet. The API surface gate
-    // `api/services/setup.rs::plugin_lifecycle_action` matches them by their
-    // flat names to enforce the loopback-only restriction; adding dotted
-    // aliases before that gate recognizes the dotted forms would let a
-    // dotted-named call bypass the loopback check. Add the dotted aliases here
-    // in the same change that teaches `plugin_lifecycle_action` the dotted
-    // names. Tracked as a deferred Arch-M3 follow-up.
 ];

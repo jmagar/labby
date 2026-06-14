@@ -246,12 +246,12 @@ async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<Exit
         }
         SetupCommand::InstalledPlugins { force } => {
             let value =
-                crate::dispatch::setup::dispatch("installed_plugins", json!({ "force": force }))
+                crate::dispatch::setup::dispatch("plugins.installed", json!({ "force": force }))
                     .await?;
             print(&value, format)?;
         }
         SetupCommand::ServicesStatus => {
-            let value = crate::dispatch::setup::dispatch("services_status", json!({})).await?;
+            let value = crate::dispatch::setup::dispatch("services.status", json!({})).await?;
             print(&value, format)?;
         }
         SetupCommand::PluginHook { no_repair } => {
@@ -312,10 +312,10 @@ async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<Exit
             println!("installed -> {}", dest.display());
         }
         SetupCommand::InstallPlugin(args) => {
-            run_plugin_mutation("install_plugin", args, format).await?;
+            run_plugin_mutation("plugin.install", args, format).await?;
         }
         SetupCommand::UninstallPlugin(args) => {
-            run_plugin_mutation("uninstall_plugin", args, format).await?;
+            run_plugin_mutation("plugin.uninstall", args, format).await?;
         }
     }
     Ok(ExitCode::SUCCESS)

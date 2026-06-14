@@ -120,17 +120,17 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `marketplace` | `agent.install` | false | true | `id*: string`<br>`node_ids*: array`<br>`platform: string`<br>`confirm*: boolean` | `InstallResults` | cli, mcp, api, web |
 | `marketplace` | `agent.list` | false | false |  | `Agent[]` | cli, mcp, api, web |
 | `marketplace` | `agent.uninstall` | false | true | `id*: string`<br>`confirm*: boolean` | `UninstallResult` | cli, mcp, api, web |
-| `marketplace` | `artifact.config.set` | false | false | `plugin_id*: string`<br>`strategy: string`<br>`notify: boolean` | `ConfigSetResult` | cli, mcp, api, web |
+| `marketplace` | `artifact.config.set` | false | false | `plugin_id*: string`<br>`strategy: string`<br>`notify: boolean`<br>`artifact_path: string` | `ConfigSetResult` | cli, mcp, api, web |
 | `marketplace` | `artifact.diff` | false | false | `plugin_id*: string`<br>`artifact_path: string`<br>`instance: string` | `ArtifactDiffResult` | cli, mcp, api, web |
-| `marketplace` | `artifact.fork` | false | false | `plugin_id*: string`<br>`artifacts: array`<br>`instance: string` | `ForkResult` | cli, mcp, api, web |
+| `marketplace` | `artifact.fork` | false | true | `plugin_id*: string`<br>`artifacts: array` | `ForkResponse` | cli, mcp, api, web |
 | `marketplace` | `artifact.list` | false | false | `plugin_id: string`<br>`instance: string` | `ForkedPluginStatus[]` | cli, mcp, api, web |
 | `marketplace` | `artifact.merge.suggest` | false | false | `plugin_id*: string`<br>`artifact_path*: string` | `MergeSuggestResult` | cli, mcp, api, web |
 | `marketplace` | `artifact.patch` | false | false | `plugin_id*: string`<br>`artifact_path*: string`<br>`patch*: string`<br>`description: string`<br>`instance: string` | `PatchResult` | cli, mcp, api, web |
-| `marketplace` | `artifact.reset` | false | true | `plugin_id*: string`<br>`artifacts: array`<br>`instance: string`<br>`confirm*: boolean` | `ResetResult` | cli, mcp, api, web |
-| `marketplace` | `artifact.unfork` | false | true | `plugin_id*: string`<br>`artifacts: array`<br>`instance: string`<br>`confirm*: boolean` | `UnforkResult` | cli, mcp, api, web |
-| `marketplace` | `artifact.update.apply` | false | true | `plugin_id*: string`<br>`strategy: string`<br>`confirm*: boolean` | `ApplyResult` | cli, mcp, api, web |
+| `marketplace` | `artifact.reset` | false | true | `plugin_id*: string`<br>`artifacts: array`<br>`instance: string` | `ResetResult` | cli, mcp, api, web |
+| `marketplace` | `artifact.unfork` | false | true | `plugin_id*: string`<br>`artifacts: array`<br>`instance: string` | `UnforkResult` | cli, mcp, api, web |
+| `marketplace` | `artifact.update.apply` | false | true | `plugin_id*: string`<br>`strategy: string`<br>`artifact_path: string` | `ApplyResult` | cli, mcp, api, web |
 | `marketplace` | `artifact.update.check` | false | false | `plugin_id: string` | `UpdateCheckResult[]` | cli, mcp, api, web |
-| `marketplace` | `artifact.update.preview` | false | false | `plugin_id*: string` | `UpdatePreviewResult` | cli, mcp, api, web |
+| `marketplace` | `artifact.update.preview` | false | false | `plugin_id*: string`<br>`artifact_path: string` | `UpdatePreviewResult` | cli, mcp, api, web |
 | `marketplace` | `help` | false | false |  | `Catalog` | cli, mcp, api, web |
 | `marketplace` | `mcp.config` | false | false |  | `RegistryConfig` | cli, mcp, api, web |
 | `marketplace` | `mcp.get` | false | false | `name*: string` | `ServerResponse` | cli, mcp, api, web |
@@ -166,13 +166,17 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `setup` | `help` | false | false |  | `Catalog` | cli, mcp, api, web |
 | `setup` | `install_plugin` | false | true | `service*: string` | `PluginMutationResult` | cli, mcp, api, web |
 | `setup` | `installed_plugins` | false | false | `force: boolean` | `InstalledPlugin[]` | cli, mcp, api, web |
+| `setup` | `plugin.install` | false | true | `service*: string` | `PluginMutationResult` | cli, mcp, api, web |
+| `setup` | `plugin.uninstall` | false | true | `service*: string` | `PluginMutationResult` | cli, mcp, api, web |
 | `setup` | `plugin_connectivity` | false | false | `server_url: string` | `ConnectivityOutcome` | cli, mcp, api, web |
 | `setup` | `plugin_export` | false | false |  | `PluginExportOutcome` | cli, mcp, api, web |
 | `setup` | `plugin_hook` | false | true | `repair: boolean` | `PluginHookReport` | cli, mcp, api, web |
 | `setup` | `plugin_sync` | false | true |  | `PluginSyncOutcome` | cli, mcp, api, web |
+| `setup` | `plugins.installed` | false | false | `force: boolean` | `InstalledPlugin[]` | cli, mcp, api, web |
 | `setup` | `repair` | false | true |  | `SetupReport` | cli, mcp, api, web |
 | `setup` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api, web |
 | `setup` | `schema.get` | false | false | `services: string[]` | `ServiceSchemaMap` | cli, mcp, api, web |
+| `setup` | `services.status` | false | false |  | `ServiceStatus[]` | cli, mcp, api, web |
 | `setup` | `services_status` | false | false |  | `ServiceStatus[]` | cli, mcp, api, web |
 | `setup` | `settings.advanced_state` | false | false |  | `SettingsState` | cli, mcp, api, web |
 | `setup` | `settings.config.update` | false | true | `entries*: SettingsUpdateEntry[]` | `SettingsMutationOutcome` | cli, mcp, api, web |
@@ -200,6 +204,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `snippets` | `snippets.remove` | false | true | `name*: string` | `SnippetRemoveResult` | cli, mcp, api |
 | `snippets` | `snippets.test` | false | false | `name: string`<br>`params: object`<br>`all: boolean` | `SnippetTestResult` | cli, mcp, api |
 | `snippets` | `snippets.validate` | false | false | `name: string`<br>`body: string` | `SnippetValidation` | cli, mcp, api |
+| `stash` | `component.adopt` | false | true | `kind*: string`<br>`name*: string`<br>`label: string`<br>`source_path*: string`<br>`origin*: object`<br>`save_label: string` | `AdoptResult` | cli, mcp, api |
 | `stash` | `component.create` | false | false | `kind*: string`<br>`name*: string`<br>`label: string` | `ComponentDetail` | cli, mcp, api |
 | `stash` | `component.deploy` | false | true | `id*: string`<br>`target_id*: string`<br>`revision_id: string` | `DeployResult` | cli, mcp, api |
 | `stash` | `component.export` | false | true | `id*: string`<br>`output_path*: string`<br>`include_secrets: boolean`<br>`force: boolean` | `ExportResult` | cli, mcp, api |

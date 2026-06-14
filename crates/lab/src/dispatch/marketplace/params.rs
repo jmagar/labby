@@ -18,6 +18,7 @@ pub(super) struct UpdateCheckParams {
 
 pub(super) struct UpdatePreviewParams {
     pub plugin_id: String,
+    pub artifact_path: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -73,6 +74,7 @@ pub(super) struct PatchParams {
 #[derive(Debug, Clone)]
 pub(super) struct UpdateApplyParams {
     pub plugin_id: String,
+    pub artifact_path: Option<String>,
     pub strategy: Option<ConflictStrategy>,
     pub instance: Option<String>,
 }
@@ -89,6 +91,7 @@ pub(super) struct MergeSuggestParams {
 #[derive(Debug, Clone)]
 pub(super) struct ConfigSetParams {
     pub plugin_id: String,
+    pub artifact_path: Option<String>,
     pub strategy: Option<ConflictStrategy>,
     pub notify: Option<bool>,
     pub instance: Option<String>,
@@ -119,7 +122,14 @@ pub(super) fn parse_update_preview_params(
         })?
         .to_string();
     parse_plugin_id(&plugin_id)?;
-    Ok(UpdatePreviewParams { plugin_id })
+    let artifact_path = optional_owned_str(params, "artifact_path")?;
+    if let Some(path) = &artifact_path {
+        validate_artifact_path(path, "artifact_path")?;
+    }
+    Ok(UpdatePreviewParams {
+        plugin_id,
+        artifact_path,
+    })
 }
 
 pub(super) fn parse_fork_params(params: &Value) -> Result<ForkParams, ToolError> {
@@ -194,8 +204,13 @@ pub(super) fn parse_patch_params(params: &Value) -> Result<PatchParams, ToolErro
 
 pub(super) fn parse_update_apply_params(params: &Value) -> Result<UpdateApplyParams, ToolError> {
     let plugin_id = parse_required_plugin_id(params)?;
+    let artifact_path = optional_owned_str(params, "artifact_path")?;
+    if let Some(path) = &artifact_path {
+        validate_artifact_path(path, "artifact_path")?;
+    }
     Ok(UpdateApplyParams {
         plugin_id,
+        artifact_path,
         strategy: parse_strategy(params)?,
         instance: optional_owned_str(params, "instance")?,
     })
@@ -214,6 +229,10 @@ pub(super) fn parse_merge_suggest_params(params: &Value) -> Result<MergeSuggestP
 
 pub(super) fn parse_config_set_params(params: &Value) -> Result<ConfigSetParams, ToolError> {
     let plugin_id = parse_required_plugin_id(params)?;
+    let artifact_path = optional_owned_str(params, "artifact_path")?;
+    if let Some(path) = &artifact_path {
+        validate_artifact_path(path, "artifact_path")?;
+    }
     let notify = match params.get("notify") {
         Some(Value::Bool(value)) => Some(*value),
         Some(_) => {
@@ -226,6 +245,7 @@ pub(super) fn parse_config_set_params(params: &Value) -> Result<ConfigSetParams,
     };
     Ok(ConfigSetParams {
         plugin_id,
+        artifact_path,
         strategy: parse_strategy(params)?,
         notify,
         instance: optional_owned_str(params, "instance")?,

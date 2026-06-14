@@ -5,6 +5,7 @@
 
 use std::path::PathBuf;
 
+use lab_apis::stash::StashOrigin;
 use serde_json::Value;
 
 use crate::dispatch::error::ToolError;
@@ -46,19 +47,65 @@ pub struct ImportParams {
 }
 
 pub fn parse_import_params(params: &Value) -> Result<ImportParams, ToolError> {
-    let source_path = require_str(params, "source_path")?;
-    let path = PathBuf::from(source_path);
-    if !path.is_absolute() {
-        return Err(ToolError::InvalidParam {
-            message: "source_path must be an absolute path".to_string(),
-            param: "source_path".to_string(),
-        });
-    }
     Ok(ImportParams {
         id: require_str(params, "id")?.to_string(),
-        source_path: path,
+        source_path: required_absolute_path(params, "source_path")?,
         kind: optional_str(params, "kind")?.map(str::to_string),
     })
+}
+
+/// `component.adopt` - create, import, attach origin metadata, and save.
+pub struct AdoptParams {
+    pub kind: String,
+    pub name: String,
+    pub label: Option<String>,
+    pub source_path: PathBuf,
+    pub origin: StashOrigin,
+    pub save_label: Option<String>,
+}
+
+pub fn parse_adopt_params(params: &Value) -> Result<AdoptParams, ToolError> {
+    let path = required_absolute_path(params, "source_path")?;
+    let origin_value = params
+        .get("origin")
+        .cloned()
+        .ok_or_else(|| ToolError::MissingParam {
+            param: "origin".to_string(),
+            message: "`origin` is required".to_string(),
+        })?;
+    let origin: StashOrigin =
+        serde_json::from_value(origin_value).map_err(|error| ToolError::InvalidParam {
+            param: "origin".to_string(),
+            message: format!("origin is invalid: {error}"),
+        })?;
+    if let StashOrigin::LocalPath { source_path } = &origin
+        && !source_path.is_absolute()
+    {
+        return Err(ToolError::InvalidParam {
+            param: "origin".to_string(),
+            message: "origin.source_path must be an absolute path".to_string(),
+        });
+    }
+    Ok(AdoptParams {
+        kind: require_str(params, "kind")?.to_string(),
+        name: require_str(params, "name")?.to_string(),
+        label: optional_str(params, "label")?.map(str::to_string),
+        source_path: path,
+        origin,
+        save_label: optional_str(params, "save_label")?.map(str::to_string),
+    })
+}
+
+fn required_absolute_path(params: &Value, name: &str) -> Result<PathBuf, ToolError> {
+    let value = require_str(params, name)?;
+    let path = PathBuf::from(value);
+    if !path.is_absolute() {
+        return Err(ToolError::InvalidParam {
+            message: format!("{name} must be an absolute path"),
+            param: name.to_string(),
+        });
+    }
+    Ok(path)
 }
 
 /// `component.workspace` — single required `id`.
@@ -221,4 +268,45 @@ pub fn parse_target_remove_params(params: &Value) -> Result<TargetRemoveParams, 
     Ok(TargetRemoveParams {
         id: require_str(params, "id")?.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn parse_adopt_rejects_relative_origin_local_path() {
+        let error = match parse_adopt_params(&json!({
+            "kind": "skill",
+            "name": "demo",
+            "source_path": "/tmp/demo",
+            "origin": {
+                "kind": "local_path",
+                "source_path": "relative/demo"
+            }
+        })) {
+            Ok(_) => panic!("relative origin local path should be rejected"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind(), "invalid_param");
+    }
+
+    #[test]
+    fn parse_adopt_accepts_absolute_origin_local_path() {
+        let params = parse_adopt_params(&json!({
+            "kind": "skill",
+            "name": "demo",
+            "source_path": "/tmp/demo",
+            "origin": {
+                "kind": "local_path",
+                "source_path": "/tmp/demo"
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(params.source_path, PathBuf::from("/tmp/demo"));
+    }
 }

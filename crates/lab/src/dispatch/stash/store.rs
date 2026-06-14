@@ -926,6 +926,7 @@ mod tests {
             label: Some("demo skill".to_string()),
             head_revision_id: None,
             origin: None,
+            origin_meta: None,
             workspace_root: PathBuf::from("/tmp/skill"),
             workspace_shape: StashWorkspaceShape::Directory,
             unix_mode: None,

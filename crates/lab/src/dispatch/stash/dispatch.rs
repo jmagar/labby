@@ -21,9 +21,10 @@ use crate::dispatch::helpers::{action_schema, help_payload, require_str};
 use super::catalog::ACTIONS;
 use super::client::require_stash_root;
 use super::params::{
-    parse_create_params, parse_deploy_params, parse_export_params, parse_get_params,
-    parse_import_params, parse_link_params, parse_provider_sync_params, parse_revisions_params,
-    parse_save_params, parse_target_add_params, parse_target_remove_params, parse_workspace_params,
+    parse_adopt_params, parse_create_params, parse_deploy_params, parse_export_params,
+    parse_get_params, parse_import_params, parse_link_params, parse_provider_sync_params,
+    parse_revisions_params, parse_save_params, parse_target_add_params, parse_target_remove_params,
+    parse_workspace_params,
 };
 use super::service;
 use super::store::StashStore;
@@ -216,6 +217,10 @@ pub async fn dispatch_with_store(
             let p = parse_import_params(&params)?;
             service::component_import(store, p).await
         }
+        "component.adopt" => {
+            let p = parse_adopt_params(&params)?;
+            service::component_adopt(store, p).await
+        }
         "component.save" => {
             let p = parse_save_params(&params)?;
             service::component_save(store, p).await
@@ -278,5 +283,54 @@ mod tests {
 
         assert_eq!(imported.get("id").and_then(Value::as_str), Some(id));
         assert!(store.workspace_dir(id).join("settings.json").is_file());
+    }
+
+    #[tokio::test]
+    async fn dispatch_adopt_imports_and_saves_marketplace_component() {
+        let (store, _stash_dir) = make_store();
+        let source_dir = tempdir().expect("source tempdir");
+        std::fs::write(source_dir.path().join("SKILL.md"), "# Demo skill\n").unwrap();
+
+        let value = dispatch_with_store(
+            &store,
+            "component.adopt",
+            json!({
+                "kind": "skill",
+                "name": "demo-skill",
+                "label": "Demo Skill",
+                "source_path": source_dir.path().display().to_string(),
+                "origin": {
+                    "kind": "marketplace",
+                    "plugin_id": "demo@labby",
+                    "artifact_path": "skills/demo",
+                    "source_version": "1.0.0",
+                    "source_fingerprint": "abc123"
+                },
+                "save_label": "Fork from demo@labby"
+            }),
+        )
+        .await
+        .unwrap();
+
+        let component_id = value
+            .get("component")
+            .unwrap()
+            .get("id")
+            .unwrap()
+            .as_str()
+            .unwrap();
+        let component = store.read_component(component_id).unwrap().unwrap();
+        assert_eq!(component.name, "demo-skill");
+        assert_eq!(
+            component.head_revision_id,
+            value
+                .get("revision")
+                .unwrap()
+                .get("id")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        );
+        assert!(store.workspace_dir(component_id).join("SKILL.md").is_file());
+        assert!(component.origin_meta.is_some());
     }
 }

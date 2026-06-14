@@ -3186,6 +3186,12 @@
         "ty": "boolean",
         "required": false,
         "description": "Whether to notify when updates are available"
+      },
+      {
+        "name": "artifact_path",
+        "ty": "string",
+        "required": false,
+        "description": "Optional relative artifact path when the plugin has multiple artifact forks"
       }
     ],
     "returns": "ConfigSetResult",
@@ -3240,8 +3246,8 @@
   {
     "service": "marketplace",
     "action": "artifact.fork",
-    "description": "Fork artifact(s) or an entire plugin into your stash with upstream tracking.",
-    "destructive": false,
+    "description": "Fork Marketplace artifact(s) into Stash [destructive]",
+    "destructive": true,
     "params": [
       {
         "name": "plugin_id",
@@ -3253,16 +3259,10 @@
         "name": "artifacts",
         "ty": "array",
         "required": false,
-        "description": "Relative artifact paths to fork; omit for a plugin-level fork"
-      },
-      {
-        "name": "instance",
-        "ty": "string",
-        "required": false,
-        "description": "Multi-instance label"
+        "description": "Relative artifact paths to fork; omit to fork the whole plugin"
       }
     ],
-    "returns": "ForkResult",
+    "returns": "ForkResponse",
     "surface_availability": {
       "cli": true,
       "mcp": true,
@@ -3408,12 +3408,6 @@
         "ty": "string",
         "required": false,
         "description": "Multi-instance label"
-      },
-      {
-        "name": "confirm",
-        "ty": "boolean",
-        "required": true,
-        "description": "Must be true to confirm this destructive operation"
       }
     ],
     "returns": "ResetResult",
@@ -3451,12 +3445,6 @@
         "ty": "string",
         "required": false,
         "description": "Multi-instance label"
-      },
-      {
-        "name": "confirm",
-        "ty": "boolean",
-        "required": true,
-        "description": "Must be true to confirm this destructive operation"
       }
     ],
     "returns": "UnforkResult",
@@ -3490,10 +3478,10 @@
         "description": "Merge strategy: keep_mine, take_upstream, always_ask, ai_suggest"
       },
       {
-        "name": "confirm",
-        "ty": "boolean",
-        "required": true,
-        "description": "Must be true to confirm this destructive update"
+        "name": "artifact_path",
+        "ty": "string",
+        "required": false,
+        "description": "Optional relative artifact path when the plugin has multiple artifact forks"
       }
     ],
     "returns": "ApplyResult",
@@ -3544,6 +3532,12 @@
         "ty": "string",
         "required": true,
         "description": "Plugin id in `name@marketplace` form"
+      },
+      {
+        "name": "artifact_path",
+        "ty": "string",
+        "required": false,
+        "description": "Optional relative artifact path when the plugin has multiple artifact forks"
       }
     ],
     "returns": "UpdatePreviewResult",
@@ -4533,7 +4527,7 @@
   {
     "service": "setup",
     "action": "install_plugin",
-    "description": "Install the Claude Code plugin for one configured service",
+    "description": "Deprecated alias for `plugin.install`",
     "destructive": true,
     "params": [
       {
@@ -4558,7 +4552,7 @@
   {
     "service": "setup",
     "action": "installed_plugins",
-    "description": "List installed Claude Code lab plugins",
+    "description": "Deprecated alias for `plugins.installed`",
     "destructive": false,
     "params": [
       {
@@ -4569,6 +4563,56 @@
       }
     ],
     "returns": "InstalledPlugin[]",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "plugin.install",
+    "description": "Install the Claude Code plugin for one configured service",
+    "destructive": true,
+    "params": [
+      {
+        "name": "service",
+        "ty": "string",
+        "required": true,
+        "description": "Registered service name"
+      }
+    ],
+    "returns": "PluginMutationResult",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "plugin.uninstall",
+    "description": "Uninstall the Claude Code plugin for one service",
+    "destructive": true,
+    "params": [
+      {
+        "name": "service",
+        "ty": "string",
+        "required": true,
+        "description": "Registered service name"
+      }
+    ],
+    "returns": "PluginMutationResult",
     "surface_availability": {
       "cli": true,
       "mcp": true,
@@ -4668,6 +4712,31 @@
   },
   {
     "service": "setup",
+    "action": "plugins.installed",
+    "description": "List installed Claude Code lab plugins",
+    "destructive": false,
+    "params": [
+      {
+        "name": "force",
+        "ty": "boolean",
+        "required": false,
+        "description": "Bypass the short in-process cache"
+      }
+    ],
+    "returns": "InstalledPlugin[]",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
     "action": "repair",
     "description": "Repair missing local Lab setup prerequisites without contacting external services",
     "destructive": true,
@@ -4736,8 +4805,26 @@
   },
   {
     "service": "setup",
-    "action": "services_status",
+    "action": "services.status",
     "description": "Join service configuration, draft, and Claude plugin state",
+    "destructive": false,
+    "params": [],
+    "returns": "ServiceStatus[]",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "services_status",
+    "description": "Deprecated alias for `services.status`",
     "destructive": false,
     "params": [],
     "returns": "ServiceStatus[]",
@@ -5085,7 +5172,7 @@
   {
     "service": "setup",
     "action": "uninstall_plugin",
-    "description": "Uninstall the Claude Code plugin for one service",
+    "description": "Deprecated alias for `plugin.uninstall`",
     "destructive": true,
     "params": [
       {
@@ -5368,6 +5455,61 @@
   },
   {
     "service": "stash",
+    "action": "component.adopt",
+    "description": "Create a stash component from a local path, attach origin metadata, and save the initial revision",
+    "destructive": true,
+    "params": [
+      {
+        "name": "kind",
+        "ty": "string",
+        "required": true,
+        "description": "Component kind: skill, agent, command, channel, monitor, hook, output_style, theme, settings, mcp_config, lsp_config, script, bin_file, plugin"
+      },
+      {
+        "name": "name",
+        "ty": "string",
+        "required": true,
+        "description": "Component name"
+      },
+      {
+        "name": "label",
+        "ty": "string",
+        "required": false,
+        "description": "Optional human-readable label"
+      },
+      {
+        "name": "source_path",
+        "ty": "string",
+        "required": true,
+        "description": "Validated absolute source path to copy into the stash workspace; direct HTTP use requires lab:admin"
+      },
+      {
+        "name": "origin",
+        "ty": "object",
+        "required": true,
+        "description": "Structured StashOrigin metadata"
+      },
+      {
+        "name": "save_label",
+        "ty": "string",
+        "required": false,
+        "description": "Optional initial revision label"
+      }
+    ],
+    "returns": "AdoptResult",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "stash",
     "action": "component.create",
     "description": "Create a new component in the stash",
     "destructive": false,
@@ -5376,7 +5518,7 @@
         "name": "kind",
         "ty": "string",
         "required": true,
-        "description": "Component kind: skill, agent, command, channel, monitor, hook, output_style, theme, settings, mcp_config, lsp_config, script, bin_file"
+        "description": "Component kind: skill, agent, command, channel, monitor, hook, output_style, theme, settings, mcp_config, lsp_config, script, bin_file, plugin"
       },
       {
         "name": "name",

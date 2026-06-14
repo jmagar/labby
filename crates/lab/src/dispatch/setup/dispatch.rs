@@ -71,12 +71,8 @@ async fn dispatch_inner(action: &str, params: &Value) -> Result<Value, ToolError
             let a = crate::dispatch::helpers::require_str(params, "action")?;
             action_schema(ACTIONS, a)
         }
-        "setup.state" | "state" => state_action(),
-        // Dotted canonical names are listed first; the flat snake_case forms on
-        // the right of each `|` are deprecated aliases kept working for existing
-        // callers (Arch-M3). The catalog lint exempts the flat forms via
-        // DEPRECATED_ACTION_ALIASES in tests/architecture_orchestrator.rs.
-        "setup.bootstrap" | "bootstrap" => super::bootstrap_action(),
+        "state" => state_action(),
+        "bootstrap" => super::bootstrap_action(),
         "schema.get" => schema_get_action(params),
         "draft.get" => draft_get_action(),
         "draft.set" => draft_set_action(params).await,
@@ -89,24 +85,25 @@ async fn dispatch_inner(action: &str, params: &Value) -> Result<Value, ToolError
         "settings.config.update" => settings_config_update_action(params),
         "settings.advanced_state" => settings_advanced_state_action(params),
         "settings.env_schema" => settings_env_schema_action(),
-        "setup.plugin.hook" | "plugin_hook" => plugin_hook_action(params).await,
-        "setup.plugin.sync" | "plugin_sync" => plugin_sync_action(),
-        "setup.plugin.export" | "plugin_export" => plugin_export_action(),
-        "setup.plugin.connectivity" | "plugin_connectivity" => {
-            plugin_connectivity_action(params).await
-        }
-        "setup.check" | "check" => setup_check_action(),
-        "setup.repair" | "repair" => setup_repair_action(),
-        // The four plugin-lifecycle actions keep ONLY their flat names: the API
-        // loopback gate (`api/services/setup.rs::plugin_lifecycle_action`)
-        // matches them by flat name. Dotted aliases are deferred until that gate
-        // recognizes the dotted forms (otherwise a dotted call bypasses the
-        // loopback-only restriction). See setup/catalog.rs note.
-        "installed_plugins" => installed_plugins_action(params).await,
-        "services_status" => services_status_action().await,
-        "install_plugin" => install_plugin_action(params).await,
-        "uninstall_plugin" => uninstall_plugin_action(params).await,
-        // `finalize` is itself a (pre-existing) deprecated alias for draft.commit.
+        "plugin_hook" => plugin_hook_action(params).await,
+        "plugin_sync" => plugin_sync_action(),
+        "plugin_export" => plugin_export_action(),
+        "plugin_connectivity" => plugin_connectivity_action(params).await,
+        "check" => setup_check_action(),
+        "repair" => setup_repair_action(),
+        // Plugin-lifecycle actions. The dotted `<resource>.<verb>` forms are
+        // the canonical names; the snake_case arms beside them are deprecated
+        // aliases retained for backward compatibility. Every name routed here
+        // is listed in `super::catalog::PLUGIN_LIFECYCLE_ACTIONS`, which the
+        // HTTP loopback gate (`crate::api::services::setup`) reads directly —
+        // so a name routable here but absent from that const would be a
+        // loopback-restriction bypass. The `plugin_lifecycle_actions_*` tests
+        // enforce that every const name both routes here and has a catalog
+        // entry; keep all of them in sync when adding a lifecycle action.
+        "plugins.installed" | "installed_plugins" => installed_plugins_action(params).await,
+        "services.status" | "services_status" => services_status_action().await,
+        "plugin.install" | "install_plugin" => install_plugin_action(params).await,
+        "plugin.uninstall" | "uninstall_plugin" => uninstall_plugin_action(params).await,
         "finalize" => draft_commit_action(params).await,
         unknown => Err(ToolError::UnknownAction {
             message: format!("unknown action `{unknown}` for service `setup`"),
@@ -770,13 +767,6 @@ fn log_outcome(
             | "plugin_connectivity"
             | "check"
             | "repair"
-            // Dotted canonical forms (Arch-M3) get the same logging treatment.
-            | "setup.plugin.hook"
-            | "setup.plugin.sync"
-            | "setup.plugin.export"
-            | "setup.plugin.connectivity"
-            | "setup.check"
-            | "setup.repair"
     ) {
         return;
     }
@@ -879,6 +869,12 @@ mod tests {
             "settings.advanced_state",
             "settings.env_schema",
             "finalize",
+            // Canonical dotted plugin-lifecycle names:
+            "plugins.installed",
+            "services.status",
+            "plugin.install",
+            "plugin.uninstall",
+            // Deprecated snake_case aliases (still routed):
             "installed_plugins",
             "services_status",
             "install_plugin",
@@ -888,6 +884,95 @@ mod tests {
             "plugin_connectivity",
         ] {
             assert!(names.contains(required), "missing setup action {required}");
+        }
+    }
+
+    #[test]
+    fn plugin_lifecycle_actions_are_cataloged() {
+        // Every loopback-gated name must have a catalog ActionSpec — otherwise
+        // the unknown-action gate in the API surface would reject it before
+        // the loopback gate ever runs, and discovery would not list it.
+        let names: std::collections::BTreeSet<&str> =
+            ACTIONS.iter().map(|action| action.name).collect();
+        for action in super::super::PLUGIN_LIFECYCLE_ACTIONS {
+            assert!(
+                names.contains(action),
+                "plugin-lifecycle action `{action}` is in PLUGIN_LIFECYCLE_ACTIONS \
+                 but has no catalog ActionSpec"
+            );
+        }
+    }
+
+    #[test]
+    fn plugin_lifecycle_canonical_alias_pairs_share_metadata() {
+        // PLUGIN_LIFECYCLE_ACTIONS is ordered (canonical, alias). Both members
+        // of a pair route to the same handler, so they MUST carry identical
+        // destructive / requires_admin / returns metadata — otherwise one form
+        // could skip the destructive-confirmation or admin-scope gate that the
+        // other enforces. Guards against hand-copy drift between the entries.
+        let spec = |name: &str| {
+            ACTIONS
+                .iter()
+                .find(|action| action.name == name)
+                .unwrap_or_else(|| panic!("missing catalog entry for `{name}`"))
+        };
+        for pair in super::super::PLUGIN_LIFECYCLE_ACTIONS.chunks_exact(2) {
+            let canonical = spec(pair[0]);
+            let alias = spec(pair[1]);
+            assert_eq!(
+                canonical.destructive, alias.destructive,
+                "`{}` and `{}` disagree on destructive",
+                pair[0], pair[1]
+            );
+            assert_eq!(
+                canonical.requires_admin, alias.requires_admin,
+                "`{}` and `{}` disagree on requires_admin",
+                pair[0], pair[1]
+            );
+            assert_eq!(
+                canonical.returns, alias.returns,
+                "`{}` and `{}` disagree on returns",
+                pair[0], pair[1]
+            );
+        }
+        // Spot-check the intended classification so a future edit that flips
+        // both members of a pair together is still caught.
+        assert!(spec("plugin.install").destructive);
+        assert!(spec("plugin.uninstall").destructive);
+        assert!(!spec("plugins.installed").destructive);
+        assert!(!spec("services.status").destructive);
+    }
+
+    #[tokio::test]
+    async fn dotted_plugin_mutation_actions_route_to_handlers() {
+        // Prove the new dotted match arms actually route to the real handlers
+        // rather than falling through to the `unknown` arm: a typo in a match
+        // literal would surface here as `unknown_action` instead of the
+        // handler's `missing_param`. The two mutation actions reach
+        // `parse_service` (→ missing_param) before any subprocess, so this is
+        // deterministic and side-effect-free. The read actions spawn the
+        // `claude` CLI, so they are intentionally not dispatched in a unit test.
+        for action in [
+            "plugin.install",
+            "plugin.uninstall",
+            "install_plugin",
+            "uninstall_plugin",
+        ] {
+            let err = dispatch(action, json!({})).await.unwrap_err();
+            assert_eq!(
+                err.kind(),
+                "missing_param",
+                "`{action}` should route to its handler and require `service`, got {err:?}"
+            );
+            match err {
+                ToolError::InvalidParam { param, .. } | ToolError::MissingParam { param, .. } => {
+                    assert_eq!(
+                        param, "service",
+                        "`{action}` should fault the `service` param"
+                    );
+                }
+                other => panic!("`{action}` returned unexpected error: {other:?}"),
+            }
         }
     }
 

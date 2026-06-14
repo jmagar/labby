@@ -11,9 +11,9 @@
 pub mod types;
 
 pub use types::{
-    StashComponent, StashComponentKind, StashDeployTarget, StashExportOptions,
-    StashProviderCapabilities, StashProviderRecord, StashProviderSummary, StashRevision,
-    StashWorkspaceShape,
+    MarketplaceOrigin, StashComponent, StashComponentKind, StashDeployTarget, StashExportOptions,
+    StashOrigin, StashProviderCapabilities, StashProviderRecord, StashProviderSummary,
+    StashRevision, StashWorkspaceShape,
 };
 
 pub use types::limits;

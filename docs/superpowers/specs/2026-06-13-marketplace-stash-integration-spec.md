@@ -38,11 +38,14 @@ The result is conceptually close but not properly connected.
 - Preserve Marketplace as the user-facing upstream/plugin workflow.
 - Preserve Stash as the canonical authored artifact library.
 - Support forking either a whole plugin or selected artifact paths.
+- V1 represents each selected artifact as its own Stash component.
+- V1 represents a whole-plugin fork as one directory-shaped
+  `StashComponentKind::Plugin` component with `artifact_path = null`.
 - Record structured origin metadata linking a stash component to:
   - plugin id
-  - optional artifact path
+  - exactly one optional artifact path
   - upstream version
-  - upstream source fingerprint or commit
+  - upstream source fingerprint
 - Save an initial immutable Stash revision at fork/adopt time.
 - Let Marketplace update/merge actions compare Stash workspace edits against
   upstream Marketplace content.
@@ -126,7 +129,8 @@ crates/lab/src/dispatch/marketplace/stash_bridge.rs
 
 1. User chooses `Fork plugin to Stash`.
 2. Gateway-admin calls `artifact.fork` without `artifacts`.
-3. Bridge imports the plugin source directory into one Stash component.
+3. Bridge imports the plugin source directory into one
+   `StashComponentKind::Plugin` component.
 4. The component origin has `artifact_path = null`.
 
 ### Edit A Fork
@@ -149,8 +153,11 @@ merge flows.
 
 ### Apply Upstream Update
 
-1. User runs `artifact.update.apply` with `confirm: true`.
-2. Marketplace validates the pending preview is fresh.
+1. User runs `artifact.update.apply`; HTTP/MCP/CLI confirmation is enforced by
+   the shared `ActionSpec.destructive` gates before dispatch.
+2. Marketplace validates the pending preview is fresh against both the upstream
+   fingerprint and a local fingerprint of the base snapshot plus Stash
+   workspace content.
 3. Marketplace applies clean merges and selected strategy results to the Stash
    workspace.
 4. Stash saves a new revision after successful apply.
@@ -191,7 +198,7 @@ pub struct MarketplaceOrigin {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_commit: Option<String>,
+    pub source_fingerprint: Option<String>,
 }
 ```
 
@@ -204,16 +211,16 @@ pub origin_meta: Option<StashOrigin>,
 
 ### Marketplace Fork State
 
-The source of truth is the Stash component record. Marketplace may keep
-merge/update helper files under the Stash workspace:
+The source of truth is the Stash component record. Marketplace keeps merge/update
+helper files in a Stash-owned sidecar directory outside the tracked component
+workspace:
 
 ```text
-stash/workspaces/<component_id>/
-├── <artifact files>
-├── .base/
+stash/marketplace/<component_id>/
+├── base/
 │   └── <artifact base snapshots>
-├── .pending-update.json
-└── .drift-cache.json
+├── pending-update.json
+└── drift-cache.json
 ```
 
 These helper files are Marketplace-owned metadata. They must not be counted as
@@ -233,7 +240,9 @@ component.adopt
 Purpose:
 
 - Create a Stash component.
-- Import a local path into its workspace.
+- Import a validated source path into its workspace. Marketplace bridge callers
+  must resolve that path from a known Marketplace source root; generic HTTP/MCP
+  callers must have `lab:admin` and still pass Stash read-path safety checks.
 - Attach structured origin metadata.
 - Save the initial revision.
 
@@ -261,9 +270,19 @@ artifact.config.set
 - Marketplace artifact paths must be relative, normal path segments only.
 - Absolute paths, `..`, `.`, null bytes, and backslashes are rejected.
 - Marketplace source paths must remain under known Marketplace roots.
+- Marketplace bridge adoption must not accept caller-supplied absolute paths.
+  It resolves sources from plugin id + artifact path inside a validated
+  Marketplace root.
+- Direct Stash adoption/import is privileged and requires `lab:admin` on HTTP.
 - Stash import must reject symlinks and sensitive system paths.
 - Base snapshots must reject symlinks.
-- Destructive actions require `confirm: true`:
+- Destructive action confirmation is owned by the shared surface gates driven by
+  `ActionSpec.destructive`. HTTP/MCP callers pass `confirm: true`; CLI callers
+  use `-y`/interactive confirmation. Dispatch params parsers must not re-require
+  `confirm` after the API helper strips it.
+- Destructive or write actions include:
+  - `component.adopt`
+  - `artifact.fork`
   - `artifact.unfork`
   - `artifact.reset`
   - `artifact.update.apply`
@@ -271,6 +290,8 @@ artifact.config.set
 - File contents used for AI merge suggestions are untrusted data and must never
   be treated as instructions.
 - Secret-looking merge regions must continue to fail before AI merge requests.
+- Absolute local paths are operator diagnostics. They must not be logged and
+  should be omitted or redacted from broad read-only UI summaries.
 
 ## Observability Requirements
 
@@ -284,7 +305,7 @@ elapsed_ms=<duration>
 kind=<error kind on failure>
 ```
 
-Stash dispatch events use:
+Stash dispatch events use this shape when `component.adopt` is called directly:
 
 ```text
 surface=<surface>
@@ -294,7 +315,9 @@ elapsed_ms=<duration>
 kind=<error kind on failure>
 ```
 
-Bridge operations should add structured fields where useful:
+Marketplace bridge operations that call Stash helpers directly must emit
+equivalent structured fields because they do not automatically pass through
+`stash::dispatch_for_surface`:
 
 - `plugin_id`
 - `artifact_path`
@@ -314,13 +337,7 @@ Do not log file contents, auth headers, tokens, cookies, or secret env values.
 
 ## Open Decisions
 
-1. Whether `.base/` should be excluded from Stash revisions immediately or in a
-   follow-up cleanup. The first implementation may keep `.base/` in workspace
-   storage but should not expose it in user-facing file lists.
-2. Whether whole-plugin forks should remain a single Stash component or expand
-   into one component per semantic artifact. V1 uses one component per fork
-   request.
-3. Whether Marketplace plugin file editing should automatically fork before
+1. Whether Marketplace plugin file editing should automatically fork before
    saving. V1 makes the fork action explicit.
 
 ## Acceptance Criteria
@@ -336,7 +353,12 @@ Do not log file contents, auth headers, tokens, cookies, or secret env values.
 - `stash component.revisions` shows the fork revision and any later update
   revisions.
 - Gateway-admin can fork the selected Marketplace file to Stash.
-- All new destructive Marketplace actions require `confirm: true`.
+- Destructive Marketplace actions continue to be gated by
+  `ActionSpec.destructive` through HTTP, MCP, and CLI confirmation helpers.
+- `component.adopt` is included in the Stash HTTP admin write-action gate.
+- Marketplace helper files are not included in Stash revisions, export, deploy,
+  or provider sync.
+- Update previews enforce file count and byte limits and return explicit
+  truncation metadata when the response is capped.
 - `cargo nextest run --workspace --all-features` passes.
 - Focused gateway-admin tests for the new API helpers pass.
-

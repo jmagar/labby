@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   deployPluginWorkspace,
+  forkMarketplaceArtifact,
   getPluginWorkspace,
   previewPluginWorkspaceDeploy,
   savePluginWorkspaceFile,
@@ -356,6 +357,23 @@ export function PluginFilesPanel({ pluginId, artifacts }: PluginFilesPanelProps)
   const [preview, setPreview] = useState<DeployPluginWorkspacePreviewResult | null>(null)
   const [previewSelection, setPreviewSelection] = useState<string | null>(null)
   const [isPreviewing, setIsPreviewing] = useState(false)
+  const [forkingPath, setForkingPath] = useState<string | null>(null)
+  const mountedRef = useRef(false)
+  const latestSelectionRef = useRef<{ pluginId: string; activePath: string | null }>({
+    pluginId,
+    activePath,
+  })
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    latestSelectionRef.current = { pluginId, activePath }
+  }, [activePath, pluginId])
 
   useEffect(() => {
     let cancelled = false
@@ -490,6 +508,45 @@ export function PluginFilesPanel({ pluginId, artifacts }: PluginFilesPanelProps)
     }
   }
 
+  async function handleForkSelectedFile() {
+    if (!activeFile || forkingPath) return
+    const targetPluginId = pluginId
+    const targetPath = activeFile.path
+    setForkingPath(targetPath)
+    try {
+      await forkMarketplaceArtifact({ pluginId: targetPluginId, artifacts: [targetPath] })
+      if (
+        !mountedRef.current
+        || latestSelectionRef.current.pluginId !== targetPluginId
+        || latestSelectionRef.current.activePath !== targetPath
+      ) {
+        return
+      }
+      setStatus({
+        tone: 'success',
+        message: 'Forked to Stash',
+        detail: targetPath,
+      })
+    } catch (error) {
+      if (
+        !mountedRef.current
+        || latestSelectionRef.current.pluginId !== targetPluginId
+        || latestSelectionRef.current.activePath !== targetPath
+      ) {
+        return
+      }
+      setStatus({
+        tone: 'error',
+        message: 'Fork failed',
+        detail: error instanceof Error ? error.message : 'Unable to fork artifact into Stash.',
+      })
+    } finally {
+      if (mountedRef.current) {
+        setForkingPath(null)
+      }
+    }
+  }
+
   if (!activeFile) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 text-sm text-aurora-text-muted">
@@ -536,6 +593,16 @@ export function PluginFilesPanel({ pluginId, artifacts }: PluginFilesPanelProps)
             className="rounded-aurora-1 border border-aurora-border-default bg-aurora-control-surface px-3 py-1.5 font-semibold text-aurora-text-primary hover:bg-aurora-hover-bg"
           >
             {isPreviewing ? 'Previewing...' : 'Preview deploy'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void handleForkSelectedFile()
+            }}
+            disabled={!activeFile || Boolean(forkingPath)}
+            className="rounded-aurora-1 border border-aurora-border-strong bg-aurora-control-surface px-3 py-1.5 font-semibold text-aurora-text-primary hover:bg-aurora-hover-bg disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {forkingPath ? 'Forking...' : 'Fork to Stash'}
           </button>
         </div>
 

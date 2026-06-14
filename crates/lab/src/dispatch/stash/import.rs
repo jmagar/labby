@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use lab_apis::stash::types::{StashComponent, StashComponentKind, limits};
+use lab_apis::stash::types::{StashComponent, StashComponentKind, StashOrigin, limits};
 
 use crate::dispatch::error::ToolError;
 use crate::dispatch::helpers::reject_path_traversal;
@@ -242,13 +242,14 @@ fn walk_measure_and_copy(src: &Path, dst: &Path) -> Result<(), ToolError> {
 /// * `symlink_rejected` — a symlink was encountered
 /// * `path_traversal` — source path resolves to a system directory or escapes source root
 /// * `invalid_param` — name is empty or exceeds `MAX_COMPONENT_NAME_LEN`
-pub async fn import_component(
+pub async fn import_component_with_origin(
     store: &StashStore,
     id: &str,
     source: &Path,
     kind_override: Option<StashComponentKind>,
     name: &str,
     label: Option<&str>,
+    origin_meta: Option<StashOrigin>,
 ) -> Result<StashComponent, ToolError> {
     // Validate name.
     if name.is_empty() {
@@ -284,7 +285,15 @@ pub async fn import_component(
     let store = store.clone();
 
     tokio::task::spawn_blocking(move || {
-        import_blocking(&store, &id, &source, kind_override, &name, label.as_deref())
+        import_blocking_with_origin(
+            &store,
+            &id,
+            &source,
+            kind_override,
+            &name,
+            label.as_deref(),
+            origin_meta,
+        )
     })
     .await
     .map_err(|e| ToolError::Sdk {
@@ -293,14 +302,26 @@ pub async fn import_component(
     })?
 }
 
-/// Synchronous inner implementation — runs inside `spawn_blocking`.
-fn import_blocking(
+pub async fn import_component(
     store: &StashStore,
     id: &str,
     source: &Path,
     kind_override: Option<StashComponentKind>,
     name: &str,
     label: Option<&str>,
+) -> Result<StashComponent, ToolError> {
+    import_component_with_origin(store, id, source, kind_override, name, label, None).await
+}
+
+/// Synchronous inner implementation — runs inside `spawn_blocking`.
+fn import_blocking_with_origin(
+    store: &StashStore,
+    id: &str,
+    source: &Path,
+    kind_override: Option<StashComponentKind>,
+    name: &str,
+    label: Option<&str>,
+    origin_meta: Option<StashOrigin>,
 ) -> Result<StashComponent, ToolError> {
     StashStore::validate_id(id)?;
 
@@ -396,7 +417,10 @@ fn import_blocking(
         lab_apis::stash::types::StashWorkspaceShape::File => {
             temp_workspace.join(filename.as_deref().unwrap_or("file"))
         }
-        lab_apis::stash::types::StashWorkspaceShape::Directory => temp_workspace.clone(),
+        lab_apis::stash::types::StashWorkspaceShape::Directory if is_dir => temp_workspace.clone(),
+        lab_apis::stash::types::StashWorkspaceShape::Directory => {
+            temp_workspace.join(filename.as_deref().unwrap_or("file"))
+        }
     };
 
     // Copy source to the staged workspace.
@@ -438,17 +462,7 @@ fn import_blocking(
     let component = store.with_component_lock(&id, || {
         let existing = store.read_component(&id)?;
 
-        if live_workspace.exists() {
-            remove_workspace_dir(&live_workspace)?;
-        }
-        std::fs::rename(&temp_workspace, &live_workspace).map_err(|e| ToolError::Sdk {
-            sdk_kind: "internal_error".into(),
-            message: format!(
-                "rename staged workspace `{}` → `{}`: {e}",
-                temp_workspace.display(),
-                live_workspace.display()
-            ),
-        })?;
+        replace_workspace_atomically(&temp_workspace, &live_workspace)?;
 
         let component = StashComponent {
             id: id.to_string(),
@@ -456,7 +470,25 @@ fn import_blocking(
             name: name.to_string(),
             label: label.map(str::to_string),
             head_revision_id: None,
-            origin: existing.as_ref().and_then(|c| c.origin.clone()),
+            origin: existing
+                .as_ref()
+                .and_then(|c| c.origin.clone())
+                .or_else(|| {
+                    origin_meta.as_ref().map(|origin| match origin {
+                        StashOrigin::Marketplace(marketplace) => {
+                            if let Some(path) = &marketplace.artifact_path {
+                                format!("marketplace://{}?artifact={}", marketplace.plugin_id, path)
+                            } else {
+                                format!("marketplace://{}", marketplace.plugin_id)
+                            }
+                        }
+                        StashOrigin::LocalPath { source_path } => {
+                            format!("file://{}", source_path.display())
+                        }
+                    })
+                }),
+            origin_meta: origin_meta
+                .or_else(|| existing.as_ref().and_then(|c| c.origin_meta.clone())),
             workspace_root,
             workspace_shape,
             unix_mode,
@@ -470,6 +502,18 @@ fn import_blocking(
     Ok(component)
 }
 
+#[cfg(test)]
+fn import_blocking(
+    store: &StashStore,
+    id: &str,
+    source: &Path,
+    kind_override: Option<StashComponentKind>,
+    name: &str,
+    label: Option<&str>,
+) -> Result<StashComponent, ToolError> {
+    import_blocking_with_origin(store, id, source, kind_override, name, label, None)
+}
+
 fn remove_workspace_dir(path: &Path) -> Result<(), ToolError> {
     match std::fs::remove_dir_all(path) {
         Ok(()) => Ok(()),
@@ -479,6 +523,44 @@ fn remove_workspace_dir(path: &Path) -> Result<(), ToolError> {
             message: format!("remove workspace `{}`: {e}", path.display()),
         }),
     }
+}
+
+fn replace_workspace_atomically(staged: &Path, live: &Path) -> Result<(), ToolError> {
+    let backup = live.with_file_name(format!(
+        ".{}.backup-{}",
+        live.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("workspace"),
+        ulid::Ulid::new().to_string().to_lowercase()
+    ));
+    let had_live = live.exists();
+    if had_live {
+        std::fs::rename(live, &backup).map_err(|e| ToolError::Sdk {
+            sdk_kind: "internal_error".into(),
+            message: format!(
+                "rename live workspace `{}` → backup `{}`: {e}",
+                live.display(),
+                backup.display()
+            ),
+        })?;
+    }
+    if let Err(error) = std::fs::rename(staged, live).map_err(|e| ToolError::Sdk {
+        sdk_kind: "internal_error".into(),
+        message: format!(
+            "rename staged workspace `{}` → `{}`: {e}",
+            staged.display(),
+            live.display()
+        ),
+    }) {
+        if had_live {
+            drop(std::fs::rename(&backup, live));
+        }
+        return Err(error);
+    }
+    if had_live {
+        remove_workspace_dir(&backup)?;
+    }
+    Ok(())
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

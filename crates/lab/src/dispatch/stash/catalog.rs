@@ -54,14 +54,14 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "component.create",
         description: "Create a new component in the stash",
         destructive: false,
-        requires_admin: false,
+        requires_admin: true,
         returns: "ComponentDetail",
         params: &[
             ParamSpec {
                 name: "kind",
                 ty: "string",
                 required: true,
-                description: "Component kind: skill, agent, command, channel, monitor, hook, output_style, theme, settings, mcp_config, lsp_config, script, bin_file",
+                description: "Component kind: skill, agent, command, channel, monitor, hook, output_style, theme, settings, mcp_config, lsp_config, script, bin_file, plugin",
             },
             ParamSpec {
                 name: "name",
@@ -81,7 +81,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "component.import",
         description: "Import a local path into the stash as a new or updated component [destructive]",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         returns: "ImportResult",
         params: &[
             ParamSpec {
@@ -105,6 +105,51 @@ pub const ACTIONS: &[ActionSpec] = &[
         ],
     },
     ActionSpec {
+        name: "component.adopt",
+        description: "Create a stash component from a local path, attach origin metadata, and save the initial revision",
+        destructive: true,
+        requires_admin: true,
+        returns: "AdoptResult",
+        params: &[
+            ParamSpec {
+                name: "kind",
+                ty: "string",
+                required: true,
+                description: "Component kind: skill, agent, command, channel, monitor, hook, output_style, theme, settings, mcp_config, lsp_config, script, bin_file, plugin",
+            },
+            ParamSpec {
+                name: "name",
+                ty: "string",
+                required: true,
+                description: "Component name",
+            },
+            ParamSpec {
+                name: "label",
+                ty: "string",
+                required: false,
+                description: "Optional human-readable label",
+            },
+            ParamSpec {
+                name: "source_path",
+                ty: "string",
+                required: true,
+                description: "Validated absolute source path to copy into the stash workspace; direct HTTP use requires lab:admin",
+            },
+            ParamSpec {
+                name: "origin",
+                ty: "object",
+                required: true,
+                description: "Structured StashOrigin metadata",
+            },
+            ParamSpec {
+                name: "save_label",
+                ty: "string",
+                required: false,
+                description: "Optional initial revision label",
+            },
+        ],
+    },
+    ActionSpec {
         name: "component.workspace",
         description: "Get the workspace (local checkout) path for a component",
         destructive: false,
@@ -121,7 +166,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "component.save",
         description: "Save (snapshot) the current workspace state for a component",
         destructive: false,
-        requires_admin: false,
+        requires_admin: true,
         returns: "SaveResult",
         params: &[
             ParamSpec {
@@ -158,7 +203,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         // All exports require confirm: true — the dispatcher does not inspect
         // include_secrets at runtime; destructive: true is the single gate.
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         returns: "ExportResult",
         params: &[
             ParamSpec {
@@ -191,7 +236,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "component.deploy",
         description: "Deploy a component to a registered target [destructive]",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         returns: "DeployResult",
         params: &[
             ParamSpec {
@@ -227,7 +272,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "provider.link",
         description: "Register a sync provider for a component",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         returns: "Provider",
         params: &[
             ParamSpec {
@@ -260,7 +305,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "provider.push",
         description: "Push the latest component revision to a provider [destructive]",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         returns: "SyncResult",
         params: &[
             ParamSpec {
@@ -281,7 +326,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "provider.pull",
         description: "Pull the latest state from a provider into the component [destructive]",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         returns: "SyncResult",
         params: &[
             ParamSpec {
@@ -311,7 +356,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "target.add",
         description: "Register a new deploy target for future component.deploy writes",
         destructive: false,
-        requires_admin: false,
+        requires_admin: true,
         returns: "Target",
         params: &[
             ParamSpec {
@@ -344,7 +389,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "target.remove",
         description: "Remove a registered deploy target [destructive]",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         returns: "RemoveResult",
         params: &[ParamSpec {
             name: "id",

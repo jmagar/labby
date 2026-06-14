@@ -57,6 +57,8 @@ pub enum StashComponentKind {
     Script,
     /// A compiled binary artefact (file).
     BinFile,
+    /// Directory-shaped component representing a whole Marketplace plugin fork.
+    Plugin,
 }
 
 impl StashComponentKind {
@@ -75,7 +77,8 @@ impl StashComponentKind {
             | Self::Monitor
             | Self::Hook
             | Self::OutputStyle
-            | Self::Theme => StashWorkspaceShape::Directory,
+            | Self::Theme
+            | Self::Plugin => StashWorkspaceShape::Directory,
 
             // file-shaped kinds
             Self::Settings | Self::McpConfig | Self::LspConfig | Self::Script | Self::BinFile => {
@@ -184,6 +187,35 @@ pub struct StashExportOptions {
 // Core structs
 // ---------------------------------------------------------------------------
 
+/// Structured origin metadata for components imported from another Lab surface.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum StashOrigin {
+    /// Component was forked or adopted from a Marketplace plugin artifact.
+    Marketplace(MarketplaceOrigin),
+    /// Component was imported directly from a local filesystem path.
+    LocalPath {
+        /// Original absolute source path at import time.
+        source_path: PathBuf,
+    },
+}
+
+/// Marketplace-specific component origin.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MarketplaceOrigin {
+    /// Plugin id in `name@marketplace` form.
+    pub plugin_id: String,
+    /// Relative artifact path inside the plugin. `None` means whole-plugin fork.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_path: Option<String>,
+    /// Version string from the plugin or marketplace manifest at fork time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_version: Option<String>,
+    /// Source tree fingerprint or upstream commit at fork time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_fingerprint: Option<String>,
+}
+
 /// A tracked component — the top-level unit of versioning in stash.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StashComponent {
@@ -200,6 +232,9 @@ pub struct StashComponent {
     /// Upstream origin URI, if this component was installed from a registry or
     /// remote stash.
     pub origin: Option<String>,
+    /// Structured origin metadata for behavior; optional for older records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_meta: Option<StashOrigin>,
     /// Absolute path to the workspace root on the local host.
     pub workspace_root: PathBuf,
     /// Whether the workspace root is a file or a directory.
@@ -282,4 +317,83 @@ pub struct StashProviderSummary {
     pub label: String,
     /// Number of components currently managed by this provider.
     pub component_count: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn marketplace_origin_round_trips() {
+        let origin = StashOrigin::Marketplace(MarketplaceOrigin {
+            plugin_id: "demo@labby".to_string(),
+            artifact_path: Some("skills/demo/SKILL.md".to_string()),
+            source_version: Some("abc123".to_string()),
+            source_fingerprint: Some("def456".to_string()),
+        });
+
+        let encoded = serde_json::to_value(&origin).unwrap();
+        assert_eq!(
+            encoded,
+            json!({
+                "kind": "marketplace",
+                "plugin_id": "demo@labby",
+                "artifact_path": "skills/demo/SKILL.md",
+                "source_version": "abc123",
+                "source_fingerprint": "def456"
+            })
+        );
+
+        let decoded: StashOrigin = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, origin);
+    }
+
+    #[test]
+    fn local_path_origin_round_trips() {
+        let origin = StashOrigin::LocalPath {
+            source_path: PathBuf::from("/tmp/demo"),
+        };
+
+        let encoded = serde_json::to_value(&origin).unwrap();
+        assert_eq!(
+            encoded,
+            json!({
+                "kind": "local_path",
+                "source_path": "/tmp/demo"
+            })
+        );
+
+        let decoded: StashOrigin = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, origin);
+    }
+
+    #[test]
+    fn component_origin_meta_is_optional_for_existing_records() {
+        let value = json!({
+            "id": "01aryz6s41tpz5x11k39dv3r2g",
+            "kind": "skill",
+            "name": "demo",
+            "label": null,
+            "head_revision_id": null,
+            "origin": null,
+            "workspace_root": "/tmp/demo",
+            "workspace_shape": "directory",
+            "unix_mode": null,
+            "created_at": "2026-06-13T00:00:00Z",
+            "updated_at": "2026-06-13T00:00:00Z"
+        });
+
+        let component: StashComponent = serde_json::from_value(value).unwrap();
+        assert!(component.origin_meta.is_none());
+    }
+
+    #[test]
+    fn plugin_kind_round_trips_for_whole_plugin_forks() {
+        let encoded = serde_json::to_value(StashComponentKind::Plugin).unwrap();
+        assert_eq!(encoded, json!("plugin"));
+
+        let decoded: StashComponentKind = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, StashComponentKind::Plugin);
+    }
 }

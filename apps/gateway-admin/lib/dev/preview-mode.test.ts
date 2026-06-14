@@ -24,6 +24,7 @@ test('isDevPreviewReadOnlyAction: returns true for every whitelisted action', ()
     'plugin.workspace',
     'plugin.components',
     'plugin.deploy.preview',
+    'artifact.list',
     'agent.list',
     'agent.get',
     'mcp.config',

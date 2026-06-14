@@ -396,6 +396,77 @@ export async function previewPluginWorkspaceDeploy(
   )
 }
 
+export interface ForkMarketplaceArtifactInput {
+  pluginId: string
+  artifacts?: string[]
+}
+
+export interface MarketplaceForkStatus {
+  plugin_id: string
+  component_id: string
+  stash_workspace: string
+  forked_artifacts: string[]
+  status: 'clean' | 'dirty' | 'unknown'
+}
+
+export function forkMarketplaceArtifact(
+  input: ForkMarketplaceArtifactInput,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  return marketplaceAction(
+    'artifact.fork',
+    {
+      plugin_id: input.pluginId,
+      ...(input.artifacts?.length ? { artifacts: input.artifacts } : {}),
+      confirm: true,
+    },
+    signal,
+  )
+}
+
+export function listMarketplaceForks(
+  pluginId?: string,
+  signal?: AbortSignal,
+): Promise<MarketplaceForkStatus[]> {
+  return marketplaceAction(
+    'artifact.list',
+    {
+      ...(pluginId ? { plugin_id: pluginId } : {}),
+    },
+    signal,
+  )
+}
+
+export function resetMarketplaceArtifact(
+  input: ForkMarketplaceArtifactInput,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  return marketplaceAction(
+    'artifact.reset',
+    {
+      plugin_id: input.pluginId,
+      ...(input.artifacts?.length ? { artifacts: input.artifacts } : {}),
+      confirm: true,
+    },
+    signal,
+  )
+}
+
+export function unforkMarketplaceArtifact(
+  input: ForkMarketplaceArtifactInput,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  return marketplaceAction(
+    'artifact.unfork',
+    {
+      plugin_id: input.pluginId,
+      ...(input.artifacts?.length ? { artifacts: input.artifacts } : {}),
+      confirm: true,
+    },
+    signal,
+  )
+}
+
 export interface AcpAgentInstallParams {
   agent_id: string
   device_ids: string[]

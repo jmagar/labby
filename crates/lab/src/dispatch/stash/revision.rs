@@ -276,6 +276,7 @@ mod tests {
             label: None,
             head_revision_id: None,
             origin: None,
+            origin_meta: None,
             workspace_root: ws_dir.clone(),
             workspace_shape: StashWorkspaceShape::Directory,
             unix_mode: None,
@@ -302,6 +303,7 @@ mod tests {
             label: None,
             head_revision_id: None,
             origin: None,
+            origin_meta: None,
             workspace_root: ws_dir.clone(), // directory, not the file — matches import_blocking
             workspace_shape: StashWorkspaceShape::File,
             unix_mode: None,

@@ -12,6 +12,8 @@
 
 **Contract:** `docs/contracts/marketplace-stash-integration.md`
 
+**Research Applied:** `docs/superpowers/research/2026-06-13-marketplace-stash-integration-research.md`
+
 ---
 
 ## Design Boundary
@@ -21,7 +23,7 @@ The integration has one direction:
 - `marketplace` may import/fork plugin artifacts into `stash`.
 - `stash` must not discover marketplaces, install plugins, or shell out to marketplace/runtime CLIs.
 
-The durable owner for user-authored or user-forked artifact content is `stash`. Marketplace stores only enough fork metadata to reconnect a stash component to upstream plugin state.
+The durable owner for user-authored or user-forked artifact content is `stash`. Marketplace stores only enough fork metadata to reconnect a stash component to upstream plugin state. Marketplace helper metadata must live outside tracked Stash workspaces so Stash revisions, export, deploy, and provider sync contain only user artifact content.
 
 ## File Structure
 
@@ -45,13 +47,15 @@ The durable owner for user-authored or user-forked artifact content is `stash`. 
   - Add `component_adopt` and `adopt_component_from_path`.
 - Modify `crates/lab/src/dispatch/stash/import.rs`
   - Add an import helper that accepts origin metadata and can create the component record in one locked operation.
+- Modify `crates/lab/src/api/services/stash.rs`
+  - Add `component.adopt` to the HTTP admin-scope write-action gate.
 
 ### Marketplace Bridge
 
 - Create `crates/lab/src/dispatch/marketplace/stash_bridge.rs`
   - Resolve plugin source/artifact paths.
   - Create or find stash components for plugin forks.
-  - Write stash revisions and marketplace fork metadata.
+  - Write stash revisions and marketplace fork metadata sidecars.
   - Convert stash component state into marketplace `artifact.*` responses.
 - Modify `crates/lab/src/dispatch/marketplace.rs`
   - Add `mod stash_bridge;`.
@@ -62,16 +66,21 @@ The durable owner for user-authored or user-forked artifact content is `stash`. 
   - Replace `not_implemented` stubs for `artifact.fork`, `artifact.list`, `artifact.unfork`, and `artifact.reset`.
 - Modify `crates/lab/src/dispatch/marketplace/update.rs`
   - Read fork metadata from stash-owned records through `stash_bridge`.
+  - Reuse existing hardened git fetch/source-root validation helpers.
+  - Save a real Stash revision after `artifact.update.apply`.
+  - Enforce preview file and byte limits with truncation metadata.
   - Stop defining a second private `StashMeta` schema after the bridge is in place.
 - Modify `crates/lab/src/dispatch/marketplace/stash_meta.rs`
-  - Keep marketplace-specific upstream merge metadata, but store it under stash workspaces and make it compatible with `StashOrigin`.
+  - Keep marketplace-specific upstream merge metadata, but store it outside tracked stash workspaces and make it compatible with `StashOrigin`.
 
 ### API and Frontend
 
 - Modify `crates/lab/src/api/services/marketplace.rs`
-  - Keep existing artifact endpoints; they now become live.
+  - Keep existing artifact endpoints; they now become live and preserve auth metadata.
 - Modify `apps/gateway-admin/lib/api/marketplace-client.ts`
   - Add typed functions for `artifact.fork`, `artifact.list`, `artifact.update.*`.
+  - Keep absolute workspace paths out of broad list UI unless explicitly shown as
+    admin diagnostics.
 - Modify `apps/gateway-admin/components/marketplace/plugin-files-panel.tsx`
   - Add a "Fork to Stash" action for the selected artifact or whole plugin.
 - Create `apps/gateway-admin/lib/api/marketplace-artifacts.test.ts`
@@ -110,7 +119,7 @@ mod tests {
             plugin_id: "demo@labby".to_string(),
             artifact_path: Some("skills/demo/SKILL.md".to_string()),
             source_version: Some("abc123".to_string()),
-            source_commit: Some("def456".to_string()),
+            source_fingerprint: Some("def456".to_string()),
         });
 
         let encoded = serde_json::to_value(&origin).unwrap();
@@ -121,7 +130,7 @@ mod tests {
                 "plugin_id": "demo@labby",
                 "artifact_path": "skills/demo/SKILL.md",
                 "source_version": "abc123",
-                "source_commit": "def456"
+                "source_fingerprint": "def456"
             })
         );
 
@@ -148,6 +157,15 @@ mod tests {
         let component: StashComponent = serde_json::from_value(value).unwrap();
         assert!(component.origin_meta.is_none());
     }
+
+    #[test]
+    fn plugin_kind_round_trips_for_whole_plugin_forks() {
+        let encoded = serde_json::to_value(StashComponentKind::Plugin).unwrap();
+        assert_eq!(encoded, json!("plugin"));
+
+        let decoded: StashComponentKind = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, StashComponentKind::Plugin);
+    }
 }
 ```
 
@@ -156,10 +174,11 @@ mod tests {
 Run:
 
 ```bash
-cargo test -p lab-apis marketplace_origin_round_trips component_origin_meta_is_optional_for_existing_records
+cargo test -p lab-apis marketplace_origin_round_trips component_origin_meta_is_optional_for_existing_records plugin_kind_round_trips_for_whole_plugin_forks
 ```
 
-Expected: FAIL because `StashOrigin`, `MarketplaceOrigin`, and `origin_meta` do not exist.
+Expected: FAIL because `StashOrigin`, `MarketplaceOrigin`, `origin_meta`, and
+`StashComponentKind::Plugin` do not exist.
 
 - [ ] **Step 3: Add origin types**
 
@@ -192,7 +211,7 @@ pub struct MarketplaceOrigin {
     pub source_version: Option<String>,
     /// Source tree fingerprint or upstream commit at fork time.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_commit: Option<String>,
+    pub source_fingerprint: Option<String>,
 }
 ```
 
@@ -218,13 +237,52 @@ pub struct StashComponent {
 }
 ```
 
-Then update every `StashComponent { ... }` literal in `crates/lab/src/dispatch/stash/` tests and implementation to include:
+Find every `StashComponent { ... }` literal before editing:
+
+```bash
+rg -n "StashComponent \\{" crates/lab-apis crates/lab
+```
+
+Then update every literal in the returned Rust source files to include:
 
 ```rust
 origin_meta: None,
 ```
 
-- [ ] **Step 5: Re-export the origin types**
+- [ ] **Step 5: Add the whole-plugin component kind**
+
+Update `StashComponentKind` in `crates/lab-apis/src/stash/types.rs`:
+
+```rust
+pub enum StashComponentKind {
+    Skill,
+    Agent,
+    Command,
+    Channel,
+    Monitor,
+    Hook,
+    OutputStyle,
+    Theme,
+    Settings,
+    McpConfig,
+    LspConfig,
+    Script,
+    BinFile,
+    /// Directory-shaped component representing a whole Marketplace plugin fork.
+    Plugin,
+}
+```
+
+Update any `match StashComponentKind` expression returned by:
+
+```bash
+rg -n "StashComponentKind::|match .*StashComponentKind|match kind" crates/lab-apis crates/lab
+```
+
+`Plugin` must use a directory workspace shape, serialize as `"plugin"`, and never
+fall through to `Skill`.
+
+- [ ] **Step 6: Re-export the origin types**
 
 Update `crates/lab-apis/src/stash.rs`:
 
@@ -236,17 +294,17 @@ pub use types::{
 };
 ```
 
-- [ ] **Step 6: Run the focused tests**
+- [ ] **Step 7: Run the focused tests**
 
 Run:
 
 ```bash
-cargo test -p lab-apis marketplace_origin_round_trips component_origin_meta_is_optional_for_existing_records
+cargo test -p lab-apis marketplace_origin_round_trips component_origin_meta_is_optional_for_existing_records plugin_kind_round_trips_for_whole_plugin_forks
 ```
 
 Expected: PASS.
 
-- [ ] **Step 7: Run stash compile check**
+- [ ] **Step 8: Run stash compile check**
 
 Run:
 
@@ -256,7 +314,7 @@ cargo check -p labby --all-features
 
 Expected: PASS. Fix missing `origin_meta: None` struct literals before continuing.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add crates/lab-apis/src/stash.rs crates/lab-apis/src/stash/types.rs crates/lab/src/dispatch/stash
@@ -273,8 +331,10 @@ git commit -m "feat(stash): add structured component origin metadata"
 - Modify: `crates/lab/src/dispatch/stash/dispatch.rs`
 - Modify: `crates/lab/src/dispatch/stash/service.rs`
 - Modify: `crates/lab/src/dispatch/stash/import.rs`
+- Modify: `crates/lab/src/api/services/stash.rs`
 - Test: `crates/lab/src/dispatch/stash/dispatch.rs`
 - Test: `crates/lab/src/dispatch/stash/import.rs`
+- Test: `crates/lab/src/api/services/stash.rs`
 
 - [ ] **Step 1: Write failing dispatch test for adopt**
 
@@ -300,7 +360,7 @@ async fn dispatch_adopt_imports_and_saves_marketplace_component() {
                 "plugin_id": "demo@labby",
                 "artifact_path": "skills/demo",
                 "source_version": "1.0.0",
-                "source_commit": "abc123"
+                "source_fingerprint": "abc123"
             },
             "save_label": "Fork from demo@labby"
         }),
@@ -361,7 +421,7 @@ ActionSpec {
             name: "source_path",
             ty: "string",
             required: true,
-            description: "Absolute source path to copy into the stash workspace",
+            description: "Validated absolute source path to copy into the stash workspace; direct HTTP use requires lab:admin",
         },
         ParamSpec {
             name: "origin",
@@ -427,6 +487,8 @@ pub fn parse_adopt_params(params: &Value) -> Result<AdoptParams, ToolError> {
     })
 }
 ```
+
+`parse_adopt_params` only validates request shape. It must not implement Marketplace source-root policy; Marketplace bridge callers resolve source paths from `plugin_id` and relative artifact paths before calling Stash. Direct HTTP access is protected by the Stash API `lab:admin` gate added below.
 
 - [ ] **Step 5: Route adopt in dispatch**
 
@@ -592,9 +654,10 @@ pub async fn adopt_component_from_path(
     )
     .await?;
     let revision = revision::save_revision(store, &component.id, save_label).await?;
-    let mut updated = component.clone();
-    updated.head_revision_id = Some(revision.id.clone());
-    store.write_component(&updated)?;
+    let updated = store.read_component(&component.id)?.ok_or_else(|| ToolError::Sdk {
+        sdk_kind: "not_found".into(),
+        message: format!("component `{}` disappeared after save", component.id),
+    })?;
     Ok(AdoptResult {
         component: updated,
         revision,
@@ -602,21 +665,69 @@ pub async fn adopt_component_from_path(
 }
 ```
 
-- [ ] **Step 8: Run tests**
+Do not write the cloned component after `save_revision`. `revision::save_revision`
+updates `head_revision_id` under the component lock; re-read the component after
+the save so the response reflects the locked update.
+
+- [ ] **Step 8: Add Stash API admin gate coverage**
+
+In `crates/lab/src/api/services/stash.rs`, add `component.adopt` to `STASH_WRITE_ACTIONS`:
+
+```rust
+const STASH_WRITE_ACTIONS: &[&str] = &[
+    "component.import",
+    "component.adopt",
+    "component.save",
+    "component.export",
+    "component.deploy",
+    "component.create",
+    "provider.link",
+    "provider.push",
+    "provider.pull",
+    "target.add",
+    "target.remove",
+];
+```
+
+Extend `write_actions_require_admin_scope` to include `component.adopt`:
+
+```rust
+let write_actions = [
+    ("component.create", json!({"kind": "settings", "name": "test"})),
+    ("component.adopt", json!({
+        "kind": "skill",
+        "name": "demo",
+        "source_path": "/tmp/demo",
+        "origin": {"kind": "local_path", "source_path": "/tmp/demo"},
+        "confirm": true
+    })),
+];
+for (action, params) in write_actions {
+    let response = post_stash(
+        test_app_with_auth(read_only_auth_context()),
+        json!({ "action": action, "params": params }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN, "{action}");
+}
+```
+
+- [ ] **Step 9: Run tests**
 
 Run:
 
 ```bash
 cargo test -p labby --all-features dispatch_adopt_imports_and_saves_marketplace_component
 cargo test -p labby --all-features dispatch_import_accepts_operator_workspace_path
+cargo test -p labby --all-features write_actions_require_admin_scope
 ```
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add crates/lab/src/dispatch/stash crates/lab-apis/src/stash
+git add crates/lab/src/dispatch/stash crates/lab/src/api/services/stash.rs crates/lab-apis/src/stash
 git commit -m "feat(stash): add component adoption flow"
 ```
 
@@ -661,7 +772,7 @@ mod tests {
         assert_eq!(kind_for_artifact_path(Some("agents/demo.md")), StashComponentKind::Agent);
         assert_eq!(kind_for_artifact_path(Some("commands/demo.md")), StashComponentKind::Command);
         assert_eq!(kind_for_artifact_path(Some("settings.json")), StashComponentKind::Settings);
-        assert_eq!(kind_for_artifact_path(None), StashComponentKind::Skill);
+        assert_eq!(kind_for_artifact_path(None), StashComponentKind::Plugin);
     }
 }
 ```
@@ -717,7 +828,7 @@ pub(super) fn component_name_for_fork(plugin_id: &str, artifact_path: Option<&st
 
 pub(super) fn kind_for_artifact_path(artifact_path: Option<&str>) -> StashComponentKind {
     let Some(path) = artifact_path else {
-        return StashComponentKind::Skill;
+        return StashComponentKind::Plugin;
     };
     let first = path.split('/').next().unwrap_or(path);
     match first {
@@ -737,17 +848,23 @@ pub(super) fn kind_for_artifact_path(artifact_path: Option<&str>) -> StashCompon
 }
 ```
 
-- [ ] **Step 5: Make marketplace source helpers visible inside the module**
+Task 1 adds `StashComponentKind::Plugin` for whole-plugin forks. Do not
+represent a whole plugin as `Skill` unless the source directory is actually a
+skill bundle.
 
-In `crates/lab/src/dispatch/marketplace/dispatch.rs`, change these functions from private to `pub(super)`:
+- [ ] **Step 5: Make validated marketplace source helpers visible inside the module**
+
+Do not expose or reuse `dispatch.rs::source_path_for_plugin` for fork adoption; it can resolve installed plugin paths that are not validated Marketplace roots.
+
+In `crates/lab/src/dispatch/marketplace/update.rs`, expose the stricter existing source-root validation helper:
 
 ```rust
-pub(super) fn workspace_root() -> Result<PathBuf, ToolError> { ... }
-pub(super) fn source_path_for_plugin(id: &str) -> Result<PathBuf, ToolError> { ... }
-pub(super) fn walk_artifacts(root: &Path, dir: &Path) -> Result<Vec<Artifact>, ToolError> { ... }
+pub(super) fn source_paths_for_bridge(id: &str) -> Result<(PathBuf, PathBuf), ToolError> {
+    source_paths_for_plugin(id)
+}
 ```
 
-Do not change their bodies in this task.
+Keep `walk_artifacts` at its current visibility if it is already usable by the bridge. Do not weaken Marketplace root containment.
 
 - [ ] **Step 6: Add bridge result types and path resolver**
 
@@ -764,16 +881,22 @@ pub(super) struct ForkResult {
 }
 
 #[derive(Debug, Serialize)]
+pub(super) struct ForkResponse {
+    pub forks: Vec<ForkResult>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub(super) struct ForkedPluginStatus {
     pub plugin_id: String,
     pub component_id: String,
     pub stash_workspace: String,
     pub forked_artifacts: Vec<String>,
-    pub dirty: bool,
+    pub status: String,
 }
 
 pub(super) fn fork_source_path(plugin_id: &str, artifact_path: Option<&str>) -> Result<PathBuf, ToolError> {
-    let source = crate::dispatch::marketplace::dispatch::source_path_for_plugin(plugin_id)?;
+    let (_marketplace_root, source) = crate::dispatch::marketplace::update::source_paths_for_bridge(plugin_id)?;
     match artifact_path {
         Some(path) => {
             crate::dispatch::marketplace::stash_meta::validate_rel_path(path)?;
@@ -788,6 +911,11 @@ pub(super) fn fork_source_path(plugin_id: &str, artifact_path: Option<&str>) -> 
         }
         None => Ok(source),
     }
+}
+
+pub(super) fn fork_state_dir(component_id: &str) -> Result<PathBuf, ToolError> {
+    let root = crate::dispatch::stash::client::require_stash_root()?.clone();
+    Ok(root.join("marketplace").join(component_id))
 }
 ```
 
@@ -813,6 +941,7 @@ git commit -m "feat(marketplace): add stash bridge helpers"
 ## Task 4: Implement Marketplace `artifact.fork` and `artifact.list`
 
 **Files:**
+- Modify: `crates/lab/src/dispatch/marketplace/catalog.rs`
 - Modify: `crates/lab/src/dispatch/marketplace/fork.rs`
 - Modify: `crates/lab/src/dispatch/marketplace/stash_bridge.rs`
 - Test: `crates/lab/src/dispatch/marketplace/fork.rs`
@@ -868,6 +997,39 @@ Expected: FAIL because `artifact.list` still returns `not_implemented`.
 
 - [ ] **Step 3: Implement bridge `fork_artifacts`**
 
+Before implementing the bridge, update `artifact.fork` in
+`crates/lab/src/dispatch/marketplace/catalog.rs`:
+
+```rust
+ActionSpec {
+    name: "artifact.fork",
+    description: "Fork Marketplace artifact(s) into Stash [destructive]",
+    destructive: true,
+    requires_admin: false,
+    params: &[
+        ParamSpec {
+            name: "plugin_id",
+            ty: "string",
+            required: true,
+            description: "Plugin id in `name@marketplace` form",
+        },
+        ParamSpec {
+            name: "artifacts",
+            ty: "array",
+            required: false,
+            description: "Relative artifact paths to fork; omit to fork the whole plugin",
+        },
+        ParamSpec {
+            name: "confirm",
+            ty: "boolean",
+            required: true,
+            description: "HTTP/MCP confirmation for this write action; stripped before dispatch",
+        },
+    ],
+    returns: "ForkResponse",
+}
+```
+
 Add to `crates/lab/src/dispatch/marketplace/stash_bridge.rs`:
 
 ```rust
@@ -876,19 +1038,25 @@ pub(super) async fn fork_artifacts(
     artifacts: Option<Vec<String>>,
 ) -> Result<Value, ToolError> {
     let artifact_paths = artifacts.unwrap_or_else(|| vec![String::new()]);
-    let mut results = Vec::with_capacity(artifact_paths.len());
+    let source_version = crate::dispatch::marketplace::update::upstream_version_for_bridge(plugin_id).ok();
+    let source_fingerprint = crate::dispatch::marketplace::update::source_fingerprint_for_bridge(plugin_id).ok();
+    let mut forks = Vec::with_capacity(artifact_paths.len());
+    let mut warnings = Vec::new();
     for artifact in artifact_paths {
         let artifact_path = if artifact.is_empty() { None } else { Some(artifact.as_str()) };
+        if let Some(existing) = existing_fork(plugin_id, artifact_path)? {
+            warnings.push(format!("fork already exists for {plugin_id}:{artifact}",));
+            forks.push(existing);
+            continue;
+        }
         let source_path = fork_source_path(plugin_id, artifact_path)?;
         let name = component_name_for_fork(plugin_id, artifact_path);
         let kind = kind_for_artifact_path(artifact_path);
-        let source_version = crate::dispatch::marketplace::update::upstream_version_for_bridge(plugin_id).ok();
-        let source_commit = crate::dispatch::marketplace::update::source_fingerprint_for_bridge(plugin_id).ok();
         let origin = StashOrigin::Marketplace(MarketplaceOrigin {
             plugin_id: plugin_id.to_string(),
             artifact_path: artifact_path.map(ToString::to_string),
-            source_version,
-            source_commit,
+            source_version: source_version.clone(),
+            source_fingerprint: source_fingerprint.clone(),
         });
         let root = crate::dispatch::stash::client::require_stash_root()?.clone();
         let store = crate::dispatch::stash::store::StashStore::new(root);
@@ -898,7 +1066,7 @@ pub(super) async fn fork_artifacts(
         })?;
         let adopt = crate::dispatch::stash::service::adopt_component_from_path(
             &store,
-            serde_json::to_value(kind).unwrap().as_str().unwrap(),
+            stash_kind_param(kind),
             &name,
             Some(&format!("Fork of {plugin_id}")),
             &source_path,
@@ -906,7 +1074,8 @@ pub(super) async fn fork_artifacts(
             Some(&format!("Fork from {plugin_id}")),
         )
         .await?;
-        results.push(ForkResult {
+        seed_base_snapshot(&store, &adopt.component.id, &source_path, artifact_path)?;
+        forks.push(ForkResult {
             plugin_id: plugin_id.to_string(),
             component_id: adopt.component.id.clone(),
             revision_id: adopt.revision.id.clone(),
@@ -914,7 +1083,50 @@ pub(super) async fn fork_artifacts(
             forked_artifacts: artifact_path.map(|path| vec![path.to_string()]).unwrap_or_default(),
         });
     }
-    crate::dispatch::helpers::to_json(results)
+    crate::dispatch::helpers::to_json(ForkResponse { forks, warnings })
+}
+```
+
+Add these helpers in the same module:
+
+```rust
+fn stash_kind_param(kind: StashComponentKind) -> &'static str {
+    match kind {
+        StashComponentKind::Skill => "skill",
+        StashComponentKind::Agent => "agent",
+        StashComponentKind::Command => "command",
+        StashComponentKind::Channel => "channel",
+        StashComponentKind::Monitor => "monitor",
+        StashComponentKind::Hook => "hook",
+        StashComponentKind::OutputStyle => "output_style",
+        StashComponentKind::Theme => "theme",
+        StashComponentKind::Settings => "settings",
+        StashComponentKind::McpConfig => "mcp_config",
+        StashComponentKind::LspConfig => "lsp_config",
+        StashComponentKind::Script => "script",
+        StashComponentKind::BinFile => "bin_file",
+        StashComponentKind::Plugin => "plugin",
+    }
+}
+
+fn existing_fork(plugin_id: &str, artifact_path: Option<&str>) -> Result<Option<ForkResult>, ToolError> {
+    let root = crate::dispatch::stash::client::require_stash_root()?.clone();
+    let store = crate::dispatch::stash::store::StashStore::new(root);
+    for component in store.list_components()? {
+        let Some(StashOrigin::Marketplace(origin)) = component.origin_meta.clone() else {
+            continue;
+        };
+        if origin.plugin_id == plugin_id && origin.artifact_path.as_deref() == artifact_path {
+            return Ok(Some(ForkResult {
+                plugin_id: origin.plugin_id,
+                component_id: component.id,
+                revision_id: component.head_revision_id.unwrap_or_default(),
+                stash_workspace: component.workspace_root.display().to_string(),
+                forked_artifacts: artifact_path.map(|path| vec![path.to_string()]).unwrap_or_default(),
+            }));
+        }
+    }
+    Ok(None)
 }
 ```
 
@@ -924,15 +1136,20 @@ In `crates/lab/src/dispatch/marketplace/update.rs`, add:
 
 ```rust
 pub(super) fn upstream_version_for_bridge(plugin_id: &str) -> Result<String, ToolError> {
-    let source = source_path_for_plugin(plugin_id)?;
+    let (_marketplace_root, source) = source_paths_for_bridge(plugin_id)?;
     Ok(upstream_version(&source).unwrap_or_else(|| "unknown".to_string()))
 }
 
 pub(super) fn source_fingerprint_for_bridge(plugin_id: &str) -> Result<String, ToolError> {
-    let source = source_path_for_plugin(plugin_id)?;
+    let (_marketplace_root, source) = source_paths_for_bridge(plugin_id)?;
     compute_tree_fingerprint(&source)
 }
 ```
+
+`source_fingerprint_for_bridge` should use the same validated source path helper
+as `source_paths_for_bridge`; do not introduce a raw `git fetch` or looser path
+resolver here. Existing hardened git fetch behavior must remain the only fetch
+path.
 
 - [ ] **Step 5: Implement bridge `list_forks`**
 
@@ -959,7 +1176,7 @@ pub(super) async fn list_forks(plugin_id: Option<String>) -> Result<Value, ToolE
             component_id: component.id,
             stash_workspace: component.workspace_root.display().to_string(),
             forked_artifacts: origin.artifact_path.into_iter().collect(),
-            dirty: false,
+            status: "unknown".to_string(),
         });
     }
     crate::dispatch::helpers::to_json(rows)
@@ -993,7 +1210,7 @@ Expected: PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add crates/lab/src/dispatch/marketplace/fork.rs crates/lab/src/dispatch/marketplace/stash_bridge.rs crates/lab/src/dispatch/marketplace/update.rs crates/lab/src/dispatch/marketplace.rs
+git add crates/lab/src/dispatch/marketplace/catalog.rs crates/lab/src/dispatch/marketplace/fork.rs crates/lab/src/dispatch/marketplace/stash_bridge.rs crates/lab/src/dispatch/marketplace/update.rs crates/lab/src/dispatch/marketplace.rs
 git commit -m "feat(marketplace): fork artifacts into stash"
 ```
 
@@ -1018,6 +1235,7 @@ pub(super) struct MarketplaceForkComponent {
     pub artifact_path: Option<String>,
     pub workspace_root: PathBuf,
     pub workspace_dir: PathBuf,
+    pub state_dir: PathBuf,
     pub base_revision_id: Option<String>,
     pub upstream_version: String,
 }
@@ -1036,6 +1254,7 @@ pub(super) fn fork_component_for_plugin(plugin_id: &str) -> Result<MarketplaceFo
                 artifact_path: origin.artifact_path,
                 workspace_root: component.workspace_root.clone(),
                 workspace_dir: store.workspace_dir(&component.id),
+                state_dir: fork_state_dir(&component.id)?,
                 base_revision_id: component.head_revision_id.clone(),
                 upstream_version: origin.source_version.unwrap_or_else(|| "unknown".to_string()),
             });
@@ -1058,10 +1277,11 @@ fn collect_versions_uses_single_artifact_path_from_origin() {
     let dir = tempfile::tempdir().unwrap();
     let stash = dir.path().join("stash");
     let source = dir.path().join("source");
-    std::fs::create_dir_all(stash.join(".base/skills/demo")).unwrap();
+    let state = dir.path().join("marketplace-state");
+    std::fs::create_dir_all(state.join("base/skills/demo")).unwrap();
     std::fs::create_dir_all(stash.join("skills/demo")).unwrap();
     std::fs::create_dir_all(source.join("skills/demo")).unwrap();
-    std::fs::write(stash.join(".base/skills/demo/SKILL.md"), "base\n").unwrap();
+    std::fs::write(state.join("base/skills/demo/SKILL.md"), "base\n").unwrap();
     std::fs::write(stash.join("skills/demo/SKILL.md"), "mine\n").unwrap();
     std::fs::write(source.join("skills/demo/SKILL.md"), "theirs\n").unwrap();
 
@@ -1077,7 +1297,7 @@ fn collect_versions_uses_single_artifact_path_from_origin() {
         pending_update: None,
     };
 
-    let versions = collect_versions(&stash, &source, &meta).unwrap();
+    let versions = collect_versions(&stash, &state.join("base"), &source, &meta).unwrap();
     assert_eq!(versions.len(), 1);
     assert_eq!(versions[0].path, "skills/demo/SKILL.md");
 }
@@ -1091,7 +1311,7 @@ Run:
 cargo test -p labby --all-features collect_versions_uses_single_artifact_path_from_origin
 ```
 
-Expected: PASS on current code. This locks current merge behavior before redirecting storage.
+Expected: FAIL until `collect_versions` accepts the sidecar base directory and no longer reads `.base` from the tracked Stash workspace.
 
 - [ ] **Step 4: Redirect fork discovery to stash**
 
@@ -1130,23 +1350,31 @@ fn collect_forks(plugin_id: Option<String>) -> Result<Vec<ForkRecord>, ToolError
 }
 ```
 
-- [ ] **Step 5: Keep `.base` under stash workspace for now**
+- [ ] **Step 5: Move base snapshots into the sidecar state directory**
 
-In `artifact.fork`, after adoption succeeds, populate `.base` snapshots in the stash workspace by copying the original source file(s). Add this helper to `stash_bridge.rs`:
+In `artifact.fork`, after adoption succeeds, populate base snapshots in the sidecar state directory by copying the original source file(s). Add this helper to `stash_bridge.rs`:
 
 ```rust
-fn seed_base_snapshot(workspace_dir: &Path, source_path: &Path, artifact_path: Option<&str>) -> Result<(), ToolError> {
-    let base = workspace_dir.join(".base");
+fn seed_base_snapshot(
+    store: &crate::dispatch::stash::store::StashStore,
+    component_id: &str,
+    source_path: &Path,
+    artifact_path: Option<&str>,
+) -> Result<(), ToolError> {
+    let state_dir = fork_state_dir(component_id)?;
+    let base = state_dir.join("base");
     match artifact_path {
         Some(path) => {
             let dest = base.join(path);
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent).map_err(crate::dispatch::marketplace::client::io_internal)?;
             }
+            reject_symlink(source_path)?;
             std::fs::copy(source_path, dest).map_err(crate::dispatch::marketplace::client::io_internal)?;
         }
         None => copy_tree_to_base(source_path, &base, source_path)?,
     }
+    let _ = store;
     Ok(())
 }
 
@@ -1155,7 +1383,10 @@ fn copy_tree_to_base(root: &Path, dest_root: &Path, current: &Path) -> Result<()
         let entry = entry.map_err(crate::dispatch::marketplace::client::io_internal)?;
         let file_type = entry.file_type().map_err(crate::dispatch::marketplace::client::io_internal)?;
         if file_type.is_symlink() {
-            continue;
+            return Err(ToolError::Sdk {
+                sdk_kind: "symlink_rejected".into(),
+                message: format!("symlink `{}` rejected while seeding base snapshot", entry.path().display()),
+            });
         }
         let rel = entry.path().strip_prefix(root).map_err(crate::dispatch::marketplace::client::io_internal)?.to_path_buf();
         let dest = dest_root.join(rel);
@@ -1175,7 +1406,58 @@ fn copy_tree_to_base(root: &Path, dest_root: &Path, current: &Path) -> Result<()
 
 Call `seed_base_snapshot` from `fork_artifacts` after `adopt_component_from_path`.
 
-- [ ] **Step 6: Run update tests**
+Never write `base/`, `pending-update.json`, or `drift-cache.json` under
+`store.workspace_dir(component_id)`. Stash revisions walk that directory and
+would otherwise capture helper metadata as user content.
+
+- [ ] **Step 6: Add preview caps and apply revision save**
+
+In `crates/lab/src/dispatch/marketplace/update.rs`, add constants near the top:
+
+```rust
+const MAX_PREVIEW_FILES: usize = 250;
+const MAX_PREVIEW_FILE_BYTES: usize = 256 * 1024;
+const MAX_PREVIEW_DIFF_BYTES: usize = 512 * 1024;
+```
+
+Before pushing full `merged_content`, `yours_diff`, `theirs_diff`, or conflict
+content into `UpdatePreviewResult`, cap content to these limits and include a
+stable truncation marker in the response. If the preview would exceed
+`MAX_PREVIEW_FILES`, return `ToolError::Sdk { sdk_kind: "preview_truncated", ... }`
+with enough detail for the caller to narrow the request.
+
+After successful `artifact.update.apply` writes, save a Stash revision and update
+origin metadata under the component lock:
+
+```rust
+let root = crate::dispatch::stash::client::require_stash_root()?.clone();
+let store = crate::dispatch::stash::store::StashStore::new(root);
+let fork = crate::dispatch::marketplace::stash_bridge::fork_component_for_plugin(&params.plugin_id)?;
+let revision = crate::dispatch::stash::revision::save_revision(
+    &store,
+    &fork.component_id,
+    Some(&format!("Apply marketplace update {}", preview.new_version)),
+)
+.await?;
+store.with_component_lock(&fork.component_id, || {
+    let mut component = store.read_component(&fork.component_id)?.ok_or_else(|| ToolError::Sdk {
+        sdk_kind: "not_found".into(),
+        message: format!("component `{}` missing after update apply", fork.component_id),
+    })?;
+    if let Some(lab_apis::stash::StashOrigin::Marketplace(origin)) = component.origin_meta.as_mut() {
+        origin.source_version = Some(preview.new_version.clone());
+        origin.source_fingerprint = Some(preview.upstream_fingerprint.clone());
+    }
+    component.updated_at = jiff::Timestamp::now().to_string();
+    store.write_component(&component)
+})?;
+```
+
+If `save_revision` is not visible from `marketplace`, expose a Stash service
+helper that performs this exact locked save-and-origin-update sequence instead
+of bypassing Stash revision semantics.
+
+- [ ] **Step 7: Run update tests**
 
 Run:
 
@@ -1186,7 +1468,7 @@ cargo test -p labby --all-features marketplace::tests::help_lists_artifact_actio
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add crates/lab/src/dispatch/marketplace/update.rs crates/lab/src/dispatch/marketplace/stash_bridge.rs
@@ -1200,46 +1482,41 @@ git commit -m "feat(marketplace): read artifact update state from stash"
 **Files:**
 - Modify: `crates/lab/src/dispatch/marketplace/fork.rs`
 - Modify: `crates/lab/src/dispatch/marketplace/stash_bridge.rs`
-- Modify: `crates/lab/src/dispatch/marketplace/params.rs`
 - Test: `crates/lab/src/dispatch/marketplace/fork.rs`
+- Test: `crates/lab/src/api/services/helpers.rs` or existing marketplace API test module
 
-- [ ] **Step 1: Enforce `confirm` in destructive artifact params**
+- [ ] **Step 1: Preserve shared destructive confirmation gates**
 
-Update `parse_unfork_params`, `parse_artifact_reset_params`, and `parse_update_apply_params` in `crates/lab/src/dispatch/marketplace/params.rs` so each requires `confirm: true`.
+Do not add `confirm` requirements to `parse_unfork_params`,
+`parse_artifact_reset_params`, or `parse_update_apply_params`. HTTP confirms
+destructive actions in `api/services/helpers.rs` and strips `confirm` before
+dispatch; CLI confirms through `run_confirmable_action_command`; MCP confirms
+through elicitation or `params.confirm`.
 
-Add this helper:
+Add or extend a surface-gate test that proves confirmed API requests reach the
+marketplace parser without `confirm` in params:
 
 ```rust
-fn require_confirm(params: &Value, action: &'static str) -> Result<(), ToolError> {
-    if params.get("confirm").and_then(Value::as_bool) == Some(true) {
-        return Ok(());
+#[tokio::test]
+async fn destructive_marketplace_actions_are_confirmed_before_dispatch() {
+    let actions = crate::dispatch::marketplace::actions();
+    for name in ["artifact.unfork", "artifact.reset", "artifact.update.apply"] {
+        let spec = actions.iter().find(|action| action.name == name).expect(name);
+        assert!(spec.destructive, "{name} must remain cataloged destructive");
     }
-    Err(ToolError::InvalidParam {
-        param: "confirm".into(),
-        message: format!("`confirm: true` is required for `{action}`"),
-    })
 }
 ```
 
-Call it in each destructive parser.
+- [ ] **Step 2: Keep params parsers focused on domain inputs**
 
-- [ ] **Step 2: Write confirm tests**
-
-Add to the `params.rs` test module:
+Verify the existing parsers accept valid domain params without a `confirm` field:
 
 ```rust
 #[test]
-fn parse_unfork_requires_confirm_true() {
-    let err = parse_unfork_params(&serde_json::json!({"plugin_id": "demo@labby"})).unwrap_err();
-    assert_eq!(err.kind(), "invalid_param");
-    assert!(parse_unfork_params(&serde_json::json!({"plugin_id": "demo@labby", "confirm": true})).is_ok());
-}
-
-#[test]
-fn parse_reset_requires_confirm_true() {
-    let err = parse_artifact_reset_params(&serde_json::json!({"plugin_id": "demo@labby"})).unwrap_err();
-    assert_eq!(err.kind(), "invalid_param");
-    assert!(parse_artifact_reset_params(&serde_json::json!({"plugin_id": "demo@labby", "confirm": true})).is_ok());
+fn destructive_artifact_parsers_do_not_require_confirm_after_surface_gate() {
+    assert!(parse_unfork_params(&serde_json::json!({"plugin_id": "demo@labby"})).is_ok());
+    assert!(parse_artifact_reset_params(&serde_json::json!({"plugin_id": "demo@labby"})).is_ok());
+    assert!(parse_update_apply_params(&serde_json::json!({"plugin_id": "demo@labby"})).is_ok());
 }
 ```
 
@@ -1283,7 +1560,9 @@ pub(super) async fn unfork(plugin_id: &str, artifacts: Option<Vec<String>>) -> R
 }
 ```
 
-If `StashStore` does not expose `delete_component`, use its existing component deletion method name. If there is no deletion method, add one in `store.rs` that removes the component record, revision index, provider index, provider records, and workspace using the already-tested deletion logic in that file.
+`StashStore::delete_component` already exists and removes the component record,
+revision index, provider index, provider records, and workspace. Use it
+directly; do not add another deletion path.
 
 - [ ] **Step 4: Implement bridge reset**
 
@@ -1308,7 +1587,7 @@ pub(super) async fn reset(plugin_id: &str, artifacts: Option<Vec<String>>) -> Re
             continue;
         }
         let workspace = store.workspace_dir(&component.id);
-        let base = workspace.join(".base");
+        let base = fork_state_dir(&component.id)?.join("base");
         let paths: Vec<String> = match artifacts.clone() {
             Some(paths) => paths,
             None => origin.artifact_path.into_iter().collect(),
@@ -1370,7 +1649,7 @@ pub(super) async fn artifact_reset(params: ArtifactResetParams) -> Result<Value,
 Run:
 
 ```bash
-cargo test -p labby --all-features parse_unfork_requires_confirm_true parse_reset_requires_confirm_true
+cargo test -p labby --all-features destructive_artifact_parsers_do_not_require_confirm_after_surface_gate destructive_marketplace_actions_are_confirmed_before_dispatch
 cargo test -p labby --all-features stash_bridge
 ```
 
@@ -1379,7 +1658,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add crates/lab/src/dispatch/marketplace/fork.rs crates/lab/src/dispatch/marketplace/params.rs crates/lab/src/dispatch/marketplace/stash_bridge.rs crates/lab/src/dispatch/stash/store.rs
+git add crates/lab/src/dispatch/marketplace/fork.rs crates/lab/src/dispatch/marketplace/stash_bridge.rs crates/lab/src/api/services
 git commit -m "feat(marketplace): manage fork reset and removal through stash"
 ```
 
@@ -1407,8 +1686,6 @@ import {
   unforkMarketplaceArtifact,
 } from './marketplace-client'
 
-const originalFetch = global.fetch
-
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
     status: 200,
@@ -1417,7 +1694,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  vi.stubGlobal('fetch', originalFetch)
+  vi.unstubAllGlobals()
 })
 
 test('forkMarketplaceArtifact posts artifact.fork', async () => {
@@ -1428,15 +1705,19 @@ test('forkMarketplaceArtifact posts artifact.fork', async () => {
     params: {
       plugin_id: 'demo@labby',
       artifacts: ['skills/demo/SKILL.md'],
+      confirm: true,
     },
   })
 })
 
-test('destructive artifact helpers include confirm true', async () => {
+test('write artifact helpers include confirm true', async () => {
+  await forkMarketplaceArtifact({ pluginId: 'demo@labby', artifacts: ['skills/demo/SKILL.md'] })
   await resetMarketplaceArtifact({ pluginId: 'demo@labby', artifacts: ['skills/demo/SKILL.md'] })
   await unforkMarketplaceArtifact({ pluginId: 'demo@labby', artifacts: ['skills/demo/SKILL.md'] })
-  const resetBody = JSON.parse(String((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body))
-  const unforkBody = JSON.parse(String((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[1][1].body))
+  const forkBody = JSON.parse(String((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body))
+  const resetBody = JSON.parse(String((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[1][1].body))
+  const unforkBody = JSON.parse(String((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[2][1].body))
+  expect(forkBody.params.confirm).toBe(true)
   expect(resetBody.params.confirm).toBe(true)
   expect(unforkBody.params.confirm).toBe(true)
 })
@@ -1476,13 +1757,14 @@ export interface MarketplaceForkStatus {
   component_id: string
   stash_workspace: string
   forked_artifacts: string[]
-  dirty: boolean
+  status: 'clean' | 'dirty' | 'unknown'
 }
 
 export function forkMarketplaceArtifact(input: ForkMarketplaceArtifactInput, signal?: AbortSignal): Promise<unknown> {
   return marketplaceAction('artifact.fork', {
     plugin_id: input.pluginId,
     ...(input.artifacts?.length ? { artifacts: input.artifacts } : {}),
+    confirm: true,
   }, signal)
 }
 
@@ -1580,7 +1862,85 @@ git commit -m "feat(gateway-admin): expose marketplace artifact forks"
 
 ---
 
-## Task 8: Docs, Generated Catalogs, and Full Verification
+## Task 8: Preserve Marketplace Artifact Route Auth Metadata
+
+**Files:**
+- Modify: `crates/lab/src/api/services/marketplace.rs`
+- Test: `crates/lab/src/api/services/marketplace.rs`
+
+- [ ] **Step 1: Pass auth context through artifact convenience routes**
+
+Current dedicated artifact routes call `handle_marketplace_action(..., None, ...)`.
+Update each `handle_artifact_*` function to accept `auth:
+Option<Extension<AuthContext>>` and pass it to `handle_artifact_path_action`.
+
+Use this shape:
+
+```rust
+async fn handle_artifact_fork(
+    headers: HeaderMap,
+    auth: Option<Extension<AuthContext>>,
+    body: Option<Json<Value>>,
+) -> Result<Json<Value>, ToolError> {
+    handle_artifact_path_action(headers, auth, "artifact.fork", body).await
+}
+
+async fn handle_artifact_path_action(
+    headers: HeaderMap,
+    auth: Option<Extension<AuthContext>>,
+    action: &'static str,
+    body: Option<Json<Value>>,
+) -> Result<Json<Value>, ToolError> {
+    let params = body
+        .map(|Json(value)| value)
+        .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+    handle_marketplace_action(
+        None,
+        headers,
+        auth,
+        ActionRequest {
+            action: action.to_string(),
+            params,
+        },
+    )
+    .await
+}
+```
+
+Apply the same signature change to `handle_artifact_list`,
+`handle_artifact_unfork`, `handle_artifact_reset`, `handle_artifact_diff`,
+`handle_artifact_patch`, `handle_artifact_update_check`,
+`handle_artifact_update_preview`, `handle_artifact_update_apply`,
+`handle_artifact_merge_suggest`, and `handle_artifact_config_set`.
+
+- [ ] **Step 2: Add route auth regression test**
+
+Add a test that sends a request through `/v1/marketplace/artifact/fork` with an
+auth extension and verifies the route does not drop auth before the shared
+handler. If mocking the full dispatcher is not available, assert the handler
+signature compiles and add a narrow unit test around `dispatch_meta_from_headers`
+with `AuthContext` from this route path.
+
+- [ ] **Step 3: Run route tests**
+
+Run:
+
+```bash
+cargo test -p labby --all-features marketplace_artifact
+```
+
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add crates/lab/src/api/services/marketplace.rs
+git commit -m "fix(api): preserve marketplace artifact route auth context"
+```
+
+---
+
+## Task 9: Docs, Generated Catalogs, and Full Verification
 
 **Files:**
 - Modify: `docs/coverage/stash.md`
@@ -1689,14 +2049,15 @@ git commit -m "docs: document marketplace stash integration"
 - Marketplace artifact forks become stash components: Tasks 3 and 4.
 - Stash remains the durable owner of component identity, workspaces, revisions, providers, export, and deploy: Tasks 1 and 2.
 - Marketplace remains the owner of plugin discovery and update/merge UX: Tasks 3, 4, and 5.
-- The existing parallel marketplace `.stash.json` concept is replaced or constrained to marketplace merge metadata under stash workspaces: Task 5.
+- The existing parallel marketplace `.stash.json` concept is replaced by marketplace merge metadata in a Stash-owned sidecar path outside tracked workspaces: Task 5.
 - Destructive actions require confirmation: Task 6.
 - Frontend can initiate forks: Task 7.
-- Docs and generated catalogs stay current: Task 8.
+- Dedicated Marketplace artifact HTTP routes preserve auth context: Task 8.
+- Docs and generated catalogs stay current: Task 9.
 
 ### Placeholder Scan
 
-This plan intentionally avoids placeholder implementation steps. The only conditional instruction is in Task 6 for the `StashStore` deletion method because the exact method name must be verified in the current checkout before editing; the fallback is fully specified.
+This plan intentionally avoids placeholder implementation steps. Stash deletion uses the existing `StashStore::delete_component` method, and Marketplace helper metadata is stored in a sidecar path rather than left as an open storage decision.
 
 ### Type Consistency
 
