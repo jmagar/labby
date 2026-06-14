@@ -4428,7 +4428,7 @@
   {
     "service": "setup",
     "action": "install_plugin",
-    "description": "Install the Claude Code plugin for one configured service",
+    "description": "Deprecated alias for `plugin.install`",
     "destructive": true,
     "params": [
       {
@@ -4453,7 +4453,7 @@
   {
     "service": "setup",
     "action": "installed_plugins",
-    "description": "List installed Claude Code lab plugins",
+    "description": "Deprecated alias for `plugins.installed`",
     "destructive": false,
     "params": [
       {
@@ -4464,6 +4464,56 @@
       }
     ],
     "returns": "InstalledPlugin[]",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "plugin.install",
+    "description": "Install the Claude Code plugin for one configured service",
+    "destructive": true,
+    "params": [
+      {
+        "name": "service",
+        "ty": "string",
+        "required": true,
+        "description": "Registered service name"
+      }
+    ],
+    "returns": "PluginMutationResult",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "plugin.uninstall",
+    "description": "Uninstall the Claude Code plugin for one service",
+    "destructive": true,
+    "params": [
+      {
+        "name": "service",
+        "ty": "string",
+        "required": true,
+        "description": "Registered service name"
+      }
+    ],
+    "returns": "PluginMutationResult",
     "surface_availability": {
       "cli": true,
       "mcp": true,
@@ -4563,6 +4613,31 @@
   },
   {
     "service": "setup",
+    "action": "plugins.installed",
+    "description": "List installed Claude Code lab plugins",
+    "destructive": false,
+    "params": [
+      {
+        "name": "force",
+        "ty": "boolean",
+        "required": false,
+        "description": "Bypass the short in-process cache"
+      }
+    ],
+    "returns": "InstalledPlugin[]",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
     "action": "repair",
     "description": "Repair missing local Lab setup prerequisites without contacting external services",
     "destructive": true,
@@ -4631,8 +4706,26 @@
   },
   {
     "service": "setup",
-    "action": "services_status",
+    "action": "services.status",
     "description": "Join service configuration, draft, and Claude plugin state",
+    "destructive": false,
+    "params": [],
+    "returns": "ServiceStatus[]",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "services_status",
+    "description": "Deprecated alias for `services.status`",
     "destructive": false,
     "params": [],
     "returns": "ServiceStatus[]",
@@ -4822,7 +4915,7 @@
   {
     "service": "setup",
     "action": "uninstall_plugin",
-    "description": "Uninstall the Claude Code plugin for one service",
+    "description": "Deprecated alias for `plugin.uninstall`",
     "destructive": true,
     "params": [
       {

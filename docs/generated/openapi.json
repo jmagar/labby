@@ -2955,6 +2955,36 @@
           }
         }
       },
+      "SetupPluginInstallParams": {
+        "type": "object",
+        "required": [
+          "service",
+          "confirm"
+        ],
+        "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
+          "service": {
+            "type": "string"
+          }
+        }
+      },
+      "SetupPluginUninstallParams": {
+        "type": "object",
+        "required": [
+          "service",
+          "confirm"
+        ],
+        "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
+          "service": {
+            "type": "string"
+          }
+        }
+      },
       "SetupPlugin_connectivityParams": {
         "type": "object",
         "properties": {
@@ -2973,6 +3003,14 @@
             "type": "boolean"
           },
           "repair": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SetupPluginsInstalledParams": {
+        "type": "object",
+        "properties": {
+          "force": {
             "type": "boolean"
           }
         }

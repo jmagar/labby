@@ -163,13 +163,17 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `setup` | `help` | false | false |  | `Catalog` | cli, mcp, api, web |
 | `setup` | `install_plugin` | false | true | `service*: string` | `PluginMutationResult` | cli, mcp, api, web |
 | `setup` | `installed_plugins` | false | false | `force: boolean` | `InstalledPlugin[]` | cli, mcp, api, web |
+| `setup` | `plugin.install` | false | true | `service*: string` | `PluginMutationResult` | cli, mcp, api, web |
+| `setup` | `plugin.uninstall` | false | true | `service*: string` | `PluginMutationResult` | cli, mcp, api, web |
 | `setup` | `plugin_connectivity` | false | false | `server_url: string` | `ConnectivityOutcome` | cli, mcp, api, web |
 | `setup` | `plugin_export` | false | false |  | `PluginExportOutcome` | cli, mcp, api, web |
 | `setup` | `plugin_hook` | false | true | `repair: boolean` | `PluginHookReport` | cli, mcp, api, web |
 | `setup` | `plugin_sync` | false | true |  | `PluginSyncOutcome` | cli, mcp, api, web |
+| `setup` | `plugins.installed` | false | false | `force: boolean` | `InstalledPlugin[]` | cli, mcp, api, web |
 | `setup` | `repair` | false | true |  | `SetupReport` | cli, mcp, api, web |
 | `setup` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api, web |
 | `setup` | `schema.get` | false | false | `services: string[]` | `ServiceSchemaMap` | cli, mcp, api, web |
+| `setup` | `services.status` | false | false |  | `ServiceStatus[]` | cli, mcp, api, web |
 | `setup` | `services_status` | false | false |  | `ServiceStatus[]` | cli, mcp, api, web |
 | `setup` | `settings.advanced_state` | false | false |  | `SettingsState` | cli, mcp, api, web |
 | `setup` | `settings.config.update` | false | true | `entries*: SettingsUpdateEntry[]` | `SettingsMutationOutcome` | cli, mcp, api, web |

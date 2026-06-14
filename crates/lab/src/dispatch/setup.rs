@@ -20,5 +20,5 @@ mod state;
 mod token;
 
 pub use bootstrap::{BootstrapOutcome, bootstrap, bootstrap_action, should_bootstrap};
-pub use catalog::ACTIONS;
+pub use catalog::{ACTIONS, PLUGIN_LIFECYCLE_ACTIONS};
 pub use dispatch::dispatch;

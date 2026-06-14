@@ -91,10 +91,19 @@ async fn dispatch_inner(action: &str, params: &Value) -> Result<Value, ToolError
         "plugin_connectivity" => plugin_connectivity_action(params).await,
         "check" => setup_check_action(),
         "repair" => setup_repair_action(),
-        "installed_plugins" => installed_plugins_action(params).await,
-        "services_status" => services_status_action().await,
-        "install_plugin" => install_plugin_action(params).await,
-        "uninstall_plugin" => uninstall_plugin_action(params).await,
+        // Plugin-lifecycle actions. The dotted `<resource>.<verb>` forms are
+        // the canonical names; the snake_case arms beside them are deprecated
+        // aliases retained for backward compatibility. Every name routed here
+        // is listed in `super::catalog::PLUGIN_LIFECYCLE_ACTIONS`, which the
+        // HTTP loopback gate (`crate::api::services::setup`) reads directly —
+        // so a name routable here but absent from that const would be a
+        // loopback-restriction bypass. The `plugin_lifecycle_actions_*` tests
+        // enforce that every const name both routes here and has a catalog
+        // entry; keep all of them in sync when adding a lifecycle action.
+        "plugins.installed" | "installed_plugins" => installed_plugins_action(params).await,
+        "services.status" | "services_status" => services_status_action().await,
+        "plugin.install" | "install_plugin" => install_plugin_action(params).await,
+        "plugin.uninstall" | "uninstall_plugin" => uninstall_plugin_action(params).await,
         "finalize" => draft_commit_action(params).await,
         unknown => Err(ToolError::UnknownAction {
             message: format!("unknown action `{unknown}` for service `setup`"),
@@ -860,6 +869,12 @@ mod tests {
             "settings.advanced_state",
             "settings.env_schema",
             "finalize",
+            // Canonical dotted plugin-lifecycle names:
+            "plugins.installed",
+            "services.status",
+            "plugin.install",
+            "plugin.uninstall",
+            // Deprecated snake_case aliases (still routed):
             "installed_plugins",
             "services_status",
             "install_plugin",
@@ -869,6 +884,95 @@ mod tests {
             "plugin_connectivity",
         ] {
             assert!(names.contains(required), "missing setup action {required}");
+        }
+    }
+
+    #[test]
+    fn plugin_lifecycle_actions_are_cataloged() {
+        // Every loopback-gated name must have a catalog ActionSpec — otherwise
+        // the unknown-action gate in the API surface would reject it before
+        // the loopback gate ever runs, and discovery would not list it.
+        let names: std::collections::BTreeSet<&str> =
+            ACTIONS.iter().map(|action| action.name).collect();
+        for action in super::super::PLUGIN_LIFECYCLE_ACTIONS {
+            assert!(
+                names.contains(action),
+                "plugin-lifecycle action `{action}` is in PLUGIN_LIFECYCLE_ACTIONS \
+                 but has no catalog ActionSpec"
+            );
+        }
+    }
+
+    #[test]
+    fn plugin_lifecycle_canonical_alias_pairs_share_metadata() {
+        // PLUGIN_LIFECYCLE_ACTIONS is ordered (canonical, alias). Both members
+        // of a pair route to the same handler, so they MUST carry identical
+        // destructive / requires_admin / returns metadata — otherwise one form
+        // could skip the destructive-confirmation or admin-scope gate that the
+        // other enforces. Guards against hand-copy drift between the entries.
+        let spec = |name: &str| {
+            ACTIONS
+                .iter()
+                .find(|action| action.name == name)
+                .unwrap_or_else(|| panic!("missing catalog entry for `{name}`"))
+        };
+        for pair in super::super::PLUGIN_LIFECYCLE_ACTIONS.chunks_exact(2) {
+            let canonical = spec(pair[0]);
+            let alias = spec(pair[1]);
+            assert_eq!(
+                canonical.destructive, alias.destructive,
+                "`{}` and `{}` disagree on destructive",
+                pair[0], pair[1]
+            );
+            assert_eq!(
+                canonical.requires_admin, alias.requires_admin,
+                "`{}` and `{}` disagree on requires_admin",
+                pair[0], pair[1]
+            );
+            assert_eq!(
+                canonical.returns, alias.returns,
+                "`{}` and `{}` disagree on returns",
+                pair[0], pair[1]
+            );
+        }
+        // Spot-check the intended classification so a future edit that flips
+        // both members of a pair together is still caught.
+        assert!(spec("plugin.install").destructive);
+        assert!(spec("plugin.uninstall").destructive);
+        assert!(!spec("plugins.installed").destructive);
+        assert!(!spec("services.status").destructive);
+    }
+
+    #[tokio::test]
+    async fn dotted_plugin_mutation_actions_route_to_handlers() {
+        // Prove the new dotted match arms actually route to the real handlers
+        // rather than falling through to the `unknown` arm: a typo in a match
+        // literal would surface here as `unknown_action` instead of the
+        // handler's `missing_param`. The two mutation actions reach
+        // `parse_service` (→ missing_param) before any subprocess, so this is
+        // deterministic and side-effect-free. The read actions spawn the
+        // `claude` CLI, so they are intentionally not dispatched in a unit test.
+        for action in [
+            "plugin.install",
+            "plugin.uninstall",
+            "install_plugin",
+            "uninstall_plugin",
+        ] {
+            let err = dispatch(action, json!({})).await.unwrap_err();
+            assert_eq!(
+                err.kind(),
+                "missing_param",
+                "`{action}` should route to its handler and require `service`, got {err:?}"
+            );
+            match err {
+                ToolError::InvalidParam { param, .. } | ToolError::MissingParam { param, .. } => {
+                    assert_eq!(
+                        param, "service",
+                        "`{action}` should fault the `service` param"
+                    );
+                }
+                other => panic!("`{action}` returned unexpected error: {other:?}"),
+            }
         }
     }
 

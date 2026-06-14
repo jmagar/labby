@@ -1258,7 +1258,7 @@
           "returns": "SetupReport"
         },
         {
-          "name": "installed_plugins",
+          "name": "plugins.installed",
           "description": "List installed Claude Code lab plugins",
           "destructive": false,
           "params": [
@@ -1272,14 +1272,35 @@
           "returns": "InstalledPlugin[]"
         },
         {
-          "name": "services_status",
+          "name": "installed_plugins",
+          "description": "Deprecated alias for `plugins.installed`",
+          "destructive": false,
+          "params": [
+            {
+              "name": "force",
+              "ty": "boolean",
+              "required": false,
+              "description": "Bypass the short in-process cache"
+            }
+          ],
+          "returns": "InstalledPlugin[]"
+        },
+        {
+          "name": "services.status",
           "description": "Join service configuration, draft, and Claude plugin state",
           "destructive": false,
           "params": [],
           "returns": "ServiceStatus[]"
         },
         {
-          "name": "install_plugin",
+          "name": "services_status",
+          "description": "Deprecated alias for `services.status`",
+          "destructive": false,
+          "params": [],
+          "returns": "ServiceStatus[]"
+        },
+        {
+          "name": "plugin.install",
           "description": "Install the Claude Code plugin for one configured service",
           "destructive": true,
           "params": [
@@ -1293,8 +1314,36 @@
           "returns": "PluginMutationResult"
         },
         {
-          "name": "uninstall_plugin",
+          "name": "install_plugin",
+          "description": "Deprecated alias for `plugin.install`",
+          "destructive": true,
+          "params": [
+            {
+              "name": "service",
+              "ty": "string",
+              "required": true,
+              "description": "Registered service name"
+            }
+          ],
+          "returns": "PluginMutationResult"
+        },
+        {
+          "name": "plugin.uninstall",
           "description": "Uninstall the Claude Code plugin for one service",
+          "destructive": true,
+          "params": [
+            {
+              "name": "service",
+              "ty": "string",
+              "required": true,
+              "description": "Registered service name"
+            }
+          ],
+          "returns": "PluginMutationResult"
+        },
+        {
+          "name": "uninstall_plugin",
+          "description": "Deprecated alias for `plugin.uninstall`",
           "destructive": true,
           "params": [
             {
