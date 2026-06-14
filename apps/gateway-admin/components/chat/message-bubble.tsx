@@ -2,15 +2,10 @@
 
 import * as React from 'react'
 import { Bot, Check, ChevronDown, Copy, ListChecks, Pencil, RotateCcw, UserRound } from 'lucide-react'
-import {
-  Streamdown,
-  defaultUrlTransform,
-  type AllowElement,
-  type UrlTransform,
-} from 'streamdown'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { SafeMarkdown } from '@/components/markdown/safe-markdown'
 import {
   ChainOfThought,
   ChainOfThoughtContent,
@@ -133,9 +128,6 @@ function StreamingCursor() {
   )
 }
 
-const SAFE_MARKDOWN_IMAGE_ELEMENTS = ['img'] as const
-const NO_REHYPE_PLUGINS: never[] = []
-const DISABLED_LINK_SAFETY = { enabled: false } as const
 const MESSAGE_CONTENT_CLASS =
   'relative max-w-full overflow-hidden rounded-aurora-2 px-4 py-3'
 const ASSISTANT_MESSAGE_CONTENT_CLASS =
@@ -144,59 +136,6 @@ const USER_MESSAGE_CONTENT_CLASS =
   'border border-aurora-border-strong bg-aurora-panel-strong shadow-[var(--aurora-shadow-medium),var(--aurora-highlight-medium)]'
 const MESSAGE_REVEAL_ON_INTERACTION_CLASS =
   'opacity-0 group-data-[interaction-open=true]:opacity-100 group-focus-within:opacity-100'
-
-function isAllowedMarkdownUrl(url: string) {
-  const trimmed = url.trim()
-  if (trimmed.startsWith('//')) return false
-
-  const scheme = trimmed.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase()
-  return !scheme || scheme === 'http' || scheme === 'https' || scheme === 'mailto'
-}
-
-const safeMarkdownUrlTransform: UrlTransform = (url, key, node) => {
-  const transformed = defaultUrlTransform(url, key, node)
-  if (!transformed) return transformed
-
-  return isAllowedMarkdownUrl(transformed) ? transformed : null
-}
-
-const allowSafeMarkdownElement: AllowElement = (element) => {
-  if (element.tagName === 'img') return false
-
-  if (element.tagName === 'a') {
-    const href = element.properties?.href
-    return typeof href === 'string' && isAllowedMarkdownUrl(href)
-  }
-
-  return true
-}
-
-function AssistantMarkdown({
-  text,
-  isStreaming,
-}: {
-  text: string
-  isStreaming: boolean
-}) {
-  return (
-    <div className="min-w-0 max-w-full text-[13px] leading-[1.55] text-aurora-text-primary [overflow-wrap:anywhere] [&_a]:break-words [&_code]:break-words [&_li]:min-w-0 [&_ol]:min-w-0 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:[overflow-wrap:normal] [&_pre]:whitespace-pre [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_ul]:min-w-0">
-      <Streamdown
-        mode={isStreaming ? 'streaming' : 'static'}
-        skipHtml
-        rehypePlugins={NO_REHYPE_PLUGINS}
-        disallowedElements={SAFE_MARKDOWN_IMAGE_ELEMENTS}
-        allowElement={allowSafeMarkdownElement}
-        urlTransform={safeMarkdownUrlTransform}
-        controls={false}
-        linkSafety={DISABLED_LINK_SAFETY}
-        lineNumbers={false}
-      >
-        {text}
-      </Streamdown>
-      {isStreaming ? <StreamingCursor /> : null}
-    </div>
-  )
-}
 
 function AgentActionsPanel({
   open,
@@ -483,7 +422,7 @@ function MessageBubbleComponent({
                 {message.isStreaming ? <StreamingCursor /> : null}
               </p>
             ) : (
-              <AssistantMarkdown text={message.text} isStreaming={isStreaming} />
+              <SafeMarkdown text={message.text} isStreaming={isStreaming} />
             )}
           </div>
         )}
