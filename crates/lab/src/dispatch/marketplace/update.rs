@@ -156,7 +156,8 @@ struct UpdatePreviewResult {
     current_version: String,
     upstream_version: String,
     new_version: String,
-    upstream_commit: String,
+    #[serde(rename = "upstream_fingerprint", alias = "upstream_commit")]
+    upstream_fingerprint: String,
     unchanged: Vec<String>,
     upstream_only: Vec<String>,
     user_only: Vec<String>,
@@ -386,14 +387,14 @@ fn build_preview_from_fork(fork: &ForkRecord) -> Result<UpdatePreviewResult, Too
     let plugin_id = &fork.plugin_id;
     let source = source_path_for_plugin(plugin_id)?;
     let new_version = upstream_version(&source).unwrap_or_else(|| "unknown".into());
-    let upstream_commit = compute_tree_fingerprint(&source)?;
+    let upstream_fingerprint = compute_tree_fingerprint(&source)?;
     let mut preview = UpdatePreviewResult {
         plugin_id: plugin_id.clone(),
         has_update: meta.upstream_version != new_version,
         current_version: meta.upstream_version.clone(),
         upstream_version: new_version.clone(),
         new_version,
-        upstream_commit,
+        upstream_fingerprint,
         unchanged: Vec::new(),
         upstream_only: Vec::new(),
         user_only: Vec::new(),
@@ -575,7 +576,7 @@ fn update_apply(params: UpdateApplyParams) -> Result<Result<Value, ToolError>, T
 
     let source = source_path_for_plugin(&params.plugin_id)?;
     let current_commit = compute_tree_fingerprint(&source)?;
-    if preview.upstream_commit != current_commit {
+    if preview.upstream_fingerprint != current_commit {
         return Ok(Err(ToolError::Sdk {
             sdk_kind: "stale_preview".into(),
             message: "Upstream changed since preview. Run artifact.update.preview again.".into(),
@@ -918,7 +919,7 @@ fn save_stash_revision_and_update_origin(
             component.origin_meta.as_mut()
         {
             origin.source_version = Some(preview.new_version.clone());
-            origin.source_fingerprint = Some(preview.upstream_commit.clone());
+            origin.source_fingerprint = Some(preview.upstream_fingerprint.clone());
         }
         component.updated_at = jiff::Timestamp::now().to_string();
         store.write_component(&component)
