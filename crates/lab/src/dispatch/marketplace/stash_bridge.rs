@@ -233,6 +233,108 @@ pub(super) fn fork_component_for_plugin(
     })
 }
 
+#[derive(Debug, Serialize)]
+pub(super) struct UnforkResult {
+    pub plugin_id: String,
+    pub removed_component_ids: Vec<String>,
+}
+
+pub(super) async fn unfork(
+    plugin_id: &str,
+    artifacts: Option<Vec<String>>,
+) -> Result<Value, ToolError> {
+    let root = crate::dispatch::stash::client::require_stash_root()?.clone();
+    let store = crate::dispatch::stash::store::StashStore::new(root);
+    let mut removed = Vec::new();
+    for component in store.list_components()? {
+        let Some(StashOrigin::Marketplace(origin)) = component.origin_meta.clone() else {
+            continue;
+        };
+        if origin.plugin_id != plugin_id {
+            continue;
+        }
+        if let Some(filter) = &artifacts {
+            let Some(path) = origin.artifact_path.as_ref() else {
+                continue;
+            };
+            if !filter.iter().any(|candidate| candidate == path) {
+                continue;
+            }
+        }
+        store.delete_component(&component.id)?;
+        removed.push(component.id);
+    }
+    crate::dispatch::helpers::to_json(UnforkResult {
+        plugin_id: plugin_id.to_string(),
+        removed_component_ids: removed,
+    })
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct ResetResult {
+    pub plugin_id: String,
+    pub reset_artifacts: Vec<String>,
+    pub revision_ids: Vec<String>,
+}
+
+pub(super) async fn reset(
+    plugin_id: &str,
+    artifacts: Option<Vec<String>>,
+) -> Result<Value, ToolError> {
+    let root = crate::dispatch::stash::client::require_stash_root()?.clone();
+    let store = crate::dispatch::stash::store::StashStore::new(root);
+    let mut reset_artifacts = Vec::new();
+    let mut revision_ids = Vec::new();
+    for component in store.list_components()? {
+        let Some(StashOrigin::Marketplace(origin)) = component.origin_meta.clone() else {
+            continue;
+        };
+        if origin.plugin_id != plugin_id {
+            continue;
+        }
+        let workspace = store.workspace_dir(&component.id);
+        let base = fork_state_dir(&component.id)?.join("base");
+        let paths: Vec<String> = match artifacts.clone() {
+            Some(paths) => paths,
+            None => origin.artifact_path.into_iter().collect(),
+        };
+        let mut reset_this_component = false;
+        for rel in paths {
+            crate::dispatch::marketplace::stash_meta::validate_rel_path(&rel)?;
+            let source = base.join(&rel);
+            let target = workspace.join(&rel);
+            if !source.exists() {
+                return Err(ToolError::Sdk {
+                    sdk_kind: "not_found".into(),
+                    message: format!("base snapshot `{rel}` is missing"),
+                });
+            }
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(crate::dispatch::marketplace::client::io_internal)?;
+            }
+            std::fs::copy(&source, &target)
+                .map_err(crate::dispatch::marketplace::client::io_internal)?;
+            reset_artifacts.push(rel);
+            reset_this_component = true;
+        }
+        if reset_this_component {
+            let revision = crate::dispatch::stash::revision::save_revision(
+                &store,
+                &component.id,
+                Some("Reset to marketplace base"),
+            )
+            .await?;
+            revision_ids.push(revision.id);
+        }
+    }
+    crate::dispatch::helpers::to_json(ResetResult {
+        plugin_id: plugin_id.to_string(),
+        reset_artifacts,
+        revision_ids,
+    })
+}
+
 fn stash_kind_param(kind: StashComponentKind) -> &'static str {
     match kind {
         StashComponentKind::Skill => "skill",
