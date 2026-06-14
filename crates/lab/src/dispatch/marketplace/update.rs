@@ -192,6 +192,8 @@ struct UpdateCheckCache {
 struct ForkRecord {
     plugin_id: String,
     stash: PathBuf,
+    state_dir: Option<PathBuf>,
+    component_id: Option<String>,
     meta: StashMeta,
 }
 
@@ -272,7 +274,11 @@ fn update_check(plugin_id: Option<String>) -> Result<Result<Value, ToolError>, T
             .as_deref()
             .is_some_and(|version| version != fork.meta.upstream_version);
         write_json_atomic(
-            &fork.stash.join(".update-check.json"),
+            &fork
+                .state_dir
+                .as_ref()
+                .map(|state| state.join("update-check.json"))
+                .unwrap_or_else(|| fork.stash.join(".update-check.json")),
             &UpdateCheckCache {
                 last_check: jiff::Timestamp::now().to_string(),
                 pending_update: update_available.then(|| new_version.clone()),
@@ -294,23 +300,28 @@ fn update_preview(
     plugin_id: &str,
     write_pending: bool,
 ) -> Result<Result<Value, ToolError>, ToolError> {
-    let preview = build_preview(plugin_id)?;
+    let fork = fork_record_for_plugin(plugin_id)?;
+    let preview = build_preview_from_fork(&fork)?;
     if write_pending {
-        let stash = stash_dir_for_plugin(plugin_id)?;
-        write_json_atomic(&pending_path(&stash), &preview)?;
+        write_json_atomic(&pending_path_for_fork(&fork), &preview)?;
     }
     to_json(preview).map(Ok)
 }
 
 fn build_preview(plugin_id: &str) -> Result<UpdatePreviewResult, ToolError> {
-    let stash = stash_dir_for_plugin(plugin_id)?;
-    let meta = read_stash_meta(&stash)?;
-    require_forked(&meta)?;
+    let fork = fork_record_for_plugin(plugin_id)?;
+    build_preview_from_fork(&fork)
+}
+
+fn build_preview_from_fork(fork: &ForkRecord) -> Result<UpdatePreviewResult, ToolError> {
+    let meta = &fork.meta;
+    require_forked(meta)?;
+    let plugin_id = &fork.plugin_id;
     let source = source_path_for_plugin(plugin_id)?;
     let new_version = upstream_version(&source).unwrap_or_else(|| "unknown".into());
     let upstream_commit = compute_tree_fingerprint(&source)?;
     let mut preview = UpdatePreviewResult {
-        plugin_id: plugin_id.into(),
+        plugin_id: plugin_id.clone(),
         has_update: meta.upstream_version != new_version,
         current_version: meta.upstream_version.clone(),
         upstream_version: new_version.clone(),
@@ -323,7 +334,8 @@ fn build_preview(plugin_id: &str) -> Result<UpdatePreviewResult, ToolError> {
         conflicts: Vec::new(),
     };
 
-    for file in collect_versions(&stash, &source, &meta)? {
+    let base = base_dir_for_fork(fork);
+    for file in collect_versions(&fork.stash, &base, &source, meta)? {
         let upstream_changed = file.theirs != file.base;
         if upstream_changed {
             preview.has_update = true;
@@ -374,12 +386,12 @@ fn build_preview(plugin_id: &str) -> Result<UpdatePreviewResult, ToolError> {
 }
 
 fn update_apply(params: UpdateApplyParams) -> Result<Result<Value, ToolError>, ToolError> {
-    let stash = stash_dir_for_plugin(&params.plugin_id)?;
-    let _lock = acquire_stash_lock(&stash)?;
-    let mut meta = read_stash_meta(&stash)?;
+    let fork = fork_record_for_plugin(&params.plugin_id)?;
+    let _lock = acquire_stash_lock(&lock_dir_for_fork(&fork))?;
+    let mut meta = fork.meta.clone();
     require_forked(&meta)?;
     let strategy = params.strategy.unwrap_or(meta.update_config.strategy);
-    let preview = match read_pending_preview(&stash) {
+    let preview = match read_pending_preview_at(&pending_path_for_fork(&fork)) {
         Ok(preview) => preview,
         Err(_) => build_preview(&params.plugin_id)?,
     };
@@ -418,15 +430,16 @@ fn update_apply(params: UpdateApplyParams) -> Result<Result<Value, ToolError>, T
     let mut writes = Vec::new();
     let mut applied_clean = Vec::new();
     let mut applied_strategy = Vec::new();
+    let base = base_dir_for_fork(&fork);
 
     for path in &preview.unchanged {
         let theirs = read_required_text(&source.join(path.as_str()))?;
         writes.push(PlannedWrite {
-            path: stash.join(path.as_str()),
+            path: fork.stash.join(path.as_str()),
             content: Some(theirs.clone()),
         });
         writes.push(PlannedWrite {
-            path: base_dir(&stash).join(path.as_str()),
+            path: base.join(path.as_str()),
             content: Some(theirs),
         });
         applied_clean.push(path.clone());
@@ -435,20 +448,20 @@ fn update_apply(params: UpdateApplyParams) -> Result<Result<Value, ToolError>, T
     for path in &preview.upstream_only {
         let theirs = read_required_text(&source.join(path.as_str()))?;
         writes.push(PlannedWrite {
-            path: stash.join(path.as_str()),
+            path: fork.stash.join(path.as_str()),
             content: Some(theirs.clone()),
         });
         writes.push(PlannedWrite {
-            path: base_dir(&stash).join(path.as_str()),
+            path: base.join(path.as_str()),
             content: Some(theirs),
         });
         applied_clean.push(path.clone());
     }
 
     for path in &preview.user_only {
-        if let Ok(yours) = std::fs::read_to_string(stash.join(path.as_str())) {
+        if let Ok(yours) = std::fs::read_to_string(fork.stash.join(path.as_str())) {
             writes.push(PlannedWrite {
-                path: base_dir(&stash).join(path.as_str()),
+                path: base.join(path.as_str()),
                 content: Some(yours),
             });
             applied_clean.push(path.clone());
@@ -458,11 +471,11 @@ fn update_apply(params: UpdateApplyParams) -> Result<Result<Value, ToolError>, T
     for clean in &preview.clean_merges {
         let theirs = read_required_text(&source.join(&clean.path))?;
         writes.push(PlannedWrite {
-            path: stash.join(&clean.path),
+            path: fork.stash.join(&clean.path),
             content: Some(clean.merged_content.clone()),
         });
         writes.push(PlannedWrite {
-            path: base_dir(&stash).join(&clean.path),
+            path: base.join(&clean.path),
             content: Some(theirs),
         });
         applied_clean.push(clean.path.clone());
@@ -477,11 +490,11 @@ fn update_apply(params: UpdateApplyParams) -> Result<Result<Value, ToolError>, T
             ConflictStrategy::AlwaysAsk => unreachable!("handled above"),
         };
         writes.push(PlannedWrite {
-            path: stash.join(&conflict.path),
+            path: fork.stash.join(&conflict.path),
             content: Some(working),
         });
         writes.push(PlannedWrite {
-            path: base_dir(&stash).join(&conflict.path),
+            path: base.join(&conflict.path),
             content: Some(theirs),
         });
         applied_strategy.push(conflict.path.clone());
@@ -490,8 +503,12 @@ fn update_apply(params: UpdateApplyParams) -> Result<Result<Value, ToolError>, T
     apply_planned_writes(&writes)?;
     meta.upstream_version = preview.new_version.clone();
     meta.pending_update = None;
-    write_stash_meta(&stash, &meta)?;
-    drop(std::fs::remove_file(pending_path(&stash)));
+    if fork.component_id.is_some() {
+        save_stash_revision_and_update_origin(&fork, &preview)?;
+    } else {
+        write_stash_meta(&fork.stash, &meta)?;
+    }
+    drop(std::fs::remove_file(pending_path_for_fork(&fork)));
 
     to_json(ApplyResult {
         plugin_id: params.plugin_id,
@@ -566,6 +583,48 @@ fn stash_dir_for_plugin(id: &str) -> Result<PathBuf, ToolError> {
 }
 
 fn collect_forks(plugin_id: Option<String>) -> Result<Vec<ForkRecord>, ToolError> {
+    let root = crate::dispatch::stash::client::require_stash_root()?.clone();
+    let store = crate::dispatch::stash::store::StashStore::new(root);
+    let mut forks = Vec::new();
+    for component in store.list_components()? {
+        let Some(lab_apis::stash::StashOrigin::Marketplace(origin)) = component.origin_meta.clone()
+        else {
+            continue;
+        };
+        if plugin_id.as_ref().is_some_and(|id| id != &origin.plugin_id) {
+            continue;
+        }
+        let meta = StashMeta {
+            schema_version: 1,
+            plugin_id: origin.plugin_id.clone(),
+            forked: true,
+            upstream_id: Some(origin.plugin_id.clone()),
+            upstream_version: origin
+                .source_version
+                .unwrap_or_else(|| "unknown".to_string()),
+            fork_type: if origin.artifact_path.is_some() {
+                ForkType::Artifact
+            } else {
+                ForkType::Plugin
+            },
+            forked_artifacts: origin.artifact_path.into_iter().collect(),
+            update_config: UpdateConfig::default(),
+            pending_update: None,
+        };
+        forks.push(ForkRecord {
+            plugin_id: meta.plugin_id.clone(),
+            stash: store.workspace_dir(&component.id),
+            state_dir: Some(crate::dispatch::marketplace::stash_bridge::fork_state_dir(
+                &component.id,
+            )?),
+            component_id: Some(component.id),
+            meta,
+        });
+    }
+    if !forks.is_empty() {
+        return Ok(forks);
+    }
+
     if let Some(plugin_id) = plugin_id {
         let stash = stash_dir_for_plugin(&plugin_id)?;
         if !stash.join(".stash.json").exists() {
@@ -575,6 +634,8 @@ fn collect_forks(plugin_id: Option<String>) -> Result<Vec<ForkRecord>, ToolError
         return Ok(vec![ForkRecord {
             plugin_id: meta.plugin_id.clone(),
             stash,
+            state_dir: None,
+            component_id: None,
             meta,
         }]);
     }
@@ -599,10 +660,103 @@ fn collect_forks(plugin_id: Option<String>) -> Result<Vec<ForkRecord>, ToolError
         forks.push(ForkRecord {
             plugin_id: meta.plugin_id.clone(),
             stash,
+            state_dir: None,
+            component_id: None,
             meta,
         });
     }
     Ok(forks)
+}
+
+fn fork_record_for_plugin(plugin_id: &str) -> Result<ForkRecord, ToolError> {
+    if let Ok(component) =
+        crate::dispatch::marketplace::stash_bridge::fork_component_for_plugin(plugin_id)
+    {
+        let _ = (&component.workspace_root, &component.base_revision_id);
+        let meta = StashMeta {
+            schema_version: 1,
+            plugin_id: component.plugin_id.clone(),
+            forked: true,
+            upstream_id: Some(component.plugin_id.clone()),
+            upstream_version: component.upstream_version.clone(),
+            fork_type: if component.artifact_path.is_some() {
+                ForkType::Artifact
+            } else {
+                ForkType::Plugin
+            },
+            forked_artifacts: component.artifact_path.into_iter().collect(),
+            update_config: UpdateConfig::default(),
+            pending_update: None,
+        };
+        return Ok(ForkRecord {
+            plugin_id: meta.plugin_id.clone(),
+            stash: component.workspace_dir,
+            state_dir: Some(component.state_dir),
+            component_id: Some(component.component_id),
+            meta,
+        });
+    }
+    collect_forks(Some(plugin_id.to_string()))?
+        .into_iter()
+        .next()
+        .ok_or_else(|| ToolError::Sdk {
+            sdk_kind: "not_found".into(),
+            message: format!("no marketplace fork found for `{plugin_id}`"),
+        })
+}
+
+fn base_dir_for_fork(fork: &ForkRecord) -> PathBuf {
+    fork.state_dir
+        .as_ref()
+        .map(|state| state.join("base"))
+        .unwrap_or_else(|| base_dir(&fork.stash))
+}
+
+fn pending_path_for_fork(fork: &ForkRecord) -> PathBuf {
+    fork.state_dir
+        .as_ref()
+        .map(|state| state.join("pending-update.json"))
+        .unwrap_or_else(|| pending_path(&fork.stash))
+}
+
+fn lock_dir_for_fork(fork: &ForkRecord) -> PathBuf {
+    fork.state_dir
+        .as_ref()
+        .cloned()
+        .unwrap_or_else(|| fork.stash.clone())
+}
+
+fn save_stash_revision_and_update_origin(
+    fork: &ForkRecord,
+    preview: &UpdatePreviewResult,
+) -> Result<(), ToolError> {
+    let Some(component_id) = fork.component_id.as_ref() else {
+        return Ok(());
+    };
+    let root = crate::dispatch::stash::client::require_stash_root()?.clone();
+    let store = crate::dispatch::stash::store::StashStore::new(root);
+    tokio::runtime::Handle::current().block_on(crate::dispatch::stash::revision::save_revision(
+        &store,
+        component_id,
+        Some(&format!("Apply marketplace update {}", preview.new_version)),
+    ))?;
+    store.with_component_lock(component_id, || {
+        let mut component = store
+            .read_component(component_id)?
+            .ok_or_else(|| ToolError::Sdk {
+                sdk_kind: "not_found".into(),
+                message: format!("component `{component_id}` missing after update apply"),
+            })?;
+        if let Some(lab_apis::stash::StashOrigin::Marketplace(origin)) =
+            component.origin_meta.as_mut()
+        {
+            origin.source_version = Some(preview.new_version.clone());
+            origin.source_fingerprint = Some(preview.upstream_commit.clone());
+        }
+        component.updated_at = jiff::Timestamp::now().to_string();
+        store.write_component(&component)
+    })?;
+    Ok(())
 }
 
 fn workspace_root() -> Result<PathBuf, ToolError> {
@@ -786,8 +940,7 @@ fn base_dir(stash: &Path) -> PathBuf {
     stash.join(".base")
 }
 
-fn read_pending_preview(stash: &Path) -> Result<UpdatePreviewResult, ToolError> {
-    let path = pending_path(stash);
+fn read_pending_preview_at(path: &Path) -> Result<UpdatePreviewResult, ToolError> {
     let bytes = std::fs::read(&path).map_err(client::io_internal)?;
     serde_json::from_slice(&bytes).map_err(|e| ToolError::Sdk {
         sdk_kind: "decode_error".into(),
@@ -812,6 +965,7 @@ fn upstream_version(source: &Path) -> Option<String> {
 
 fn collect_versions(
     stash: &Path,
+    base: &Path,
     source: &Path,
     meta: &StashMeta,
 ) -> Result<Vec<FileVersions>, ToolError> {
@@ -819,7 +973,7 @@ fn collect_versions(
     match meta.fork_type {
         ForkType::Plugin => {
             collect_text_paths(stash, stash, &mut paths, true)?;
-            collect_text_paths(&base_dir(stash), &base_dir(stash), &mut paths, false)?;
+            collect_text_paths(base, base, &mut paths, false)?;
             collect_text_paths(source, source, &mut paths, false)?;
         }
         ForkType::Artifact => {
@@ -832,7 +986,7 @@ fn collect_versions(
     let mut out = Vec::with_capacity(paths.len());
     for path in paths {
         out.push(FileVersions {
-            base: std::fs::read_to_string(base_dir(stash).join(&path)).ok(),
+            base: std::fs::read_to_string(base.join(&path)).ok(),
             yours: std::fs::read_to_string(stash.join(&path)).ok(),
             theirs: std::fs::read_to_string(source.join(&path)).ok(),
             path,
@@ -1671,6 +1825,37 @@ esac
                 .is_empty()
         );
         assert!(pending_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn collect_versions_uses_single_artifact_path_from_origin() {
+        let dir = tempdir().unwrap();
+        let stash = dir.path().join("stash");
+        let source = dir.path().join("source");
+        let state = dir.path().join("marketplace-state");
+        std::fs::create_dir_all(state.join("base/skills/demo")).unwrap();
+        std::fs::create_dir_all(stash.join("skills/demo")).unwrap();
+        std::fs::create_dir_all(source.join("skills/demo")).unwrap();
+        std::fs::write(state.join("base/skills/demo/SKILL.md"), "base\n").unwrap();
+        std::fs::write(stash.join("skills/demo/SKILL.md"), "mine\n").unwrap();
+        std::fs::write(source.join("skills/demo/SKILL.md"), "theirs\n").unwrap();
+
+        let meta = super::StashMeta {
+            schema_version: 1,
+            plugin_id: "demo@labby".into(),
+            forked: true,
+            upstream_id: Some("demo@labby".into()),
+            upstream_version: "1.0.0".into(),
+            fork_type: super::ForkType::Artifact,
+            forked_artifacts: vec!["skills/demo/SKILL.md".into()],
+            update_config: super::UpdateConfig::default(),
+            pending_update: None,
+        };
+
+        let versions =
+            super::collect_versions(&stash, &state.join("base"), &source, &meta).unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].path, "skills/demo/SKILL.md");
     }
 
     #[test]

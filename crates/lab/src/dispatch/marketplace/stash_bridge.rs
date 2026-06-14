@@ -191,6 +191,48 @@ pub(super) async fn list_forks(plugin_id: Option<String>) -> Result<Value, ToolE
     crate::dispatch::helpers::to_json(rows)
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct MarketplaceForkComponent {
+    pub plugin_id: String,
+    pub component_id: String,
+    pub artifact_path: Option<String>,
+    pub workspace_root: PathBuf,
+    pub workspace_dir: PathBuf,
+    pub state_dir: PathBuf,
+    pub base_revision_id: Option<String>,
+    pub upstream_version: String,
+}
+
+pub(super) fn fork_component_for_plugin(
+    plugin_id: &str,
+) -> Result<MarketplaceForkComponent, ToolError> {
+    let root = crate::dispatch::stash::client::require_stash_root()?.clone();
+    let store = crate::dispatch::stash::store::StashStore::new(root);
+    for component in store.list_components()? {
+        let Some(StashOrigin::Marketplace(origin)) = component.origin_meta.clone() else {
+            continue;
+        };
+        if origin.plugin_id == plugin_id {
+            return Ok(MarketplaceForkComponent {
+                plugin_id: origin.plugin_id,
+                component_id: component.id.clone(),
+                artifact_path: origin.artifact_path,
+                workspace_root: component.workspace_root.clone(),
+                workspace_dir: store.workspace_dir(&component.id),
+                state_dir: fork_state_dir(&component.id)?,
+                base_revision_id: component.head_revision_id.clone(),
+                upstream_version: origin
+                    .source_version
+                    .unwrap_or_else(|| "unknown".to_string()),
+            });
+        }
+    }
+    Err(ToolError::Sdk {
+        sdk_kind: "not_found".into(),
+        message: format!("no stash fork found for `{plugin_id}`"),
+    })
+}
+
 fn stash_kind_param(kind: StashComponentKind) -> &'static str {
     match kind {
         StashComponentKind::Skill => "skill",
