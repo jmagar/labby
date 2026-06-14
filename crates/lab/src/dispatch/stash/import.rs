@@ -417,7 +417,10 @@ fn import_blocking_with_origin(
         lab_apis::stash::types::StashWorkspaceShape::File => {
             temp_workspace.join(filename.as_deref().unwrap_or("file"))
         }
-        lab_apis::stash::types::StashWorkspaceShape::Directory => temp_workspace.clone(),
+        lab_apis::stash::types::StashWorkspaceShape::Directory if is_dir => temp_workspace.clone(),
+        lab_apis::stash::types::StashWorkspaceShape::Directory => {
+            temp_workspace.join(filename.as_deref().unwrap_or("file"))
+        }
     };
 
     // Copy source to the staged workspace.
@@ -459,17 +462,7 @@ fn import_blocking_with_origin(
     let component = store.with_component_lock(&id, || {
         let existing = store.read_component(&id)?;
 
-        if live_workspace.exists() {
-            remove_workspace_dir(&live_workspace)?;
-        }
-        std::fs::rename(&temp_workspace, &live_workspace).map_err(|e| ToolError::Sdk {
-            sdk_kind: "internal_error".into(),
-            message: format!(
-                "rename staged workspace `{}` → `{}`: {e}",
-                temp_workspace.display(),
-                live_workspace.display()
-            ),
-        })?;
+        replace_workspace_atomically(&temp_workspace, &live_workspace)?;
 
         let component = StashComponent {
             id: id.to_string(),
@@ -530,6 +523,44 @@ fn remove_workspace_dir(path: &Path) -> Result<(), ToolError> {
             message: format!("remove workspace `{}`: {e}", path.display()),
         }),
     }
+}
+
+fn replace_workspace_atomically(staged: &Path, live: &Path) -> Result<(), ToolError> {
+    let backup = live.with_file_name(format!(
+        ".{}.backup-{}",
+        live.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("workspace"),
+        ulid::Ulid::new().to_string().to_lowercase()
+    ));
+    let had_live = live.exists();
+    if had_live {
+        std::fs::rename(live, &backup).map_err(|e| ToolError::Sdk {
+            sdk_kind: "internal_error".into(),
+            message: format!(
+                "rename live workspace `{}` → backup `{}`: {e}",
+                live.display(),
+                backup.display()
+            ),
+        })?;
+    }
+    if let Err(error) = std::fs::rename(staged, live).map_err(|e| ToolError::Sdk {
+        sdk_kind: "internal_error".into(),
+        message: format!(
+            "rename staged workspace `{}` → `{}`: {e}",
+            staged.display(),
+            live.display()
+        ),
+    }) {
+        if had_live {
+            drop(std::fs::rename(&backup, live));
+        }
+        return Err(error);
+    }
+    if had_live {
+        remove_workspace_dir(&backup)?;
+    }
+    Ok(())
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

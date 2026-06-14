@@ -44,10 +44,12 @@ pub(super) async fn dispatch_update_action(
                 .map_err(join_err)??
         }
         "artifact.update.preview" => {
-            let plugin_id = parse_update_preview_params(&params)?.plugin_id;
-            tokio::task::spawn_blocking(move || update_preview(&plugin_id, true))
-                .await
-                .map_err(join_err)??
+            let params = parse_update_preview_params(&params)?;
+            tokio::task::spawn_blocking(move || {
+                update_preview(&params.plugin_id, params.artifact_path.as_deref(), true)
+            })
+            .await
+            .map_err(join_err)??
         }
         "artifact.update.apply" => {
             let apply = parse_update_apply_params(&params)?;
@@ -158,6 +160,8 @@ struct UpdatePreviewResult {
     new_version: String,
     #[serde(rename = "upstream_fingerprint", alias = "upstream_commit")]
     upstream_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    local_fingerprint: Option<String>,
     unchanged: Vec<String>,
     upstream_only: Vec<String>,
     user_only: Vec<String>,
@@ -324,9 +328,10 @@ fn update_check(plugin_id: Option<String>) -> Result<Result<Value, ToolError>, T
 
 fn update_preview(
     plugin_id: &str,
+    artifact_path: Option<&str>,
     write_pending: bool,
 ) -> Result<Result<Value, ToolError>, ToolError> {
-    let fork = fork_record_for_plugin(plugin_id)?;
+    let fork = fork_record_for_plugin(plugin_id, artifact_path)?;
     let preview = build_preview_from_fork(&fork)?;
     if write_pending {
         write_json_atomic(&pending_path_for_fork(&fork), &preview)?;
@@ -335,7 +340,7 @@ fn update_preview(
 }
 
 fn build_preview(plugin_id: &str) -> Result<UpdatePreviewResult, ToolError> {
-    let fork = fork_record_for_plugin(plugin_id)?;
+    let fork = fork_record_for_plugin(plugin_id, None)?;
     build_preview_from_fork(&fork)
 }
 
@@ -395,6 +400,7 @@ fn build_preview_from_fork(fork: &ForkRecord) -> Result<UpdatePreviewResult, Too
         upstream_version: new_version.clone(),
         new_version,
         upstream_fingerprint,
+        local_fingerprint: None,
         unchanged: Vec::new(),
         upstream_only: Vec::new(),
         user_only: Vec::new(),
@@ -404,6 +410,7 @@ fn build_preview_from_fork(fork: &ForkRecord) -> Result<UpdatePreviewResult, Too
 
     let base = base_dir_for_fork(fork);
     let files = collect_versions(&fork.stash, &base, &source, meta)?;
+    preview.local_fingerprint = Some(compute_versions_local_fingerprint(&files));
     if files.len() > MAX_PREVIEW_FILES {
         return Err(ToolError::Sdk {
             sdk_kind: "preview_truncated".into(),
@@ -554,14 +561,15 @@ fn build_preview_from_fork(fork: &ForkRecord) -> Result<UpdatePreviewResult, Too
 }
 
 fn update_apply(params: UpdateApplyParams) -> Result<Result<Value, ToolError>, ToolError> {
-    let fork = fork_record_for_plugin(&params.plugin_id)?;
+    let fork = fork_record_for_plugin(&params.plugin_id, params.artifact_path.as_deref())?;
     let _lock = acquire_stash_lock(&lock_dir_for_fork(&fork))?;
     let mut meta = fork.meta.clone();
     require_forked(&meta)?;
     let strategy = params.strategy.unwrap_or(meta.update_config.strategy);
     let preview = match read_pending_preview_at(&pending_path_for_fork(&fork)) {
         Ok(preview) => preview,
-        Err(_) => build_preview(&params.plugin_id)?,
+        Err(error) if error.kind() == "not_found" => build_preview(&params.plugin_id)?,
+        Err(error) => return Ok(Err(error)),
     };
 
     if !preview.has_update {
@@ -582,6 +590,22 @@ fn update_apply(params: UpdateApplyParams) -> Result<Result<Value, ToolError>, T
             message: "Upstream changed since preview. Run artifact.update.preview again.".into(),
         }));
     }
+    let base = base_dir_for_fork(&fork);
+    let files = collect_versions(&fork.stash, &base, &source, &meta)?;
+    if preview.local_fingerprint.is_none() {
+        return Ok(Err(stale_preview_error(
+            "Pending preview is missing local freshness data. Run artifact.update.preview again.",
+        )));
+    }
+    if local_fingerprint_changed(&preview, &files) {
+        return Ok(Err(stale_preview_error(
+            "Local fork changed since preview. Run artifact.update.preview again.",
+        )));
+    }
+    let files_by_path: BTreeMap<String, FileVersions> = files
+        .into_iter()
+        .map(|file| (file.path.clone(), file))
+        .collect();
 
     if strategy == ConflictStrategy::AlwaysAsk && !preview.conflicts.is_empty() {
         return to_json(ApplyResult {
@@ -598,7 +622,6 @@ fn update_apply(params: UpdateApplyParams) -> Result<Result<Value, ToolError>, T
     let mut writes = Vec::new();
     let mut applied_clean = Vec::new();
     let mut applied_strategy = Vec::new();
-    let base = base_dir_for_fork(&fork);
 
     for path in &preview.unchanged {
         let theirs = read_required_text(&source.join(path.as_str()))?;
@@ -637,24 +660,40 @@ fn update_apply(params: UpdateApplyParams) -> Result<Result<Value, ToolError>, T
     }
 
     for clean in &preview.clean_merges {
-        let theirs = read_required_text(&source.join(&clean.path))?;
+        let file = full_versions_for_path(&files_by_path, &clean.path)?;
+        let (Some(base_content), Some(yours), Some(theirs)) = (
+            file.base.as_deref(),
+            file.yours.as_deref(),
+            file.theirs.as_deref(),
+        ) else {
+            return Ok(Err(stale_preview_error(
+                "Clean merge inputs changed since preview. Run artifact.update.preview again.",
+            )));
+        };
+        let Some(merged_content) = try_clean_merge(base_content, yours, theirs) else {
+            return Ok(Err(stale_preview_error(
+                "Clean merge no longer applies. Run artifact.update.preview again.",
+            )));
+        };
         writes.push(PlannedWrite {
             path: fork.stash.join(&clean.path),
-            content: Some(clean.merged_content.clone()),
+            content: Some(merged_content),
         });
         writes.push(PlannedWrite {
             path: base.join(&clean.path),
-            content: Some(theirs),
+            content: Some(theirs.to_string()),
         });
         applied_clean.push(clean.path.clone());
     }
 
     for conflict in &preview.conflicts {
-        let theirs = conflict.theirs_content.clone().unwrap_or_default();
+        let file = full_versions_for_path(&files_by_path, &conflict.path)?;
+        let full_conflict = full_merge_conflict_from_versions(&conflict.path, file);
+        let theirs = full_conflict.theirs_content.clone().unwrap_or_default();
         let working = match strategy {
-            ConflictStrategy::KeepMine => conflict.yours_content.clone().unwrap_or_default(),
+            ConflictStrategy::KeepMine => full_conflict.yours_content.clone().unwrap_or_default(),
             ConflictStrategy::TakeUpstream => theirs.clone(),
-            ConflictStrategy::AiSuggest => deterministic_merge_suggestion(conflict),
+            ConflictStrategy::AiSuggest => deterministic_merge_suggestion(&full_conflict),
             ConflictStrategy::AlwaysAsk => unreachable!("handled above"),
         };
         writes.push(PlannedWrite {
@@ -730,9 +769,9 @@ fn merge_suggest(params: MergeSuggestParams) -> Result<Result<Value, ToolError>,
 }
 
 fn config_set(params: ConfigSetParams) -> Result<Result<Value, ToolError>, ToolError> {
-    let stash = stash_dir_for_plugin(&params.plugin_id)?;
-    let _lock = acquire_stash_lock(&stash)?;
-    let mut meta = read_stash_meta(&stash)?;
+    let fork = fork_record_for_plugin(&params.plugin_id, params.artifact_path.as_deref())?;
+    let _lock = acquire_stash_lock(&lock_dir_for_fork(&fork))?;
+    let mut meta = fork.meta.clone();
     require_forked(&meta)?;
     if let Some(strategy) = params.strategy {
         meta.update_config.strategy = strategy;
@@ -740,7 +779,7 @@ fn config_set(params: ConfigSetParams) -> Result<Result<Value, ToolError>, ToolE
     if let Some(notify) = params.notify {
         meta.update_config.notify = notify;
     }
-    write_stash_meta(&stash, &meta)?;
+    write_fork_update_config(&fork, &meta)?;
     to_json(ConfigSetResult {
         plugin_id: params.plugin_id,
         updated_config: meta.update_config,
@@ -779,43 +818,46 @@ fn collect_forks(plugin_id: Option<String>) -> Result<Vec<ForkRecord>, ToolError
                 ForkType::Plugin
             },
             forked_artifacts: origin.artifact_path.into_iter().collect(),
-            update_config: UpdateConfig::default(),
+            update_config: read_component_update_config(&component.id)?,
             pending_update: None,
         };
-        forks.push(ForkRecord {
-            plugin_id: meta.plugin_id.clone(),
-            stash: store.workspace_dir(&component.id),
-            state_dir: Some(crate::dispatch::marketplace::stash_bridge::fork_state_dir(
-                &component.id,
-            )?),
-            component_id: Some(component.id),
-            meta,
-        });
-    }
-    if !forks.is_empty() {
-        return Ok(forks);
+        push_fork_unique(
+            &mut forks,
+            ForkRecord {
+                plugin_id: meta.plugin_id.clone(),
+                stash: store.workspace_dir(&component.id),
+                state_dir: Some(crate::dispatch::marketplace::stash_bridge::fork_state_dir(
+                    &component.id,
+                )?),
+                component_id: Some(component.id),
+                meta,
+            },
+        );
     }
 
     if let Some(plugin_id) = plugin_id {
         let stash = stash_dir_for_plugin(&plugin_id)?;
         if !stash.join(".stash.json").exists() {
-            return Ok(Vec::new());
+            return Ok(forks);
         }
         let meta = read_stash_meta(&stash)?;
-        return Ok(vec![ForkRecord {
-            plugin_id: meta.plugin_id.clone(),
-            stash,
-            state_dir: None,
-            component_id: None,
-            meta,
-        }]);
+        push_fork_unique(
+            &mut forks,
+            ForkRecord {
+                plugin_id: meta.plugin_id.clone(),
+                stash,
+                state_dir: None,
+                component_id: None,
+                meta,
+            },
+        );
+        return Ok(forks);
     }
 
     let root = workspace_root()?;
     if !root.exists() {
-        return Ok(Vec::new());
+        return Ok(forks);
     }
-    let mut forks = Vec::new();
     for entry in std::fs::read_dir(root)
         .map_err(client::io_internal)?
         .flatten()
@@ -828,52 +870,121 @@ fn collect_forks(plugin_id: Option<String>) -> Result<Vec<ForkRecord>, ToolError
         }
         let stash = entry.path();
         let meta = read_stash_meta(&stash)?;
-        forks.push(ForkRecord {
-            plugin_id: meta.plugin_id.clone(),
-            stash,
-            state_dir: None,
-            component_id: None,
-            meta,
-        });
+        push_fork_unique(
+            &mut forks,
+            ForkRecord {
+                plugin_id: meta.plugin_id.clone(),
+                stash,
+                state_dir: None,
+                component_id: None,
+                meta,
+            },
+        );
     }
     Ok(forks)
 }
 
-fn fork_record_for_plugin(plugin_id: &str) -> Result<ForkRecord, ToolError> {
-    if let Ok(component) =
-        crate::dispatch::marketplace::stash_bridge::fork_component_for_plugin(plugin_id)
+fn push_fork_unique(forks: &mut Vec<ForkRecord>, fork: ForkRecord) {
+    let key = fork_key(&fork);
+    if !forks.iter().any(|existing| fork_key(existing) == key) {
+        forks.push(fork);
+    }
+}
+
+fn fork_key(fork: &ForkRecord) -> (String, Vec<String>) {
+    let mut artifacts = fork.meta.forked_artifacts.clone();
+    artifacts.sort();
+    (fork.plugin_id.clone(), artifacts)
+}
+
+fn fork_record_for_plugin(
+    plugin_id: &str,
+    artifact_path: Option<&str>,
+) -> Result<ForkRecord, ToolError> {
+    if let Some(path) = artifact_path
+        && let Some(fork) = collect_forks(Some(plugin_id.to_string()))?
+            .into_iter()
+            .find(|fork| {
+                fork.meta
+                    .forked_artifacts
+                    .iter()
+                    .any(|artifact| artifact == path)
+            })
     {
-        let _ = (&component.workspace_root, &component.base_revision_id);
-        let meta = StashMeta {
-            schema_version: 1,
-            plugin_id: component.plugin_id.clone(),
-            forked: true,
-            upstream_id: Some(component.plugin_id.clone()),
-            upstream_version: component.upstream_version.clone(),
-            fork_type: if component.artifact_path.is_some() {
-                ForkType::Artifact
-            } else {
-                ForkType::Plugin
-            },
-            forked_artifacts: component.artifact_path.into_iter().collect(),
-            update_config: UpdateConfig::default(),
-            pending_update: None,
-        };
-        return Ok(ForkRecord {
-            plugin_id: meta.plugin_id.clone(),
-            stash: component.workspace_dir,
-            state_dir: Some(component.state_dir),
-            component_id: Some(component.component_id),
-            meta,
+        return Ok(fork);
+    }
+    match crate::dispatch::marketplace::stash_bridge::fork_component_for_plugin(plugin_id) {
+        Ok(component) => {
+            let _ = (&component.workspace_root, &component.base_revision_id);
+            let update_config = read_component_update_config(&component.component_id)?;
+            let meta = StashMeta {
+                schema_version: 1,
+                plugin_id: component.plugin_id.clone(),
+                forked: true,
+                upstream_id: Some(component.plugin_id.clone()),
+                upstream_version: component.upstream_version.clone(),
+                fork_type: if component.artifact_path.is_some() {
+                    ForkType::Artifact
+                } else {
+                    ForkType::Plugin
+                },
+                forked_artifacts: component.artifact_path.into_iter().collect(),
+                update_config,
+                pending_update: None,
+            };
+            return Ok(ForkRecord {
+                plugin_id: meta.plugin_id.clone(),
+                stash: component.workspace_dir,
+                state_dir: Some(component.state_dir),
+                component_id: Some(component.component_id),
+                meta,
+            });
+        }
+        Err(error) if error.kind() == "not_found" => {}
+        Err(error) => return Err(error),
+    }
+    let forks = collect_forks(Some(plugin_id.to_string()))?;
+    if artifact_path.is_some() {
+        return Err(ToolError::Sdk {
+            sdk_kind: "not_found".into(),
+            message: format!(
+                "no marketplace fork found for `{plugin_id}` and artifact `{}`",
+                artifact_path.unwrap_or_default()
+            ),
         });
     }
-    collect_forks(Some(plugin_id.to_string()))?
-        .into_iter()
-        .next()
-        .ok_or_else(|| ToolError::Sdk {
-            sdk_kind: "not_found".into(),
-            message: format!("no marketplace fork found for `{plugin_id}`"),
-        })
+    if forks.len() > 1 {
+        return Err(ToolError::Sdk {
+            sdk_kind: "conflict".into(),
+            message: format!(
+                "multiple marketplace forks found for `{plugin_id}`; pass `artifact_path` to select one"
+            ),
+        });
+    }
+    forks.into_iter().next().ok_or_else(|| ToolError::Sdk {
+        sdk_kind: "not_found".into(),
+        message: format!("no marketplace fork found for `{plugin_id}`"),
+    })
+}
+
+fn read_component_update_config(component_id: &str) -> Result<UpdateConfig, ToolError> {
+    let state = crate::dispatch::marketplace::stash_bridge::fork_state_dir(component_id)?;
+    let path = state.join("update-config.json");
+    if !path.exists() {
+        return Ok(UpdateConfig::default());
+    }
+    let bytes = std::fs::read(&path).map_err(client::io_internal)?;
+    serde_json::from_slice(&bytes).map_err(|error| ToolError::Sdk {
+        sdk_kind: "decode_error".into(),
+        message: format!("parse {}: {error}", path.display()),
+    })
+}
+
+fn write_fork_update_config(fork: &ForkRecord, meta: &StashMeta) -> Result<(), ToolError> {
+    if let Some(state) = &fork.state_dir {
+        return write_json_atomic(&state.join("update-config.json"), &meta.update_config);
+    }
+    write_stash_meta(&fork.stash, meta)
 }
 
 fn base_dir_for_fork(fork: &ForkRecord) -> PathBuf {
@@ -1109,7 +1220,16 @@ fn base_dir(stash: &Path) -> PathBuf {
 }
 
 fn read_pending_preview_at(path: &Path) -> Result<UpdatePreviewResult, ToolError> {
-    let bytes = std::fs::read(path).map_err(client::io_internal)?;
+    let bytes = std::fs::read(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            ToolError::Sdk {
+                sdk_kind: "not_found".into(),
+                message: format!("pending preview `{}` not found", path.display()),
+            }
+        } else {
+            client::io_internal(error)
+        }
+    })?;
     serde_json::from_slice(&bytes).map_err(|e| ToolError::Sdk {
         sdk_kind: "decode_error".into(),
         message: format!("parse {}: {e}", path.display()),
@@ -1147,7 +1267,7 @@ fn collect_versions(
         ForkType::Artifact => {
             for path in &meta.forked_artifacts {
                 validate_rel_path(path, "forked_artifacts")?;
-                paths.insert(path.clone());
+                collect_artifact_text_paths(stash, base, source, path, &mut paths)?;
             }
         }
     }
@@ -1205,6 +1325,80 @@ fn collect_text_paths(
         }
     }
     Ok(())
+}
+
+fn collect_artifact_text_paths(
+    stash: &Path,
+    base: &Path,
+    source: &Path,
+    artifact_path: &str,
+    out: &mut BTreeSet<String>,
+) -> Result<(), ToolError> {
+    let mut expanded = false;
+    for root in [stash, base, source] {
+        let candidate = root.join(artifact_path);
+        if candidate.is_dir() {
+            collect_text_paths(root, &candidate, out, root == stash)?;
+            expanded = true;
+        }
+    }
+    if !expanded {
+        out.insert(artifact_path.to_string());
+    }
+    Ok(())
+}
+
+fn compute_versions_local_fingerprint(files: &[FileVersions]) -> String {
+    let mut acc = String::new();
+    for file in files {
+        acc.push_str(&file.path);
+        acc.push('\0');
+        acc.push_str(file.base.as_deref().unwrap_or("<missing>"));
+        acc.push('\0');
+        acc.push_str(file.yours.as_deref().unwrap_or("<missing>"));
+        acc.push('\0');
+    }
+    format!("{:016x}", stable_hash(acc.as_bytes()))
+}
+
+fn local_fingerprint_changed(preview: &UpdatePreviewResult, files: &[FileVersions]) -> bool {
+    preview
+        .local_fingerprint
+        .as_deref()
+        .is_some_and(|fingerprint| fingerprint != compute_versions_local_fingerprint(files))
+}
+
+fn full_versions_for_path<'a>(
+    files: &'a BTreeMap<String, FileVersions>,
+    path: &str,
+) -> Result<&'a FileVersions, ToolError> {
+    files.get(path).ok_or_else(|| {
+        stale_preview_error("Preview path is no longer present. Run artifact.update.preview again.")
+    })
+}
+
+fn full_merge_conflict_from_versions(path: &str, file: &FileVersions) -> MergeConflict {
+    MergeConflict {
+        path: path.to_string(),
+        base_content: file.base.clone(),
+        yours_content: file.yours.clone(),
+        theirs_content: file.theirs.clone(),
+        conflict_ranges: conflict_ranges(
+            file.base.as_deref().unwrap_or_default(),
+            file.yours.as_deref().unwrap_or_default(),
+            file.theirs.as_deref().unwrap_or_default(),
+        ),
+        truncated: false,
+        original_size: None,
+        preview: None,
+    }
+}
+
+fn stale_preview_error(message: &str) -> ToolError {
+    ToolError::Sdk {
+        sdk_kind: "stale_preview".into(),
+        message: message.into(),
+    }
 }
 
 fn compute_tree_fingerprint(root: &Path) -> Result<String, ToolError> {
@@ -1747,6 +1941,20 @@ mod tests {
         );
     }
 
+    fn artifact_meta(path: &str) -> super::StashMeta {
+        super::StashMeta {
+            schema_version: 1,
+            plugin_id: "demo@labby".into(),
+            forked: true,
+            upstream_id: Some("demo@labby".into()),
+            upstream_version: "1.0.0".into(),
+            fork_type: super::ForkType::Artifact,
+            forked_artifacts: vec![path.into()],
+            update_config: super::UpdateConfig::default(),
+            pending_update: None,
+        }
+    }
+
     #[cfg(unix)]
     fn with_fake_git<T>(home: &Path, version: &str, fetch_exit: i32, run: impl FnOnce() -> T) -> T {
         let _guard = TEST_GIT_BIN_LOCK.lock().unwrap();
@@ -2008,22 +2216,36 @@ esac
         std::fs::write(stash.join("skills/demo/SKILL.md"), "mine\n").unwrap();
         std::fs::write(source.join("skills/demo/SKILL.md"), "theirs\n").unwrap();
 
-        let meta = super::StashMeta {
-            schema_version: 1,
-            plugin_id: "demo@labby".into(),
-            forked: true,
-            upstream_id: Some("demo@labby".into()),
-            upstream_version: "1.0.0".into(),
-            fork_type: super::ForkType::Artifact,
-            forked_artifacts: vec!["skills/demo/SKILL.md".into()],
-            update_config: super::UpdateConfig::default(),
-            pending_update: None,
-        };
+        let meta = artifact_meta("skills/demo/SKILL.md");
 
         let versions =
             super::collect_versions(&stash, &state.join("base"), &source, &meta).unwrap();
         assert_eq!(versions.len(), 1);
         assert_eq!(versions[0].path, "skills/demo/SKILL.md");
+    }
+
+    #[test]
+    fn collect_versions_expands_directory_artifact_paths() {
+        let dir = tempdir().unwrap();
+        let stash = dir.path().join("stash");
+        let source = dir.path().join("source");
+        let state = dir.path().join("marketplace-state");
+        std::fs::create_dir_all(state.join("base/skills/demo")).unwrap();
+        std::fs::create_dir_all(stash.join("skills/demo")).unwrap();
+        std::fs::create_dir_all(source.join("skills/demo")).unwrap();
+        std::fs::write(state.join("base/skills/demo/SKILL.md"), "base\n").unwrap();
+        std::fs::write(stash.join("skills/demo/SKILL.md"), "mine\n").unwrap();
+        std::fs::write(source.join("skills/demo/SKILL.md"), "theirs\n").unwrap();
+
+        let meta = artifact_meta("skills/demo");
+
+        let versions =
+            super::collect_versions(&stash, &state.join("base"), &source, &meta).unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].path, "skills/demo/SKILL.md");
+        assert_eq!(versions[0].base.as_deref(), Some("base\n"));
+        assert_eq!(versions[0].yours.as_deref(), Some("mine\n"));
+        assert_eq!(versions[0].theirs.as_deref(), Some("theirs\n"));
     }
 
     #[test]
@@ -2087,6 +2309,40 @@ esac
                 .as_str()
                 .is_some_and(|text| text.len() <= super::MAX_PREVIEW_FILE_BYTES)
         );
+    }
+
+    #[test]
+    fn update_apply_recomputes_full_content_for_truncated_clean_merge() {
+        let dir = tempdir().unwrap();
+        let large_mine = format!("{}\nalpha\nmiddle\nomega\n", "mine".repeat(70_000));
+        let large_theirs = format!("alpha\nmiddle\nomega\n{}\n", "theirs".repeat(70_000));
+        seed_fork(
+            dir.path(),
+            "1.0.0",
+            "alpha\nmiddle\nomega\n",
+            &large_mine,
+            &large_theirs,
+        );
+
+        let preview = dispatch_with_home(
+            dir.path(),
+            "artifact.update.preview",
+            json!({ "plugin_id": plugin_id() }),
+        )
+        .unwrap();
+        assert_eq!(preview["clean_merges"][0]["truncated"], true);
+
+        dispatch_with_home(
+            dir.path(),
+            "artifact.update.apply",
+            json!({ "plugin_id": plugin_id(), "strategy": "keep_mine", "confirm": true }),
+        )
+        .unwrap();
+
+        let working = std::fs::read_to_string(workspace(dir.path()).join("plugin.json")).unwrap();
+        assert!(working.len() > super::MAX_PREVIEW_FILE_BYTES);
+        assert!(working.contains(&"mine".repeat(100)));
+        assert!(working.contains(&"theirs".repeat(100)));
     }
 
     #[test]
@@ -2163,6 +2419,72 @@ esac
                 .unwrap();
         assert_eq!(meta["upstream_version"], "unknown");
         assert!(!pending_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn update_apply_rejects_stale_local_preview() {
+        let dir = tempdir().unwrap();
+        seed_fork(
+            dir.path(),
+            "1.0.0",
+            "line=base\n",
+            "line=mine\n",
+            "line=theirs\n",
+        );
+
+        dispatch_with_home(
+            dir.path(),
+            "artifact.update.preview",
+            json!({ "plugin_id": plugin_id() }),
+        )
+        .unwrap();
+        write_file(&workspace(dir.path()).join("plugin.json"), "line=later\n");
+
+        let err = dispatch_with_home(
+            dir.path(),
+            "artifact.update.apply",
+            json!({ "plugin_id": plugin_id(), "strategy": "keep_mine", "confirm": true }),
+        )
+        .unwrap_err();
+
+        assert_eq!(err.kind(), "stale_preview");
+        assert_eq!(
+            std::fs::read_to_string(workspace(dir.path()).join("plugin.json")).unwrap(),
+            "line=later\n"
+        );
+    }
+
+    #[test]
+    fn update_apply_rejects_pending_preview_without_local_fingerprint() {
+        let dir = tempdir().unwrap();
+        seed_fork(
+            dir.path(),
+            "1.0.0",
+            "line=base\n",
+            "line=mine\n",
+            "line=theirs\n",
+        );
+
+        dispatch_with_home(
+            dir.path(),
+            "artifact.update.preview",
+            json!({ "plugin_id": plugin_id() }),
+        )
+        .unwrap();
+        let mut pending: Value =
+            serde_json::from_str(&std::fs::read_to_string(pending_path(dir.path())).unwrap())
+                .unwrap();
+        pending.as_object_mut().unwrap().remove("local_fingerprint");
+        std::fs::write(pending_path(dir.path()), pending.to_string()).unwrap();
+
+        let err = dispatch_with_home(
+            dir.path(),
+            "artifact.update.apply",
+            json!({ "plugin_id": plugin_id(), "strategy": "keep_mine", "confirm": true }),
+        )
+        .unwrap_err();
+
+        assert_eq!(err.kind(), "stale_preview");
     }
 
     #[test]

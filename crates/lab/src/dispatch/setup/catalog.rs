@@ -235,7 +235,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "repair",
         description: "Repair missing local Lab setup prerequisites without contacting external services",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         returns: "SetupReport",
         params: &[],
     },

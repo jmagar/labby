@@ -3087,6 +3087,12 @@
         "ty": "boolean",
         "required": false,
         "description": "Whether to notify when updates are available"
+      },
+      {
+        "name": "artifact_path",
+        "ty": "string",
+        "required": false,
+        "description": "Optional relative artifact path when the plugin has multiple artifact forks"
       }
     ],
     "returns": "ConfigSetResult",
@@ -3155,12 +3161,6 @@
         "ty": "array",
         "required": false,
         "description": "Relative artifact paths to fork; omit to fork the whole plugin"
-      },
-      {
-        "name": "confirm",
-        "ty": "boolean",
-        "required": true,
-        "description": "HTTP/MCP confirmation for this write action; stripped before dispatch"
       }
     ],
     "returns": "ForkResponse",
@@ -3309,12 +3309,6 @@
         "ty": "string",
         "required": false,
         "description": "Multi-instance label"
-      },
-      {
-        "name": "confirm",
-        "ty": "boolean",
-        "required": true,
-        "description": "Must be true to confirm this destructive operation"
       }
     ],
     "returns": "ResetResult",
@@ -3352,12 +3346,6 @@
         "ty": "string",
         "required": false,
         "description": "Multi-instance label"
-      },
-      {
-        "name": "confirm",
-        "ty": "boolean",
-        "required": true,
-        "description": "Must be true to confirm this destructive operation"
       }
     ],
     "returns": "UnforkResult",
@@ -3391,10 +3379,10 @@
         "description": "Merge strategy: keep_mine, take_upstream, always_ask, ai_suggest"
       },
       {
-        "name": "confirm",
-        "ty": "boolean",
-        "required": true,
-        "description": "Must be true to confirm this destructive update"
+        "name": "artifact_path",
+        "ty": "string",
+        "required": false,
+        "description": "Optional relative artifact path when the plugin has multiple artifact forks"
       }
     ],
     "returns": "ApplyResult",
@@ -3445,6 +3433,12 @@
         "ty": "string",
         "required": true,
         "description": "Plugin id in `name@marketplace` form"
+      },
+      {
+        "name": "artifact_path",
+        "ty": "string",
+        "required": false,
+        "description": "Optional relative artifact path when the plugin has multiple artifact forks"
       }
     ],
     "returns": "UpdatePreviewResult",
@@ -5119,7 +5113,7 @@
         "name": "kind",
         "ty": "string",
         "required": true,
-        "description": "Component kind: skill, agent, command, channel, monitor, hook, output_style, theme, settings, mcp_config, lsp_config, script, bin_file"
+        "description": "Component kind: skill, agent, command, channel, monitor, hook, output_style, theme, settings, mcp_config, lsp_config, script, bin_file, plugin"
       },
       {
         "name": "name",
@@ -5174,7 +5168,7 @@
         "name": "kind",
         "ty": "string",
         "required": true,
-        "description": "Component kind: skill, agent, command, channel, monitor, hook, output_style, theme, settings, mcp_config, lsp_config, script, bin_file"
+        "description": "Component kind: skill, agent, command, channel, monitor, hook, output_style, theme, settings, mcp_config, lsp_config, script, bin_file, plugin"
       },
       {
         "name": "name",

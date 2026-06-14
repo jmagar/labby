@@ -40,11 +40,46 @@ pub fn resolve_stash_root() -> Option<PathBuf> {
 
 static STASH_ROOT: OnceLock<Option<PathBuf>> = OnceLock::new();
 
+#[cfg(test)]
+static TEST_STASH_ROOT_OVERRIDE: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+#[cfg(test)]
+static TEST_STASH_ROOT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Return the cached stash root path, or a structured `workspace_not_configured`
 /// error if the root cannot be determined.
 ///
 /// The first call resolves and caches; subsequent calls return the cached value.
 pub fn require_stash_root() -> Result<&'static PathBuf, ToolError> {
+    #[cfg(test)]
+    if let Some(path) = TEST_STASH_ROOT_OVERRIDE.lock().unwrap().clone() {
+        return Ok(Box::leak(Box::new(path)));
+    }
+
     let cached = STASH_ROOT.get_or_init(resolve_stash_root);
     cached.as_ref().ok_or_else(not_configured_error)
+}
+
+#[cfg(test)]
+pub fn with_test_stash_root<T>(root: PathBuf, run: impl FnOnce() -> T) -> T {
+    let _guard = TEST_STASH_ROOT_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let previous = {
+        let mut slot = TEST_STASH_ROOT_OVERRIDE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (*slot).replace(root)
+    };
+
+    struct RestoreGuard(Option<PathBuf>);
+    impl Drop for RestoreGuard {
+        fn drop(&mut self) {
+            *TEST_STASH_ROOT_OVERRIDE
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = self.0.take();
+        }
+    }
+    let _restore = RestoreGuard(previous);
+
+    run()
 }

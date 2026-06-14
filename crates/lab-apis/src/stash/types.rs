@@ -350,6 +350,25 @@ mod tests {
     }
 
     #[test]
+    fn local_path_origin_round_trips() {
+        let origin = StashOrigin::LocalPath {
+            source_path: PathBuf::from("/tmp/demo"),
+        };
+
+        let encoded = serde_json::to_value(&origin).unwrap();
+        assert_eq!(
+            encoded,
+            json!({
+                "kind": "local_path",
+                "source_path": "/tmp/demo"
+            })
+        );
+
+        let decoded: StashOrigin = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, origin);
+    }
+
+    #[test]
     fn component_origin_meta_is_optional_for_existing_records() {
         let value = json!({
             "id": "01aryz6s41tpz5x11k39dv3r2g",

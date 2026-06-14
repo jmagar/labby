@@ -423,6 +423,7 @@ Response:
   "upstream_version": "1.1.0",
   "new_version": "1.1.0",
   "upstream_fingerprint": "tree-fingerprint-def456",
+  "local_fingerprint": "base-and-workspace-fingerprint-abc123",
   "unchanged": [],
   "upstream_only": [],
   "user_only": [],
@@ -444,8 +445,12 @@ Preview size rules:
   total diff bytes.
 - Truncated entries include `truncated: true`, `original_size`, and a `preview`
   string.
-- Oversized binary or non-UTF-8 files are reported as conflicts with omitted
-  content, not embedded in the response.
+- Binary or non-UTF-8 files are outside the text-merge contract and are not
+  embedded in previews; callers should treat omitted artifact paths as
+  non-previewable content and reset/apply them through explicit artifact
+  operations instead of expecting a merge-conflict payload.
+- `local_fingerprint` binds the preview to the base snapshot plus user's Stash
+  workspace content so apply can reject local edits made after preview.
 
 ### Marketplace `artifact.update.apply`
 
@@ -485,7 +490,8 @@ Contract rules:
 - Apply saves a new Stash revision after successful writes.
 - Apply updates Marketplace origin metadata with the new upstream version and
   source fingerprint.
-- If the pending preview is stale, return `stale_preview`.
+- If the pending preview is stale because upstream or the local fork changed,
+  return `stale_preview`.
 - If conflicts exist and strategy is `always_ask`, return
   `status = "partial_conflicts"` and do not write conflicted files.
 
@@ -628,7 +634,7 @@ New or reused kinds:
 | `file_too_large` | stash | Single file exceeds limit |
 | `workspace_too_large` | stash | Import exceeds workspace limits |
 | `marketplace_auth_required` | marketplace | Git fetch requires credentials |
-| `stale_preview` | marketplace | Upstream changed after preview |
+| `stale_preview` | marketplace | Upstream or local fork changed after preview |
 | `preview_truncated` | marketplace | Preview exceeded configured size limits |
 | `forbidden` | both | Caller lacks required scope |
 | `content_contains_secrets` | marketplace | Merge suggestion input appears secret-bearing |

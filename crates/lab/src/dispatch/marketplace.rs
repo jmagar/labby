@@ -30,7 +30,7 @@ pub mod store;
 pub mod sync;
 mod update;
 
-pub use catalog::actions;
+pub use catalog::{action_requires_admin, actions};
 pub use client::NodeRpcPort;
 pub use dispatch::{dispatch, dispatch_with_port};
 pub use mcp_params::resolve_search_for_rest;
@@ -39,7 +39,10 @@ pub const LAB_REGISTRY_META_NAMESPACE: &str = "tv.tootie.lab/registry";
 #[cfg(test)]
 #[allow(clippy::panic)]
 mod tests {
-    use serde_json::json;
+    use lab_apis::stash::StashOrigin;
+    use serde_json::{Value, json};
+    use tempfile::tempdir;
+    use tokio::runtime::Builder;
 
     const ARTIFACT_ACTIONS: &[(&str, bool, &str)] = &[
         ("artifact.fork", true, "ForkResponse"),
@@ -86,6 +89,104 @@ mod tests {
         .await
         .unwrap_err();
         assert_ne!(err.kind(), "not_implemented");
+    }
+
+    #[test]
+    fn dispatch_artifact_fork_creates_stash_component_for_file_artifact() {
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let plugins = home.join(".claude").join("plugins");
+        let plugin = plugins
+            .join("marketplaces")
+            .join("demo-market")
+            .join("demo-plugin");
+        std::fs::create_dir_all(plugin.join("agents")).unwrap();
+        std::fs::write(plugin.join("plugin.json"), r#"{"name":"demo-plugin"}"#).unwrap();
+        std::fs::write(plugin.join("agents/demo.md"), "# Agent\n").unwrap();
+        std::fs::write(
+            plugins.join("known_marketplaces.json"),
+            json!({
+                "demo-market": {
+                    "installLocation": plugins.join("marketplaces").join("demo-market")
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let stash_root = home.join(".lab").join("stash");
+        let result = super::client::with_test_plugins_root(home, || {
+            crate::dispatch::stash::client::with_test_stash_root(stash_root.clone(), || {
+                Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(async {
+                        super::dispatch(
+                            "artifact.fork",
+                            json!({
+                                "plugin_id": "demo-plugin@demo-market",
+                                "artifacts": ["agents/demo.md"]
+                            }),
+                        )
+                        .await
+                    })
+            })
+        })
+        .unwrap();
+
+        let fork = &result["forks"][0];
+        let component_id = fork["component_id"].as_str().unwrap();
+        assert!(!component_id.is_empty());
+        assert!(!fork["revision_id"].as_str().unwrap().is_empty());
+        assert_eq!(fork["forked_artifacts"], json!(["agents/demo.md"]));
+
+        let store = crate::dispatch::stash::store::StashStore::new(stash_root.clone());
+        let component = store.read_component(component_id).unwrap().unwrap();
+        match component.origin_meta.unwrap() {
+            StashOrigin::Marketplace(origin) => {
+                assert_eq!(origin.plugin_id, "demo-plugin@demo-market");
+                assert_eq!(origin.artifact_path.as_deref(), Some("agents/demo.md"));
+            }
+            other => panic!("unexpected origin: {other:?}"),
+        }
+        assert!(
+            store
+                .workspace_dir(component_id)
+                .join("agents/demo.md")
+                .exists()
+        );
+        assert!(
+            stash_root
+                .join("marketplace")
+                .join(component_id)
+                .join("base/agents/demo.md")
+                .exists()
+        );
+
+        let preview = super::client::with_test_plugins_root(home, || {
+            crate::dispatch::stash::client::with_test_stash_root(stash_root, || {
+                Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(async {
+                        super::dispatch(
+                            "artifact.update.preview",
+                            json!({
+                                "plugin_id": "demo-plugin@demo-market",
+                                "artifact_path": "agents/demo.md"
+                            }),
+                        )
+                        .await
+                    })
+            })
+        })
+        .unwrap();
+        assert_eq!(
+            preview["plugin_id"],
+            Value::String("demo-plugin@demo-market".into())
+        );
     }
 
     #[tokio::test]

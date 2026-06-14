@@ -135,7 +135,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "plugin.deploy",
         description: "Deploy the saved plugin workspace to the local Claude Code install target",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         params: &[ParamSpec {
             name: "id",
             ty: "string",
@@ -161,7 +161,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "artifact.fork",
         description: "Fork Marketplace artifact(s) into Stash [destructive]",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -174,12 +174,6 @@ pub const ACTIONS: &[ActionSpec] = &[
                 ty: "array",
                 required: false,
                 description: "Relative artifact paths to fork; omit to fork the whole plugin",
-            },
-            ParamSpec {
-                name: "confirm",
-                ty: "boolean",
-                required: true,
-                description: "HTTP/MCP confirmation for this write action; stripped before dispatch",
             },
         ],
         returns: "ForkResponse",
@@ -209,7 +203,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "artifact.unfork",
         description: "Remove fork tracking metadata for artifact(s) or a plugin stash.",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -229,12 +223,6 @@ pub const ACTIONS: &[ActionSpec] = &[
                 required: false,
                 description: "Multi-instance label",
             },
-            ParamSpec {
-                name: "confirm",
-                ty: "boolean",
-                required: true,
-                description: "Must be true to confirm this destructive operation",
-            },
         ],
         returns: "UnforkResult",
     },
@@ -242,7 +230,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "artifact.reset",
         description: "Reset forked artifact(s) back to their upstream base snapshot.",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -261,12 +249,6 @@ pub const ACTIONS: &[ActionSpec] = &[
                 ty: "string",
                 required: false,
                 description: "Multi-instance label",
-            },
-            ParamSpec {
-                name: "confirm",
-                ty: "boolean",
-                required: true,
-                description: "Must be true to confirm this destructive operation",
             },
         ],
         returns: "ResetResult",
@@ -302,7 +284,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "artifact.patch",
         description: "Apply a patch to one forked artifact in the marketplace stash.",
         destructive: false,
-        requires_admin: false,
+        requires_admin: true,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -355,19 +337,27 @@ pub const ACTIONS: &[ActionSpec] = &[
         description: "Preview artifact update changes and conflicts for a forked plugin stash",
         destructive: false,
         requires_admin: false,
-        params: &[ParamSpec {
-            name: "plugin_id",
-            ty: "string",
-            required: true,
-            description: "Plugin id in `name@marketplace` form",
-        }],
+        params: &[
+            ParamSpec {
+                name: "plugin_id",
+                ty: "string",
+                required: true,
+                description: "Plugin id in `name@marketplace` form",
+            },
+            ParamSpec {
+                name: "artifact_path",
+                ty: "string",
+                required: false,
+                description: "Optional relative artifact path when the plugin has multiple artifact forks",
+            },
+        ],
         returns: "UpdatePreviewResult",
     },
     ActionSpec {
         name: "artifact.update.apply",
         description: "Apply a pending upstream artifact update to a forked plugin stash",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -382,10 +372,10 @@ pub const ACTIONS: &[ActionSpec] = &[
                 description: "Merge strategy: keep_mine, take_upstream, always_ask, ai_suggest",
             },
             ParamSpec {
-                name: "confirm",
-                ty: "boolean",
-                required: true,
-                description: "Must be true to confirm this destructive update",
+                name: "artifact_path",
+                ty: "string",
+                required: false,
+                description: "Optional relative artifact path when the plugin has multiple artifact forks",
             },
         ],
         returns: "ApplyResult",
@@ -415,7 +405,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "artifact.config.set",
         description: "Update artifact update preferences for a forked plugin stash",
         destructive: false,
-        requires_admin: false,
+        requires_admin: true,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -435,6 +425,12 @@ pub const ACTIONS: &[ActionSpec] = &[
                 required: false,
                 description: "Whether to notify when updates are available",
             },
+            ParamSpec {
+                name: "artifact_path",
+                ty: "string",
+                required: false,
+                description: "Optional relative artifact path when the plugin has multiple artifact forks",
+            },
         ],
         returns: "ConfigSetResult",
     },
@@ -442,7 +438,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "sources.add",
         description: "Register a new marketplace via `claude plugin marketplace add`",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         params: &[
             ParamSpec {
                 name: "repo",
@@ -469,7 +465,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "plugin.install",
         description: "Install a plugin via `claude plugin install`",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         params: &[ParamSpec {
             name: "id",
             ty: "string",
@@ -482,7 +478,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "plugin.uninstall",
         description: "Uninstall a plugin via `claude plugin uninstall`",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         params: &[ParamSpec {
             name: "id",
             ty: "string",
@@ -519,7 +515,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "agent.install",
         description: "Install an ACP agent on one or more devices. Local installs write a provider entry to `~/.lab/acp-providers.json`; binary archives are downloaded only over HTTPS, SHA-256 verified, size-limited, and installed atomically.",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         returns: "InstallResults",
         params: &[
             ParamSpec {
@@ -553,7 +549,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "plugin.cherry_pick",
         description: "Install selected components from a plugin to one or more devices",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         params: &[
             ParamSpec {
                 name: "plugin_id",
@@ -598,7 +594,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         name: "agent.uninstall",
         description: "Remove an installed ACP agent entry from `~/.lab/acp-providers.json`",
         destructive: true,
-        requires_admin: false,
+        requires_admin: true,
         returns: "UninstallResult",
         params: &[
             ParamSpec {

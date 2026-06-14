@@ -80,6 +80,8 @@ async fn handle_marketplace_action(
     auth: Option<Extension<AuthContext>>,
     req: ActionRequest,
 ) -> Result<Json<Value>, ToolError> {
+    let request_id = headers.get("x-request-id").and_then(|v| v.to_str().ok());
+    require_marketplace_admin(&req.action, request_id, auth.as_ref())?;
     handle_action_with_meta(
         "marketplace",
         "api",
@@ -91,6 +93,38 @@ async fn handle_marketplace_action(
         },
     )
     .await
+}
+
+fn has_admin_scope(auth: Option<&Extension<AuthContext>>) -> bool {
+    auth.is_some_and(|ctx| ctx.0.scopes.iter().any(|scope| scope == "lab:admin"))
+}
+
+fn require_marketplace_admin(
+    action: &str,
+    request_id: Option<&str>,
+    auth: Option<&Extension<AuthContext>>,
+) -> Result<(), ToolError> {
+    let bare = action.strip_prefix("marketplace.").unwrap_or(action);
+    if bare == "help"
+        || bare == "schema"
+        || !crate::dispatch::marketplace::action_requires_admin(bare)
+        || has_admin_scope(auth)
+    {
+        return Ok(());
+    }
+
+    tracing::warn!(
+        surface = "api",
+        service = "marketplace",
+        action,
+        request_id,
+        kind = "forbidden",
+        "marketplace action rejected: lab:admin scope required"
+    );
+    Err(ToolError::Sdk {
+        sdk_kind: "forbidden".to_string(),
+        message: format!("action `{action}` requires `lab:admin` scope"),
+    })
 }
 
 async fn handle_artifact_fork(
@@ -316,20 +350,70 @@ mod tests {
     fn marketplace_artifact_routes_preserve_auth_context_metadata() {
         let mut headers = HeaderMap::new();
         headers.insert("x-request-id", HeaderValue::from_static("req-artifact-1"));
-        let auth = AuthContext {
-            sub: "artifact-user".to_string(),
-            actor_key: Some(Arc::<str>::from("actor-artifact")),
-            scopes: vec!["lab:read".to_string(), "lab:admin".to_string()],
-            issuer: "test".to_string(),
-            via_session: true,
-            csrf_token: None,
-            email: Some("artifact@example.com".to_string()),
-        };
+        let mut auth = auth_context("artifact-user", &["lab:read", "lab:admin"]);
+        auth.actor_key = Some(Arc::<str>::from("actor-artifact"));
+        auth.via_session = true;
 
         let meta = dispatch_meta_from_headers(&headers, Some(&auth), None);
 
         assert_eq!(meta.request_id, Some("req-artifact-1"));
         assert_eq!(meta.actor_key, Some("actor-artifact"));
         assert_eq!(meta.agent_kind, Some("device"));
+    }
+
+    #[test]
+    fn marketplace_artifact_routes_preserve_request_metadata_without_auth() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-request-id", HeaderValue::from_static("req-public-1"));
+
+        let meta = dispatch_meta_from_headers(&headers, None, None);
+
+        assert_eq!(meta.request_id, Some("req-public-1"));
+        assert_eq!(meta.actor_key, None);
+        assert_eq!(meta.agent_kind, None);
+    }
+
+    fn auth_context(sub: &str, scopes: &[&str]) -> AuthContext {
+        AuthContext {
+            sub: sub.to_string(),
+            actor_key: None,
+            scopes: scopes.iter().map(|scope| (*scope).to_string()).collect(),
+            issuer: "test".to_string(),
+            via_session: false,
+            csrf_token: None,
+            email: Some(format!("{sub}@example.com")),
+        }
+    }
+
+    #[test]
+    fn marketplace_write_actions_require_admin_scope() {
+        let read_auth = auth_context("reader", &["lab:read"]);
+        let admin_auth = auth_context("admin", &["lab:read", "lab:admin"]);
+        let read_ext = Extension(read_auth);
+        let admin_ext = Extension(admin_auth);
+
+        for action in [
+            "artifact.fork",
+            "marketplace.artifact.fork",
+            "artifact.unfork",
+            "artifact.reset",
+            "artifact.update.apply",
+            "artifact.patch",
+            "artifact.config.set",
+        ] {
+            assert_eq!(
+                require_marketplace_admin(action, Some("req"), Some(&read_ext))
+                    .unwrap_err()
+                    .kind(),
+                "forbidden",
+                "{action}"
+            );
+            require_marketplace_admin(action, Some("req"), Some(&admin_ext))
+                .unwrap_or_else(|error| panic!("{action}: {error}"));
+        }
+
+        require_marketplace_admin("artifact.list", Some("req"), Some(&read_ext)).unwrap();
+        require_marketplace_admin("help", Some("req"), None).unwrap();
+        require_marketplace_admin("schema", Some("req"), None).unwrap();
     }
 }

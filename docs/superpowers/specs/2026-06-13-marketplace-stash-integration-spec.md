@@ -155,7 +155,9 @@ merge flows.
 
 1. User runs `artifact.update.apply`; HTTP/MCP/CLI confirmation is enforced by
    the shared `ActionSpec.destructive` gates before dispatch.
-2. Marketplace validates the pending preview is fresh.
+2. Marketplace validates the pending preview is fresh against both the upstream
+   fingerprint and a local fingerprint of the base snapshot plus Stash
+   workspace content.
 3. Marketplace applies clean merges and selected strategy results to the Stash
    workspace.
 4. Stash saves a new revision after successful apply.

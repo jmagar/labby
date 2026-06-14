@@ -138,6 +138,50 @@ fn snippets_builtin_actions_require_catalog_admin_scope() {
 }
 
 #[test]
+fn marketplace_and_stash_builtin_actions_follow_catalog_admin_scope() {
+    let registry = crate::registry::build_default_registry();
+    let read_only = make_auth(&["lab:read"]);
+    let admin = make_auth(&["lab:admin"]);
+
+    for service_name in ["marketplace", "stash"] {
+        let entry = registry
+            .services()
+            .iter()
+            .find(|service| service.name == service_name)
+            .unwrap_or_else(|| panic!("{service_name} service"));
+        for spec in entry.actions {
+            assert_eq!(
+                spec.requires_admin,
+                super::builtin_action_requires_admin(entry, spec.name),
+                "MCP admin gate must follow {service_name} catalog for `{}`",
+                spec.name
+            );
+            assert_eq!(
+                spec.requires_admin,
+                super::builtin_action_requires_admin(
+                    entry,
+                    &format!("{service_name}.{}", spec.name)
+                ),
+                "MCP admin gate must strip {service_name} prefix for `{}`",
+                spec.name
+            );
+            if spec.requires_admin {
+                assert!(
+                    !tool_execute_builtin_action_allowed(entry, spec.name, Some(&read_only)),
+                    "`{}` should reject non-admin MCP callers",
+                    spec.name
+                );
+                assert!(
+                    tool_execute_builtin_action_allowed(entry, spec.name, Some(&admin)),
+                    "`{}` should allow admin MCP callers",
+                    spec.name
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn code_mode_scope_allows_read_but_tool_execute_does_not() {
     let base = crate::api::oauth::AuthContext {
         sub: "alice".to_string(),

@@ -104,6 +104,40 @@ pub(super) fn fork_state_dir(component_id: &str) -> Result<PathBuf, ToolError> {
     Ok(root.join("marketplace").join(component_id))
 }
 
+struct OriginLock {
+    path: PathBuf,
+}
+
+impl Drop for OriginLock {
+    fn drop(&mut self) {
+        drop(std::fs::remove_file(&self.path));
+    }
+}
+
+fn acquire_origin_lock(
+    plugin_id: &str,
+    artifact_path: Option<&str>,
+) -> Result<OriginLock, ToolError> {
+    let root = crate::dispatch::stash::client::require_stash_root()?.clone();
+    let lock_dir = root.join("marketplace").join(".locks");
+    std::fs::create_dir_all(&lock_dir)
+        .map_err(crate::dispatch::marketplace::client::io_internal)?;
+    let key = component_name_for_fork(plugin_id, artifact_path);
+    let path = lock_dir.join(format!("{key}.lock"));
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(_) => Ok(OriginLock { path }),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(ToolError::Sdk {
+            sdk_kind: "conflict".into(),
+            message: format!("fork for `{plugin_id}` is locked by another operation"),
+        }),
+        Err(error) => Err(crate::dispatch::marketplace::client::io_internal(error)),
+    }
+}
+
 pub(super) async fn fork_artifacts(
     plugin_id: &str,
     artifacts: Option<Vec<String>>,
@@ -113,20 +147,47 @@ pub(super) async fn fork_artifacts(
         crate::dispatch::marketplace::update::upstream_version_for_bridge(plugin_id).ok();
     let source_fingerprint =
         crate::dispatch::marketplace::update::source_fingerprint_for_bridge(plugin_id).ok();
+    let root = crate::dispatch::stash::client::require_stash_root()?.clone();
+    let store = crate::dispatch::stash::store::StashStore::new(root);
+    store.ensure_dirs().map_err(|error| ToolError::Sdk {
+        sdk_kind: "internal_error".into(),
+        message: format!("stash store init: {error}"),
+    })?;
     let mut forks = Vec::with_capacity(artifact_paths.len());
     let mut warnings = Vec::new();
+    let mut created_component_ids = Vec::new();
     for artifact in artifact_paths {
         let artifact_path = if artifact.is_empty() {
             None
         } else {
             Some(artifact.as_str())
         };
-        if let Some(existing) = existing_fork(plugin_id, artifact_path)? {
+        let _lock = match acquire_origin_lock(plugin_id, artifact_path) {
+            Ok(lock) => lock,
+            Err(error) => {
+                cleanup_created_forks(&store, &created_component_ids);
+                return Err(error);
+            }
+        };
+        let existing = match existing_fork(plugin_id, artifact_path) {
+            Ok(existing) => existing,
+            Err(error) => {
+                cleanup_created_forks(&store, &created_component_ids);
+                return Err(error);
+            }
+        };
+        if let Some(existing) = existing {
             warnings.push(format!("fork already exists for {plugin_id}:{artifact}"));
             forks.push(existing);
             continue;
         }
-        let source_path = fork_source_path(plugin_id, artifact_path)?;
+        let source_path = match fork_source_path(plugin_id, artifact_path) {
+            Ok(source_path) => source_path,
+            Err(error) => {
+                cleanup_created_forks(&store, &created_component_ids);
+                return Err(error);
+            }
+        };
         let name = component_name_for_fork(plugin_id, artifact_path);
         let kind = kind_for_artifact_path(artifact_path);
         let origin = StashOrigin::Marketplace(MarketplaceOrigin {
@@ -135,13 +196,7 @@ pub(super) async fn fork_artifacts(
             source_version: source_version.clone(),
             source_fingerprint: source_fingerprint.clone(),
         });
-        let root = crate::dispatch::stash::client::require_stash_root()?.clone();
-        let store = crate::dispatch::stash::store::StashStore::new(root);
-        store.ensure_dirs().map_err(|error| ToolError::Sdk {
-            sdk_kind: "internal_error".into(),
-            message: format!("stash store init: {error}"),
-        })?;
-        let adopt = crate::dispatch::stash::service::adopt_component_from_path(
+        let adopt = match crate::dispatch::stash::service::adopt_component_from_path(
             &store,
             stash_kind_param(kind),
             &name,
@@ -150,19 +205,85 @@ pub(super) async fn fork_artifacts(
             origin,
             Some(&format!("Fork from {plugin_id}")),
         )
-        .await?;
-        seed_base_snapshot(&store, &adopt.component.id, &source_path, artifact_path)?;
+        .await
+        {
+            Ok(adopt) => adopt,
+            Err(error) => {
+                cleanup_created_forks(&store, &created_component_ids);
+                return Err(error);
+            }
+        };
+        let setup = async {
+            let revision = normalize_marketplace_workspace(
+                &store,
+                &adopt.component.id,
+                &source_path,
+                artifact_path,
+                &format!("Fork from {plugin_id}"),
+            )
+            .await?
+            .unwrap_or(adopt.revision.clone());
+            seed_base_snapshot(&adopt.component.id, &source_path, artifact_path)?;
+            Ok::<_, ToolError>(revision)
+        }
+        .await;
+        let revision = match setup {
+            Ok(revision) => revision,
+            Err(error) => {
+                drop(store.delete_component(&adopt.component.id));
+                if let Ok(state) = fork_state_dir(&adopt.component.id)
+                    && state.exists()
+                {
+                    drop(std::fs::remove_dir_all(state));
+                }
+                cleanup_created_forks(&store, &created_component_ids);
+                return Err(error);
+            }
+        };
+        let component = match store
+            .read_component(&adopt.component.id)
+            .and_then(|component| {
+                component.ok_or_else(|| ToolError::Sdk {
+                    sdk_kind: "not_found".into(),
+                    message: format!(
+                        "component `{}` missing after marketplace fork",
+                        adopt.component.id
+                    ),
+                })
+            }) {
+            Ok(component) => component,
+            Err(error) => {
+                drop(store.delete_component(&adopt.component.id));
+                cleanup_created_forks(&store, &created_component_ids);
+                return Err(error);
+            }
+        };
+        created_component_ids.push(component.id.clone());
         forks.push(ForkResult {
             plugin_id: plugin_id.to_string(),
-            component_id: adopt.component.id.clone(),
-            revision_id: adopt.revision.id.clone(),
-            stash_workspace: adopt.component.workspace_root.display().to_string(),
+            component_id: component.id.clone(),
+            revision_id: revision.id.clone(),
+            stash_workspace: component.workspace_root.display().to_string(),
             forked_artifacts: artifact_path
                 .map(|path| vec![path.to_string()])
                 .unwrap_or_default(),
         });
     }
     crate::dispatch::helpers::to_json(ForkResponse { forks, warnings })
+}
+
+fn cleanup_created_forks(
+    store: &crate::dispatch::stash::store::StashStore,
+    component_ids: &[String],
+) {
+    for component_id in component_ids.iter().rev() {
+        drop(store.delete_component(component_id));
+        if let Ok(state) = fork_state_dir(component_id)
+            && state.exists()
+        {
+            drop(std::fs::remove_dir_all(state));
+        }
+    }
 }
 
 pub(super) async fn list_forks(plugin_id: Option<String>) -> Result<Value, ToolError> {
@@ -208,12 +329,13 @@ pub(super) fn fork_component_for_plugin(
 ) -> Result<MarketplaceForkComponent, ToolError> {
     let root = crate::dispatch::stash::client::require_stash_root()?.clone();
     let store = crate::dispatch::stash::store::StashStore::new(root);
+    let mut matches = Vec::new();
     for component in store.list_components()? {
         let Some(StashOrigin::Marketplace(origin)) = component.origin_meta.clone() else {
             continue;
         };
         if origin.plugin_id == plugin_id {
-            return Ok(MarketplaceForkComponent {
+            matches.push(MarketplaceForkComponent {
                 plugin_id: origin.plugin_id,
                 component_id: component.id.clone(),
                 artifact_path: origin.artifact_path,
@@ -226,6 +348,17 @@ pub(super) fn fork_component_for_plugin(
                     .unwrap_or_else(|| "unknown".to_string()),
             });
         }
+    }
+    if matches.len() > 1 {
+        return Err(ToolError::Sdk {
+            sdk_kind: "conflict".into(),
+            message: format!(
+                "multiple stash forks found for `{plugin_id}`; use artifact-specific update actions"
+            ),
+        });
+    }
+    if let Some(component) = matches.into_iter().next() {
+        return Ok(component);
     }
     Err(ToolError::Sdk {
         sdk_kind: "not_found".into(),
@@ -262,6 +395,11 @@ pub(super) async fn unfork(
             }
         }
         store.delete_component(&component.id)?;
+        let state = fork_state_dir(&component.id)?;
+        if state.exists() {
+            std::fs::remove_dir_all(&state)
+                .map_err(crate::dispatch::marketplace::client::io_internal)?;
+        }
         removed.push(component.id);
     }
     crate::dispatch::helpers::to_json(UnforkResult {
@@ -294,39 +432,25 @@ pub(super) async fn reset(
         }
         let workspace = store.workspace_dir(&component.id);
         let base = fork_state_dir(&component.id)?.join("base");
-        let paths: Vec<String> = match artifacts.clone() {
-            Some(paths) => paths,
-            None => origin.artifact_path.into_iter().collect(),
+        let paths: Vec<&str> = match &artifacts {
+            Some(paths) => paths.iter().map(String::as_str).collect(),
+            None => origin.artifact_path.as_deref().into_iter().collect(),
         };
-        let mut reset_this_component = false;
-        for rel in paths {
-            crate::dispatch::marketplace::stash_meta::validate_rel_path(&rel)?;
-            let source = base.join(&rel);
-            let target = workspace.join(&rel);
-            if !source.exists() {
-                return Err(ToolError::Sdk {
-                    sdk_kind: "not_found".into(),
-                    message: format!("base snapshot `{rel}` is missing"),
-                });
+        if paths.is_empty() {
+            reset_artifacts.extend(replace_workspace_from_base(&base, &workspace)?);
+        } else {
+            for rel in paths {
+                crate::dispatch::marketplace::stash_meta::validate_rel_path(rel)?;
+                reset_artifacts.extend(reset_one_path_from_base(&base, &workspace, rel)?);
             }
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(crate::dispatch::marketplace::client::io_internal)?;
-            }
-            std::fs::copy(&source, &target)
-                .map_err(crate::dispatch::marketplace::client::io_internal)?;
-            reset_artifacts.push(rel);
-            reset_this_component = true;
         }
-        if reset_this_component {
-            let revision = crate::dispatch::stash::revision::save_revision(
-                &store,
-                &component.id,
-                Some("Reset to marketplace base"),
-            )
-            .await?;
-            revision_ids.push(revision.id);
-        }
+        let revision = crate::dispatch::stash::revision::save_revision(
+            &store,
+            &component.id,
+            Some("Reset to marketplace base"),
+        )
+        .await?;
+        revision_ids.push(revision.id);
     }
     crate::dispatch::helpers::to_json(ResetResult {
         plugin_id: plugin_id.to_string(),
@@ -380,7 +504,6 @@ fn existing_fork(
 }
 
 fn seed_base_snapshot(
-    store: &crate::dispatch::stash::store::StashStore,
     component_id: &str,
     source_path: &Path,
     artifact_path: Option<&str>,
@@ -390,22 +513,69 @@ fn seed_base_snapshot(
     match artifact_path {
         Some(path) => {
             let dest = base.join(path);
-            crate::dispatch::path_safety::reject_symlink(source_path)?;
-            if source_path.is_dir() {
-                copy_tree_to_base(source_path, &dest, source_path)?;
-            } else {
-                if let Some(parent) = dest.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(crate::dispatch::marketplace::client::io_internal)?;
-                }
-                std::fs::copy(source_path, dest)
-                    .map_err(crate::dispatch::marketplace::client::io_internal)?;
-            }
+            copy_artifact_source(source_path, &dest)?;
         }
         None => copy_tree_to_base(source_path, &base, source_path)?,
     }
-    let _ = store;
     Ok(())
+}
+
+async fn normalize_marketplace_workspace(
+    store: &crate::dispatch::stash::store::StashStore,
+    component_id: &str,
+    source_path: &Path,
+    artifact_path: Option<&str>,
+    save_label: &str,
+) -> Result<Option<lab_apis::stash::StashRevision>, ToolError> {
+    let Some(path) = artifact_path else {
+        return Ok(None);
+    };
+    crate::dispatch::marketplace::stash_meta::validate_rel_path(path)?;
+    let workspace = store.workspace_dir(component_id);
+    let temp_workspace = workspace.with_file_name(format!(
+        ".{component_id}.marketplace-{}",
+        ulid::Ulid::new().to_string().to_lowercase()
+    ));
+    if temp_workspace.exists() {
+        std::fs::remove_dir_all(&temp_workspace)
+            .map_err(crate::dispatch::marketplace::client::io_internal)?;
+    }
+    let target = temp_workspace.join(path);
+    copy_artifact_source(source_path, &target)?;
+
+    store.with_component_lock(component_id, || {
+        let mut component = store
+            .read_component(component_id)?
+            .ok_or_else(|| ToolError::Sdk {
+                sdk_kind: "not_found".into(),
+                message: format!("component `{component_id}` missing after marketplace adopt"),
+            })?;
+        replace_path_atomically(&temp_workspace, &workspace)?;
+        component.workspace_root = workspace.join(path);
+        component.updated_at = jiff::Timestamp::now().to_string();
+        store.write_component(&component)
+    })?;
+    let revision =
+        crate::dispatch::stash::revision::save_revision(store, component_id, Some(save_label))
+            .await?;
+    Ok(Some(revision))
+}
+
+fn copy_artifact_source(source_path: &Path, target: &Path) -> Result<(), ToolError> {
+    crate::dispatch::path_safety::reject_symlink(source_path)?;
+    if source_path.is_dir() {
+        std::fs::create_dir_all(target)
+            .map_err(crate::dispatch::marketplace::client::io_internal)?;
+        copy_tree_to_base(source_path, target, source_path)
+    } else {
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(crate::dispatch::marketplace::client::io_internal)?;
+        }
+        std::fs::copy(source_path, target)
+            .map(|_| ())
+            .map_err(crate::dispatch::marketplace::client::io_internal)
+    }
 }
 
 fn copy_tree_to_base(root: &Path, dest_root: &Path, current: &Path) -> Result<(), ToolError> {
@@ -447,6 +617,136 @@ fn copy_tree_to_base(root: &Path, dest_root: &Path, current: &Path) -> Result<()
     Ok(())
 }
 
+fn replace_workspace_from_base(base: &Path, workspace: &Path) -> Result<Vec<String>, ToolError> {
+    if !base.exists() {
+        return Err(ToolError::Sdk {
+            sdk_kind: "not_found".into(),
+            message: format!("base snapshot `{}` is missing", base.display()),
+        });
+    }
+    let temp = sibling_temp_path(workspace, "reset");
+    if temp.exists() {
+        remove_existing_path(&temp)?;
+    }
+    std::fs::create_dir_all(&temp).map_err(crate::dispatch::marketplace::client::io_internal)?;
+    copy_tree_to_base(base, &temp, base)?;
+    let paths = relative_file_paths(&temp, &temp)?;
+    crate::dispatch::path_safety::reject_existing_symlinks_in_path(workspace)?;
+    replace_path_atomically(&temp, workspace)?;
+    Ok(paths)
+}
+
+fn reset_one_path_from_base(
+    base: &Path,
+    workspace: &Path,
+    rel: &str,
+) -> Result<Vec<String>, ToolError> {
+    let source = base.join(rel);
+    let target = workspace.join(rel);
+    if !source.exists() {
+        return Err(ToolError::Sdk {
+            sdk_kind: "not_found".into(),
+            message: format!("base snapshot `{rel}` is missing"),
+        });
+    }
+    crate::dispatch::path_safety::reject_symlink(&source)?;
+    crate::dispatch::path_safety::reject_existing_symlink_ancestors(workspace, &target)?;
+    let temp = sibling_temp_path(&target, "reset");
+    if temp.exists() {
+        remove_existing_path(&temp)?;
+    }
+    if source.is_dir() {
+        std::fs::create_dir_all(&temp)
+            .map_err(crate::dispatch::marketplace::client::io_internal)?;
+        copy_tree_to_base(&source, &temp, &source)?;
+        let paths = relative_file_paths(base, &source)?;
+        replace_path_atomically(&temp, &target)?;
+        Ok(paths)
+    } else {
+        if let Some(parent) = temp.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(crate::dispatch::marketplace::client::io_internal)?;
+        }
+        std::fs::copy(&source, &temp).map_err(crate::dispatch::marketplace::client::io_internal)?;
+        replace_path_atomically(&temp, &target)?;
+        Ok(vec![rel.to_string()])
+    }
+}
+
+fn sibling_temp_path(path: &Path, label: &str) -> PathBuf {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("path");
+    path.with_file_name(format!(
+        ".{name}.{label}-{}",
+        ulid::Ulid::new().to_string().to_lowercase()
+    ))
+}
+
+fn replace_path_atomically(staged: &Path, live: &Path) -> Result<(), ToolError> {
+    let backup = sibling_temp_path(live, "backup");
+    let had_live = live.exists();
+    if had_live {
+        std::fs::rename(live, &backup)
+            .map_err(crate::dispatch::marketplace::client::io_internal)?;
+    }
+    if let Err(error) =
+        std::fs::rename(staged, live).map_err(crate::dispatch::marketplace::client::io_internal)
+    {
+        if had_live {
+            drop(std::fs::rename(&backup, live));
+        }
+        return Err(error);
+    }
+    if had_live {
+        remove_existing_path(&backup)?;
+    }
+    Ok(())
+}
+
+fn remove_existing_path(path: &Path) -> Result<(), ToolError> {
+    if path.is_dir() {
+        std::fs::remove_dir_all(path).map_err(crate::dispatch::marketplace::client::io_internal)
+    } else {
+        std::fs::remove_file(path).map_err(crate::dispatch::marketplace::client::io_internal)
+    }
+}
+
+fn relative_file_paths(root: &Path, current: &Path) -> Result<Vec<String>, ToolError> {
+    let mut out = Vec::new();
+    for entry in
+        std::fs::read_dir(current).map_err(crate::dispatch::marketplace::client::io_internal)?
+    {
+        let entry = entry.map_err(crate::dispatch::marketplace::client::io_internal)?;
+        let file_type = entry
+            .file_type()
+            .map_err(crate::dispatch::marketplace::client::io_internal)?;
+        if file_type.is_symlink() {
+            return Err(ToolError::Sdk {
+                sdk_kind: "symlink_rejected".into(),
+                message: format!(
+                    "symlink `{}` rejected while listing reset paths",
+                    entry.path().display()
+                ),
+            });
+        }
+        if file_type.is_dir() {
+            out.extend(relative_file_paths(root, &entry.path())?);
+        } else {
+            out.push(
+                entry
+                    .path()
+                    .strip_prefix(root)
+                    .map_err(crate::dispatch::marketplace::client::io_internal)?
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -478,5 +778,45 @@ mod tests {
             StashComponentKind::Settings
         );
         assert_eq!(kind_for_artifact_path(None), StashComponentKind::Plugin);
+    }
+
+    #[test]
+    fn replace_workspace_from_base_resets_whole_plugin_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("base");
+        let workspace = dir.path().join("workspace");
+        std::fs::create_dir_all(base.join("skills/demo")).unwrap();
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(base.join("skills/demo/SKILL.md"), "# base\n").unwrap();
+        std::fs::write(workspace.join("extra.md"), "user-only\n").unwrap();
+
+        let reset = replace_workspace_from_base(&base, &workspace).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(workspace.join("skills/demo/SKILL.md")).unwrap(),
+            "# base\n"
+        );
+        assert!(!workspace.join("extra.md").exists());
+        assert_eq!(reset, vec!["skills/demo/SKILL.md"]);
+    }
+
+    #[test]
+    fn reset_one_path_from_base_handles_directory_artifacts() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("base");
+        let workspace = dir.path().join("workspace");
+        std::fs::create_dir_all(base.join("skills/demo")).unwrap();
+        std::fs::create_dir_all(workspace.join("skills/demo")).unwrap();
+        std::fs::write(base.join("skills/demo/SKILL.md"), "# base\n").unwrap();
+        std::fs::write(workspace.join("skills/demo/extra.md"), "user-only\n").unwrap();
+
+        let reset = reset_one_path_from_base(&base, &workspace, "skills/demo").unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(workspace.join("skills/demo/SKILL.md")).unwrap(),
+            "# base\n"
+        );
+        assert!(!workspace.join("skills/demo/extra.md").exists());
+        assert_eq!(reset, vec!["skills/demo/SKILL.md"]);
     }
 }

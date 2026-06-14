@@ -254,13 +254,17 @@ pub fn build_action_schemas(services: &[RegisteredService]) -> Vec<(String, RefO
             let name = format!("{svc_pascal}{action_pascal}Params");
 
             let mut builder = ObjectBuilder::new();
+            let mut has_confirm_param = false;
             for p in action.params {
+                if p.name == "confirm" {
+                    has_confirm_param = true;
+                }
                 builder = builder.property(p.name, param_type_to_schema(p.ty));
                 if p.required {
                     builder = builder.required(p.name);
                 }
             }
-            if action.destructive {
+            if action.destructive && !has_confirm_param {
                 builder = builder
                     .property(
                         "confirm",
@@ -886,6 +890,22 @@ mod tests {
                 .unwrap()
                 .contains(&serde_json::json!("confirm"))
         );
+
+        for (schema_name, schema) in schemas {
+            let Some(required) = schema.get("required").and_then(|value| value.as_array()) else {
+                continue;
+            };
+            let mut seen = std::collections::BTreeSet::new();
+            for required_field in required {
+                let Some(required_field) = required_field.as_str() else {
+                    continue;
+                };
+                assert!(
+                    seen.insert(required_field),
+                    "schema {schema_name} has duplicate required field `{required_field}`"
+                );
+            }
+        }
 
         // Security scheme
         let security_schemes = spec["components"]["securitySchemes"]

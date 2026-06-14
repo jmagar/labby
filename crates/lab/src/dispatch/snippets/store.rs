@@ -9,7 +9,7 @@ use serde_json::{Map, Value};
 use crate::dispatch::error::ToolError;
 
 const SNIPPET_EXTENSIONS: &[&str] = &["md", "js"];
-const MAX_SNIPPET_BYTES: usize = 20 * 1024;
+const MAX_SNIPPET_BYTES: usize = 24 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

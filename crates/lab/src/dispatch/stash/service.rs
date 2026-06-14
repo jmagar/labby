@@ -61,7 +61,7 @@ pub fn component_create(store: &StashStore, p: CreateParams) -> Result<Value, To
             param: "kind".into(),
             message: format!(
                 "unrecognised component kind `{}`; valid: skill, agent, command, channel, \
-                 monitor, hook, output_style, theme, settings, mcp_config, lsp_config, script, bin_file",
+                 monitor, hook, output_style, theme, settings, mcp_config, lsp_config, script, bin_file, plugin",
                 p.kind
             ),
         })?;
@@ -218,13 +218,23 @@ pub async fn adopt_component_from_path(
         Some(origin),
     )
     .await?;
-    let revision = revision::save_revision(store, &component.id, save_label).await?;
-    let updated = store
-        .read_component(&component.id)?
-        .ok_or_else(|| ToolError::Sdk {
-            sdk_kind: "not_found".into(),
-            message: format!("component `{}` disappeared after save", component.id),
-        })?;
+    let revision = match revision::save_revision(store, &component.id, save_label).await {
+        Ok(revision) => revision,
+        Err(error) => {
+            drop(store.delete_component(&component.id));
+            return Err(error);
+        }
+    };
+    let updated = match store.read_component(&component.id)? {
+        Some(component) => component,
+        None => {
+            drop(store.delete_component(&component.id));
+            return Err(ToolError::Sdk {
+                sdk_kind: "not_found".into(),
+                message: format!("component `{}` disappeared after save", component.id),
+            });
+        }
+    };
     Ok(AdoptResult {
         component: updated,
         revision,

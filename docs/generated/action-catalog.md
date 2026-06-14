@@ -117,17 +117,17 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `marketplace` | `agent.install` | false | true | `id*: string`<br>`node_ids*: array`<br>`platform: string`<br>`confirm*: boolean` | `InstallResults` | cli, mcp, api, web |
 | `marketplace` | `agent.list` | false | false |  | `Agent[]` | cli, mcp, api, web |
 | `marketplace` | `agent.uninstall` | false | true | `id*: string`<br>`confirm*: boolean` | `UninstallResult` | cli, mcp, api, web |
-| `marketplace` | `artifact.config.set` | false | false | `plugin_id*: string`<br>`strategy: string`<br>`notify: boolean` | `ConfigSetResult` | cli, mcp, api, web |
+| `marketplace` | `artifact.config.set` | false | false | `plugin_id*: string`<br>`strategy: string`<br>`notify: boolean`<br>`artifact_path: string` | `ConfigSetResult` | cli, mcp, api, web |
 | `marketplace` | `artifact.diff` | false | false | `plugin_id*: string`<br>`artifact_path: string`<br>`instance: string` | `ArtifactDiffResult` | cli, mcp, api, web |
-| `marketplace` | `artifact.fork` | false | true | `plugin_id*: string`<br>`artifacts: array`<br>`confirm*: boolean` | `ForkResponse` | cli, mcp, api, web |
+| `marketplace` | `artifact.fork` | false | true | `plugin_id*: string`<br>`artifacts: array` | `ForkResponse` | cli, mcp, api, web |
 | `marketplace` | `artifact.list` | false | false | `plugin_id: string`<br>`instance: string` | `ForkedPluginStatus[]` | cli, mcp, api, web |
 | `marketplace` | `artifact.merge.suggest` | false | false | `plugin_id*: string`<br>`artifact_path*: string` | `MergeSuggestResult` | cli, mcp, api, web |
 | `marketplace` | `artifact.patch` | false | false | `plugin_id*: string`<br>`artifact_path*: string`<br>`patch*: string`<br>`description: string`<br>`instance: string` | `PatchResult` | cli, mcp, api, web |
-| `marketplace` | `artifact.reset` | false | true | `plugin_id*: string`<br>`artifacts: array`<br>`instance: string`<br>`confirm*: boolean` | `ResetResult` | cli, mcp, api, web |
-| `marketplace` | `artifact.unfork` | false | true | `plugin_id*: string`<br>`artifacts: array`<br>`instance: string`<br>`confirm*: boolean` | `UnforkResult` | cli, mcp, api, web |
-| `marketplace` | `artifact.update.apply` | false | true | `plugin_id*: string`<br>`strategy: string`<br>`confirm*: boolean` | `ApplyResult` | cli, mcp, api, web |
+| `marketplace` | `artifact.reset` | false | true | `plugin_id*: string`<br>`artifacts: array`<br>`instance: string` | `ResetResult` | cli, mcp, api, web |
+| `marketplace` | `artifact.unfork` | false | true | `plugin_id*: string`<br>`artifacts: array`<br>`instance: string` | `UnforkResult` | cli, mcp, api, web |
+| `marketplace` | `artifact.update.apply` | false | true | `plugin_id*: string`<br>`strategy: string`<br>`artifact_path: string` | `ApplyResult` | cli, mcp, api, web |
 | `marketplace` | `artifact.update.check` | false | false | `plugin_id: string` | `UpdateCheckResult[]` | cli, mcp, api, web |
-| `marketplace` | `artifact.update.preview` | false | false | `plugin_id*: string` | `UpdatePreviewResult` | cli, mcp, api, web |
+| `marketplace` | `artifact.update.preview` | false | false | `plugin_id*: string`<br>`artifact_path: string` | `UpdatePreviewResult` | cli, mcp, api, web |
 | `marketplace` | `help` | false | false |  | `Catalog` | cli, mcp, api, web |
 | `marketplace` | `mcp.config` | false | false |  | `RegistryConfig` | cli, mcp, api, web |
 | `marketplace` | `mcp.get` | false | false | `name*: string` | `ServerResponse` | cli, mcp, api, web |
