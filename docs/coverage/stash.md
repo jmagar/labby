@@ -75,6 +75,22 @@ All 16 actions are dispatched via the shared dispatch layer in `crates/lab/src/d
 └── targets/       — StashDeployTarget JSON records
 ```
 
+## Marketplace-Origin Components
+
+Marketplace artifact forks are stored as normal stash components with
+`origin_meta.kind = "marketplace"`. Marketplace owns source discovery, upstream
+version checks, and merge/diff presentation. Stash owns the copied workspace,
+saved revisions, provider sync, export, and deploy handoff.
+
+Primary entry points:
+
+| Surface | Action | Purpose |
+|---------|--------|---------|
+| marketplace | `artifact.fork` | Copy one plugin artifact or a whole plugin into stash |
+| marketplace | `artifact.list` | List stash components whose origin is marketplace |
+| marketplace | `artifact.update.*` | Compare stash edits against marketplace upstream |
+| stash | `component.adopt` | Generic create/import/save action used by marketplace |
+
 ## Surfaces
 
 | Surface | Status | Notes |

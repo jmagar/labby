@@ -119,7 +119,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `marketplace` | `agent.uninstall` | false | true | `id*: string`<br>`confirm*: boolean` | `UninstallResult` | cli, mcp, api, web |
 | `marketplace` | `artifact.config.set` | false | false | `plugin_id*: string`<br>`strategy: string`<br>`notify: boolean` | `ConfigSetResult` | cli, mcp, api, web |
 | `marketplace` | `artifact.diff` | false | false | `plugin_id*: string`<br>`artifact_path: string`<br>`instance: string` | `ArtifactDiffResult` | cli, mcp, api, web |
-| `marketplace` | `artifact.fork` | false | false | `plugin_id*: string`<br>`artifacts: array`<br>`instance: string` | `ForkResult` | cli, mcp, api, web |
+| `marketplace` | `artifact.fork` | false | true | `plugin_id*: string`<br>`artifacts: array`<br>`confirm*: boolean` | `ForkResponse` | cli, mcp, api, web |
 | `marketplace` | `artifact.list` | false | false | `plugin_id: string`<br>`instance: string` | `ForkedPluginStatus[]` | cli, mcp, api, web |
 | `marketplace` | `artifact.merge.suggest` | false | false | `plugin_id*: string`<br>`artifact_path*: string` | `MergeSuggestResult` | cli, mcp, api, web |
 | `marketplace` | `artifact.patch` | false | false | `plugin_id*: string`<br>`artifact_path*: string`<br>`patch*: string`<br>`description: string`<br>`instance: string` | `PatchResult` | cli, mcp, api, web |
@@ -189,6 +189,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `snippets` | `snippets.remove` | false | true | `name*: string` | `SnippetRemoveResult` | cli, mcp, api |
 | `snippets` | `snippets.test` | false | false | `name: string`<br>`params: object`<br>`all: boolean` | `SnippetTestResult` | cli, mcp, api |
 | `snippets` | `snippets.validate` | false | false | `name: string`<br>`body: string` | `SnippetValidation` | cli, mcp, api |
+| `stash` | `component.adopt` | false | true | `kind*: string`<br>`name*: string`<br>`label: string`<br>`source_path*: string`<br>`origin*: object`<br>`save_label: string` | `AdoptResult` | cli, mcp, api |
 | `stash` | `component.create` | false | false | `kind*: string`<br>`name*: string`<br>`label: string` | `ComponentDetail` | cli, mcp, api |
 | `stash` | `component.deploy` | false | true | `id*: string`<br>`target_id*: string`<br>`revision_id: string` | `DeployResult` | cli, mcp, api |
 | `stash` | `component.export` | false | true | `id*: string`<br>`output_path*: string`<br>`include_secrets: boolean`<br>`force: boolean` | `ExportResult` | cli, mcp, api |

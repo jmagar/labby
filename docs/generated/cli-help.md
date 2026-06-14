@@ -3053,7 +3053,7 @@ Arguments:
   <ACTION>
           Action to run, e.g. `help`, `components.list`, `component.get`
 
-          [possible values: help, schema, components.list, component.get, component.create, component.import, component.workspace, component.save, component.revisions, component.export, component.deploy, providers.list, provider.link, provider.push, provider.pull, targets.list, target.add, target.remove]
+          [possible values: help, schema, components.list, component.get, component.create, component.import, component.adopt, component.workspace, component.save, component.revisions, component.export, component.deploy, providers.list, provider.link, provider.push, provider.pull, targets.list, target.add, target.remove]
 
   [KEY=VALUE]...
           Optional `key=value` params for the action
