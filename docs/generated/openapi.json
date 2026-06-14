@@ -1147,6 +1147,64 @@
           "params": {}
         }
       },
+      "DeployDeployPlanParams": {
+        "type": "object",
+        "required": [
+          "targets"
+        ],
+        "properties": {
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "DeployDeployRollbackParams": {
+        "type": "object",
+        "required": [
+          "targets",
+          "confirm",
+          "confirm"
+        ],
+        "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "DeployDeployRunParams": {
+        "type": "object",
+        "required": [
+          "targets",
+          "confirm",
+          "confirm"
+        ],
+        "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
+          "fail_fast": {
+            "type": "boolean"
+          },
+          "max_parallel": {
+            "type": "integer"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "DeployPlanParams": {
         "type": "object",
         "required": [
@@ -3181,6 +3239,28 @@
             "type": "boolean"
           },
           "services.built_in_upstream_apis_enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SetupSetupPluginConnectivityParams": {
+        "type": "object",
+        "properties": {
+          "server_url": {
+            "type": "string"
+          }
+        }
+      },
+      "SetupSetupPluginHookParams": {
+        "type": "object",
+        "required": [
+          "confirm"
+        ],
+        "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
+          "repair": {
             "type": "boolean"
           }
         }

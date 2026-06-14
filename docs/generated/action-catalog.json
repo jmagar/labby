@@ -580,25 +580,7 @@
   },
   {
     "service": "deploy",
-    "action": "help",
-    "description": "List deploy actions",
-    "destructive": false,
-    "params": [],
-    "returns": "Catalog",
-    "surface_availability": {
-      "cli": true,
-      "mcp": true,
-      "api": false,
-      "web_ui": false
-    },
-    "requires_http_subject": false,
-    "auth_posture": "uses the selected transport auth and gateway visibility policy",
-    "inventory_scope": "global_inventory_not_active_runtime_exposure",
-    "builtin": false
-  },
-  {
-    "service": "deploy",
-    "action": "plan",
+    "action": "deploy.plan",
     "description": "Dry-run: resolve targets, hash local artifact, show what would happen",
     "destructive": false,
     "params": [
@@ -623,7 +605,7 @@
   },
   {
     "service": "deploy",
-    "action": "rollback",
+    "action": "deploy.rollback",
     "description": "Restore the most recent timestamped backup on the specified targets (destructive)",
     "destructive": true,
     "params": [
@@ -654,8 +636,125 @@
   },
   {
     "service": "deploy",
-    "action": "run",
+    "action": "deploy.run",
     "description": "Build, transfer, install, restart, verify on targets (destructive)",
+    "destructive": true,
+    "params": [
+      {
+        "name": "targets",
+        "ty": "string[]",
+        "required": true,
+        "description": "SSH host aliases to deploy to"
+      },
+      {
+        "name": "confirm",
+        "ty": "boolean",
+        "required": true,
+        "description": "Must be true to confirm the destructive operation"
+      },
+      {
+        "name": "max_parallel",
+        "ty": "integer",
+        "required": false,
+        "description": "Maximum number of hosts to work on concurrently"
+      },
+      {
+        "name": "fail_fast",
+        "ty": "boolean",
+        "required": false,
+        "description": "Abort remaining hosts on the first failure"
+      }
+    ],
+    "returns": "DeployRunSummary",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": false,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "deploy",
+    "action": "help",
+    "description": "List deploy actions",
+    "destructive": false,
+    "params": [],
+    "returns": "Catalog",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": false,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "deploy",
+    "action": "plan",
+    "description": "Deprecated alias for `deploy.plan`",
+    "destructive": false,
+    "params": [
+      {
+        "name": "targets",
+        "ty": "string[]",
+        "required": true,
+        "description": "SSH host aliases to include in the plan"
+      }
+    ],
+    "returns": "DeployPlan",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": false,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "deploy",
+    "action": "rollback",
+    "description": "Deprecated alias for `deploy.rollback`",
+    "destructive": true,
+    "params": [
+      {
+        "name": "targets",
+        "ty": "string[]",
+        "required": true,
+        "description": "SSH host aliases to roll back"
+      },
+      {
+        "name": "confirm",
+        "ty": "boolean",
+        "required": true,
+        "description": "Must be true to confirm the destructive operation"
+      }
+    ],
+    "returns": "DeployRunSummary",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": false,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "deploy",
+    "action": "run",
+    "description": "Deprecated alias for `deploy.run`",
     "destructive": true,
     "params": [
       {
@@ -4796,6 +4895,164 @@
       }
     ],
     "returns": "SettingsState",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "setup.bootstrap",
+    "description": "Create ~/.lab/.env with a generated token + loopback defaults when absent (first-run)",
+    "destructive": false,
+    "params": [],
+    "returns": "BootstrapOutcome",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "setup.check",
+    "description": "Check local Lab setup prerequisites without mutating the filesystem",
+    "destructive": false,
+    "params": [],
+    "returns": "SetupReport",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "setup.plugin.connectivity",
+    "description": "Validate connectivity to the lab MCP server at {server_url}/health",
+    "destructive": false,
+    "params": [
+      {
+        "name": "server_url",
+        "ty": "string",
+        "required": false,
+        "description": "Override server URL; defaults to CLAUDE_PLUGIN_OPTION_SERVER_URL or http://localhost:8765"
+      }
+    ],
+    "returns": "ConnectivityOutcome",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "setup.plugin.export",
+    "description": "Read ~/.lab/.env and return current values keyed by userConfig field name",
+    "destructive": false,
+    "params": [],
+    "returns": "PluginExportOutcome",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "setup.plugin.hook",
+    "description": "Run binary-owned local setup checks for Claude plugin hooks; in repair mode also syncs CLAUDE_PLUGIN_OPTION_* and probes server connectivity",
+    "destructive": true,
+    "params": [
+      {
+        "name": "repair",
+        "ty": "boolean",
+        "required": false,
+        "description": "Create missing local Lab setup files and sync plugin env; defaults to true"
+      }
+    ],
+    "returns": "PluginHookReport",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "setup.plugin.sync",
+    "description": "Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.lab/.env as LAB_* vars",
+    "destructive": true,
+    "params": [],
+    "returns": "PluginSyncOutcome",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "setup.repair",
+    "description": "Repair missing local Lab setup prerequisites without contacting external services",
+    "destructive": true,
+    "params": [],
+    "returns": "SetupReport",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "setup",
+    "action": "setup.state",
+    "description": "First-run + draft snapshot for the wizard / settings UI",
+    "destructive": false,
+    "params": [],
+    "returns": "SetupSnapshot",
     "surface_availability": {
       "cli": true,
       "mcp": true,

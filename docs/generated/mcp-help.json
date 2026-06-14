@@ -1319,6 +1319,76 @@
             }
           ],
           "returns": "CommitOutcome"
+        },
+        {
+          "name": "setup.state",
+          "description": "First-run + draft snapshot for the wizard / settings UI",
+          "destructive": false,
+          "params": [],
+          "returns": "SetupSnapshot"
+        },
+        {
+          "name": "setup.bootstrap",
+          "description": "Create ~/.lab/.env with a generated token + loopback defaults when absent (first-run)",
+          "destructive": false,
+          "params": [],
+          "returns": "BootstrapOutcome"
+        },
+        {
+          "name": "setup.plugin.hook",
+          "description": "Run binary-owned local setup checks for Claude plugin hooks; in repair mode also syncs CLAUDE_PLUGIN_OPTION_* and probes server connectivity",
+          "destructive": true,
+          "params": [
+            {
+              "name": "repair",
+              "ty": "boolean",
+              "required": false,
+              "description": "Create missing local Lab setup files and sync plugin env; defaults to true"
+            }
+          ],
+          "returns": "PluginHookReport"
+        },
+        {
+          "name": "setup.plugin.sync",
+          "description": "Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.lab/.env as LAB_* vars",
+          "destructive": true,
+          "params": [],
+          "returns": "PluginSyncOutcome"
+        },
+        {
+          "name": "setup.plugin.export",
+          "description": "Read ~/.lab/.env and return current values keyed by userConfig field name",
+          "destructive": false,
+          "params": [],
+          "returns": "PluginExportOutcome"
+        },
+        {
+          "name": "setup.plugin.connectivity",
+          "description": "Validate connectivity to the lab MCP server at {server_url}/health",
+          "destructive": false,
+          "params": [
+            {
+              "name": "server_url",
+              "ty": "string",
+              "required": false,
+              "description": "Override server URL; defaults to CLAUDE_PLUGIN_OPTION_SERVER_URL or http://localhost:8765"
+            }
+          ],
+          "returns": "ConnectivityOutcome"
+        },
+        {
+          "name": "setup.check",
+          "description": "Check local Lab setup prerequisites without mutating the filesystem",
+          "destructive": false,
+          "params": [],
+          "returns": "SetupReport"
+        },
+        {
+          "name": "setup.repair",
+          "description": "Repair missing local Lab setup prerequisites without contacting external services",
+          "destructive": true,
+          "params": [],
+          "returns": "SetupReport"
         }
       ]
     },
@@ -3362,7 +3432,7 @@
           "returns": "ConfigListing"
         },
         {
-          "name": "plan",
+          "name": "deploy.plan",
           "description": "Dry-run: resolve targets, hash local artifact, show what would happen",
           "destructive": false,
           "params": [
@@ -3376,7 +3446,7 @@
           "returns": "DeployPlan"
         },
         {
-          "name": "run",
+          "name": "deploy.run",
           "description": "Build, transfer, install, restart, verify on targets (destructive)",
           "destructive": true,
           "params": [
@@ -3408,8 +3478,74 @@
           "returns": "DeployRunSummary"
         },
         {
-          "name": "rollback",
+          "name": "deploy.rollback",
           "description": "Restore the most recent timestamped backup on the specified targets (destructive)",
+          "destructive": true,
+          "params": [
+            {
+              "name": "targets",
+              "ty": "string[]",
+              "required": true,
+              "description": "SSH host aliases to roll back"
+            },
+            {
+              "name": "confirm",
+              "ty": "boolean",
+              "required": true,
+              "description": "Must be true to confirm the destructive operation"
+            }
+          ],
+          "returns": "DeployRunSummary"
+        },
+        {
+          "name": "plan",
+          "description": "Deprecated alias for `deploy.plan`",
+          "destructive": false,
+          "params": [
+            {
+              "name": "targets",
+              "ty": "string[]",
+              "required": true,
+              "description": "SSH host aliases to include in the plan"
+            }
+          ],
+          "returns": "DeployPlan"
+        },
+        {
+          "name": "run",
+          "description": "Deprecated alias for `deploy.run`",
+          "destructive": true,
+          "params": [
+            {
+              "name": "targets",
+              "ty": "string[]",
+              "required": true,
+              "description": "SSH host aliases to deploy to"
+            },
+            {
+              "name": "confirm",
+              "ty": "boolean",
+              "required": true,
+              "description": "Must be true to confirm the destructive operation"
+            },
+            {
+              "name": "max_parallel",
+              "ty": "integer",
+              "required": false,
+              "description": "Maximum number of hosts to work on concurrently"
+            },
+            {
+              "name": "fail_fast",
+              "ty": "boolean",
+              "required": false,
+              "description": "Abort remaining hosts on the first failure"
+            }
+          ],
+          "returns": "DeployRunSummary"
+        },
+        {
+          "name": "rollback",
+          "description": "Deprecated alias for `deploy.rollback`",
           "destructive": true,
           "params": [
             {

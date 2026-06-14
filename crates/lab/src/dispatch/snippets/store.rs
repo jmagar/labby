@@ -364,12 +364,6 @@ fn io_error(action: &str, path: &Path, error: std::io::Error) -> ToolError {
 }
 
 pub fn validate_snippet_body(name: &str, body: &str) -> Result<(), ToolError> {
-    if body.len() > MAX_SNIPPET_BYTES {
-        return Err(ToolError::InvalidParam {
-            message: format!("snippet body exceeds {MAX_SNIPPET_BYTES} bytes"),
-            param: "body".to_string(),
-        });
-    }
     if let Some(metadata) = frontmatter(body)? {
         if metadata.name != name {
             return Err(ToolError::InvalidParam {
@@ -386,6 +380,17 @@ pub fn validate_snippet_body(name: &str, body: &str) -> Result<(), ToolError> {
     } else {
         body.trim().to_string()
     };
+    // The byte limit mirrors the code-mode source limit and must apply to the
+    // *executable* code, not to the surrounding tutorial markdown (prose,
+    // headings, comments). A long markdown tutorial whose extracted JS block is
+    // under the limit is fine; what must stay bounded is the source actually
+    // handed to the code-mode runtime.
+    if code.len() > MAX_SNIPPET_BYTES {
+        return Err(ToolError::InvalidParam {
+            message: format!("snippet executable code exceeds {MAX_SNIPPET_BYTES} bytes"),
+            param: "body".to_string(),
+        });
+    }
     validate_snippet_code(&code)
 }
 
@@ -782,6 +787,31 @@ mod tests {
     #[test]
     fn validate_snippet_body_accepts_valid_frontmatter() {
         assert!(validate_snippet_body("demo", valid_body()).is_ok());
+    }
+
+    #[test]
+    fn validate_snippet_body_allows_long_markdown_with_small_code_block() {
+        // A tutorial-style snippet whose prose far exceeds MAX_SNIPPET_BYTES is
+        // fine as long as the *executable* JS block stays under the limit.
+        let prose = "x".repeat(MAX_SNIPPET_BYTES * 2);
+        let body = format!(
+            "---\nname: demo\ndescription: Demo snippet\ntags: []\n---\n\n{prose}\n\n```js\nasync () => ({{ ok: true }})\n```\n"
+        );
+        assert!(body.len() > MAX_SNIPPET_BYTES);
+        assert!(validate_snippet_body("demo", &body).is_ok());
+    }
+
+    #[test]
+    fn validate_snippet_body_rejects_oversized_executable_code() {
+        // The byte limit must still bound the executable source handed to the
+        // code-mode runtime, even when wrapped in tutorial markdown.
+        let filler = " ".repeat(MAX_SNIPPET_BYTES + 1);
+        let body = format!(
+            "---\nname: demo\ndescription: Demo snippet\ntags: []\n---\n\n```js\nasync () => {{{filler}return ({{ ok: true }}); }}\n```\n"
+        );
+        let error = validate_snippet_body("demo", &body)
+            .expect_err("oversized executable code should be rejected");
+        assert!(format!("{error}").contains("executable code exceeds"));
     }
 
     #[test]

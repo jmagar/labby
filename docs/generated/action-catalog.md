@@ -24,6 +24,9 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `acp` | `session.start_and_prompt` | false | false | `provider: string`<br>`model: string`<br>`title: string`<br>`cwd: string`<br>`prompt*: string`<br>`page_context: object`<br>`principal*: string` | `Value` | cli, mcp, api |
 | `acp` | `session.subscribe_ticket` | false | false | `session_id*: string`<br>`principal: string` | `Value` | cli, mcp, api |
 | `deploy` | `config.list` | false | false |  | `ConfigListing` | cli, mcp |
+| `deploy` | `deploy.plan` | false | false | `targets*: string[]` | `DeployPlan` | cli, mcp |
+| `deploy` | `deploy.rollback` | false | true | `targets*: string[]`<br>`confirm*: boolean` | `DeployRunSummary` | cli, mcp |
+| `deploy` | `deploy.run` | false | true | `targets*: string[]`<br>`confirm*: boolean`<br>`max_parallel: integer`<br>`fail_fast: boolean` | `DeployRunSummary` | cli, mcp |
 | `deploy` | `help` | false | false |  | `Catalog` | cli, mcp |
 | `deploy` | `plan` | false | false | `targets*: string[]` | `DeployPlan` | cli, mcp |
 | `deploy` | `rollback` | false | true | `targets*: string[]`<br>`confirm*: boolean` | `DeployRunSummary` | cli, mcp |
@@ -178,6 +181,14 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `setup` | `settings.schema` | false | false |  | `SettingsSchema` | cli, mcp, api, web |
 | `setup` | `settings.state` | false | false | `section: string` | `SettingsState` | cli, mcp, api, web |
 | `setup` | `settings.update` | false | true | `services.built_in_upstream_apis_enabled*: boolean` | `SettingsState` | cli, mcp, api, web |
+| `setup` | `setup.bootstrap` | false | false |  | `BootstrapOutcome` | cli, mcp, api, web |
+| `setup` | `setup.check` | false | false |  | `SetupReport` | cli, mcp, api, web |
+| `setup` | `setup.plugin.connectivity` | false | false | `server_url: string` | `ConnectivityOutcome` | cli, mcp, api, web |
+| `setup` | `setup.plugin.export` | false | false |  | `PluginExportOutcome` | cli, mcp, api, web |
+| `setup` | `setup.plugin.hook` | false | true | `repair: boolean` | `PluginHookReport` | cli, mcp, api, web |
+| `setup` | `setup.plugin.sync` | false | true |  | `PluginSyncOutcome` | cli, mcp, api, web |
+| `setup` | `setup.repair` | false | true |  | `SetupReport` | cli, mcp, api, web |
+| `setup` | `setup.state` | false | false |  | `SetupSnapshot` | cli, mcp, api, web |
 | `setup` | `state` | false | false |  | `SetupSnapshot` | cli, mcp, api, web |
 | `setup` | `uninstall_plugin` | false | true | `service*: string` | `PluginMutationResult` | cli, mcp, api, web |
 | `snippets` | `help` | false | false |  | `Catalog` | cli, mcp, api |
