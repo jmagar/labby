@@ -30,7 +30,7 @@ pub mod store;
 pub mod sync;
 mod update;
 
-pub use catalog::{action_requires_admin, actions};
+pub use catalog::actions;
 pub use client::NodeRpcPort;
 pub use dispatch::{dispatch, dispatch_with_port};
 pub use mcp_params::resolve_search_for_rest;

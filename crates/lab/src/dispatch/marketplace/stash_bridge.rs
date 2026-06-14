@@ -77,6 +77,13 @@ pub(super) struct ForkedPluginStatus {
     pub status: String,
 }
 
+fn join_err(error: tokio::task::JoinError) -> ToolError {
+    ToolError::Sdk {
+        sdk_kind: "internal_error".into(),
+        message: format!("spawn_blocking failed: {error}"),
+    }
+}
+
 pub(super) fn fork_source_path(
     plugin_id: &str,
     artifact_path: Option<&str>,
@@ -147,12 +154,18 @@ pub(super) async fn fork_artifacts(
         crate::dispatch::marketplace::update::upstream_version_for_bridge(plugin_id).ok();
     let source_fingerprint =
         crate::dispatch::marketplace::update::source_fingerprint_for_bridge(plugin_id).ok();
-    let root = crate::dispatch::stash::client::require_stash_root()?.clone();
+    let root = tokio::task::spawn_blocking(|| {
+        let root = crate::dispatch::stash::client::require_stash_root()?.clone();
+        let store = crate::dispatch::stash::store::StashStore::new(root.clone());
+        store.ensure_dirs().map_err(|error| ToolError::Sdk {
+            sdk_kind: "internal_error".into(),
+            message: format!("stash store init: {error}"),
+        })?;
+        Ok::<_, ToolError>(root)
+    })
+    .await
+    .map_err(join_err)??;
     let store = crate::dispatch::stash::store::StashStore::new(root);
-    store.ensure_dirs().map_err(|error| ToolError::Sdk {
-        sdk_kind: "internal_error".into(),
-        message: format!("stash store init: {error}"),
-    })?;
     let mut forks = Vec::with_capacity(artifact_paths.len());
     let mut warnings = Vec::new();
     let mut created_component_ids = Vec::new();
@@ -162,15 +175,28 @@ pub(super) async fn fork_artifacts(
         } else {
             Some(artifact.as_str())
         };
-        let _lock = match acquire_origin_lock(plugin_id, artifact_path) {
-            Ok(lock) => lock,
-            Err(error) => {
+        let preflight = {
+            let plugin_id = plugin_id.to_string();
+            let artifact_path = artifact_path.map(ToString::to_string);
+            tokio::task::spawn_blocking(move || {
+                let lock = acquire_origin_lock(&plugin_id, artifact_path.as_deref())?;
+                let existing = existing_fork(&plugin_id, artifact_path.as_deref())?;
+                let source_path = if existing.is_some() {
+                    None
+                } else {
+                    Some(fork_source_path(&plugin_id, artifact_path.as_deref())?)
+                };
+                Ok::<_, ToolError>((lock, existing, source_path))
+            })
+            .await
+            .map_err(join_err)
+        };
+        let (_lock, existing, source_path) = match preflight {
+            Ok(Ok(preflight)) => preflight,
+            Ok(Err(error)) => {
                 cleanup_created_forks(&store, &created_component_ids);
                 return Err(error);
             }
-        };
-        let existing = match existing_fork(plugin_id, artifact_path) {
-            Ok(existing) => existing,
             Err(error) => {
                 cleanup_created_forks(&store, &created_component_ids);
                 return Err(error);
@@ -181,13 +207,7 @@ pub(super) async fn fork_artifacts(
             forks.push(existing);
             continue;
         }
-        let source_path = match fork_source_path(plugin_id, artifact_path) {
-            Ok(source_path) => source_path,
-            Err(error) => {
-                cleanup_created_forks(&store, &created_component_ids);
-                return Err(error);
-            }
-        };
+        let source_path = source_path.expect("source path is present for new fork");
         let name = component_name_for_fork(plugin_id, artifact_path);
         let kind = kind_for_artifact_path(artifact_path);
         let origin = StashOrigin::Marketplace(MarketplaceOrigin {
@@ -217,13 +237,20 @@ pub(super) async fn fork_artifacts(
             let revision = normalize_marketplace_workspace(
                 &store,
                 &adopt.component.id,
-                &source_path,
-                artifact_path,
+                source_path.clone(),
+                artifact_path.map(ToString::to_string),
                 &format!("Fork from {plugin_id}"),
             )
             .await?
             .unwrap_or(adopt.revision.clone());
-            seed_base_snapshot(&adopt.component.id, &source_path, artifact_path)?;
+            let component_id = adopt.component.id.clone();
+            let source_path = source_path.clone();
+            let artifact_path = artifact_path.map(ToString::to_string);
+            tokio::task::spawn_blocking(move || {
+                seed_base_snapshot(&component_id, &source_path, artifact_path.as_deref())
+            })
+            .await
+            .map_err(join_err)??;
             Ok::<_, ToolError>(revision)
         }
         .await;
@@ -240,19 +267,25 @@ pub(super) async fn fork_artifacts(
                 return Err(error);
             }
         };
-        let component = match store
-            .read_component(&adopt.component.id)
-            .and_then(|component| {
-                component.ok_or_else(|| ToolError::Sdk {
-                    sdk_kind: "not_found".into(),
-                    message: format!(
-                        "component `{}` missing after marketplace fork",
-                        adopt.component.id
-                    ),
+        let component_id = adopt.component.id.clone();
+        let store_for_blocking = store.clone();
+        let component = match tokio::task::spawn_blocking(move || {
+            store_for_blocking
+                .read_component(&component_id)
+                .and_then(|component| {
+                    component.ok_or_else(|| ToolError::Sdk {
+                        sdk_kind: "not_found".into(),
+                        message: format!(
+                            "component `{component_id}` missing after marketplace fork"
+                        ),
+                    })
                 })
-            }) {
-            Ok(component) => component,
-            Err(error) => {
+        })
+        .await
+        .map_err(join_err)
+        {
+            Ok(Ok(component)) => component,
+            Ok(Err(error)) | Err(error) => {
                 drop(store.delete_component(&adopt.component.id));
                 cleanup_created_forks(&store, &created_component_ids);
                 return Err(error);
@@ -287,6 +320,12 @@ fn cleanup_created_forks(
 }
 
 pub(super) async fn list_forks(plugin_id: Option<String>) -> Result<Value, ToolError> {
+    tokio::task::spawn_blocking(move || list_forks_blocking(plugin_id))
+        .await
+        .map_err(join_err)?
+}
+
+fn list_forks_blocking(plugin_id: Option<String>) -> Result<Value, ToolError> {
     let root = crate::dispatch::stash::client::require_stash_root()?.clone();
     let store = crate::dispatch::stash::store::StashStore::new(root);
     store.ensure_dirs().map_err(|error| ToolError::Sdk {
@@ -376,6 +415,13 @@ pub(super) async fn unfork(
     plugin_id: &str,
     artifacts: Option<Vec<String>>,
 ) -> Result<Value, ToolError> {
+    let plugin_id = plugin_id.to_string();
+    tokio::task::spawn_blocking(move || unfork_blocking(&plugin_id, artifacts))
+        .await
+        .map_err(join_err)?
+}
+
+fn unfork_blocking(plugin_id: &str, artifacts: Option<Vec<String>>) -> Result<Value, ToolError> {
     let root = crate::dispatch::stash::client::require_stash_root()?.clone();
     let store = crate::dispatch::stash::store::StashStore::new(root);
     let mut removed = Vec::new();
@@ -394,12 +440,12 @@ pub(super) async fn unfork(
                 continue;
             }
         }
-        store.delete_component(&component.id)?;
         let state = fork_state_dir(&component.id)?;
         if state.exists() {
             std::fs::remove_dir_all(&state)
                 .map_err(crate::dispatch::marketplace::client::io_internal)?;
         }
+        store.delete_component(&component.id)?;
         removed.push(component.id);
     }
     crate::dispatch::helpers::to_json(UnforkResult {
@@ -415,14 +461,48 @@ pub(super) struct ResetResult {
     pub revision_ids: Vec<String>,
 }
 
+struct ResetWork {
+    store: crate::dispatch::stash::store::StashStore,
+    component_ids: Vec<String>,
+    reset_artifacts: Vec<String>,
+}
+
 pub(super) async fn reset(
     plugin_id: &str,
     artifacts: Option<Vec<String>>,
 ) -> Result<Value, ToolError> {
+    let plugin_id = plugin_id.to_string();
+    let work = tokio::task::spawn_blocking({
+        let plugin_id = plugin_id.clone();
+        move || reset_workspaces_blocking(&plugin_id, artifacts)
+    })
+    .await
+    .map_err(join_err)??;
+    let mut revision_ids = Vec::new();
+    for component_id in &work.component_ids {
+        let revision = crate::dispatch::stash::revision::save_revision(
+            &work.store,
+            component_id,
+            Some("Reset to marketplace base"),
+        )
+        .await?;
+        revision_ids.push(revision.id);
+    }
+    crate::dispatch::helpers::to_json(ResetResult {
+        plugin_id,
+        reset_artifacts: work.reset_artifacts,
+        revision_ids,
+    })
+}
+
+fn reset_workspaces_blocking(
+    plugin_id: &str,
+    artifacts: Option<Vec<String>>,
+) -> Result<ResetWork, ToolError> {
     let root = crate::dispatch::stash::client::require_stash_root()?.clone();
     let store = crate::dispatch::stash::store::StashStore::new(root);
     let mut reset_artifacts = Vec::new();
-    let mut revision_ids = Vec::new();
+    let mut selected = Vec::new();
     for component in store.list_components()? {
         let Some(StashOrigin::Marketplace(origin)) = component.origin_meta.clone() else {
             continue;
@@ -430,10 +510,38 @@ pub(super) async fn reset(
         if origin.plugin_id != plugin_id {
             continue;
         }
+        if let Some(filter) = &artifacts {
+            match origin.artifact_path.as_ref() {
+                Some(path) if filter.iter().any(|candidate| candidate == path) => {}
+                Some(_) | None => continue,
+            }
+        }
+        selected.push((component, origin));
+    }
+    if selected.is_empty() {
+        return Err(ToolError::Sdk {
+            sdk_kind: "not_found".into(),
+            message: match &artifacts {
+                Some(paths) => format!(
+                    "no stash forks found for `{plugin_id}` matching artifact(s): {}",
+                    paths.join(", ")
+                ),
+                None => format!("no stash forks found for `{plugin_id}`"),
+            },
+        });
+    }
+    let mut component_ids = Vec::with_capacity(selected.len());
+    for (component, origin) in selected {
         let workspace = store.workspace_dir(&component.id);
         let base = fork_state_dir(&component.id)?.join("base");
         let paths: Vec<&str> = match &artifacts {
-            Some(paths) => paths.iter().map(String::as_str).collect(),
+            Some(paths) => paths
+                .iter()
+                .filter_map(|path| {
+                    (origin.artifact_path.as_deref() == Some(path.as_str()))
+                        .then_some(path.as_str())
+                })
+                .collect(),
             None => origin.artifact_path.as_deref().into_iter().collect(),
         };
         if paths.is_empty() {
@@ -444,18 +552,12 @@ pub(super) async fn reset(
                 reset_artifacts.extend(reset_one_path_from_base(&base, &workspace, rel)?);
             }
         }
-        let revision = crate::dispatch::stash::revision::save_revision(
-            &store,
-            &component.id,
-            Some("Reset to marketplace base"),
-        )
-        .await?;
-        revision_ids.push(revision.id);
+        component_ids.push(component.id);
     }
-    crate::dispatch::helpers::to_json(ResetResult {
-        plugin_id: plugin_id.to_string(),
+    Ok(ResetWork {
+        store,
+        component_ids,
         reset_artifacts,
-        revision_ids,
     })
 }
 
@@ -523,14 +625,38 @@ fn seed_base_snapshot(
 async fn normalize_marketplace_workspace(
     store: &crate::dispatch::stash::store::StashStore,
     component_id: &str,
-    source_path: &Path,
-    artifact_path: Option<&str>,
+    source_path: PathBuf,
+    artifact_path: Option<String>,
     save_label: &str,
 ) -> Result<Option<lab_apis::stash::StashRevision>, ToolError> {
     let Some(path) = artifact_path else {
         return Ok(None);
     };
-    crate::dispatch::marketplace::stash_meta::validate_rel_path(path)?;
+    let store_for_blocking = store.clone();
+    let component_id_for_blocking = component_id.to_string();
+    tokio::task::spawn_blocking(move || {
+        normalize_marketplace_workspace_blocking(
+            &store_for_blocking,
+            &component_id_for_blocking,
+            &source_path,
+            &path,
+        )
+    })
+    .await
+    .map_err(join_err)??;
+    let revision =
+        crate::dispatch::stash::revision::save_revision(store, component_id, Some(save_label))
+            .await?;
+    Ok(Some(revision))
+}
+
+fn normalize_marketplace_workspace_blocking(
+    store: &crate::dispatch::stash::store::StashStore,
+    component_id: &str,
+    source_path: &Path,
+    artifact_path: &str,
+) -> Result<(), ToolError> {
+    crate::dispatch::marketplace::stash_meta::validate_rel_path(artifact_path)?;
     let workspace = store.workspace_dir(component_id);
     let temp_workspace = workspace.with_file_name(format!(
         ".{component_id}.marketplace-{}",
@@ -540,7 +666,7 @@ async fn normalize_marketplace_workspace(
         std::fs::remove_dir_all(&temp_workspace)
             .map_err(crate::dispatch::marketplace::client::io_internal)?;
     }
-    let target = temp_workspace.join(path);
+    let target = temp_workspace.join(artifact_path);
     copy_artifact_source(source_path, &target)?;
 
     store.with_component_lock(component_id, || {
@@ -551,14 +677,10 @@ async fn normalize_marketplace_workspace(
                 message: format!("component `{component_id}` missing after marketplace adopt"),
             })?;
         replace_path_atomically(&temp_workspace, &workspace)?;
-        component.workspace_root = workspace.join(path);
+        component.workspace_root = workspace.join(artifact_path);
         component.updated_at = jiff::Timestamp::now().to_string();
         store.write_component(&component)
-    })?;
-    let revision =
-        crate::dispatch::stash::revision::save_revision(store, component_id, Some(save_label))
-            .await?;
-    Ok(Some(revision))
+    })
 }
 
 fn copy_artifact_source(source_path: &Path, target: &Path) -> Result<(), ToolError> {
@@ -750,6 +872,9 @@ fn relative_file_paths(root: &Path, current: &Path) -> Result<Vec<String>, ToolE
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lab_apis::stash::{StashComponent, StashWorkspaceShape};
+    use serde_json::Value;
+    use tempfile::tempdir;
 
     #[test]
     fn stash_component_name_sanitizes_plugin_and_artifact() {
@@ -782,7 +907,7 @@ mod tests {
 
     #[test]
     fn replace_workspace_from_base_resets_whole_plugin_tree() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir().unwrap();
         let base = dir.path().join("base");
         let workspace = dir.path().join("workspace");
         std::fs::create_dir_all(base.join("skills/demo")).unwrap();
@@ -802,7 +927,7 @@ mod tests {
 
     #[test]
     fn reset_one_path_from_base_handles_directory_artifacts() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir().unwrap();
         let base = dir.path().join("base");
         let workspace = dir.path().join("workspace");
         std::fs::create_dir_all(base.join("skills/demo")).unwrap();
@@ -818,5 +943,140 @@ mod tests {
         );
         assert!(!workspace.join("skills/demo/extra.md").exists());
         assert_eq!(reset, vec!["skills/demo/SKILL.md"]);
+    }
+
+    fn write_file(path: &Path, content: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, content).unwrap();
+    }
+
+    fn seed_component(
+        root: &Path,
+        component_id: &str,
+        artifact_path: &str,
+        base_content: &str,
+        local_content: &str,
+    ) {
+        let store = crate::dispatch::stash::store::StashStore::new(root.to_path_buf());
+        store.ensure_dirs().unwrap();
+        let workspace = store.workspace_dir(component_id);
+        write_file(&workspace.join(artifact_path), local_content);
+        write_file(
+            &root
+                .join("marketplace")
+                .join(component_id)
+                .join("base")
+                .join(artifact_path),
+            base_content,
+        );
+        let now = "2026-06-14T00:00:00Z".to_string();
+        store
+            .write_component(&StashComponent {
+                id: component_id.to_string(),
+                kind: StashComponentKind::Skill,
+                name: component_id.to_string(),
+                label: None,
+                head_revision_id: None,
+                origin: None,
+                origin_meta: Some(StashOrigin::Marketplace(MarketplaceOrigin {
+                    plugin_id: "demo@labby".to_string(),
+                    artifact_path: Some(artifact_path.to_string()),
+                    source_version: Some("1.0.0".to_string()),
+                    source_fingerprint: None,
+                })),
+                workspace_root: workspace.join(artifact_path),
+                workspace_shape: StashWorkspaceShape::Directory,
+                unix_mode: None,
+                created_at: now.clone(),
+                updated_at: now,
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn reset_with_artifacts_targets_only_matching_artifact_forks() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("stash");
+        seed_component(
+            &root,
+            "comp-skill",
+            "skills/demo/SKILL.md",
+            "skill=base\n",
+            "skill=edited\n",
+        );
+        seed_component(
+            &root,
+            "comp-command",
+            "commands/demo.md",
+            "command=base\n",
+            "command=edited\n",
+        );
+
+        let result = crate::dispatch::stash::client::with_test_stash_root(root.clone(), || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    reset("demo@labby", Some(vec!["skills/demo/SKILL.md".to_string()])).await
+                })
+        })
+        .unwrap();
+
+        assert_eq!(result["plugin_id"], "demo@labby");
+        assert_eq!(
+            result["reset_artifacts"],
+            Value::from(vec!["skills/demo/SKILL.md"])
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("workspaces/comp-skill/skills/demo/SKILL.md"))
+                .unwrap(),
+            "skill=base\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("workspaces/comp-command/commands/demo.md")).unwrap(),
+            "command=edited\n"
+        );
+        let command = crate::dispatch::stash::store::StashStore::new(root)
+            .read_component("comp-command")
+            .unwrap()
+            .unwrap();
+        assert!(
+            command.head_revision_id.is_none(),
+            "unselected fork must not receive a reset revision"
+        );
+    }
+
+    #[test]
+    fn reset_with_unknown_artifact_fails_before_mutating_any_fork() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("stash");
+        seed_component(
+            &root,
+            "comp-skill",
+            "skills/demo/SKILL.md",
+            "skill=base\n",
+            "skill=edited\n",
+        );
+
+        let err = crate::dispatch::stash::client::with_test_stash_root(root.clone(), || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    reset("demo@labby", Some(vec!["commands/demo.md".to_string()])).await
+                })
+        })
+        .unwrap_err();
+
+        assert_eq!(err.kind(), "not_found");
+        assert_eq!(
+            std::fs::read_to_string(root.join("workspaces/comp-skill/skills/demo/SKILL.md"))
+                .unwrap(),
+            "skill=edited\n"
+        );
     }
 }

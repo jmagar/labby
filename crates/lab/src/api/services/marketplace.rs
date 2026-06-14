@@ -107,7 +107,7 @@ fn require_marketplace_admin(
     let bare = action.strip_prefix("marketplace.").unwrap_or(action);
     if bare == "help"
         || bare == "schema"
-        || !crate::dispatch::marketplace::action_requires_admin(bare)
+        || !marketplace_action_requires_admin(bare)
         || has_admin_scope(auth)
     {
         return Ok(());
@@ -125,6 +125,14 @@ fn require_marketplace_admin(
         sdk_kind: "forbidden".to_string(),
         message: format!("action `{action}` requires `lab:admin` scope"),
     })
+}
+
+fn marketplace_action_requires_admin(action: &str) -> bool {
+    crate::dispatch::marketplace::actions()
+        .iter()
+        .find(|spec| spec.name == action)
+        .map(|spec| spec.requires_admin)
+        .unwrap_or(true)
 }
 
 async fn handle_artifact_fork(
@@ -415,5 +423,35 @@ mod tests {
         require_marketplace_admin("artifact.list", Some("req"), Some(&read_ext)).unwrap();
         require_marketplace_admin("help", Some("req"), None).unwrap();
         require_marketplace_admin("schema", Some("req"), None).unwrap();
+    }
+
+    #[test]
+    fn marketplace_catalog_admin_actions_drive_rest_gate() {
+        let read_auth = Extension(auth_context("reader", &["lab:read"]));
+        let admin_auth = Extension(auth_context("admin", &["lab:read", "lab:admin"]));
+
+        for spec in crate::dispatch::marketplace::actions()
+            .iter()
+            .filter(|spec| spec.requires_admin)
+        {
+            assert_eq!(
+                require_marketplace_admin(spec.name, Some("req"), Some(&read_auth))
+                    .unwrap_err()
+                    .kind(),
+                "forbidden",
+                "{}",
+                spec.name
+            );
+            require_marketplace_admin(spec.name, Some("req"), Some(&admin_auth))
+                .unwrap_or_else(|error| panic!("{}: {error}", spec.name));
+        }
+
+        for spec in crate::dispatch::marketplace::actions()
+            .iter()
+            .filter(|spec| !spec.requires_admin)
+        {
+            require_marketplace_admin(spec.name, Some("req"), Some(&read_auth))
+                .unwrap_or_else(|error| panic!("{}: {error}", spec.name));
+        }
     }
 }

@@ -16,21 +16,6 @@ use crate::api::{ActionRequest, state::AppState};
 use crate::dispatch::error::ToolError;
 use crate::dispatch::stash::catalog::ACTIONS;
 
-/// Actions that mutate stash state and require `lab:admin` scope.
-const STASH_WRITE_ACTIONS: &[&str] = &[
-    "component.import",
-    "component.adopt",
-    "component.save",
-    "component.export",
-    "component.deploy",
-    "component.create",
-    "provider.link",
-    "provider.push",
-    "provider.pull",
-    "target.add",
-    "target.remove",
-];
-
 pub fn routes(_state: AppState) -> Router<AppState> {
     Router::new().route("/", post(handle))
 }
@@ -44,10 +29,7 @@ async fn handle(
 ) -> Result<Json<Value>, ToolError> {
     let request_id = headers.get("x-request-id").and_then(|v| v.to_str().ok());
 
-    // Scope gate: mutating actions require `lab:admin`.
-    // Read-only actions (components.list, component.get, component.workspace,
-    // component.revisions, providers.list, targets.list, help, schema) pass through.
-    if STASH_WRITE_ACTIONS.contains(&req.action.as_str()) {
+    if stash_action_requires_admin(&req.action) {
         let has_admin = auth
             .as_ref()
             .is_some_and(|ctx| ctx.0.scopes.iter().any(|s| s == "lab:admin"));
@@ -84,8 +66,21 @@ async fn handle(
     .await
 }
 
+fn stash_action_requires_admin(action: &str) -> bool {
+    let bare = action.strip_prefix("stash.").unwrap_or(action);
+    if bare == "help" || bare == "schema" {
+        return false;
+    }
+    ACTIONS
+        .iter()
+        .find(|spec| spec.name == bare)
+        .map(|spec| spec.requires_admin)
+        .unwrap_or(true)
+}
+
 #[cfg(test)]
 mod tests {
+    use super::{ACTIONS, stash_action_requires_admin};
     use axum::{
         Extension, Router,
         body::Body,
@@ -169,30 +164,17 @@ mod tests {
 
     #[tokio::test]
     async fn write_actions_require_admin_scope() {
-        let write_actions = [
-            (
-                "component.create",
-                json!({"kind": "settings", "name": "test"}),
-            ),
-            (
-                "component.adopt",
-                json!({
-                    "kind": "skill",
-                    "name": "demo",
-                    "source_path": "/tmp/demo",
-                    "origin": {"kind": "local_path", "source_path": "/tmp/demo"},
-                    "confirm": true
-                }),
-            ),
-        ];
-
-        for (action, params) in write_actions {
+        for action in ACTIONS
+            .iter()
+            .filter(|spec| spec.requires_admin)
+            .map(|spec| spec.name)
+        {
             for app in [test_app(), test_app_with_auth(read_only_auth_context())] {
                 let response = post_stash(
                     app,
                     json!({
                         "action": action,
-                        "params": params.clone()
+                        "params": {}
                     }),
                 )
                 .await;
@@ -209,5 +191,25 @@ mod tests {
         )
         .await;
         assert_ne!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn stash_catalog_admin_actions_drive_rest_gate() {
+        for spec in ACTIONS.iter().filter(|spec| spec.requires_admin) {
+            assert!(
+                stash_action_requires_admin(spec.name),
+                "{} should require admin",
+                spec.name
+            );
+        }
+        for spec in ACTIONS.iter().filter(|spec| !spec.requires_admin) {
+            assert!(
+                !stash_action_requires_admin(spec.name),
+                "{} should not require admin",
+                spec.name
+            );
+        }
+        assert!(!stash_action_requires_admin("stash.help"));
+        assert!(stash_action_requires_admin("stash.component.create"));
     }
 }

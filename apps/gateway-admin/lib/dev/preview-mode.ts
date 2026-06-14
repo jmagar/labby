@@ -10,6 +10,7 @@ const READ_ONLY_ACTIONS = new Set([
   'plugin.workspace',
   'plugin.components',
   'plugin.deploy.preview',
+  'artifact.list',
   'agent.list',
   'agent.get',
   'mcp.config',

@@ -339,11 +339,6 @@ fn update_preview(
     to_json(preview).map(Ok)
 }
 
-fn build_preview(plugin_id: &str) -> Result<UpdatePreviewResult, ToolError> {
-    let fork = fork_record_for_plugin(plugin_id, None)?;
-    build_preview_from_fork(&fork)
-}
-
 fn truncate_preview_string(value: String, max_bytes: usize) -> (String, Option<PreviewTruncation>) {
     let original_size = value.len();
     if original_size <= max_bytes {
@@ -568,7 +563,7 @@ fn update_apply(params: UpdateApplyParams) -> Result<Result<Value, ToolError>, T
     let strategy = params.strategy.unwrap_or(meta.update_config.strategy);
     let preview = match read_pending_preview_at(&pending_path_for_fork(&fork)) {
         Ok(preview) => preview,
-        Err(error) if error.kind() == "not_found" => build_preview(&params.plugin_id)?,
+        Err(error) if error.kind() == "not_found" => build_preview_from_fork(&fork)?,
         Err(error) => return Ok(Err(error)),
     };
 
@@ -1856,6 +1851,9 @@ mod tests {
         git_security_envs,
     };
     use crate::dispatch::error::ToolError;
+    use lab_apis::stash::{
+        MarketplaceOrigin, StashComponent, StashComponentKind, StashOrigin, StashWorkspaceShape,
+    };
     use serde_json::{Value, json};
     use std::collections::HashMap;
     #[cfg(unix)]
@@ -1870,11 +1868,16 @@ mod tests {
 
     fn dispatch_with_home(home: &Path, action: &str, params: Value) -> Result<Value, ToolError> {
         with_home(home, || {
-            Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(async { dispatch(action, params).await })
+            crate::dispatch::stash::client::with_test_stash_root(
+                home.join(".lab").join("stash"),
+                || {
+                    Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap()
+                        .block_on(async { dispatch(action, params).await })
+                },
+            )
         })
     }
 
@@ -1953,6 +1956,68 @@ mod tests {
             update_config: super::UpdateConfig::default(),
             pending_update: None,
         }
+    }
+
+    fn seed_marketplace_source(home: &Path, plugin_id: &str, files: &[(&str, &str)]) {
+        let (name, marketplace) = plugin_id.split_once('@').unwrap();
+        let marketplace_root = plugins_root(home).join("marketplaces").join(marketplace);
+        let plugin_root = marketplace_root.join(name);
+        for (path, content) in files {
+            write_file(&plugin_root.join(path), content);
+        }
+        write_file(
+            &plugins_root(home).join("known_marketplaces.json"),
+            &json!({
+                marketplace: {
+                    "installLocation": marketplace_root
+                }
+            })
+            .to_string(),
+        );
+    }
+
+    fn seed_stash_artifact_component(
+        home: &Path,
+        component_id: &str,
+        artifact_path: &str,
+        base_content: &str,
+        local_content: &str,
+    ) {
+        let root = home.join(".lab").join("stash");
+        let store = crate::dispatch::stash::store::StashStore::new(root.clone());
+        store.ensure_dirs().unwrap();
+        let workspace = store.workspace_dir(component_id);
+        write_file(&workspace.join(artifact_path), local_content);
+        write_file(
+            &root
+                .join("marketplace")
+                .join(component_id)
+                .join("base")
+                .join(artifact_path),
+            base_content,
+        );
+        let now = "2026-06-14T00:00:00Z".to_string();
+        store
+            .write_component(&StashComponent {
+                id: component_id.to_string(),
+                kind: StashComponentKind::Skill,
+                name: component_id.to_string(),
+                label: None,
+                head_revision_id: None,
+                origin: None,
+                origin_meta: Some(StashOrigin::Marketplace(MarketplaceOrigin {
+                    plugin_id: plugin_id().to_string(),
+                    artifact_path: Some(artifact_path.to_string()),
+                    source_version: Some("1.0.0".to_string()),
+                    source_fingerprint: None,
+                })),
+                workspace_root: workspace.join(artifact_path),
+                workspace_shape: StashWorkspaceShape::Directory,
+                unix_mode: None,
+                created_at: now.clone(),
+                updated_at: now,
+            })
+            .unwrap();
     }
 
     #[cfg(unix)]
@@ -2385,6 +2450,71 @@ esac
         .unwrap();
 
         assert_eq!(result["status"], "complete");
+    }
+
+    #[test]
+    fn update_apply_rebuilds_missing_preview_for_selected_artifact_fork() {
+        let dir = tempdir().unwrap();
+        seed_marketplace_source(
+            dir.path(),
+            plugin_id(),
+            &[
+                ("skills/demo/SKILL.md", "skill=theirs\n"),
+                ("commands/demo.md", "command=theirs\n"),
+            ],
+        );
+        seed_stash_artifact_component(
+            dir.path(),
+            "comp-skill",
+            "skills/demo/SKILL.md",
+            "skill=base\n",
+            "skill=mine\n",
+        );
+        seed_stash_artifact_component(
+            dir.path(),
+            "comp-command",
+            "commands/demo.md",
+            "command=base\n",
+            "command=mine\n",
+        );
+
+        let result = dispatch_with_home(
+            dir.path(),
+            "artifact.update.apply",
+            json!({
+                "plugin_id": plugin_id(),
+                "artifact_path": "skills/demo/SKILL.md",
+                "strategy": "keep_mine",
+                "confirm": true
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(result["status"], "complete");
+        assert_eq!(
+            std::fs::read_to_string(
+                dir.path()
+                    .join(".lab/stash/workspaces/comp-skill/skills/demo/SKILL.md")
+            )
+            .unwrap(),
+            "skill=mine\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(
+                dir.path()
+                    .join(".lab/stash/marketplace/comp-skill/base/skills/demo/SKILL.md")
+            )
+            .unwrap(),
+            "skill=theirs\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(
+                dir.path()
+                    .join(".lab/stash/workspaces/comp-command/commands/demo.md")
+            )
+            .unwrap(),
+            "command=mine\n"
+        );
     }
 
     #[test]

@@ -622,18 +622,3 @@ pub fn actions() -> &'static [ActionSpec] {
     });
     &ACTIONS
 }
-
-#[allow(dead_code)]
-pub fn action_requires_admin(action: &str) -> bool {
-    actions()
-        .iter()
-        .any(|spec| spec.name == action && spec.destructive)
-        || matches!(
-            action,
-            "plugin.workspace"
-                | "plugin.save"
-                | "artifact.fork"
-                | "artifact.patch"
-                | "artifact.config.set"
-        )
-}
