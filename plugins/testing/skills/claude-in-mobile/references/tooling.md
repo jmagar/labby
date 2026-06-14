@@ -38,6 +38,86 @@ claude-in-mobile setup codex --global
 - Aurora OS: install `audb-client`, enable SSH on the device, and install Python
   on device for tap/swipe support.
 
+### Labby + Android Device Recovery
+
+When `claude-in-mobile` is exposed through Labby, the MCP server can be healthy
+while Android still reports `no device`. Do not stop there. First distinguish
+tool availability from target availability.
+
+```bash
+# Confirm the upstream and helper namespace.
+labby gateway list | rg -i 'claude-in-mobile|mobile'
+labby gateway code exec --json --code \
+  'async () => Object.keys(codemode.claude_in_mobile)'
+
+# List targets through Labby.
+labby gateway code exec --json --code \
+  'async () => await codemode.claude_in_mobile.device({ action: "list" })'
+```
+
+If the Android system call fails with an ADB error such as:
+
+```text
+failed to connect to '172.19.0.1:5037': Connection refused
+cannot start server on remote host
+```
+
+then the gateway can see the host, but host ADB is only listening on loopback.
+Restart ADB with remote binding:
+
+```bash
+adb kill-server
+adb -a start-server
+ss -ltnp | rg ':5037'   # should show *:5037, not only 127.0.0.1:5037
+```
+
+If no device is connected, create or boot an emulator rather than reporting
+that claude-in-mobile cannot test Android:
+
+```bash
+sdkmanager --list_installed | rg 'emulator|platform-tools|system-images;android'
+avdmanager list avd
+
+# Create one if needed, using an installed system image.
+echo no | avdmanager create avd \
+  -n mobile_debug \
+  -k 'system-images;android-35-ext15;google_apis;x86_64' \
+  -d pixel_6 --force
+
+# Headless launch that works well under agent sessions.
+/home/$USER/Android/Sdk/emulator/emulator -avd mobile_debug \
+  -no-window -no-audio -no-boot-anim -no-snapshot \
+  -gpu off -camera-back none -camera-front none -verbose
+```
+
+In another shell, wait for boot and re-check Labby:
+
+```bash
+for i in $(seq 1 120); do
+  serial=$(adb devices | awk '/^emulator-[0-9]+[[:space:]]+device/{print $1; exit}')
+  if [ -n "$serial" ]; then
+    boot=$(adb -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+    echo "serial=$serial boot=$boot"
+    [ "$boot" = "1" ] && break
+  fi
+  sleep 2
+done
+
+labby gateway code exec --json --code \
+  'async () => await codemode.claude_in_mobile.device({ action: "list" })'
+```
+
+Once Android appears, continue with install, launch, screenshots, UI tree, and
+crash logs:
+
+```bash
+labby gateway code exec --json --code \
+  'async () => await codemode.claude_in_mobile.app({ action: "install", path: "/tmp/app.apk" })'
+labby gateway code exec --json --code \
+  'async () => await codemode.claude_in_mobile.app({ action: "launch", package: "com.example.app" })'
+adb -s emulator-5554 logcat -d -b crash
+```
+
 ## Coordinate Rule
 
 Raw `input` coordinates come from the most recent screenshot pixel space and can

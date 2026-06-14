@@ -62,6 +62,54 @@ Run `claude-in-mobile doctor` first when setup is uncertain. It checks common
 dependencies such as ADB, Android SDK paths, Xcode/simctl, Appium/WDA, JDK,
 audb-client, and Chrome.
 
+## Android Via Labby
+
+When using the Labby gateway, do not conclude that `claude-in-mobile` is broken
+just because the first `device list` shows no Android target. The gateway may
+have a working `claude-in-mobile` server while no device is attached yet, or
+while host ADB is bound only to loopback.
+
+Use this recovery sequence before giving up:
+
+```bash
+# 1. Confirm the upstream is connected.
+labby gateway list | rg -i 'claude-in-mobile|mobile'
+
+# 2. Ask claude-in-mobile what it can see through Labby.
+labby gateway code exec --json --code \
+  'async () => await codemode.claude_in_mobile.device({ action: "list" })'
+
+# 3. If Android is missing or system info reports ADB connection refused to
+#    172.19.0.1:5037, restart host ADB so gateway/container clients can reach it.
+adb kill-server
+adb -a start-server
+ss -ltnp | rg ':5037'
+
+# 4. If no Android device is attached, boot an emulator instead of stopping.
+avdmanager list avd
+/path/to/Android/Sdk/emulator/emulator -avd <name> \
+  -no-window -no-audio -no-boot-anim -no-snapshot \
+  -gpu off -camera-back none -camera-front none
+
+# 5. Wait for the emulator, then re-check both ADB and Labby.
+adb devices -l
+adb -s emulator-5554 shell getprop sys.boot_completed
+labby gateway code exec --json --code \
+  'async () => await codemode.claude_in_mobile.device({ action: "list" })'
+```
+
+Important details:
+- Labby-hosted `claude-in-mobile` may reach the host ADB daemon through a Docker
+  bridge address such as `172.19.0.1:5037`; host ADB listening on
+  `127.0.0.1:5037` is not enough. `adb -a start-server` binds it for gateway
+  access.
+- If an AVD appears to exit immediately, rerun the emulator in the foreground
+  with `-verbose` and headless-safe flags instead of assuming the emulator is
+  unavailable. A successful headless launch should eventually show
+  `control console listening on port 5554, ADB on port 5555`.
+- After Labby sees `emulator-5554`, use the MCP app/system tools to install,
+  launch, capture screenshots, and collect crash logs.
+
 ## Core Tool Families
 
 - `device`: list devices, set/get active target, and enable/disable modules.
