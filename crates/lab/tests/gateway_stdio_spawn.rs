@@ -11,7 +11,6 @@
     clippy::unnested_or_patterns
 )]
 //! Integration test: real stdio MCP child-process spawn + reaping.
-#![allow(clippy::panic)]
 //!
 //! These tests are `#[ignore]` (local-only, per repo convention) because they
 //! spawn real child processes and require the `labby` binary compiled into
