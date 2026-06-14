@@ -198,6 +198,27 @@ async () => ({ ok: true })
     }
 
     #[test]
+    fn list_keeps_tutorial_sized_builtin_snippets() {
+        let temp = tempfile::tempdir().unwrap();
+        let lab_home = temp.path().join("lab-home");
+        let builtin_dir = temp.path().join("builtins");
+        fs::create_dir_all(&builtin_dir).unwrap();
+        let tutorial = "This tutorial explains the selected tools and schemas.\n".repeat(450);
+        fs::write(
+            builtin_dir.join("tutorial.md"),
+            format!(
+                "---\nname: tutorial\ndescription: Tutorial snippet\ntags: [docs]\n---\n\n# Tutorial\n\n{tutorial}\n```js\nasync () => ({{ ok: true }})\n```\n"
+            ),
+        )
+        .unwrap();
+
+        let snippets = list_snippets(&lab_home, &builtin_dir).unwrap();
+
+        assert_eq!(snippets.len(), 1);
+        assert_eq!(snippets[0].name, "tutorial");
+    }
+
+    #[test]
     fn frontmatter_inputs_merge_defaults_and_validate_params() {
         let temp = tempfile::tempdir().unwrap();
         let lab_home = temp.path().join("lab-home");
