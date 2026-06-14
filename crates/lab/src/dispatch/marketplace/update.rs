@@ -890,10 +890,7 @@ fn pending_path_for_fork(fork: &ForkRecord) -> PathBuf {
 }
 
 fn lock_dir_for_fork(fork: &ForkRecord) -> PathBuf {
-    fork.state_dir
-        .as_ref()
-        .cloned()
-        .unwrap_or_else(|| fork.stash.clone())
+    fork.state_dir.clone().unwrap_or_else(|| fork.stash.clone())
 }
 
 fn save_stash_revision_and_update_origin(
@@ -1111,7 +1108,7 @@ fn base_dir(stash: &Path) -> PathBuf {
 }
 
 fn read_pending_preview_at(path: &Path) -> Result<UpdatePreviewResult, ToolError> {
-    let bytes = std::fs::read(&path).map_err(client::io_internal)?;
+    let bytes = std::fs::read(path).map_err(client::io_internal)?;
     serde_json::from_slice(&bytes).map_err(|e| ToolError::Sdk {
         sdk_kind: "decode_error".into(),
         message: format!("parse {}: {e}", path.display()),

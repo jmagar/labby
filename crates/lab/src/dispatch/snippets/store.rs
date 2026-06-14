@@ -131,7 +131,7 @@ pub fn extract_javascript_block(source: &str) -> Result<String, ToolError> {
                 continue;
             }
 
-            let language = info.trim().split_whitespace().next().unwrap_or_default();
+            let language = info.split_whitespace().next().unwrap_or_default();
             in_fence = true;
             wanted = matches!(language, "js" | "javascript");
             body.clear();
