@@ -95,83 +95,95 @@ async fn handle_marketplace_action(
 
 async fn handle_artifact_fork(
     headers: HeaderMap,
+    auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
 ) -> Result<Json<Value>, ToolError> {
-    handle_artifact_path_action(headers, "artifact.fork", body).await
+    handle_artifact_path_action(headers, auth, "artifact.fork", body).await
 }
 
 async fn handle_artifact_list(
     headers: HeaderMap,
+    auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
 ) -> Result<Json<Value>, ToolError> {
-    handle_artifact_path_action(headers, "artifact.list", body).await
+    handle_artifact_path_action(headers, auth, "artifact.list", body).await
 }
 
 async fn handle_artifact_unfork(
     headers: HeaderMap,
+    auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
 ) -> Result<Json<Value>, ToolError> {
-    handle_artifact_path_action(headers, "artifact.unfork", body).await
+    handle_artifact_path_action(headers, auth, "artifact.unfork", body).await
 }
 
 async fn handle_artifact_reset(
     headers: HeaderMap,
+    auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
 ) -> Result<Json<Value>, ToolError> {
-    handle_artifact_path_action(headers, "artifact.reset", body).await
+    handle_artifact_path_action(headers, auth, "artifact.reset", body).await
 }
 
 async fn handle_artifact_diff(
     headers: HeaderMap,
+    auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
 ) -> Result<Json<Value>, ToolError> {
-    handle_artifact_path_action(headers, "artifact.diff", body).await
+    handle_artifact_path_action(headers, auth, "artifact.diff", body).await
 }
 
 async fn handle_artifact_patch(
     headers: HeaderMap,
+    auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
 ) -> Result<Json<Value>, ToolError> {
-    handle_artifact_path_action(headers, "artifact.patch", body).await
+    handle_artifact_path_action(headers, auth, "artifact.patch", body).await
 }
 
 async fn handle_artifact_update_check(
     headers: HeaderMap,
+    auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
 ) -> Result<Json<Value>, ToolError> {
-    handle_artifact_path_action(headers, "artifact.update.check", body).await
+    handle_artifact_path_action(headers, auth, "artifact.update.check", body).await
 }
 
 async fn handle_artifact_update_preview(
     headers: HeaderMap,
+    auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
 ) -> Result<Json<Value>, ToolError> {
-    handle_artifact_path_action(headers, "artifact.update.preview", body).await
+    handle_artifact_path_action(headers, auth, "artifact.update.preview", body).await
 }
 
 async fn handle_artifact_update_apply(
     headers: HeaderMap,
+    auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
 ) -> Result<Json<Value>, ToolError> {
-    handle_artifact_path_action(headers, "artifact.update.apply", body).await
+    handle_artifact_path_action(headers, auth, "artifact.update.apply", body).await
 }
 
 async fn handle_artifact_merge_suggest(
     headers: HeaderMap,
+    auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
 ) -> Result<Json<Value>, ToolError> {
-    handle_artifact_path_action(headers, "artifact.merge.suggest", body).await
+    handle_artifact_path_action(headers, auth, "artifact.merge.suggest", body).await
 }
 
 async fn handle_artifact_config_set(
     headers: HeaderMap,
+    auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
 ) -> Result<Json<Value>, ToolError> {
-    handle_artifact_path_action(headers, "artifact.config.set", body).await
+    handle_artifact_path_action(headers, auth, "artifact.config.set", body).await
 }
 
 async fn handle_artifact_path_action(
     headers: HeaderMap,
+    auth: Option<Extension<AuthContext>>,
     action: &'static str,
     body: Option<Json<Value>>,
 ) -> Result<Json<Value>, ToolError> {
@@ -181,7 +193,7 @@ async fn handle_artifact_path_action(
     handle_marketplace_action(
         None,
         headers,
-        None,
+        auth,
         ActionRequest {
             action: action.to_string(),
             params,
@@ -290,4 +302,34 @@ async fn cherry_pick_progress(
             .interval(Duration::from_secs(15))
             .text("keepalive"),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use axum::http::{HeaderMap, HeaderValue};
+
+    use super::*;
+
+    #[test]
+    fn marketplace_artifact_routes_preserve_auth_context_metadata() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-request-id", HeaderValue::from_static("req-artifact-1"));
+        let auth = AuthContext {
+            sub: "artifact-user".to_string(),
+            actor_key: Some(Arc::<str>::from("actor-artifact")),
+            scopes: vec!["lab:read".to_string(), "lab:admin".to_string()],
+            issuer: "test".to_string(),
+            via_session: true,
+            csrf_token: None,
+            email: Some("artifact@example.com".to_string()),
+        };
+
+        let meta = dispatch_meta_from_headers(&headers, Some(&auth), None);
+
+        assert_eq!(meta.request_id, Some("req-artifact-1"));
+        assert_eq!(meta.actor_key, Some("actor-artifact"));
+        assert_eq!(meta.agent_kind, Some("device"));
+    }
 }
