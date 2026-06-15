@@ -479,8 +479,7 @@ fn normalize_artifact_path(raw: &str) -> Result<String, ToolError> {
     // real `../` separators that escape the jail. Converting first makes the
     // guards see exactly the separators the filesystem will.
     let normalized = trimmed.replace('\\', "/");
-    let path = Path::new(&normalized);
-    if path.is_absolute() {
+    if is_rooted_or_drive_absolute(&normalized) {
         return Err(ToolError::InvalidParam {
             message: "artifact path must be a relative path".to_string(),
             param: "path".to_string(),
@@ -488,4 +487,27 @@ fn normalize_artifact_path(raw: &str) -> Result<String, ToolError> {
     }
     reject_path_traversal(&normalized)?;
     Ok(normalized)
+}
+
+/// Cross-platform "is this artifact path rooted or absolute?" check.
+///
+/// `Path::is_absolute()` is platform-dependent: on Windows a POSIX-rooted path
+/// like `/etc/evil` (or `\etc\evil`, which we normalize to `/etc/evil`) is NOT
+/// absolute because it lacks a drive prefix, so it would slip past the guard and
+/// only later be caught — with the wrong error kind — by `reject_path_traversal`.
+/// We operate on the already-`\`->`/`-normalized string so the rule is identical
+/// on every OS: reject a leading `/`, a Windows drive prefix (`C:`), or anything
+/// the current platform already considers absolute.
+fn is_rooted_or_drive_absolute(normalized: &str) -> bool {
+    normalized.starts_with('/')
+        || has_windows_drive_prefix(normalized)
+        || Path::new(normalized).is_absolute()
+}
+
+/// True when the path begins with a Windows drive-letter prefix such as `C:` —
+/// covering both drive-absolute (`C:/foo`) and drive-relative (`C:foo`) forms,
+/// neither of which is a valid jailed relative artifact path on any platform.
+fn has_windows_drive_prefix(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }

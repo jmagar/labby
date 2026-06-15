@@ -856,14 +856,12 @@ fn relative_file_paths(root: &Path, current: &Path) -> Result<Vec<String>, ToolE
         if file_type.is_dir() {
             out.extend(relative_file_paths(root, &entry.path())?);
         } else {
-            out.push(
-                entry
-                    .path()
-                    .strip_prefix(root)
-                    .map_err(crate::dispatch::marketplace::client::io_internal)?
-                    .to_string_lossy()
-                    .into_owned(),
-            );
+            let relative = entry
+                .path()
+                .strip_prefix(root)
+                .map_err(crate::dispatch::marketplace::client::io_internal)?
+                .to_path_buf();
+            out.push(crate::dispatch::path_safety::rel_to_unix_string(&relative));
         }
     }
     Ok(out)

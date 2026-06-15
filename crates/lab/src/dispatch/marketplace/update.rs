@@ -1311,12 +1311,8 @@ fn collect_text_paths(
             continue;
         }
         if std::fs::read_to_string(&path).is_ok() {
-            out.insert(
-                path.strip_prefix(root)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .into_owned(),
-            );
+            let relative = path.strip_prefix(root).unwrap_or(&path);
+            out.insert(crate::dispatch::path_safety::rel_to_unix_string(relative));
         }
     }
     Ok(())

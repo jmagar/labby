@@ -239,6 +239,21 @@ fn reject_existing_symlink(path: &Path) -> Result<(), ToolError> {
     }
 }
 
+/// Render a relative path with `/` separators on every platform so the logical
+/// artifact keys stashes and updates emit are stable across Unix and Windows.
+///
+/// `Path::to_string_lossy()` uses the platform separator (`\` on Windows), which
+/// would make the same artifact key differ by OS and break equality with the
+/// forward-slash keys callers and snapshots expect. Iterating `components()`
+/// only rewrites the real `MAIN_SEPARATOR`; a literal backslash inside a Unix
+/// filename stays intact because it is part of a single `Normal` component.
+pub fn rel_to_unix_string(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 fn normalize_lexical(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for comp in path.components() {

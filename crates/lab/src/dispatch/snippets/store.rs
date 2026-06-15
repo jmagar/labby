@@ -425,8 +425,17 @@ pub fn validate_snippet_code(code: &str) -> Result<(), ToolError> {
     Ok(())
 }
 
+/// Strip the opening `---` frontmatter delimiter line, tolerating both LF and
+/// CRLF endings. Windows checkouts (and Windows-authored user snippets) carry
+/// `---\r\n`, which a bare `strip_prefix("---\n")` would miss — silently
+/// dropping the snippet's frontmatter and making built-ins undiscoverable.
+fn strip_frontmatter_open(body: &str) -> Option<&str> {
+    body.strip_prefix("---\n")
+        .or_else(|| body.strip_prefix("---\r\n"))
+}
+
 pub fn frontmatter(body: &str) -> Result<Option<SnippetFrontmatter>, ToolError> {
-    let Some(rest) = body.strip_prefix("---\n") else {
+    let Some(rest) = strip_frontmatter_open(body) else {
         return Ok(None);
     };
     let Some(raw) = frontmatter_block(rest) else {
@@ -496,7 +505,7 @@ fn frontmatter_block(rest: &str) -> Option<String> {
 }
 
 fn has_frontmatter(body: &str) -> bool {
-    body.starts_with("---\n")
+    strip_frontmatter_open(body).is_some()
 }
 
 fn required_frontmatter_field(value: Option<String>, field: &str) -> Result<String, ToolError> {
@@ -850,8 +859,7 @@ mod tests {
             // and must fail loudly — so skip only on genuine absence and let the
             // `frontmatter(body)?` inside `validate_snippet_body` surface parse
             // errors, rather than collapsing both cases with `.ok().flatten()`.
-            if path.extension().and_then(|e| e.to_str()) == Some("md") && !body.starts_with("---\n")
-            {
+            if path.extension().and_then(|e| e.to_str()) == Some("md") && !has_frontmatter(&body) {
                 continue;
             }
             validate_snippet_body(stem, &body).unwrap_or_else(|error| {

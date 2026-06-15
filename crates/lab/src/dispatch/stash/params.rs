@@ -276,12 +276,21 @@ mod tests {
 
     use super::*;
 
+    // `required_absolute_path` uses OS-semantic `Path::is_absolute()`, which is
+    // correct for real host paths: a Unix `/tmp/demo` is not absolute on Windows
+    // (no drive prefix). Use a platform-appropriate absolute path so the test
+    // exercises the accept/reject contract on every OS.
+    #[cfg(windows)]
+    const ABS_PATH: &str = r"C:\tmp\demo";
+    #[cfg(not(windows))]
+    const ABS_PATH: &str = "/tmp/demo";
+
     #[test]
     fn parse_adopt_rejects_relative_origin_local_path() {
         let error = match parse_adopt_params(&json!({
             "kind": "skill",
             "name": "demo",
-            "source_path": "/tmp/demo",
+            "source_path": ABS_PATH,
             "origin": {
                 "kind": "local_path",
                 "source_path": "relative/demo"
@@ -299,14 +308,14 @@ mod tests {
         let params = parse_adopt_params(&json!({
             "kind": "skill",
             "name": "demo",
-            "source_path": "/tmp/demo",
+            "source_path": ABS_PATH,
             "origin": {
                 "kind": "local_path",
-                "source_path": "/tmp/demo"
+                "source_path": ABS_PATH
             }
         }))
         .unwrap();
 
-        assert_eq!(params.source_path, PathBuf::from("/tmp/demo"));
+        assert_eq!(params.source_path, PathBuf::from(ABS_PATH));
     }
 }
