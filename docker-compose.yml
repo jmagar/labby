@@ -20,6 +20,27 @@ services:
     volumes:
       # Hot-swap the locally built binary into the dev runtime.
       - ./bin/labby:/usr/local/bin/labby
+      # adb client for the in-container claude-in-mobile MCP server. claude-in-mobile
+      # talks to the host's adb SERVER (config.toml: ANDROID_ADB_SERVER_ADDRESS +
+      # ANDROID_ADB_SERVER_PORT=5037), so it only needs a client binary on PATH to
+      # enumerate host-booted emulators (emulator-5554). Point the address at the
+      # `host.docker.internal` alias provided by extra_hosts below rather than a
+      # hardcoded bridge IP — Docker resolves it to the current host gateway on any
+      # network. The host adb server must listen on a non-loopback interface
+      # (`ADB_SERVER_SOCKET=tcp:0.0.0.0:5037` / `adb -a` on the host).
+      #
+      # We bind-mount the HOST's adb (not an apt-installed one) so the client version
+      # matches the host server's exactly — a mismatched client would kill+restart
+      # the host adb server and drop its live emulator sessions.
+      #
+      # Opt-in: set ADB_PATH in the repo .env to the host's adb (e.g.
+      # ${HOME}/Android/Sdk/platform-tools/adb). The default /dev/null is a real
+      # device present on every host; without it, an unset ADB_PATH would leave
+      # Docker to auto-create an empty directory at the (missing) source path and
+      # shadow the adb binary with a directory.
+      - ${ADB_PATH:-/dev/null}:/usr/local/bin/adb:ro
+    # extra_hosts (host.docker.internal:host-gateway) is inherited from
+    # docker-compose.prod.yml via `extends` above — see the comment there.
     environment:
       # Serve frontend assets from the bind-mounted workspace so `pnpm build`
       # changes are reflected immediately without a binary rebuild.
