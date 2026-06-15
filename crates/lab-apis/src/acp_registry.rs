@@ -7,10 +7,14 @@
 
 pub mod client;
 pub mod error;
+pub mod installer;
+pub mod ssrf;
 pub mod types;
 
 pub use client::AcpRegistryClient;
 pub use error::AcpRegistryError;
+pub use installer::{AcpInstaller, AcpInstallerError, InstallOutcome, InstallSpec};
+pub use ssrf::SsrfError;
 
 use std::time::Instant;
 

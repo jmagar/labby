@@ -72,8 +72,17 @@ pub const DANGEROUS_DENO_FLAGS: &[&str] = &["eval", "--allow-all", "-A"];
 /// must call this before writing to config.
 ///
 /// Pass `extra` to extend the built-in list with operator-configured commands
-/// (from `[gateway] extra_stdio_commands` in `config.toml`).
-/// Pass `bypass = true` to skip all validation (requires `disable_spawn_guard = true`).
+/// (from `[gateway] extra_stdio_commands` in `config.toml`). This scoped
+/// allowlist is the **preferred** way to permit an additional runtime: it adds
+/// exactly the binaries you name while keeping every other guard (argv flags,
+/// env names/values) enforced.
+///
+/// Pass `bypass = true` (driven by `[gateway] disable_spawn_guard = true`) to
+/// skip the command allowlist **entirely**. This is a coarse, global escape
+/// hatch — with it set, `bash`, `/bin/sh -c`, and arbitrary binaries like
+/// `/tmp/evil` all become spawnable. Prefer `extra_stdio_commands` and leave
+/// the guard on. When the bypass is active, every skipped validation emits a
+/// `WARN` so the weakened posture is visible in logs.
 ///
 /// Returns `invalid_param` if the command is not in either allowlist.
 pub fn validate_stdio_command(
@@ -82,6 +91,12 @@ pub fn validate_stdio_command(
     bypass: bool,
 ) -> Result<(), ToolError> {
     if bypass {
+        tracing::warn!(
+            service = "upstream.pool",
+            command = %command,
+            "SECURITY: spawn-guard bypass active — command allowlist NOT enforced \
+             (disable_spawn_guard = true); prefer scoping with [gateway] extra_stdio_commands"
+        );
         return Ok(());
     }
 
@@ -281,6 +296,85 @@ mod tests {
         assert!(validate_stdio_command("bash", &[], true).is_ok());
         assert!(validate_stdio_command("/bin/sh", &[], true).is_ok());
         assert!(validate_stdio_command("/tmp/anything", &[], true).is_ok());
+    }
+
+    #[test]
+    fn command_bypass_emits_security_warn() {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::{EnvFilter, fmt};
+
+        use crate::test_support::{SharedBuf, captured_logs};
+
+        let _tracing_lock = crate::test_support::TRACING_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        let buf = SharedBuf::default();
+        let subscriber = tracing_subscriber::registry()
+            .with(EnvFilter::new("labby=warn"))
+            .with(
+                fmt::layer()
+                    .json()
+                    .with_writer(buf.clone())
+                    .with_ansi(false)
+                    .without_time(),
+            );
+
+        {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            // The bypass path must allow the otherwise-rejected command...
+            assert!(validate_stdio_command("bash", &[], true).is_ok());
+        }
+
+        // ...AND emit a WARN documenting the weakened posture (Sec-M2).
+        let logs = captured_logs(&buf);
+        assert!(
+            logs.contains("\"level\":\"WARN\""),
+            "bypass must emit a WARN-level event; captured logs: {logs}"
+        );
+        assert!(
+            logs.contains("spawn-guard bypass active"),
+            "WARN must identify the spawn-guard bypass; captured logs: {logs}"
+        );
+        assert!(
+            logs.contains("bash"),
+            "WARN should record the bypassed command; captured logs: {logs}"
+        );
+    }
+
+    #[test]
+    fn command_no_bypass_emits_no_warn() {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::{EnvFilter, fmt};
+
+        use crate::test_support::{SharedBuf, captured_logs};
+
+        let _tracing_lock = crate::test_support::TRACING_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        let buf = SharedBuf::default();
+        let subscriber = tracing_subscriber::registry()
+            .with(EnvFilter::new("labby=warn"))
+            .with(
+                fmt::layer()
+                    .json()
+                    .with_writer(buf.clone())
+                    .with_ansi(false)
+                    .without_time(),
+            );
+
+        {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            // A normally-allowed command with the guard ON must not WARN.
+            assert!(validate_stdio_command("npx", &[], false).is_ok());
+        }
+
+        let logs = captured_logs(&buf);
+        assert!(
+            !logs.contains("spawn-guard bypass active"),
+            "no bypass WARN must be emitted when bypass=false; captured logs: {logs}"
+        );
     }
 
     // ── validate_stdio_argv ─────────────────────────────────────────────────

@@ -74,30 +74,46 @@ impl From<String> for CodeModeRunnerError {
     }
 }
 
+/// Extract a structured `{kind,message}` payload embedded in a rejection message
+/// and return its `kind`, scanning the ENTIRE message rather than the first line.
+///
+/// The `__labSettleToolCall` bridge rejects a failed `callTool` with an `Error`
+/// whose `.message` is the *pure JSON* `{kind,message}` of the upstream error.
+/// That pure-JSON shape is a load-bearing contract: caller JS recovers the
+/// structured error via `JSON.parse(e.message)` (see the runner integration
+/// tests), so the bridge must NOT wrap the message in markers or prose. QuickJS
+/// then surfaces an uncaught rejection to the host as `Error: <message>`,
+/// optionally followed by a `\n    at ...` stack trace. Rather than depend on
+/// that exact prefix/first-line shape, locate the embedded JSON object (first
+/// `{` to last `}`) and parse it: `JSON.stringify` escapes any newline inside
+/// `message`, so the object stays single-line and a multi-line tool message no
+/// longer perturbs recovery, and QuickJS stack frames carry no braces so a
+/// trailing stack is ignored. A non-JSON span (e.g. `Error: x is not a
+/// function`) fails the parse and falls through to the generic classification.
+fn extract_structured_kind(message: &str) -> Option<String> {
+    let start = message.find('{')?;
+    let end = message.rfind('}')?;
+    if end < start {
+        return None;
+    }
+    let json_candidate = &message[start..=end];
+    let Value::Object(map) = serde_json::from_str::<Value>(json_candidate).ok()? else {
+        return None;
+    };
+    map.get("kind").and_then(Value::as_str).map(str::to_string)
+}
+
 /// Classify a main-promise rejection message into an error kind:
-/// 1. If the message is a JSON object carrying a `kind`, preserve that kind
-///    (structured tool-error rejections re-raised through the sandbox).
+/// 1. If the message carries an embedded structured `{kind,message}` JSON object,
+///    preserve that kind (structured tool-error rejections re-raised through the
+///    sandbox). See `extract_structured_kind`.
 /// 2. Else if it mentions `JSON-serializable`, the result could not be
 ///    serialized — a caller mistake → `invalid_param`.
 /// 3. Otherwise it is a runtime throw (e.g. the non-function TypeError) →
 ///    `server_error`.
 fn classify_rejection(message: String) -> CodeModeRunnerError {
-    // An uncaught structured tool-error rejection arrives as the JS Error's
-    // stringified form, e.g. `Error: {"kind":"upstream_error","message":"..."}`
-    // followed by a `\n    at ...` stack trace that QuickJS appends. Take only
-    // the first line and strip the `Error: ` prefix before attempting to recover
-    // the structured `{kind,message}` payload — the trailing stack would
-    // otherwise make `serde_json::from_str` reject the candidate as having
-    // trailing garbage and silently fall through to `server_error`.
-    let first_line = message.lines().next().unwrap_or(&message);
-    let json_candidate = first_line.strip_prefix("Error: ").unwrap_or(first_line);
-    if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(json_candidate)
-        && let Some(kind) = map.get("kind").and_then(Value::as_str)
-    {
-        return CodeModeRunnerError {
-            kind: kind.to_string(),
-            message,
-        };
+    if let Some(kind) = extract_structured_kind(&message) {
+        return CodeModeRunnerError { kind, message };
     }
     if message.contains("JSON-serializable") {
         return CodeModeRunnerError {
@@ -109,6 +125,25 @@ fn classify_rejection(message: String) -> CodeModeRunnerError {
         kind: "server_error".to_string(),
         message,
     }
+}
+
+#[cfg(test)]
+pub(in crate::dispatch::gateway::code_mode) fn classify_rejection_kind_for_test(
+    message: &str,
+) -> String {
+    classify_rejection(message.to_string()).kind
+}
+
+/// The exact `Error.message` the `__labSettleToolCall` bridge throws on a
+/// `tool_error`: the pure JSON `{kind,message}`. Exposed for the round-trip
+/// regression test so it asserts against the real wire shape rather than a
+/// hand-rolled approximation.
+#[cfg(test)]
+pub(in crate::dispatch::gateway::code_mode) fn structured_error_message_for_test(
+    kind: &str,
+    message: &str,
+) -> String {
+    serde_json::json!({ "kind": kind, "message": message }).to_string()
 }
 
 fn run_code_mode_runner() -> Result<(), CodeModeRunnerError> {
@@ -238,9 +273,14 @@ globalThis.__labSettleToolCall = (message) => {{
     return;
   }}
   if (input.type === "tool_error") {{
-    // Reject with a JS string whose content is JSON-encoded CodeModeError so that
-    // JSON.parse(String(e.message)) in the sandbox recovers the structured error.
-    // Both the Javy and Boa paths had the same plain-string bug ("kind: message").
+    // Reject with an Error whose message is the *pure JSON* {{kind,message}} of
+    // the upstream error. This is a load-bearing contract: caller JS recovers the
+    // structured error via `JSON.parse(e.message)` (see the runner integration
+    // tests), so the message must stay valid JSON — do NOT wrap it in markers or
+    // prose. The host preserves `kind` by extracting the embedded JSON object from
+    // the rejection (see classify_rejection / extract_structured_kind), which is
+    // robust to QuickJS's `Error: ` prefix and any appended stack trace because
+    // JSON.stringify escapes newlines and stack frames carry no braces.
     pending.reject(new Error(JSON.stringify({{kind: input.kind, message: input.message}})));
     return;
   }}

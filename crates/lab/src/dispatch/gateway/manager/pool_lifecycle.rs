@@ -98,7 +98,49 @@ impl GatewayManager {
             "gateway reconcile"
         );
         self.reconcile_upstream_oauth_managers(&cfg);
-        let old_pool = self.runtime.current_pool().await;
+
+        // C1(b): diff-aware reload. The full path below tears down the live
+        // upstream pool and builds a fresh one, which drops every lazily-spawned
+        // stdio child and forces a re-handshake on next use — even when the
+        // logical change (e.g. a `protected_mcp_routes` edit, or a no-op reload)
+        // left every upstream untouched. When the upstream set, gateway spawn
+        // prefs, and code-mode settings are byte-identical between the live
+        // in-memory config and the freshly-loaded one, keep the existing pool and
+        // only reconcile the cheap in-memory state (protected routes + config
+        // swap). Per-upstream *partial* diffing (reconnect only the changed
+        // upstreams while preserving the rest) would require carrying live
+        // connections across the build-first/swap/drain boundary in
+        // `pool/lifecycle.rs` + `pool/ensure.rs`, which are outside this change's
+        // scope — so this implements the all-or-nothing safe subset and leaves
+        // the partial-reconnect gap documented here.
+        let pool_inputs_unchanged = {
+            let current = self.config.read().await;
+            upstream_runtime_fingerprint(&current) == upstream_runtime_fingerprint(&cfg)
+        };
+        let existing_pool = self.runtime.current_pool().await;
+        if pool_inputs_unchanged && existing_pool.is_some() {
+            *self.protected_route_index.write().await =
+                ProtectedRouteIndex::from_routes(&cfg.protected_mcp_routes);
+            let current_pool = existing_pool;
+            *self.config.write().await = cfg;
+            let current_cfg = self.config.read().await.clone();
+            self.reconcile_runtime_state(&current_cfg, current_pool.as_deref())
+                .await?;
+            let diff = GatewayCatalogDiff::default();
+            tracing::info!(
+                surface = "dispatch",
+                service = "gateway",
+                action = "gateway.reload",
+                event = "catalog.refresh.finish",
+                phase = "finish",
+                pool_rebuild_skipped = true,
+                elapsed_ms = started.elapsed().as_millis(),
+                "gateway reconcile (upstream runtime inputs unchanged; live pool preserved)"
+            );
+            return Ok(diff);
+        }
+
+        let old_pool = existing_pool;
         let before = snapshot_from_pool(old_pool.clone()).await;
         let old_pool_present = old_pool.is_some();
         if let Some(old_pool) = old_pool {
@@ -229,6 +271,39 @@ pub(super) fn quarantine_unregistered_virtual_servers(
 
     cfg.virtual_servers = active;
     (cfg, migration)
+}
+
+/// Fingerprint of the config inputs that determine upstream-pool runtime shape.
+///
+/// Two configs with the same fingerprint seed the identical pool (same upstream
+/// set, same spawn-guard prefs, same code-mode toggle / request timeout), so a
+/// reload between them can keep the live pool instead of draining and rebuilding
+/// it. Fields that do not affect the pool (protected routes, virtual servers,
+/// tombstones, public URLs) are intentionally excluded — they are reconciled
+/// separately and must not force a pool rebuild.
+fn upstream_runtime_fingerprint(cfg: &LabConfig) -> String {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+    // Per-upstream fingerprints reuse the canonical helper so this matches the
+    // catalog cache's notion of "this upstream changed".
+    for upstream in &cfg.upstream {
+        hasher.update(
+            crate::dispatch::gateway::code_mode::catalog_cache::fingerprint(upstream).as_bytes(),
+        );
+        hasher.update([0u8]);
+    }
+    // Pool-shaping config beyond the upstream list.
+    hasher.update(serde_json::to_vec(&cfg.gateway).unwrap_or_default());
+    hasher.update([0u8]);
+    hasher.update(serde_json::to_vec(&cfg.code_mode).unwrap_or_default());
+    hasher.update([0u8]);
+    hasher.update(cfg.upstream_request_timeout().as_millis().to_le_bytes());
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 async fn snapshot_from_pool(pool: Option<Arc<UpstreamPool>>) -> GatewayCatalogSnapshot {

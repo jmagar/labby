@@ -80,10 +80,43 @@ impl SharedServiceClients {
     }
 
     pub async fn refresh_from_env_path(&self, path: &Path) -> anyhow::Result<()> {
-        let values = dotenvy::from_path_iter(path)
-            .ok()
-            .map(|iter| iter.filter_map(Result::ok).collect())
-            .unwrap_or_default();
+        // Distinguish "file absent" from "file present but unparseable".
+        // Collapsing both into an empty-map rebuild would silently tear down
+        // every configured client on a hot-reload triggered by a malformed
+        // `.env`, with no signal to the operator.
+        let iter = match dotenvy::from_path_iter(path) {
+            Ok(iter) => iter,
+            // File absent (or otherwise unopenable) — preserve the prior
+            // behavior of rebuilding from the ambient environment only.
+            Err(_) => {
+                *self.inner.write().await = ServiceClients::from_env_map(HashMap::new());
+                #[cfg(test)]
+                self.refresh_count
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                return Ok(());
+            }
+        };
+
+        // The file opened: a per-line error means it parsed partway then hit a
+        // malformed entry. Do NOT wipe the live clients in that case — warn and
+        // keep prior state so a typo can't take the whole fleet offline.
+        let mut values = HashMap::new();
+        for entry in iter {
+            match entry {
+                Ok((key, value)) => {
+                    values.insert(key, value);
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "malformed .env on hot-reload; keeping existing service clients"
+                    );
+                    return Ok(());
+                }
+            }
+        }
+
         *self.inner.write().await = ServiceClients::from_env_map(values);
         #[cfg(test)]
         self.refresh_count
@@ -94,5 +127,48 @@ impl SharedServiceClients {
     #[cfg(test)]
     pub fn refresh_count(&self) -> usize {
         self.refresh_count.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[tokio::test]
+    async fn refresh_rebuilds_on_absent_file() {
+        let shared = SharedServiceClients::from_clients(ServiceClients::default());
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("absent-does-not-exist.env");
+        shared.refresh_from_env_path(&missing).await.unwrap();
+        // File-absent keeps the prior rebuild-from-ambient behavior: the swap runs.
+        assert_eq!(shared.refresh_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn refresh_rebuilds_on_valid_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("good.env");
+        std::fs::write(&path, b"FOO=bar\nBAZ=qux\n").unwrap();
+        let shared = SharedServiceClients::from_clients(ServiceClients::default());
+        shared.refresh_from_env_path(&path).await.unwrap();
+        assert_eq!(shared.refresh_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn refresh_preserves_state_on_malformed_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.env");
+        // A line with no `=` and an illegal key is a dotenvy parse error, which
+        // surfaces as a per-line `Err` from `from_path_iter`.
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(b"VALID=ok\n!!! this is not valid env syntax !!!\n")
+            .unwrap();
+        f.flush().unwrap();
+
+        let shared = SharedServiceClients::from_clients(ServiceClients::default());
+        shared.refresh_from_env_path(&path).await.unwrap();
+        // Malformed `.env` must NOT trigger a teardown/rebuild — prior state kept.
+        assert_eq!(shared.refresh_count(), 0);
     }
 }

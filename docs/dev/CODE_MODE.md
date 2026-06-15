@@ -251,6 +251,11 @@ try {
 Canonical recovery buckets:
 
 - Retry-safe: `rate_limited`, `timeout`, `network_error`
+  - The live budget kind is `timeout`: the Javy/QuickJS runner's wall-clock
+    backstop interrupts an over-running snippet and the host normalizes the
+    trap to `timeout`. (`code_mode_fuel_exhausted` is **not** emitted on the
+    live path — it belongs to the dead Wasmtime reference engine; see
+    [Runner Architecture](#runner-architecture).)
 - Fix-and-retry: `missing_param`, `invalid_param`, `validation_failed`,
   `confirmation_required`
 - Terminal: `unknown_tool`, `unknown_action`, `auth_failed`, `server_error`,
@@ -283,22 +288,25 @@ The stdio parent-broker protocol is:
    `tool_error`.
 5. Child settles pending promises and emits `done`.
 
-Code Mode always uses Javy/QuickJS for snippet execution — a single engine, with
-no Boa fallback and no `code_mode_wasm` feature. Both `execute` and `search` run
-in the Javy child runner (search injects the tool catalog as `const tools` and
-runs with `max_tool_calls = 0`). Javy and Wasmtime are pulled in by the `gateway`
-feature.
+Code Mode always uses Javy/QuickJS for snippet execution — it is the **sole live
+engine**, with no Boa fallback and no `code_mode_wasm` feature. Both `execute`
+and `search` run in the Javy/QuickJS child runner over stdio (search injects the
+tool catalog as `const tools` and runs with `max_tool_calls = 0`). The Javy
+toolchain is pulled in by the `gateway` feature.
 
 The runner starts with an empty environment in a temporary directory. It does not
 provide Node, Deno, Bun, `fetch`, `connect`, `XMLHttpRequest`, `require`, or host
 module `import()` access. `callTool` is the only host bridge exposed to user code.
 
-The Wasmtime engine skeleton uses fuel and epoch interruption. Fuel and timeout
-traps are normalized to `code_mode_fuel_exhausted` and `code_mode_timeout` so
-callers can recover programmatically as the Wasmtime path grows. The Wasmtime path
-shares one configured engine and caches compiled modules by source to avoid paying
-compile cost on repeated executions while keeping per-call stores and instances
-isolated.
+> **Wasmtime is dead reference code, not a live path.** `wasm_runner.rs` is an
+> unused engine skeleton retained only for reference; nothing on the live Code
+> Mode path constructs or runs it. Its fuel/epoch-interruption design would
+> normalize fuel and timeout traps to `code_mode_fuel_exhausted` and
+> `code_mode_timeout`, but because the skeleton never executes, **neither kind is
+> emitted today.** The only budget kind a caller observes on the live
+> Javy/QuickJS path is `timeout` (the wall-clock backstop). Treat
+> `code_mode_fuel_exhausted` / `code_mode_timeout` as reserved-for-the-dead-path
+> and do not switch-case on them as live outcomes.
 
 Loose JavaScript snippets are normalized before execution. Already-formed
 function expressions pass through, while statement blocks such as

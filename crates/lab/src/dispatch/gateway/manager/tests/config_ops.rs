@@ -9,59 +9,90 @@ use crate::dispatch::gateway::config_mutation::read_env_values;
 
 use super::*;
 
-#[tokio::test]
-#[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
-async fn service_config_get_redacts_secret_values() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("config.toml");
-    let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
+// CWE-532 secret-redaction guard, re-fixtured post-gateway-pivot.
+//
+// Why not the original manager end-to-end path: `set_service_config` only accepts a
+// service that `registry::service_meta` resolves to a `PluginMeta`, and post-pivot
+// that arm resolves ONLY `deploy` — which declares zero env fields. No
+// `service_meta`-resolvable service exposes a `secret: true` field, so the secret
+// branch of `service_config_view` is unreachable through `set_service_config`
+// without a production change (adding e.g. `acp` to `service_meta`).
+//
+// Instead we exercise the actual redaction unit — `service_config_view`, the
+// projection that `set_service_config` returns verbatim — directly against the kept
+// `acp` service's real `PluginMeta`, which declares both a secret field
+// (`LAB_ACP_HMAC_SECRET`, `secret: true`) and a non-secret one (`LAB_ACP_DB`). This
+// is the function that enforces the redaction contract; pinning it here keeps the
+// CWE-532 guard live in CI.
+#[test]
+fn service_config_get_redacts_secret_values() {
+    let mut values = HashMap::new();
+    values.insert("LAB_ACP_DB".to_string(), "/tmp/acp.db".to_string());
+    values.insert(
+        "LAB_ACP_HMAC_SECRET".to_string(),
+        "super-secret".to_string(),
+    );
 
-    let mut values = BTreeMap::new();
-    values.insert("PLEX_URL".to_string(), "http://127.0.0.1:32400".to_string());
-    values.insert("PLEX_TOKEN".to_string(), "super-secret".to_string());
+    let config =
+        crate::dispatch::gateway::projection::service_config_view(&lab_apis::acp::META, &values);
 
-    let config = manager
-        .set_service_config("deploy", &values)
-        .await
-        .expect("set service config");
-
-    let token = config
+    let secret = config
         .fields
         .iter()
-        .find(|field| field.name == "PLEX_TOKEN")
-        .expect("token field");
-    assert!(token.present);
-    assert!(token.secret);
-    assert_eq!(token.value_preview, None);
-}
+        .find(|field| field.name == "LAB_ACP_HMAC_SECRET")
+        .expect("secret field");
+    assert!(secret.present);
+    assert!(secret.secret);
+    assert_eq!(
+        secret.value_preview, None,
+        "secret values must never be echoed back in a config read (CWE-532)"
+    );
 
-#[tokio::test]
-#[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
-async fn service_config_get_treats_empty_values_as_not_present() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("config.toml");
-    let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
-
-    let mut values = BTreeMap::new();
-    values.insert("OPENAI_API_KEY".to_string(), "token".to_string());
-    values.insert("OPENAI_URL".to_string(), String::new());
-
-    let config = manager
-        .set_service_config("setup", &values)
-        .await
-        .expect("set service config");
-
-    let url = config
+    // The non-secret companion field IS previewed — redaction is targeted, not a
+    // blanket suppression of every field value.
+    let non_secret = config
         .fields
         .iter()
-        .find(|field| field.name == "OPENAI_URL")
-        .expect("url field");
-    assert!(!url.present);
-    assert_eq!(url.value_preview, None);
+        .find(|field| field.name == "LAB_ACP_DB")
+        .expect("non-secret field");
+    assert!(non_secret.present);
+    assert!(!non_secret.secret);
+    assert_eq!(non_secret.value_preview.as_deref(), Some("/tmp/acp.db"));
 }
 
+// Re-fixtured post-gateway-pivot via `service_config_view` directly against the
+// kept `acp` `PluginMeta` (see `service_config_get_redacts_secret_values` for why
+// the manager end-to-end path isn't usable). An empty value for a declared field
+// must be reported as not-present and never previewed.
+#[test]
+fn service_config_get_treats_empty_values_as_not_present() {
+    let mut values = HashMap::new();
+    values.insert("LAB_ACP_HMAC_SECRET".to_string(), "token".to_string());
+    values.insert("LAB_ACP_DB".to_string(), String::new());
+
+    let config =
+        crate::dispatch::gateway::projection::service_config_view(&lab_apis::acp::META, &values);
+
+    let db = config
+        .fields
+        .iter()
+        .find(|field| field.name == "LAB_ACP_DB")
+        .expect("db field");
+    assert!(!db.present);
+    assert_eq!(db.value_preview, None);
+}
+
+// CANNOT be re-fixtured without production-code changes (out of test-only scope).
+// This test asserts `configured == false` when a *required* field is missing, but
+// post-gateway-pivot NO surviving/kept service declares any `required_env` (acp,
+// stash, deploy, setup, doctor, marketplace all have `required_env: &[]`). With no
+// required fields, `service_config_view` reports `configured: true` unconditionally,
+// so the assertion can never hold. Re-enabling this requires either a kept service
+// that declares a required env var, or a synthetic `PluginMeta` reachable through
+// `registered_service_meta` (which resolves via the static `service_meta` table) —
+// both are production-code changes. Leaving ignored per the restoration spec.
 #[tokio::test]
-#[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
+#[ignore = "no kept service declares required_env post-pivot; re-fixturing needs a prod PluginMeta change"]
 async fn service_config_get_marks_service_unconfigured_when_required_fields_are_missing() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
@@ -81,24 +112,19 @@ async fn service_config_get_marks_service_unconfigured_when_required_fields_are_
     );
 }
 
-#[tokio::test]
-#[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
-async fn service_config_get_marks_service_configured_when_required_fields_are_present() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("config.toml");
-    let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
+// Re-fixtured post-gateway-pivot via `service_config_view` directly against the
+// kept `acp` `PluginMeta`. acp declares no required env (only optional), so the
+// all-required-present predicate holds and the service reports `configured == true`
+// once its fields are populated. Exercises the `configured == true` branch of
+// `service_config_view` for a real registered service.
+#[test]
+fn service_config_get_marks_service_configured_when_required_fields_are_present() {
+    let mut values = HashMap::new();
+    values.insert("LAB_ACP_DB".to_string(), "/tmp/acp.db".to_string());
+    values.insert("LAB_ACP_HMAC_SECRET".to_string(), "token".to_string());
 
-    let mut values = BTreeMap::new();
-    values.insert("OPENAI_API_KEY".to_string(), "token".to_string());
-    values.insert(
-        "OPENAI_URL".to_string(),
-        "https://api.openai.com/v1".to_string(),
-    );
-
-    let config = manager
-        .set_service_config("setup", &values)
-        .await
-        .expect("set service config");
+    let config =
+        crate::dispatch::gateway::projection::service_config_view(&lab_apis::acp::META, &values);
 
     assert!(config.configured);
 }
@@ -174,8 +200,10 @@ async fn concurrent_gateway_adds_persist_both_gateways() {
     assert_eq!(names, BTreeSet::from(["alpha", "bravo"]));
 }
 
+// Re-fixtured post-gateway-pivot: the virtual server is backed by the kept
+// `deploy` service (no plex/radarr env fixtures involved). Asserts a concurrent
+// root config mutation and a virtual-server surface mutation both persist.
 #[tokio::test]
-#[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
 async fn concurrent_root_and_virtual_server_mutations_both_persist() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
@@ -225,8 +253,20 @@ async fn concurrent_root_and_virtual_server_mutations_both_persist() {
     assert!(plex.surfaces.mcp);
 }
 
+// CANNOT be re-fixtured without a production-code change (out of test-only scope).
+// This asserts that a real env-credential write through `set_service_config`
+// triggers exactly one service-client refresh. The refresh only fires when
+// `values_to_service_creds` is non-empty, which requires `set_service_config` to
+// accept at least one declared field. Post-pivot the only `service_meta`-resolvable
+// service is `deploy`, which declares zero env fields — so every accepted call
+// produces empty creds and zero refreshes. A secret/url-bearing service (e.g. `acp`)
+// is rejected by `set_service_config` because it is absent from
+// `registry::service_meta`. Re-enabling requires adding such a service to
+// `service_meta` (a production change). Unlike the redaction/empty/configured tests
+// above, this one asserts a *side effect* of the manager write path and cannot be
+// rerouted through the `service_config_view` projection.
 #[tokio::test]
-#[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
+#[ignore = "set_service_config accepts only `deploy` (zero env fields) post-pivot, so no creds are written and no refresh fires — needs a service_meta prod change"]
 async fn service_clients_refresh_after_service_config_update() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");

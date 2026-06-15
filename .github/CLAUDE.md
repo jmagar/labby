@@ -22,6 +22,7 @@ Every push and PR to `main` must pass all jobs:
 | fmt | `cargo fmt --all -- --check` |
 | clippy | `cargo clippy --workspace --all-features -- -D warnings` |
 | deny | `cargo deny check` (via `EmbarkStudios/cargo-deny-action`) |
+| docs-check (name: `Generated docs`) | `just docs-check` — the generated-docs freshness gate; fails if `docs/generated/*` (action catalog, MCP help, CLI help) drift from the registry. This is the only freshness check; there is **no** standalone `doc-freshness.yml` or `code-conventions.yml` workflow — only `ci.yml` and `release.yml` exist. |
 | test | `cargo nextest run --workspace --all-features --profile ci` |
 | test-windows | same nextest run on the self-hosted `agent-os-lab` runner (label `windows-lab`); skipped on PRs — push/schedule/dispatch only |
 | release-smoke | `cargo build --workspace --all-features --release` — Linux always; Windows skipped on PRs (see below) |

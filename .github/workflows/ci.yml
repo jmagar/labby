@@ -94,7 +94,7 @@ jobs:
           path: apps/gateway-admin/out
       - uses: dtolnay/rust-toolchain@1.94.1
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --workspace --all-features
+      - run: cargo check --workspace --all-features --locked
 
   docs-check:
     name: Generated docs
@@ -125,7 +125,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-features -- -D warnings
+      - run: cargo clippy --workspace --all-features --locked -- -D warnings
 
   test:
     name: Test
@@ -140,7 +140,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.94.1
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --workspace --all-features --profile ci
+      - run: cargo nextest run --workspace --all-features --locked --profile ci
       - name: Upload nextest report
         if: always()
         uses: actions/upload-artifact@v4
@@ -177,7 +177,7 @@ jobs:
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
-      - run: cargo nextest run --workspace --all-features --profile ci
+      - run: cargo nextest run --workspace --all-features --locked --profile ci
 
   release-smoke:
     name: Release smoke (${{ matrix.os }})
@@ -203,7 +203,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: true
-      - run: cargo build --workspace --all-features --release
+      - run: cargo build --workspace --all-features --locked --release
       - name: Verify release binary
         if: runner.os != 'Windows'
         run: |

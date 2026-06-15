@@ -61,6 +61,18 @@ sha256_check() {
 }
 
 install_from_release() {
+    # aarch64/arm64 ships no prebuilt release archive (rquickjs-sys does not
+    # cross-compile; no aarch64 fleet host). Skip the release-download path
+    # entirely so we don't attempt a URL that 404s, and go straight to the
+    # build-from-source fallback below.
+    arch="$(uname -m)"
+    case "$arch" in
+        aarch64 | arm64)
+            say "no prebuilt release archive for $arch — using the build-from-source fallback"
+            return 1
+            ;;
+    esac
+
     triple="$(target_triple)" || return 1
     asset="lab-${triple}.tar.gz"
     if [ "$VERSION" = "latest" ]; then

@@ -1380,14 +1380,17 @@ mod tests {
         assert_eq!(row["exposed_prompt_count"], 3);
     }
 
+    // Re-fixtured post-gateway-pivot: backed by the kept `deploy` service and a real
+    // `deploy.plan` action (the policy validator checks `allowed_actions` against the
+    // service's compiled action catalog, so the action must actually exist for
+    // `deploy`). The original `server.info` belonged to a removed plex/radarr service.
     #[tokio::test]
-    #[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
     async fn virtual_server_policy_validation_uses_service_name() {
         let manager = test_manager();
         manager
             .seed_config(crate::config::LabConfig {
                 virtual_servers: vec![crate::config::VirtualServerConfig {
-                    id: "plex-primary".to_string(),
+                    id: "deploy-primary".to_string(),
                     service: "deploy".to_string(),
                     enabled: true,
                     surfaces: crate::config::VirtualServerSurfacesConfig::default(),
@@ -1400,12 +1403,12 @@ mod tests {
         let value = dispatch_with_manager(
             &manager,
             "gateway.virtual_server.set_mcp_policy",
-            json!({"id":"plex-primary","allowed_actions":["server.info"]}),
+            json!({"id":"deploy-primary","allowed_actions":["deploy.plan"]}),
         )
         .await
         .expect("set policy");
 
-        assert_eq!(value["allowed_actions"][0], "server.info");
+        assert_eq!(value["allowed_actions"][0], "deploy.plan");
     }
 
     #[test]
@@ -1424,8 +1427,15 @@ mod tests {
         let _services = value.as_array().expect("array");
     }
 
+    // CANNOT be re-fixtured without a production change (out of test-only scope): it
+    // relies on `filter_built_in_upstream_apis(reg, false)` removing `deploy`/`setup`,
+    // but post-pivot that filter is a documented no-op — no `BuiltInUpstreamApi`
+    // services remain (all surviving services are `BootstrapOperator`). See
+    // `registry::tests::upstream_api_filter_is_noop_after_gateway_pivot`. So `deploy`
+    // and `setup` are never omitted and the assertions can't hold. Re-enabling needs a
+    // real `BuiltInUpstreamApi` service to exist again — a production change.
     #[tokio::test]
-    #[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
+    #[ignore = "filter_built_in_upstream_apis is a no-op post-pivot (no BuiltInUpstreamApi services left); deploy/setup are never omitted — prod change required"]
     async fn supported_services_omits_upstreams_when_policy_disabled() {
         let registry = crate::registry::filter_built_in_upstream_apis(
             crate::registry::build_default_registry(),
@@ -1441,8 +1451,13 @@ mod tests {
         assert!(!services.iter().any(|service| service["key"] == "setup"));
     }
 
+    // CANNOT be re-fixtured without a production change (out of test-only scope): same
+    // root cause as `supported_services_omits_upstreams_when_policy_disabled` —
+    // `filter_built_in_upstream_apis(reg, false)` is a no-op post-pivot, so `deploy`
+    // stays in the registry and `service_actions` returns its catalog instead of
+    // erroring. Re-enabling needs a real `BuiltInUpstreamApi` service.
     #[tokio::test]
-    #[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
+    #[ignore = "filter_built_in_upstream_apis is a no-op post-pivot; deploy is never filtered out so service_actions does not error — prod change required"]
     async fn service_actions_rejects_disabled_upstream_service() {
         let registry = crate::registry::filter_built_in_upstream_apis(
             crate::registry::build_default_registry(),
@@ -1460,8 +1475,13 @@ mod tests {
         assert_eq!(err.kind(), "invalid_param");
     }
 
+    // CANNOT be re-fixtured without a production change (out of test-only scope): same
+    // root cause — `filter_built_in_upstream_apis(reg, false)` is a no-op post-pivot, so
+    // `deploy` remains a registered service and enabling its virtual server succeeds
+    // instead of returning `not_found`. Re-enabling needs a real `BuiltInUpstreamApi`
+    // service.
     #[tokio::test]
-    #[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
+    #[ignore = "filter_built_in_upstream_apis is a no-op post-pivot; deploy stays registered so virtual_server.enable succeeds — prod change required"]
     async fn virtual_server_enable_rejects_disabled_upstream_service() {
         let registry = crate::registry::filter_built_in_upstream_apis(
             crate::registry::build_default_registry(),
@@ -1492,8 +1512,8 @@ mod tests {
         assert_eq!(err.kind(), "not_found");
     }
 
+    // Re-fixtured post-gateway-pivot: backed by the kept/registered `deploy` service.
     #[tokio::test]
-    #[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
     async fn enabling_virtual_server_marks_existing_server_row_enabled() {
         let manager = test_manager();
         manager
@@ -1521,8 +1541,14 @@ mod tests {
         assert_eq!(value["enabled"], true);
     }
 
+    // CANNOT be re-fixtured without a production change (out of test-only scope): it
+    // drives `gateway.service_config.set` with `PLEX_*` values, which only succeeds for
+    // a `service_meta`-resolvable service that declares those env fields. Post-pivot the
+    // only resolvable service is `deploy`, which declares zero env fields, so the set is
+    // rejected before a service row can be created. Needs a service_meta service with
+    // env fields.
     #[tokio::test]
-    #[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
+    #[ignore = "service_config.set requires a service_meta service with env fields; only deploy resolves and it has none — prod change required"]
     async fn enabling_virtual_server_creates_missing_service_row() {
         let manager = test_manager();
 
@@ -1592,8 +1618,13 @@ mod tests {
         );
     }
 
+    // CANNOT be re-fixtured without a production change (out of test-only scope):
+    // `gateway.service_config.set` with `PLEX_*` requires a service_meta-resolvable
+    // service that declares those env fields. Only `deploy` resolves post-pivot and it
+    // declares none, so the write is rejected. Needs a service_meta service with env
+    // fields.
     #[tokio::test]
-    #[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
+    #[ignore = "service_config.set requires a service_meta service with env fields; only deploy resolves and it has none — prod change required"]
     async fn setting_service_config_writes_canonical_env_backed_fields() {
         let manager = test_manager();
 
@@ -1629,8 +1660,13 @@ mod tests {
         );
     }
 
+    // CANNOT be re-fixtured without a production change (out of test-only scope):
+    // `gateway.service_config.set` with `PLEX_*` requires a service_meta-resolvable
+    // service that declares those env fields. Only `deploy` resolves post-pivot and it
+    // declares none, so the write is rejected before the read-back can be exercised.
+    // Needs a service_meta service with env fields.
     #[tokio::test]
-    #[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
+    #[ignore = "service_config.set requires a service_meta service with env fields; only deploy resolves and it has none — prod change required"]
     async fn configured_but_disabled_service_can_be_read_back_for_editing() {
         let manager = test_manager();
         manager
@@ -1718,8 +1754,10 @@ mod tests {
         assert_eq!(value["surfaces"]["api"]["enabled"], true);
     }
 
+    // Re-fixtured post-gateway-pivot: backed by the kept `deploy` service and its real
+    // `deploy.plan` action (the policy validator checks allowed_actions against the
+    // service's compiled catalog, so the action must exist for `deploy`).
     #[tokio::test]
-    #[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
     async fn setting_virtual_server_mcp_policy_persists_allowed_actions() {
         let manager = test_manager();
         manager
@@ -1743,12 +1781,12 @@ mod tests {
         let value = dispatch_with_manager(
             &manager,
             "gateway.virtual_server.set_mcp_policy",
-            json!({"id": "deploy", "allowed_actions": ["server.info"]}),
+            json!({"id": "deploy", "allowed_actions": ["deploy.plan"]}),
         )
         .await
         .expect("set mcp policy");
 
-        assert_eq!(value["allowed_actions"], json!(["server.info"]));
+        assert_eq!(value["allowed_actions"], json!(["deploy.plan"]));
 
         let reloaded = dispatch_with_manager(
             &manager,
@@ -1758,11 +1796,12 @@ mod tests {
         .await
         .expect("get mcp policy");
 
-        assert_eq!(reloaded["allowed_actions"], json!(["server.info"]));
+        assert_eq!(reloaded["allowed_actions"], json!(["deploy.plan"]));
     }
 
+    // Re-fixtured post-gateway-pivot: assert against the kept `deploy` service's real
+    // `deploy.plan` action instead of the removed plex/radarr `server.info`.
     #[tokio::test]
-    #[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
     async fn service_actions_returns_compiled_action_catalog() {
         let manager = test_manager();
         let value = dispatch_with_manager(
@@ -1774,7 +1813,7 @@ mod tests {
         .expect("service actions");
 
         let actions = value.as_array().expect("array");
-        assert!(actions.iter().any(|action| action["name"] == "server.info"));
+        assert!(actions.iter().any(|action| action["name"] == "deploy.plan"));
     }
 
     #[tokio::test]
@@ -2000,8 +2039,9 @@ mod tests {
         assert_eq!(remaining.as_array().expect("array").len(), 0);
     }
 
+    // Re-fixtured post-gateway-pivot: the quarantined virtual server is backed by the
+    // kept/registered `deploy` service, so restore returns it to the active list.
     #[tokio::test]
-    #[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
     async fn virtual_server_quarantine_list_and_restore_round_trip() {
         let manager = test_manager();
         manager

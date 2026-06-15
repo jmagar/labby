@@ -60,6 +60,8 @@ Dispatch layers may add the following kinds on top of SDK errors:
 - `route_scope_denied` — caller requested a service, upstream, tool, resource, prompt, or Code Mode target that is not exposed by the current protected MCP route scope. MCP tool result error envelope.
 - `restart_required` — requested configuration change was persisted or rejected because the live runtime cannot safely apply it until `labby serve` restarts. HTTP 409.
 - `tool_call_limit_exceeded` — a Code Mode snippet exceeded a host-brokered operation budget. Tool calls and artifact writes have **separate** counters, each bounded by `max_tool_calls`; the message names which limit was hit. HTTP 429.
+- `path_traversal` — a path escapes its target root (contains `..`, is absolute, or canonicalizes outside the root). This is the **canonical** path-escape kind, emitted across the dispatch layer (`path_safety.rs`, `helpers::reject_path_traversal`, the Code Mode artifact containment check, and stash import/export) and by the ACP binary installer (`AcpInstallerError::PathTraversal` → `path_traversal`). HTTP 422. The older `path_traversal_rejected` spelling is retained only by the Fleet-WS marketplace installer (see below) for back-compat; new emitters must use `path_traversal`.
+- `symlink_rejected` — a symlink was encountered along a write/walk path where symlinks are disallowed. Emitted by the dispatch layer (stash save/import/export, Code Mode artifact containment) and the Fleet-WS marketplace installer. HTTP 422.
 
 > Note: Code Mode artifact writes (`writeArtifact(path, content, options?)`) reuse only kinds already defined in this contract — no artifact-specific kind is introduced. They emit `invalid_param` (empty/absolute/`..` path after `\`→`/` normalization, content over the configured size cap — default 8 MiB, raise with `LAB_CODE_MODE_ARTIFACT_MAX_MIB` — or a `content_type` over 256 bytes), `path_traversal`/`symlink_rejected` (the post-join containment check found the destination escaping the per-run root or resolving through a symlinked ancestor), or `internal_error` (a host-side filesystem write/flush failure).
 
@@ -67,8 +69,8 @@ Dispatch layers may add the following kinds on top of SDK errors:
 > Code Mode execution disabled → `internal_error`. Sandbox/runner JS evaluation failure
 > → `server_error`. These map into the canonical kind set so agents switch-casing on
 > `err.kind` don't fall into the default branch.
-- `code_mode_fuel_exhausted` — the Wasmtime Code Mode runner consumed its configured fuel budget before completion. HTTP 408.
-- `code_mode_timeout` — the Code Mode wall-clock backstop interrupted execution before completion. HTTP 408.
+- `code_mode_fuel_exhausted` — **reserved, not currently emitted.** Belongs to the dead Wasmtime reference engine (`wasm_runner.rs`), which is never run on the live path. Would map to HTTP 408 if the Wasmtime path were ever revived.
+- `code_mode_timeout` — **reserved, not currently emitted.** Same dead-Wasmtime origin as above. On the live Javy/QuickJS runner, a wall-clock backstop interruption surfaces as the canonical `timeout` kind, not `code_mode_timeout`. Would map to HTTP 408 if the Wasmtime path were ever revived. See [CODE_MODE.md](./CODE_MODE.md) "Runner Architecture".
 - `queue_saturated` — bounded runtime queue is full; caller should retry after the current work drains. HTTP 429.
 - `session_limit_exceeded` — ACP registry has reached `MAX_CONCURRENT_SESSIONS` (20); no new provider processes will be launched until existing sessions are closed. HTTP 429.
 - `too_many_subscribers` — a single ACP session has reached `MAX_SUBSCRIBERS_PER_SESSION` (32) concurrent SSE subscribers; the caller must reconnect later. HTTP 429.
@@ -76,7 +78,7 @@ Dispatch layers may add the following kinds on top of SDK errors:
 ### Fleet-WS install hardening kinds (lab-zxx5.18)
 
 - `symlink_rejected` — the target write path (or a component along it) is a symlink. Emitted by `marketplace.install_component` when `write_atomic`'s defense-in-depth check finds the tempfile is a symlink or the target's parent chain resolves through a symlink outside `write_root`. HTTP 422.
-- `path_traversal_rejected` — the relative component path contains `..`, `.`, or is absolute; or the canonicalized target resolves outside the install root. Raised before any write. HTTP 422.
+- `path_traversal_rejected` — **legacy spelling, scoped to this installer only.** The relative component path contains `..`, `.`, or is absolute; or the canonicalized target resolves outside the install root. Raised before any write by `marketplace.install_component`. Same threat class as the canonical `path_traversal`; retained here for back-compat. New emitters must use `path_traversal`. HTTP 422.
 - `content_too_large` — a single component exceeds `MAX_COMPONENT_FILE_SIZE` (5 MB) or the aggregate of all components in one `install_component` RPC exceeds `MAX_COMPONENT_AGGREGATE_SIZE` (32 MB). Enforced before the handler is spawned so oversized payloads can't OOM the node or lock a worker permit. HTTP 413.
 - `invalid_encoding` — an install_component `files[].encoding` is missing, not `"utf8"` or `"base64"`, or the base64 payload fails to decode. No implicit fallback — explicit encoding is required to defeat utf8/base64 ambiguity. HTTP 422.
 - `install_timeout` — the `agent.install` download watchdog fired (no bytes received for 30s), or the overall RPC ack timeout elapsed. The partial tempfile is cleaned up on fire. HTTP 504.
@@ -93,6 +95,28 @@ Dispatch layers may add the following kinds on top of SDK errors:
 `sync_in_progress` uses `ToolError::Sdk { sdk_kind, message }`. HTTP status: 503.
 `integrity_missing` and `integrity_mismatch` use `ToolError::Sdk { sdk_kind, message }`. HTTP status: 502.
 
+### ACP binary installer kinds
+
+The ACP `binary`-distribution agent installer emits its stable kinds from
+`AcpInstallerError::kind()` in `lab-apis/src/acp_registry/installer.rs`. They
+reach the surface envelopes through the `From<AcpInstallerError> for ToolError`
+bridge in `crates/lab/src/dispatch/error.rs`. The installer reuses kinds already
+defined above rather than inventing an installer-local vocabulary:
+
+| `AcpInstallerError` variant | `kind()` | Notes |
+|------|------|------|
+| `Ssrf` | `ssrf_blocked` (delegates to `SsrfError::kind()`) | archive host resolves to a private/loopback/link-local/ULA address, or the connected peer fails post-connect re-validation |
+| `InvalidParam` | `invalid_param` | bad archive URL or caller param |
+| `IntegrityMissing` | `integrity_missing` | mandatory SHA-256 metadata absent (fail-closed) |
+| `IntegrityMismatch` | `integrity_mismatch` | downloaded bytes ≠ expected SHA-256 |
+| `ContentTooLarge` | `content_too_large` | download exceeds `MAX_ACP_ARCHIVE_BYTES` (256 MiB) |
+| `InstallTimeout` | `install_timeout` | download stall watchdog fired |
+| `PathTraversal` | `path_traversal` | archive entry escaped the extraction root, or a symlink was present (canonical kind) |
+| `Network` | `network_error` | transport failure during download |
+| `NotFound` | `not_found` | expected binary missing from the extracted archive |
+| `Api` | delegates to `ApiError::kind()` | underlying SDK/transport error |
+| `Internal` | `internal_error` | filesystem / subprocess failure |
+
 ### Stash-specific kinds
 
 The following kinds are emitted by the `stash` dispatch service.
@@ -103,8 +127,8 @@ The following kinds are emitted by the `stash` dispatch service.
 - `sync_failed` — provider push or pull failed due to an I/O error on the provider's remote root. HTTP 502.
 - `workspace_too_large` — the component workspace exceeds `MAX_WORKSPACE_SIZE` (200 MiB) before a save or import. HTTP 413.
 - `file_too_large` — a single file inside the workspace exceeds `MAX_FILE_SIZE` (50 MiB). HTTP 413.
-- `path_traversal` — a path escapes the target root (re-uses global `path_traversal_rejected`; emitted during import and export, and by the Code Mode artifact containment check). HTTP 422.
-- `symlink_rejected` — a symlink was encountered during a workspace walk (re-uses global `symlink_rejected`; emitted during save, import, and export). HTTP 422.
+- `path_traversal` — a path escapes the target root; emitted during import and export, and by the Code Mode artifact containment check. This is the canonical top-level `path_traversal` kind (defined under "Dispatcher-Level Kinds"), not a stash-local spelling. HTTP 422.
+- `symlink_rejected` — a symlink was encountered during a workspace walk (the canonical top-level `symlink_rejected` kind; emitted during save, import, and export). HTTP 422.
 - `export_target_not_empty` — the output directory for `component.export` is non-empty and `force` is not set. HTTP 409.
 - `ambiguous_kind` — component kind could not be auto-detected from the source path and no `kind` override was provided. HTTP 422.
 
@@ -166,7 +190,7 @@ mismatched authorization codes and refresh tokens.
 
 - surface: HTTP auth routes only
 - status: `400 Bad Request`
-- contract owner: `docs/OAUTH.md`
+- contract owner: [runtime/OAUTH.md](../runtime/OAUTH.md)
 
 This kind does not replace the canonical shared SDK taxonomy for service
 dispatch. It exists because OAuth token endpoints have a protocol-level error
@@ -376,6 +400,7 @@ Default mapping expectations:
 - `ambiguous_tool` -> `409 Conflict`
 - `conflict` -> `409 Conflict`
 - `symlink_rejected` -> `422 Unprocessable Entity`
+- `path_traversal` -> `422 Unprocessable Entity`
 - `path_traversal_rejected` -> `422 Unprocessable Entity`
 - `invalid_encoding` -> `422 Unprocessable Entity`
 - `content_too_large` -> `413 Payload Too Large`
@@ -466,9 +491,9 @@ The following are spec changes:
 
 When making one of those changes, update:
 
-- `docs/ERRORS.md`
-- `docs/MCP.md`
-- `docs/CONVENTIONS.md`
+- [ERRORS.md](./ERRORS.md) (this file)
+- [MCP.md](../surfaces/MCP.md)
+- [CONVENTIONS.md](../CONVENTIONS.md)
 - `CLAUDE.md`
 - any affected surface code and tests
 

@@ -26,6 +26,12 @@ impl UpstreamPool {
             "upstream pool drain start"
         );
 
+        // Cancel the background subject-connection sweep task (P-H2) before
+        // evicting connections so it does not race the drain.
+        if let Some(cancel) = self.subject_sweep_task.write().await.take() {
+            cancel.cancel();
+        }
+
         // Evict all subject-scoped cached connections first so the
         // per-`(upstream, subject)` handles are dropped before the pool-level
         // connections are shut down (P-C1 cleanup).

@@ -74,8 +74,14 @@ async fn stale_virtual_server_with_unknown_service_does_not_break_list() {
     );
 }
 
+// CANNOT be re-fixtured without a production change (out of test-only scope): it
+// drives `set_service_config("deploy", {PLEX_TOKEN})`, but `deploy` (the only
+// service `registry::service_meta` resolves post-pivot) declares zero env fields, so
+// the call is rejected as an invalid field. Modelling an "incomplete" service needs
+// a service_meta-resolvable service that declares a required env var — none exists
+// post-pivot.
 #[tokio::test]
-#[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
+#[ignore = "needs a service_meta-resolvable service with required env fields; only `deploy` resolves and it declares none — prod change required"]
 async fn incomplete_service_does_not_appear_in_list_before_virtual_server_enablement() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
@@ -151,13 +157,16 @@ fn disabled_virtual_server_reports_disconnected_even_when_health_is_ok() {
     assert!(!view.surfaces.mcp.connected);
 }
 
+// Re-fixtured post-gateway-pivot to the kept `deploy` service. `service_known` is
+// `service_meta(service).is_some()`, and post-pivot `service_meta` resolves only
+// `deploy` — so a registered, healthy service must produce no `unknown_service`
+// warning. (`unraid` is no longer registered and would now warn.)
 #[test]
-#[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
 fn healthy_informational_probe_messages_do_not_create_gateway_warnings() {
     let view = server_view_from_virtual_server(
         &VirtualServerConfig {
-            id: "unraid".to_string(),
-            service: "unraid".to_string(),
+            id: "deploy".to_string(),
+            service: "deploy".to_string(),
             enabled: true,
             surfaces: VirtualServerSurfacesConfig::default(),
             mcp_policy: None,
@@ -174,8 +183,13 @@ fn healthy_informational_probe_messages_do_not_create_gateway_warnings() {
     assert!(view.warnings.is_empty());
 }
 
+// CANNOT be re-fixtured without a production change (out of test-only scope): it
+// drives `set_service_config("deploy", {PLEX_URL, PLEX_TOKEN})`, which `deploy`
+// rejects (it declares no env fields). The surface assertions that follow don't need
+// the config write, but the `.expect()` on it panics first. Needs a
+// service_meta-resolvable service that declares env fields — none exists post-pivot.
 #[tokio::test]
-#[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
+#[ignore = "set_service_config rejects deploy's PLEX_* fields (deploy declares no env); needs a service_meta service with env fields — prod change required"]
 async fn managed_services_are_hidden_on_surfaces_until_enabled() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
@@ -195,8 +209,10 @@ async fn managed_services_are_hidden_on_surfaces_until_enabled() {
     assert!(manager.surface_enabled_for_service("deploy", "cli").await);
 }
 
+// Re-fixtured post-gateway-pivot: backed by the kept/registered `deploy` service,
+// so the surface-gating logic runs (not the unregistered-service early-return in
+// `surface_enabled_for_service`).
 #[tokio::test]
-#[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
 async fn enabled_virtual_server_only_exposes_enabled_surfaces() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
@@ -297,8 +313,10 @@ fn virtual_server_mcp_policy_reduces_exposed_tool_count() {
     assert_eq!(view.exposed_tool_count, 3);
 }
 
+// Re-fixtured post-gateway-pivot: backed by the kept/registered `deploy` service so
+// the MCP action allowlist is actually enforced (an unregistered service would
+// early-return `true` for every action in `mcp_action_allowed_for_service`).
 #[tokio::test]
-#[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
 async fn mcp_action_policy_restricts_actions_to_allowlist() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");

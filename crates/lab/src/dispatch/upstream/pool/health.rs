@@ -254,4 +254,79 @@ mod tests {
             Some("tool listing returned 500 internal error")
         );
     }
+
+    /// Helper: read the current tool-capability health for an upstream.
+    async fn tool_health(pool: &UpstreamPool, name: &str) -> UpstreamHealth {
+        let catalog = pool.catalog.read().await;
+        catalog
+            .get(name)
+            .expect("entry present")
+            .health_for(UpstreamCapability::Tools)
+    }
+
+    #[tokio::test]
+    async fn circuit_breaker_opens_after_threshold_then_closes_on_success() {
+        let pool = UpstreamPool::new();
+        let upstream_name: Arc<str> = Arc::from("github");
+        let entry = healthy_in_process_entry(Arc::clone(&upstream_name), HashMap::new());
+        pool.catalog
+            .write()
+            .await
+            .insert("github".to_string(), entry);
+
+        // Starts healthy/routable.
+        assert!(tool_health(&pool, "github").await.is_routable());
+        assert!(!tool_health(&pool, "github").await.is_open());
+
+        // Record CIRCUIT_BREAKER_THRESHOLD consecutive failures. The breaker
+        // should only open on the final one.
+        for i in 1..types::CIRCUIT_BREAKER_THRESHOLD {
+            pool.record_failure_for(
+                "github",
+                UpstreamCapability::Tools,
+                format!("tool listing failed (attempt {i})"),
+            )
+            .await;
+            assert!(
+                tool_health(&pool, "github").await.is_routable(),
+                "breaker must stay closed before reaching the threshold (after {i} failures)"
+            );
+            assert!(!tool_health(&pool, "github").await.is_open());
+        }
+
+        // The threshold-th consecutive failure opens the breaker.
+        pool.record_failure_for(
+            "github",
+            UpstreamCapability::Tools,
+            "tool listing failed (threshold hit)",
+        )
+        .await;
+
+        let opened = tool_health(&pool, "github").await;
+        assert!(
+            opened.is_open(),
+            "breaker must be open after CIRCUIT_BREAKER_THRESHOLD failures"
+        );
+        assert!(!opened.is_routable(), "open breaker must not be routable");
+        assert!(matches!(
+            opened,
+            UpstreamHealth::Unhealthy {
+                consecutive_failures
+            } if consecutive_failures == types::CIRCUIT_BREAKER_THRESHOLD
+        ));
+
+        // A single success closes/recovers the breaker.
+        pool.record_success_for("github", UpstreamCapability::Tools)
+            .await;
+
+        let recovered = tool_health(&pool, "github").await;
+        assert!(
+            matches!(recovered, UpstreamHealth::Healthy),
+            "success must reset breaker to Healthy"
+        );
+        assert!(recovered.is_routable());
+        assert!(!recovered.is_open());
+        // Last-error and unhealthy-since are cleared on recovery.
+        assert_eq!(pool.upstream_tool_last_error("github").await, None);
+    }
 }

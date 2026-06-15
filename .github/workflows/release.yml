@@ -78,11 +78,11 @@ jobs:
 
       - name: Build with cross
         if: matrix.use-cross == true
-        run: cross build --workspace --all-features --release --target ${{ matrix.target }}
+        run: cross build --workspace --all-features --locked --release --target ${{ matrix.target }}
 
       - name: Build natively
         if: matrix.use-cross != true
-        run: cargo build --workspace --all-features --release --target ${{ matrix.target }}
+        run: cargo build --workspace --all-features --locked --release --target ${{ matrix.target }}
 
       - name: Package Unix artifact
         if: runner.os != 'Windows'
@@ -145,6 +145,10 @@ jobs:
           context: .
           file: config/Dockerfile
           push: true
+          # The immutable, reproducible reference is the :<tag> (vX.Y.Z) image.
+          # :latest is MUTABLE — it is retained only because docker-compose.prod.yml
+          # defaults LAB_IMAGE to ghcr.io/jmagar/lab:latest. Prefer pinning to a
+          # version tag (or digest) in any reproducibility-sensitive deployment.
           tags: |
             ghcr.io/${{ github.repository }}:${{ github.ref_name }}
             ghcr.io/${{ github.repository }}:latest

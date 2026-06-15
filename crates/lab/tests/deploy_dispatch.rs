@@ -25,7 +25,11 @@ fn catalog_lists_required_actions() {
 #[test]
 fn run_and_rollback_are_destructive_and_others_are_not() {
     for action in deploy::ACTIONS {
-        let expect_destructive = matches!(action.name, "run" | "rollback");
+        // Canonical dotted forms and their deprecated bare aliases are both destructive.
+        let expect_destructive = matches!(
+            action.name,
+            "deploy.run" | "deploy.rollback" | "run" | "rollback"
+        );
         assert_eq!(
             action.destructive, expect_destructive,
             "{} destructive flag wrong",

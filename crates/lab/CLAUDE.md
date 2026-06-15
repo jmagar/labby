@@ -60,6 +60,9 @@ When adding new services, use the full `dispatch/<service>/` directory layout fr
 
 These are facts about the current state, not the spec:
 
-- **`surface` field** in HTTP handler log events: missing (gap vs `OBSERVABILITY.md`).
-- **`/ready` probe**: always returns 200; readiness is not actually checked.
 - **Human table rendering** in `output.rs`: `print()` falls back to `serde_json::to_string_pretty` for both `Human` and `Json` formats.
+
+Recently closed (kept here briefly to prevent re-flagging):
+
+- **`surface` field** in HTTP handler log events: now emitted as `surface = "api"` on the API dispatch path (`api/services/helpers.rs`), per `OBSERVABILITY.md`.
+- **`/ready` probe**: now implements real readiness predicates in `api/health.rs::ready` — returns `503` with a `pending` list (e.g. empty service registry, gateway pool not yet initialised) until all predicates pass, then `200`.

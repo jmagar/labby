@@ -35,6 +35,24 @@ Rules:
 
 Do not start a migrated service as one large file and split it later.
 
+## Shared subsystems and sanctioned layout exceptions
+
+Not everything under `dispatch/` is an action-dispatched service. The following
+are **shared subsystems, not services — they are exempt from the 4-file layout**
+(`catalog.rs`/`client.rs`/`params.rs`/`dispatch.rs`) and from the action catalog:
+`node`, `security`, `upstream`, and `gateway/code_mode` (a submodule of
+`gateway`). They are the common runtime substrate other services build on, not
+peers with their own MCP tool. The architecture test
+(`crates/lab/tests/architecture_orchestrator.rs`) classifies them in
+`SHARED_NON_SERVICES` and always permits imports of them.
+
+`snippets` is a **sanctioned exception** to the required layout: it has no
+`client.rs` or `params.rs` because it wraps no upstream API — it reuses
+`gateway::code_mode` (the shared JS execution kernel) and the local snippet
+store instead of constructing an HTTP client. Do not cite `snippets` as
+precedent for skipping `client.rs`/`params.rs` in a service that DOES front an
+upstream API.
+
 ## Ownership
 
 `dispatch/` owns:
@@ -247,8 +265,11 @@ another service from a surface module, move the orchestration into
 `dispatch/` instead.
 
 The one-way direction is enforced by
-`crates/lab/tests/architecture_orchestrator.rs` — the test fails when any
-file outside the allowlist (orchestrator's own modules, surface adapters,
-registry) imports `crate::dispatch::setup`. If you need to extend the
-exception, update the test's `ALLOWED_PATHS` and explain why in the same
-PR.
+`crates/lab/tests/architecture_orchestrator.rs`. That test now enforces a
+**general cross-service import allowlist** (`ALLOWED_EDGES`): every edge
+`dispatch::<a> → dispatch::<b>` must be listed with a rationale, and no
+`* → setup` edge is allowed. The `setup → doctor` orchestrator edge is encoded
+there as a sanctioned entry. If you need to extend the exception (or add any new
+cross-service edge), add the `(consumer, target)` pair to `ALLOWED_EDGES` with a
+one-line rationale and explain why in the same PR. The same test also lints
+action names to `<resource>.<verb>` dotted form.

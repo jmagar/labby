@@ -97,6 +97,10 @@ pub struct UpstreamPool {
     /// for the same key do not open duplicate OAuth connections (mirrors the
     /// `lazy_connect_locks` gate used by the normal pool path).
     subject_connect_locks: Arc<RwLock<HashMap<(String, String), Arc<Mutex<()>>>>>,
+    /// Cancellation token for the background subject-connection sweep task.
+    /// `None` until the first subject-scoped connect arms it; cancelled and
+    /// cleared on `drain_for_swap` (P-H2). Mirrors the `probe_tasks` lifecycle.
+    subject_sweep_task: Arc<RwLock<Option<CancellationToken>>>,
     /// Request/session identity stamped onto spawned stdio upstreams.
     runtime_origin: Option<String>,
     /// Structured owner metadata stamped onto spawned stdio upstreams.
@@ -172,6 +176,7 @@ impl UpstreamPool {
             lazy_connect_locks: Arc::new(RwLock::new(HashMap::new())),
             subject_connections: Arc::new(RwLock::new(HashMap::new())),
             subject_connect_locks: Arc::new(RwLock::new(HashMap::new())),
+            subject_sweep_task: Arc::new(RwLock::new(None)),
             runtime_origin: None,
             runtime_owner: None,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,

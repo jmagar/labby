@@ -107,7 +107,8 @@ pub fn dispatch_mcp(
             let result = authz::require_deploy_token().and_then(|_| runner.config_list_impl());
             Box::pin(async move { result })
         }
-        "plan" => {
+        // `deploy.plan` is canonical; bare `plan` is a deprecated alias (Arch-M3).
+        "deploy.plan" | "plan" => {
             let auth = authz::require_deploy_token();
             let req = auth.and_then(|_| params::parse_run(&params_v).map_err(ToolError::from));
             Box::pin(async move {
@@ -115,14 +116,16 @@ pub fn dispatch_mcp(
                 to_json(runner.plan_impl(req).await?)
             })
         }
-        "run" => {
+        // `deploy.run` is canonical; bare `run` is a deprecated alias (Arch-M3).
+        "deploy.run" | "run" => {
             let result = validate_deploy_action("run", &params_v);
             Box::pin(async move {
                 let req = result?;
                 to_json(runner.run_impl(req).await?)
             })
         }
-        "rollback" => {
+        // `deploy.rollback` is canonical; bare `rollback` is a deprecated alias (Arch-M3).
+        "deploy.rollback" | "rollback" => {
             let result = validate_deploy_action("rollback", &params_v);
             Box::pin(async move {
                 let req = result?;
@@ -163,16 +166,19 @@ pub async fn dispatch_with_runner(
             authz::require_deploy_token()?;
             runner.config_list_impl()
         }
-        "plan" => {
+        // `deploy.plan` is canonical; bare `plan` is a deprecated alias (Arch-M3).
+        "deploy.plan" | "plan" => {
             authz::require_deploy_token()?;
             let req = params::parse_run(&params_v).map_err(ToolError::from)?;
             to_json(runner.plan_impl(req).await?)
         }
-        "run" => {
+        // `deploy.run` is canonical; bare `run` is a deprecated alias (Arch-M3).
+        "deploy.run" | "run" => {
             let req = validate_deploy_action("run", &params_v)?;
             to_json(runner.run_impl(req).await?)
         }
-        "rollback" => {
+        // `deploy.rollback` is canonical; bare `rollback` is a deprecated alias (Arch-M3).
+        "deploy.rollback" | "rollback" => {
             let req = validate_deploy_action("rollback", &params_v)?;
             to_json(runner.rollback_impl(req).await?)
         }

@@ -8,6 +8,7 @@
 //! (`lifecycle`, `probe`, `ensure`, `tools_call`, `resources_read`,
 //! `prompts_get`).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -21,9 +22,45 @@ use tokio::sync::Mutex;
 use crate::config::UpstreamConfig;
 
 use super::super::types::UpstreamCapability;
-use super::helpers::{STDIO_SHUTDOWN_TIMEOUT, SUBJECT_CONN_IDLE_TTL};
+use super::helpers::{
+    STDIO_SHUTDOWN_TIMEOUT, SUBJECT_CONN_IDLE_TTL, SUBJECT_CONN_MAX_ENTRIES,
+    SUBJECT_CONN_SWEEP_INTERVAL,
+};
 use super::logging::capability_name;
 use super::{SubjectScopedConnection, UpstreamConnection, UpstreamPool};
+
+/// Evict least-recently-used subject connections until the map holds at most
+/// `max_entries`, returning the removed `(upstream_name, connection)` pairs so
+/// the caller can shut their peers down cleanly off-lock.
+///
+/// `protect` is the key about to be (re)inserted by the caller; it is never
+/// chosen for eviction so a fresh connect is not torn down moments after it
+/// opens.
+fn evict_lru_over_cap(
+    cache: &mut HashMap<(String, String), SubjectScopedConnection>,
+    max_entries: usize,
+    protect: &(String, String),
+) -> Vec<(String, UpstreamConnection)> {
+    let mut evicted = Vec::new();
+    while cache.len() > max_entries {
+        // Find the least-recently-used key that is not the protected key.
+        let lru_key = cache
+            .iter()
+            .filter(|(k, _)| *k != protect)
+            .min_by_key(|(_, entry)| entry.last_used)
+            .map(|(k, _)| k.clone());
+        match lru_key {
+            Some(key) => {
+                if let Some(entry) = cache.remove(&key) {
+                    evicted.push((key.0, entry._connection));
+                }
+            }
+            // Only the protected key remains — nothing left to evict.
+            None => break,
+        }
+    }
+    evicted
+}
 
 impl std::fmt::Debug for UpstreamConnection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -283,6 +320,11 @@ impl UpstreamPool {
             }
         }
 
+        // First subject-scoped connect on this pool also arms the background
+        // sweep task (idempotent — no-op once armed). This keeps the sweep dormant
+        // until the OAuth/subject path is actually exercised (P-H2).
+        self.ensure_subject_sweep_task().await;
+
         // Slow path: acquire the per-key single-flight lock so only one
         // concurrent caller opens a new connection.
         let connect_lock: Arc<Mutex<()>> = {
@@ -321,8 +363,12 @@ impl UpstreamPool {
 
             let peer = conn.peer.clone();
             let cached_tools = tools.clone();
-            {
+            // Enforce the LRU cap BEFORE inserting so a burst of unique subjects
+            // can't push the live-peer (and FD) count past the bound. Evicted
+            // peers are shut down cleanly off-lock (P-H2).
+            let evicted = {
                 let mut cache = self.subject_connections.write().await;
+                let evicted = evict_lru_over_cap(&mut cache, SUBJECT_CONN_MAX_ENTRIES - 1, &key);
                 cache.insert(
                     key.clone(),
                     SubjectScopedConnection {
@@ -332,6 +378,12 @@ impl UpstreamPool {
                         last_used: Instant::now(),
                     },
                 );
+                evicted
+            };
+            for (name, evicted_conn) in evicted {
+                evicted_conn
+                    .shutdown(&name, "subject.cache.lru_evict")
+                    .await;
             }
             Ok((peer, tools))
         }
@@ -387,6 +439,102 @@ impl UpstreamPool {
     /// before the pool is swapped out.
     pub(super) async fn evict_all_subject_connections(&self) {
         self.subject_connections.write().await.clear();
+    }
+
+    /// Sweep the subject-connection cache once (P-H2).
+    ///
+    /// Removes every `subject_connections` entry whose `last_used` exceeds the
+    /// idle TTL (shutting its peer down cleanly), then prunes orphan
+    /// `subject_connect_locks` — lock entries with no live connection and no
+    /// other strong reference (`Arc::strong_count == 1`, i.e. only the map's
+    /// own clone). Returns `(connections_evicted, locks_pruned)` for logging
+    /// and tests.
+    ///
+    /// Eviction of locks is conservative: a lock currently held by an in-flight
+    /// connect has `strong_count >= 2` (the connector holds a clone), so it is
+    /// never pruned out from under a single-flight gate.
+    pub(super) async fn sweep_subject_connections(&self) -> (usize, usize) {
+        // Phase 1: drain idle-TTL-expired connection entries under the write
+        // lock, but shut their peers down OUTSIDE the lock so a slow shutdown
+        // does not stall fast-path cache hits.
+        let expired = {
+            let mut cache = self.subject_connections.write().await;
+            let stale_keys: Vec<(String, String)> = cache
+                .iter()
+                .filter(|(_, entry)| entry.last_used.elapsed() >= SUBJECT_CONN_IDLE_TTL)
+                .map(|(key, _)| key.clone())
+                .collect();
+            stale_keys
+                .into_iter()
+                .filter_map(|key| cache.remove(&key).map(|entry| (key.0, entry._connection)))
+                .collect::<Vec<_>>()
+        };
+        let connections_evicted = expired.len();
+        for (name, conn) in expired {
+            conn.shutdown(&name, "subject.cache.sweep").await;
+        }
+
+        // Phase 2: prune orphan single-flight locks. Hold both locks so the
+        // strong_count check cannot race a connect inserting/cloning a lock.
+        let locks_pruned = {
+            let cache = self.subject_connections.read().await;
+            let mut locks = self.subject_connect_locks.write().await;
+            let before = locks.len();
+            locks.retain(|key, lock| {
+                // Keep locks that still gate a live connection, or that another
+                // task currently holds (in-flight connect: strong_count >= 2).
+                cache.contains_key(key) || Arc::strong_count(lock) > 1
+            });
+            before - locks.len()
+        };
+
+        if connections_evicted > 0 || locks_pruned > 0 {
+            tracing::debug!(
+                surface = "dispatch",
+                service = "upstream.pool",
+                action = "upstream.subject.sweep",
+                event = "finish",
+                operation = "subject.cache.sweep",
+                connections_evicted,
+                locks_pruned,
+                "subject connection cache sweep finished"
+            );
+        }
+        (connections_evicted, locks_pruned)
+    }
+
+    /// Spawn the background subject-connection sweep loop (P-H2).
+    ///
+    /// Mirrors the cancelable-task pattern used by `ensure_probe_task`: the
+    /// returned-by-side-effect task lives on `subject_sweep_task` and is
+    /// cancelled by `drain_for_swap`. Idempotent — a second call while a task
+    /// is already registered is a no-op.
+    pub(super) async fn ensure_subject_sweep_task(&self) {
+        {
+            let mut slot = self.subject_sweep_task.write().await;
+            if slot.is_some() {
+                return;
+            }
+            *slot = Some(tokio_util::sync::CancellationToken::new());
+        }
+        let cancel = self
+            .subject_sweep_task
+            .read()
+            .await
+            .clone()
+            .expect("sweep token just inserted");
+
+        let pool = self.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    _ = tokio::time::sleep(SUBJECT_CONN_SWEEP_INTERVAL) => {
+                        pool.sweep_subject_connections().await;
+                    }
+                }
+            }
+        });
     }
 }
 
@@ -538,5 +686,190 @@ mod tests {
             .collect();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].0, "beta");
+    }
+
+    /// P-H2: `sweep_subject_connections` removes entries whose `last_used`
+    /// exceeds `SUBJECT_CONN_IDLE_TTL` (simulated by back-dating `last_used`)
+    /// while leaving fresh entries in place. Without the sweep these idle
+    /// entries would leak one live peer + FD per subject forever.
+    #[tokio::test]
+    async fn sweep_evicts_idle_ttl_expired_subject_connections() {
+        use std::time::{Duration, Instant};
+
+        use super::super::helpers::SUBJECT_CONN_IDLE_TTL;
+
+        let pool = static_catalog_pool("alpha").await;
+        let stale_conn = pool
+            .connections
+            .write()
+            .await
+            .remove("alpha")
+            .expect("alpha connection for stale entry");
+        let stale_peer = stale_conn.peer.clone();
+
+        // Fresh entry: borrow beta's connection so it survives the sweep.
+        let beta_pool = static_catalog_pool("beta").await;
+        let fresh_conn = beta_pool
+            .connections
+            .write()
+            .await
+            .remove("beta")
+            .expect("beta connection for fresh entry");
+        let fresh_peer = fresh_conn.peer.clone();
+
+        {
+            let mut cache = pool.subject_connections.write().await;
+            // Stale: last_used well past the idle TTL.
+            cache.insert(
+                ("alpha".to_string(), "alice".to_string()),
+                SubjectScopedConnection {
+                    _connection: stale_conn,
+                    peer: stale_peer,
+                    tools: vec![],
+                    last_used: Instant::now()
+                        .checked_sub(SUBJECT_CONN_IDLE_TTL + Duration::from_secs(60))
+                        .expect("instant in range"),
+                },
+            );
+            // Fresh: just used.
+            cache.insert(
+                ("beta".to_string(), "bob".to_string()),
+                SubjectScopedConnection {
+                    _connection: fresh_conn,
+                    peer: fresh_peer,
+                    tools: vec![],
+                    last_used: Instant::now(),
+                },
+            );
+        }
+
+        assert_eq!(pool.subject_connections.read().await.len(), 2);
+
+        let (evicted, _) = pool.sweep_subject_connections().await;
+        assert_eq!(evicted, 1, "exactly the stale entry should be evicted");
+
+        let remaining: Vec<_> = pool
+            .subject_connections
+            .read()
+            .await
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].0, "beta");
+    }
+
+    /// P-H2: the sweep prunes orphan `subject_connect_locks` — lock entries with
+    /// no live connection and no in-flight holder (`Arc::strong_count == 1`) —
+    /// but preserves locks that still gate a live cached connection.
+    #[tokio::test]
+    async fn sweep_prunes_orphan_subject_connect_locks() {
+        use std::time::Instant;
+
+        let pool = static_catalog_pool("alpha").await;
+        let conn = pool
+            .connections
+            .write()
+            .await
+            .remove("alpha")
+            .expect("alpha connection");
+        let peer = conn.peer.clone();
+
+        // A live cached connection for (alpha, alice) plus its gating lock.
+        pool.subject_connections.write().await.insert(
+            ("alpha".to_string(), "alice".to_string()),
+            SubjectScopedConnection {
+                _connection: conn,
+                peer,
+                tools: vec![],
+                last_used: Instant::now(),
+            },
+        );
+        {
+            let mut locks = pool.subject_connect_locks.write().await;
+            // Lock that still gates a live connection — must be kept.
+            locks.insert(
+                ("alpha".to_string(), "alice".to_string()),
+                Arc::new(tokio::sync::Mutex::new(())),
+            );
+            // Orphan lock: no matching connection, no other holder — must be pruned.
+            locks.insert(
+                ("alpha".to_string(), "ghost".to_string()),
+                Arc::new(tokio::sync::Mutex::new(())),
+            );
+        }
+
+        let (_, pruned) = pool.sweep_subject_connections().await;
+        assert_eq!(pruned, 1, "only the orphan lock should be pruned");
+
+        let remaining: Vec<_> = pool
+            .subject_connect_locks
+            .read()
+            .await
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].1, "alice");
+    }
+
+    /// P-H2: `evict_lru_over_cap` selects least-recently-used entries for
+    /// eviction, never touches the protected (about-to-be-inserted) key, and
+    /// drives the map down to the cap. Exercising the selection logic directly
+    /// keeps the test light (no need to open 256+ live peers to hit the real
+    /// `SUBJECT_CONN_MAX_ENTRIES` bound).
+    #[tokio::test]
+    async fn evict_lru_over_cap_drops_least_recently_used_and_spares_protected() {
+        use std::collections::HashMap;
+        use std::time::{Duration, Instant};
+
+        use super::evict_lru_over_cap;
+
+        // Mint three live connections from three pools.
+        let mut conns = Vec::new();
+        for name in ["a", "b", "c"] {
+            let p = static_catalog_pool(name).await;
+            let c = p
+                .connections
+                .write()
+                .await
+                .remove(name)
+                .expect("connection present");
+            conns.push((name, c));
+        }
+
+        let now = Instant::now();
+        let mut cache: HashMap<(String, String), SubjectScopedConnection> = HashMap::new();
+        // last_used ages: a = oldest, b = middle, c = newest.
+        for (offset_secs, (name, conn)) in conns.into_iter().enumerate() {
+            let peer = conn.peer.clone();
+            cache.insert(
+                (name.to_string(), "subj".to_string()),
+                SubjectScopedConnection {
+                    _connection: conn,
+                    peer,
+                    tools: vec![],
+                    last_used: now
+                        .checked_sub(Duration::from_secs(300 - offset_secs as u64 * 100))
+                        .expect("instant in range"),
+                },
+            );
+        }
+
+        // Cap the map at 2, protecting "c" (the newest / pretend just-inserted).
+        let protect = ("c".to_string(), "subj".to_string());
+        let evicted = evict_lru_over_cap(&mut cache, 2, &protect);
+
+        // Exactly one eviction: the least-recently-used "a".
+        assert_eq!(evicted.len(), 1);
+        assert_eq!(evicted[0].0, "a");
+        assert_eq!(cache.len(), 2);
+        assert!(cache.contains_key(&("b".to_string(), "subj".to_string())));
+        assert!(cache.contains_key(&protect));
+
+        // Clean up evicted peers so their server tasks stop.
+        for (name, conn) in evicted {
+            conn.shutdown(&name, "test.cleanup").await;
+        }
     }
 }

@@ -3,10 +3,20 @@
 //! This is a preflight guard, not a complete DNS-rebinding defense. Any code
 //! that later performs an outbound request must still avoid unsafe redirects and
 //! must not claim that validation-time DNS pins the final connection target.
+//!
+//! The host/IP allow-deny policy itself is **not** defined here — it lives in
+//! `lab_apis::acp_registry::ssrf` (the canonical single source of truth, since
+//! `lab-apis` cannot depend back on `dispatch`). This module owns only the
+//! `lab`-side concerns: DNS resolution, the async `spawn_blocking` wrapper,
+//! the concurrency semaphore, and conversion of `SsrfError` into `ToolError`.
+//! The private-TLD suffix denylist, CGNAT/ULA ranges, and IPv4-mapped handling
+//! are all enforced by the shared helpers.
 
 use std::net::{IpAddr, ToSocketAddrs};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+
+use lab_apis::acp_registry::ssrf as shared;
 
 use crate::dispatch::error::ToolError;
 use tokio::sync::Semaphore;
@@ -20,53 +30,49 @@ const MAX_CONCURRENT_DNS_VALIDATIONS: usize = 8;
 /// Call this only from blocking contexts. Async dispatch paths should call
 /// [`validate_external_https_url`] instead.
 pub fn validate_external_https_url_blocking(url: &str) -> Result<(), ToolError> {
-    let redacted = redact_url_for_error(url);
-    let ssrf_err = |msg: String| ToolError::Sdk {
-        sdk_kind: "ssrf_blocked".to_string(),
-        message: msg,
-    };
+    // Static checks (scheme/userinfo/query/fragment/host + IP-literal &
+    // private-TLD denylist) are owned by the shared canonical guard. This
+    // wrapper's stable contract is that *every* rejection surfaces as
+    // `ssrf_blocked` (preserved from the pre-consolidation behavior and relied
+    // on by the gateway/marketplace callers), so all `SsrfError` variants are
+    // collapsed onto that kind here.
+    let parsed = shared::parse_validated_https_url(url).map_err(as_ssrf_blocked)?;
 
-    let parsed =
-        url::Url::parse(url).map_err(|e| ssrf_err(format!("invalid URL `{redacted}`: {e}")))?;
-
-    if parsed.scheme() != "https" {
-        return Err(ssrf_err(format!(
-            "URL `{redacted}` must use https to prevent SSRF"
-        )));
-    }
-
-    if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err(ssrf_err(format!(
-            "URL `{redacted}` must not include userinfo"
-        )));
-    }
-
-    if parsed.query().is_some() || parsed.fragment().is_some() {
-        return Err(ssrf_err(format!(
-            "URL `{redacted}` must not include query or fragment components"
-        )));
-    }
-
+    // An IP-literal host is fully validated by the static guard above.
     let host = parsed
         .host_str()
-        .ok_or_else(|| ssrf_err(format!("URL `{redacted}` must include a host")))?;
-    let port = parsed
-        .port_or_known_default()
-        .ok_or_else(|| ssrf_err(format!("URL `{redacted}` must include a resolvable port")))?;
-
-    if let Ok(addr) = host.parse::<IpAddr>() {
-        return check_ip_not_private(addr, &redacted);
+        .ok_or_else(|| ssrf_blocked("URL must include a host".to_string()))?;
+    if host.parse::<IpAddr>().is_ok() {
+        return Ok(());
     }
 
+    // Resolve the name and validate every address via the shared IP guard.
+    let redacted = shared::redact_url(url);
+    let port = parsed.port_or_known_default().unwrap_or(443);
     let addrs = (host, port)
         .to_socket_addrs()
-        .map_err(|e| ssrf_err(format!("failed to resolve host `{host}`: {e}")))?;
+        .map_err(|e| ssrf_blocked(format!("failed to resolve host `{host}`: {e}")))?;
 
     for sock_addr in addrs {
-        check_ip_not_private(sock_addr.ip(), &redacted)?;
+        shared::check_ip_not_private(sock_addr.ip(), &redacted).map_err(as_ssrf_blocked)?;
     }
 
     Ok(())
+}
+
+fn ssrf_blocked(message: String) -> ToolError {
+    ToolError::Sdk {
+        sdk_kind: "ssrf_blocked".to_string(),
+        message,
+    }
+}
+
+/// Collapse any [`shared::SsrfError`] onto the `ssrf_blocked` kind, preserving
+/// this wrapper's historic contract that all preflight rejections share one
+/// stable kind regardless of whether the cause was a static URL defect or a
+/// blocked address.
+fn as_ssrf_blocked(e: shared::SsrfError) -> ToolError {
+    ssrf_blocked(e.to_string())
 }
 
 /// Async wrapper for request/dispatch paths. Owns `spawn_blocking` and timeout
@@ -107,68 +113,6 @@ pub async fn validate_external_https_url(url: &str) -> Result<(), ToolError> {
 fn dns_validation_semaphore() -> &'static Arc<Semaphore> {
     static SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
     SEMAPHORE.get_or_init(|| Arc::new(Semaphore::new(MAX_CONCURRENT_DNS_VALIDATIONS)))
-}
-
-fn check_ip_not_private(ip: IpAddr, redacted_url: &str) -> Result<(), ToolError> {
-    let blocked = match ip {
-        IpAddr::V4(v4) => {
-            v4.is_private()
-                || v4.is_loopback()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || is_cgnat(v4)
-        }
-        IpAddr::V6(v6) => {
-            v6.is_loopback()
-                || v6.is_unspecified()
-                || is_ipv6_link_local(v6)
-                || is_ipv6_ula(v6)
-                || v6.to_ipv4_mapped().is_some_and(|v4| {
-                    v4.is_private()
-                        || v4.is_loopback()
-                        || v4.is_link_local()
-                        || v4.is_unspecified()
-                        || is_cgnat(v4)
-                })
-        }
-    };
-
-    if blocked {
-        return Err(ToolError::Sdk {
-            sdk_kind: "ssrf_blocked".to_string(),
-            message: format!(
-                "URL `{redacted_url}` resolves to private, loopback, link-local, CGNAT, or ULA address {ip}; blocked to prevent SSRF"
-            ),
-        });
-    }
-
-    Ok(())
-}
-
-fn is_cgnat(ip: std::net::Ipv4Addr) -> bool {
-    let octets = ip.octets();
-    octets[0] == 100 && (64..=127).contains(&octets[1])
-}
-
-fn is_ipv6_link_local(ip: std::net::Ipv6Addr) -> bool {
-    (ip.segments()[0] & 0xffc0) == 0xfe80
-}
-
-fn is_ipv6_ula(ip: std::net::Ipv6Addr) -> bool {
-    (ip.segments()[0] & 0xfe00) == 0xfc00
-}
-
-fn redact_url_for_error(raw: &str) -> String {
-    match url::Url::parse(raw) {
-        Ok(mut url) => {
-            let _ = url.set_username("");
-            let _ = url.set_password(None);
-            url.set_query(None);
-            url.set_fragment(None);
-            url.to_string()
-        }
-        Err(_) => "<invalid-url>".to_string(),
-    }
 }
 
 #[cfg(test)]
@@ -213,7 +157,7 @@ mod tests {
             "::ffff:100.64.0.1",
         ] {
             let parsed: IpAddr = ip.parse().expect(ip);
-            let err = check_ip_not_private(parsed, "https://example.com").unwrap_err();
+            let err = shared::check_ip_not_private(parsed, "https://example.com").unwrap_err();
             assert_eq!(err.kind(), "ssrf_blocked", "{ip}");
         }
     }

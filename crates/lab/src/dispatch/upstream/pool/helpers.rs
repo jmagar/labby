@@ -43,8 +43,26 @@ pub(super) const STDIO_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 /// Idle TTL for per-`(upstream, subject)` cached connections.
 ///
 /// A connection that has not been used for this long will be evicted from
-/// the subject-connection cache on the next access for its key (P-C1).
+/// the subject-connection cache on the next access for its key (P-C1), or by
+/// the background sweep task ([`SUBJECT_CONN_SWEEP_INTERVAL`]).
 pub(super) const SUBJECT_CONN_IDLE_TTL: Duration = Duration::from_secs(300);
+
+/// Interval at which the background subject-connection sweep runs (P-H2).
+///
+/// Each tick evicts idle-TTL-expired `subject_connections` entries (shutting
+/// their peers down cleanly) and prunes orphan `subject_connect_locks`. Set to
+/// the idle TTL so a leaked-but-idle connection lives at most ~2× the TTL.
+pub(super) const SUBJECT_CONN_SWEEP_INTERVAL: Duration = SUBJECT_CONN_IDLE_TTL;
+
+/// Hard upper bound on the number of live per-`(upstream, subject)` cached
+/// connections (P-H2).
+///
+/// In an OAuth multi-user deployment each unique subject opens one live peer
+/// (one stdio child / one HTTP keep-alive + FD). Without a cap a burst of unique
+/// subjects could exhaust file descriptors before the idle TTL sweep reclaims
+/// them. When an insert would exceed this cap the least-recently-used entries
+/// are evicted (and shut down cleanly) down to the cap first.
+pub(super) const SUBJECT_CONN_MAX_ENTRIES: usize = 256;
 
 /// Default maximum response size from upstream servers (10 MB).
 pub(super) const DEFAULT_MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;

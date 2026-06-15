@@ -3449,7 +3449,7 @@
           "returns": "ConfigListing"
         },
         {
-          "name": "plan",
+          "name": "deploy.plan",
           "description": "Dry-run: resolve targets, hash local artifact, show what would happen",
           "destructive": false,
           "params": [
@@ -3463,7 +3463,7 @@
           "returns": "DeployPlan"
         },
         {
-          "name": "run",
+          "name": "deploy.run",
           "description": "Build, transfer, install, restart, verify on targets (destructive)",
           "destructive": true,
           "params": [
@@ -3495,8 +3495,74 @@
           "returns": "DeployRunSummary"
         },
         {
-          "name": "rollback",
+          "name": "deploy.rollback",
           "description": "Restore the most recent timestamped backup on the specified targets (destructive)",
+          "destructive": true,
+          "params": [
+            {
+              "name": "targets",
+              "ty": "string[]",
+              "required": true,
+              "description": "SSH host aliases to roll back"
+            },
+            {
+              "name": "confirm",
+              "ty": "boolean",
+              "required": true,
+              "description": "Must be true to confirm the destructive operation"
+            }
+          ],
+          "returns": "DeployRunSummary"
+        },
+        {
+          "name": "plan",
+          "description": "Deprecated alias for `deploy.plan`",
+          "destructive": false,
+          "params": [
+            {
+              "name": "targets",
+              "ty": "string[]",
+              "required": true,
+              "description": "SSH host aliases to include in the plan"
+            }
+          ],
+          "returns": "DeployPlan"
+        },
+        {
+          "name": "run",
+          "description": "Deprecated alias for `deploy.run`",
+          "destructive": true,
+          "params": [
+            {
+              "name": "targets",
+              "ty": "string[]",
+              "required": true,
+              "description": "SSH host aliases to deploy to"
+            },
+            {
+              "name": "confirm",
+              "ty": "boolean",
+              "required": true,
+              "description": "Must be true to confirm the destructive operation"
+            },
+            {
+              "name": "max_parallel",
+              "ty": "integer",
+              "required": false,
+              "description": "Maximum number of hosts to work on concurrently"
+            },
+            {
+              "name": "fail_fast",
+              "ty": "boolean",
+              "required": false,
+              "description": "Abort remaining hosts on the first failure"
+            }
+          ],
+          "returns": "DeployRunSummary"
+        },
+        {
+          "name": "rollback",
+          "description": "Deprecated alias for `deploy.rollback`",
           "destructive": true,
           "params": [
             {

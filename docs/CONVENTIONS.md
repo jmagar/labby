@@ -73,6 +73,34 @@ The canonical error contract for stable kinds, envelopes, and mapping rules live
 
 Do not maintain separate hand-written copies of action metadata.
 
+## Action Naming & Deprecation
+
+Action names are dotted `<resource>.<verb>` (lowercase, dot-separated) — this is
+the **canonical** form (e.g. `deploy.plan`, `setup.bootstrap`,
+`marketplace.mcp.install`). The dotted form is enforced by a catalog lint:
+`catalog_action_names_are_dotted` in `crates/lab/tests/architecture_orchestrator.rs`
+fails CI for any catalog action that does not match `^[a-z0-9_]+(\.[a-z0-9_]+)+$`.
+
+Some services historically shipped **bare/flat** action names (e.g. `deploy`'s
+bare `plan`/`run`/`rollback`, `setup`'s flat snake_case verbs). Those bare names
+are kept as **deprecated aliases** for back-compat: the canonical dotted form is
+added alongside the bare name, both dispatch to the same handler, and the bare
+name is exempted from the dotted-name lint via the `DEPRECATED_ACTION_ALIASES`
+allowlist in the same test file. Removing an alias from that allowlist (after the
+dotted form has been added) makes the lint enforce the dotted name and is the
+mechanism for retiring a deprecated alias.
+
+Rules:
+
+- New actions MUST use the dotted `<resource>.<verb>` form only — never add a new
+  bare alias.
+- A deprecated alias and its canonical dotted form must dispatch identically.
+- Until tooling flags them, deprecated aliases appear as equal first-class catalog
+  entries (so a service's catalog can look ~doubled). A future improvement is a
+  `deprecated: bool` field on `ActionSpec` so `help`/`schema`/catalog surfaces can
+  flag aliases and hide them from primary listings; that is a separate code
+  follow-up and does not change `ActionSpec` today.
+
 ## Batch Operations
 
 Batch APIs must be explicit and limited to real use cases.

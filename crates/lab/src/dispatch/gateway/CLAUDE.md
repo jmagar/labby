@@ -134,6 +134,14 @@ process environment.** The following invariants are NON-NEGOTIABLE:
 Any doc or comment that says "Wasmtime", "fuel budget", or
 `code_mode_fuel_exhausted` on an active code path is wrong and must be corrected.
 
+**Runner process hardening is IMPLEMENTED (not "planned").** The Code Mode
+runner subprocess is spawned with `env_clear()` (`runner_drive.rs:163` — the
+child inherits *no* labby environment, so `LAB_*` secrets cannot leak) and on
+Linux calls `prctl(PR_SET_DUMPABLE, 0)` as its first act (`runner.rs:22`) to
+block `/proc/<pid>/environ` readback. Combined with the per-run `TempDir` cwd
+and the process-group/`killpg` guard, this is the current hardened state. See
+`code_mode/CLAUDE.md` § "Sandbox Containment Invariants" for the full table.
+
 ---
 
 ## OAuth Lifecycle
@@ -150,11 +158,56 @@ failures are in `docs/dev/ERRORS.md` under "Upstream OAuth Kinds".
 
 ---
 
+## `GatewayManager` — sanctioned in-dispatch stateful runtime component
+
+`GatewayManager` (`manager.rs` + the `manager/` impl split) is a **de-facto SDK
+client that intentionally lives in dispatch, not in `lab-apis`.** This is a
+sanctioned pattern, not a Golden-Rule violation — call it out explicitly so it
+is not mistaken for a layout mistake during review or onboarding:
+
+- It is the gateway analogue of the **`upstream` connection pool**: a stateful
+  runtime object (`RwLock<LabConfig>` + a live `Arc<UpstreamPool>` of spawned
+  stdio children) that cannot be a stateless `lab-apis` HTTP client. The pool is
+  in-process, file-backed, and inherently single-instance (see the
+  horizontal-scaling note in `02-security-performance.md` / Perf-C1).
+- Dispatch arms over it are correctly **thin**: `to_json(manager.foo().await?)`.
+  The complexity is encapsulated inside `GatewayManager`, which is the right
+  place for it given the runtime state it owns.
+- **No `lab-apis` counterpart is expected.** Unlike pure upstream API services
+  (radarr, unraid, …), the gateway's "client" manages local process and config
+  state, which the `lab-apis` layer (no `tokio`-spawned children, no config
+  files) deliberately does not own.
+
+`config.rs` persistence (`toml_edit` round-trips, atomic write, `fd_lock`) is a
+property of this single-instance runtime component and stays with it; it is not
+a separable SDK concern that belongs in `lab-apis`.
+
 ## Module Size Rule
 
-**No file in this tree may exceed 500 LOC (tests included).** The manager split
-exists specifically to enforce this. If a module approaches 500 LOC, split it
-following the pattern already established in `manager/` and `pool/`:
+**Target: no source file in this tree should exceed 500 LOC of non-data logic.**
+The `manager/` and `pool/` impl-splits exist specifically to enforce this for
+behavioral code. Two clarifications keep this rule and the actual code honest:
+
+1. **Pure `ActionSpec` data tables are EXEMPT.** `catalog.rs` is a flat
+   `&[ActionSpec]` literal — a declarative data table, not logic. It is allowed
+   to exceed 500 LOC; splitting it would fragment a single source of truth for
+   no maintainability gain. (Current size ~1030 LOC, almost entirely the
+   action table.)
+
+2. **Behavioral files that currently exceed 500 LOC are a tracked DEFERRED
+   follow-up, not a silent exception.** As of this writing the over-limit
+   behavioral files are:
+
+   | File | LOC | Status |
+   |------|-----|--------|
+   | `config.rs` | ~2218 | DEFERRED split — by concern (load / render / mutation) using the `manager/` impl-split pattern. |
+   | `dispatch.rs` | ~2636 | DEFERRED split — extract the `handle_*` action groups into submodules. |
+   | `code_mode/runner_drive.rs` | ~818 | DEFERRED split — separate spawn/IO from timeout/retry/history. |
+
+   These splits were intentionally left out of the current architecture sweep to
+   keep the change reviewable; do not treat their current size as license to add
+   more. New behavioral code in this tree must still aim for ≤500 LOC and split
+   following the established pattern:
 
 - Keep the struct definition in the parent `.rs` file.
 - Move method bodies into named child modules as `impl StructName` blocks.

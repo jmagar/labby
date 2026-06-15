@@ -643,7 +643,7 @@ async fn write_code_mode_artifact_rejects_parent_dir_paths() {
         .await
         .expect_err("parent dir artifact path must be rejected");
 
-    assert_eq!(err.kind(), "invalid_param");
+    assert_eq!(err.kind(), "path_traversal");
     assert!(
         err.to_string().contains("path traversal"),
         "error should mention traversal: {err}"
@@ -670,7 +670,7 @@ async fn write_code_mode_artifact_rejects_backslash_relative_traversal() {
         .await
         .expect_err("backslash traversal must be rejected");
 
-    assert_eq!(err.kind(), "invalid_param");
+    assert_eq!(err.kind(), "path_traversal");
     assert!(
         err.to_string().contains("path traversal"),
         "error should mention traversal: {err}"
@@ -1291,6 +1291,47 @@ fn binary_search_log_truncation_boundary_is_tight() {
             );
         }
     }
+}
+
+/// M2 regression: a structured tool error whose `message` CONTAINS A NEWLINE
+/// must still classify to its real `kind`. This is the exact case that silently
+/// downgraded `upstream_error` → `server_error` under the old `"Error: "` prefix
+/// + first-line parse. The bridge now wraps the JSON payload in sentinel markers
+/// and the host scans the whole message, so an embedded newline (and any
+/// QuickJS-appended stack trace) no longer perturbs recovery.
+#[test]
+fn classify_rejection_preserves_kind_with_multiline_message() {
+    // Build the exact wire shape the JS bridge throws, then simulate QuickJS's
+    // `Error.toString()`: an `Error: ` prefix plus an appended stack trace on a
+    // following line. The multi-line tool message is the load-bearing part.
+    let multiline_message = "upstream failed:\nline two of the detail\nline three";
+    let thrown = runner::structured_error_message_for_test("upstream_error", multiline_message);
+    let stringified = format!("Error: {thrown}\n    at <anonymous>:1:1\n    at callTool");
+
+    assert_eq!(
+        runner::classify_rejection_kind_for_test(&stringified),
+        "upstream_error",
+        "a structured kind must survive a multi-line message + appended stack trace"
+    );
+
+    // Control: a bare runtime throw with no sentinel payload stays server_error.
+    assert_eq!(
+        runner::classify_rejection_kind_for_test("Error: x is not a function\n    at foo"),
+        "server_error",
+    );
+
+    // Control: the non-serializable result path still maps to invalid_param.
+    assert_eq!(
+        runner::classify_rejection_kind_for_test("Code Mode result must be JSON-serializable: ..."),
+        "invalid_param",
+    );
+
+    // A single-line structured rate_limited error is preserved too.
+    let rate_limited = runner::structured_error_message_for_test("rate_limited", "slow down");
+    assert_eq!(
+        runner::classify_rejection_kind_for_test(&format!("Error: {rate_limited}")),
+        "rate_limited",
+    );
 }
 
 #[test]

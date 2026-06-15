@@ -117,7 +117,6 @@ pub struct GatewayManager {
 impl GatewayManager {
     pub(super) async fn persist_config(&self, cfg: LabConfig) -> Result<(), ToolError> {
         let path = self.path.clone();
-        let cfg_clone = cfg.clone();
         tracing::info!(
             action = "gateway.config.write",
             phase = "start",
@@ -125,9 +124,24 @@ impl GatewayManager {
             virtual_server_count = cfg.virtual_servers.len(),
             "gateway reconcile"
         );
-        tokio::task::spawn_blocking(move || write_gateway_config(&path, &cfg_clone))
-            .await
-            .map_err(|e| ToolError::internal_message(format!("config write task failed: {e}")))??;
+        // C1(a): hand the owned `cfg` to the blocking writer and have it return
+        // the value back, instead of deep-cloning `LabConfig` a second time just
+        // to keep an in-memory copy for the post-write swap. The previous
+        // `cfg.clone()` here doubled the per-mutation deep-clone cost.
+        //
+        // The broader `RwLock<LabConfig>` → `RwLock<Arc<LabConfig>>` change
+        // suggested for this finding is deliberately NOT done: `self.config` is
+        // read via guard-deref field access in ~10 sibling modules
+        // (`runtime.rs`, `oauth_lifecycle.rs`, `virtual_servers.rs`,
+        // `code_mode_runtime.rs`, `views.rs`, `imports.rs`, …) that this task is
+        // scoped out of, so switching the inner type would ripple far beyond the
+        // five owned files. Killing the redundant clone is the safe partial win.
+        let cfg = tokio::task::spawn_blocking(move || -> Result<LabConfig, ToolError> {
+            write_gateway_config(&path, &cfg)?;
+            Ok(cfg)
+        })
+        .await
+        .map_err(|e| ToolError::internal_message(format!("config write task failed: {e}")))??;
         *self.protected_route_index.write().await =
             ProtectedRouteIndex::from_routes(&cfg.protected_mcp_routes);
         *self.config.write().await = cfg;

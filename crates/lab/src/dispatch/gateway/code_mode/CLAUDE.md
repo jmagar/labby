@@ -63,23 +63,27 @@ without updating both sides and `protocol.rs`.
 
 ## Sandbox Containment Invariants
 
-The following invariants govern runner subprocess security. The **intended**
-hardened state is listed; items marked "(planned)" are not yet implemented.
+The following invariants govern runner subprocess security. All rows below are
+**implemented** on the live code path — there are no remaining "(planned)"
+items.
 
-| Invariant | Current state | Intended state |
-|-----------|--------------|----------------|
-| No ambient network APIs | Enforced by QuickJS — no `fetch`, no `XMLHttpRequest`, no Node builtins | Same |
-| No dynamic import of host modules | Enforced by QuickJS module resolver | Same |
-| Process-group guard | `spawn_guard.rs` sets PGID; `killpg` on drop | Same |
-| Env isolation | **Runner inherits labby env** | `env_clear` + explicit allowlist (SEC work item) |
-| `PR_SET_DUMPABLE` | Not set | Set on Linux for runner child (SEC work item) |
-| Artifact path containment | Enforced: `artifacts.rs` checks `canonicalize` + `starts_with(jail_root)`, rejects symlinks | Same |
-| Artifact size cap | Enforced: 8 MiB default (`LAB_CODE_MODE_ARTIFACT_MAX_MIB`) | Same |
-| Tool call budget | Enforced: `max_tool_calls` counter, emits `tool_call_limit_exceeded` | Same |
+| Invariant | Current state |
+|-----------|--------------|
+| No ambient network APIs | Enforced by QuickJS — no `fetch`, no `XMLHttpRequest`, no Node builtins |
+| No dynamic import of host modules | Enforced by QuickJS module resolver |
+| Process-group guard | Runner spawned with `process_group(0)` (Unix) / Job Object (Windows); `kill_on_drop(true)`; `killpg` reaches grandchildren |
+| Env isolation | **Implemented.** Runner spawned with `env_clear()` (`runner_drive.rs:163`) — the child inherits NO labby env at all (not even an allowlist), so `LAB_*` secrets and every other ambient var are excluded. |
+| `PR_SET_DUMPABLE` | **Implemented.** `runner.rs:22` calls `prctl(PR_SET_DUMPABLE, 0)` as the runner's first act on Linux, blocking `/proc/<pid>/environ` readback. Failure is non-fatal and warns via stderr (drained into the parent's response logs). |
+| Per-run cwd isolation | Runner `current_dir` is a fresh `TempDir` (`runner_drive.rs`), dropped after the run. |
+| Artifact path containment | Enforced: `artifacts.rs` checks `canonicalize` + `starts_with(jail_root)`, rejects symlinks |
+| Artifact size cap | Enforced: 8 MiB default (`LAB_CODE_MODE_ARTIFACT_MAX_MIB`) |
+| Tool call budget | Enforced: `max_tool_calls` counter, emits `tool_call_limit_exceeded` |
 
-**Writing tests that assert on env isolation:** until `env_clear` lands, tests
-that assert the runner child has a minimal environment MUST be marked `#[ignore]`
-and include a comment explaining the intended vs. actual state.
+**Writing tests that assert on env isolation:** `env_clear()` has landed, so a
+test asserting the runner child has a minimal/empty environment reflects real
+behavior and need NOT be `#[ignore]` when it can inspect the child hermetically
+(e.g. via the runner's own reporting). Do not re-introduce an `#[ignore]` "until
+env_clear lands" comment — that state is in the past.
 
 ---
 
@@ -126,4 +130,4 @@ and include a comment explaining the intended vs. actual state.
 
 - `docs/dev/CODE_MODE.md` — surface documentation and examples (authoritative)
 - `docs/dev/ERRORS.md` — `"timeout"`, `"tool_call_limit_exceeded"`, artifact kinds
-- Parent: `crates/lab/src/dispatch/gateway/CLAUDE.md` — trust model, env inheritance
+- Parent: `crates/lab/src/dispatch/gateway/CLAUDE.md` — trust model, runner env isolation (`env_clear`)

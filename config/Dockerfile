@@ -1,5 +1,7 @@
 # ─── Stage 1: Build ───────────────────────────────────────────────────────────
 # Requires Rust 1.92+ (Cargo.toml: rust-version = "1.92", edition = "2024")
+# TODO: pin by digest (FROM rust:1-slim@sha256:...) for reproducible builds —
+#       floating tag resolves a fresh image per build.
 FROM rust:1-slim AS builder
 
 WORKDIR /build
@@ -92,6 +94,8 @@ RUN find crates -type f -exec touch {} + \
  && cargo build --workspace --all-features --release
 
 # ─── Stage 2: Runtime ─────────────────────────────────────────────────────────
+# TODO: pin by digest (FROM debian:trixie-slim@sha256:...) for reproducible
+#       builds — floating tag resolves a fresh image per build.
 FROM debian:trixie-slim AS runtime
 
 # ca-certificates: reqwest uses rustls for TLS but still validates against the
@@ -124,7 +128,15 @@ RUN mkdir -p /opt/agent-clis \
 
 # Python MCP servers commonly use `uvx` as their stdio launcher. Install uv
 # into PATH for gateway child processes.
-RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
+#
+# Reproducibility: the astral.sh installer pins a version when UV_VERSION is set
+# (it fetches that exact release instead of "latest"). UV_VERSION is currently
+# empty, so this tracks the latest uv at build time.
+# TODO: pin uv by setting UV_VERSION to a verified release tag (e.g. "0.x.y")
+#       so the runtime image is reproducible across builds.
+ARG UV_VERSION=""
+RUN curl -LsSf https://astral.sh/uv/install.sh \
+    | env UV_INSTALL_DIR=/usr/local/bin UV_VERSION="${UV_VERSION}" sh \
  && uv --version \
  && uvx --version
 

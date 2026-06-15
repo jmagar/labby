@@ -270,10 +270,34 @@ impl From<lab_apis::acp_registry::AcpRegistryError> for ToolError {
         use lab_apis::acp_registry::AcpRegistryError;
         let sdk_kind = match &e {
             AcpRegistryError::Request(api) => api.kind().to_string(),
-            AcpRegistryError::Api { .. } => "server_error".to_string(),
+            // The `Api { status, body }` envelope carries the upstream status,
+            // so map it onto the canonical kind vocabulary rather than always
+            // flattening to `server_error`.
+            AcpRegistryError::Api { status, .. } => match status {
+                401 | 403 => "auth_failed",
+                404 => "not_found",
+                429 => "rate_limited",
+                _ => "server_error",
+            }
+            .to_string(),
         };
         Self::Sdk {
             sdk_kind,
+            message: e.to_string(),
+        }
+    }
+}
+
+// The ACP archive installer (download/verify/extract/install primitive in
+// lab-apis) carries its own stable `kind()` taxonomy that already matches the
+// dispatcher vocabulary (`ssrf_blocked`, `integrity_missing`, `path_traversal`,
+// `content_too_large`, …), so the conversion is a straight kind+message
+// pass-through. Messages are built only from non-secret URL/host forms.
+#[cfg(feature = "acp_registry")]
+impl From<lab_apis::acp_registry::AcpInstallerError> for ToolError {
+    fn from(e: lab_apis::acp_registry::AcpInstallerError) -> Self {
+        Self::Sdk {
+            sdk_kind: e.kind().to_string(),
             message: e.to_string(),
         }
     }

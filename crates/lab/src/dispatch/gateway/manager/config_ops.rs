@@ -81,12 +81,21 @@ impl GatewayManager {
         let creds = values_to_service_creds(service, values);
         let env_path = self.env_path();
         if !creds.is_empty() && !env_is_up_to_date(&env_path, &creds) {
-            drop(backup_env(&env_path).map_err(|e| {
-                ToolError::internal_message(format!("failed to back up env file: {e}"))
-            })?);
-            write_env(&env_path, &creds, true).map_err(|e| {
-                ToolError::internal_message(format!("failed to write env file: {e}"))
-            })?;
+            // Offload the synchronous backup + rewrite to a blocking thread —
+            // mirrors `persist_config`'s discipline so the async runtime is not
+            // stalled by `std::fs` I/O while the mutation guard is held.
+            let env_path_for_write = env_path.clone();
+            tokio::task::spawn_blocking(move || -> Result<(), ToolError> {
+                drop(backup_env(&env_path_for_write).map_err(|e| {
+                    ToolError::internal_message(format!("failed to back up env file: {e}"))
+                })?);
+                write_env(&env_path_for_write, &creds, true).map_err(|e| {
+                    ToolError::internal_message(format!("failed to write env file: {e}"))
+                })?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| ToolError::internal_message(format!("env write task failed: {e}")))??;
             if let Some(service_clients) = &self.service_clients {
                 service_clients
                     .refresh_from_env_path(&env_path)

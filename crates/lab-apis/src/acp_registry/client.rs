@@ -51,9 +51,16 @@ impl AcpRegistryClient {
     /// Fetch the full registry manifest and return all agents.
     ///
     /// # Errors
-    /// Returns [`AcpRegistryError`] on HTTP or decode failure.
+    /// Returns [`AcpRegistryError`] on HTTP or decode failure. Non-2xx upstream
+    /// statuses surface as [`AcpRegistryError::Api`] carrying the status + body
+    /// so callers can see the upstream failure rather than an opaque transport
+    /// error.
     pub async fn list_agents(&self) -> Result<Vec<Agent>, AcpRegistryError> {
-        let response: AcpRegistryResponse = self.http.get_json(REGISTRY_PATH).await?;
+        let response: AcpRegistryResponse = self
+            .http
+            .get_json(REGISTRY_PATH)
+            .await
+            .map_err(map_api_error)?;
         Ok(response.agents)
     }
 
@@ -69,7 +76,32 @@ impl AcpRegistryClient {
     }
 
     pub(super) async fn health_probe(&self) -> Result<AcpRegistryResponse, AcpRegistryError> {
-        Ok(self.http.get_json(REGISTRY_PATH).await?)
+        self.http
+            .get_json(REGISTRY_PATH)
+            .await
+            .map_err(map_api_error)
+    }
+}
+
+/// Map a transport-layer [`ApiError`] into an [`AcpRegistryError`].
+///
+/// A non-success HTTP status that `HttpClient` already classified (5xx →
+/// [`ApiError::Server`], 401/403 → [`ApiError::Auth`], 404 → [`ApiError::NotFound`])
+/// is promoted to the richer [`AcpRegistryError::Api`] envelope so callers see the
+/// upstream status/body. Every other failure (network, decode, internal) folds
+/// into the opaque [`AcpRegistryError::Request`] wrapper.
+fn map_api_error(e: ApiError) -> AcpRegistryError {
+    match e {
+        ApiError::Server { status, body } => AcpRegistryError::Api { status, body },
+        ApiError::Auth => AcpRegistryError::Api {
+            status: 401,
+            body: "authentication failed".to_string(),
+        },
+        ApiError::NotFound => AcpRegistryError::Api {
+            status: 404,
+            body: "not found".to_string(),
+        },
+        other => AcpRegistryError::Request(other),
     }
 }
 
@@ -189,7 +221,12 @@ mod tests {
 
         let client = make_client(&server.uri());
         let result = client.list_agents().await;
-        assert!(result.is_err(), "expected error on 404, got Ok");
+        // 404 is promoted to the richer `Api` envelope carrying the status.
+        let err = result.expect_err("expected error on 404");
+        assert!(
+            matches!(err, AcpRegistryError::Api { status: 404, .. }),
+            "expected Api {{ status: 404 }}, got {err:?}"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -207,7 +244,15 @@ mod tests {
 
         let client = make_client(&server.uri());
         let result = client.list_agents().await;
-        assert!(result.is_err(), "expected error on 503, got Ok");
+        // 5xx is promoted to the richer `Api` envelope carrying status + body.
+        let err = result.expect_err("expected error on 503");
+        assert!(
+            matches!(
+                &err,
+                AcpRegistryError::Api { status: 503, body } if body.contains("service unavailable")
+            ),
+            "expected Api {{ status: 503, body: \"…service unavailable…\" }}, got {err:?}"
+        );
     }
 
     // -----------------------------------------------------------------------

@@ -119,8 +119,9 @@ async fn runtime_handle_swaps_pool_atomically() {
     assert!(Arc::ptr_eq(&current, &pool));
 }
 
+// Re-fixtured post-gateway-pivot: `deploy` is a kept/registered service and must
+// survive reload; `mcpregistry` is unregistered and must be quarantined.
 #[tokio::test]
-#[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
 async fn reload_quarantines_virtual_servers_for_unregistered_services() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
@@ -341,5 +342,142 @@ async fn reload_unaffected_upstream_catalog_entry_survives_single_upstream_chang
     assert!(
         !Arc::ptr_eq(&pool_after_first, &pool_after_second),
         "reload must swap the pool (new Arc expected)"
+    );
+}
+
+// Perf C1 regression: a true no-op reload (the on-disk config is byte-identical
+// to the live in-memory config) MUST preserve the live `Arc<UpstreamPool>`. The
+// fingerprint-gated short-circuit in `pool_lifecycle.rs`
+// (`upstream_runtime_fingerprint` + the `pool_inputs_unchanged` branch that logs
+// `pool_rebuild_skipped=true`) is what keeps lazily-spawned stdio children alive
+// across unrelated reloads. Without this, every reload would tear down and rebuild
+// the pool, forcing a re-handshake on next use.
+//
+// This is the POSITIVE counterpart to
+// `reload_unaffected_upstream_catalog_entry_survives_single_upstream_change`,
+// whose only `Arc::ptr_eq` assertion is the NEGATIVE one (rebuild-on-add). We have
+// no log-capture infra wired in this tree, so the `Arc::ptr_eq` identity assertion
+// is the core contract: same Arc ⇒ the rebuild was skipped.
+#[tokio::test]
+async fn reload_noop_preserves_live_pool() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+
+    write_gateway_config(
+        &path,
+        &LabConfig {
+            upstream: vec![
+                fixture_http_upstream("alpha"),
+                fixture_http_upstream("bravo"),
+            ],
+            ..LabConfig::default()
+        },
+    )
+    .expect("write config");
+
+    let manager = GatewayManager::new(path.clone(), GatewayRuntimeHandle::default());
+    manager
+        .reload_with_origin(None, None)
+        .await
+        .expect("initial reload");
+
+    let pool_before = manager
+        .current_pool()
+        .await
+        .expect("pool after first reload");
+
+    // Reload again WITHOUT changing the config on disk — the upstream set, gateway
+    // spawn prefs, and code-mode settings are byte-identical, so the fingerprint
+    // matches and the live pool must be preserved.
+    manager
+        .reload_with_origin(None, None)
+        .await
+        .expect("no-op reload");
+
+    let pool_after = manager
+        .current_pool()
+        .await
+        .expect("pool after no-op reload");
+
+    assert!(
+        Arc::ptr_eq(&pool_before, &pool_after),
+        "a no-op reload must preserve the SAME live pool (fingerprint unchanged ⇒ \
+         pool_rebuild_skipped); a rebuilt pool here re-regresses Perf C1"
+    );
+}
+
+// Perf C1 regression: a reload that changes ONLY fields the fingerprint
+// deliberately EXCLUDES (here: `protected_mcp_routes`) must also preserve the live
+// pool. `upstream_runtime_fingerprint` hashes only the upstream set, gateway spawn
+// prefs, code-mode config, and request timeout — protected routes, virtual servers,
+// tombstones, and public URLs are reconciled separately and must NOT force a pool
+// rebuild. If a future edit folds protected routes into the fingerprint, this test
+// fails (correctly flagging the C1 regression).
+#[tokio::test]
+async fn reload_protected_routes_only_change_preserves_live_pool() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+
+    write_gateway_config(
+        &path,
+        &LabConfig {
+            upstream: vec![
+                fixture_http_upstream("alpha"),
+                fixture_http_upstream("bravo"),
+            ],
+            ..LabConfig::default()
+        },
+    )
+    .expect("write config");
+
+    let manager = GatewayManager::new(path.clone(), GatewayRuntimeHandle::default());
+    manager
+        .reload_with_origin(None, None)
+        .await
+        .expect("initial reload");
+
+    let pool_before = manager
+        .current_pool()
+        .await
+        .expect("pool after first reload");
+
+    // Rewrite the config adding ONLY a protected MCP route — every upstream and all
+    // pool-shaping config is untouched, so the runtime fingerprint is unchanged.
+    write_gateway_config(
+        &path,
+        &LabConfig {
+            upstream: vec![
+                fixture_http_upstream("alpha"),
+                fixture_http_upstream("bravo"),
+            ],
+            protected_mcp_routes: vec![fixture_protected_route("syslog")],
+            ..LabConfig::default()
+        },
+    )
+    .expect("write config with protected route");
+
+    manager
+        .reload_with_origin(None, None)
+        .await
+        .expect("protected-routes-only reload");
+
+    let pool_after = manager
+        .current_pool()
+        .await
+        .expect("pool after protected-routes reload");
+
+    assert!(
+        Arc::ptr_eq(&pool_before, &pool_after),
+        "a reload that changes only fingerprint-excluded fields (protected routes) \
+         must preserve the SAME live pool; a rebuilt pool here re-regresses Perf C1"
+    );
+
+    // The protected-routes reconciliation still happened — the in-memory config now
+    // carries the new route even though the pool was preserved.
+    let cfg = manager.current_config().await;
+    assert_eq!(
+        cfg.protected_mcp_routes.len(),
+        1,
+        "protected route must be applied even on the pool-preserving path"
     );
 }

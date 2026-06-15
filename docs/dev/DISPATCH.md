@@ -246,7 +246,7 @@ The important rule is:
 
 - surfaces must not re-execute operation logic to reshape results
 
-The canonical serialization rules remain defined by [design/SERIALIZATION.md](./design/SERIALIZATION.md).
+The canonical serialization rules remain defined by [design/SERIALIZATION.md](../design/SERIALIZATION.md).
 
 ## Client Resolution
 
@@ -358,8 +358,8 @@ The exact file breakdown may evolve, but every migrated service must start direc
 
 ## Related Docs
 
-- [ARCH.md](./ARCH.md)
+- [ARCH.md](../ARCH.md)
 - [SERVICE_ONBOARDING.md](./SERVICE_ONBOARDING.md)
 - [OBSERVABILITY.md](./OBSERVABILITY.md)
 - [ERRORS.md](./ERRORS.md)
-- [design/SERIALIZATION.md](./design/SERIALIZATION.md)
+- [design/SERIALIZATION.md](../design/SERIALIZATION.md)

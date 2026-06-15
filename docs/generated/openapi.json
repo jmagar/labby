@@ -1146,6 +1146,62 @@
           "params": {}
         }
       },
+      "DeployDeployPlanParams": {
+        "type": "object",
+        "required": [
+          "targets"
+        ],
+        "properties": {
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "DeployDeployRollbackParams": {
+        "type": "object",
+        "required": [
+          "targets",
+          "confirm"
+        ],
+        "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "DeployDeployRunParams": {
+        "type": "object",
+        "required": [
+          "targets",
+          "confirm"
+        ],
+        "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
+          "fail_fast": {
+            "type": "boolean"
+          },
+          "max_parallel": {
+            "type": "integer"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "DeployPlanParams": {
         "type": "object",
         "required": [

@@ -133,3 +133,53 @@ pub fn current_context() -> McpContext {
         .try_with(|c| *c)
         .unwrap_or(McpContext::HeadlessNoElicitation)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn headless_with_confirm_true_is_rejected() {
+        let params = json!({ "confirm": true });
+        let err = reject_headless_bypass(&params, McpContext::HeadlessNoElicitation)
+            .expect_err("headless confirm:true must be rejected");
+        assert_eq!(err.kind(), "auth_failed");
+    }
+
+    #[test]
+    fn elicited_with_confirm_true_is_ok() {
+        let params = json!({ "confirm": true });
+        assert!(
+            reject_headless_bypass(&params, McpContext::McpElicited).is_ok(),
+            "an elicitation-capable context may carry confirm:true"
+        );
+    }
+
+    #[test]
+    fn cli_with_confirm_true_is_ok() {
+        // CLI confirmation (operator `-y`) is not a headless MCP bypass.
+        let params = json!({ "confirm": true });
+        assert!(reject_headless_bypass(&params, McpContext::Cli).is_ok());
+    }
+
+    #[test]
+    fn headless_without_confirm_is_ok() {
+        // No `confirm` requested → the bypass gate does not apply, even headless.
+        let params = json!({});
+        assert!(reject_headless_bypass(&params, McpContext::HeadlessNoElicitation).is_ok());
+    }
+
+    #[test]
+    fn headless_with_confirm_false_is_ok() {
+        let params = json!({ "confirm": false });
+        assert!(reject_headless_bypass(&params, McpContext::HeadlessNoElicitation).is_ok());
+    }
+
+    #[test]
+    fn non_bool_confirm_is_treated_as_absent() {
+        // `confirm` present but not a bool → unwrap_or(false) → gate passes.
+        let params = json!({ "confirm": "true" });
+        assert!(reject_headless_bypass(&params, McpContext::HeadlessNoElicitation).is_ok());
+    }
+}

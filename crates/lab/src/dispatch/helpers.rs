@@ -41,8 +41,21 @@ pub fn lab_home() -> std::path::PathBuf {
     {
         return std::path::PathBuf::from(home);
     }
-    let base = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    std::path::PathBuf::from(base).join(".lab")
+    match std::env::var("HOME") {
+        Ok(home) if !home.is_empty() => std::path::PathBuf::from(home).join(".lab"),
+        // Fail closed: never anchor token/secret/artifact/DB storage to the
+        // process CWD (CWE-426/377). For a daemon the CWD is attacker-influenced
+        // and non-durable, so derive a fixed absolute location under the system
+        // temp dir instead and WARN so the misconfiguration is visible.
+        _ => {
+            let fallback = std::env::temp_dir().join("lab");
+            tracing::warn!(
+                fallback = %fallback.display(),
+                "neither LAB_HOME nor HOME is set; using a temp-dir fallback for lab home instead of the process CWD"
+            );
+            fallback
+        }
+    }
 }
 
 /// Replace the user's home-directory prefix with literal `~` so paths
@@ -83,17 +96,22 @@ pub fn redact_home(path: &str) -> String {
 /// writing to protect against symlinks escaping the jail (TOCTOU-weak, but
 /// strictly better than skipping). Windows UNC / absolute paths are rejected
 /// upstream by callers via `Path::is_absolute`.
+///
+/// Emits the canonical `path_traversal` kind (see `docs/dev/ERRORS.md`) so this
+/// lexical guard and the canonicalizing guards in `dispatch/path_safety.rs`
+/// report the same path-escape threat under one stable kind rather than
+/// splitting it across `path_traversal` and `invalid_param`.
 pub fn reject_path_traversal(rel_path: &str) -> Result<(), ToolError> {
     for component in Path::new(rel_path).components() {
         if matches!(
             component,
             Component::ParentDir | Component::RootDir | Component::Prefix(_)
         ) {
-            return Err(ToolError::InvalidParam {
+            return Err(ToolError::Sdk {
+                sdk_kind: "path_traversal".to_string(),
                 message: format!(
                     "path traversal rejected: `{rel_path}` must be a relative path with only normal components"
                 ),
-                param: "path".to_string(),
             });
         }
     }

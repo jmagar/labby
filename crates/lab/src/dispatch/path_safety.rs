@@ -296,7 +296,9 @@ mod tests {
     #[test]
     fn reject_path_traversal_rejects_dotdot() {
         let err = reject_path_traversal("../escape").unwrap_err();
-        assert_eq!(err.kind(), "invalid_param");
+        // Canonical path-escape kind, shared with this module's
+        // `canonicalize_and_reject_*` guards (see docs/dev/ERRORS.md).
+        assert_eq!(err.kind(), "path_traversal");
     }
 
     #[test]

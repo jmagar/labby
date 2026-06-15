@@ -2,8 +2,41 @@
 
 use reqwest::Url;
 
+/// Returns `true` for keys whose values must be masked in logs/observability.
+///
+/// The exact-match list also carries three ACP-origin keys that are NOT
+/// credentials in the usual sense but are masked deliberately:
+///
+/// - `code` — ACP OAuth authorization codes flow through stdio args under this
+///   key; an unmasked auth code is exchangeable for tokens.
+/// - `cwd` — ACP session working directories leak the OS username and local
+///   filesystem layout into shared logs.
+/// - `terminal_id` — ACP terminal handles correlate a log line to a live
+///   session; treated as sensitive session state.
+///
+/// Do not remove these without re-checking the ACP stdio redaction path — they
+/// look innocuous but are intentional.
+///
+/// The broad `_key` suffix is kept (fail-safe: under-redaction is a security
+/// risk, so any unknown `*_key` is masked) but a small allowlist of
+/// known non-secret `_key` keys is carved out to stop the false positives the
+/// review flagged: `sort_key`, `cache_key`, `idempotency_key`, `partition_key`,
+/// `primary_key`. These are ordering/lookup/identity keys, never credentials.
+/// The genuine credential cases remain covered by the
+/// `_secret` / `_token` / `_password` / `api_key` arms regardless.
 pub fn is_sensitive_key(key: &str) -> bool {
     let normalized = key.to_ascii_lowercase().replace('-', "_");
+
+    // Known non-secret keys that happen to end in `_key`. Kept narrow and
+    // conservative — only add a key here when it is unambiguously NOT a
+    // credential, since masking a real secret is the safer failure mode.
+    if matches!(
+        normalized.as_str(),
+        "sort_key" | "cache_key" | "idempotency_key" | "partition_key" | "primary_key"
+    ) {
+        return false;
+    }
+
     matches!(
         normalized.as_str(),
         "token"
@@ -141,6 +174,40 @@ fn redact_query_pairs(query: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_sensitive_key_still_masks_real_secrets() {
+        for key in [
+            "api_key",
+            "auth_token",
+            "password",
+            "client_secret",
+            "service_api_key",
+            "signing_secret_key",
+            "tls_private_key",
+            "code",
+            "cwd",
+            "terminal_id",
+        ] {
+            assert!(is_sensitive_key(key), "expected `{key}` to be sensitive");
+        }
+    }
+
+    #[test]
+    fn is_sensitive_key_allows_non_secret_key_suffixes() {
+        for key in [
+            "sort_key",
+            "cache_key",
+            "idempotency_key",
+            "partition_key",
+            "primary_key",
+        ] {
+            assert!(
+                !is_sensitive_key(key),
+                "expected `{key}` to NOT be sensitive"
+            );
+        }
+    }
 
     #[test]
     fn redact_stdio_args_masks_split_form_secret_flags() {

@@ -136,6 +136,30 @@ mod tests {
     }
 
     #[test]
+    fn path_traversal_maps_to_422() {
+        // The ACP installer converges on the canonical `path_traversal` kind
+        // (Docs-M1). It must map to the same 422 as the legacy
+        // `path_traversal_rejected` spelling.
+        let response = ToolError::Sdk {
+            sdk_kind: "path_traversal".to_string(),
+            message: "archive entry escapes extract root".to_string(),
+        }
+        .into_response();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn content_too_large_maps_to_413() {
+        // Decompression-bomb / oversized-archive guard (Sec/Test-M3).
+        let response = ToolError::Sdk {
+            sdk_kind: "content_too_large".to_string(),
+            message: "uncompressed archive exceeds cap".to_string(),
+        }
+        .into_response();
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[test]
     fn integrity_missing_maps_to_502() {
         let response = ToolError::Sdk {
             sdk_kind: "integrity_missing".to_string(),
