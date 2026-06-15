@@ -21,13 +21,13 @@ services:
       # Hot-swap the locally built binary into the dev runtime.
       - ./bin/labby:/usr/local/bin/labby
       # adb client for the in-container claude-in-mobile MCP server. claude-in-mobile
-      # is configured (config.toml: ANDROID_ADB_SERVER_ADDRESS=172.19.0.1 +
-      # ANDROID_ADB_SERVER_PORT=5037) to talk to the host's adb SERVER, so it only
-      # needs a client binary on PATH to enumerate host-booted emulators
-      # (emulator-5554). 172.19.0.1 is the gateway of the shared axon/jakenet bridge
-      # the service also attaches to (see docker-compose.prod.yml), NOT the `lab`
-      # bridge defined below; it's an IPAM assignment, so re-check with
-      # `docker network inspect jakenet` if adb can't reach the host.
+      # talks to the host's adb SERVER (config.toml: ANDROID_ADB_SERVER_ADDRESS +
+      # ANDROID_ADB_SERVER_PORT=5037), so it only needs a client binary on PATH to
+      # enumerate host-booted emulators (emulator-5554). Point the address at the
+      # `host.docker.internal` alias provided by extra_hosts below rather than a
+      # hardcoded bridge IP — Docker resolves it to the current host gateway on any
+      # network. The host adb server must listen on a non-loopback interface
+      # (`ADB_SERVER_SOCKET=tcp:0.0.0.0:5037` / `adb -a` on the host).
       #
       # We bind-mount the HOST's adb (not an apt-installed one) so the client version
       # matches the host server's exactly — a mismatched client would kill+restart
@@ -39,6 +39,14 @@ services:
       # Docker to auto-create an empty directory at the (missing) source path and
       # shadow the adb binary with a directory.
       - ${ADB_PATH:-/dev/null}:/usr/local/bin/adb:ro
+    # Stable alias for "the host" reachable from inside the container. On Linux
+    # Docker Engine this is not auto-provided, so we map it to the special
+    # `host-gateway` value (Docker substitutes the current host gateway IP across
+    # whichever bridge the container is on). Lets config.toml reference host
+    # services by name (adb server, LM Studio/Ollama/TEI on :52000) instead of a
+    # hardcoded, IPAM-assigned bridge IP.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       # Serve frontend assets from the bind-mounted workspace so `pnpm build`
       # changes are reflected immediately without a binary rebuild.
