@@ -39,14 +39,8 @@ services:
       # Docker to auto-create an empty directory at the (missing) source path and
       # shadow the adb binary with a directory.
       - ${ADB_PATH:-/dev/null}:/usr/local/bin/adb:ro
-    # Stable alias for "the host" reachable from inside the container. On Linux
-    # Docker Engine this is not auto-provided, so we map it to the special
-    # `host-gateway` value (Docker substitutes the current host gateway IP across
-    # whichever bridge the container is on). Lets config.toml reference host
-    # services by name (adb server, LM Studio/Ollama/TEI on :52000) instead of a
-    # hardcoded, IPAM-assigned bridge IP.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    # extra_hosts (host.docker.internal:host-gateway) is inherited from
+    # docker-compose.prod.yml via `extends` above — see the comment there.
     environment:
       # Serve frontend assets from the bind-mounted workspace so `pnpm build`
       # changes are reflected immediately without a binary rebuild.
