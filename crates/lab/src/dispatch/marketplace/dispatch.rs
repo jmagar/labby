@@ -249,7 +249,11 @@ async fn plugin_save(id: &str, rel_path: &str, content: &str) -> Result<Value, T
         let mut temp = NamedTempFile::new_in(temp_dir).map_err(io_internal)?;
         temp.write_all(content_owned.as_bytes())
             .map_err(io_internal)?;
-        temp.flush().map_err(io_internal)?;
+        // fsync the data before the rename exposes the file. `flush()` only drains
+        // the userspace buffer; without sync_all the rename can publish the file at
+        // its final size while its data blocks are still unwritten, so a concurrent
+        // reader (e.g. plugin.deploy's copy) sees null bytes of the correct length.
+        temp.as_file().sync_all().map_err(io_internal)?;
         temp.persist(&target)
             .map_err(|err| io_internal(err.error))?;
         Ok(SaveResult {
@@ -775,7 +779,8 @@ fn persist_marketplace_auto_update_sync(target: &str, auto_update: bool) -> Resu
     let bytes = serde_json::to_vec_pretty(&value).map_err(io_internal)?;
     let mut temp = NamedTempFile::new_in(temp_dir).map_err(io_internal)?;
     temp.write_all(&bytes).map_err(io_internal)?;
-    temp.flush().map_err(io_internal)?;
+    // fsync before the rename so the file is never published with unwritten data.
+    temp.as_file().sync_all().map_err(io_internal)?;
     temp.persist(&path).map_err(|e| io_internal(e.error))?;
 
     // Lock is released when lock_file is dropped.

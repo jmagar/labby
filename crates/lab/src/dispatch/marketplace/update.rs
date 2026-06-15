@@ -1172,7 +1172,8 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ToolError> {
     let temp_dir = path.parent().unwrap_or_else(|| Path::new("."));
     let mut temp = NamedTempFile::new_in(temp_dir).map_err(client::io_internal)?;
     temp.write_all(bytes).map_err(client::io_internal)?;
-    temp.flush().map_err(client::io_internal)?;
+    // fsync before the rename so the file is never published with unwritten data.
+    temp.as_file().sync_all().map_err(client::io_internal)?;
     temp.persist(path)
         .map_err(|err| client::io_internal(err.error))?;
     Ok(())
