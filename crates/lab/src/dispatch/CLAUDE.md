@@ -248,15 +248,19 @@ Reserve `HTTP` for actual transport concerns such as:
 ## Orchestrator Exception (lab-bg3e.3)
 
 `Category::Bootstrap` services may invoke peer dispatch actions when the
-operation is intrinsically composite. The current sanctioned cross-call:
+operation is intrinsically composite. The current sanctioned cross-calls:
 
 - `setup.draft.commit` invokes `doctor::dispatch("audit.full", _)` to gate
   the merge of `.env.draft` into `.env` on a clean health audit.
+- `marketplace` forks persist through `stash`: `marketplace/stash_bridge.rs`
+  reuses `stash::store::StashStore` + `stash::service::adopt_component_from_path`
+  so a fork lands as a `StashOrigin::Marketplace` Stash component instead of a
+  marketplace-private store.
 
 Dependency direction is one-way:
 
-- setup may depend on doctor.
-- doctor MUST NOT depend on setup.
+- setup may depend on doctor; doctor MUST NOT depend on setup.
+- marketplace may depend on stash; stash MUST NOT import or resolve marketplace.
 
 Surface adapters (CLI/MCP/HTTP) MUST NOT chain dispatch calls themselves —
 that work belongs in the shared dispatch layer so all three surfaces share
@@ -268,8 +272,10 @@ The one-way direction is enforced by
 `crates/lab/tests/architecture_orchestrator.rs`. That test now enforces a
 **general cross-service import allowlist** (`ALLOWED_EDGES`): every edge
 `dispatch::<a> → dispatch::<b>` must be listed with a rationale, and no
-`* → setup` edge is allowed. The `setup → doctor` orchestrator edge is encoded
-there as a sanctioned entry. If you need to extend the exception (or add any new
-cross-service edge), add the `(consumer, target)` pair to `ALLOWED_EDGES` with a
-one-line rationale and explain why in the same PR. The same test also lints
-action names to `<resource>.<verb>` dotted form.
+`* → setup` edge is allowed. The `setup → doctor` orchestrator edge and the
+`marketplace → stash` fork-persistence edge (alongside `marketplace → gateway`
+and `marketplace → node`) are encoded there as sanctioned entries. If you need to
+extend the exception (or add any new cross-service edge), add the
+`(consumer, target)` pair to `ALLOWED_EDGES` with a one-line rationale and
+explain why in the same PR. The same test also lints action names to
+`<resource>.<verb>` dotted form.

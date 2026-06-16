@@ -492,6 +492,15 @@ pub(crate) fn io_internal(error: impl std::fmt::Display) -> ToolError {
     }
 }
 
+/// Map a `spawn_blocking` join error into a structured `internal_error`. Shared
+/// by every marketplace module that offloads blocking work.
+pub(crate) fn join_err(error: tokio::task::JoinError) -> ToolError {
+    ToolError::Sdk {
+        sdk_kind: "internal_error".into(),
+        message: format!("spawn_blocking failed: {error}"),
+    }
+}
+
 #[cfg(test)]
 pub(super) fn with_test_plugins_root<T>(home: &Path, run: impl FnOnce() -> T) -> T {
     // Recover from a poisoned serialization lock so that a panicking test

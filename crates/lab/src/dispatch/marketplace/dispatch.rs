@@ -1,17 +1,16 @@
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use lab_apis::marketplace::{Artifact, ArtifactLang};
 use serde::Serialize;
 use serde_json::Value;
-use tempfile::NamedTempFile;
 
 use crate::dispatch::error::ToolError;
 use crate::dispatch::helpers::{action_schema, help_payload, optional_str, require_str, to_json};
 use crate::dispatch::marketplace::acp_dispatch;
 use crate::dispatch::marketplace::catalog;
 use crate::dispatch::marketplace::client;
+use crate::dispatch::marketplace::client::join_err;
 use crate::dispatch::marketplace::params::{self, parse_plugin_id};
 
 pub async fn dispatch(action: &str, params: Value) -> Result<Value, ToolError> {
@@ -236,26 +235,20 @@ async fn plugin_workspace(id: &str) -> Result<Value, ToolError> {
 
 async fn plugin_save(id: &str, rel_path: &str, content: &str) -> Result<Value, ToolError> {
     parse_plugin_id(id)?;
+    // Validate the relative path through the canonical validator before it is
+    // joined onto the workspace root.
+    params::validate_rel_path(rel_path, "path")?;
     let id_owned = id.to_string();
     let rel_owned = rel_path.to_string();
     let content_owned = content.to_string();
     let result = tokio::task::spawn_blocking(move || -> Result<SaveResult, ToolError> {
         let workspace = ensure_workspace_for_plugin(&id_owned)?;
         let target = resolve_relative_path(&workspace, &rel_owned)?;
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).map_err(io_internal)?;
-        }
-        let temp_dir = target.parent().unwrap_or(&workspace);
-        let mut temp = NamedTempFile::new_in(temp_dir).map_err(io_internal)?;
-        temp.write_all(content_owned.as_bytes())
-            .map_err(io_internal)?;
-        // fsync the data before the rename exposes the file. `flush()` only drains
-        // the userspace buffer; without sync_all the rename can publish the file at
-        // its final size while its data blocks are still unwritten, so a concurrent
-        // reader (e.g. plugin.deploy's copy) sees null bytes of the correct length.
-        temp.as_file().sync_all().map_err(io_internal)?;
-        temp.persist(&target)
-            .map_err(|err| io_internal(err.error))?;
+        // Reject a symlinked ancestor in the destination so a workspace symlink
+        // (e.g. `agents -> /elsewhere`) cannot redirect the write out of the
+        // plugin workspace.
+        crate::dispatch::path_safety::reject_existing_symlink_ancestors(&workspace, &target)?;
+        crate::dispatch::fs_atomic::write_bytes_atomic(&target, content_owned.as_bytes())?;
         Ok(SaveResult {
             saved_at: jiff::Timestamp::now().to_string(),
         })
@@ -738,12 +731,18 @@ fn persist_marketplace_auto_update_sync(target: &str, auto_update: bool) -> Resu
         return Ok(());
     }
 
-    // Take an advisory lock on the file for the duration of the read-modify-write
-    // cycle to prevent concurrent write corruption when both MCP server and CLI
-    // access the file simultaneously.
+    // Take an advisory lock on a STABLE sidecar file (not on `path` itself) for
+    // the read-modify-write cycle. The data file is replaced by an atomic rename
+    // below, so locking it directly would let a contender lock the old inode
+    // while a later caller locks the new one — overlapping RMW cycles and lost
+    // updates. The sidecar persists across the rename and serializes correctly.
+    let lock_path = path.with_file_name("known_marketplaces.json.lock");
     let lock_file = std::fs::OpenOptions::new()
+        .read(true)
         .write(true)
-        .open(&path)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
         .map_err(io_internal)?;
     lock_file.lock().map_err(io_internal)?;
 
@@ -774,14 +773,7 @@ fn persist_marketplace_auto_update_sync(target: &str, auto_update: bool) -> Resu
         return Ok(());
     }
 
-    // Atomic write: write to a temp file in the same directory, then rename.
-    let temp_dir = path.parent().unwrap_or(Path::new("."));
-    let bytes = serde_json::to_vec_pretty(&value).map_err(io_internal)?;
-    let mut temp = NamedTempFile::new_in(temp_dir).map_err(io_internal)?;
-    temp.write_all(&bytes).map_err(io_internal)?;
-    // fsync before the rename so the file is never published with unwritten data.
-    temp.as_file().sync_all().map_err(io_internal)?;
-    temp.persist(&path).map_err(|e| io_internal(e.error))?;
+    crate::dispatch::fs_atomic::write_json_atomic(&path, &value)?;
 
     // Lock is released when lock_file is dropped.
     Ok(())
@@ -858,13 +850,6 @@ async fn plugin_cherry_pick<P: client::NodeRpcPort>(
     }
 
     to_json(CherryPickResult { results })
-}
-
-fn join_err(e: tokio::task::JoinError) -> ToolError {
-    ToolError::Sdk {
-        sdk_kind: "internal_error".into(),
-        message: format!("spawn_blocking join error: {e}"),
-    }
 }
 
 /// Validate that a `NodeRpcPort` response for an install RPC (cherry_pick

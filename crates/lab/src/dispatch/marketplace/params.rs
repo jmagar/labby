@@ -1,8 +1,54 @@
+use std::path::{Component, Path};
+
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::dispatch::error::ToolError;
 use crate::dispatch::helpers::{optional_str, require_str};
-use crate::dispatch::marketplace::stash_meta::{ConflictStrategy, validate_rel_path};
+
+/// Conflict-resolution strategy for a marketplace artifact update.
+///
+/// Lives here (the marketplace param layer) because it is a request parameter
+/// that the dispatch/merge code consumes; there is no separate "stash meta"
+/// schema module.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ConflictStrategy {
+    KeepMine,
+    TakeUpstream,
+    #[default]
+    AlwaysAsk,
+    AiSuggest,
+}
+
+/// The single canonical relative-path validator for marketplace artifact paths.
+///
+/// Rejects empty strings, null bytes, backslashes, and any non-`Normal` path
+/// component (so `..`, absolute paths, `.`, and Windows drive prefixes are all
+/// rejected) on every platform. Do NOT reintroduce a per-call-site copy — every
+/// artifact-path entry point (params parsing, the fork bridge, update preview/
+/// apply) must funnel through this function so the rules cannot diverge.
+pub(crate) fn validate_rel_path(rel_path: &str, param: &str) -> Result<(), ToolError> {
+    let invalid = |message: &str| ToolError::InvalidParam {
+        param: param.into(),
+        message: message.into(),
+    };
+    if rel_path.is_empty() {
+        return Err(invalid("must not be empty"));
+    }
+    if rel_path.as_bytes().contains(&0) {
+        return Err(invalid("must not contain null bytes"));
+    }
+    if rel_path.contains('\\') {
+        return Err(invalid("path traversal not allowed"));
+    }
+    for component in Path::new(rel_path).components() {
+        if !matches!(component, Component::Normal(_)) {
+            return Err(invalid("path traversal not allowed"));
+        }
+    }
+    Ok(())
+}
 
 pub(super) struct CherryPickParams {
     pub plugin_id: String,
@@ -124,7 +170,7 @@ pub(super) fn parse_update_preview_params(
     parse_plugin_id(&plugin_id)?;
     let artifact_path = optional_owned_str(params, "artifact_path")?;
     if let Some(path) = &artifact_path {
-        validate_artifact_path(path, "artifact_path")?;
+        validate_rel_path(path, "artifact_path")?;
     }
     Ok(UpdatePreviewParams {
         plugin_id,
@@ -179,7 +225,7 @@ pub(super) fn parse_artifact_diff_params(params: &Value) -> Result<ArtifactDiffP
     let plugin_id = parse_required_plugin_id(params)?;
     let artifact_path = optional_owned_str(params, "artifact_path")?;
     if let Some(path) = &artifact_path {
-        validate_artifact_path(path, "artifact_path")?;
+        validate_rel_path(path, "artifact_path")?;
     }
     Ok(ArtifactDiffParams {
         plugin_id,
@@ -191,7 +237,7 @@ pub(super) fn parse_artifact_diff_params(params: &Value) -> Result<ArtifactDiffP
 pub(super) fn parse_patch_params(params: &Value) -> Result<PatchParams, ToolError> {
     let plugin_id = parse_required_plugin_id(params)?;
     let artifact_path = require_str(params, "artifact_path")?.to_string();
-    validate_artifact_path(&artifact_path, "artifact_path")?;
+    validate_rel_path(&artifact_path, "artifact_path")?;
     let patch = require_str(params, "patch")?.to_string();
     Ok(PatchParams {
         plugin_id,
@@ -206,7 +252,7 @@ pub(super) fn parse_update_apply_params(params: &Value) -> Result<UpdateApplyPar
     let plugin_id = parse_required_plugin_id(params)?;
     let artifact_path = optional_owned_str(params, "artifact_path")?;
     if let Some(path) = &artifact_path {
-        validate_artifact_path(path, "artifact_path")?;
+        validate_rel_path(path, "artifact_path")?;
     }
     Ok(UpdateApplyParams {
         plugin_id,
@@ -219,7 +265,7 @@ pub(super) fn parse_update_apply_params(params: &Value) -> Result<UpdateApplyPar
 pub(super) fn parse_merge_suggest_params(params: &Value) -> Result<MergeSuggestParams, ToolError> {
     let plugin_id = parse_required_plugin_id(params)?;
     let artifact_path = require_str(params, "artifact_path")?.to_string();
-    validate_artifact_path(&artifact_path, "artifact_path")?;
+    validate_rel_path(&artifact_path, "artifact_path")?;
     Ok(MergeSuggestParams {
         plugin_id,
         artifact_path,
@@ -231,7 +277,7 @@ pub(super) fn parse_config_set_params(params: &Value) -> Result<ConfigSetParams,
     let plugin_id = parse_required_plugin_id(params)?;
     let artifact_path = optional_owned_str(params, "artifact_path")?;
     if let Some(path) = &artifact_path {
-        validate_artifact_path(path, "artifact_path")?;
+        validate_rel_path(path, "artifact_path")?;
     }
     let notify = match params.get("notify") {
         Some(Value::Bool(value)) => Some(*value),
@@ -256,47 +302,39 @@ pub(super) fn parse_cherry_pick_params(params: &Value) -> Result<CherryPickParam
     let plugin_id = require_str(params, "plugin_id")?.to_string();
     parse_plugin_id(&plugin_id)?;
 
-    let components: Vec<String> = params
-        .get("components")
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(Value::as_str)
-                .map(ToString::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
+    // Parse `components` strictly: a non-string entry is rejected rather than
+    // silently dropped (which would proceed with a partial cherry-pick).
+    // Defense-in-depth: every accepted string is funnelled through the single
+    // canonical validator so the path-traversal rules cannot diverge from the
+    // rest of the marketplace artifact-path entry points.
+    let components: Vec<String> = match params.get("components") {
+        Some(Value::Array(arr)) => {
+            let mut out = Vec::with_capacity(arr.len());
+            for value in arr {
+                let Some(component) = value.as_str() else {
+                    return Err(ToolError::InvalidParam {
+                        param: "components".into(),
+                        message: "`components` must be an array of strings".into(),
+                    });
+                };
+                validate_rel_path(component, "components")?;
+                out.push(component.to_string());
+            }
+            out
+        }
+        Some(_) => {
+            return Err(ToolError::InvalidParam {
+                param: "components".into(),
+                message: "`components` must be an array of strings".into(),
+            });
+        }
+        None => Vec::new(),
+    };
     if components.is_empty() {
         return Err(ToolError::MissingParam {
             param: "components".into(),
             message: "`components` must be a non-empty array".into(),
         });
-    }
-    // Defense-in-depth: reject path traversal on component paths even though
-    // the device-side handler is expected to validate again. Only `Normal`
-    // path components are accepted — no `..`, no absolute paths, no `.` or
-    // other special components. Prevents a malicious marketplace manifest
-    // or a crafted params payload from inducing an out-of-tree write.
-    for component in &components {
-        let path = std::path::Path::new(component);
-        if path.is_absolute() {
-            return Err(ToolError::InvalidParam {
-                param: "components".into(),
-                message: format!(
-                    "component path `{component}` must be relative to the plugin root"
-                ),
-            });
-        }
-        for part in path.components() {
-            if !matches!(part, std::path::Component::Normal(_)) {
-                return Err(ToolError::InvalidParam {
-                    param: "components".into(),
-                    message: format!(
-                        "component path `{component}` contains traversal or invalid segments"
-                    ),
-                });
-            }
-        }
     }
 
     let node_ids: Vec<String> = params
@@ -394,17 +432,10 @@ fn optional_artifact_paths(
                 message: format!("`{key}` must be an array of strings"),
             });
         };
-        validate_artifact_path(path, key)?;
+        validate_rel_path(path, key)?;
         out.push(path.to_string());
     }
     Ok(Some(out))
-}
-
-fn validate_artifact_path(path: &str, param: &str) -> Result<(), ToolError> {
-    validate_rel_path(path).map_err(|_| ToolError::InvalidParam {
-        param: param.into(),
-        message: format!("`{param}` must be a relative path without traversal"),
-    })
 }
 
 fn parse_strategy(params: &Value) -> Result<Option<ConflictStrategy>, ToolError> {
@@ -435,8 +466,8 @@ pub fn parse_plugin_id(id: &str) -> Result<(&str, &str), ToolError> {
             param: "id".into(),
         })?;
     for part in [name, marketplace] {
-        for component in std::path::Path::new(part).components() {
-            if !matches!(component, std::path::Component::Normal(_)) {
+        for component in Path::new(part).components() {
+            if !matches!(component, Component::Normal(_)) {
                 return Err(ToolError::InvalidParam {
                     message: format!("plugin id `{id}` contains invalid path characters"),
                     param: "id".into(),
@@ -451,6 +482,35 @@ pub fn parse_plugin_id(id: &str) -> Result<(&str, &str), ToolError> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn validate_rel_path_accepts_normal_relative_paths() {
+        assert!(validate_rel_path("agents/foo.md", "p").is_ok());
+        assert!(validate_rel_path("skills/bar/baz.md", "p").is_ok());
+    }
+
+    #[test]
+    fn validate_rel_path_rejects_traversal_on_all_platforms() {
+        // The backslash and null-byte cases are the regression guard for the
+        // formerly-weaker update.rs validator: `agents\..\x` must be rejected
+        // even on Unix, where it would otherwise be one Normal component.
+        for bad in [
+            "../secrets",
+            "/etc/passwd",
+            "a/../b",
+            "bad\0path",
+            "",
+            r"C:\windows",
+            r"agents\..\secret",
+            r"a\b",
+            ".",
+            "./x",
+        ] {
+            let err =
+                validate_rel_path(bad, "artifact_path").expect_err(&format!("must reject {bad:?}"));
+            assert_eq!(err.kind(), "invalid_param", "input {bad:?}");
+        }
+    }
 
     fn base_params() -> Value {
         json!({

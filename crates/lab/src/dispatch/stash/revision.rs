@@ -148,7 +148,7 @@ pub async fn save_revision(
     })?
 }
 
-pub(super) fn save_revision_blocking(
+pub(crate) fn save_revision_blocking(
     store: &StashStore,
     component_id: &str,
     label: Option<&str>,

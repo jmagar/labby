@@ -72,7 +72,6 @@ dirs = "5"
 
 base64.workspace = true
 fd-lock = "4"
-fs4 = "1"
 tempfile = "3.27"
 subtle = "2"
 indexmap = { version = "2", features = ["serde"] }

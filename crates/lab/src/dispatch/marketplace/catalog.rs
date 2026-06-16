@@ -180,7 +180,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "artifact.list",
-        description: "List forked marketplace artifact stashes with drift status.",
+        description: "List forked marketplace artifact stashes with per-fork drift status (clean/dirty/base_missing).",
         destructive: false,
         requires_admin: false,
         params: &[
@@ -255,7 +255,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "artifact.diff",
-        description: "Show diffs between forked artifact content and upstream/base snapshots.",
+        description: "[not implemented — returns not_implemented] Show diffs between forked artifact content and upstream/base snapshots.",
         destructive: false,
         requires_admin: false,
         params: &[
@@ -282,7 +282,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "artifact.patch",
-        description: "Apply a patch to one forked artifact in the marketplace stash.",
+        description: "[not implemented — returns not_implemented] Apply a patch to one forked artifact in the marketplace stash.",
         destructive: false,
         requires_admin: true,
         params: &[

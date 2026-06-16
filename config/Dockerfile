@@ -100,8 +100,10 @@ FROM debian:trixie-slim AS runtime
 
 # ca-certificates: reqwest uses rustls for TLS but still validates against the
 # system CA bundle — required for outbound HTTPS calls.
+# git: the marketplace feature shells out to `git` (fetch/show/rev-parse) for
+# its update/fork flow — without it that feature is dead in the shipped image.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+ && apt-get install -y --no-install-recommends ca-certificates curl git gnupg \
  && mkdir -p /etc/apt/keyrings \
  && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
     | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
