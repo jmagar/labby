@@ -39,6 +39,8 @@ services:
       # Docker to auto-create an empty directory at the (missing) source path and
       # shadow the adb binary with a directory.
       - ${ADB_PATH:-/dev/null}:/usr/local/bin/adb:ro
+      # ssh client for zsnoop-mcp and other upstreams that need to reach fleet hosts.
+      - /usr/bin/ssh:/usr/local/bin/ssh:ro
     # extra_hosts (host.docker.internal:host-gateway) is inherited from
     # docker-compose.prod.yml via `extends` above — see the comment there.
     environment:
