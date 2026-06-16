@@ -20,6 +20,16 @@ services:
     volumes:
       # Hot-swap the locally built binary into the dev runtime.
       - ./bin/labby:/usr/local/bin/labby
+      # Persist the npm/uv package caches across container recreates. stdio MCP
+      # upstreams are launched via `npx -y <pkg>` / `uvx <pkg>`, which install
+      # into these caches on first cold spawn. Without persistence the caches
+      # live in the container's writable layer and are wiped on every recreate,
+      # forcing a fresh concurrent re-download each boot — the window in which
+      # the install race (see pool/spawn_lock.rs) corrupts a package. A named
+      # volume makes the clean install permanent: every later spawn is a cache
+      # hit, so the race never runs again.
+      - npm-cache:/home/lab/.npm
+      - uv-cache:/home/lab/.cache
       # adb client for the in-container claude-in-mobile MCP server. claude-in-mobile
       # talks to the host's adb SERVER (config.toml: ANDROID_ADB_SERVER_ADDRESS +
       # ANDROID_ADB_SERVER_PORT=5037), so it only needs a client binary on PATH to
@@ -50,6 +60,10 @@ services:
 
 volumes:
   labby-data:
+    driver: local
+  npm-cache:
+    driver: local
+  uv-cache:
     driver: local
 
 networks:

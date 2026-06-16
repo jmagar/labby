@@ -44,6 +44,18 @@ pub(super) async fn connect_stdio_upstream(
     use std::process::Stdio;
     use tokio::process::Command;
 
+    // Cross-process spawn lock: stdio servers launched via `npx -y`/`uvx` install
+    // into a shared package cache on first cold spawn; two processes installing
+    // the same package at once corrupt it. Hold an advisory file lock (keyed on
+    // the command + args) for the whole connect — spawn, handshake, and the
+    // `list_tools` below — so identical commands serialize across every process.
+    // Best-effort: a `None` guard means locking was unavailable and we proceed.
+    // The guard borrows `spawn_lock`, so both are held as locals here; the guard
+    // is declared second so it drops first (unlock before the file handle closes)
+    // at the end of this function.
+    let mut spawn_lock = super::spawn_lock::open(command, args);
+    let _spawn_guard = super::spawn_lock::acquire(spawn_lock.as_mut()).await;
+
     // SECURITY (S1): never inherit labby's full environment — it holds
     // LAB_OAUTH_ENCRYPTION_KEY and every upstream credential. Start from a
     // scrubbed allowlist of runtime essentials (so npx/uvx/docker/etc. can still

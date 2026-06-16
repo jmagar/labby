@@ -37,6 +37,7 @@ mod prompts_list;
 mod registration;
 mod resources_list;
 mod resources_read;
+mod spawn_lock;
 #[cfg(test)]
 mod testsupport;
 mod tools;
