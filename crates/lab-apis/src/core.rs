@@ -28,6 +28,12 @@ pub mod traits;
 /// `deploy`.
 pub mod ssh;
 
+/// Canonical SSRF preflight guards for externally supplied HTTPS URLs. Lives in
+/// `core` (not under a feature-gated service module) because it is a shared
+/// security primitive used by always-compiled `lab` dispatch code as well as
+/// the feature-gated `acp_registry` installer.
+pub mod ssrf;
+
 // Convenience re-exports so service modules can `use crate::core::{Auth, HttpClient, ApiError, ...}`.
 pub use action::{ActionSpec, ParamSpec};
 pub use auth::Auth;

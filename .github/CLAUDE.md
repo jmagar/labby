@@ -19,6 +19,7 @@ Every push and PR to `main` must pass all jobs:
 | actionlint | `go run github.com/rhysd/actionlint/cmd/actionlint@latest` |
 | frontend-assets | `pnpm install --frozen-lockfile && pnpm build` in `apps/gateway-admin` |
 | check | `cargo check --workspace --all-features` |
+| feature-slices | `cargo check -p labby --no-default-features --features <slice>` per slice (`gateway`/`marketplace`/`fs`/`deploy`/`acp_registry`) — catches cross-slice coupling (a shared module unconditionally referencing a feature-gated one). Gates compilation only; overrides the global `-D warnings` because per-slice dead-code warnings are expected. |
 | fmt | `cargo fmt --all -- --check` |
 | clippy | `cargo clippy --workspace --all-features -- -D warnings` |
 | deny | `cargo deny check` (via `EmbarkStudios/cargo-deny-action`) |
@@ -36,7 +37,10 @@ is not viable because aws-lc-sys requires a real Windows C toolchain even under
 `cargo check`). Windows breakage therefore surfaces on the post-merge main run,
 not in the PR.
 
-`RUSTFLAGS: -D warnings` is set globally — zero warnings permitted.
+`RUSTFLAGS: -D warnings` is set globally — zero warnings permitted. The lone
+exception is the `feature-slices` job, which overrides it to `""` because
+per-slice dead-code warnings are an inherent, expected consequence of disabling
+features; that job gates compilation, not warning-cleanliness.
 
 ## Release Build Matrix (release.yml)
 

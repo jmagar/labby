@@ -5,7 +5,7 @@
 //! must not claim that validation-time DNS pins the final connection target.
 //!
 //! The host/IP allow-deny policy itself is **not** defined here — it lives in
-//! `lab_apis::acp_registry::ssrf` (the canonical single source of truth, since
+//! `lab_apis::core::ssrf` (the canonical single source of truth, since
 //! `lab-apis` cannot depend back on `dispatch`). This module owns only the
 //! `lab`-side concerns: DNS resolution, the async `spawn_blocking` wrapper,
 //! the concurrency semaphore, and conversion of `SsrfError` into `ToolError`.
@@ -16,7 +16,7 @@ use std::net::{IpAddr, ToSocketAddrs};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use lab_apis::acp_registry::ssrf as shared;
+use lab_apis::core::ssrf as shared;
 
 use crate::dispatch::error::ToolError;
 use tokio::sync::Semaphore;

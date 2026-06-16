@@ -102,16 +102,16 @@ jobs:
     needs: frontend-assets
     # CLAUDE.md's intent is that each standalone product slice compiles on its
     # own (--no-default-features --features <slice>) to catch cross-slice
-    # coupling. This job runs that check but is ADVISORY: shared MCP/security
-    # infra (mcp/call_tool.rs, mcp/context.rs, dispatch/security/ssrf.rs,
-    # dispatch/setup/dispatch.rs) currently references the gateway / upstream /
-    # acp_registry feature-gated modules unconditionally, so no single slice
-    # builds standalone yet. Feature-gating that core plumbing (~55 references)
-    # is its own change; the authoritative signal remains the all-features
-    # `check`/`test` jobs above. Until the slices build clean, a failure is
-    # downgraded to a `::warning::` annotation so this advisory gate does not
-    # block the PR. Drop the `|| { ... }` wrapper once the slices compile.
-    # `stash` has no feature flag (always-on) so it is absent.
+    # coupling — a shared module referencing a feature-gated one unconditionally.
+    # This is a hard gate on COMPILATION (errors), not warning-cleanliness:
+    # per-slice dead-code warnings are an inherent, expected consequence of
+    # disabling features (a service module is compiled but its registration is
+    # gated off), so this job overrides the global `-D warnings`. The
+    # all-features `check`/`clippy`/`test` jobs above remain the authoritative
+    # warning-clean signal. `stash` has no feature flag (always-on) so it is
+    # absent.
+    env:
+      RUSTFLAGS: ""
     strategy:
       fail-fast: false
       matrix:
@@ -124,10 +124,7 @@ jobs:
           path: apps/gateway-admin/out
       - uses: dtolnay/rust-toolchain@1.94.1
       - uses: Swatinem/rust-cache@v2
-      - run: |
-          cargo check -p labby --no-default-features --features ${{ matrix.slice }} --locked || {
-            echo "::warning title=feature-slice::slice '${{ matrix.slice }}' does not yet build standalone (pre-existing cross-slice coupling in shared MCP/security infra)"
-          }
+      - run: cargo check -p labby --no-default-features --features ${{ matrix.slice }} --locked
 
   docs-check:
     name: Generated docs

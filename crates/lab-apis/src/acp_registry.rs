@@ -8,8 +8,11 @@
 pub mod client;
 pub mod error;
 pub mod installer;
-pub mod ssrf;
 pub mod types;
+
+/// The canonical SSRF guard now lives in `crate::core::ssrf`; re-exported here so
+/// existing `acp_registry::ssrf` / `super::ssrf` paths keep working unchanged.
+pub use crate::core::ssrf;
 
 pub use client::AcpRegistryClient;
 pub use error::AcpRegistryError;

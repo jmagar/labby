@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use crate::config::env_merge::{self, EnvEntry, MergeRequest, snapshot_mtime};
 use crate::config::{config_toml_path, patch_built_in_upstream_apis_enabled};
+#[cfg(feature = "gateway")]
 use crate::dispatch::gateway::current_gateway_manager;
 
 /// Maximum elapsed time for the inline doctor.audit.full call inside
@@ -376,6 +377,10 @@ fn settings_update_action(params: &Value) -> Result<Value, ToolError> {
 
 fn refresh_built_in_upstream_registry(enabled: bool) {
     crate::registry::set_runtime_built_in_upstream_apis_enabled(enabled);
+    // Notify the live gateway manager so upstream discovery reflects the change.
+    // The gateway manager only exists with the gateway feature; without it there
+    // is nothing to refresh.
+    #[cfg(feature = "gateway")]
     if let Some(manager) = current_gateway_manager() {
         manager.set_builtin_service_registry(crate::registry::filter_built_in_upstream_apis(
             crate::registry::build_default_registry(),

@@ -9,9 +9,9 @@
 //!
 //! It is a *preflight* guard, not a complete DNS-rebinding defense. Any code
 //! that performs an outbound request must still avoid unsafe redirects and
-//! must re-validate the connected peer where it can (see
-//! [`super::installer`], which pins a single validated address and re-checks
-//! the peer IP post-connect).
+//! must re-validate the connected peer where it can (see the ACP installer in
+//! `crate::acp_registry::installer`, which pins a single validated address and
+//! re-checks the peer IP post-connect).
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -19,7 +19,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 ///
 /// Carries no caller secrets — messages are built from already-redacted URL
 /// forms / bare host strings. Wrapped into surface error types (`ToolError`,
-/// [`AcpInstallerError`](super::installer::AcpInstallerError)) by callers; the
+/// `AcpInstallerError`) by callers; the
 /// stable error `kind` for all variants is `ssrf_blocked` except
 /// [`SsrfError::InvalidUrl`] which is `invalid_param`.
 #[derive(Debug, Clone, thiserror::Error)]

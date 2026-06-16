@@ -24,9 +24,13 @@ use rmcp::service::RequestContext;
 use serde_json::Value;
 
 use crate::dispatch::error::ToolError;
+#[cfg(feature = "gateway")]
 use crate::dispatch::gateway::manager::CallbackToolLookup;
+#[cfg(feature = "gateway")]
 use crate::dispatch::upstream::types::UpstreamTool;
+#[cfg(feature = "gateway")]
 use crate::mcp::call_tool_upstream::PreResolvedUpstreamTool;
+#[cfg(feature = "gateway")]
 use crate::mcp::catalog::{CODE_MODE_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME};
 use crate::mcp::context::{
     auth_context_from_extensions, tool_execute_builtin_action_allowed, tool_execute_scope_allowed,
@@ -39,6 +43,7 @@ use crate::mcp::result_format::{
 };
 use crate::mcp::server::LabMcpServer;
 
+#[cfg(feature = "gateway")]
 enum WidgetCallbackGate {
     Allowed {
         resolved: Box<PreResolvedUpstreamTool>,
@@ -240,7 +245,13 @@ impl LabMcpServer {
             )]));
         }
 
+        // Upstream widget-callback resolution is a gateway-only concern (it
+        // proxies to upstream MCP tools). Without the gateway feature there are
+        // no upstream tools, so this resolution and the upstream tail below are
+        // both compiled out.
+        #[cfg(feature = "gateway")]
         let mut resolved_upstream_tool = None;
+        #[cfg(feature = "gateway")]
         if self.code_mode_visibility().await.hides_raw_tools() {
             let widget_callback = if svc.is_none() {
                 match self.resolve_widget_callback_gate(&service, &context).await {
@@ -459,20 +470,39 @@ impl LabMcpServer {
 
         // Fall through to upstream proxy dispatch (raw + subject-scoped +
         // no-dispatcher-wired fallback). The helper returns unconditionally.
-        self.call_tool_upstream_impl(
-            &service,
-            &action,
-            raw_arguments,
-            resolved_upstream_tool,
-            start,
-            &subject,
-            actor_key,
-            &context,
-        )
-        .await
+        // The upstream proxy only exists with the gateway feature; without it an
+        // unresolved service name is simply not found.
+        #[cfg(feature = "gateway")]
+        {
+            self.call_tool_upstream_impl(
+                &service,
+                &action,
+                raw_arguments,
+                resolved_upstream_tool,
+                start,
+                &subject,
+                actor_key,
+                &context,
+            )
+            .await
+        }
+        #[cfg(not(feature = "gateway"))]
+        {
+            let _ = (raw_arguments, actor_key, start);
+            let envelope = build_error(
+                &service,
+                &action,
+                "not_found",
+                &format!("service `{service}` not found"),
+            );
+            Ok(CallToolResult::error(vec![Content::text(
+                envelope.to_string(),
+            )]))
+        }
     }
 }
 
+#[cfg(feature = "gateway")]
 impl LabMcpServer {
     async fn resolve_widget_callback_gate(
         &self,
@@ -549,6 +579,7 @@ impl LabMcpServer {
     }
 }
 
+#[cfg(feature = "gateway")]
 fn classify_widget_callback_candidates(
     route: &'static str,
     hidden_sibling: bool,
