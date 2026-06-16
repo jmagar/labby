@@ -14,6 +14,11 @@ const MAX_DEPTH: usize = 16;
 const MAX_COLLECTION_ITEMS: usize = 64;
 const MAX_STRING_CHARS: usize = 512;
 const DEFAULT_PARAM_BYTES: usize = 4096;
+/// Byte cap for the actual search return value embedded in the trace when no
+/// tool rows can be summarized. Larger than `DEFAULT_PARAM_BYTES` because this
+/// is a display aid for the inspector (not a secret-bearing param channel), but
+/// still bounded so a reduced aggregate stays compact in the widget payload.
+const SEARCH_RESULT_DISPLAY_BYTES: usize = 8192;
 
 #[must_use]
 pub(in crate::dispatch::gateway::code_mode) fn redact_trace_params(
@@ -61,7 +66,7 @@ pub(crate) fn code_mode_search_trace(response: &Value, elapsed_ms: u128) -> Valu
         .unwrap_or_default();
     let match_count = response.as_array().map_or(0, Vec::len);
     let displayed_count = matches.len();
-    json!({
+    let mut trace = json!({
         "kind": "code_mode_search_trace",
         "query_kind": "catalog_filter",
         "elapsed_ms": elapsed_ms,
@@ -70,7 +75,26 @@ pub(crate) fn code_mode_search_trace(response: &Value, elapsed_ms: u128) -> Valu
         "truncated": match_count > displayed_count,
         "matches": matches,
         "result_shape": compact_result_shape(response),
-    })
+    });
+    // When no tool rows were summarized — the snippet returned a reduced/aggregate
+    // value, or an array whose items aren't catalog entries — the inspector would
+    // otherwise show a bare "No matches" even though the search ran and produced
+    // data. Embed the bounded *actual* return value so the widget can show WHAT
+    // the search produced. Skipped when real matches exist: the `matches` array
+    // already carries the data, and re-embedding the full catalog array would
+    // bloat the trace (and re-expose the per-entry `dts`/`signature` blobs the
+    // match summary deliberately drops). Mirrors `code_mode_execute_trace`, which
+    // embeds its `result` verbatim; here the value is bounded by
+    // `redact_trace_value` since search results are not budget-capped upstream.
+    if displayed_count == 0
+        && let Some(object) = trace.as_object_mut()
+    {
+        object.insert(
+            "result".to_string(),
+            redact_trace_value(response, SEARCH_RESULT_DISPLAY_BYTES),
+        );
+    }
+    trace
 }
 
 fn search_match_summary(value: &Value) -> Option<Value> {

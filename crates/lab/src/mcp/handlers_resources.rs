@@ -1118,4 +1118,33 @@ mod tests {
             "inline app must use result_shape.length"
         );
     }
+
+    #[test]
+    fn code_mode_app_html_renders_reduced_search_result_fallback() {
+        // The bundle is hand-maintained vanilla JS with no test harness, so guard
+        // the no-match search path that shows the returned value/shape instead of
+        // a bare "No matches" when the snippet returned a reduced/aggregate value.
+        let html = code_mode_app_html(CODE_MODE_SEARCH_APP_URI, None).expect("search resource");
+        assert!(
+            html.contains("Search result"),
+            "bundle must render the reduced-result panel for matchless searches"
+        );
+        assert!(
+            html.contains("shapeDetail"),
+            "bundle must describe the returned value's shape"
+        );
+        assert!(
+            html.contains("t.result"),
+            "bundle must embed the actual returned value when no rows match"
+        );
+        // Status must not be claimed "connected" before the bridge resolves.
+        assert!(
+            html.contains("\"connecting\""),
+            "MCP Apps branch must start from a 'connecting' state, not optimistic 'connected'"
+        );
+        assert!(
+            html.contains("if (!hydrated) setState(\"connected\", true)"),
+            "MCP Apps branch must gate 'connected' on the connect() handshake"
+        );
+    }
 }

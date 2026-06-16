@@ -139,6 +139,7 @@ const stats=document.getElementById("stats");
 function esc(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
 function json(value){try{return JSON.stringify(value,null,2)}catch{return String(value)}}
 function shape(s){if(!s)return"";return [s.type,s.key_count&&`${s.key_count} keys`,s.length&&`${s.length} items`].filter(Boolean).join(" / ")}
+function shapeDetail(s){if(!s||!s.type)return"";const parts=[s.type];if(s.type==="object"&&s.key_count!=null)parts.push(`${s.key_count} key${s.key_count===1?"":"s"}`);if(s.type==="array"&&s.length!=null)parts.push(`${s.length} item${s.length===1?"":"s"}`);if(s.type==="string"&&s.length!=null)parts.push(`${s.length} chars`);if(s.size_bytes!=null)parts.push(`${s.size_bytes} B`);let label=parts.join(" · ");if(s.type==="object"&&Array.isArray(s.keys)&&s.keys.length)label+=` — keys: ${s.keys.join(", ")}`;if(s.type==="array"&&Array.isArray(s.item_types)&&s.item_types.length)label+=` — items: ${s.item_types.join(", ")}`;return label;}
 function card(body){return `<article class="card">${body}</article>`}
 function panel(title,count,body,meta=""){return `<section class="panel"><div class="panel-head"><div class="panel-title">${esc(title)}</div><div class="row"><span class="pill info">${esc(count)}</span>${meta?`<span class="pill err">${esc(meta)}</span>`:""}</div></div><div class="panel-body">${body}</div></section>`}
 function compactStatLabel(label){return String(label).replace("Execute calls","Calls").replace("Catalog matches","Matches").replace("History entries","History")}
@@ -165,7 +166,30 @@ function render(trace){
   const t=trace&&trace.structuredContent?trace.structuredContent:trace;
   if(!t||!t.kind){clearStats();content.innerHTML=card('<div class="meta">Run Code Mode search or execute to populate the inspector.</div>');return false;}
   if(t.kind==="code_mode_execute_trace"){const rows=(t.calls||[]).map(callRow).join("")||card('<div class="meta">No calls were made.</div>');summary.textContent=`${t.call_count||0} calls captured`;renderStats([["Execute calls",t.call_count||0],["Catalog matches",0],["History entries",0]]);content.innerHTML=panel("Execute calls",t.call_count||0,rows);return true;}
-  if(t.kind==="code_mode_search_trace"){const count=searchCount(t);const shown=`${(t.matches||[]).length} shown`;const rows=(t.matches||[]).map(matchRow).join("")||card('<div class="meta">No matches.</div>');summary.textContent=t.truncated?"Search matches truncated to the current display window":"Search matches from current search";renderStats([["Execute calls",0],["Catalog matches",count],["History entries",0]]);content.innerHTML=panel("Search matches",t.truncated?shown:count,rows);return true;}
+  if(t.kind==="code_mode_search_trace"){
+    const matchRows=(t.matches||[]);
+    if(matchRows.length>0){
+      const count=searchCount(t);
+      const shown=`${matchRows.length} shown`;
+      summary.textContent=t.truncated?"Search matches truncated to the current display window":"Search matches from current search";
+      renderStats([["Execute calls",0],["Catalog matches",count],["History entries",0]]);
+      content.innerHTML=panel("Search matches",t.truncated?shown:count,matchRows.map(matchRow).join(""));
+      return true;
+    }
+    // No tool rows summarized: the snippet returned a reduced/aggregate value
+    // (or an array of non-entry items). Show WHAT it returned instead of a bare
+    // "No matches" — the encouraged "reduce inside the sandbox" pattern lands here.
+    const s=t.result_shape;
+    const headline=s&&s.type==="array"
+      ?(t.match_count>0?`Search returned ${t.match_count} array items, but none are tool-entry objects.`:"Search returned an empty list — no tools matched.")
+      :"Search returned a reduced value, not a tool list — the matches panel only lists tool-entry objects.";
+    const detail=shapeDetail(s);
+    const value=t.result!==undefined?`<details><summary>Returned value</summary><pre>${esc(json(t.result))}</pre></details>`:"";
+    summary.textContent="Search returned a value with no tool rows to list";
+    renderStats([["Execute calls",0],["Catalog matches",searchCount(t)],["History entries",0]]);
+    content.innerHTML=panel("Search result",(s&&s.type)||"empty",card(`<div class="name">${esc(headline)}</div>${detail?`<div class="meta">${esc(detail)}</div>`:""}${value}`));
+    return true;
+  }
   if(t.kind==="code_mode_history"){const rows=(t.entries||[]).map(historyRow).join("")||card('<div class="meta">History is empty.</div>');summary.textContent=`${(t.entries||[]).length} bounded history entries`;renderStats([["Execute calls",0],["Catalog matches",0],["History entries",(t.entries||[]).length]]);content.innerHTML=panel("Recent history",(t.entries||[]).length,rows);return true;}
   clearStats();content.innerHTML=card(`<pre>${esc(json(t))}</pre>`);return false;
 }
@@ -214,11 +238,31 @@ if (window.openai) {
   // MCP Apps bridge (Claude): live search/execute traces arrive via ontoolresult.
   const app = new App({ name: "LabCodeModeInspector", version: "1.0.0" }, {});
   app.onhostcontextchanged = (ctx) => { if (ctx && ctx.theme) { document.documentElement.classList.toggle("dark", ctx.theme === "dark"); } };
-  app.ontoolresult = (result) => render(result && result.structuredContent ? result.structuredContent : result);
-  try { state.textContent = "connected"; state.classList.add("connected"); } catch (_) {}
-  // Fire-and-forget per the MCP Apps spec — resolves async after the host
-  // postMessage handshake, which may be delayed or unavailable.
-  app.connect().catch(() => { try { state.textContent = "read only"; state.classList.remove("connected"); } catch (_) {} });
+  let hydrated = false;
+  const setState = (label, connected) => {
+    try { state.textContent = label; state.classList.toggle("connected", connected); } catch (_) {}
+  };
+  app.ontoolresult = (result) => {
+    // Recognized trace -> connected; non-null-but-unrecognized -> "malformed"
+    // (parity with the OpenAI branch / React inspector) rather than passing a
+    // raw JSON dump off as a healthy render.
+    const recognized = render(result && result.structuredContent ? result.structuredContent : result);
+    hydrated = true;
+    setState(recognized ? "connected" : "malformed", recognized);
+  };
+  // Do NOT claim "connected" up front — the handshake has not resolved yet and
+  // no trace has arrived. Show "connecting" until either the postMessage
+  // handshake resolves or a tool result renders, so an unconnected widget is
+  // never indistinguishable from a connected one. Mirrors the React inspector's
+  // connect()-gated bridge state.
+  setState("connecting", false);
+  app
+    .connect()
+    // Fire-and-forget per the MCP Apps spec — resolves async after the host
+    // postMessage handshake, which may be delayed or unavailable. A tool result
+    // may have already rendered by then (don't downgrade a live trace).
+    .then(() => { if (!hydrated) setState("connected", true); })
+    .catch(() => { if (!hydrated) setState("read only", false); });
 }
 })();
 </script>

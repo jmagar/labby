@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { flattenTraceRows, parseCodeModeTrace, stringifyRedactedParams } from './trace'
+import {
+  describeResultShape,
+  flattenTraceRows,
+  parseCodeModeTrace,
+  stringifyRedactedParams,
+} from './trace'
 
 test('parses execute traces with redacted params', () => {
   const trace = parseCodeModeTrace({
@@ -45,6 +50,36 @@ test('parses search traces with matched tools', () => {
 
   assert.equal(trace?.kind, 'code_mode_search_trace')
   assert.equal(flattenTraceRows(trace).matches[0].tool, 'ask')
+})
+
+test('parses search traces that carry a reduced result value', () => {
+  const trace = parseCodeModeTrace({
+    kind: 'code_mode_search_trace',
+    query_kind: 'catalog_filter',
+    match_count: 0,
+    matches: [],
+    result_shape: { type: 'object', key_count: 2, keys: ['total', 'upstreams'] },
+    result: { total: 398, upstreams: 42 },
+  })
+
+  assert.equal(trace?.kind, 'code_mode_search_trace')
+  assert.equal(flattenTraceRows(trace).matches.length, 0)
+  assert.deepEqual(
+    trace?.kind === 'code_mode_search_trace' ? trace.result : undefined,
+    { total: 398, upstreams: 42 },
+  )
+})
+
+test('describes result shapes for the no-match search view', () => {
+  assert.equal(
+    describeResultShape({ type: 'object', key_count: 2, keys: ['total', 'upstreams'] }),
+    'object · 2 keys — keys: total, upstreams',
+  )
+  assert.equal(
+    describeResultShape({ type: 'array', length: 3, item_types: ['string'] }),
+    'array · 3 items — items: string',
+  )
+  assert.equal(describeResultShape(undefined), '')
 })
 
 test('parses history traces and flattens nested execute calls', () => {

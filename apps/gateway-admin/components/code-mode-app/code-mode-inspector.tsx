@@ -22,6 +22,7 @@ import {
 } from '@/components/aurora/tokens'
 import {
   type CodeModeTrace,
+  describeResultShape,
   flattenTraceRows,
   parseCodeModeTrace,
   stringifyRedactedParams,
@@ -250,6 +251,10 @@ export function CodeModeInspector({ initialTrace }: CodeModeInspectorProps) {
           </Panel>
         ) : null}
 
+        {trace?.kind === 'code_mode_search_trace' && rows.matches.length === 0 ? (
+          <SearchResultPanel trace={trace} />
+        ) : null}
+
         {rows.history.length > 0 ? (
           <Panel title="Recent history" count={rows.history.length}>
             <div className="grid gap-2">
@@ -456,6 +461,46 @@ function SearchRow({ match }: { match: ReturnType<typeof flattenTraceRows>['matc
         </div>
       </div>
     </article>
+  )
+}
+
+function SearchResultPanel({
+  trace,
+}: {
+  trace: Extract<CodeModeTrace, { kind: 'code_mode_search_trace' }>
+}) {
+  const shape = trace.result_shape
+  const headline =
+    shape?.type === 'array'
+      ? trace.match_count > 0
+        ? `Search returned ${trace.match_count} array items, but none are tool-entry objects.`
+        : 'Search returned an empty list — no tools matched.'
+      : 'Search returned a reduced value, not a tool list — the matches panel only lists tool-entry objects.'
+  const shapeLabel = describeResultShape(shape)
+  const resultJson = stringifyRedactedParams(trace.result)
+
+  return (
+    <Panel title="Search result" count={shape?.type ?? 'empty'}>
+      <article className={cn('p-2.5 sm:p-3', AURORA_MESSAGE_SURFACE)}>
+        <div className="flex items-center gap-2">
+          <Search className="size-4 text-aurora-accent-primary" />
+          <p className="text-sm font-medium text-aurora-text-primary">{headline}</p>
+        </div>
+        {shapeLabel ? (
+          <p className="mt-1 font-mono text-xs text-aurora-text-muted">{shapeLabel}</p>
+        ) : null}
+        {resultJson ? (
+          <details className="mt-1.5 rounded-md border border-aurora-border-default bg-aurora-panel-strong sm:mt-3 sm:rounded-aurora-2">
+            <summary className="cursor-pointer px-2.5 py-1 text-xs font-semibold text-aurora-accent-strong sm:px-3 sm:py-2">
+              Returned value
+            </summary>
+            <pre className="max-h-52 overflow-auto whitespace-pre-wrap break-words px-2.5 pb-2.5 font-mono text-xs text-aurora-text-primary sm:px-3 sm:pb-3">
+              {resultJson}
+            </pre>
+          </details>
+        ) : null}
+      </article>
+    </Panel>
   )
 }
 

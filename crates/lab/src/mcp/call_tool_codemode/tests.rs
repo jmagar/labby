@@ -235,4 +235,47 @@ fn search_trace_reports_display_truncation() {
     assert_eq!(trace["displayed_count"], json!(50));
     assert_eq!(trace["truncated"], json!(true));
     assert_eq!(trace["matches"].as_array().expect("matches").len(), 50);
+    // Matches were summarized, so the lean trace must NOT also embed the raw
+    // catalog array (which would re-expose the dropped per-entry blobs).
+    assert!(
+        trace.get("result").is_none(),
+        "matched searches keep the trace lean and omit the raw result"
+    );
+}
+
+#[test]
+fn search_trace_embeds_reduced_result_when_no_matches() {
+    // A reduced/aggregate return (the encouraged Code Mode pattern) is not a
+    // catalog-entry array, so no tool rows can be summarized. The trace must
+    // still carry the actual returned value so the inspector shows WHAT the
+    // search produced instead of a bare "No matches".
+    let response = json!({
+        "total": 398,
+        "upstreams": 42,
+        "heavy_hitters": { "github": 48, "notebooklm": 30 },
+    });
+
+    let trace = code_mode_search_trace(&response, 9);
+    assert_eq!(trace["kind"], json!("code_mode_search_trace"));
+    assert_eq!(trace["match_count"], json!(0));
+    assert_eq!(trace["displayed_count"], json!(0));
+    assert_eq!(trace["matches"], json!([]));
+    assert_eq!(trace["result_shape"]["type"], json!("object"));
+    // The bounded actual return value is embedded for the inspector.
+    assert_eq!(trace["result"]["total"], json!(398));
+    assert_eq!(trace["result"]["heavy_hitters"]["github"], json!(48));
+}
+
+#[test]
+fn search_trace_embeds_result_for_non_entry_array() {
+    // An array whose items aren't catalog entries: `match_count` reflects the
+    // array length, but no rows summarize, so the raw (bounded) array is embedded.
+    let response = json!(["github", "axon", "unraid"]);
+
+    let trace = code_mode_search_trace(&response, 3);
+    assert_eq!(trace["match_count"], json!(3));
+    assert_eq!(trace["displayed_count"], json!(0));
+    assert_eq!(trace["matches"], json!([]));
+    assert_eq!(trace["result_shape"]["type"], json!("array"));
+    assert_eq!(trace["result"], json!(["github", "axon", "unraid"]));
 }

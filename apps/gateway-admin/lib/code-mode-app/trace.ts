@@ -20,6 +20,13 @@ export interface CodeModeSearchTrace {
   truncated?: boolean
   matches: CodeModeSearchMatch[]
   result_shape?: ResultShape
+  /**
+   * Present when no tool rows were summarized (the snippet returned a
+   * reduced/aggregate value, or an array of non-entry items). Carries the
+   * bounded actual return value so the inspector can show what the search
+   * produced instead of a bare "No matches".
+   */
+  result?: unknown
   warnings?: CodeModeTraceWarning[]
 }
 
@@ -131,8 +138,37 @@ function parseSearchTrace(value: Record<string, unknown>): CodeModeSearchTrace |
     truncated: booleanOptional(value.truncated),
     matches: matches.items,
     result_shape: parseResultShape(value.result_shape),
+    result: 'result' in value ? value.result : undefined,
     warnings: droppedWarning(matches.dropped, 'search match'),
   }
+}
+
+/**
+ * Human-readable one-line description of a result shape, used by the inspector
+ * when a search returned a value with no summarizable tool rows. Returns an
+ * empty string when no shape is available.
+ */
+export function describeResultShape(shape: ResultShape | undefined): string {
+  if (!shape?.type) return ''
+  const parts: string[] = [shape.type]
+  if (shape.type === 'object' && shape.key_count !== undefined) {
+    parts.push(`${shape.key_count} key${shape.key_count === 1 ? '' : 's'}`)
+  }
+  if (shape.type === 'array' && shape.length !== undefined) {
+    parts.push(`${shape.length} item${shape.length === 1 ? '' : 's'}`)
+  }
+  if (shape.type === 'string' && shape.length !== undefined) {
+    parts.push(`${shape.length} chars`)
+  }
+  if (shape.size_bytes !== undefined) parts.push(`${shape.size_bytes} B`)
+  let label = parts.join(' · ')
+  if (shape.type === 'object' && shape.keys?.length) {
+    label += ` — keys: ${shape.keys.join(', ')}`
+  }
+  if (shape.type === 'array' && shape.item_types?.length) {
+    label += ` — items: ${shape.item_types.join(', ')}`
+  }
+  return label
 }
 
 function parseHistoryTrace(value: Record<string, unknown>): CodeModeHistoryTrace | null {

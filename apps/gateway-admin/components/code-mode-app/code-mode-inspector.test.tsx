@@ -96,6 +96,28 @@ test('renders search truncation count metadata', async () => {
   await unmount()
 })
 
+test('renders reduced search result shape and value when no tool rows match', async () => {
+  installChatTestDom()
+  const { container, unmount } = await renderClient(
+    <CodeModeInspector
+      initialTrace={{
+        kind: 'code_mode_search_trace',
+        query_kind: 'catalog_filter',
+        match_count: 0,
+        matches: [],
+        result_shape: { type: 'object', key_count: 2, keys: ['total', 'upstreams'] },
+        result: { total: 398, upstreams: 42 },
+      }}
+    />,
+  )
+
+  assert.match(container.textContent ?? '', /Search result/)
+  assert.match(container.textContent ?? '', /reduced value/)
+  assert.match(container.textContent ?? '', /keys: total, upstreams/)
+  assert.match(container.textContent ?? '', /398/)
+  await unmount()
+})
+
 test('renders history rows and flattened nested calls', async () => {
   installChatTestDom()
   const { container, unmount } = await renderClient(
