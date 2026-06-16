@@ -51,7 +51,7 @@ backups/
 settings.local.json
 .worktrees/
 storage/
-/bin/labby
+/bin/
 
 # ── IDE / editor ─────────────────────────────────────────────────────────────
 .vscode/
@@ -86,7 +86,7 @@ __pycache__/
 **/*.rs.bk
 *.profraw
 *.profdata
-/bin/lab
+
 
 # ── Node / TypeScript build artifacts ────────────────────────────────────────
 node_modules/
