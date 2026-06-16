@@ -641,6 +641,7 @@ mod tests {
                 crate::mcp::logging::logging_level_rank(LoggingLevel::Emergency),
             )),
             route_scope,
+            relay_session_id: 0,
             code_mode_widget_callbacks_enabled_for_test: false,
         }
     }

@@ -1325,6 +1325,7 @@ async fn run_stdio(
             crate::mcp::logging::logging_level_rank(rmcp::model::LoggingLevel::Info),
         )),
         route_scope: crate::mcp::route_scope::McpRouteScope::Root,
+        relay_session_id: crate::mcp::server::next_relay_session_id(),
         #[cfg(test)]
         code_mode_widget_callbacks_enabled_for_test: false,
     };
@@ -1477,6 +1478,7 @@ fn build_mcp_service_with_scope(
                     crate::mcp::logging::logging_level_rank(rmcp::model::LoggingLevel::Info),
                 )),
                 route_scope,
+                relay_session_id: crate::mcp::server::next_relay_session_id(),
                 #[cfg(test)]
                 code_mode_widget_callbacks_enabled_for_test: false,
             })

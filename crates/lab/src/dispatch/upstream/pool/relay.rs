@@ -36,6 +36,7 @@
 //! agent advertises elicitation. Cost: one fresh connect per call — the gate
 //! keeps that off the default hot path.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -46,12 +47,14 @@ use rmcp::model::{
 };
 use rmcp::service::{Peer, RequestContext};
 use rmcp::{ClientHandler, RoleClient, RoleServer};
+use tokio::sync::Mutex;
 
 use crate::config::UpstreamConfig;
 
 use super::super::types::UpstreamCapability;
-use super::UpstreamPool;
 use super::connect::connect_upstream_with_handler;
+use super::helpers::{SUBJECT_CONN_IDLE_TTL, SUBJECT_CONN_MAX_ENTRIES};
+use super::{UpstreamConnection, UpstreamPool};
 
 /// A client handler that relays an upstream server's server→client requests
 /// (elicitation, sampling, roots) down to the gateway's downstream agent peer.
@@ -158,37 +161,172 @@ impl ClientHandler for RelayClientHandler {
     }
 }
 
+/// A cached relay connection, keyed in the pool by `(upstream, session_id)`.
+///
+/// The `RelayClientHandler` inside `_connection` is bound to **one** downstream
+/// agent peer (the session identified by the key). Because the key includes the
+/// downstream session id, a cached entry is only ever reused by the same agent
+/// — never shared across sessions, which is what keeps relayed elicitation from
+/// being misrouted.
+pub(super) struct RelayCachedConnection {
+    /// Keeps the relay-served running service (and any stdio child) alive.
+    _connection: UpstreamConnection<RelayClientHandler>,
+    /// Pre-cloned upstream peer for the cache-hit fast path.
+    peer: Peer<RoleClient>,
+    /// Wall-clock instant when this entry was last used.
+    last_used: Instant,
+}
+
+/// Evict least-recently-used relay connections until the map holds at most
+/// `max_entries`, sparing the about-to-be-inserted `protect` key. Mirrors
+/// `connection::evict_lru_over_cap` for the relay-typed cache.
+fn evict_relay_lru_over_cap(
+    cache: &mut HashMap<(String, u64), RelayCachedConnection>,
+    max_entries: usize,
+    protect: &(String, u64),
+) -> Vec<(String, UpstreamConnection<RelayClientHandler>)> {
+    let mut evicted = Vec::new();
+    while cache.len() > max_entries {
+        let lru_key = cache
+            .iter()
+            .filter(|(k, _)| *k != protect)
+            .min_by_key(|(_, entry)| entry.last_used)
+            .map(|(k, _)| k.clone());
+        match lru_key {
+            Some(key) => {
+                if let Some(entry) = cache.remove(&key) {
+                    evicted.push((key.0, entry._connection));
+                }
+            }
+            None => break,
+        }
+    }
+    evicted
+}
+
 impl UpstreamPool {
-    /// Call a single tool on an upstream over a **dedicated, relay-handled**
-    /// connection.
+    /// Call a single tool on an upstream over a **relay-handled** connection
+    /// that is cached per `(upstream, downstream-session)`.
     ///
-    /// Unlike [`UpstreamPool::call_tool`] (which reuses a pooled, multiplexed
-    /// `()` connection), this opens a fresh connection served with a
-    /// [`RelayClientHandler`] bound to `downstream`, so any server→client
-    /// request the upstream raises mid-call (elicitation/sampling/roots) is
-    /// forwarded to that one agent. The connection is shut down before
-    /// returning — it exists only for the lifetime of the call, which is what
-    /// makes the upstream→agent mapping unambiguous.
+    /// Unlike [`UpstreamPool::call_tool`] (a pooled, multiplexed `()`
+    /// connection), the connection here is served with a [`RelayClientHandler`]
+    /// bound to `downstream`, so any server→client request the upstream raises
+    /// mid-call (elicitation/sampling/roots) is forwarded to that one agent.
+    ///
+    /// `session_id` must uniquely identify the downstream agent connection (the
+    /// gateway mints one per `LabMcpServer` session). It is the second half of
+    /// the cache key, which is what guarantees a cached relay connection is
+    /// never reused by a *different* agent — the property that makes the
+    /// upstream→agent mapping unambiguous even though the connection is reused
+    /// across calls within the session.
     ///
     /// Reuses the generic `connect_upstream_with_handler` seam, so every
     /// transport (HTTP, WebSocket, stdio, OAuth-HTTP) and the stdio
     /// process-reaping guard work unchanged. `subject` is forwarded for
     /// OAuth-scoped upstreams (`None` for the common non-OAuth case).
     ///
-    /// Returns `None` only if the dedicated connect fails before a peer exists
-    /// — mirroring `call_tool`'s "not connected" signal so the caller's circuit
-    /// breaker can react identically.
+    /// Returns `None` only when no connection could be established — mirroring
+    /// `call_tool`'s "not connected" signal.
     pub async fn call_tool_relayed(
         &self,
         config: &UpstreamConfig,
         subject: Option<&str>,
         params: CallToolRequestParams,
         downstream: Peer<RoleServer>,
+        session_id: u64,
     ) -> Option<Result<CallToolResult, String>> {
+        let peer = self
+            .acquire_or_connect_relay(config, subject, downstream, session_id)
+            .await?;
+
+        let timeout = self.request_timeout;
+        let started = Instant::now();
+        let outcome = match tokio::time::timeout(timeout, peer.call_tool(params)).await {
+            Ok(Ok(result)) => Some(Ok(result)),
+            Ok(Err(error)) => {
+                // A failed call may mean the cached connection went bad; drop it
+                // so the next call reconnects rather than reusing a dead peer.
+                self.evict_relay_connection(&config.name, session_id).await;
+                Some(Err(format!("relayed upstream call failed: {error}")))
+            }
+            Err(_) => {
+                self.evict_relay_connection(&config.name, session_id).await;
+                Some(Err(format!(
+                    "relayed upstream call timed out after {}ms",
+                    timeout.as_millis()
+                )))
+            }
+        };
+
+        tracing::debug!(
+            surface = "dispatch",
+            service = "upstream.pool",
+            action = "upstream.relay.call",
+            upstream = %config.name,
+            session_id,
+            subject_scoped = subject.is_some(),
+            elapsed_ms = started.elapsed().as_millis(),
+            "relayed upstream tool call complete",
+        );
+        outcome
+    }
+
+    /// Return a cached relay peer for `(upstream, session_id)`, or open and
+    /// cache a new relay connection. Mirrors `acquire_or_connect_subject`:
+    /// write-locked fast path with inline TTL + dead-transport eviction, then a
+    /// per-key single-flight slow path.
+    async fn acquire_or_connect_relay(
+        &self,
+        config: &UpstreamConfig,
+        subject: Option<&str>,
+        downstream: Peer<RoleServer>,
+        session_id: u64,
+    ) -> Option<Peer<RoleClient>> {
+        let key = (config.name.clone(), session_id);
+
+        // Fast path: fresh, live cached entry.
+        {
+            let mut cache = self.relay_connections.write().await;
+            if let Some(entry) = cache.get_mut(&key) {
+                if entry.last_used.elapsed() < SUBJECT_CONN_IDLE_TTL
+                    && !entry.peer.is_transport_closed()
+                {
+                    entry.last_used = Instant::now();
+                    return Some(entry.peer.clone());
+                }
+                cache.remove(&key);
+            }
+        }
+
+        self.ensure_subject_sweep_task().await;
+
+        // Slow path: per-key single-flight so concurrent first calls do not open
+        // duplicate connections.
+        let connect_lock: Arc<Mutex<()>> = {
+            let mut locks = self.relay_connect_locks.write().await;
+            locks
+                .entry(key.clone())
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone()
+        };
+        let _guard = connect_lock.lock().await;
+
+        // Re-check after acquiring the lock.
+        {
+            let mut cache = self.relay_connections.write().await;
+            if let Some(entry) = cache.get_mut(&key) {
+                if entry.last_used.elapsed() < SUBJECT_CONN_IDLE_TTL
+                    && !entry.peer.is_transport_closed()
+                {
+                    entry.last_used = Instant::now();
+                    return Some(entry.peer.clone());
+                }
+                cache.remove(&key);
+            }
+        }
+
         let upstream_name: Arc<str> = Arc::from(config.name.as_str());
         let handler = RelayClientHandler::new(downstream, Arc::clone(&upstream_name));
-        let started = Instant::now();
-
         let (conn, _tools) = match connect_upstream_with_handler(
             config,
             subject,
@@ -212,30 +350,82 @@ impl UpstreamPool {
             }
         };
 
-        let timeout = self.request_timeout;
-        let outcome = match tokio::time::timeout(timeout, conn.peer.call_tool(params)).await {
-            Ok(Ok(result)) => Some(Ok(result)),
-            Ok(Err(error)) => Some(Err(format!("relayed upstream call failed: {error}"))),
-            Err(_) => Some(Err(format!(
-                "relayed upstream call timed out after {}ms",
-                timeout.as_millis()
-            ))),
+        let peer = conn.peer.clone();
+        // Enforce the LRU cap BEFORE inserting so a burst of unique sessions
+        // cannot push the live-peer count past the bound; shut evicted peers
+        // down off-lock.
+        let evicted = {
+            let mut cache = self.relay_connections.write().await;
+            let evicted = evict_relay_lru_over_cap(&mut cache, SUBJECT_CONN_MAX_ENTRIES - 1, &key);
+            cache.insert(
+                key.clone(),
+                RelayCachedConnection {
+                    _connection: conn,
+                    peer: peer.clone(),
+                    last_used: Instant::now(),
+                },
+            );
+            evicted
+        };
+        for (name, evicted_conn) in evicted {
+            evicted_conn.shutdown(&name, "relay.cache.lru_evict").await;
+        }
+
+        Some(peer)
+    }
+
+    /// Evict and shut down the cached relay connection for one
+    /// `(upstream, session)` pair (called on a failed/timed-out call).
+    pub(super) async fn evict_relay_connection(&self, upstream_name: &str, session_id: u64) {
+        let key = (upstream_name.to_string(), session_id);
+        let removed = self.relay_connections.write().await.remove(&key);
+        if let Some(entry) = removed {
+            entry._connection.shutdown(upstream_name, "relay.cache.evict").await;
+        }
+    }
+
+    /// Evict all cached relay connections (called during pool drain).
+    pub(super) async fn evict_all_relay_connections(&self) {
+        let drained: Vec<_> = self.relay_connections.write().await.drain().collect();
+        for ((name, _session), entry) in drained {
+            entry._connection.shutdown(&name, "relay.cache.drain").await;
+        }
+    }
+
+    /// Sweep the relay-connection cache: evict entries past the idle TTL or
+    /// whose upstream transport has closed, shutting their peers down off-lock.
+    /// Also prunes orphan single-flight locks. Returns
+    /// `(connections_evicted, locks_pruned)`.
+    pub(super) async fn sweep_relay_connections(&self) -> (usize, usize) {
+        let expired = {
+            let mut cache = self.relay_connections.write().await;
+            let stale_keys: Vec<(String, u64)> = cache
+                .iter()
+                .filter(|(_, entry)| {
+                    entry.last_used.elapsed() >= SUBJECT_CONN_IDLE_TTL
+                        || entry.peer.is_transport_closed()
+                })
+                .map(|(key, _)| key.clone())
+                .collect();
+            stale_keys
+                .into_iter()
+                .filter_map(|key| cache.remove(&key).map(|entry| (key.0, entry._connection)))
+                .collect::<Vec<_>>()
+        };
+        let connections_evicted = expired.len();
+        for (name, conn) in expired {
+            conn.shutdown(&name, "relay.cache.sweep").await;
+        }
+
+        let locks_pruned = {
+            let cache = self.relay_connections.read().await;
+            let mut locks = self.relay_connect_locks.write().await;
+            let before = locks.len();
+            locks.retain(|key, lock| cache.contains_key(key) || Arc::strong_count(lock) > 1);
+            before - locks.len()
         };
 
-        tracing::debug!(
-            surface = "dispatch",
-            service = "upstream.pool",
-            action = "upstream.relay.call",
-            upstream = %config.name,
-            subject_scoped = subject.is_some(),
-            elapsed_ms = started.elapsed().as_millis(),
-            "relayed upstream tool call complete",
-        );
-
-        // Tear the dedicated connection down before returning — it is scoped to
-        // this single call (and, for stdio, must reap its child).
-        conn.shutdown(&config.name, "relay.call.complete").await;
-        outcome
+        (connections_evicted, locks_pruned)
     }
 }
 
@@ -251,6 +441,10 @@ mod tests {
     };
     use rmcp::service::{RequestContext, RunningService};
     use rmcp::{ClientHandler, RoleClient, RoleServer, ServerHandler, ServiceExt};
+
+    use std::time::Instant;
+
+    use crate::dispatch::upstream::types::UpstreamRuntimeMetadata;
 
     use super::super::helpers::IN_PROCESS_PEER_BUFFER_BYTES;
     use super::*;
@@ -468,6 +662,7 @@ mod tests {
                 None,
                 CallToolRequestParams::new("anything"),
                 downstream,
+                1,
             )
             .await;
 
@@ -475,5 +670,112 @@ mod tests {
             result.is_none(),
             "a failed dedicated connect should surface as None"
         );
+    }
+
+    /// Build a live `RelayCachedConnection` over in-memory duplex transports for
+    /// the cache-ops tests. Returns the entry plus the downstream-server running
+    /// service, which the caller must keep alive (dropping it closes the agent
+    /// peer the relay handler is bound to).
+    async fn live_relay_cached_connection(
+        last_used: Instant,
+    ) -> (RelayCachedConnection, RunningService<RoleServer, TrivialServer>) {
+        let (gw_server_transport, agent_transport) = tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
+        tokio::spawn(async move {
+            if let Ok(running) = ().serve(agent_transport).await {
+                running.waiting().await.ok();
+            }
+        });
+        let gw_server = TrivialServer
+            .serve(gw_server_transport)
+            .await
+            .expect("downstream server connects");
+        let downstream = gw_server.peer().clone();
+
+        let (upstream_transport, gw_client_transport) =
+            tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
+        tokio::spawn(async move {
+            if let Ok(running) = ElicitingUpstream.serve(upstream_transport).await {
+                running.waiting().await.ok();
+            }
+        });
+        let service = RelayClientHandler::new(downstream, Arc::from("up"))
+            .serve(gw_client_transport)
+            .await
+            .expect("relay client connects");
+        let peer = service.peer().clone();
+        let conn = UpstreamConnection {
+            _client_service: service,
+            _server_task: None,
+            peer: peer.clone(),
+            runtime: UpstreamRuntimeMetadata::default(),
+        };
+        (
+            RelayCachedConnection {
+                _connection: conn,
+                peer,
+                last_used,
+            },
+            gw_server,
+        )
+    }
+
+    /// `evict_all_relay_connections` empties the cache (and shuts the cached
+    /// connections down) — the drain path.
+    #[tokio::test]
+    async fn relay_cache_evict_all_clears_entries() {
+        let pool = UpstreamPool::new();
+        let (entry, _keepalive) = live_relay_cached_connection(Instant::now()).await;
+        pool.relay_connections
+            .write()
+            .await
+            .insert(("up".to_string(), 7), entry);
+        assert_eq!(pool.relay_connections.read().await.len(), 1);
+
+        pool.evict_all_relay_connections().await;
+        assert!(pool.relay_connections.read().await.is_empty());
+    }
+
+    /// `evict_relay_connection` removes only the targeted `(upstream, session)`
+    /// entry, leaving a different session's entry intact.
+    #[tokio::test]
+    async fn relay_cache_evict_one_is_scoped_to_session() {
+        let pool = UpstreamPool::new();
+        let (a, _ka) = live_relay_cached_connection(Instant::now()).await;
+        let (b, _kb) = live_relay_cached_connection(Instant::now()).await;
+        {
+            let mut cache = pool.relay_connections.write().await;
+            cache.insert(("up".to_string(), 1), a);
+            cache.insert(("up".to_string(), 2), b);
+        }
+
+        pool.evict_relay_connection("up", 1).await;
+
+        let remaining: Vec<_> = pool.relay_connections.read().await.keys().cloned().collect();
+        assert_eq!(remaining, vec![("up".to_string(), 2)]);
+    }
+
+    /// `sweep_relay_connections` evicts entries past the idle TTL while keeping
+    /// fresh ones.
+    #[tokio::test]
+    async fn relay_cache_sweep_evicts_idle_entries() {
+        use std::time::{Duration, Instant};
+
+        let pool = UpstreamPool::new();
+        let stale_used = Instant::now()
+            .checked_sub(SUBJECT_CONN_IDLE_TTL + Duration::from_secs(60))
+            .expect("instant in range");
+        let (stale, _ks) = live_relay_cached_connection(stale_used).await;
+        let (fresh, _kf) = live_relay_cached_connection(Instant::now()).await;
+        {
+            let mut cache = pool.relay_connections.write().await;
+            cache.insert(("up".to_string(), 1), stale);
+            cache.insert(("up".to_string(), 2), fresh);
+        }
+
+        let (evicted, _pruned) = pool.sweep_relay_connections().await;
+        assert_eq!(evicted, 1, "only the idle-TTL-expired entry should evict");
+
+        let remaining: Vec<_> = pool.relay_connections.read().await.keys().cloned().collect();
+        assert_eq!(remaining, vec![("up".to_string(), 2)]);
     }
 }

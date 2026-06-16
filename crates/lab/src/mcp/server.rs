@@ -4,7 +4,7 @@
 //! can share the same handler logic.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::Instant;
 
 use axum::http;
@@ -30,6 +30,19 @@ use crate::mcp::logging::{DispatchLogOutcome, logging_level_rank};
 use crate::mcp::route_scope::McpRouteScope;
 use crate::registry::ToolRegistry;
 
+/// Process-global counter minting a unique `relay_session_id` per
+/// `LabMcpServer` instance. Each transport session (HTTP factory invocation or
+/// the single stdio server) builds one `LabMcpServer`, so the id is stable for
+/// a session's lifetime and unique across sessions — exactly the key the
+/// upstream relay cache needs to bind a cached connection to one downstream
+/// agent without ever reusing it across agents.
+static RELAY_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// Mint the next unique relay-session id. Called once per `LabMcpServer`.
+pub(crate) fn next_relay_session_id() -> u64 {
+    RELAY_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
 /// MCP server handler — one tool per registered service.
 pub struct LabMcpServer {
     pub registry: Arc<ToolRegistry>,
@@ -44,6 +57,10 @@ pub struct LabMcpServer {
     pub logging_level: Arc<AtomicU8>,
     /// Visibility and dispatch constraints for this MCP route/session.
     pub(crate) route_scope: McpRouteScope,
+    /// Unique id for this session's downstream agent connection. Used as the
+    /// second half of the upstream relay cache key so a cached relay connection
+    /// is bound to exactly this agent (see `dispatch/upstream/pool/relay.rs`).
+    pub(crate) relay_session_id: u64,
     #[cfg(test)]
     pub(crate) code_mode_widget_callbacks_enabled_for_test: bool,
 }
@@ -373,6 +390,7 @@ mod tests {
                 logging_level_rank(rmcp::model::LoggingLevel::Info),
             )),
             route_scope: crate::mcp::route_scope::McpRouteScope::Root,
+            relay_session_id: 0,
             code_mode_widget_callbacks_enabled_for_test: false,
         };
 

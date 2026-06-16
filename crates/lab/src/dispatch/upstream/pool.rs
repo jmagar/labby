@@ -98,6 +98,17 @@ pub struct UpstreamPool {
     /// for the same key do not open duplicate OAuth connections (mirrors the
     /// `lazy_connect_locks` gate used by the normal pool path).
     subject_connect_locks: Arc<RwLock<HashMap<(String, String), Arc<Mutex<()>>>>>,
+    /// Per-`(upstream, downstream-session)` cached **relay** connections.
+    ///
+    /// Distinct from `subject_connections` because the cached connection is
+    /// served with a `RelayClientHandler` bound to one specific downstream
+    /// agent peer (`UpstreamConnection<RelayClientHandler>`, a different type).
+    /// The session component of the key is what guarantees a cached relay
+    /// connection is never reused across agents — see `pool/relay.rs`.
+    relay_connections: Arc<RwLock<HashMap<(String, u64), relay::RelayCachedConnection>>>,
+    /// Single-flight locks for the relay-connection cache, mirroring
+    /// `subject_connect_locks`.
+    relay_connect_locks: Arc<RwLock<HashMap<(String, u64), Arc<Mutex<()>>>>>,
     /// Cancellation token for the background subject-connection sweep task.
     /// `None` until the first subject-scoped connect arms it; cancelled and
     /// cleared on `drain_for_swap` (P-H2). Mirrors the `probe_tasks` lifecycle.
@@ -188,6 +199,8 @@ impl UpstreamPool {
             lazy_connect_locks: Arc::new(RwLock::new(HashMap::new())),
             subject_connections: Arc::new(RwLock::new(HashMap::new())),
             subject_connect_locks: Arc::new(RwLock::new(HashMap::new())),
+            relay_connections: Arc::new(RwLock::new(HashMap::new())),
+            relay_connect_locks: Arc::new(RwLock::new(HashMap::new())),
             subject_sweep_task: Arc::new(RwLock::new(None)),
             runtime_origin: None,
             runtime_owner: None,

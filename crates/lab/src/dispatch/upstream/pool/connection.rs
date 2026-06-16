@@ -531,6 +531,7 @@ impl UpstreamPool {
                     _ = cancel.cancelled() => break,
                     _ = tokio::time::sleep(SUBJECT_CONN_SWEEP_INTERVAL) => {
                         pool.sweep_subject_connections().await;
+                        pool.sweep_relay_connections().await;
                     }
                 }
             }

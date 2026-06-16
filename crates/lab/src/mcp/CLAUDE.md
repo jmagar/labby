@@ -100,8 +100,15 @@ advertised elicitation (`context.peer.supported_elicitation_modes()` non-empty).
 Both proxy branches honor the gate — the raw branch passes `subject = None`, the
 OAuth/subject-scoped branch forwards the resolved `oauth_subject` so the
 dedicated connection authenticates as the caller. The relay forwards the
-upstream's request straight to `context.peer` (the agent). It is opt-in because
-each relayed call pays a fresh upstream connect; the default path stays pooled.
+upstream's request straight to `context.peer` (the agent).
+
+Relay connections are cached per `(upstream, session_id)`, where `session_id` is
+minted once per `LabMcpServer` session (`next_relay_session_id()`) and passed
+into `call_tool_relayed`. Because each session has exactly one downstream agent
+peer, the session-scoped key guarantees a cached relay connection is never
+reused across agents — so the first relayed call in a session pays the connect
+cost and subsequent calls reuse it, without risking misrouted elicitation. It
+stays opt-in (gated) so the default path is the untouched pooled `call_tool`.
 
 ## Built-in actions
 

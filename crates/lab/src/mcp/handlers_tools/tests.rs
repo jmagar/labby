@@ -107,6 +107,7 @@ fn test_server(
         peers: Arc::new(tokio::sync::RwLock::new(Vec::new())),
         logging_level: Arc::new(AtomicU8::new(logging_level_rank(logging_level))),
         route_scope,
+        relay_session_id: 0,
         code_mode_widget_callbacks_enabled_for_test: false,
     }
 }
@@ -1891,6 +1892,7 @@ async fn server_reads_current_pool_from_gateway_manager() {
             rmcp::model::LoggingLevel::Info,
         ))),
         route_scope: crate::mcp::route_scope::McpRouteScope::Root,
+        relay_session_id: 0,
         code_mode_widget_callbacks_enabled_for_test: false,
     };
 

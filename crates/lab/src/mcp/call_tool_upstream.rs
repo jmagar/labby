@@ -186,8 +186,14 @@ impl LabMcpServer {
                     route = "relayed",
                     "proxying to upstream over relayed dedicated connection"
                 );
-                pool.call_tool_relayed(&config, None, upstream_params, context.peer.clone())
-                    .await
+                pool.call_tool_relayed(
+                    &config,
+                    None,
+                    upstream_params,
+                    context.peer.clone(),
+                    self.relay_session_id,
+                )
+                .await
             } else {
                 pool.call_tool(&upstream_name, upstream_params).await
             };
@@ -410,6 +416,7 @@ impl LabMcpServer {
                             Some(oauth_subject.as_ref()),
                             upstream_params,
                             context.peer.clone(),
+                            self.relay_session_id,
                         )
                         .await
                     {
