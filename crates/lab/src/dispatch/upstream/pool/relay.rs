@@ -92,7 +92,10 @@ fn relay_error(upstream: &str, capability: &str, error: &rmcp::service::ServiceE
         error = %error,
         "relaying upstream server->client request to downstream agent failed",
     );
-    McpError::internal_error(format!("relay of {capability} to downstream agent failed"), None)
+    McpError::internal_error(
+        format!("relay of {capability} to downstream agent failed"),
+        None,
+    )
 }
 
 impl ClientHandler for RelayClientHandler {
@@ -380,7 +383,10 @@ impl UpstreamPool {
         let key = (upstream_name.to_string(), session_id);
         let removed = self.relay_connections.write().await.remove(&key);
         if let Some(entry) = removed {
-            entry._connection.shutdown(upstream_name, "relay.cache.evict").await;
+            entry
+                ._connection
+                .shutdown(upstream_name, "relay.cache.evict")
+                .await;
         }
     }
 
@@ -545,7 +551,8 @@ mod tests {
     async fn upstream_elicitation_is_relayed_to_downstream_agent() {
         // 1. Wire the gateway's downstream side to a mock agent that answers
         //    elicitation. The gateway-server peer is what the relay forwards to.
-        let (gw_server_transport, agent_transport) = tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
+        let (gw_server_transport, agent_transport) =
+            tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
         let _agent_task = tokio::spawn(async move {
             let running = AnsweringAgent
                 .serve(agent_transport)
@@ -638,12 +645,10 @@ mod tests {
     async fn call_tool_relayed_returns_none_when_connect_fails() {
         // A downstream agent peer is required by the signature; the connect
         // fails before it is ever used.
-        let (gw_server_transport, agent_transport) = tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
+        let (gw_server_transport, agent_transport) =
+            tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
         let _agent_task = tokio::spawn(async move {
-            let running = ()
-                .serve(agent_transport)
-                .await
-                .expect("agent connects");
+            let running = ().serve(agent_transport).await.expect("agent connects");
             running.waiting().await.expect("agent runs");
         });
         let gw_server = TrivialServer
@@ -678,8 +683,12 @@ mod tests {
     /// peer the relay handler is bound to).
     async fn live_relay_cached_connection(
         last_used: Instant,
-    ) -> (RelayCachedConnection, RunningService<RoleServer, TrivialServer>) {
-        let (gw_server_transport, agent_transport) = tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
+    ) -> (
+        RelayCachedConnection,
+        RunningService<RoleServer, TrivialServer>,
+    ) {
+        let (gw_server_transport, agent_transport) =
+            tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
         tokio::spawn(async move {
             if let Ok(running) = ().serve(agent_transport).await {
                 running.waiting().await.ok();
@@ -750,7 +759,13 @@ mod tests {
 
         pool.evict_relay_connection("up", 1).await;
 
-        let remaining: Vec<_> = pool.relay_connections.read().await.keys().cloned().collect();
+        let remaining: Vec<_> = pool
+            .relay_connections
+            .read()
+            .await
+            .keys()
+            .cloned()
+            .collect();
         assert_eq!(remaining, vec![("up".to_string(), 2)]);
     }
 
@@ -775,7 +790,13 @@ mod tests {
         let (evicted, _pruned) = pool.sweep_relay_connections().await;
         assert_eq!(evicted, 1, "only the idle-TTL-expired entry should evict");
 
-        let remaining: Vec<_> = pool.relay_connections.read().await.keys().cloned().collect();
+        let remaining: Vec<_> = pool
+            .relay_connections
+            .read()
+            .await
+            .keys()
+            .cloned()
+            .collect();
         assert_eq!(remaining, vec![("up".to_string(), 2)]);
     }
 }

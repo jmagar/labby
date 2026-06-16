@@ -88,8 +88,15 @@ pub(super) async fn connect_upstream_with_handler<H: ClientHandler>(
         if is_websocket_url(url) {
             connect_websocket_upstream(url, config, handler).await
         } else {
-            connect_http_upstream(url, config, subject, oauth_client_cache, shared_client, handler)
-                .await
+            connect_http_upstream(
+                url,
+                config,
+                subject,
+                oauth_client_cache,
+                shared_client,
+                handler,
+            )
+            .await
         }
     } else if let Some(ref command) = config.command {
         connect_stdio_upstream(
