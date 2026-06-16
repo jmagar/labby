@@ -270,7 +270,7 @@ mod tests {
 
         let error = serde_json::to_string(&RxJsonRpcMessage::<RoleClient>::error(
             ErrorData::new(ErrorCode::METHOD_NOT_FOUND, "method not found", None),
-            NumberOrString::Number(11),
+            Some(NumberOrString::Number(11)),
         ))
         .expect("encode error");
         let decoded_error = decode_server_message(&error).expect("decode error");
