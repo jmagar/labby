@@ -283,34 +283,42 @@ fn code_mode_tool_meta_points_to_canonical_ui_resource() {
     let search = code_mode_tool_meta(CODE_MODE_SEARCH_TOOL_NAME);
     let execute = code_mode_tool_meta(TOOL_EXECUTE_TOOL_NAME);
 
-    assert_eq!(
-        search.0["ui"]["resourceUri"].as_str(),
-        Some(CODE_MODE_SEARCH_APP_URI)
-    );
-    assert_eq!(
-        execute.0["ui"]["resourceUri"].as_str(),
-        Some(CODE_MODE_EXECUTE_APP_URI)
-    );
+    // The binding URI carries a `?v=<hash>` cache-bust token (so a rebuilt widget
+    // forces the host to refetch), but resolves to the canonical base URI.
+    let search_ui = search.0["ui"]["resourceUri"]
+        .as_str()
+        .expect("search resourceUri");
+    assert!(search_ui.starts_with(CODE_MODE_SEARCH_APP_URI));
+    assert!(search_ui.contains("?v="));
+    let execute_ui = execute.0["ui"]["resourceUri"]
+        .as_str()
+        .expect("execute resourceUri");
+    assert!(execute_ui.starts_with(CODE_MODE_EXECUTE_APP_URI));
+    assert!(execute_ui.contains("?v="));
     // OpenAI Apps hosts (ChatGPT / Codex) bind widgets via `openai/outputTemplate`
     // rather than `_meta.ui`. It points at the skybridge variant (same HTML, the
     // `text/html+skybridge` MIME those hosts expect) so the Claude resource is
     // untouched.
-    assert_eq!(
-        search
-            .0
-            .get("openai/outputTemplate")
-            .and_then(|value| value.as_str()),
-        Some(CODE_MODE_SEARCH_APP_SKYBRIDGE_URI),
+    let search_skybridge = search
+        .0
+        .get("openai/outputTemplate")
+        .and_then(|value| value.as_str())
+        .expect("search openai/outputTemplate");
+    assert!(
+        search_skybridge.starts_with(CODE_MODE_SEARCH_APP_SKYBRIDGE_URI),
         "search tool must expose the OpenAI Apps output template"
     );
-    assert_eq!(
-        execute
-            .0
-            .get("openai/outputTemplate")
-            .and_then(|value| value.as_str()),
-        Some(CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI),
+    assert!(search_skybridge.contains("?v="));
+    let execute_skybridge = execute
+        .0
+        .get("openai/outputTemplate")
+        .and_then(|value| value.as_str())
+        .expect("execute openai/outputTemplate");
+    assert!(
+        execute_skybridge.starts_with(CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI),
         "execute tool must expose the OpenAI Apps output template"
     );
+    assert!(execute_skybridge.contains("?v="));
 }
 
 #[test]

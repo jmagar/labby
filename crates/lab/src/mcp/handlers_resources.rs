@@ -118,6 +118,43 @@ pub(crate) const CODE_MODE_APP_RESOURCE_DESCRIPTORS: &[CodeModeAppResourceDescri
 
 const CODE_MODE_APP_FALLBACK_HTML: &str = include_str!("assets/code_mode_app.html");
 
+/// FNV-1a over the bundled widget HTML, evaluated at compile time. Changes iff
+/// the HTML bytes change, so it is a stable per-build cache-bust key.
+const fn fnv1a_64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut i = 0;
+    while i < bytes.len() {
+        hash ^= bytes[i] as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        i += 1;
+    }
+    hash
+}
+
+/// Cache-bust token for the Code Mode widget URIs.
+///
+/// MCP Apps / OpenAI Apps hosts cache the widget resource by its `resourceUri`,
+/// and the base `ui://lab/code-mode/*` URIs never change between builds — so a
+/// host that cached pre-fix HTML keeps serving it even after labby is rebuilt
+/// and restarted. Appending a content hash of the bundled HTML as `?v=<hash>`
+/// makes the advertised URI change exactly when the widget changes, forcing the
+/// host to refetch. The read path strips this suffix before matching descriptors,
+/// so the base URIs stay directly readable.
+static CODE_MODE_APP_VERSION: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    format!("{:016x}", fnv1a_64(CODE_MODE_APP_FALLBACK_HTML.as_bytes()))
+});
+
+/// Append the cache-bust token to a base Code Mode widget URI.
+fn versioned_app_uri(base: &str) -> String {
+    format!("{base}?v={}", *CODE_MODE_APP_VERSION)
+}
+
+/// Strip the `?v=<hash>` cache-bust suffix so a versioned URI matches its base
+/// descriptor. A base URI (no query) is returned unchanged.
+fn strip_app_version(uri: &str) -> &str {
+    uri.split_once('?').map_or(uri, |(base, _)| base)
+}
+
 impl LabMcpServer {
     pub(crate) async fn list_resources_impl(
         &self,
@@ -440,7 +477,7 @@ impl LabMcpServer {
                 })),
             ));
         }
-        let history = if uri == CODE_MODE_HISTORY_APP_URI {
+        let history = if strip_app_version(uri) == CODE_MODE_HISTORY_APP_URI {
             #[cfg(feature = "gateway")]
             match &self.gateway_manager {
                 Some(manager) if self.route_scope.protected_history_label().is_some() => {
@@ -493,9 +530,10 @@ impl LabMcpServer {
 }
 
 fn code_mode_app_html(uri: &str, history: Option<&Value>) -> Result<String, String> {
+    let base = strip_app_version(uri);
     if !CODE_MODE_APP_RESOURCE_DESCRIPTORS
         .iter()
-        .any(|descriptor| descriptor.uri == uri)
+        .any(|descriptor| descriptor.uri == base)
     {
         return Err(format!("unknown UI resource: {uri}"));
     }
@@ -512,10 +550,11 @@ fn code_mode_app_html(uri: &str, history: Option<&Value>) -> Result<String, Stri
 }
 
 fn code_mode_app_resource(descriptor: &CodeModeAppResourceDescriptor) -> rmcp::model::Resource {
-    RawResource::new(descriptor.uri.to_string(), descriptor.name.to_string())
+    let uri = versioned_app_uri(descriptor.uri);
+    RawResource::new(uri.clone(), descriptor.name.to_string())
         .with_description("Read-only MCP App for Code Mode call traces")
         .with_mime_type(descriptor.runtime.mime())
-        .with_meta(code_mode_app_resource_meta(descriptor.uri))
+        .with_meta(code_mode_app_resource_meta(&uri))
         .no_annotation()
 }
 
@@ -524,9 +563,10 @@ fn code_mode_app_resource(descriptor: &CodeModeAppResourceDescriptor) -> rmcp::m
 /// and binding, so a silent wrong default would mis-bind the widget) — assert in
 /// debug, warn and fall back to MCP Apps in release rather than serving nothing.
 fn code_mode_app_runtime_for_uri(uri: &str) -> CodeModeRuntime {
+    let base = strip_app_version(uri);
     CODE_MODE_APP_RESOURCE_DESCRIPTORS
         .iter()
-        .find(|descriptor| descriptor.uri == uri)
+        .find(|descriptor| descriptor.uri == base)
         .map_or_else(
             || {
                 debug_assert!(
@@ -559,20 +599,25 @@ fn code_mode_app_resources() -> Vec<rmcp::model::Resource> {
 }
 
 /// MCP Apps (Claude) widget URI for a tool — backs `_meta.ui.resourceUri`.
-pub(crate) fn code_mode_app_resource_uri_for_tool(tool_name: &str) -> Option<&'static str> {
+///
+/// Carries the `?v=<hash>` cache-bust suffix so a rebuilt widget forces the host
+/// to refetch instead of rendering its cached copy of the previous build.
+pub(crate) fn code_mode_app_resource_uri_for_tool(tool_name: &str) -> Option<String> {
     code_mode_app_uri_for_tool(CodeModeRuntime::McpApp, tool_name)
 }
 
 /// OpenAI Apps (ChatGPT / Codex) widget URI for a tool — backs `openai/outputTemplate`.
-pub(crate) fn code_mode_app_skybridge_uri_for_tool(tool_name: &str) -> Option<&'static str> {
+///
+/// Carries the same `?v=<hash>` cache-bust suffix as the MCP Apps URI.
+pub(crate) fn code_mode_app_skybridge_uri_for_tool(tool_name: &str) -> Option<String> {
     code_mode_app_uri_for_tool(CodeModeRuntime::Skybridge, tool_name)
 }
 
-fn code_mode_app_uri_for_tool(runtime: CodeModeRuntime, tool_name: &str) -> Option<&'static str> {
+fn code_mode_app_uri_for_tool(runtime: CodeModeRuntime, tool_name: &str) -> Option<String> {
     CODE_MODE_APP_RESOURCE_DESCRIPTORS
         .iter()
         .find(|descriptor| descriptor.runtime == runtime && descriptor.tool_name == Some(tool_name))
-        .map(|descriptor| descriptor.uri)
+        .map(|descriptor| versioned_app_uri(descriptor.uri))
 }
 
 pub(crate) fn code_mode_app_resource_meta(uri: &str) -> Meta {
@@ -715,15 +760,23 @@ mod tests {
             .resources
             .iter()
             .filter(|resource| resource.uri.starts_with("ui://lab/code-mode/"))
-            .map(|resource| resource.uri.as_str())
+            .map(|resource| resource.uri.clone())
             .collect::<Vec<_>>();
+        // Advertised URIs carry the `?v=<hash>` cache-bust suffix; compare bases.
         assert_eq!(
-            code_mode_uris,
+            code_mode_uris
+                .iter()
+                .map(|uri| strip_app_version(uri))
+                .collect::<Vec<_>>(),
             vec![
                 CODE_MODE_SEARCH_APP_URI,
                 CODE_MODE_EXECUTE_APP_URI,
                 CODE_MODE_HISTORY_APP_URI
             ]
+        );
+        assert!(
+            code_mode_uris.iter().all(|uri| uri.contains("?v=")),
+            "advertised Code Mode URIs must carry a cache-bust token: {code_mode_uris:?}"
         );
     }
 
@@ -966,6 +1019,37 @@ mod tests {
     }
 
     #[test]
+    fn versioned_widget_uri_round_trips_through_the_read_path() {
+        // The host fetches the advertised (versioned) URI. It must resolve to the
+        // same descriptor/HTML as the base URI so the cache-bust token is purely a
+        // cache key, not a new resource the read path can't find.
+        let versioned = versioned_app_uri(CODE_MODE_SEARCH_APP_URI);
+        assert!(versioned.starts_with(CODE_MODE_SEARCH_APP_URI));
+        assert!(versioned.contains("?v="));
+        assert_eq!(strip_app_version(&versioned), CODE_MODE_SEARCH_APP_URI);
+
+        let from_base = code_mode_app_html(CODE_MODE_SEARCH_APP_URI, None).expect("base resource");
+        let from_versioned = code_mode_app_html(&versioned, None).expect("versioned resource");
+        assert_eq!(from_base, from_versioned);
+
+        // Runtime/MIME resolution must also ignore the suffix.
+        assert_eq!(
+            code_mode_app_runtime_for_uri(&versioned).mime(),
+            CODE_MODE_APP_MIME
+        );
+
+        // A base URI with no query is returned unchanged.
+        assert_eq!(
+            strip_app_version(CODE_MODE_SEARCH_APP_URI),
+            CODE_MODE_SEARCH_APP_URI
+        );
+
+        // An un-tabled URI is still rejected even with a cache-bust suffix.
+        let bogus = versioned_app_uri("ui://lab/code-mode/nope");
+        assert!(code_mode_app_html(&bogus, None).is_err());
+    }
+
+    #[test]
     fn code_mode_app_html_accepts_known_ui_resources_and_rejects_unknown() {
         let html = code_mode_app_html(CODE_MODE_EXECUTE_APP_URI, None).expect("known resource");
         assert!(html.contains("Lab Code Mode Inspector"));
@@ -1052,7 +1136,7 @@ mod tests {
         let resources = code_mode_app_resources();
         let uris = resources
             .iter()
-            .map(|resource| resource.uri.as_str())
+            .map(|resource| strip_app_version(&resource.uri).to_string())
             .collect::<Vec<_>>();
         assert_eq!(
             uris,
@@ -1062,14 +1146,16 @@ mod tests {
                 CODE_MODE_HISTORY_APP_URI
             ]
         );
-        assert_eq!(
-            code_mode_app_resource_uri_for_tool(CODE_MODE_SEARCH_TOOL_NAME),
-            Some(CODE_MODE_SEARCH_APP_URI)
-        );
-        assert_eq!(
-            code_mode_app_resource_uri_for_tool(TOOL_EXECUTE_TOOL_NAME),
-            Some(CODE_MODE_EXECUTE_APP_URI)
-        );
+        // The tool-binding URI carries the cache-bust token but resolves to the
+        // canonical base after stripping it.
+        let search_uri =
+            code_mode_app_resource_uri_for_tool(CODE_MODE_SEARCH_TOOL_NAME).expect("search uri");
+        assert!(search_uri.contains("?v="));
+        assert_eq!(strip_app_version(&search_uri), CODE_MODE_SEARCH_APP_URI);
+        let execute_uri =
+            code_mode_app_resource_uri_for_tool(TOOL_EXECUTE_TOOL_NAME).expect("execute uri");
+        assert!(execute_uri.contains("?v="));
+        assert_eq!(strip_app_version(&execute_uri), CODE_MODE_EXECUTE_APP_URI);
     }
 
     #[test]
