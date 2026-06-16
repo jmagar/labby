@@ -972,7 +972,12 @@ async fn run_gateway_oauth_start(
         "dispatch ok"
     );
 
-    crate::output::print(&value, format)?;
+    // In JSON mode emit the structured payload to stdout for scripting. In human
+    // mode the friendly "Open this URL to authorize" hint below already renders the
+    // URL, so printing the structured value here too would show it twice.
+    if format.is_json() {
+        crate::output::print(&value, format)?;
+    }
 
     let start_view: GatewayOauthStartView =
         serde_json::from_value(value.clone()).map_err(|error| {
