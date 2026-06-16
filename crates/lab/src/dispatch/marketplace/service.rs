@@ -10,6 +10,7 @@ use crate::dispatch::error::ToolError;
 use crate::dispatch::marketplace::backend::{MarketplaceBackend, PluginFilter};
 use crate::dispatch::marketplace::backends::claude::ClaudeMarketplaceBackend;
 use crate::dispatch::marketplace::backends::codex::CodexMarketplaceBackend;
+use crate::dispatch::marketplace::client::join_err;
 use crate::dispatch::marketplace::runtime::{parse_marketplace_runtime, runtime_display_name};
 
 pub fn runtime_from_params(params: &Value) -> Result<Option<MarketplaceRuntime>, ToolError> {
@@ -226,13 +227,6 @@ fn unsupported_runtime_action(runtime: MarketplaceRuntime, action: &str) -> Tool
             runtime_display_name(runtime)
         ),
         param: "runtime".into(),
-    }
-}
-
-fn join_err(error: tokio::task::JoinError) -> ToolError {
-    ToolError::Sdk {
-        sdk_kind: "internal_error".into(),
-        message: format!("join error: {error}"),
     }
 }
 

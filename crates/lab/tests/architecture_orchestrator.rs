@@ -39,7 +39,7 @@ use std::path::{Path, PathBuf};
 /// Dispatch services (top-level `dispatch/<service>.rs` entrypoints) whose
 /// cross-service imports are governed by the allowlist. Shared subsystems
 /// (`node`, `security`, `upstream`, `code_mode`) and shared leaf modules
-/// (`error`, `helpers`, `redact`, `path_safety`, `clients`) are NOT
+/// (`error`, `helpers`, `redact`, `path_safety`, `fs_atomic`, `clients`) are NOT
 /// action-dispatched services and are always importable — they are the common
 /// substrate, not peers. See `dispatch/CLAUDE.md` § "Shared subsystems".
 const SHARED_NON_SERVICES: &[&str] = &[
@@ -52,6 +52,7 @@ const SHARED_NON_SERVICES: &[&str] = &[
     "helpers",
     "redact",
     "path_safety",
+    "fs_atomic",
     "clients",
 ];
 

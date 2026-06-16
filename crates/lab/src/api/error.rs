@@ -31,15 +31,25 @@ impl IntoResponse for ToolError {
             "symlink_rejected"
             | "path_traversal"
             | "path_traversal_rejected"
-            | "invalid_encoding" => StatusCode::UNPROCESSABLE_ENTITY,
-            "content_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
+            | "invalid_encoding"
+            // marketplace/stash validation-style caller errors
+            | "missing_env_values"
+            | "unsupported_runtime_hint"
+            | "unsupported_registry_type" => StatusCode::UNPROCESSABLE_ENTITY,
+            "content_too_large" | "preview_truncated" | "too_many_files" => {
+                StatusCode::PAYLOAD_TOO_LARGE
+            }
+            // Advertised-but-unimplemented actions (artifact.diff/artifact.patch)
+            // and unsupported operations.
+            "not_implemented" | "not_supported" => StatusCode::NOT_IMPLEMENTED,
+            "secrets_export_not_allowed" => StatusCode::FORBIDDEN,
             "install_timeout" | "timeout" | "code_mode_timeout" | "code_mode_fuel_exhausted" => {
                 StatusCode::GATEWAY_TIMEOUT
             }
             "oauth_needs_reauth" => StatusCode::UNAUTHORIZED,
             "oauth_state_invalid" => StatusCode::BAD_REQUEST,
             "forbidden" | "dev_preview_read_only" => StatusCode::FORBIDDEN,
-            "unknown_action" | "unknown_subaction" | "unknown_instance" => {
+            "unknown_action" | "unknown_subaction" | "unknown_instance" | "unknown_target" => {
                 StatusCode::BAD_REQUEST
             }
             "network_error"
@@ -60,7 +70,9 @@ impl IntoResponse for ToolError {
             | "verify_failed"
             | "arch_mismatch"
             | "integrity_missing"
-            | "integrity_mismatch" => StatusCode::BAD_GATEWAY,
+            | "integrity_mismatch"
+            | "deploy_failed"
+            | "not_connected" => StatusCode::BAD_GATEWAY,
             "conflict" | "ambiguous_tool" | "restart_required" => StatusCode::CONFLICT,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
@@ -83,6 +95,37 @@ mod tests {
     use axum::response::IntoResponse;
 
     use super::ToolError;
+
+    fn status_for(kind: &str) -> StatusCode {
+        ToolError::Sdk {
+            sdk_kind: kind.to_string(),
+            message: "x".to_string(),
+        }
+        .into_response()
+        .status()
+    }
+
+    #[test]
+    fn marketplace_stash_kinds_map_to_expected_status() {
+        assert_eq!(status_for("not_implemented"), StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(status_for("not_supported"), StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(
+            status_for("preview_truncated"),
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        assert_eq!(status_for("too_many_files"), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(
+            status_for("secrets_export_not_allowed"),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            status_for("missing_env_values"),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(status_for("unknown_target"), StatusCode::BAD_REQUEST);
+        assert_eq!(status_for("deploy_failed"), StatusCode::BAD_GATEWAY);
+        assert_eq!(status_for("not_connected"), StatusCode::BAD_GATEWAY);
+    }
 
     #[test]
     fn confirmation_required_maps_to_422() {

@@ -1,5 +1,25 @@
+//! Marketplace artifact update engine: check / preview / apply / merge-suggest.
+//!
+//! Drives the three-way merge between a fork's `base` snapshot (last applied
+//! upstream), the user's stash workspace (`yours`), and the freshly-fetched
+//! upstream source (`theirs`). Staleness is guarded with two non-cryptographic
+//! fingerprints (`upstream_fingerprint` + `local_fingerprint`, see
+//! [`stable_hash`]) so an apply is rejected if either side moved since the
+//! preview was produced.
+//!
+//! Fork discovery (`collect_forks`) reads forks from the stash store as
+//! `StashOrigin::Marketplace` components, and also still discovers legacy
+//! workspace-root `.stash.json` forks for back-compat. The `StashMeta` type in
+//! this module is the live legacy/in-workspace shape; durable fork state for the
+//! modern path lives on the stash component record plus the
+//! `<stash_root>/marketplace/<component_id>/` sidecar (see `stash_bridge.rs`).
+//!
+//! Upstream is fetched via a hardened `git` subprocess (no prompts, no system/
+//! global config, dangerous protocols denied, source root validated, 30s
+//! timeout). `ConflictStrategy` and the canonical `validate_rel_path` live in
+//! `params.rs`.
+
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, OnceLock};
@@ -9,17 +29,17 @@ use dashmap::DashMap;
 use diffy_imara::{create_patch, merge};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tempfile::NamedTempFile;
 
 use crate::dispatch::error::ToolError;
 use crate::dispatch::helpers::to_json;
 use crate::dispatch::marketplace::client;
+use crate::dispatch::marketplace::client::join_err;
+use crate::dispatch::marketplace::params::ConflictStrategy;
 use crate::dispatch::marketplace::params::{
     ConfigSetParams, MergeSuggestParams, UpdateApplyParams, parse_config_set_params,
     parse_merge_suggest_params, parse_plugin_id, parse_update_apply_params,
     parse_update_check_params, parse_update_preview_params,
 };
-use crate::dispatch::marketplace::stash_meta::ConflictStrategy;
 
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_PREVIEW_FILES: usize = 250;
@@ -272,14 +292,16 @@ struct PreviewTruncation {
     preview: String,
 }
 
+/// RAII guard holding an OS advisory lock on the stash `.stash.lock` file.
+///
+/// The lock is held for as long as the underlying file descriptor is open and
+/// is released by the kernel when the fd closes — including on process crash.
+/// This is deliberately NOT a `create_new` sentinel file: those leak on
+/// SIGKILL/power-loss and permanently wedge a fork on `conflict` until an
+/// operator manually deletes the lock file.
+#[derive(Debug)]
 struct StashLock {
-    path: PathBuf,
-}
-
-impl Drop for StashLock {
-    fn drop(&mut self) {
-        drop(std::fs::remove_file(&self.path));
-    }
+    _file: std::fs::File,
 }
 
 fn update_check(plugin_id: Option<String>) -> Result<Result<Value, ToolError>, ToolError> {
@@ -689,7 +711,19 @@ fn update_apply(params: UpdateApplyParams) -> Result<Result<Value, ToolError>, T
             ConflictStrategy::KeepMine => full_conflict.yours_content.clone().unwrap_or_default(),
             ConflictStrategy::TakeUpstream => theirs.clone(),
             ConflictStrategy::AiSuggest => deterministic_merge_suggestion(&full_conflict),
-            ConflictStrategy::AlwaysAsk => unreachable!("handled above"),
+            // `AlwaysAsk` with conflicts returns early above (the guard at the
+            // top of this function). Reaching here would mean that invariant was
+            // broken — e.g. a pending-preview file deserialized with a strategy
+            // inconsistent with its conflict set. Fail with a structured error
+            // rather than panicking inside `spawn_blocking`.
+            ConflictStrategy::AlwaysAsk => {
+                return Ok(Err(ToolError::Sdk {
+                    sdk_kind: "internal_error".into(),
+                    message: "always_ask strategy reached conflict application; \
+                              run artifact.update.preview again"
+                        .into(),
+                }));
+            }
         };
         writes.push(PlannedWrite {
             path: fork.stash.join(&conflict.path),
@@ -702,6 +736,7 @@ fn update_apply(params: UpdateApplyParams) -> Result<Result<Value, ToolError>, T
         applied_strategy.push(conflict.path.clone());
     }
 
+    warn_if_writes_contain_secrets(&writes, &[&fork.stash, &base]);
     apply_planned_writes(&writes)?;
     meta.upstream_version = preview.new_version.clone();
     meta.pending_update = None;
@@ -710,7 +745,12 @@ fn update_apply(params: UpdateApplyParams) -> Result<Result<Value, ToolError>, T
     } else {
         write_stash_meta(&fork.stash, &meta)?;
     }
-    drop(std::fs::remove_file(pending_path_for_fork(&fork)));
+    if let Err(e) = std::fs::remove_file(pending_path_for_fork(&fork))
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(error = %e, "failed to remove pending-update file after apply; \
+            a stale pending preview may be reported on the next check");
+    }
 
     to_json(ApplyResult {
         plugin_id: params.plugin_id,
@@ -727,7 +767,10 @@ fn merge_suggest(params: MergeSuggestParams) -> Result<Result<Value, ToolError>,
     let stash = stash_dir_for_plugin(&params.plugin_id)?;
     let meta = read_stash_meta(&stash)?;
     require_forked(&meta)?;
-    validate_rel_path(&params.artifact_path, "artifact_path")?;
+    crate::dispatch::marketplace::params::validate_rel_path(
+        &params.artifact_path,
+        "artifact_path",
+    )?;
     let source = source_path_for_plugin(&params.plugin_id)?;
     let conflict = MergeConflict {
         path: params.artifact_path.clone(),
@@ -1009,11 +1052,16 @@ fn save_stash_revision_and_update_origin(
     };
     let root = crate::dispatch::stash::client::require_stash_root()?.clone();
     let store = crate::dispatch::stash::store::StashStore::new(root);
-    tokio::runtime::Handle::current().block_on(crate::dispatch::stash::revision::save_revision(
+    // This runs inside `spawn_blocking` (see `update_apply`), so call the
+    // synchronous revision-save directly rather than re-entering the async
+    // runtime with `Handle::current().block_on`, which panics on a
+    // current-thread runtime and otherwise pins a blocking-pool thread on
+    // async work.
+    crate::dispatch::stash::revision::save_revision_blocking(
         &store,
         component_id,
         Some(&format!("Apply marketplace update {}", preview.new_version)),
-    ))?;
+    )?;
     store.with_component_lock(component_id, || {
         let mut component = store
             .read_component(component_id)?
@@ -1161,22 +1209,11 @@ fn write_stash_meta(stash: &Path, meta: &StashMeta) -> Result<(), ToolError> {
 }
 
 fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), ToolError> {
-    let bytes = serde_json::to_vec_pretty(value).map_err(client::io_internal)?;
-    write_atomic(path, &bytes)
+    crate::dispatch::fs_atomic::write_json_atomic(path, value)
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ToolError> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(client::io_internal)?;
-    }
-    let temp_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let mut temp = NamedTempFile::new_in(temp_dir).map_err(client::io_internal)?;
-    temp.write_all(bytes).map_err(client::io_internal)?;
-    // fsync before the rename so the file is never published with unwritten data.
-    temp.as_file().sync_all().map_err(client::io_internal)?;
-    temp.persist(path)
-        .map_err(|err| client::io_internal(err.error))?;
-    Ok(())
+    crate::dispatch::fs_atomic::write_bytes_atomic(path, bytes)
 }
 
 fn require_forked(meta: &StashMeta) -> Result<(), ToolError> {
@@ -1193,17 +1230,34 @@ fn require_forked(meta: &StashMeta) -> Result<(), ToolError> {
 fn acquire_stash_lock(stash: &Path) -> Result<StashLock, ToolError> {
     std::fs::create_dir_all(stash).map_err(client::io_internal)?;
     let path = stash.join(".stash.lock");
-    match std::fs::OpenOptions::new()
+    let file = std::fs::OpenOptions::new()
+        .read(true)
         .write(true)
-        .create_new(true)
+        .create(true)
+        .truncate(false)
         .open(&path)
-    {
-        Ok(_) => Ok(StashLock { path }),
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(ToolError::Sdk {
+        .map_err(client::io_internal)?;
+    acquire_advisory_lock(file, "artifact stash is locked by another operation")
+        .map(|file| StashLock { _file: file })
+}
+
+/// Take a non-blocking exclusive advisory lock on `file`, returning a `conflict`
+/// error if another process already holds it. The lock auto-releases when the
+/// file descriptor closes, so a crash cannot leave a permanently-held lock.
+fn acquire_advisory_lock(
+    file: std::fs::File,
+    busy_message: &str,
+) -> Result<std::fs::File, ToolError> {
+    // `File::try_lock` (stable since Rust 1.89) takes a non-blocking exclusive
+    // advisory lock that the kernel releases when the fd closes, including on
+    // crash. `Err(WouldBlock)` means another holder has it.
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(ToolError::Sdk {
             sdk_kind: "conflict".into(),
-            message: "artifact stash is locked by another operation".into(),
+            message: busy_message.into(),
         }),
-        Err(error) => Err(client::io_internal(error)),
+        Err(std::fs::TryLockError::Error(error)) => Err(client::io_internal(error)),
     }
 }
 
@@ -1262,7 +1316,7 @@ fn collect_versions(
         }
         ForkType::Artifact => {
             for path in &meta.forked_artifacts {
-                validate_rel_path(path, "forked_artifacts")?;
+                crate::dispatch::marketplace::params::validate_rel_path(path, "forked_artifacts")?;
                 collect_artifact_text_paths(stash, base, source, path, &mut paths)?;
             }
         }
@@ -1408,32 +1462,12 @@ fn compute_tree_fingerprint(root: &Path) -> Result<String, ToolError> {
     Ok(format!("{:016x}", stable_hash(acc.as_bytes())))
 }
 
+/// Non-cryptographic content fingerprint used for change detection (preview
+/// staleness, drift). Uses xxh3 — the single non-crypto hash for the marketplace
+/// fork flow. (Durable, content-addressed revision digests use SHA-256 in
+/// `stash::revision`; do not conflate the two.)
 fn stable_hash(bytes: &[u8]) -> u64 {
-    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    hash
-}
-
-fn validate_rel_path(path: &str, param: &str) -> Result<(), ToolError> {
-    let candidate = Path::new(path);
-    if candidate.is_absolute() {
-        return Err(ToolError::InvalidParam {
-            param: param.into(),
-            message: "artifact path must be relative".into(),
-        });
-    }
-    for component in candidate.components() {
-        if !matches!(component, std::path::Component::Normal(_)) {
-            return Err(ToolError::InvalidParam {
-                param: param.into(),
-                message: "artifact path contains traversal or invalid segments".into(),
-            });
-        }
-    }
-    Ok(())
+    xxhash_rust::xxh3::xxh3_64(bytes)
 }
 
 fn try_clean_merge(base: &str, yours: &str, theirs: &str) -> Option<String> {
@@ -1549,7 +1583,15 @@ fn fetch_marketplace(marketplace: &str, root: &Path) -> Result<(), ToolError> {
         message: "marketplace fetch lock poisoned".into(),
     })?;
     let supports_no_config = git_supports_no_config()?;
+    tracing::debug!(marketplace, "marketplace git fetch starting");
+    let started = Instant::now();
     let status = run_git_fetch(&canonical, supports_no_config)?;
+    tracing::debug!(
+        marketplace,
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        success = status.success(),
+        "marketplace git fetch finished"
+    );
     if status.success() {
         return Ok(());
     }
@@ -1559,9 +1601,18 @@ fn fetch_marketplace(marketplace: &str, root: &Path) -> Result<(), ToolError> {
             message: format!("marketplace `{marketplace}` requires git authentication"),
         });
     }
+    // Include the exit code for diagnostics. We deliberately do NOT capture and
+    // surface git's stderr: a failing fetch typically prints the remote URL
+    // (`fatal: unable to access 'https://...'`), and `OBSERVABILITY.md` forbids
+    // logging provider URLs. The numeric code is enough to distinguish the
+    // common failure classes without that leak.
+    let code = status
+        .code()
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "signal".to_string());
     Err(ToolError::Sdk {
         sdk_kind: "server_error".into(),
-        message: format!("git fetch failed for marketplace `{marketplace}`"),
+        message: format!("git fetch failed for marketplace `{marketplace}` (git exit {code})"),
     })
 }
 
@@ -1609,6 +1660,10 @@ fn run_git_fetch(
         if Instant::now() >= deadline {
             drop(child.kill());
             drop(child.wait());
+            tracing::warn!(
+                timeout_secs = FETCH_TIMEOUT.as_secs(),
+                "marketplace git fetch timed out and was killed"
+            );
             return Err(ToolError::Sdk {
                 sdk_kind: "network_error".into(),
                 message: "git fetch timed out after 30s".into(),
@@ -1675,17 +1730,41 @@ fn remote_head_ref(root: &Path) -> Option<String> {
         .filter(|text| !text.is_empty())
 }
 
+/// Cap on the bytes read from `git show` for a manifest. Marketplace manifests
+/// (`plugin.json`/`marketplace.json`) are small; a multi-GB file at that path in
+/// a malicious upstream repo must not OOM the process. Oversized output is
+/// treated as "manifest absent".
+const MAX_GIT_SHOW_BYTES: u64 = 1024 * 1024;
+
 fn git_show(root: &Path, head: &str, rel: &str) -> Result<Option<String>, ToolError> {
+    use std::io::Read;
     let spec = format!("{head}:{rel}");
-    let output = hardened_git_command(root, false)
+    let mut child = hardened_git_command(root, false)
         .arg("show")
         .arg(spec)
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
         .map_err(map_git_spawn_error)?;
-    if !output.status.success() {
+    // Read at most MAX_GIT_SHOW_BYTES + 1 so we can detect (and reject) overflow.
+    let mut buf = Vec::new();
+    let read_result = match child.stdout.take() {
+        Some(stdout) => stdout.take(MAX_GIT_SHOW_BYTES + 1).read_to_end(&mut buf),
+        None => Ok(0),
+    };
+    let status = child.wait().map_err(client::io_internal)?;
+    read_result.map_err(client::io_internal)?;
+    if !status.success() {
         return Ok(None);
     }
-    String::from_utf8(output.stdout)
+    if buf.len() as u64 > MAX_GIT_SHOW_BYTES {
+        tracing::warn!(
+            rel,
+            "git show output exceeds cap; treating manifest as absent"
+        );
+        return Ok(None);
+    }
+    String::from_utf8(buf)
         .map(Some)
         .map_err(|e| ToolError::Sdk {
             sdk_kind: "decode_error".into(),
@@ -1737,9 +1816,19 @@ fn deterministic_merge_suggestion(conflict: &MergeConflict) -> String {
 fn apply_planned_writes(writes: &[PlannedWrite]) -> Result<(), ToolError> {
     let mut originals = BTreeMap::new();
     for write in writes {
-        if !originals.contains_key(&write.path) {
-            originals.insert(write.path.clone(), std::fs::read(&write.path).ok());
+        if originals.contains_key(&write.path) {
+            continue;
         }
+        // Capture the original fallibly: only a genuinely-absent file becomes
+        // `None`. A file that exists but is unreadable (permissions, I/O) must
+        // abort BEFORE any write, otherwise rollback could delete or fail to
+        // restore a pre-existing target whose content was never captured.
+        let original = match std::fs::read(&write.path) {
+            Ok(bytes) => Some(bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(client::io_internal(error)),
+        };
+        originals.insert(write.path.clone(), original);
     }
 
     for write in writes {
@@ -1794,6 +1883,39 @@ fn changed_region_text(conflict: &MergeConflict) -> String {
     .join("\n")
 }
 
+/// Detective (non-blocking) secret scan for the apply path.
+///
+/// Upstream content can legitimately contain `token = ...` lines, so blocking
+/// the update on a fuzzy heuristic would break valid forks. Instead we emit a
+/// redacted WARN listing the affected paths (never the content) so an operator
+/// can audit a fork that pulled in credential-shaped content. The pre-LLM
+/// `merge.suggest` path still blocks via [`contains_secret`].
+fn warn_if_writes_contain_secrets(writes: &[PlannedWrite], roots: &[&Path]) {
+    let mut flagged: BTreeSet<String> = BTreeSet::new();
+    for write in writes {
+        if let Some(content) = &write.content
+            && contains_secret(content)
+        {
+            // Log a path relative to a fork root, never the absolute path — the
+            // stash root reveals the username/filesystem layout, which
+            // OBSERVABILITY.md says not to leak. Fall back to the file name.
+            let rel = roots
+                .iter()
+                .find_map(|root| write.path.strip_prefix(root).ok())
+                .or_else(|| write.path.file_name().map(Path::new))
+                .unwrap_or(&write.path);
+            flagged.insert(rel.display().to_string());
+        }
+    }
+    if !flagged.is_empty() {
+        tracing::warn!(
+            count = flagged.len(),
+            paths = ?flagged,
+            "marketplace update wrote credential-shaped content; review the fork for leaked secrets"
+        );
+    }
+}
+
 fn contains_secret(text: &str) -> bool {
     for line in text.lines() {
         let lower = line.to_ascii_lowercase();
@@ -1832,20 +1954,13 @@ fn build_merge_prompt(conflict: &MergeConflict) -> String {
     )
 }
 
-fn join_err(error: tokio::task::JoinError) -> ToolError {
-    ToolError::Sdk {
-        sdk_kind: "internal_error".into(),
-        message: format!("join error: {error}"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::client;
     use super::super::dispatch::dispatch;
     use super::{
-        PlannedWrite, TEST_GIT_BIN, TEST_GIT_BIN_LOCK, apply_planned_writes, git_security_args,
-        git_security_envs,
+        PlannedWrite, TEST_GIT_BIN, TEST_GIT_BIN_LOCK, acquire_stash_lock, apply_planned_writes,
+        contains_secret, git_security_args, git_security_envs,
     };
     use crate::dispatch::error::ToolError;
     use lab_apis::stash::{
@@ -2615,6 +2730,36 @@ esac
     }
 
     #[test]
+    fn update_apply_does_not_block_when_upstream_looks_like_secret() {
+        // Apply is deliberately detective-only on secrets (the merge.suggest
+        // path blocks; apply must not, or every fork whose upstream legitimately
+        // ships a `token = ...` line would break). Pin that asymmetry.
+        let dir = tempdir().unwrap();
+        seed_fork(
+            dir.path(),
+            "1.0.0",
+            "k=base\n",
+            "k=mine\n",
+            // Credential-shaped (keyword + `=`) but a low-entropy placeholder, so
+            // it trips the heuristic without being a real-looking secret pattern.
+            "api_key = placeholder-not-a-real-key\n",
+        );
+
+        let result = dispatch_with_home(
+            dir.path(),
+            "artifact.update.apply",
+            json!({ "plugin_id": plugin_id(), "strategy": "take_upstream", "confirm": true }),
+        )
+        .unwrap();
+        assert_eq!(result["status"], "complete");
+        assert!(
+            std::fs::read_to_string(workspace(dir.path()).join("plugin.json"))
+                .unwrap()
+                .contains("api_key")
+        );
+    }
+
+    #[test]
     fn update_apply_take_upstream_overwrites_working() {
         let dir = tempdir().unwrap();
         seed_fork(
@@ -2741,13 +2886,44 @@ esac
     }
 
     #[test]
+    fn acquire_stash_lock_second_holder_gets_conflict() {
+        let dir = tempdir().unwrap();
+        let stash = dir.path().join("fork");
+        let _held = acquire_stash_lock(&stash).unwrap();
+        // A second acquire must not block and must surface a `conflict` envelope.
+        let err = acquire_stash_lock(&stash).unwrap_err();
+        assert_eq!(err.kind(), "conflict");
+    }
+
+    #[test]
+    fn acquire_stash_lock_released_on_drop_allows_reacquire() {
+        let dir = tempdir().unwrap();
+        let stash = dir.path().join("fork");
+        drop(acquire_stash_lock(&stash).unwrap());
+        // Dropping the guard closes the fd → kernel releases the advisory lock.
+        assert!(acquire_stash_lock(&stash).is_ok());
+    }
+
+    #[test]
+    fn contains_secret_flags_each_detector_branch() {
+        assert!(contains_secret("api_key = whatever")); // keyword + '='
+        assert!(contains_secret("password: hunter2")); // keyword + ':'
+        // `sk-` prefix + a >=20-char tail; the dashes keep it from matching real
+        // provider secret patterns (so it doesn't trip repo secret scanners).
+        assert!(contains_secret("x sk-not-a-real-token-aaaa-bbbb"));
+        assert!(contains_secret(&"A".repeat(40))); // base64-ish run
+        assert!(!contains_secret("just a normal line"));
+        assert!(!contains_secret("token")); // keyword but no '='/':'
+    }
+
+    #[test]
     fn merge_suggest_rejects_secret_content_before_backend() {
         let dir = tempdir().unwrap();
         seed_fork(
             dir.path(),
             "1.0.0",
             "line=base\n",
-            "api_key = sk-abcdefghijklmnopqrstuvwxyz\n",
+            "api_key = sk-not-a-real-token-aaaa-bbbb\n",
             "line=theirs\n",
         );
 

@@ -1,7 +1,10 @@
-//! Marketplace artifact diff/patch stubs.
+//! Marketplace artifact diff/patch actions — not yet implemented.
 //!
-//! Full diff and patch behavior belongs to `lab-iut1.4`. This module wires the
-//! action surface with stable signatures and structured placeholder errors.
+//! `artifact.diff` and `artifact.patch` are advertised in the catalog but
+//! currently return the `not_implemented` error kind. The intended behavior is
+//! described in `docs/contracts/marketplace-stash-integration.md`; until it
+//! lands, these wire stable signatures and a structured `not_implemented`
+//! envelope so callers fail predictably rather than on a missing action.
 
 use serde_json::Value;
 

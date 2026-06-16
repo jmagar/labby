@@ -56,12 +56,55 @@ The handwritten contract is organized by action family:
 | `sources.*` | `sources.list`, `sources.add` | List or add Claude/Codex plugin marketplaces. |
 | `plugins.*` | `plugins.list` | Search plugin manifests across configured plugin marketplaces. |
 | `plugin.*` | `plugin.get`, `plugin.install`, `plugin.workspace`, `plugin.deploy` | Read, install, edit, and deploy whole plugins. |
-| `artifact.*` | `artifact.fork`, `artifact.diff`, `artifact.update.apply` | Fork, patch, diff, reset, and update individual plugin artifacts. |
+| `artifact.*` | `artifact.fork`, `artifact.list`, `artifact.update.apply` | Fork, reset, and update individual plugin artifacts. `artifact.diff` and `artifact.patch` are reserved but **not yet implemented** (see below). |
 | `mcp.*` | `mcp.config`, `mcp.list`, `mcp.get`, `mcp.versions`, `mcp.validate`, `mcp.meta.get`, `mcp.meta.set`, `mcp.meta.delete`, `mcp.sync`, `mcp.install`, `mcp.uninstall` | Discover, validate, mirror, annotate, install, and remove MCP Registry servers. |
 | `agent.*` | `agent.list`, `agent.get`, `agent.install`, `agent.uninstall` | Discover and install ACP-compatible agents. |
 
 `help` and `schema` are also available through the shared service dispatch
 model.
+
+### Artifact action status
+
+Not every `artifact.*` action is fully implemented yet:
+
+- `artifact.diff` and `artifact.patch` are **reserved but not yet implemented**.
+  Calling either returns the `not_implemented` error kind. The action signatures
+  and the shared git shell-out boundary exist so the implementation can land
+  without changing the wire shape, but no diff/patch is produced today.
+- `artifact.list` returns a per-fork drift `status` field that is currently a
+  placeholder. Per-artifact drift detection is not yet wired, so `status` is
+  reported as `"unknown"` for every fork unless drift detection is enabled.
+  Treat `"unknown"` as "drift not computed", not as "no drift".
+
+The full marketplace ↔ stash boundary, including these caveats, is specified in
+[marketplace-stash-integration.md](../contracts/marketplace-stash-integration.md).
+
+### Fork persistence
+
+Forked artifacts are stored as first-class Stash components, not in a
+marketplace-private store. Two representations exist:
+
+- **Modern (canonical):** each fork is a Stash component record whose
+  `origin_meta` is `StashOrigin::Marketplace`. Tracked content lives in the
+  normal Stash workspace, and marketplace helper metadata (base snapshot,
+  pending update, drift cache) lives in a Stash-owned sidecar at
+  `<stash_root>/marketplace/<component_id>/`. This component-record + sidecar
+  pair is the authoritative storage for all new forks.
+- **Legacy (retired, read-only):** earlier forks wrote a `.stash.json` file
+  under `<workspace.root>/plugins/<plugin_id>/`. This path is no longer
+  authoritative — it is recognized only as a legacy discovery branch and is
+  migrated on read into the modern component-record model. New forks are never
+  written there, and `.stash.json`/`stash_meta` is not the canonical fork store.
+
+See [STASH.md](./STASH.md#marketplace-origin-components) for the stash-side view.
+
+### Git runtime requirement
+
+`artifact.fork` and the `artifact.update.*` actions shell out to a `git` binary
+on `PATH` (for example, `artifact.update.check` fetches upstream refs). If `git`
+is absent, these actions fail closed with the `git_not_available` error kind
+rather than degrading silently. Install `git` on the controller host to use the
+fork/update workflows.
 
 ## Install Targets
 

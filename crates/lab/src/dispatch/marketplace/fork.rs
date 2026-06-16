@@ -1,7 +1,9 @@
-//! Marketplace artifact fork lifecycle stubs.
+//! Marketplace artifact fork lifecycle dispatch shims.
 //!
-//! Full fork lifecycle behavior belongs to `lab-iut1.3`. This module wires the
-//! action surface with stable signatures and structured placeholder errors.
+//! Thin wrappers for the artifact fork/list/unfork/reset actions. The business
+//! logic lives in [`stash_bridge`](super::stash_bridge); these wrappers add the
+//! destructive-intent logging required by `docs/dev/OBSERVABILITY.md`. See
+//! `docs/contracts/marketplace-stash-integration.md` for the action contract.
 
 use serde_json::Value;
 

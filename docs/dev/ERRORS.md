@@ -131,6 +131,10 @@ The following kinds are emitted by the `stash` dispatch service.
 - `symlink_rejected` — a symlink was encountered during a workspace walk (the canonical top-level `symlink_rejected` kind; emitted during save, import, and export). HTTP 422.
 - `export_target_not_empty` — the output directory for `component.export` is non-empty and `force` is not set. HTTP 409.
 - `ambiguous_kind` — component kind could not be auto-detected from the source path and no `kind` override was provided. HTTP 422.
+- `secrets_export_not_allowed` — `component.export` was requested for a component whose `kind` is `Settings` or `McpConfig`; these may carry secrets and are not exportable (`stash/export.rs`). HTTP 403 (Forbidden).
+- `too_many_files` — a workspace walk during import exceeded `MAX_FILE_COUNT` (`stash/import.rs`). HTTP 413 (Payload Too Large).
+- `unknown_target` — `component.deploy` named a deploy target that is not registered (`stash/service.rs`). HTTP 400 (Bad Request), grouped with the other `unknown_*` kinds.
+- `deploy_failed` — a `component.deploy` operation failed during the deploy execution (target write, atomic rename, or post-deploy step) in `stash/service.rs`. HTTP 502 (Bad Gateway), grouped with the other deploy execution kinds.
 
 ### Setup / env_merge kinds (lab-bg3e.3)
 
@@ -171,12 +175,20 @@ instead of double-wrapping.
 
 ### Marketplace artifact update kinds
 
-- `git_not_available` — `artifact.update.check` could not spawn `git`. Install git on the controller host to use update checking. HTTP 500.
+- `git_not_available` — `artifact.update.check`, `artifact.fork`, and the other `artifact.update.*` actions could not spawn `git`. Install git on the controller host to use the fork/update workflows. HTTP 500.
 - `marketplace_auth_required` — `artifact.update.check` received git exit code 128 while fetching a marketplace; the message names the marketplace and does not include credentials or git stderr. HTTP 401.
-- `not_forked` — an artifact update action was requested for a plugin without forked `.stash.json` metadata. HTTP 404.
+- `not_forked` — an artifact update action was requested for a plugin that has no marketplace fork (no `StashOrigin::Marketplace` component, and no legacy `.stash.json` discoverable for migration). HTTP 404.
 - `stale_preview` — `artifact.update.apply` was called with a pending preview whose upstream fingerprint no longer matches the current marketplace source. Caller must run `artifact.update.preview` again. HTTP 409.
 - `ai_backend_not_configured` — `artifact.merge.suggest` or AI merge application needs an AI backend, but no merge backend is configured. HTTP 422.
 - `content_contains_secrets` — `artifact.merge.suggest` rejected changed artifact content before transmission because it matched credential-like patterns. HTTP 422.
+- `preview_truncated` — `artifact.update.preview` exceeded a configured size limit (total preview files, per-file bytes, or total diff bytes). The truncated entries carry `truncated: true`, `original_size`, and a `preview` string. HTTP 413 (Payload Too Large).
+- `not_implemented` — a reserved action with a stable signature is not yet implemented. Emitted by `artifact.diff` and `artifact.patch` (`marketplace/patch.rs`, `marketplace/diff.rs`). HTTP 501 (Not Implemented).
+- `not_supported` — a marketplace sub-surface received a request that is structurally valid but unsupported for the selected registry/runtime/path (e.g. an MCP or ACP dispatch branch that does not support the requested shape). Emitted across `marketplace/mcp_dispatch.rs`, `marketplace/acp_dispatch.rs`, and `marketplace/dispatch.rs`. HTTP 501 (Not Implemented).
+- `not_connected` — a marketplace operation required a client/connection that is not available; the unconfigured client returns a structured `not_connected` error rather than panicking (`marketplace/client.rs`). HTTP 502 (Bad Gateway).
+- `not_configured` — a required marketplace/registry configuration value is absent. HTTP 500 (internal-style, aligning with the `not_configured_error()` → `internal_error` convention in `dispatch/CLAUDE.md`; falls through to the default 500 arm).
+- `missing_env_values` — an MCP install requires environment values (via `env_values` or an explicit env-var reference) that were not supplied (`marketplace/mcp_dispatch.rs`). HTTP 422 (Unprocessable Entity).
+- `unsupported_runtime_hint` — an MCP install `runtime_hint` is not in the allowed list (`marketplace/mcp_params.rs`, `marketplace/mcp_dispatch.rs`). HTTP 422 (Unprocessable Entity).
+- `unsupported_registry_type` — an MCP registry package/type is not supported for install (`marketplace/mcp_dispatch.rs`). HTTP 422 (Unprocessable Entity).
 
 Additional MCP destructive-confirmation flow-control case:
 

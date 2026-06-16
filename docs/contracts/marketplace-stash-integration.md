@@ -1,10 +1,20 @@
 # Marketplace Stash Integration Contract
 
-Status: Draft
+Status: Active
 Date: 2026-06-13
 
 This contract defines the stable boundary between `marketplace`, `stash`, HTTP,
 MCP, CLI, and gateway-admin for marketplace-origin Stash components.
+
+The integration ships: marketplace forks persist as first-class Stash components
+(`StashOrigin::Marketplace`), and the fork/list/unfork/reset/update action family
+is wired end to end. Two caveats apply to this otherwise-Active status:
+
+- `artifact.diff` and `artifact.patch` are **not yet implemented** — both return
+  the `not_implemented` error kind today (see their action sections below).
+- `artifact.list` reports a per-artifact drift `status` that is currently a
+  placeholder (`"unknown"`) — real drift detection is not yet wired (see the
+  `artifact.list` section).
 
 ## Service Ownership Contract
 
@@ -294,6 +304,37 @@ Response:
 ]
 ```
 
+**Drift `status` is a placeholder.** Per-artifact drift detection is not yet
+wired, so `status` is currently reported as `"unknown"` for every fork unless a
+later drift-detection implementation is enabled. Callers must treat `"unknown"`
+as "drift not computed", not as "no drift". When drift detection lands, this
+field becomes a concrete state (e.g. `clean`/`dirty`); until then, do not gate
+behavior on `status`.
+
+### Marketplace `artifact.diff` (not yet implemented)
+
+`artifact.diff` is reserved in the action surface but **not yet implemented**.
+Calling it returns the `not_implemented` error kind:
+
+```json
+{ "kind": "not_implemented", "message": "artifact.diff: artifact diff is not implemented yet for `demo@labby`" }
+```
+
+The stable request signature (`plugin_id`, artifact selection) and the shared
+git shell-out boundary exist so the implementation can land without changing the
+wire shape. Until then, callers must not depend on a diff payload.
+
+### Marketplace `artifact.patch` (not yet implemented)
+
+`artifact.patch` is reserved in the action surface but **not yet implemented**.
+Calling it returns the `not_implemented` error kind:
+
+```json
+{ "kind": "not_implemented", "message": "artifact.patch: artifact patch is not implemented yet for `demo@labby` at `skills/demo/SKILL.md`" }
+```
+
+As with `artifact.diff`, the signature is stable but no patch is applied.
+
 ### Marketplace `artifact.unfork`
 
 Removes fork tracking by deleting the matching Stash component.
@@ -547,6 +588,32 @@ workflows.
 
 ## Storage Contract
 
+### Fork persistence (canonical vs legacy)
+
+There are two on-disk representations for a marketplace fork. New forks use the
+modern representation; the legacy representation is retired and read-only.
+
+**Modern (canonical):** a fork is a first-class Stash component record carrying
+`origin_meta` with `kind: "marketplace"` (`StashOrigin::Marketplace`). The
+component's tracked content lives in the normal Stash workspace
+(`<stash_root>/workspaces/<component_id>/`), and marketplace-specific helper
+metadata (base snapshot, pending update, drift cache) lives in a Stash-owned
+sidecar directory at `<stash_root>/marketplace/<component_id>/`. This component
+record + sidecar pair is the authoritative, canonical storage for all new forks.
+
+**Legacy (retired, read-only):** earlier forks wrote a `.stash.json` metadata
+file under `<workspace.root>/plugins/<plugin_id>/`. This path is **not** the
+authoritative store. It is recognized only as a legacy discovery branch and is
+migrated on read into the modern component-record model. New code must never
+treat `.stash.json` (or any `stash_meta`-style sidecar under
+`plugins/<id>/`) as the durable schema owner, and must not write new forks
+there.
+
+> The `stash_meta.rs` module that defined the `.stash.json` schema is dead code
+> retained only for the migrate-on-read path; it is not the canonical fork
+> store. The canonical model is the `StashOrigin::Marketplace` component record
+> plus the `<stash_root>/marketplace/<component_id>/` sidecar described above.
+
 ### Stash Root
 
 Stash root resolution remains:
@@ -581,6 +648,23 @@ Rules:
   deploy, or Marketplace plugin deploy payloads.
 - If future migrations place helper files under workspaces, revision/export/deploy
   exclusion tests are required in the same change.
+
+### Legacy discovery
+
+In addition to enumerating modern component records, marketplace fork discovery
+also checks the legacy `.stash.json` location under
+`<workspace.root>/plugins/<plugin_id>/`. Any fork found only at the legacy path
+is treated as discoverable but read-only and is migrated on read into the modern
+component-record model (see "Fork persistence" above). The legacy branch exists
+purely for back-compat discovery and migration; nothing should write to it.
+
+### Git runtime requirement
+
+The `marketplace.artifact.update.*` actions and `artifact.fork` shell out to a
+`git` binary on `PATH` (for example, `artifact.update.check` fetches upstream
+refs). If `git` is not available, these actions fail closed with the
+`git_not_available` error kind rather than silently degrading. Install `git` on
+the controller host to use the fork/update workflows.
 
 ## API Contract
 
@@ -634,8 +718,10 @@ New or reused kinds:
 | `file_too_large` | stash | Single file exceeds limit |
 | `workspace_too_large` | stash | Import exceeds workspace limits |
 | `marketplace_auth_required` | marketplace | Git fetch requires credentials |
+| `git_not_available` | marketplace | `git` binary missing on `PATH` for fork/update actions |
 | `stale_preview` | marketplace | Upstream or local fork changed after preview |
 | `preview_truncated` | marketplace | Preview exceeded configured size limits |
+| `not_implemented` | marketplace | Action is reserved but not yet implemented (`artifact.diff`, `artifact.patch`) |
 | `forbidden` | both | Caller lacks required scope |
 | `content_contains_secrets` | marketplace | Merge suggestion input appears secret-bearing |
 | `ai_backend_not_configured` | marketplace | AI merge requested without backend |

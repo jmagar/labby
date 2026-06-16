@@ -24,12 +24,10 @@
 #![allow(dead_code)]
 
 use std::fs::{File, OpenOptions};
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tempfile::NamedTempFile;
 
 use lab_apis::stash::types::{
     StashComponent, StashDeployTarget, StashProviderRecord, StashRevision, StashWorkspaceShape,
@@ -802,16 +800,7 @@ fn open_lock_file(path: &Path) -> Result<File, ToolError> {
 /// Uses a temp file in the same directory and `persist` (atomic rename) so
 /// readers never see a partially-written file.
 fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), ToolError> {
-    let Some(parent) = path.parent() else {
-        return Err(ToolError::internal_message("target path has no parent"));
-    };
-    std::fs::create_dir_all(parent).map_err(io_internal)?;
-    let mut temp = NamedTempFile::new_in(parent).map_err(io_internal)?;
-    let bytes = serde_json::to_vec_pretty(value).map_err(io_internal)?;
-    temp.write_all(&bytes).map_err(io_internal)?;
-    temp.as_file().sync_all().map_err(io_internal)?;
-    temp.persist(path).map_err(|e| io_internal(e.error))?;
-    Ok(())
+    crate::dispatch::fs_atomic::write_json_atomic(path, value)
 }
 
 /// Read and deserialize a JSON file, returning `None` if the file does not

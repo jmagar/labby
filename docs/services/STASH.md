@@ -82,6 +82,57 @@ Stash tracks 13 component kinds. Each kind has a fixed workspace shape.
 
 If kind cannot be auto-detected and no override is given, `component.import` returns `ambiguous_kind`.
 
+## Marketplace-origin components
+
+Stash is also the durable home for **marketplace forks**. When the marketplace
+service forks a plugin or an individual artifact, it does not keep a private
+copy — it adopts the content as a first-class Stash component. These components
+are ordinary Stash components in every respect (revisions, workspaces, providers,
+deploy) and additionally carry origin metadata that records where they came from.
+
+### `StashOrigin` and `origin_meta`
+
+Each component record may carry an optional `origin_meta` field describing its
+provenance via the `StashOrigin` shape. The marketplace variant is
+`StashOrigin::Marketplace`:
+
+```json
+{
+  "kind": "marketplace",
+  "plugin_id": "demo@labby",
+  "artifact_path": "skills/demo/SKILL.md",
+  "source_version": "1.0.0",
+  "source_fingerprint": "tree-fingerprint-abc123"
+}
+```
+
+Compatibility rules:
+
+- `origin_meta` is optional and defaults to `null`.
+- Component records written before this field existed must still deserialize.
+- New code uses `origin_meta` for behavior; the older free-form `origin` string
+  is retained only for display/back-compat.
+
+A component with `StashOrigin::Marketplace` is a normal, first-class Stash
+component — there is no separate "marketplace store". This is the canonical
+storage for marketplace forks.
+
+### Fork sidecar and legacy path
+
+Marketplace-specific helper metadata for a fork (base snapshot, pending update,
+drift cache) lives in a Stash-owned sidecar directory at
+`<stash_root>/marketplace/<component_id>/`, **outside** the tracked workspace, so
+it never appears in revisions, provider sync, export, or deploy payloads.
+
+An older representation wrote a `.stash.json` file under
+`<workspace.root>/plugins/<plugin_id>/`. That path is **retired and read-only**:
+it is recognized only as a legacy discovery branch and migrated on read into the
+modern component-record + sidecar model above. It is not the authoritative fork
+store.
+
+The full marketplace ↔ stash boundary is specified in
+[marketplace-stash-integration.md](../contracts/marketplace-stash-integration.md).
+
 ## Actions
 
 All 18 actions are dispatched via `stash({ "action": "...", "params": {...} })`.
@@ -281,3 +332,9 @@ Stash-specific error kinds:
 - `symlink_rejected` — symlink encountered during workspace walk (HTTP 422)
 - `export_target_not_empty` — output directory non-empty and `force` not set (HTTP 409)
 - `ambiguous_kind` — component kind could not be auto-detected (HTTP 422)
+- `secrets_export_not_allowed` — `component.export` of a `settings`/`mcp_config` component is refused (may carry secrets); suggested 403, currently 500
+- `too_many_files` — import workspace exceeds `MAX_FILE_COUNT`; suggested 413, currently 500
+- `unknown_target` — `component.deploy` named an unregistered deploy target; suggested 404, currently 500
+- `deploy_failed` — `component.deploy` failed during execution; HTTP 500
+
+> Note: several of the kinds above (`secrets_export_not_allowed`, `too_many_files`, `unknown_target`) are not yet given an explicit HTTP status in `api/error.rs` and currently fall through to HTTP 500. See [ERRORS.md](../dev/ERRORS.md#stash-specific-kinds) for the canonical status mapping and suggested target codes.

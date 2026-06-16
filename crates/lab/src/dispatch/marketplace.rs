@@ -25,7 +25,6 @@ mod patch;
 mod runtime;
 pub(crate) mod service;
 mod stash_bridge;
-pub(crate) mod stash_meta;
 pub mod store;
 pub mod sync;
 mod update;

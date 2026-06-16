@@ -5,6 +5,7 @@ pub mod deploy;
 pub mod doctor;
 pub mod error;
 pub mod fs;
+pub mod fs_atomic;
 #[cfg(feature = "gateway")]
 pub mod gateway;
 pub mod helpers;
