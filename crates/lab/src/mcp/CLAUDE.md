@@ -91,12 +91,15 @@ When the MCP client does not support elicitation (e.g. headless agents, CI, Clau
 The above is lab's *own* server→downstream elicitation. The reverse direction —
 an **upstream** MCP server that raises `elicitation/create` (or sampling/roots)
 back at the gateway during a proxied tool call — is bridged by the relay path.
-`mcp/call_tool_upstream.rs` routes the raw-proxy call through
+`mcp/call_tool_upstream.rs` routes the proxied call through
 `UpstreamPool::call_tool_relayed` (a dedicated connection served with
 `RelayClientHandler`, see `dispatch/upstream/pool/relay.rs`) instead of the
-pooled `call_tool` when **both**: the `LAB_UPSTREAM_RELAY_ELICITATION` env flag
-is set, and the downstream agent advertised elicitation
-(`context.peer.supported_elicitation_modes()` non-empty). The relay forwards the
+pooled `call_tool` / `subject_scoped_call_tool` when **both**: the
+`LAB_UPSTREAM_RELAY_ELICITATION` env flag is set, and the downstream agent
+advertised elicitation (`context.peer.supported_elicitation_modes()` non-empty).
+Both proxy branches honor the gate — the raw branch passes `subject = None`, the
+OAuth/subject-scoped branch forwards the resolved `oauth_subject` so the
+dedicated connection authenticates as the caller. The relay forwards the
 upstream's request straight to `context.peer` (the agent). It is opt-in because
 each relayed call pays a fresh upstream connect; the default path stays pooled.
 
