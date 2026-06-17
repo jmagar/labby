@@ -211,8 +211,12 @@ fn search_trace_summarizes_matched_tools() {
     assert_eq!(trace["matches"][0]["has_schema"], json!(true));
     assert_eq!(trace["matches"][0]["has_output_schema"], json!(false));
 
-    let serialized = trace.to_string();
-    assert!(!serialized.contains("large"));
+    // The UI summary stays compact, but structuredContent also carries the
+    // actual search result so agents that prefer structuredContent can still
+    // inspect schema/signature/DTS data.
+    assert_eq!(trace["result"][0]["schema"], json!({"type": "object"}));
+    assert_eq!(trace["result"][0]["signature"], json!("large"));
+    assert_eq!(trace["result"][0]["dts"], json!("large"));
 }
 
 #[test]
@@ -235,12 +239,9 @@ fn search_trace_reports_display_truncation() {
     assert_eq!(trace["displayed_count"], json!(50));
     assert_eq!(trace["truncated"], json!(true));
     assert_eq!(trace["matches"].as_array().expect("matches").len(), 50);
-    // Matches were summarized, so the lean trace must NOT also embed the raw
-    // catalog array (which would re-expose the dropped per-entry blobs).
-    assert!(
-        trace.get("result").is_none(),
-        "matched searches keep the trace lean and omit the raw result"
-    );
+    // `matches` is the compact UI summary; `result` is the agent-facing search
+    // return value.
+    assert_eq!(trace["result"].as_array().expect("result").len(), 60);
 }
 
 #[test]

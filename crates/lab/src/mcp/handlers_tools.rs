@@ -112,6 +112,20 @@ impl LabMcpServer {
             ).with_raw_output_schema(Arc::clone(&trace_output_schema))
                 .with_meta(code_mode_tool_meta(CODE_MODE_SEARCH_TOOL_NAME)));
             gateway_tool_count += 1;
+            let search_resource_uri =
+                code_mode_app_resource_uri_for_tool(CODE_MODE_SEARCH_TOOL_NAME)
+                    .unwrap_or_else(|| "<missing>".to_string());
+            let search_skybridge_uri =
+                code_mode_app_skybridge_uri_for_tool(CODE_MODE_SEARCH_TOOL_NAME)
+                    .unwrap_or_else(|| "<missing>".to_string());
+            tracing::info!(
+                surface = "mcp",
+                service = "search",
+                action = "mcp_app.advertise",
+                resource_uri = %search_resource_uri,
+                skybridge_uri = %search_skybridge_uri,
+                "advertised Code Mode MCP app metadata"
+            );
             let execute_schema = match serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -149,6 +163,19 @@ impl LabMcpServer {
                 action = "tool.describe",
                 description_bytes = CODE_EXECUTE_DESCRIPTION.len(),
                 "registered Code Mode execute description"
+            );
+            let execute_resource_uri = code_mode_app_resource_uri_for_tool(TOOL_EXECUTE_TOOL_NAME)
+                .unwrap_or_else(|| "<missing>".to_string());
+            let execute_skybridge_uri =
+                code_mode_app_skybridge_uri_for_tool(TOOL_EXECUTE_TOOL_NAME)
+                    .unwrap_or_else(|| "<missing>".to_string());
+            tracing::info!(
+                surface = "mcp",
+                service = "execute",
+                action = "mcp_app.advertise",
+                resource_uri = %execute_resource_uri,
+                skybridge_uri = %execute_skybridge_uri,
+                "advertised Code Mode MCP app metadata"
             );
             tools.push(
                 Tool::new(
@@ -305,9 +332,10 @@ fn code_mode_trace_output_schema() -> Arc<serde_json::Map<String, Value>> {
                     "displayed_count": { "type": "integer", "minimum": 0 },
                     "truncated": { "type": "boolean" },
                     "matches": { "type": "array", "items": { "type": "object" } },
-                    "result_shape": { "type": "object" }
+                    "result_shape": { "type": "object" },
+                    "result": {}
                 },
-                "required": ["kind", "query_kind", "elapsed_ms", "match_count", "displayed_count", "truncated", "matches", "result_shape"],
+                "required": ["kind", "query_kind", "elapsed_ms", "match_count", "displayed_count", "truncated", "matches", "result_shape", "result"],
                 "additionalProperties": true
             },
             {

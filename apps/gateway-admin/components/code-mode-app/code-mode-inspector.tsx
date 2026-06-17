@@ -180,33 +180,32 @@ export function CodeModeInspector({ initialTrace }: CodeModeInspectorProps) {
       style={AURORA_DARK_TOKENS}
     >
       <section className="aurora-scrollbar mx-auto flex h-full w-full max-w-5xl flex-col gap-3 overflow-y-auto p-3 sm:gap-4 sm:p-5">
-        <header className={cn('relative overflow-visible px-3 py-2.5 sm:p-4', AURORA_STRONG_PANEL)}>
+        <header className={cn('relative min-h-[54px] overflow-visible px-2.5 py-2 pr-24 sm:px-3 sm:py-2.5', AURORA_STRONG_PANEL)}>
           <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-aurora-accent-primary/50 to-transparent" />
           <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex min-w-0 gap-2.5">
-              <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-aurora-accent-primary/35 bg-[color-mix(in_srgb,var(--aurora-accent-primary)_14%,transparent)] shadow-[var(--aurora-active-glow)] sm:size-10 sm:rounded-aurora-2">
-                <Sparkles className="size-4 text-aurora-accent-strong sm:size-5" strokeWidth={1.65} />
+              <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-aurora-accent-primary/35 bg-[color-mix(in_srgb,var(--aurora-accent-primary)_14%,transparent)] shadow-[var(--aurora-active-glow)] sm:size-8">
+                <Sparkles className="size-4 text-aurora-accent-strong" strokeWidth={1.65} />
               </div>
               <div className="min-w-0">
                 <div className={cn('flex items-center gap-1.5', AURORA_MUTED_LABEL, 'text-[10px] tracking-[0.12em] sm:text-[11px] sm:tracking-[0.18em]')}>
                   <Database className="size-3.5 text-aurora-accent-primary" strokeWidth={1.65} />
                   Code Mode trace
                 </div>
-                <h1 className="mt-0.5 font-display text-[19px] font-extrabold leading-tight text-aurora-text-primary sm:mt-1 sm:text-[22px]">
+                <h1 className="mt-0.5 font-display text-[16px] font-extrabold leading-tight text-aurora-text-primary sm:text-[18px]">
                   Call inspector
                 </h1>
-                <p className={cn('mt-0.5 hidden max-w-2xl text-aurora-text-muted sm:mt-1 sm:block', AURORA_DENSE_META)}>
+                <p className={cn('mt-0.5 hidden max-w-2xl text-aurora-text-muted sm:block', AURORA_DENSE_META)}>
                   {trace
                     ? 'Live calls, search matches, and recent history from the active MCP app session.'
                     : 'Waiting for an MCP Apps tool result or history snapshot.'}
                 </p>
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-1.5 text-xs text-aurora-text-muted">
+            <div className="absolute right-2.5 top-2 flex flex-wrap items-center justify-end gap-1.5 text-xs text-aurora-text-muted">
               <StatusPill tone={bridgeState === 'connected' ? 'success' : 'neutral'}>
                 {bridgeState}
               </StatusPill>
-              {trace ? <StatusPill tone="info">{trace.kind.replace('code_mode_', '')}</StatusPill> : null}
             </div>
           </div>
         </header>
@@ -233,6 +232,10 @@ export function CodeModeInspector({ initialTrace }: CodeModeInspectorProps) {
           </Panel>
         ) : null}
 
+        {trace?.kind === 'code_mode_execute_trace' && trace.result !== undefined ? (
+          <ExecuteResultPanel trace={trace} />
+        ) : null}
+
         {rows.matches.length > 0 ? (
           <Panel
             title="Search matches"
@@ -242,6 +245,7 @@ export function CodeModeInspector({ initialTrace }: CodeModeInspectorProps) {
                 : rows.matches.length
             }
             meta={trace?.kind === 'code_mode_search_trace' && trace.truncated ? 'truncated' : undefined}
+            scrollable
           >
             <div className="grid gap-2">
               {rows.matches.map((match) => (
@@ -293,11 +297,13 @@ function Panel({
   title,
   count,
   meta,
+  scrollable,
   children,
 }: {
   title: string
   count: number | string
   meta?: string
+  scrollable?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -313,7 +319,9 @@ function Panel({
           {meta ? <StatusPill tone="warning">{meta}</StatusPill> : null}
         </div>
       </div>
-      <div className="grid gap-2 p-3">{children}</div>
+      <div className={cn('grid gap-2 p-3', scrollable && 'aurora-scrollbar max-h-36 overflow-y-auto overscroll-contain sm:max-h-52')}>
+        {children}
+      </div>
     </section>
   )
 }
@@ -499,6 +507,39 @@ function SearchResultPanel({
             </pre>
           </details>
         ) : null}
+      </article>
+    </Panel>
+  )
+}
+
+function ExecuteResultPanel({
+  trace,
+}: {
+  trace: Extract<CodeModeTrace, { kind: 'code_mode_execute_trace' }>
+}) {
+  const shapeLabel = describeResultShape(trace.result_shape)
+  const resultJson = stringifyRedactedParams(trace.result)
+
+  if (!resultJson) return null
+
+  return (
+    <Panel title="Returned value" count={trace.result_shape?.type ?? 'value'}>
+      <article className={cn('p-2.5 sm:p-3', AURORA_MESSAGE_SURFACE)}>
+        <div className="flex items-center gap-2">
+          <Braces className="size-4 text-aurora-accent-primary" />
+          <p className="text-sm font-medium text-aurora-text-primary">Execute returned a value.</p>
+        </div>
+        {shapeLabel ? (
+          <p className="mt-1 font-mono text-xs text-aurora-text-muted">{shapeLabel}</p>
+        ) : null}
+        <details className="mt-1.5 rounded-md border border-aurora-border-default bg-aurora-panel-strong sm:mt-3 sm:rounded-aurora-2">
+          <summary className="cursor-pointer px-2.5 py-1 text-xs font-semibold text-aurora-accent-strong sm:px-3 sm:py-2">
+            Result
+          </summary>
+          <pre className="max-h-52 overflow-auto whitespace-pre-wrap break-words px-2.5 pb-2.5 font-mono text-xs text-aurora-text-primary sm:px-3 sm:pb-3">
+            {resultJson}
+          </pre>
+        </details>
       </article>
     </Panel>
   )

@@ -2504,7 +2504,7 @@ dependencies = [
 
 [[package]]
 name = "lab-apis"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "base64",
  "futures",
@@ -2525,7 +2525,7 @@ dependencies = [
 
 [[package]]
 name = "lab-auth"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "axum",
  "base64",
@@ -2554,7 +2554,7 @@ dependencies = [
 
 [[package]]
 name = "lab-winjob"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "tracing",
  "windows-sys 0.59.0",
@@ -2562,7 +2562,7 @@ dependencies = [
 
 [[package]]
 name = "labby"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",

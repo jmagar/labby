@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/lab-apis", "crates/lab", "crates/lab-auth", "crates/lab-winjob"]
 
 [workspace.package]
-version = "0.25.0"
+version = "0.26.0"
 edition = "2024"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -247,6 +247,11 @@ panic = "abort"
 opt-level = 3
 debug = false
 incremental = false
+
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16
 
 [profile.dev]
 opt-level = 0

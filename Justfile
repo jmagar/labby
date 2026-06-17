@@ -1,5 +1,7 @@
 # Lab — Development Commands
 
+local_release_profile := "release-fast"
+
 default:
     @just --list
 
@@ -52,23 +54,91 @@ build-release:
     install -D -m 755 target/release/labby bin/labby
     just link-bin
 
-# Symlink the compiled release binary into PATH.
+# Symlink the compiled binary into PATH.
 # Called automatically by `just build-release` and `just install`.
-link-bin:
+link-bin profile="release":
     #!/usr/bin/env bash
     set -euo pipefail
+    profile="{{profile}}"
     LAB_TARGET_DIR="${CARGO_TARGET_DIR:-target}"
     case "$LAB_TARGET_DIR" in
-      /*) LABBY_BIN="$LAB_TARGET_DIR/release/labby" ;;
-      *)  LABBY_BIN="$(pwd)/$LAB_TARGET_DIR/release/labby" ;;
+      /*) LABBY_BIN="$LAB_TARGET_DIR/$profile/labby" ;;
+      *)  LABBY_BIN="$(pwd)/$LAB_TARGET_DIR/$profile/labby" ;;
     esac
     if [ ! -x "$LABBY_BIN" ]; then
-      echo "release binary not found at $LABBY_BIN — run 'just build-release' first" >&2
+      echo "$profile binary not found at $LABBY_BIN — run the matching build first" >&2
       exit 1
     fi
     mkdir -p ~/.local/bin
     ln -sf "$LABBY_BIN" ~/.local/bin/labby
     echo "labby → $LABBY_BIN"
+
+# Build local release-fast binary when stale, sync PATH/container bind binary,
+# rebuild the dev image only when runtime inputs changed, and restart container.
+sync-container:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    repo="$(pwd)"
+    profile="{{local_release_profile}}"
+    if command -v mold >/dev/null 2>&1; then
+      export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=mold"
+    fi
+
+    LAB_TARGET_DIR="${CARGO_TARGET_DIR:-target}"
+    case "$LAB_TARGET_DIR" in
+      /*) LABBY_BIN="$LAB_TARGET_DIR/$profile/labby" ;;
+      *)  LABBY_BIN="$repo/$LAB_TARGET_DIR/$profile/labby" ;;
+    esac
+
+    release_stale=0
+    if [ ! -x "$LABBY_BIN" ]; then
+      release_stale=1
+    else
+      while IFS= read -r -d '' input; do
+        if [ "$input" -nt "$LABBY_BIN" ]; then
+          release_stale=1
+          break
+        fi
+      done < <(git ls-files -z -- Cargo.toml Cargo.lock rust-toolchain.toml .cargo build.rs crates config apps/gateway-admin/out)
+    fi
+    if [ "$release_stale" -eq 1 ]; then
+      CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-16}" cargo build --workspace --all-features --profile "$profile" --bin labby
+    else
+      echo "$profile binary is current: $LABBY_BIN"
+    fi
+
+    install -D -m 755 "$LABBY_BIN" bin/labby
+    mkdir -p ~/.local/bin
+    ln -sf "$LABBY_BIN" ~/.local/bin/labby
+    echo "labby → $LABBY_BIN"
+
+    compose=(docker compose -f docker-compose.yml)
+    container_sentinel="$LAB_TARGET_DIR/.labby-container-built"
+    image_stale=0
+    if ! docker image inspect labby:dev >/dev/null 2>&1; then
+      image_stale=1
+    else
+      while IFS= read -r -d '' input; do
+        if [ "$input" -nt "$container_sentinel" ] 2>/dev/null; then
+          image_stale=1
+          break
+        fi
+      done < <(git ls-files -z -- config/Dockerfile.fast docker-compose.yml docker-compose.prod.yml config/acp-adapters.package.json)
+    fi
+    if [ "$image_stale" -eq 1 ]; then
+      "${compose[@]}" build labby-master
+      mkdir -p "$(dirname "$container_sentinel")"
+      touch "$container_sentinel"
+      "${compose[@]}" up -d labby-master --no-deps --no-build
+    else
+      echo "dev runtime image is current"
+      "${compose[@]}" up -d labby-master --no-deps --no-build
+    fi
+    "${compose[@]}" restart labby-master
+    "${compose[@]}" ps labby-master
+    echo "container synced"
+
+container-sync: sync-container
 
 # Generate Claude Code marketplace tree from compiled service metadata
 marketplace: build-release

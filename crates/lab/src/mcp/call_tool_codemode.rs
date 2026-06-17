@@ -262,6 +262,20 @@ impl LabMcpServer {
                     .await;
                 let structured = code_mode_search_trace(&response, elapsed_ms);
                 let output_tokens = estimate_tokens(&output);
+                let trace_match_count = structured
+                    .get("match_count")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                let trace_displayed_count = structured
+                    .get("displayed_count")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                let trace_has_result = structured.get("result").is_some();
+                let trace_result_type = structured
+                    .get("result_shape")
+                    .and_then(|shape| shape.get("type"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("<unknown>");
                 tracing::info!(
                     surface = "mcp",
                     service = "code_search",
@@ -275,6 +289,10 @@ impl LabMcpServer {
                     elapsed_ms = started.elapsed().as_millis(),
                     input_tokens,
                     output_tokens,
+                    trace_match_count,
+                    trace_displayed_count,
+                    trace_has_result,
+                    trace_result_type,
                     "gateway code search ok"
                 );
                 // `search` never surfaces a widget — it runs pure catalog JS.
@@ -495,7 +513,12 @@ impl LabMcpServer {
             map.insert("ui".to_string(), ui.ui_meta.clone());
             Meta(map)
         });
-        if let Some(ui) = response.ui.as_ref() {
+        let mirrored_resource_uri = response.ui.as_ref().and_then(|ui| {
+            ui.ui_meta
+                .get("resourceUri")
+                .and_then(|value| value.as_str())
+        });
+        if response.ui.is_some() {
             tracing::info!(
                 surface = "mcp",
                 service = "code_execute",
@@ -504,17 +527,19 @@ impl LabMcpServer {
                 actor_key,
                 actor_label = subject,
                 agent_kind = "agent",
-                resource_uri = ui
-                    .ui_meta
-                    .get("resourceUri")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("<unknown>"),
+                resource_uri = mirrored_resource_uri.unwrap_or("<unknown>"),
                 "mirroring upstream MCP App widget metadata onto execute result"
             );
         }
         let output = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
         let structured = code_mode_execute_trace(&response);
         let output_tokens = estimate_tokens(&output);
+        let trace_result_type = structured
+            .get("result_shape")
+            .and_then(|shape| shape.get("type"))
+            .and_then(Value::as_str)
+            .unwrap_or("<unknown>");
+        let trace_has_result = structured.get("result").is_some();
         let truncated = response
             .result
             .as_ref()
@@ -536,6 +561,9 @@ impl LabMcpServer {
             elapsed_ms = started.elapsed().as_millis(),
             input_tokens,
             output_tokens,
+            trace_has_result,
+            trace_result_type,
+            mirrored_ui_resource_uri = mirrored_resource_uri.unwrap_or("<none>"),
             "gateway code execute ok"
         );
         Ok(call_result_with_structured(output, structured, ui_meta))

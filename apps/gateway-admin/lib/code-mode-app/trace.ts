@@ -8,6 +8,7 @@ export interface CodeModeExecuteTrace {
   call_count: number
   calls: CodeModeCallTrace[]
   result_shape?: ResultShape
+  result?: unknown
   logs_count?: number
   warnings?: CodeModeTraceWarning[]
 }
@@ -122,6 +123,7 @@ function parseExecuteTrace(value: Record<string, unknown>): CodeModeExecuteTrace
     call_count: numberValue(value.call_count, calls.items.length),
     calls: calls.items,
     result_shape: parseResultShape(value.result_shape),
+    result: 'result' in value ? value.result : undefined,
     logs_count: optionalNumber(value.logs_count),
     warnings: droppedWarning(calls.dropped, 'execute call'),
   }

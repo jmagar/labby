@@ -6,6 +6,19 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.26.0] - 2026-06-17
+
+### Added
+
+- **Fast Labby container sync** — added a `release-fast` profile plus `just sync-container` / `just container-sync` to rebuild only stale local binaries, update the host/container-bound `labby`, rebuild the dev image only when runtime inputs changed, and restart the Labby container.
+- **Code Mode returned-value inspection** — execute traces now carry returned values through structured content and the gateway-admin inspector renders returned values directly, while search traces keep the full structured result available for agents.
+
+### Changed
+
+- **Gateway CLI internals** — split the gateway CLI implementation into focused `args`, `code`, `dispatch`, `list`, and `oauth` modules while preserving the public command surface.
+
+---
+
 ## [0.25.0] - 2026-06-13
 
 ### Added

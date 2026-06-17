@@ -502,6 +502,8 @@ impl LabMcpServer {
         };
         let html = code_mode_app_html(uri, history.as_ref())
             .map_err(|message| ErrorData::resource_not_found(message, None))?;
+        let runtime = code_mode_app_runtime_for_uri(uri);
+        let mime_type = runtime.mime();
         let elapsed_ms = start.elapsed().as_millis();
         tracing::info!(
             surface = "mcp",
@@ -510,6 +512,9 @@ impl LabMcpServer {
             subject,
             elapsed_ms,
             resource_uri = uri,
+            mime_type,
+            html_bytes = html.len(),
+            versioned = uri.contains("?v="),
             "code mode app resource read ok"
         );
         self.emit_dispatch_notification(
@@ -523,7 +528,7 @@ impl LabMcpServer {
 
         Ok(ReadResourceResult::new(vec![
             ResourceContents::text(html, uri.to_string())
-                .with_mime_type(code_mode_app_runtime_for_uri(uri).mime())
+                .with_mime_type(mime_type)
                 .with_meta(code_mode_app_resource_meta(uri)),
         ]))
     }
