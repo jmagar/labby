@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.26.1] - 2026-06-17
+
+### Fixed
+
+- **Dependabot npm alerts** — patched vulnerable transitive dependencies in the root npm lockfile and gateway-admin pnpm lockfile by overriding `hono` to `4.12.25`, `js-yaml` to `4.2.0`, `@babel/core` to `7.29.6`, `dompurify` to `3.4.9`, `ws` to `8.21.0`, and `brace-expansion` to `5.0.6`.
+
+---
+
 ## [0.26.0] - 2026-06-17
 
 ### Added
