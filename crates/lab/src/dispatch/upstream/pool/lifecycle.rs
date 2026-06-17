@@ -12,6 +12,14 @@ use crate::config::UpstreamConfig;
 use super::UpstreamPool;
 
 impl UpstreamPool {
+    pub fn runtime_identity_matches(
+        &self,
+        origin: &Option<String>,
+        owner: Option<&crate::dispatch::upstream::types::UpstreamRuntimeOwner>,
+    ) -> bool {
+        self.runtime_origin == *origin && self.runtime_owner.as_ref() == owner
+    }
+
     pub async fn reconcile_lazy_upstreams(
         &self,
         configs: &[UpstreamConfig],

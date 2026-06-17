@@ -99,7 +99,6 @@ struct StatusQuery {
 #[derive(Debug, Deserialize)]
 struct ClearQuery {
     upstream: String,
-    confirm: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -397,13 +396,6 @@ async fn clear(
     }
     if let Err(error) = require_admin_scope(&auth, "clear") {
         return error.into_response();
-    }
-    if query.confirm != Some(true) {
-        return ToolError::Sdk {
-            sdk_kind: "confirmation_required".to_string(),
-            message: "set ?confirm=true to clear upstream oauth credentials".to_string(),
-        }
-        .into_response();
     }
     let manager = match state.gateway_manager.clone() {
         Some(manager) => manager,
@@ -794,7 +786,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn clear_requires_explicit_confirmation() {
+    async fn clear_does_not_require_explicit_confirmation() {
         let state = AppState::new();
         let app = gateway_routes(state.clone())
             .layer(Extension(test_auth_context()))
@@ -812,12 +804,13 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
         let body = body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["kind"], "confirmation_required");
+        assert_eq!(json["kind"], "internal_error");
+        assert_eq!(json["message"], "gateway manager not wired");
     }
 
     #[tokio::test]
@@ -868,7 +861,7 @@ mod tests {
                 Some(serde_json::json!({"upstream":"fixture"})),
             ),
             ("GET", "/status?upstream=fixture", None),
-            ("POST", "/clear?upstream=fixture&confirm=true", None),
+            ("POST", "/clear?upstream=fixture", None),
         ];
 
         for (method, uri, body) in cases {

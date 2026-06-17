@@ -2,7 +2,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use anyhow::Result;
-use serde_json::json;
+use serde_json::{Map, Value, json};
 
 use crate::cli::gateway::{
     GatewayArgs, GatewayCommand, GatewayMcpAuthCommand, GatewayMcpCommand, GatewayPendingCommand,
@@ -95,40 +95,49 @@ fn protected_route_from_update_args(
     (name, route)
 }
 
-fn update_patch_from_args(args: GatewayUpdateArgs) -> serde_json::Value {
+fn update_patch_from_args(args: GatewayUpdateArgs) -> Value {
     let url_was_set = args.url.is_some();
     let command_was_set = args.command.is_some();
-    let url = if args.clear_url || command_was_set {
-        Some(None)
-    } else {
-        args.url.map(Some)
-    };
-    let command = if args.clear_command || url_was_set {
-        Some(None)
-    } else {
-        args.command.map(Some)
-    };
-    let command_args = if url_was_set {
-        Some(Vec::new())
-    } else if args.args.is_empty() {
-        None
-    } else {
-        Some(args.args)
-    };
-    let bearer_token_env = if args.clear_bearer_token_env {
-        Some(None)
-    } else {
-        args.bearer_token_env.map(Some)
-    };
+    let mut patch = Map::new();
 
-    json!({
-        "name": args.new_name,
-        "url": url,
-        "command": command,
-        "args": command_args,
-        "bearer_token_env": bearer_token_env,
-        "proxy_resources": args.proxy_resources,
-    })
+    insert_if_some(&mut patch, "name", args.new_name);
+    insert_if_some(&mut patch, "proxy_resources", args.proxy_resources);
+
+    if args.clear_url || command_was_set {
+        patch.insert("url".to_string(), Value::Null);
+    } else {
+        insert_if_some(&mut patch, "url", args.url);
+    }
+
+    if args.clear_command || url_was_set {
+        patch.insert("command".to_string(), Value::Null);
+    } else {
+        insert_if_some(&mut patch, "command", args.command);
+    }
+
+    if url_was_set {
+        patch.insert("args".to_string(), json!([]));
+    } else if !args.args.is_empty() {
+        patch.insert("args".to_string(), json!(args.args));
+    }
+
+    if args.clear_bearer_token_env {
+        patch.insert("bearer_token_env".to_string(), Value::Null);
+    } else {
+        insert_if_some(&mut patch, "bearer_token_env", args.bearer_token_env);
+    }
+
+    Value::Object(patch)
+}
+
+fn insert_if_some<T: serde::Serialize>(
+    patch: &mut Map<String, Value>,
+    key: &str,
+    value: Option<T>,
+) {
+    if let Some(value) = value {
+        patch.insert(key.to_string(), json!(value));
+    }
 }
 
 pub(super) async fn dispatch_command(
@@ -440,12 +449,9 @@ mod tests {
         assert_eq!(
             update_patch_from_args(update),
             json!({
-                "name": null,
                 "url": null,
                 "command": "local-mcp-server",
                 "args": ["--stdio"],
-                "bearer_token_env": null,
-                "proxy_resources": null,
             })
         );
     }
@@ -464,12 +470,9 @@ mod tests {
         assert_eq!(
             update_patch_from_args(update),
             json!({
-                "name": null,
                 "url": "https://example.test/mcp",
                 "command": null,
                 "args": [],
-                "bearer_token_env": null,
-                "proxy_resources": null,
             })
         );
     }
@@ -489,12 +492,28 @@ mod tests {
         assert_eq!(
             update_patch_from_args(update),
             json!({
-                "name": null,
                 "url": null,
                 "command": null,
-                "args": null,
                 "bearer_token_env": null,
-                "proxy_resources": null,
+            })
+        );
+    }
+
+    #[test]
+    fn gateway_update_proxy_resources_omits_nullable_transport_fields() {
+        let update = parsed_update(&[
+            "lab",
+            "gateway",
+            "update",
+            "fixture",
+            "--proxy-resources",
+            "false",
+        ]);
+
+        assert_eq!(
+            update_patch_from_args(update),
+            json!({
+                "proxy_resources": false,
             })
         );
     }

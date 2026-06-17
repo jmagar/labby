@@ -1238,14 +1238,23 @@ Options:
       --url <URL>
           New HTTP(S) URL for a remote MCP server
 
+      --clear-url
+          Clear the HTTP(S) URL from this gateway
+
       --command <COMMAND>
           New stdio command for a local MCP server
+
+      --clear-command
+          Clear the stdio command from this gateway
 
       --arg <ARGS>
           Replace all command arguments with these values (repeat for multiple)
 
       --bearer-token-env <BEARER_TOKEN_ENV>
           Environment variable name whose value is used as the upstream bearer token
+
+      --clear-bearer-token-env
+          Clear the upstream bearer token environment variable name
 
       --proxy-resources <PROXY_RESOURCES>
           [possible values: true, false]

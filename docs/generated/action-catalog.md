@@ -48,59 +48,59 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `fs` | `fs.preview` | false | false | `path*: string`<br>`max_bytes: integer` | `binary (streamed); mime from safe-MIME whitelist or application/octet-stream` | api, web |
 | `fs` | `help` | true | false |  | `HelpPayload` | mcp, api, web |
 | `fs` | `schema` | true | false | `action*: string` | `ActionSpec` | mcp, api, web |
-| `gateway` | `gateway.add` | false | true | `spec*: json`<br>`bearer_token_value: string` | `GatewayView` | cli, mcp, api, web |
+| `gateway` | `gateway.add` | false | false | `spec*: json`<br>`bearer_token_value: string` | `GatewayView` | cli, mcp, api, web |
 | `gateway` | `gateway.client_config.get` | false | false | `name*: string` | `McpClientConfigView` | cli, mcp, api, web |
 | `gateway` | `gateway.code_mode.get` | false | false |  | `CodeModeConfig` | cli, mcp, api, web |
-| `gateway` | `gateway.code_mode.set` | false | true | `enabled: boolean`<br>`trace_params: boolean`<br>`timeout_ms: integer`<br>`max_tool_calls: integer`<br>`max_response_bytes: integer`<br>`max_response_tokens: integer`<br>`token_estimate_divisor: integer`<br>`max_log_entries: integer`<br>`max_log_bytes: integer` | `CodeModeConfig` | cli, mcp, api, web |
+| `gateway` | `gateway.code_mode.set` | false | false | `enabled: boolean`<br>`trace_params: boolean`<br>`timeout_ms: integer`<br>`max_tool_calls: integer`<br>`max_response_bytes: integer`<br>`max_response_tokens: integer`<br>`token_estimate_divisor: integer`<br>`max_log_entries: integer`<br>`max_log_bytes: integer` | `CodeModeConfig` | cli, mcp, api, web |
 | `gateway` | `gateway.discover` | false | false | `clients: string[]`<br>`include_existing: boolean` | `DiscoveredServerView[]` | cli, mcp, api, web |
 | `gateway` | `gateway.discovered_prompts` | false | false | `name*: string` | `string[]` | cli, mcp, api, web |
 | `gateway` | `gateway.discovered_resources` | false | false | `name*: string` | `string[]` | cli, mcp, api, web |
 | `gateway` | `gateway.discovered_tools` | false | false | `name*: string` | `GatewayToolExposureRowView[]` | cli, mcp, api, web |
 | `gateway` | `gateway.get` | false | false | `name*: string` | `GatewayView` | cli, mcp, api, web |
-| `gateway` | `gateway.import` | false | true | `all: boolean`<br>`names: string[]`<br>`clients: string[]` | `ImportResultView` | cli, mcp, api, web |
-| `gateway` | `gateway.import_pending.approve` | false | true | `name*: string` | `PendingImportView` | cli, mcp, api, web |
+| `gateway` | `gateway.import` | false | false | `all: boolean`<br>`names: string[]`<br>`clients: string[]` | `ImportResultView` | cli, mcp, api, web |
+| `gateway` | `gateway.import_pending.approve` | false | false | `name*: string` | `PendingImportView` | cli, mcp, api, web |
 | `gateway` | `gateway.import_pending.list` | false | false |  | `PendingImportView[]` | cli, mcp, api, web |
-| `gateway` | `gateway.import_pending.reject` | false | true | `name*: string` | `PendingImportView` | cli, mcp, api, web |
-| `gateway` | `gateway.import_tombstones.clear` | false | true | `name*: string`<br>`source_client: string`<br>`source_path: string`<br>`server_name: string`<br>`transport_fingerprint: string` | `ImportTombstoneView[]` | cli, mcp, api, web |
+| `gateway` | `gateway.import_pending.reject` | false | false | `name*: string` | `PendingImportView` | cli, mcp, api, web |
+| `gateway` | `gateway.import_tombstones.clear` | false | false | `name*: string`<br>`source_client: string`<br>`source_path: string`<br>`server_name: string`<br>`transport_fingerprint: string` | `ImportTombstoneView[]` | cli, mcp, api, web |
 | `gateway` | `gateway.import_tombstones.list` | false | false |  | `ImportTombstoneView[]` | cli, mcp, api, web |
-| `gateway` | `gateway.import_tombstones.restore` | false | true | `name*: string`<br>`source_client: string`<br>`source_path: string`<br>`server_name: string`<br>`transport_fingerprint: string` | `GatewayView` | cli, mcp, api, web |
+| `gateway` | `gateway.import_tombstones.restore` | false | false | `name*: string`<br>`source_client: string`<br>`source_path: string`<br>`server_name: string`<br>`transport_fingerprint: string` | `GatewayView` | cli, mcp, api, web |
 | `gateway` | `gateway.list` | false | false |  | `ServerView[]` | cli, mcp, api, web |
-| `gateway` | `gateway.mcp.cleanup` | false | true | `name*: string`<br>`aggressive: boolean`<br>`dry_run: boolean` | `GatewayCleanupView` | cli, mcp, api, web |
-| `gateway` | `gateway.mcp.disable` | false | true | `name*: string`<br>`cleanup: boolean`<br>`aggressive: boolean` | `GatewayView + optional cleanup result` | cli, mcp, api, web |
-| `gateway` | `gateway.mcp.enable` | false | true | `name*: string` | `GatewayView` | cli, mcp, api, web |
+| `gateway` | `gateway.mcp.cleanup` | false | false | `name*: string`<br>`aggressive: boolean`<br>`dry_run: boolean` | `GatewayCleanupView` | cli, mcp, api, web |
+| `gateway` | `gateway.mcp.disable` | false | false | `name*: string`<br>`cleanup: boolean`<br>`aggressive: boolean` | `GatewayView + optional cleanup result` | cli, mcp, api, web |
+| `gateway` | `gateway.mcp.enable` | false | false | `name*: string` | `GatewayView` | cli, mcp, api, web |
 | `gateway` | `gateway.mcp.list` | false | false |  | `GatewayMcpRuntimeView[]` | cli, mcp, api, web |
-| `gateway` | `gateway.oauth.clear` | false | true | `upstream*: string`<br>`subject: string` | `ok` | cli, mcp, api, web |
-| `gateway` | `gateway.oauth.probe` | false | true | `url*: string` | `ProbeResult` | cli, mcp, api, web |
+| `gateway` | `gateway.oauth.clear` | false | false | `upstream*: string`<br>`subject: string` | `ok` | cli, mcp, api, web |
+| `gateway` | `gateway.oauth.probe` | false | false | `url*: string` | `ProbeResult` | cli, mcp, api, web |
 | `gateway` | `gateway.oauth.start` | false | false | `upstream*: string`<br>`subject: string` | `BeginAuthorization` | cli, mcp, api, web |
 | `gateway` | `gateway.oauth.status` | false | false | `upstream*: string`<br>`subject: string` | `UpstreamOauthStatusView` | cli, mcp, api, web |
 | `gateway` | `gateway.oauth.wait` | false | false | `upstream*: string`<br>`subject: string`<br>`timeout_secs: integer` | `{authenticated: bool, timed_out: bool}` | cli, mcp, api, web |
-| `gateway` | `gateway.protected_route.add` | false | true | `route*: json` | `ProtectedMcpRouteConfig` | cli, mcp, api, web |
+| `gateway` | `gateway.protected_route.add` | false | false | `route*: json` | `ProtectedMcpRouteConfig` | cli, mcp, api, web |
 | `gateway` | `gateway.protected_route.get` | false | false | `name*: string` | `ProtectedMcpRouteConfig` | cli, mcp, api, web |
 | `gateway` | `gateway.protected_route.list` | false | false |  | `ProtectedMcpRouteConfig[]` | cli, mcp, api, web |
-| `gateway` | `gateway.protected_route.remove` | false | true | `name*: string` | `ProtectedMcpRouteConfig` | cli, mcp, api, web |
+| `gateway` | `gateway.protected_route.remove` | false | false | `name*: string` | `ProtectedMcpRouteConfig` | cli, mcp, api, web |
 | `gateway` | `gateway.protected_route.test` | false | false | `route*: json` | `ProtectedMcpRouteTestResult` | cli, mcp, api, web |
-| `gateway` | `gateway.protected_route.update` | false | true | `name*: string`<br>`route*: json` | `ProtectedMcpRouteConfig` | cli, mcp, api, web |
+| `gateway` | `gateway.protected_route.update` | false | false | `name*: string`<br>`route*: json` | `ProtectedMcpRouteConfig` | cli, mcp, api, web |
 | `gateway` | `gateway.public_urls.get` | false | false |  | `{app: string?, mcp_gateway: string?, effective_mcp_gateway: string?}` | cli, mcp, api, web |
-| `gateway` | `gateway.reload` | false | true |  | `GatewayCatalogDiff` | cli, mcp, api, web |
-| `gateway` | `gateway.remove` | false | true | `name*: string` | `GatewayView` | cli, mcp, api, web |
+| `gateway` | `gateway.reload` | false | false |  | `GatewayCatalogDiff` | cli, mcp, api, web |
+| `gateway` | `gateway.remove` | false | false | `name*: string` | `GatewayView` | cli, mcp, api, web |
 | `gateway` | `gateway.schema` | false | false | `name*: string` | `GatewayServerSchema` | cli, mcp, api, web |
 | `gateway` | `gateway.server.get` | false | false | `id*: string` | `ServerView` | cli, mcp, api, web |
 | `gateway` | `gateway.servers` | false | false |  | `GatewayServersDoc` | cli, mcp, api, web |
 | `gateway` | `gateway.service_actions` | false | false | `service*: string` | `ServiceActionView[]` | cli, mcp, api, web |
 | `gateway` | `gateway.service_config.get` | false | false | `service*: string` | `ServiceConfigView` | cli, mcp, api, web |
-| `gateway` | `gateway.service_config.set` | false | true | `service*: string`<br>`values*: json` | `ServiceConfigView` | cli, mcp, api, web |
+| `gateway` | `gateway.service_config.set` | false | false | `service*: string`<br>`values*: json` | `ServiceConfigView` | cli, mcp, api, web |
 | `gateway` | `gateway.status` | false | false | `name: string` | `GatewayRuntimeView[]` | cli, mcp, api, web |
 | `gateway` | `gateway.supported_services` | false | false |  | `SupportedServiceView[]` | cli, mcp, api, web |
-| `gateway` | `gateway.test` | false | true | `name: string`<br>`spec: json` | `GatewayTestResult` | cli, mcp, api, web |
-| `gateway` | `gateway.update` | false | true | `name*: string`<br>`patch*: json`<br>`bearer_token_value: string` | `GatewayView` | cli, mcp, api, web |
-| `gateway` | `gateway.virtual_server.disable` | false | true | `id*: string` | `ServerView` | cli, mcp, api, web |
-| `gateway` | `gateway.virtual_server.enable` | false | true | `id*: string` | `ServerView` | cli, mcp, api, web |
+| `gateway` | `gateway.test` | false | false | `name: string`<br>`spec: json` | `GatewayTestResult` | cli, mcp, api, web |
+| `gateway` | `gateway.update` | false | false | `name*: string`<br>`patch*: json`<br>`bearer_token_value: string` | `GatewayView` | cli, mcp, api, web |
+| `gateway` | `gateway.virtual_server.disable` | false | false | `id*: string` | `ServerView` | cli, mcp, api, web |
+| `gateway` | `gateway.virtual_server.enable` | false | false | `id*: string` | `ServerView` | cli, mcp, api, web |
 | `gateway` | `gateway.virtual_server.get_mcp_policy` | false | false | `id*: string` | `VirtualServerMcpPolicyView` | cli, mcp, api, web |
 | `gateway` | `gateway.virtual_server.quarantine.list` | false | false |  | `ServerView[]` | cli, mcp, api, web |
-| `gateway` | `gateway.virtual_server.quarantine.restore` | false | true | `id*: string` | `ServerView` | cli, mcp, api, web |
-| `gateway` | `gateway.virtual_server.remove` | false | true | `id*: string` | `ServerView` | cli, mcp, api, web |
-| `gateway` | `gateway.virtual_server.set_mcp_policy` | false | true | `id*: string`<br>`allowed_actions*: string[]` | `VirtualServerMcpPolicyView` | cli, mcp, api, web |
-| `gateway` | `gateway.virtual_server.set_surface` | false | true | `id*: string`<br>`surface*: string`<br>`enabled*: boolean` | `ServerView` | cli, mcp, api, web |
+| `gateway` | `gateway.virtual_server.quarantine.restore` | false | false | `id*: string` | `ServerView` | cli, mcp, api, web |
+| `gateway` | `gateway.virtual_server.remove` | false | false | `id*: string` | `ServerView` | cli, mcp, api, web |
+| `gateway` | `gateway.virtual_server.set_mcp_policy` | false | false | `id*: string`<br>`allowed_actions*: string[]` | `VirtualServerMcpPolicyView` | cli, mcp, api, web |
+| `gateway` | `gateway.virtual_server.set_surface` | false | false | `id*: string`<br>`surface*: string`<br>`enabled*: boolean` | `ServerView` | cli, mcp, api, web |
 | `gateway` | `help` | false | false |  | `Catalog` | cli, mcp, api, web |
 | `gateway` | `schema` | false | false | `action*: string` | `Schema` | cli, mcp, api, web |
 | `lab_admin` | `help` | false | false |  | `Catalog` | cli, mcp |

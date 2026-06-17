@@ -53,39 +53,11 @@ fn gateway_actions_include_management_surface() {
     assert!(names.contains(&"gateway.mcp.cleanup"));
     assert!(names.contains(&"gateway.public_urls.get"));
 
-    for name in [
-        "gateway.test",
-        "gateway.add",
-        "gateway.update",
-        "gateway.remove",
-        "gateway.protected_route.add",
-        "gateway.protected_route.update",
-        "gateway.protected_route.remove",
-        "gateway.virtual_server.remove",
-        "gateway.virtual_server.quarantine.restore",
-        "gateway.reload",
-        "gateway.oauth.probe",
-    ] {
-        let spec = ACTIONS
-            .iter()
-            .find(|spec| spec.name == name)
-            .expect("action");
-        assert!(spec.destructive, "{name} must be destructive");
-    }
-
-    for name in [
-        "gateway.oauth.clear",
-        "gateway.mcp.enable",
-        "gateway.mcp.disable",
-        "gateway.mcp.cleanup",
-    ] {
-        let spec = ACTIONS
-            .iter()
-            .find(|spec| spec.name == name)
-            .expect("action");
+    for spec in ACTIONS {
         assert!(
             !spec.destructive,
-            "{name} is reversible/easily recreated and must not be destructive"
+            "{} must not be destructive unless it risks permanent, hard-to-recreate data loss",
+            spec.name
         );
     }
 }

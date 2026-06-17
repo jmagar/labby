@@ -342,6 +342,110 @@ async fn reload_unaffected_upstream_catalog_entry_survives_single_upstream_chang
     );
 }
 
+#[tokio::test]
+async fn reload_changed_upstream_rebuilds_pool_instead_of_reusing_stale_runtime() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+
+    write_gateway_config(
+        &path,
+        &LabConfig {
+            upstream: vec![
+                fixture_http_upstream("alpha"),
+                fixture_http_upstream("bravo"),
+            ],
+            ..LabConfig::default()
+        },
+    )
+    .expect("write initial config");
+
+    let manager = GatewayManager::new(path.clone(), GatewayRuntimeHandle::default());
+    manager
+        .reload_with_origin(None, None)
+        .await
+        .expect("initial reload");
+    let pool_before = manager
+        .current_pool()
+        .await
+        .expect("pool after first reload");
+
+    let mut changed_alpha = fixture_http_upstream("alpha");
+    changed_alpha.url = Some("http://127.0.0.1:9100".to_string());
+    write_gateway_config(
+        &path,
+        &LabConfig {
+            upstream: vec![changed_alpha, fixture_http_upstream("bravo")],
+            ..LabConfig::default()
+        },
+    )
+    .expect("write updated config");
+
+    manager
+        .reload_with_origin(None, None)
+        .await
+        .expect("second reload");
+    let pool_after = manager
+        .current_pool()
+        .await
+        .expect("pool after second reload");
+
+    assert!(
+        !Arc::ptr_eq(&pool_before, &pool_after),
+        "modified upstreams must rebuild the pool to avoid stale runtime state"
+    );
+}
+
+#[tokio::test]
+async fn reload_removed_upstream_rebuilds_pool_instead_of_reusing_stale_runtime() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+
+    write_gateway_config(
+        &path,
+        &LabConfig {
+            upstream: vec![
+                fixture_http_upstream("alpha"),
+                fixture_http_upstream("bravo"),
+            ],
+            ..LabConfig::default()
+        },
+    )
+    .expect("write initial config");
+
+    let manager = GatewayManager::new(path.clone(), GatewayRuntimeHandle::default());
+    manager
+        .reload_with_origin(None, None)
+        .await
+        .expect("initial reload");
+    let pool_before = manager
+        .current_pool()
+        .await
+        .expect("pool after first reload");
+
+    write_gateway_config(
+        &path,
+        &LabConfig {
+            upstream: vec![fixture_http_upstream("bravo")],
+            ..LabConfig::default()
+        },
+    )
+    .expect("write updated config");
+
+    manager
+        .reload_with_origin(None, None)
+        .await
+        .expect("second reload");
+    let pool_after = manager
+        .current_pool()
+        .await
+        .expect("pool after second reload");
+
+    assert!(
+        !Arc::ptr_eq(&pool_before, &pool_after),
+        "removed upstreams must rebuild the pool to avoid stale runtime state"
+    );
+}
+
 // Perf C1 regression: a true no-op reload (the on-disk config is byte-identical
 // to the live in-memory config) MUST preserve the live `Arc<UpstreamPool>`. The
 // fingerprint-gated short-circuit in `pool_lifecycle.rs`

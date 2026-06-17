@@ -338,3 +338,35 @@ fn spawn_stderr_drain(
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::StderrBuffer;
+
+    #[tokio::test]
+    async fn stderr_buffer_take_since_and_clear_releases_retained_lines() {
+        let buffer = StderrBuffer::new();
+        buffer.lines.lock().await.push("before".to_string());
+        let mark = buffer.mark().await;
+        {
+            let mut lines = buffer.lines.lock().await;
+            lines.push("during-one".to_string());
+            lines.push("during-two".to_string());
+        }
+
+        let captured = buffer.take_since_and_clear(mark).await;
+
+        assert_eq!(captured, ["during-one", "during-two"]);
+        assert!(buffer.lines.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn stderr_buffer_clear_discards_retained_lines() {
+        let buffer = StderrBuffer::new();
+        buffer.lines.lock().await.push("discard me".to_string());
+
+        buffer.clear().await;
+
+        assert!(buffer.lines.lock().await.is_empty());
+    }
+}

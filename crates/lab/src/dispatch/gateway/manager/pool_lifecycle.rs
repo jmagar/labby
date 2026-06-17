@@ -99,11 +99,15 @@ impl GatewayManager {
         );
         self.reconcile_upstream_oauth_managers(&cfg);
 
-        let (pool_settings_unchanged, changed_upstreams) = {
+        let (pool_settings_unchanged, changed_upstreams, changed_upstreams_add_only) = {
             let current = self.config.read().await;
+            let changed_upstreams = upstream_changed_names(&current, &cfg);
+            let changed_upstreams_add_only =
+                upstream_changes_are_add_only(&current, &changed_upstreams);
             (
                 pool_settings_fingerprint(&current) == pool_settings_fingerprint(&cfg),
-                upstream_changed_names(&current, &cfg),
+                changed_upstreams,
+                changed_upstreams_add_only,
             )
         };
         let existing_pool = self.runtime.current_pool().await;
@@ -128,7 +132,15 @@ impl GatewayManager {
             );
             return Ok(diff);
         }
-        if pool_settings_unchanged && let Some(current_pool) = existing_pool.clone() {
+        let expected_runtime_origin = runtime_origin_tag(origin);
+        let pool_runtime_identity_matches = existing_pool.as_ref().is_some_and(|pool| {
+            pool.runtime_identity_matches(&expected_runtime_origin, owner.as_ref())
+        });
+        if pool_settings_unchanged
+            && changed_upstreams_add_only
+            && pool_runtime_identity_matches
+            && let Some(current_pool) = existing_pool.clone()
+        {
             let before = snapshot_from_pool(Some(Arc::clone(&current_pool))).await;
             current_pool
                 .reconcile_lazy_upstreams(
@@ -332,6 +344,16 @@ fn upstream_changed_names(current: &LabConfig, next: &LabConfig) -> HashSet<Stri
         .filter(|name| current.get(*name) != next.get(*name))
         .cloned()
         .collect()
+}
+
+fn upstream_changes_are_add_only(current: &LabConfig, changed_names: &HashSet<String>) -> bool {
+    !changed_names.is_empty()
+        && changed_names.iter().all(|name| {
+            current
+                .upstream
+                .iter()
+                .all(|upstream| upstream.name != *name)
+        })
 }
 
 fn upstream_fingerprint_map(cfg: &LabConfig) -> BTreeMap<String, String> {

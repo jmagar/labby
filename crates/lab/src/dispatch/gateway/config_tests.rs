@@ -250,6 +250,29 @@ fn update_upstream_replaces_named_upstream_only() {
 }
 
 #[test]
+fn update_upstream_clears_bearer_token_env_with_null_patch() {
+    let mut cfg = sample_config();
+
+    update_upstream(
+        &mut cfg,
+        "a",
+        GatewayUpdatePatch {
+            bearer_token_env: Some(None),
+            ..GatewayUpdatePatch::default()
+        },
+    )
+    .expect("update should succeed");
+
+    let a = cfg
+        .upstream
+        .iter()
+        .find(|u| u.name == "a")
+        .expect("a upstream");
+
+    assert_eq!(a.bearer_token_env, None);
+}
+
+#[test]
 fn update_upstream_applies_expose_tools_patch() {
     let mut cfg = sample_config();
 

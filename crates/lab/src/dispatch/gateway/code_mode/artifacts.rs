@@ -334,16 +334,13 @@ pub(in crate::dispatch::gateway::code_mode) async fn prune_artifact_runs_in(
     // decision loop below.
     let sizes: Vec<u64> = if byte_pruning {
         const SIZE_WALK_CONCURRENCY: usize = 8;
-        let mut indexed_sizes: Vec<(usize, u64)> =
-            stream::iter(newest_first.iter().cloned().enumerate().map(|(idx, name)| {
-                let path = store_root.join(name);
-                async move { (idx, dir_size_bytes(path).await) }
-            }))
-            .buffer_unordered(SIZE_WALK_CONCURRENCY)
-            .collect()
-            .await;
-        indexed_sizes.sort_by_key(|(idx, _)| *idx);
-        indexed_sizes.into_iter().map(|(_, size)| size).collect()
+        stream::iter(newest_first.iter().cloned().map(|name| {
+            let path = store_root.join(name);
+            async move { dir_size_bytes(path).await }
+        }))
+        .buffered(SIZE_WALK_CONCURRENCY)
+        .collect()
+        .await
     } else {
         Vec::new()
     };
