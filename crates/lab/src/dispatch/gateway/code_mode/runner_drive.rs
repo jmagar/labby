@@ -8,7 +8,8 @@
 //! `ArtifactWrite`, `Error`) is handled by a named async helper to keep the
 //! select loop readable.
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use futures::{StreamExt, stream::FuturesUnordered};
@@ -35,6 +36,8 @@ use super::types::{
 };
 
 const ARTIFACT_WRITE_CALL_ID: &str = "code_mode::write_artifact";
+const MAX_SNIPPET_RESOLVES_PER_RUN: usize = 32;
+const MAX_SNIPPET_RESOLVED_BYTES_PER_RUN: usize = 256 * 1024;
 
 // Concrete future type for pending tool calls.
 // Using Pin<Box<dyn Future>> keeps the FuturesUnordered type concrete so the
@@ -79,7 +82,18 @@ struct DriveState {
     artifacts: Vec<CodeModeArtifactReceipt>,
     artifact_store_pruned: bool,
     artifact_max_bytes: usize,
-    artifact_root: std::path::PathBuf,
+    artifact_root: PathBuf,
+    snippet_resolves: usize,
+    snippet_resolved_bytes: usize,
+    snippet_code_cache: HashMap<String, CachedSnippetCode>,
+}
+
+#[derive(Debug, Clone)]
+struct CachedSnippetCode {
+    code: String,
+    mtime_ns: u128,
+    len: u64,
+    path: PathBuf,
 }
 
 impl DriveState {
@@ -92,6 +106,9 @@ impl DriveState {
             artifact_store_pruned: false,
             artifact_max_bytes,
             artifact_root,
+            snippet_resolves: 0,
+            snippet_resolved_bytes: 0,
+            snippet_code_cache: HashMap::new(),
         }
     }
 }
@@ -350,6 +367,24 @@ impl CodeModeBroker<'_> {
                                 return DriveOutcome::RunnerUnhealthy(err);
                             }
                         }
+                        CodeModeRunnerOutput::SnippetResolve { seq, name, input } => {
+                            if let Err(err) = handle_snippet_resolve_event(
+                                self,
+                                seq,
+                                name,
+                                input,
+                                stdin,
+                                child,
+                                child_pid,
+                                deadline,
+                                cfg,
+                                &mut state,
+                            )
+                            .await
+                            {
+                                return DriveOutcome::RunnerUnhealthy(err);
+                            }
+                        }
                         CodeModeRunnerOutput::Done { result, logs } => {
                             // Preserve original invariant: Done with in-flight
                             // tool calls is a protocol error → evict.
@@ -564,6 +599,144 @@ async fn handle_artifact_write_event(
     }
 }
 
+async fn handle_snippet_resolve_event(
+    broker: &CodeModeBroker<'_>,
+    seq: u64,
+    name: String,
+    input: Value,
+    stdin: &mut ChildStdin,
+    child: &mut tokio::process::Child,
+    child_pid: Option<u32>,
+    deadline: tokio::time::Instant,
+    cfg: &RunnerConfig,
+    state: &mut DriveState,
+) -> Result<(), CodeModeExecutionError> {
+    let op = resolve_snippet_for_runner(broker, &name, input, cfg, state);
+    match tokio::time::timeout_at(deadline, op).await {
+        Ok(Ok((code, input))) => write_runner_input(
+            stdin,
+            &CodeModeRunnerInput::SnippetResolved { seq, code, input },
+        )
+        .await
+        .map_err(Into::into),
+        Ok(Err(err)) => {
+            write_runner_input(
+                stdin,
+                &CodeModeRunnerInput::ToolError {
+                    seq,
+                    kind: err.kind().to_string(),
+                    message: err.user_message().to_string(),
+                },
+            )
+            .await?;
+            Ok(())
+        }
+        Err(_) => {
+            terminate_code_mode_runner(child, child_pid).await;
+            Err(code_mode_timeout_error(&state.calls))
+        }
+    }
+}
+
+async fn resolve_snippet_for_runner(
+    broker: &CodeModeBroker<'_>,
+    name: &str,
+    input: Value,
+    cfg: &RunnerConfig,
+    state: &mut DriveState,
+) -> Result<(String, Value), ToolError> {
+    if !cfg.caller.can_use_snippets() {
+        return Err(ToolError::Forbidden {
+            message: "codemode.run requires lab:admin or trusted-local Code Mode".to_string(),
+            required_scopes: vec!["lab:admin".to_string()],
+        });
+    }
+    if cfg.capability_filter.is_scoped_to_upstreams() {
+        return Err(ToolError::Forbidden {
+            message: "codemode.run is not available on route-scoped Code Mode surfaces".to_string(),
+            required_scopes: vec!["lab:admin".to_string()],
+        });
+    }
+    if broker.gateway_manager.is_none() {
+        return Err(ToolError::Sdk {
+            sdk_kind: "gateway_unavailable".to_string(),
+            message: "codemode.run requires a live gateway manager".to_string(),
+        });
+    }
+    if state.snippet_resolves >= MAX_SNIPPET_RESOLVES_PER_RUN {
+        return Err(ToolError::Sdk {
+            sdk_kind: "snippet_resolve_limit".to_string(),
+            message: "snippet resolve limit exceeded".to_string(),
+        });
+    }
+
+    state.snippet_resolves = state.snippet_resolves.saturating_add(1);
+    let started = std::time::Instant::now();
+    let lab_home = crate::dispatch::helpers::lab_home();
+    let builtin_dir = crate::dispatch::snippets::store::builtin_snippet_dir();
+    let name = name.to_string();
+    let resolved = tokio::task::spawn_blocking(move || {
+        let resolved =
+            crate::dispatch::snippets::store::resolve_snippet(&lab_home, &builtin_dir, &name)?;
+        let input = crate::dispatch::snippets::store::merge_snippet_input(&resolved, input)?;
+        let metadata = std::fs::metadata(&resolved.path).map_err(|err| {
+            ToolError::internal_message(format!(
+                "read snippet metadata `{}` failed: {err}",
+                resolved.path.display()
+            ))
+        })?;
+        let mtime_ns = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let len = metadata.len();
+        let code = crate::dispatch::snippets::store::code_for_snippet(&resolved)?;
+        Ok::<_, ToolError>((resolved.name, resolved.path, mtime_ns, len, code, input))
+    })
+    .await
+    .map_err(|err| ToolError::internal_message(format!("snippet resolve task failed: {err}")))??;
+
+    let (name, path, mtime_ns, len, code, input) = resolved;
+    let cache_key = format!("{}:{}:{}:{}", name, path.display(), mtime_ns, len);
+    let code = if let Some(cached) = state.snippet_code_cache.get(&cache_key) {
+        if cached.path == path && cached.mtime_ns == mtime_ns && cached.len == len {
+            cached.code.clone()
+        } else {
+            code
+        }
+    } else {
+        state.snippet_code_cache.insert(
+            cache_key,
+            CachedSnippetCode {
+                code: code.clone(),
+                mtime_ns,
+                len,
+                path: path.clone(),
+            },
+        );
+        code
+    };
+
+    state.snippet_resolved_bytes = state.snippet_resolved_bytes.saturating_add(code.len());
+    if state.snippet_resolved_bytes > MAX_SNIPPET_RESOLVED_BYTES_PER_RUN {
+        return Err(ToolError::Sdk {
+            sdk_kind: "snippet_budget_exceeded".to_string(),
+            message: "resolved snippet code budget exceeded".to_string(),
+        });
+    }
+    tracing::info!(
+        surface = "dispatch",
+        service = "code_mode",
+        action = "snippet.resolve",
+        snippet = %name,
+        elapsed_ms = started.elapsed().as_millis(),
+        "Code Mode snippet resolved"
+    );
+    Ok((code, input))
+}
+
 /// Assemble the `Done` response. The runner is long-lived (it loops after Done),
 /// so this does NOT wait on the child — the process parks for the next `Start`.
 /// Logs are merged by the caller from the per-execution stderr slice.
@@ -579,6 +752,7 @@ fn finalize_done(
     let mut sorted = state.calls.clone();
     sorted.sort_by_key(|(seq, _)| *seq);
     CodeModeExecutionResponse {
+        execution_id: None,
         result: result.into_response_result(),
         // Widget capture and optional `__ui` unwrapping are applied later in
         // `execute()`; the runner-level response always starts with `ui: None`.

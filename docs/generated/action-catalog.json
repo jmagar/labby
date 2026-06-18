@@ -5192,6 +5192,61 @@
   },
   {
     "service": "snippets",
+    "action": "snippets.promote",
+    "description": "Promote a successful live Code Mode execution into a user snippet",
+    "destructive": true,
+    "params": [
+      {
+        "name": "execution_id",
+        "ty": "string",
+        "required": true,
+        "description": "Live gateway Code Mode execution id"
+      },
+      {
+        "name": "name",
+        "ty": "string",
+        "required": true,
+        "description": "Target user snippet name"
+      },
+      {
+        "name": "description",
+        "ty": "string",
+        "required": false,
+        "description": "Snippet description"
+      },
+      {
+        "name": "force",
+        "ty": "boolean",
+        "required": false,
+        "description": "Overwrite an existing user snippet"
+      },
+      {
+        "name": "shadow_builtin",
+        "ty": "boolean",
+        "required": false,
+        "description": "Allow creating a user snippet that shadows a built-in snippet"
+      },
+      {
+        "name": "confirm",
+        "ty": "boolean",
+        "required": false,
+        "description": "Required by headless MCP clients for destructive promotion"
+      }
+    ],
+    "returns": "SnippetPromotionResult",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "snippets",
     "action": "snippets.remove",
     "description": "Remove a user snippet",
     "destructive": true,

@@ -1619,6 +1619,50 @@
           "returns": "SnippetInfo"
         },
         {
+          "name": "snippets.promote",
+          "description": "Promote a successful live Code Mode execution into a user snippet",
+          "destructive": true,
+          "params": [
+            {
+              "name": "execution_id",
+              "ty": "string",
+              "required": true,
+              "description": "Live gateway Code Mode execution id"
+            },
+            {
+              "name": "name",
+              "ty": "string",
+              "required": true,
+              "description": "Target user snippet name"
+            },
+            {
+              "name": "description",
+              "ty": "string",
+              "required": false,
+              "description": "Snippet description"
+            },
+            {
+              "name": "force",
+              "ty": "boolean",
+              "required": false,
+              "description": "Overwrite an existing user snippet"
+            },
+            {
+              "name": "shadow_builtin",
+              "ty": "boolean",
+              "required": false,
+              "description": "Allow creating a user snippet that shadows a built-in snippet"
+            },
+            {
+              "name": "confirm",
+              "ty": "boolean",
+              "required": false,
+              "description": "Required by headless MCP clients for destructive promotion"
+            }
+          ],
+          "returns": "SnippetPromotionResult"
+        },
+        {
           "name": "snippets.validate",
           "description": "Validate a snippet body or existing snippet without executing it",
           "destructive": false,

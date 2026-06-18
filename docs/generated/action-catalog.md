@@ -193,6 +193,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `snippets` | `snippets.exec` | false | false | `name*: string`<br>`params: object` | `CodeModeExecutionResponse` | cli, mcp, api |
 | `snippets` | `snippets.get` | false | false | `name*: string` | `ResolvedSnippet` | cli, mcp, api |
 | `snippets` | `snippets.list` | false | false |  | `SnippetList` | cli, mcp, api |
+| `snippets` | `snippets.promote` | false | true | `execution_id*: string`<br>`name*: string`<br>`description: string`<br>`force: boolean`<br>`shadow_builtin: boolean`<br>`confirm: boolean` | `SnippetPromotionResult` | cli, mcp, api |
 | `snippets` | `snippets.remove` | false | true | `name*: string` | `SnippetRemoveResult` | cli, mcp, api |
 | `snippets` | `snippets.test` | false | false | `name: string`<br>`params: object`<br>`all: boolean` | `SnippetTestResult` | cli, mcp, api |
 | `snippets` | `snippets.validate` | false | false | `name: string`<br>`body: string` | `SnippetValidation` | cli, mcp, api |

@@ -20,8 +20,8 @@ use serde_json::Value;
 
 use crate::dispatch::error::ToolError as DispatchToolError;
 use crate::dispatch::gateway::code_mode::{
-    CodeModeBroker, CodeModeCaller, CodeModeCapabilityFilter, CodeModeHistoryEntry,
-    CodeModeHistoryKind, code_mode_execute_trace,
+    CodeModeBroker, CodeModeCaller, CodeModeCapabilityFilter, CodeModeExecutionSource,
+    CodeModeHistoryEntry, CodeModeHistoryKind, code_mode_execute_trace,
 };
 use crate::mcp::context::{auth_context_from_extensions, tool_execute_scope_allowed};
 use crate::mcp::envelope::{build_error, build_error_extra};
@@ -39,7 +39,8 @@ Execute a JavaScript async arrow function in the Code Mode sandbox. This is the 
 
 Inside the sandbox:
 - `await codemode.search(\"short intent phrase\")` searches the reduced in-execution catalog.
-- `await codemode.describe(\"upstream.tool\")` returns compact docs for an exact tool target.
+- `await codemode.describe(\"upstream.tool\")` returns compact docs for an exact tool or snippet target.
+- `await codemode.run(\"snippet-name\", input)` runs a discovered Code Mode snippet.
 - `await codemode.<upstream>.<tool>(params)` calls a discovered upstream method.
 - `await callTool(\"upstream::tool\", params)` is the raw escape hatch.
 
@@ -47,6 +48,8 @@ Pass `code` as `async () => { ... }` — the sandbox awaits its return value. \
 Every upstream MCP tool is callable two ways: `callTool(id, params)`, or the \
 auto-generated `codemode.<upstream>.<tool>(params)` helper (a thin wrapper over \
 the same callTool, named from the live catalog).
+Snippets are discoverable through `codemode.search` and `codemode.describe`; \
+run them with `codemode.run(\"<snippet>\", input)`.
 
 ```ts
 // code is an async arrow function; whatever it returns becomes `result`.
@@ -246,6 +249,8 @@ impl LabMcpServer {
                 }
             };
         let code_hash = hash_arguments(&Value::String(code.to_string()));
+        let execution_id = ulid::Ulid::new().to_string();
+        let capability_filter_fingerprint = capability_filter.fingerprint();
         tracing::info!(
             surface = "mcp",
             service = "codemode",
@@ -267,7 +272,7 @@ impl LabMcpServer {
             }
         });
         let before = self.snapshot_catalog().await;
-        let response = match broker
+        let mut response = match broker
             .execute(
                 code,
                 caller,
@@ -308,6 +313,7 @@ impl LabMcpServer {
                 let tool_error = err.into_tool_error();
                 manager
                     .record_code_mode_history(CodeModeHistoryEntry {
+                        execution_id: Some(execution_id.clone()),
                         seq: 0,
                         route_scope: self.route_scope.label(),
                         kind: CodeModeHistoryKind::Execute,
@@ -324,6 +330,7 @@ impl LabMcpServer {
                 return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
             }
         };
+        response.execution_id = Some(execution_id.clone());
         // Mirror the upstream's `_meta.ui` verbatim onto the codemode result so
         // the host renders the native mcp-ui widget (last-wins). The widget
         // itself is driven by the `ui://` resource read, not by inline content,
@@ -356,6 +363,7 @@ impl LabMcpServer {
         let output_tokens = estimate_tokens(&output);
         manager
             .record_code_mode_history(CodeModeHistoryEntry {
+                execution_id: Some(execution_id.clone()),
                 seq: 0,
                 route_scope: self.route_scope.label(),
                 kind: CodeModeHistoryKind::Execute,
@@ -368,8 +376,30 @@ impl LabMcpServer {
                 match_count: None,
             })
             .await;
+        let is_admin = auth.is_none_or(|auth| auth.scopes.iter().any(|scope| scope == "lab:admin"));
+        if is_admin && code.len() <= CODE_MODE_MAX_CODE_BYTES {
+            manager
+                .record_code_mode_source(CodeModeExecutionSource {
+                    execution_id: execution_id.clone(),
+                    created_at_ms: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|duration| duration.as_millis() as i64)
+                        .unwrap_or_default(),
+                    actor_key: actor_key.map(ToOwned::to_owned),
+                    is_admin,
+                    route_scope: self.route_scope.label(),
+                    surface: self.code_mode_surface(),
+                    capability_filter_fingerprint,
+                    code: code.to_string(),
+                })
+                .await;
+        }
         let mut structured = code_mode_execute_trace(&response);
         if let Some(object) = structured.as_object_mut() {
+            object.insert(
+                "execution_id".to_string(),
+                Value::String(execution_id.clone()),
+            );
             object.insert("input_tokens".to_string(), Value::from(input_tokens as u64));
             object.insert(
                 "output_tokens".to_string(),

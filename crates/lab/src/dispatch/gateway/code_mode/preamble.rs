@@ -11,7 +11,7 @@
 //! machinery from commit 780c67d3). Surfacing types/schemas via `search` is a
 //! separate follow-up; this module only restores the executable proxy.
 
-use super::types::CodeModeDiscoveryEntry;
+use super::types::{CodeModeCatalogEntry, CodeModeCatalogKind, CodeModeDiscoveryEntry};
 use crate::dispatch::upstream::types::UpstreamTool;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ const JS_RESERVED: &[&str] = &[
 /// Upstream namespaces that sanitize to one of these names are suffixed so a
 /// real upstream named `search`, `describe`, or `step` cannot overwrite the
 /// local discovery/control helpers.
-const CODEMODE_TOP_LEVEL_RESERVED: &[&str] = &["search", "describe", "step"];
+const CODEMODE_TOP_LEVEL_RESERVED: &[&str] = &["search", "describe", "run", "step"];
 
 /// Convert a dotted/hyphenated/slashed/coloned tool name to snake_case.
 ///
@@ -200,7 +200,9 @@ codemode.search = function(input) {{
       [__codemodeNormalize(entry.path), 12],
       [__codemodeNormalize(entry.name), 10],
       [__codemodeNormalize(entry.upstream), 8],
-      [__codemodeNormalize(entry.description), 5]
+      [__codemodeNormalize(entry.description), 5],
+      [__codemodeNormalize((entry.tags || []).join(" ")), 7],
+      [__codemodeNormalize(entry.kind === "snippet" ? "codemode run snippet" : ""), 9]
     ];
     var covered = 0;
     var score = 0;
@@ -219,10 +221,12 @@ codemode.search = function(input) {{
       scored.push({{
         path: entry.path,
         id: entry.id,
+        kind: entry.kind,
         upstream: entry.upstream,
         name: entry.name,
         description: entry.description,
         signature: entry.signature,
+        tags: entry.tags || [],
         score: score
       }});
     }}
@@ -236,29 +240,69 @@ codemode.search = function(input) {{
 }};
 codemode.describe = function(target) {{
   var raw = String(target == null ? "" : target).trim();
-  var matches = [];
+  var exact = [];
+  var bare = [];
+  var ambiguous = [];
   for (var i = 0; i < __codemodeDiscovery.length; i++) {{
     var entry = __codemodeDiscovery[i];
-    if (raw === entry.id || raw === entry.path || raw === entry.helper) matches.push(entry);
-    if (raw === entry.upstream) matches.push({{ __ambiguous: true, path: entry.path }});
+    if (raw === entry.id || raw === entry.path || raw === entry.helper) exact.push(entry);
+    if (entry.kind === "snippet" && raw === "snippet::" + entry.name) exact.push(entry);
+    if (raw === entry.name) bare.push(entry);
+    if (raw === entry.upstream) ambiguous.push(entry);
   }}
-  var ambiguous = matches.filter(function(item) {{ return item.__ambiguous; }});
-  if (ambiguous.length) {{
+  if (exact.length > 1) {{
+    var uniqueExact = [];
+    var seenExact = {{}};
+    for (var e = 0; e < exact.length; e++) {{
+      if (!seenExact[exact[e].path]) {{
+        seenExact[exact[e].path] = true;
+        uniqueExact.push(exact[e]);
+      }}
+    }}
+    exact = uniqueExact;
+  }}
+  if (!exact.length && bare.length === 1) exact = bare;
+  if (!exact.length && (ambiguous.length || bare.length > 1)) {{
+    var candidates = ambiguous.length ? ambiguous : bare;
     throw new Error(JSON.stringify({{
       kind: "ambiguous_target",
-      message: "codemode.describe requires an exact tool id, upstream.tool path, or helper path",
-      valid: ambiguous.map(function(item) {{ return item.path; }}).sort()
+      message: "codemode.describe requires an exact id, path, helper, or unambiguous bare name",
+      valid: candidates.map(function(item) {{ return item.path; }}).sort()
     }}));
   }}
-  if (!matches.length) {{
+  if (!exact.length) {{
     throw new Error(JSON.stringify({{ kind: "unknown_tool", message: "No Code Mode discovery target matched `" + raw + "`" }}));
   }}
-  var entry = matches[0];
+  if (exact.length > 1) {{
+    throw new Error(JSON.stringify({{
+      kind: "ambiguous_target",
+      message: "codemode.describe matched multiple targets",
+      valid: exact.map(function(item) {{ return item.path; }}).sort()
+    }}));
+  }}
+  var entry = exact[0];
+  var markdown;
+  if (entry.kind === "snippet") {{
+    var inputLines = (entry.inputs || []).map(function(input) {{
+      var bits = ["- `" + input.name + "` (" + input.ty + ")"];
+      if (input.required) bits.push("required");
+      if (Object.prototype.hasOwnProperty.call(input, "default")) bits.push("default: `" + JSON.stringify(input.default) + "`");
+      if (input.description) bits.push(input.description);
+      return bits.join(" - ");
+    }}).join("\n");
+    markdown = "# " + entry.name + "\n\nKind: snippet\n\nName: `" + entry.name + "`\n\nDescription: " + entry.description + "\n\nRun: `codemode.run(" + JSON.stringify(entry.name) + ", input)`\n" + (inputLines ? "\nInputs:\n" + inputLines + "\n" : "\nInputs: none\n");
+  }} else {{
+    markdown = "# " + entry.path + "\n\n" + entry.description + "\n\n- kind: `tool`\n- id: `" + entry.id + "`\n- helper: `" + entry.helper + "`\n- signature: `" + entry.signature + "`\n";
+  }}
   return Promise.resolve({{
     path: entry.path,
     id: entry.id,
-    markdown: "# " + entry.path + "\n\n" + entry.description + "\n\n- id: `" + entry.id + "`\n- helper: `" + entry.helper + "`\n- signature: `" + entry.signature + "`\n"
+    kind: entry.kind,
+    markdown: markdown
   }});
+}};
+codemode.run = function(name, input) {{
+  return globalThis.__labRunSnippet(name, input == null ? {{}} : input);
 }};
 codemode.step = function(name, fn) {{
   if (typeof fn !== "function") throw new Error("codemode.step requires a function");
@@ -282,6 +326,7 @@ codemode.step = function(name, fn) {{
 ///
 /// `tools` — the upstream tools to expose
 /// `upstreams` — sorted, deduplicated list of upstream names
+#[allow(dead_code)]
 pub fn generate_js_proxy(tools: &[UpstreamTool], upstreams: &[String]) -> Result<String, String> {
     use std::collections::BTreeMap;
     use std::fmt::Write as _;
@@ -378,6 +423,88 @@ pub fn generate_js_proxy(tools: &[UpstreamTool], upstreams: &[String]) -> Result
     ))
 }
 
+pub(crate) fn generate_js_proxy_from_catalog(
+    tools: &[&CodeModeCatalogEntry],
+    upstreams: &[String],
+) -> Result<String, String> {
+    use std::collections::BTreeMap;
+    use std::fmt::Write as _;
+
+    let mut by_upstream: BTreeMap<&str, Vec<&CodeModeCatalogEntry>> = BTreeMap::new();
+    for tool in tools {
+        if tool.kind != CodeModeCatalogKind::Tool {
+            continue;
+        }
+        by_upstream.entry(&tool.upstream).or_default().push(*tool);
+    }
+
+    let mut parts = String::new();
+    let mut by_snake_upstream: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut final_proxy_keys: BTreeMap<(String, String), (String, String)> = BTreeMap::new();
+    for (upstream_name, upstream_tools) in &by_upstream {
+        let upstream_snake = upstream_name_to_namespace(upstream_name);
+        let mut snake_to_dotted: BTreeMap<String, String> = BTreeMap::new();
+        let mut sorted_tools = upstream_tools.to_vec();
+        sorted_tools.sort_by(|a, b| a.name.cmp(&b.name));
+        for tool in &sorted_tools {
+            let snake = tool_name_to_snake(&tool.name);
+            if snake_to_dotted.contains_key(&snake) {
+                let existing = snake_to_dotted
+                    .get(&snake)
+                    .map(String::as_str)
+                    .unwrap_or("<unknown>");
+                return Err(format!(
+                    "Tool names \"{existing}\" and \"{}\" both sanitize to \"{snake}\" in upstream \"{upstream_name}\"",
+                    tool.name
+                ));
+            }
+            snake_to_dotted.insert(snake, tool.name.clone());
+        }
+
+        let method_defs = by_snake_upstream.entry(upstream_snake.clone()).or_default();
+        for (snake, dotted) in &snake_to_dotted {
+            if let Some((existing_upstream, existing_tool)) = final_proxy_keys.insert(
+                (upstream_snake.clone(), snake.clone()),
+                (upstream_name.to_string(), dotted.clone()),
+            ) {
+                return Err(format!(
+                    "Tools \"{existing_upstream}::{existing_tool}\" and \"{upstream_name}::{dotted}\" both sanitize to \"{upstream_snake}.{snake}\""
+                ));
+            }
+            let tool_id = super::types::upstream_tool_id(upstream_name, dotted);
+            let tool_id_json =
+                serde_json::to_string(&tool_id).unwrap_or_else(|_| "\"unknown\"".to_string());
+            let snake_json =
+                serde_json::to_string(snake.as_str()).unwrap_or_else(|_| format!("\"{snake}\""));
+            method_defs.push(format!(
+                "    {snake_json}: function(p) {{ return callTool({tool_id_json}, p == null ? {{}} : p); }}"
+            ));
+        }
+    }
+
+    for (upstream_snake, method_defs) in &by_snake_upstream {
+        let upstream_snake_json =
+            serde_json::to_string(upstream_snake).unwrap_or_else(|_| "\"unknown\"".to_string());
+        let methods = method_defs.join(",\n");
+        let _ = write!(
+            parts,
+            "codemode[{upstream_snake_json}] = {{\n{methods}\n}};\n"
+        );
+    }
+
+    let upstreams_json = serde_json::to_string(upstreams).unwrap_or_else(|_| "[]".to_string());
+
+    Ok(format!(
+        "// Code Mode proxy — auto-generated\n\
+         globalThis.codemode = globalThis.codemode || {{}};\n\
+         var codemode = globalThis.codemode;\n\
+         codemode.run = function(name, input) {{ return globalThis.__labRunSnippet(name, input == null ? {{}} : input); }};\n\
+         {parts}\
+         codemode.__meta__ = {{ upstreams: function() {{ return Promise.resolve({upstreams_json}); }} }};\n\
+         var __upstreams__ = {upstreams_json};\n"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -387,6 +514,22 @@ mod tests {
 
     use super::*;
     use crate::dispatch::upstream::types::UpstreamTool;
+
+    fn discovery_entry(upstream: &str, name: &str, description: &str) -> CodeModeDiscoveryEntry {
+        let path = format!("{upstream}.{name}");
+        CodeModeDiscoveryEntry {
+            kind: CodeModeCatalogKind::Tool,
+            id: format!("{upstream}::{name}"),
+            path: path.clone(),
+            upstream: upstream.to_string(),
+            name: name.to_string(),
+            helper: format!("codemode.{path}"),
+            description: description.to_string(),
+            signature: format!("codemode.{path}(params: unknown): Promise<unknown>"),
+            tags: Vec::new(),
+            inputs: Vec::new(),
+        }
+    }
 
     // ── tool_name_to_snake ────────────────────────────────────────────────────
 
@@ -440,15 +583,7 @@ mod tests {
 
     #[test]
     fn discovery_preamble_preserves_existing_codemode_object() {
-        let entries = vec![CodeModeDiscoveryEntry {
-            id: "arcane::containers".to_string(),
-            path: "arcane.containers".to_string(),
-            upstream: "arcane".to_string(),
-            name: "containers".to_string(),
-            helper: "codemode.arcane.containers".to_string(),
-            description: "List containers".to_string(),
-            signature: "codemode.arcane.containers(params: unknown): Promise<unknown>".to_string(),
-        }];
+        let entries = vec![discovery_entry("arcane", "containers", "List containers")];
         let js = generate_discovery_js(&entries).expect("js");
         assert!(js.contains("globalThis.codemode = globalThis.codemode || {}"));
         assert!(js.contains("codemode.search"));
@@ -461,26 +596,8 @@ mod tests {
     #[test]
     fn discovery_preamble_advertises_search_describe_and_step_semantics() {
         let entries = vec![
-            CodeModeDiscoveryEntry {
-                id: "github::search_issues".to_string(),
-                path: "github.search_issues".to_string(),
-                upstream: "github".to_string(),
-                name: "search_issues".to_string(),
-                helper: "codemode.github.search_issues".to_string(),
-                description: "Search GitHub issues".to_string(),
-                signature: "codemode.github.search_issues(params: unknown): Promise<unknown>"
-                    .to_string(),
-            },
-            CodeModeDiscoveryEntry {
-                id: "github::list_pull_requests".to_string(),
-                path: "github.list_pull_requests".to_string(),
-                upstream: "github".to_string(),
-                name: "list_pull_requests".to_string(),
-                helper: "codemode.github.list_pull_requests".to_string(),
-                description: "List GitHub pull requests".to_string(),
-                signature: "codemode.github.list_pull_requests(params: unknown): Promise<unknown>"
-                    .to_string(),
-            },
+            discovery_entry("github", "search_issues", "Search GitHub issues"),
+            discovery_entry("github", "list_pull_requests", "List GitHub pull requests"),
         ];
         let js = generate_discovery_js(&entries).expect("js");
 
@@ -495,16 +612,7 @@ mod tests {
 
     #[test]
     fn discovery_describe_rejects_upstream_only_targets() {
-        let entries = vec![CodeModeDiscoveryEntry {
-            id: "github::search_issues".to_string(),
-            path: "github.search_issues".to_string(),
-            upstream: "github".to_string(),
-            name: "search_issues".to_string(),
-            helper: "codemode.github.search_issues".to_string(),
-            description: "Search issues".to_string(),
-            signature: "codemode.github.search_issues(params: unknown): Promise<unknown>"
-                .to_string(),
-        }];
+        let entries = vec![discovery_entry("github", "search_issues", "Search issues")];
         let js = generate_discovery_js(&entries).expect("js");
         assert!(js.contains("ambiguous_target"));
         assert!(js.contains("github.search_issues"));

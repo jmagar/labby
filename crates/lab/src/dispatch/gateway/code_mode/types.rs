@@ -3,12 +3,13 @@
 
 use std::collections::{BTreeSet, VecDeque};
 
-use serde::Serialize;
 use serde::ser::SerializeStruct;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 use crate::dispatch::error::ToolError;
 use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
+use crate::dispatch::snippets::store::{SnippetInfo, SnippetInputSpec, SnippetInputType};
 use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
 
 use super::artifacts::CodeModeArtifactReceipt;
@@ -97,6 +98,7 @@ pub fn sanitize_code_mode_schema(schema: Option<Value>) -> Option<Value> {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CodeModeCatalogEntry {
+    pub kind: CodeModeCatalogKind,
     pub id: String,
     pub name: String,
     pub upstream: String,
@@ -107,6 +109,24 @@ pub struct CodeModeCatalogEntry {
     pub output_schema: Option<Value>,
     pub signature: String,
     pub dts: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<CodeModeSnippetInputEntry>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeModeCatalogKind {
+    Tool,
+    Snippet,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeModeSnippetInputEntry {
+    pub name: String,
+    #[serde(flatten)]
+    pub spec: SnippetInputSpec,
 }
 
 impl CodeModeCatalogEntry {
@@ -126,6 +146,7 @@ impl CodeModeCatalogEntry {
             output_schema.as_ref(),
         );
         Self {
+            kind: CodeModeCatalogKind::Tool,
             id: upstream_tool_id(upstream, tool),
             name: tool.to_string(),
             upstream: upstream.to_string(),
@@ -134,12 +155,87 @@ impl CodeModeCatalogEntry {
             output_schema,
             signature: types.signature,
             dts: types.dts,
+            tags: Vec::new(),
+            inputs: Vec::new(),
         }
+    }
+
+    #[must_use]
+    pub fn snippet(info: &SnippetInfo) -> Self {
+        let description = info
+            .description
+            .clone()
+            .unwrap_or_else(|| format!("Code Mode snippet `{}`", info.name));
+        let inputs = info
+            .inputs
+            .iter()
+            .map(|(name, spec)| CodeModeSnippetInputEntry {
+                name: name.clone(),
+                spec: spec.clone(),
+            })
+            .collect::<Vec<_>>();
+        Self {
+            kind: CodeModeCatalogKind::Snippet,
+            id: format!("snippet::{}", info.name),
+            name: info.name.clone(),
+            upstream: "snippet".to_string(),
+            description,
+            schema: Some(snippet_inputs_schema(&info.inputs)),
+            output_schema: None,
+            signature: format!("codemode.run({:?}, input?)", info.name),
+            dts: String::new(),
+            tags: info.tags.clone(),
+            inputs,
+        }
+    }
+}
+
+fn snippet_inputs_schema(inputs: &std::collections::BTreeMap<String, SnippetInputSpec>) -> Value {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+    for (name, spec) in inputs {
+        if spec.required {
+            required.push(Value::String(name.clone()));
+        }
+        let mut field = serde_json::Map::new();
+        field.insert(
+            "type".to_string(),
+            Value::String(snippet_input_json_type(spec.ty).to_string()),
+        );
+        if let Some(description) = &spec.description {
+            field.insert(
+                "description".to_string(),
+                Value::String(description.clone()),
+            );
+        }
+        if let Some(default) = &spec.default {
+            field.insert("default".to_string(), default.clone());
+        }
+        properties.insert(name.clone(), Value::Object(field));
+    }
+    json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": false,
+    })
+}
+
+fn snippet_input_json_type(ty: SnippetInputType) -> &'static str {
+    match ty {
+        SnippetInputType::String => "string",
+        SnippetInputType::Integer => "integer",
+        SnippetInputType::Number => "number",
+        SnippetInputType::Boolean => "boolean",
+        SnippetInputType::Object => "object",
+        SnippetInputType::Array => "array",
+        SnippetInputType::Json => "string",
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct CodeModeDiscoveryEntry {
+    pub(crate) kind: CodeModeCatalogKind,
     pub(crate) id: String,
     pub(crate) path: String,
     pub(crate) upstream: String,
@@ -147,6 +243,40 @@ pub(crate) struct CodeModeDiscoveryEntry {
     pub(crate) helper: String,
     pub(crate) description: String,
     pub(crate) signature: String,
+    pub(crate) tags: Vec<String>,
+    pub(crate) inputs: Vec<CodeModeSnippetInputEntry>,
+}
+
+impl CodeModeDiscoveryEntry {
+    #[must_use]
+    pub(crate) fn from_catalog(entry: &CodeModeCatalogEntry) -> Self {
+        let (path, helper) = match entry.kind {
+            CodeModeCatalogKind::Tool => {
+                let upstream = super::preamble::upstream_name_to_namespace(&entry.upstream);
+                let name = super::preamble::tool_name_to_snake(&entry.name);
+                (
+                    format!("{upstream}.{name}"),
+                    format!("codemode.{upstream}.{name}"),
+                )
+            }
+            CodeModeCatalogKind::Snippet => (
+                format!("snippet.{}", entry.name),
+                format!("codemode.run({:?}, input)", entry.name),
+            ),
+        };
+        Self {
+            kind: entry.kind,
+            id: entry.id.clone(),
+            path,
+            upstream: entry.upstream.clone(),
+            name: entry.name.clone(),
+            helper,
+            description: entry.description.clone(),
+            signature: entry.signature.clone(),
+            tags: entry.tags.clone(),
+            inputs: entry.inputs.clone(),
+        }
+    }
 }
 
 /// A captured upstream MCP Apps (mcp-ui) widget link.
@@ -163,6 +293,8 @@ pub struct UiLink {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CodeModeExecutionResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
     /// The final return value of the async function. None when the function
     /// returns undefined or throws (the throw case surfaces via ToolError).
     /// Explicit JavaScript `null` is represented as `Some(Value::Null)` and
@@ -274,6 +406,8 @@ pub enum CodeModeHistoryKind {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CodeModeHistoryEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
     pub seq: u64,
     pub route_scope: String,
     pub kind: CodeModeHistoryKind,
@@ -383,6 +517,7 @@ impl CodeModeHistory {
 
     fn oversized_entry_sentinel(seq: u64, kind: CodeModeHistoryKind) -> CodeModeHistoryEntry {
         CodeModeHistoryEntry {
+            execution_id: None,
             seq,
             route_scope: "root".to_string(),
             kind,
@@ -394,6 +529,112 @@ impl CodeModeHistory {
             calls: Vec::new(),
             match_count: None,
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CodeModeExecutionSource {
+    pub execution_id: String,
+    pub created_at_ms: i64,
+    pub actor_key: Option<String>,
+    pub is_admin: bool,
+    pub route_scope: String,
+    pub surface: CodeModeSurface,
+    pub capability_filter_fingerprint: String,
+    pub code: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct CodeModeSourceLookup {
+    pub actor_key: Option<String>,
+    pub is_admin: bool,
+    pub route_scope: String,
+    pub capability_filter_fingerprint: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct CodeModeSourceStore {
+    entries: VecDeque<CodeModeExecutionSource>,
+    running_bytes: usize,
+    max_entries: usize,
+    max_bytes: usize,
+}
+
+impl Default for CodeModeSourceStore {
+    fn default() -> Self {
+        Self::new(50, 512 * 1024)
+    }
+}
+
+impl CodeModeSourceStore {
+    #[must_use]
+    pub fn new(max_entries: usize, max_bytes: usize) -> Self {
+        Self {
+            entries: VecDeque::new(),
+            running_bytes: 0,
+            max_entries: max_entries.max(1),
+            max_bytes: max_bytes.max(1024),
+        }
+    }
+
+    pub fn push(&mut self, source: CodeModeExecutionSource) {
+        let bytes = source.code.len();
+        if bytes > self.max_bytes {
+            return;
+        }
+        self.running_bytes = self.running_bytes.saturating_add(bytes);
+        self.entries.push_back(source);
+        while self.entries.len() > self.max_entries || self.running_bytes > self.max_bytes {
+            if let Some(evicted) = self.entries.pop_front() {
+                self.running_bytes = self.running_bytes.saturating_sub(evicted.code.len());
+            } else {
+                break;
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn resolve(
+        &self,
+        execution_id: &str,
+        lookup: &CodeModeSourceLookup,
+    ) -> Result<CodeModeExecutionSource, ToolError> {
+        let Some(source) = self
+            .entries
+            .iter()
+            .find(|entry| entry.execution_id == execution_id)
+            .cloned()
+        else {
+            return Err(ToolError::Sdk {
+                sdk_kind: "unknown_execution".to_string(),
+                message: "Code Mode promotion source is ephemeral and may have expired, been evicted, lived in another gateway process, or disappeared after restart".to_string(),
+            });
+        };
+        if !lookup.is_admin {
+            return Err(ToolError::Forbidden {
+                message: "promoting Code Mode executions requires lab:admin".to_string(),
+                required_scopes: vec!["lab:admin".to_string()],
+            });
+        }
+        if source.route_scope != lookup.route_scope
+            || source.capability_filter_fingerprint != lookup.capability_filter_fingerprint
+        {
+            return Err(ToolError::Forbidden {
+                message: "Code Mode promotion source is outside this route or capability scope"
+                    .to_string(),
+                required_scopes: vec!["lab:admin".to_string()],
+            });
+        }
+        if source.actor_key.is_some()
+            && lookup.actor_key.is_some()
+            && source.actor_key != lookup.actor_key
+        {
+            return Err(ToolError::Forbidden {
+                message: "Code Mode promotion source belongs to a different actor".to_string(),
+                required_scopes: vec!["lab:admin".to_string()],
+            });
+        }
+        Ok(source)
     }
 }
 
@@ -444,6 +685,14 @@ pub(in crate::dispatch::gateway::code_mode) fn destructive_permitted(
 }
 
 impl CodeModeCaller {
+    #[must_use]
+    pub fn can_use_snippets(&self) -> bool {
+        match self {
+            Self::TrustedLocal => true,
+            Self::Scoped { scopes, .. } => scopes.iter().any(|scope| scope == "lab:admin"),
+        }
+    }
+
     #[must_use]
     pub fn can_read(&self) -> bool {
         match self {
@@ -559,5 +808,26 @@ impl CodeModeCapabilityFilter {
             && (self.tools.is_empty()
                 || self.tools.contains(tool)
                 || self.tools.contains(&upstream_tool_id(upstream, tool)))
+    }
+
+    #[must_use]
+    pub fn is_scoped_to_upstreams(&self) -> bool {
+        self.upstreams.is_some()
+    }
+
+    #[must_use]
+    pub fn allowed_upstreams(&self) -> Option<&BTreeSet<String>> {
+        self.upstreams.as_ref()
+    }
+
+    #[must_use]
+    pub fn fingerprint(&self) -> String {
+        let upstreams = self
+            .upstreams
+            .as_ref()
+            .map(|set| set.iter().cloned().collect::<Vec<_>>().join(","))
+            .unwrap_or_else(|| "*".to_string());
+        let tools = self.tools.iter().cloned().collect::<Vec<_>>().join(",");
+        format!("upstreams={upstreams};tools={tools}")
     }
 }

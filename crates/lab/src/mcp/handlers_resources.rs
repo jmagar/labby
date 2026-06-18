@@ -836,6 +836,7 @@ mod tests {
         let manager = server.gateway_manager.as_ref().expect("manager").clone();
         manager
             .record_code_mode_history(crate::dispatch::gateway::code_mode::CodeModeHistoryEntry {
+                execution_id: None,
                 seq: 0,
                 route_scope: "root".to_string(),
                 kind: crate::dispatch::gateway::code_mode::CodeModeHistoryKind::Execute,

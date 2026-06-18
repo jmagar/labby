@@ -89,8 +89,19 @@ pub struct CatalogRenderCache {
     /// Serialized catalog size in bytes (for the tracing log).
     pub serialized_size: usize,
 }
+
+/// Cached snippet metadata for Code Mode discovery.
+///
+/// Keyed by cheap directory metadata plus the caller visibility policy. This
+/// stores metadata only; executable snippet source is resolved lazily per
+/// execution when `codemode.run()` asks the host for it.
+pub(crate) struct SnippetMetadataCache {
+    pub fingerprint: String,
+    pub entries: Vec<crate::dispatch::snippets::store::SnippetInfo>,
+}
 #[cfg(test)]
 pub(crate) use types::{CodeModeExecutionError, CodeModeExecutionResponse};
+pub(crate) use types::{CodeModeExecutionSource, CodeModeSourceLookup, CodeModeSourceStore};
 pub(crate) use types::{CodeModeHistory, CodeModeHistoryEntry, CodeModeHistoryKind};
 
 // Re-exported for the in-crate test modules (`tests_*`), which reference these

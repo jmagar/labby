@@ -12,8 +12,9 @@ mod tests {
     use serde_json::json;
 
     use super::store::{
-        SnippetSource, create_user_snippet, extract_javascript_block, list_snippets,
-        merge_snippet_input, remove_user_snippet, resolve_snippet, validate_snippet_name,
+        SnippetSource, create_promoted_user_snippet, create_user_snippet, extract_javascript_block,
+        list_snippets, merge_snippet_input, remove_user_snippet, resolve_snippet,
+        validate_snippet_name,
     };
 
     #[test]
@@ -156,6 +157,57 @@ async () => ({ ok: true })
             "async () => ({ ok: true })"
         );
         assert_eq!(resolved.description.as_deref(), Some("Raw snippet"));
+    }
+
+    #[test]
+    fn promoted_snippet_writes_atomically_and_rejects_builtin_shadow_without_flag() {
+        let temp = tempfile::tempdir().unwrap();
+        let lab_home = temp.path().join("lab-home");
+        let builtin_dir = temp.path().join("builtins");
+        fs::create_dir_all(&builtin_dir).unwrap();
+        fs::write(
+            builtin_dir.join("demo.md"),
+            "---\nname: demo\ndescription: Builtin demo\ntags: []\n---\n\n```js\nasync () => ({ builtin: true })\n```\n",
+        )
+        .unwrap();
+
+        let err = create_promoted_user_snippet(
+            &lab_home,
+            &builtin_dir,
+            "demo",
+            "async () => ({ promoted: true })",
+            Some("Promoted"),
+            false,
+            false,
+        )
+        .expect_err("builtin shadow requires explicit flag");
+        assert_eq!(err.kind(), "builtin_shadow_requires_confirmation");
+
+        let info = create_promoted_user_snippet(
+            &lab_home,
+            &builtin_dir,
+            "demo",
+            "async () => ({ promoted: true })",
+            Some("Promoted"),
+            false,
+            true,
+        )
+        .expect("shadow allowed");
+        assert!(info.shadowed);
+        let resolved = resolve_snippet(&lab_home, &builtin_dir, "demo").unwrap();
+        assert_eq!(
+            super::store::code_for_snippet(&resolved).unwrap(),
+            "async () => ({ promoted: true })"
+        );
+        assert!(
+            fs::read_dir(lab_home.join("snippets"))
+                .unwrap()
+                .all(|entry| !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".tmp"))
+        );
     }
 
     #[test]

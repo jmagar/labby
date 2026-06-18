@@ -124,6 +124,7 @@ fn codemode_input_schema_is_code_only() {
 #[test]
 fn execute_trace_embeds_result_and_redacts_call_params() {
     let response = CodeModeExecutionResponse {
+        execution_id: None,
         ui: None,
         result: Some(json!({
             "answer": "the full research answer the model asked for",
@@ -165,6 +166,7 @@ fn execute_trace_embeds_result_and_redacts_call_params() {
 #[test]
 fn execute_trace_omits_result_when_function_returns_undefined() {
     let response = CodeModeExecutionResponse {
+        execution_id: None,
         ui: None,
         result: None,
         calls: vec![],
@@ -186,6 +188,7 @@ fn execute_trace_omits_result_when_function_returns_undefined() {
 #[test]
 fn execute_trace_preserves_explicit_null_result() {
     let response = CodeModeExecutionResponse {
+        execution_id: None,
         ui: None,
         result: Some(Value::Null),
         calls: vec![],

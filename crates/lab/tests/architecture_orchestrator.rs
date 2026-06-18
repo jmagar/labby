@@ -87,6 +87,10 @@ const ALLOWED_EDGES: &[(&str, &str)] = &[
     // gateway → upstream: gateway owns the upstream connection pool, circuit
     //   breaker, and stdio spawn — upstream IS gateway's runtime substrate.
     ("gateway", "upstream"),
+    // gateway → snippets: gateway/code_mode exposes trusted local snippets in
+    //   the reduced Code Mode catalog and resolves them lazily inside the
+    //   sandbox. Snippet persistence remains owned by the snippets service.
+    ("gateway", "snippets"),
     // doctor → upstream: doctor's gateway health check reads
     //   CIRCUIT_BREAKER_THRESHOLD / UpstreamHealth types to report breaker state.
     ("doctor", "upstream"),

@@ -9,7 +9,7 @@ use tokio::sync::{Mutex, RwLock};
 
 use crate::config::LabConfig;
 use crate::dispatch::clients::SharedServiceClients;
-use crate::dispatch::gateway::code_mode::CodeModeHistory;
+use crate::dispatch::gateway::code_mode::{CodeModeHistory, CodeModeSourceStore};
 use crate::dispatch::gateway::protected_routes::ProtectedRouteIndex;
 use crate::dispatch::gateway::service_catalog::service_meta;
 use crate::dispatch::gateway::types::CatalogChangeNotifier;
@@ -99,10 +99,12 @@ impl GatewayManager {
             oauth_redirect_uri: None,
             protected_route_index: Arc::new(RwLock::new(ProtectedRouteIndex::default())),
             code_mode_history: Arc::new(Mutex::new(CodeModeHistory::default())),
+            code_mode_source_store: Arc::new(Mutex::new(CodeModeSourceStore::default())),
             in_process_connector: None,
             code_mode_refresh_deadline: Arc::new(Mutex::new(None)),
             code_mode_refresh_inflight: Arc::new(Mutex::new(())),
             code_mode_catalog_render_cache: Arc::new(Mutex::new(None)),
+            code_mode_snippet_metadata_cache: Arc::new(Mutex::new(None)),
             code_mode_runner_pool: Arc::new(
                 crate::dispatch::gateway::code_mode::RunnerPool::from_env(),
             ),

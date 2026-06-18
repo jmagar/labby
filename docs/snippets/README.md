@@ -1,12 +1,12 @@
 # Code Mode Snippets
 
-Code Mode snippets are reusable JavaScript workflows for Labby's `search` and `execute` tools. They let an agent run many upstream MCP calls from one controlled async function, combine the results, and return a structured answer that is easier to reuse than a one-off chat transcript.
+Code Mode snippets are reusable JavaScript workflows for Labby's single `codemode` MCP tool. They let an agent run many upstream MCP calls from one controlled async function, combine the results, and return a structured answer that is easier to reuse than a one-off chat transcript.
 
 This document is only about snippets that run inside Code Mode.
 
 ## What A Snippet Is
 
-A snippet is a Markdown or JavaScript file that contains an async arrow function passed to Code Mode `execute`.
+A snippet is a Markdown or JavaScript file that contains an async arrow function run by Code Mode.
 
 The simple version:
 
@@ -47,7 +47,7 @@ Tool ids use the live Code Mode catalog shape: `<upstream>::<tool>`. For example
 await callTool("axon::axon", { action: "search", query: "mcp-ui rust" })
 ```
 
-Before writing or running a snippet, use Code Mode `search` to inspect the live catalog. Search returns tool ids, descriptions, input schemas, output schemas, TypeScript signatures, and focused DTS blocks. A snippet should be written against those returned ids and schemas, not against guessed tool names.
+Before writing or running a snippet, use `codemode.search()` and `codemode.describe()` to inspect the live catalog. Search returns compact tool and snippet metadata; describe returns focused docs for the exact target. A snippet should be written against returned ids and schemas, not against guessed tool names.
 
 ## How Users Should Build Snippets
 
@@ -215,6 +215,51 @@ same all-snippet check.
 
 `snippets.list`, `help`, and `schema` are read-only discovery actions. Actions
 that expose snippet bodies or execute/manage snippets require `lab:admin`.
+
+Inside Code Mode, trusted-local and `lab:admin` callers can discover snippets:
+
+```js
+async () => {
+  const found = await codemode.search("snippet gateway");
+  const docs = await codemode.describe(found.results[0].id);
+  return { found, docs };
+}
+```
+
+They can run a snippet in the same sandbox with:
+
+```js
+async () => {
+  const summary = await codemode.run("gateway-summary", { includeHealth: true });
+  await writeArtifact("gateway-summary.json", JSON.stringify(summary, null, 2), {
+    contentType: "application/json"
+  });
+  return summary;
+}
+```
+
+`codemode.run()` resolves snippet source lazily through the live gateway and
+evaluates it inside the same Javy/QuickJS runtime as the caller. Snippet source
+is not injected into search/describe metadata.
+
+Successful admin/trusted-local Code Mode executions return an `execution_id`.
+Promote a prior execution through the live gateway snippets action, not a
+standalone local CLI command:
+
+```js
+snippets({ action: "snippets.promote", params: {
+  execution_id: "01JEXAMPLE",
+  name: "gateway-summary",
+  description: "Summarize gateway health",
+  confirm: true
+}})
+```
+
+Promotion is ephemeral and live-gateway scoped: the raw Code Mode source is kept
+only in memory and may expire, be evicted, disappear after restart/deploy, or
+live in another gateway process. Promoted snippets are written as plaintext
+executable content and may contain anything the original Code Mode source
+contained.
 
 Successful upstream MCP results are unwrapped before reaching snippet code when possible. Structured content is returned as the value; all-text content is parsed as JSON when possible; mixed content keeps its MCP content shape.
 

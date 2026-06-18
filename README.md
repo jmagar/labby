@@ -154,7 +154,7 @@ The stdio spawn guard allows known runtimes such as `npx`, `uvx`, `docker`,
 ### Use Code Mode
 
 When `[code_mode].enabled = true`, Lab hides raw proxied upstream tools from MCP
-`list_tools()` and exposes the canonical synthetic tools `search` and `execute`.
+`list_tools()` and exposes the canonical synthetic `codemode` tool.
 
 ```bash
 labby gateway code status
@@ -165,11 +165,15 @@ labby gateway code exec --code 'async () => tools.length'
 MCP call shapes:
 
 ```json
-{ "code": "async () => tools.filter(t => t.upstream === \"github\").map(t => ({ id: t.id, signature: t.signature }))" }
+{ "code": "async () => (await codemode.search(\"github issues\")).results" }
 ```
 
 ```json
 { "code": "async () => callTool(\"github::search_issues\", {\"query\":\"repo:jmagar/lab gateway\"})" }
+```
+
+```json
+{ "code": "async () => codemode.run(\"gateway-summary\", {\"includeHealth\": true})" }
 ```
 
 Code Mode can call exposed upstream MCP tools only. It cannot call Lab actions

@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use std::collections::BTreeMap;
+use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -196,7 +197,7 @@ pub fn create_user_snippet(
         });
     }
     let body = render_user_snippet_body(name, body, description)?;
-    fs::write(&path, &body).map_err(|e| io_error("write snippet", &path, e))?;
+    atomic_write_snippet(&path, &body)?;
     let metadata = frontmatter(&body).ok().flatten();
     Ok(SnippetInfo {
         name: name.to_string(),
@@ -209,6 +210,33 @@ pub fn create_user_snippet(
         source: SnippetSource::User,
         path,
         shadowed: false,
+    })
+}
+
+pub fn create_promoted_user_snippet(
+    lab_home: &Path,
+    builtin_dir: &Path,
+    name: &str,
+    code: &str,
+    description: Option<&str>,
+    force: bool,
+    shadow_builtin: bool,
+) -> Result<SnippetInfo, ToolError> {
+    validate_snippet_name(name)?;
+    validate_snippet_code(code)?;
+    let shadows_builtin = find_snippet_file(builtin_dir, name).is_some();
+    if shadows_builtin && !shadow_builtin {
+        return Err(ToolError::Sdk {
+            sdk_kind: "builtin_shadow_requires_confirmation".to_string(),
+            message: format!(
+                "snippet `{name}` matches a built-in snippet; pass shadow_builtin:true to create a user override"
+            ),
+        });
+    }
+    let info = create_user_snippet(lab_home, name, code, description, force)?;
+    Ok(SnippetInfo {
+        shadowed: shadows_builtin,
+        ..info
     })
 }
 
@@ -566,6 +594,38 @@ fn sanitize_frontmatter_scalar(value: &str) -> String {
     } else {
         sanitized.replace('"', "'")
     }
+}
+
+fn atomic_write_snippet(path: &Path, body: &str) -> Result<(), ToolError> {
+    static WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let _guard = WRITE_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| ToolError::internal_message("snippet write lock poisoned"))?;
+    let dir = path.parent().ok_or_else(|| {
+        ToolError::internal_message(format!("snippet path `{}` has no parent", path.display()))
+    })?;
+    let temp = dir.join(format!(
+        ".{}.{}.tmp",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("snippet"),
+        std::process::id()
+    ));
+    {
+        let mut file =
+            fs::File::create(&temp).map_err(|e| io_error("create temp snippet", &temp, e))?;
+        use std::io::Write as _;
+        file.write_all(body.as_bytes())
+            .map_err(|e| io_error("write temp snippet", &temp, e))?;
+        file.sync_all()
+            .map_err(|e| io_error("sync temp snippet", &temp, e))?;
+    }
+    fs::rename(&temp, path).map_err(|e| io_error("rename snippet", path, e))?;
+    if let Ok(dir_file) = fs::File::open(dir) {
+        drop(dir_file.sync_all());
+    }
+    Ok(())
 }
 
 pub fn merge_snippet_input(snippet: &ResolvedSnippet, caller: Value) -> Result<Value, ToolError> {

@@ -98,6 +98,51 @@ pub const ACTIONS: &[ActionSpec] = &[
         ],
     },
     ActionSpec {
+        name: "snippets.promote",
+        description: "Promote a successful live Code Mode execution into a user snippet",
+        destructive: true,
+        requires_admin: true,
+        returns: "SnippetPromotionResult",
+        params: &[
+            ParamSpec {
+                name: "execution_id",
+                ty: "string",
+                required: true,
+                description: "Live gateway Code Mode execution id",
+            },
+            ParamSpec {
+                name: "name",
+                ty: "string",
+                required: true,
+                description: "Target user snippet name",
+            },
+            ParamSpec {
+                name: "description",
+                ty: "string",
+                required: false,
+                description: "Snippet description",
+            },
+            ParamSpec {
+                name: "force",
+                ty: "boolean",
+                required: false,
+                description: "Overwrite an existing user snippet",
+            },
+            ParamSpec {
+                name: "shadow_builtin",
+                ty: "boolean",
+                required: false,
+                description: "Allow creating a user snippet that shadows a built-in snippet",
+            },
+            ParamSpec {
+                name: "confirm",
+                ty: "boolean",
+                required: false,
+                description: "Required by headless MCP clients for destructive promotion",
+            },
+        ],
+    },
+    ActionSpec {
         name: "snippets.validate",
         description: "Validate a snippet body or existing snippet without executing it",
         destructive: false,

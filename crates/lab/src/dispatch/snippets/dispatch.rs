@@ -3,14 +3,15 @@ use serde_json::{Value, json};
 
 use crate::dispatch::error::ToolError;
 use crate::dispatch::gateway::code_mode::{
-    CodeModeBroker, CodeModeCaller, CodeModeCapabilityFilter, CodeModeSurface,
+    CodeModeBroker, CodeModeCaller, CodeModeCapabilityFilter, CodeModeSourceLookup, CodeModeSurface,
 };
 use crate::dispatch::helpers::{action_schema, help_payload, lab_home, require_str, to_json};
 
 use super::catalog::ACTIONS;
 use super::store::{
-    builtin_snippet_dir, code_for_snippet, create_user_snippet, list_snippets, merge_snippet_input,
-    remove_user_snippet, resolve_snippet, validate_snippet_body, validate_snippet_name,
+    builtin_snippet_dir, code_for_snippet, create_promoted_user_snippet, create_user_snippet,
+    list_snippets, merge_snippet_input, remove_user_snippet, resolve_snippet,
+    validate_snippet_body, validate_snippet_name,
 };
 
 #[derive(Debug, Deserialize)]
@@ -35,6 +36,23 @@ struct ExecParams {
 struct ValidateParams {
     name: Option<String>,
     body: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PromoteParams {
+    execution_id: String,
+    name: String,
+    description: Option<String>,
+    #[serde(default)]
+    force: bool,
+    #[serde(default)]
+    shadow_builtin: bool,
+    #[serde(default)]
+    route_scope: Option<String>,
+    #[serde(default)]
+    actor_key: Option<String>,
+    #[serde(default)]
+    capability_filter_fingerprint: Option<String>,
 }
 
 pub async fn dispatch(action: &str, params: Value) -> Result<Value, ToolError> {
@@ -78,6 +96,10 @@ async fn dispatch_inner(
                 params.description.as_deref(),
                 params.force,
             )?)
+        }
+        "snippets.promote" => {
+            let params: PromoteParams = parse_params(params)?;
+            promote_snippet(manager, params).await
         }
         "snippets.validate" => {
             let params: ValidateParams = parse_params(params)?;
@@ -130,6 +152,52 @@ async fn dispatch_inner(
             hint: None,
         }),
     }
+}
+
+async fn promote_snippet(
+    manager: Option<&crate::dispatch::gateway::manager::GatewayManager>,
+    params: PromoteParams,
+) -> Result<Value, ToolError> {
+    validate_snippet_name(&params.name)?;
+    let manager = manager.ok_or_else(|| ToolError::Sdk {
+        sdk_kind: "gateway_unavailable".to_string(),
+        message: "snippets.promote requires the live gateway manager source store".to_string(),
+    })?;
+    let source = manager
+        .resolve_code_mode_source(
+            &params.execution_id,
+            &CodeModeSourceLookup {
+                actor_key: params.actor_key.clone(),
+                is_admin: true,
+                route_scope: params.route_scope.unwrap_or_else(|| "root".to_string()),
+                capability_filter_fingerprint: params
+                    .capability_filter_fingerprint
+                    .unwrap_or_else(|| CodeModeCapabilityFilter::default().fingerprint()),
+            },
+        )
+        .await?;
+    let info = create_promoted_user_snippet(
+        &lab_home(),
+        &builtin_snippet_dir(),
+        &params.name,
+        &source.code,
+        params.description.as_deref(),
+        params.force,
+        params.shadow_builtin,
+    )?;
+    to_json(json!({
+        "execution_id": source.execution_id,
+        "source": {
+            "created_at_ms": source.created_at_ms,
+            "is_admin": source.is_admin,
+            "surface": match source.surface {
+                CodeModeSurface::Mcp => "mcp",
+                CodeModeSurface::Cli => "cli",
+            },
+            "route_scope": source.route_scope,
+        },
+        "snippet": info,
+    }))
 }
 
 fn validate_snippet(name: Option<&str>, body: Option<&str>) -> Result<Value, ToolError> {

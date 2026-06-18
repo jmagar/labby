@@ -27,6 +27,11 @@ pub enum CodeModeRunnerInput {
         seq: u64,
         result: Value,
     },
+    SnippetResolved {
+        seq: u64,
+        code: String,
+        input: Value,
+    },
     ToolError {
         seq: u64,
         kind: String,
@@ -55,6 +60,12 @@ pub enum CodeModeRunnerOutput {
         #[serde(default)]
         content_type: Option<String>,
     },
+    SnippetResolve {
+        seq: u64,
+        name: String,
+        #[serde(default)]
+        input: Value,
+    },
     /// Runner completed successfully. `result` is the serialized return value of
     /// the async function (`Undefined` when the function returns undefined).
     /// `logs` carries captured console output (Boa path) or redirected stderr (Javy path).
@@ -79,7 +90,10 @@ impl CodeModeRunnerOutput {
     pub(in crate::dispatch::gateway::code_mode) fn result_for_response(&self) -> Option<Value> {
         match self {
             Self::Done { result, .. } => result.clone().into_response_result(),
-            Self::ToolCall { .. } | Self::ArtifactWrite { .. } | Self::Error { .. } => None,
+            Self::ToolCall { .. }
+            | Self::ArtifactWrite { .. }
+            | Self::SnippetResolve { .. }
+            | Self::Error { .. } => None,
         }
     }
 }

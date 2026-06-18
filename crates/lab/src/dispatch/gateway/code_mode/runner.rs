@@ -230,10 +230,43 @@ fn classify_rejection(message: String) -> CodeModeRunnerError {
             message,
         };
     }
+    let message = add_code_mode_hint("server_error", &message);
     CodeModeRunnerError {
         kind: "server_error".to_string(),
         message,
     }
+}
+
+fn add_code_mode_hint(kind: &str, message: &str) -> String {
+    let mut hints = Vec::new();
+    if kind == "ReferenceError"
+        || message.contains(" is not defined")
+        || message.contains("not defined")
+    {
+        hints.push(
+            "Available globals: codemode, codemode.run, codemode.search, codemode.describe, codemode.step, callTool, writeArtifact. Node/Deno globals such as require, process, fs, fetch, and Bun are not available in the sandbox.",
+        );
+    }
+    if (message.contains(" is not a function") || message.contains("not a function"))
+        && message.contains("codemode")
+    {
+        hints.push(
+            "Use await codemode.search(\"...\") or await codemode.describe(\"...\") to find the exact helper name.",
+        );
+    }
+    if hints.is_empty() {
+        message.to_string()
+    } else {
+        format!("{message}\n\nHint: {}", hints.join(" "))
+    }
+}
+
+#[cfg(test)]
+pub(in crate::dispatch::gateway::code_mode) fn add_code_mode_hint_for_test(
+    kind: &str,
+    message: &str,
+) -> String {
+    add_code_mode_hint(kind, message)
 }
 
 #[cfg(test)]
@@ -307,6 +340,15 @@ fn run_code_mode_runner() -> Result<RunnerLoopOutcome, CodeModeRunnerError> {
                     }),
                 )?,
             )?;
+            globals.set(
+                "__labEmitSnippetResolve",
+                javy::quickjs::Function::new(
+                    cx.clone(),
+                    javy::quickjs::prelude::MutFn::new(|cx, args| {
+                        javy_emit_snippet_resolve(javy::Args::hold(cx, args))
+                    }),
+                )?,
+            )?;
             Ok(())
         })
         .map_err(javy_error_message)?;
@@ -362,6 +404,12 @@ fn wrap_code_mode(code: &str, proxy: &str) -> String {
     format!(
         r#"
 globalThis.__labPendingToolCalls = new Map();
+globalThis.__labSnippetStack = [];
+globalThis.__labSnippetResolveCount = 0;
+globalThis.__labSnippetResolvedBytes = 0;
+globalThis.__labSnippetMaxDepth = 8;
+globalThis.__labSnippetMaxResolves = 32;
+globalThis.__labSnippetMaxBytes = 262144;
 {codec}
 globalThis.callTool = (id, params = {{}}) => {{
   if (typeof id !== "string" || id.trim() === "") {{
@@ -372,7 +420,7 @@ globalThis.callTool = (id, params = {{}}) => {{
   }}
   return new Promise((resolve, reject) => {{
     const seq = globalThis.__labEmitToolCall(id, __labEncodeResult(params));
-    globalThis.__labPendingToolCalls.set(seq, {{ resolve, reject }});
+    globalThis.__labPendingToolCalls.set(seq, {{ kind: "tool", resolve, reject }});
   }});
 }};
 globalThis.writeArtifact = (path, content, options = {{}}) => {{
@@ -388,18 +436,63 @@ globalThis.writeArtifact = (path, content, options = {{}}) => {{
   const contentType = typeof options.contentType === "string" ? options.contentType : null;
   return new Promise((resolve, reject) => {{
     const seq = globalThis.__labEmitArtifactWrite(path, content, contentType);
-    globalThis.__labPendingToolCalls.set(seq, {{ resolve, reject }});
+    globalThis.__labPendingToolCalls.set(seq, {{ kind: "artifact", resolve, reject }});
   }});
 }};
-globalThis.__labSettleToolCall = (message) => {{
+globalThis.__labRunSnippet = (name, input = {{}}) => {{
+  if (typeof name !== "string" || name.trim() === "") {{
+    return Promise.reject(new Error(JSON.stringify({{kind: "bad_snippet_name", message: "codemode.run name must be a non-empty string"}})));
+  }}
+  if (input === null || typeof input !== "object" || Array.isArray(input)) {{
+    return Promise.reject(new Error(JSON.stringify({{kind: "invalid_param", message: "codemode.run input must be a JSON object"}})));
+  }}
+  if (globalThis.__labSnippetStack.indexOf(name) !== -1) {{
+    return Promise.reject(new Error(JSON.stringify({{kind: "snippet_recursion_limit", message: "snippet recursion detected for `" + name + "`"}})));
+  }}
+  if (globalThis.__labSnippetStack.length >= globalThis.__labSnippetMaxDepth) {{
+    return Promise.reject(new Error(JSON.stringify({{kind: "snippet_depth_exceeded", message: "snippet depth limit exceeded"}})));
+  }}
+  if (globalThis.__labSnippetResolveCount >= globalThis.__labSnippetMaxResolves) {{
+    return Promise.reject(new Error(JSON.stringify({{kind: "snippet_resolve_limit", message: "snippet resolve limit exceeded"}})));
+  }}
+  globalThis.__labSnippetResolveCount++;
+  return new Promise((resolve, reject) => {{
+    const seq = globalThis.__labEmitSnippetResolve(name, __labEncodeResult(input));
+    globalThis.__labPendingToolCalls.set(seq, {{ kind: "snippet", name, resolve, reject }});
+  }});
+}};
+globalThis.__labSettlePendingOperation = (message) => {{
   const input = JSON.parse(message);
   const pending = globalThis.__labPendingToolCalls.get(input.seq);
   if (!pending) {{
-    throw new Error("runner received a response for an unknown tool call");
+    throw new Error("runner received a response for an unknown pending operation");
   }}
   globalThis.__labPendingToolCalls.delete(input.seq);
   if (input.type === "tool_result") {{
     pending.resolve(__labDecodeResult(input.result));
+    return;
+  }}
+  if (input.type === "snippet_resolved") {{
+    if (pending.kind !== "snippet") {{
+      throw new Error("runner received snippet code for a non-snippet operation");
+    }}
+    if (typeof input.code !== "string") {{
+      pending.reject(new Error(JSON.stringify({{kind: "invalid_snippet_resolution", message: "resolved snippet code must be a string"}})));
+      return;
+    }}
+    globalThis.__labSnippetResolvedBytes += input.code.length;
+    if (globalThis.__labSnippetResolvedBytes > globalThis.__labSnippetMaxBytes) {{
+      pending.reject(new Error(JSON.stringify({{kind: "snippet_budget_exceeded", message: "resolved snippet code budget exceeded"}})));
+      return;
+    }}
+    Promise.resolve().then(async () => {{
+      globalThis.__labSnippetStack.push(pending.name);
+      try {{
+        return await (eval("(" + input.code + ")"))(__labDecodeResult(input.input));
+      }} finally {{
+        globalThis.__labSnippetStack.pop();
+      }}
+    }}).then(pending.resolve, pending.reject);
     return;
   }}
   if (input.type === "tool_error") {{
@@ -416,6 +509,7 @@ globalThis.__labSettleToolCall = (message) => {{
   }}
   throw new Error("runner received unexpected protocol message");
 }};
+globalThis.__labSettleToolCall = globalThis.__labSettlePendingOperation;
 {proxy}
 globalThis.__labMainPromise = (async () => {{
 {invoker}}})();
@@ -527,6 +621,50 @@ fn javy_emit_artifact_write(args: javy::Args<'_>) -> javy::quickjs::Result<u64> 
     Ok(seq)
 }
 
+fn javy_emit_snippet_resolve(args: javy::Args<'_>) -> javy::quickjs::Result<u64> {
+    let (cx, args) = args.release();
+    let name_value = args
+        .0
+        .first()
+        .ok_or_else(|| javy_type_error(cx.clone(), "snippet name must be a non-empty string"))?;
+    let name = javy::val_to_string(&cx, name_value.clone())
+        .map_err(|err| javy::to_js_error(cx.clone(), err))?;
+    if name.trim().is_empty() {
+        return Err(javy_type_error(
+            cx.clone(),
+            "snippet name must be a non-empty string",
+        ));
+    }
+
+    let input_json = args
+        .0
+        .get(1)
+        .map(|input| cx.json_stringify(input.clone()))
+        .transpose()?
+        .flatten()
+        .map(|input| input.to_string())
+        .transpose()?
+        .unwrap_or_else(|| "{}".to_string());
+    let input: Value = serde_json::from_str(&input_json).map_err(|err| {
+        javy_type_error(
+            cx.clone(),
+            format!("snippet input must be JSON-serializable: {err}"),
+        )
+    })?;
+    if !input.is_object() {
+        return Err(javy_type_error(
+            cx.clone(),
+            "snippet input must be a JSON object",
+        ));
+    }
+
+    let seq = next_runner_seq(&cx)?;
+
+    runner_emit(CodeModeRunnerOutput::SnippetResolve { seq, name, input })
+        .map_err(|err| javy_type_error(cx, err))?;
+    Ok(seq)
+}
+
 fn javy_settle_tool_promise(
     runtime: &javy::Runtime,
     input: &CodeModeRunnerInput,
@@ -535,7 +673,8 @@ fn javy_settle_tool_promise(
     runtime
         .context()
         .with(|cx| -> javy::quickjs::Result<()> {
-            let settle: javy::quickjs::Function<'_> = cx.globals().get("__labSettleToolCall")?;
+            let settle: javy::quickjs::Function<'_> =
+                cx.globals().get("__labSettlePendingOperation")?;
             settle.call::<_, ()>((message,))?;
             Ok(())
         })

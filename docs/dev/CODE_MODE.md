@@ -20,7 +20,9 @@ Inside the sandbox:
 - `await codemode.search("GitHub pull requests")` searches the reduced
   in-execution catalog.
 - `await codemode.describe("github.list_pull_requests")` returns compact docs
-  for an exact tool target.
+  for an exact tool or snippet target.
+- `await codemode.run("gateway-summary", input)` resolves and runs a snippet
+  inside the same sandbox runtime.
 - `await codemode.github.list_pull_requests(params)` calls the generated helper.
 - `await callTool("github::list_pull_requests", params)` calls the raw bridge.
 
@@ -45,6 +47,56 @@ success is useful.
 The gateway exposes only `codemode`. Discovery, schema inspection, tool calls,
 and intermediate values stay inside one sandbox execution.
 
+## Snippets
+
+Snippet metadata appears in `codemode.search()` and `codemode.describe()` for
+trusted-local or `lab:admin` callers. Snippets are listed as `kind: "snippet"`
+and are invoked through the single helper:
+
+```ts
+async () => {
+  const found = await codemode.search("snippet gateway");
+  const docs = await codemode.describe(found.results[0].id);
+  const summary = await codemode.run("gateway-summary", { includeHealth: true });
+  await writeArtifact("gateway-summary.json", JSON.stringify(summary, null, 2), {
+    contentType: "application/json"
+  });
+  return { docs: docs.path, summary };
+}
+```
+
+`codemode.run()` lazily resolves snippet source through the host, then evaluates
+`return await (<snippet-code>)(input)` inside the same Javy/QuickJS runtime as the
+caller. A snippet can call `codemode.<upstream>.<tool>()`, `callTool()`,
+`writeArtifact()`, and other snippets, bounded by the same Code Mode timeout plus
+per-run snippet depth/count/byte budgets.
+
+Snippet execution is admin/trusted-local only. Route-scoped Code Mode catalogs do
+not expose user snippets, and host-side snippet resolution repeats the permission
+check because discovery is not a security boundary.
+
+Successful Code Mode executions return an `execution_id`. Admin callers can
+promote the live process's retained source into a user snippet through the
+`snippets` service:
+
+```json
+{
+  "action": "snippets.promote",
+  "params": {
+    "execution_id": "01JEXAMPLE",
+    "name": "gateway-summary",
+    "description": "Summarize gateway health",
+    "confirm": true
+  }
+}
+```
+
+Promotion source is deliberately ephemeral and live-gateway scoped. It is stored
+only in memory, is evicted by retention limits, and disappears after restart,
+deploy, or a different gateway process handles the promotion request. Promoted
+source is written as plaintext executable snippet content under the user snippet
+directory and may contain anything the original Code Mode source contained.
+
 ## Tool IDs and Helpers
 
 Upstream tool IDs use:
@@ -67,11 +119,11 @@ Legacy `search` entries include both raw JSON Schemas and generated TypeScript:
 - `signature` — one-line TypeScript call signature.
 - `dts` — focused TypeScript declarations with JSDoc for that tool.
 
-The `codemode.search` helper uses a reduced in-execution catalog (`id`, `path`,
-`upstream`, `name`, `description`, and `signature`) so normal runs do not inject
-full schema, output schema, or dts payloads. Legacy `search` remains available
-when callers need those full metadata fields. When a schema is missing or too
-complex for the TypeScript emitter, generated signatures fall back to `unknown`.
+The `codemode.search` helper uses a reduced in-execution catalog (`kind`, `id`,
+`path`, `upstream`, `name`, `description`, and `signature`) so normal runs do not
+inject full schema, output schema, dts payloads, or snippet source. When a schema
+is missing or too complex for the TypeScript emitter, generated signatures fall
+back to `unknown`.
 
 ## Catalog Freshness
 

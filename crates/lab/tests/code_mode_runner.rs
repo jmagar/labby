@@ -818,6 +818,125 @@ fn code_mode_runner_tool_error_does_not_abort_fan_out() {
     assert!(status.success(), "runner exited with {status}");
 }
 
+#[test]
+fn code_mode_runner_resolves_and_runs_snippet() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+    let proxy = "globalThis.codemode = globalThis.codemode || {}; var codemode = globalThis.codemode; codemode.run = (name, input) => globalThis.__labRunSnippet(name, input);";
+
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "start",
+            "proxy": proxy,
+            "code": "async () => await codemode.run('demo', { x: 2 })"
+        })
+    )
+    .expect("write start");
+
+    assert_eq!(
+        read_protocol_line(&mut stdout),
+        json!({
+            "type": "snippet_resolve",
+            "seq": 0,
+            "name": "demo",
+            "input": {"x": 2}
+        })
+    );
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "snippet_resolved",
+            "seq": 0,
+            "code": "async (input) => input.x * 2",
+            "input": {"x": 2}
+        })
+    )
+    .expect("write snippet");
+
+    let done = read_protocol_line(&mut stdout);
+    assert_eq!(done["type"], "done");
+    assert_eq!(done_json_result(&done), &json!(4));
+    drop(stdin);
+    assert!(child.wait().expect("wait for runner").success());
+}
+
+#[test]
+fn code_mode_runner_snippet_can_call_tool() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_labby"))
+        .args(["internal", "code-mode-runner"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn code mode runner");
+
+    let mut stdin = child.stdin.take().expect("runner stdin");
+    let stdout = child.stdout.take().expect("runner stdout");
+    let mut stdout = BufReader::new(stdout);
+    let proxy = "globalThis.codemode = globalThis.codemode || {}; var codemode = globalThis.codemode; codemode.run = (name, input) => globalThis.__labRunSnippet(name, input);";
+
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "start",
+            "proxy": proxy,
+            "code": "async () => await codemode.run('tool-demo', { x: 3 })"
+        })
+    )
+    .expect("write start");
+
+    assert_eq!(read_protocol_line(&mut stdout)["type"], "snippet_resolve");
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "snippet_resolved",
+            "seq": 0,
+            "code": "async (input) => await callTool('lab::double', { x: input.x })",
+            "input": {"x": 3}
+        })
+    )
+    .expect("write snippet");
+    assert_eq!(
+        read_protocol_line(&mut stdout),
+        json!({
+            "type": "tool_call",
+            "seq": 1,
+            "id": "lab::double",
+            "params": {"x": 3}
+        })
+    );
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "type": "tool_result",
+            "seq": 1,
+            "result": {"value": 6}
+        })
+    )
+    .expect("write tool result");
+
+    let done = read_protocol_line(&mut stdout);
+    assert_eq!(done["type"], "done");
+    assert_eq!(done_json_result(&done), &json!({"value": 6}));
+    drop(stdin);
+    assert!(child.wait().expect("wait for runner").success());
+}
+
 /// Drive the runner with `code` that makes exactly one `callTool` and returns
 /// its result. Answers the single tool call with `tool_result`, then asserts
 /// Done carries the returned value. Used to prove a given code shape executes

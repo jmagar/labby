@@ -11,7 +11,9 @@ use tokio::time::Instant;
 use crate::config::{CodeModeConfig, LabConfig};
 use crate::dispatch::error::ToolError;
 use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
-use crate::dispatch::gateway::code_mode::CodeModeHistoryEntry;
+use crate::dispatch::gateway::code_mode::{
+    CodeModeExecutionSource, CodeModeHistoryEntry, CodeModeSourceLookup,
+};
 use crate::dispatch::upstream::pool::UpstreamPool;
 use crate::dispatch::upstream::types::{UpstreamRuntimeOwner, UpstreamTool};
 
@@ -50,6 +52,21 @@ impl GatewayManager {
 
     pub async fn record_code_mode_history(&self, entry: CodeModeHistoryEntry) {
         self.code_mode_history.lock().await.push(entry);
+    }
+
+    pub async fn record_code_mode_source(&self, source: CodeModeExecutionSource) {
+        self.code_mode_source_store.lock().await.push(source);
+    }
+
+    pub async fn resolve_code_mode_source(
+        &self,
+        execution_id: &str,
+        lookup: &CodeModeSourceLookup,
+    ) -> Result<CodeModeExecutionSource, ToolError> {
+        self.code_mode_source_store
+            .lock()
+            .await
+            .resolve(execution_id, lookup)
     }
 
     pub async fn code_mode_history_snapshot(&self) -> Vec<CodeModeHistoryEntry> {
@@ -208,6 +225,7 @@ impl GatewayManager {
         pool
     }
 
+    #[allow(dead_code)]
     pub async fn code_mode_catalog_tools(
         &self,
         allow_cold_connect: bool,
@@ -253,6 +271,7 @@ impl GatewayManager {
     /// upstream), so a stale cache can only mis-shape the proxy — `callTool`
     /// remains the always-fresh escape hatch. Upstreams that fail to probe are
     /// omitted from the proxy and NOT cached, so the next run retries them.
+    #[allow(dead_code)]
     pub async fn code_mode_catalog_tools_cached(
         &self,
         owner: Option<&UpstreamRuntimeOwner>,
@@ -514,6 +533,24 @@ impl GatewayManager {
                 None
             }
         })
+    }
+
+    pub(crate) async fn cached_snippet_metadata(
+        &self,
+        fingerprint: &str,
+    ) -> Option<Vec<crate::dispatch::snippets::store::SnippetInfo>> {
+        let guard = self.code_mode_snippet_metadata_cache.lock().await;
+        guard
+            .as_ref()
+            .and_then(|cache| (cache.fingerprint == fingerprint).then(|| cache.entries.clone()))
+    }
+
+    pub(crate) async fn store_snippet_metadata_cache(
+        &self,
+        cache: crate::dispatch::gateway::code_mode::SnippetMetadataCache,
+    ) {
+        let mut guard = self.code_mode_snippet_metadata_cache.lock().await;
+        *guard = Some(cache);
     }
 
     /// Fire-and-forget: spawn per-upstream connection tasks for exclusive code mode.

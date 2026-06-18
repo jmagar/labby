@@ -104,66 +104,37 @@ impl CodeModeBroker<'_> {
         let allow_cold_connect = caller.can_execute();
         let owner = caller.runtime_owner(surface);
         let oauth_subject = caller.oauth_subject();
-        // One-shot CLI invocations serve the proxy catalog from the disk cache
-        // (connecting only stale/missing upstreams) instead of cold-connecting
-        // the full fleet per call. The MCP surface keeps the live-pool path.
-        let tools = if surface == CodeModeSurface::Cli {
-            manager
-                .code_mode_catalog_tools_cached(Some(&owner), oauth_subject)
-                .await
-        } else {
-            manager
-                .code_mode_catalog_tools(allow_cold_connect, Some(&owner), oauth_subject)
-                .await
-        }
-        .map_err(|err| ToolError::Sdk {
-            sdk_kind: err.kind().to_string(),
-            message: err.user_message().to_string(),
-        })?;
-        let tools = tools
+        let include_snippets =
+            caller.can_use_snippets() && !capability_filter.is_scoped_to_upstreams();
+        let allowed_upstreams = capability_filter.allowed_upstreams();
+        let (catalog, _catalog_json, _serialized_size) = self
+            .code_mode_catalog_for_proxy(
+                manager,
+                allow_cold_connect,
+                &owner,
+                oauth_subject,
+                allowed_upstreams,
+                include_snippets,
+            )
+            .await?;
+        let catalog = catalog
             .into_iter()
-            .filter(|tool| {
-                capability_filter.allows(tool.upstream_name.as_ref(), tool.tool.name.as_ref())
+            .filter(|entry| {
+                entry.kind == super::types::CodeModeCatalogKind::Snippet
+                    || capability_filter.allows(&entry.upstream, &entry.name)
             })
             .collect::<Vec<_>>();
-        let mut upstreams: Vec<String> =
-            tools.iter().map(|t| t.upstream_name.to_string()).collect();
+        let mut upstreams: Vec<String> = catalog
+            .iter()
+            .filter(|entry| entry.kind == super::types::CodeModeCatalogKind::Tool)
+            .map(|entry| entry.upstream.clone())
+            .collect();
         upstreams.sort();
         upstreams.dedup();
 
-        let discovery_entries = tools
+        let discovery_entries = catalog
             .iter()
-            .map(|tool| {
-                let upstream = tool.upstream_name.to_string();
-                let name = tool.tool.name.to_string();
-                let upstream_snake = super::preamble::upstream_name_to_namespace(&upstream);
-                let name_snake = super::preamble::tool_name_to_snake(&name);
-                let description = tool
-                    .tool
-                    .description
-                    .as_ref()
-                    .map(|description| {
-                        crate::dispatch::gateway::projection::sanitize_tool_text(description, 1024)
-                    })
-                    .unwrap_or_default();
-                let signature = super::ts_signatures::generate_tool_types(
-                    &upstream,
-                    &name,
-                    &description,
-                    tool.input_schema.as_ref(),
-                    tool.output_schema.as_ref(),
-                )
-                .signature;
-                CodeModeDiscoveryEntry {
-                    id: super::types::upstream_tool_id(&upstream, &name),
-                    path: format!("{upstream_snake}.{name_snake}"),
-                    upstream,
-                    name,
-                    helper: format!("codemode.{upstream_snake}.{name_snake}"),
-                    description,
-                    signature,
-                }
-            })
+            .map(CodeModeDiscoveryEntry::from_catalog)
             .collect::<Vec<_>>();
         let discovery_js =
             super::preamble::generate_discovery_js(&discovery_entries).map_err(|message| {
@@ -172,16 +143,21 @@ impl CodeModeBroker<'_> {
                     message,
                 }
             })?;
-        let namespace_js = match super::preamble::generate_js_proxy(&tools, &upstreams) {
-            Ok(namespace_js) => namespace_js,
-            Err(message) => {
-                tracing::warn!(
-                    error = %message,
-                    "code_mode.proxy_helpers_omitted; discovery helpers remain available"
-                );
-                String::new()
-            }
-        };
+        let tool_entries = catalog
+            .iter()
+            .filter(|entry| entry.kind == super::types::CodeModeCatalogKind::Tool)
+            .collect::<Vec<_>>();
+        let namespace_js =
+            match super::preamble::generate_js_proxy_from_catalog(&tool_entries, &upstreams) {
+                Ok(namespace_js) => namespace_js,
+                Err(message) => {
+                    tracing::warn!(
+                        error = %message,
+                        "code_mode.proxy_helpers_omitted; discovery helpers remain available"
+                    );
+                    String::new()
+                }
+            };
         Ok(format!("{discovery_js}\n{namespace_js}"))
     }
 
@@ -568,6 +544,7 @@ mod tests {
 
     fn response_with_result(result: Value) -> CodeModeExecutionResponse {
         CodeModeExecutionResponse {
+            execution_id: None,
             result: Some(result),
             ui: None,
             calls: Vec::new(),

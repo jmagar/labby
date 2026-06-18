@@ -185,6 +185,16 @@ build verification for the richer Next route lives under
 The history resource is process-local inspection state, not a durable audit log
 or a hard quota guarantee.
 
+The synthetic `codemode` tool is also the Code Mode snippet surface. Trusted
+local and `lab:admin` callers can discover snippet metadata with
+`codemode.search()`, inspect it with `codemode.describe("snippet.<name>")`, and
+run it with `codemode.run("<name>", input)`. Snippet source is resolved lazily
+inside the live gateway process and is not exposed through public history or
+discovery metadata. `snippets.promote` can turn a successful `codemode`
+`execution_id` into a user snippet; it is destructive/admin-only, writes
+plaintext executable content, and depends on the live in-memory gateway source
+store.
+
 For upstream MCP Apps, Code Mode keeps widget-bearing tools host-visible so the
 host can render their `_meta.ui.resourceUri` resources. Ordinary sibling tools
 remain hidden from `tools/list`, but a rendered app's `callServerTool` callback

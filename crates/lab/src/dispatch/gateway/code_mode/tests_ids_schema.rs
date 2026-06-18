@@ -5,6 +5,8 @@
 use rmcp::model::{CallToolResult, Content};
 use serde_json::json;
 
+use crate::dispatch::snippets::store::{SnippetInfo, SnippetSource};
+
 use super::protocol::CodeModeRunnerOutput;
 use super::runner_io::code_mode_upstream_error_info;
 use super::*;
@@ -27,6 +29,30 @@ fn artifact_write_protocol_round_trips() {
     let decoded: CodeModeRunnerOutput =
         serde_json::from_str(&encoded).expect("deserialize protocol");
     assert_eq!(decoded, output);
+}
+
+#[test]
+fn snippet_catalog_entry_projects_to_codemode_run() {
+    let info = SnippetInfo {
+        name: "gateway-summary".to_string(),
+        description: Some("Summarize gateway health".to_string()),
+        tags: vec!["gateway".to_string()],
+        inputs: Default::default(),
+        source: SnippetSource::User,
+        path: "gateway-summary.md".into(),
+        shadowed: false,
+    };
+    let entry = CodeModeCatalogEntry::snippet(&info);
+    assert_eq!(entry.kind, types::CodeModeCatalogKind::Snippet);
+    assert_eq!(entry.id, "snippet::gateway-summary");
+    assert_eq!(entry.upstream, "snippet");
+    assert!(entry.signature.contains("codemode.run"));
+    assert!(entry.dts.is_empty());
+
+    let discovery = types::CodeModeDiscoveryEntry::from_catalog(&entry);
+    assert_eq!(discovery.kind, types::CodeModeCatalogKind::Snippet);
+    assert_eq!(discovery.path, "snippet.gateway-summary");
+    assert_eq!(discovery.helper, "codemode.run(\"gateway-summary\", input)");
 }
 
 #[test]

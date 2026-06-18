@@ -35,7 +35,7 @@ use crate::oauth::upstream::encryption::EncryptionKey;
 use crate::oauth::upstream::manager::UpstreamOauthManager;
 use crate::registry::ToolRegistry;
 
-use super::code_mode::CodeModeHistory;
+use super::code_mode::{CodeModeHistory, CodeModeSourceStore};
 use super::config::write_gateway_config;
 use super::protected_routes::ProtectedRouteIndex;
 pub use super::runtime::GatewayRuntimeHandle;
@@ -93,6 +93,7 @@ pub struct GatewayManager {
     pub(super) oauth_redirect_uri: Option<Arc<String>>,
     protected_route_index: Arc<RwLock<ProtectedRouteIndex>>,
     code_mode_history: Arc<Mutex<CodeModeHistory>>,
+    code_mode_source_store: Arc<Mutex<CodeModeSourceStore>>,
     /// Optional connector for in-process (built-in) service peers.
     /// Propagated to each pool the manager creates so built-in services are
     /// reachable without an external HTTP/stdio connection.
@@ -112,6 +113,10 @@ pub struct GatewayManager {
     /// the upstream catalog has not changed between calls.
     pub(super) code_mode_catalog_render_cache:
         Arc<Mutex<Option<crate::dispatch::gateway::code_mode::CatalogRenderCache>>>,
+    /// Cached snippet metadata for Code Mode discovery. Snippet executable
+    /// source is never stored here; `codemode.run()` resolves source lazily.
+    pub(super) code_mode_snippet_metadata_cache:
+        Arc<Mutex<Option<crate::dispatch::gateway::code_mode::SnippetMetadataCache>>>,
     /// Shared, long-lived warm-runner pool for Code Mode (Perf H1). Pools the
     /// runner OS process across executions (fresh `javy::Runtime` per run) to
     /// amortize fork/startup. Wrapped in `Arc` so the `Clone` manager shares one

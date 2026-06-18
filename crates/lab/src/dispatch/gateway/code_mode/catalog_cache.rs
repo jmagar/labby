@@ -31,6 +31,7 @@ const CACHE_VERSION: u32 = 1;
 /// How long a cached upstream catalog stays valid. The fingerprint catches
 /// config edits; the TTL catches upstream-side tool drift (server upgrades)
 /// that no config change reflects.
+#[allow(dead_code)]
 const CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 
 #[derive(Default, Serialize, Deserialize)]
@@ -97,6 +98,7 @@ impl CatalogCache {
 
     /// Return the cached tools for `upstream_name` when the entry matches
     /// `fingerprint` and is within the TTL.
+    #[allow(dead_code)]
     pub(crate) fn fresh_tools(
         &self,
         upstream_name: &str,

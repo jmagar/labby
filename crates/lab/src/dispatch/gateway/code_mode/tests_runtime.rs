@@ -11,13 +11,117 @@ use super::artifacts::{
     CodeModeArtifactReceipt, CodeModeArtifactWrite, code_mode_artifact_root,
     write_code_mode_artifact,
 };
-use super::protocol::{CodeModeRunnerOutput, CodeModeRunnerResult};
+use super::protocol::{CodeModeRunnerInput, CodeModeRunnerOutput, CodeModeRunnerResult};
 use super::*;
 
 /// Generous content cap for artifact tests whose subject is not the size limit
 /// (path safety, content-type defaulting, persistence, I/O failure). The
 /// dedicated size test passes its own explicit cap.
 const TEST_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+#[test]
+fn snippet_runner_protocol_round_trips() {
+    let output = CodeModeRunnerOutput::SnippetResolve {
+        seq: 7,
+        name: "demo".to_string(),
+        input: json!({"x": 2}),
+    };
+    let encoded = serde_json::to_string(&output).unwrap();
+    assert_eq!(
+        serde_json::from_str::<CodeModeRunnerOutput>(&encoded).unwrap(),
+        output
+    );
+
+    let input = CodeModeRunnerInput::SnippetResolved {
+        seq: 7,
+        code: "async (input) => input.x * 2".to_string(),
+        input: json!({"x": 2}),
+    };
+    let encoded = serde_json::to_string(&input).unwrap();
+    assert_eq!(
+        serde_json::from_str::<CodeModeRunnerInput>(&encoded).unwrap(),
+        input
+    );
+}
+
+#[test]
+fn code_mode_reference_error_hint_names_available_globals() {
+    let message = runner::add_code_mode_hint_for_test(
+        "ReferenceError",
+        "ReferenceError: require is not defined",
+    );
+    assert!(message.contains("Available globals"));
+    assert!(message.contains("codemode.run"));
+    assert!(message.contains("require, process, fs, fetch"));
+}
+
+#[test]
+fn code_mode_helper_type_error_hint_points_to_search_describe() {
+    let message = runner::add_code_mode_hint_for_test(
+        "server_error",
+        "TypeError: codemode.github.nope is not a function",
+    );
+    assert!(message.contains("codemode.search"));
+    assert!(message.contains("codemode.describe"));
+}
+
+#[test]
+fn code_mode_source_store_resolves_same_route_admin_source() {
+    let mut store = CodeModeSourceStore::new(4, 4096);
+    store.push(CodeModeExecutionSource {
+        execution_id: "01JTEST".to_string(),
+        created_at_ms: 1,
+        actor_key: Some("actor-a".to_string()),
+        is_admin: true,
+        route_scope: "root".to_string(),
+        surface: CodeModeSurface::Mcp,
+        capability_filter_fingerprint: CodeModeCapabilityFilter::default().fingerprint(),
+        code: "async () => ({ ok: true })".to_string(),
+    });
+
+    let source = store
+        .resolve(
+            "01JTEST",
+            &CodeModeSourceLookup {
+                actor_key: Some("actor-a".to_string()),
+                is_admin: true,
+                route_scope: "root".to_string(),
+                capability_filter_fingerprint: CodeModeCapabilityFilter::default().fingerprint(),
+            },
+        )
+        .unwrap();
+    assert_eq!(source.code, "async () => ({ ok: true })");
+}
+
+#[test]
+fn code_mode_source_store_rejects_unknown_and_cross_route() {
+    let mut store = CodeModeSourceStore::new(4, 4096);
+    store.push(CodeModeExecutionSource {
+        execution_id: "01JTEST".to_string(),
+        created_at_ms: 1,
+        actor_key: None,
+        is_admin: true,
+        route_scope: "root".to_string(),
+        surface: CodeModeSurface::Mcp,
+        capability_filter_fingerprint: CodeModeCapabilityFilter::default().fingerprint(),
+        code: "async () => ({ ok: true })".to_string(),
+    });
+
+    let lookup = CodeModeSourceLookup {
+        actor_key: None,
+        is_admin: true,
+        route_scope: "protected".to_string(),
+        capability_filter_fingerprint: CodeModeCapabilityFilter::default().fingerprint(),
+    };
+    assert_eq!(
+        store.resolve("missing", &lookup).unwrap_err().kind(),
+        "unknown_execution"
+    );
+    assert_eq!(
+        store.resolve("01JTEST", &lookup).unwrap_err().kind(),
+        "forbidden"
+    );
+}
 
 #[test]
 fn code_mode_runner_wrapper_exposes_write_artifact() {
@@ -60,6 +164,7 @@ fn truncates_codemode_final_result_when_oversized() {
     // result. An oversized final result is replaced with a truncation marker;
     // the calls metadata is preserved untouched.
     let response = CodeModeExecutionResponse {
+        execution_id: None,
         ui: None,
         result: Some(json!({"payload": "x".repeat(5000)})),
         calls: vec![
@@ -104,6 +209,7 @@ fn truncates_codemode_final_result_when_oversized() {
 #[test]
 fn does_not_truncate_when_final_result_within_budget() {
     let response = CodeModeExecutionResponse {
+        execution_id: None,
         ui: None,
         result: Some(json!({"items": ["small"]})),
         calls: vec![CodeModeExecutedCall {
@@ -127,6 +233,7 @@ fn truncates_oversized_logs_after_result() {
     // lines push the envelope over budget. After capping the (small) result,
     // logs must be trimmed until within budget, leaving a sentinel.
     let response = CodeModeExecutionResponse {
+        execution_id: None,
         ui: None,
         result: Some(json!({"ok": true})),
         calls: vec![CodeModeExecutedCall {
@@ -169,6 +276,7 @@ fn log_trimming_terminates_when_budget_unreachable() {
     // unreachable. The log-trimming loop must still terminate (best-effort),
     // collapsing logs to a single sentinel rather than looping forever.
     let response = CodeModeExecutionResponse {
+        execution_id: None,
         ui: None,
         result: Some(json!({"ok": true})),
         calls: (0..200)
@@ -302,6 +410,7 @@ fn token_estimate_divisor_affects_truncation_decision() {
     // max_response_tokens=2000).  With divisor=1 → ~4000 tokens (exceeds 2000).
     let payload = "x".repeat(4000);
     let make_response = || CodeModeExecutionResponse {
+        execution_id: None,
         ui: None,
         result: Some(json!({"payload": payload.clone()})),
         calls: vec![CodeModeExecutedCall {
@@ -350,6 +459,7 @@ fn code_mode_history_bounds_entries_and_keeps_redacted_params_only() {
     let mut history = CodeModeHistory::new(2, 100_000);
     for idx in 0..3 {
         history.push(CodeModeHistoryEntry {
+            execution_id: None,
             seq: 0,
             route_scope: "root".to_string(),
             kind: CodeModeHistoryKind::Execute,
@@ -388,6 +498,7 @@ fn code_mode_history_bounds_by_bytes() {
     let mut history = CodeModeHistory::new(50, 1300);
     for idx in 0..10 {
         history.push(CodeModeHistoryEntry {
+            execution_id: None,
             seq: 0,
             route_scope: "root".to_string(),
             kind: CodeModeHistoryKind::Execute,
@@ -422,6 +533,7 @@ fn code_mode_history_bounds_by_bytes() {
 fn code_mode_history_replaces_single_oversized_entry_with_bounded_sentinel() {
     let mut history = CodeModeHistory::new(50, 1300);
     history.push(CodeModeHistoryEntry {
+        execution_id: None,
         seq: 0,
         route_scope: "root".to_string(),
         kind: CodeModeHistoryKind::Execute,
@@ -501,6 +613,7 @@ fn runner_protocol_preserves_null_distinct_from_undefined() {
     );
 
     let explicit_null = serde_json::to_value(CodeModeExecutionResponse {
+        execution_id: None,
         ui: None,
         result: Some(Value::Null),
         calls: Vec::new(),
@@ -509,6 +622,7 @@ fn runner_protocol_preserves_null_distinct_from_undefined() {
     })
     .unwrap();
     let undefined = serde_json::to_value(CodeModeExecutionResponse {
+        execution_id: None,
         ui: None,
         result: None,
         calls: Vec::new(),
@@ -550,6 +664,7 @@ fn code_mode_execution_error_carries_partial_calls() {
 #[test]
 fn truncation_preserves_artifact_receipts() {
     let response = CodeModeExecutionResponse {
+        execution_id: None,
         ui: None,
         result: Some(serde_json::json!({
             "markdown": "x".repeat(10_000),
@@ -580,6 +695,7 @@ fn truncation_preserves_artifact_receipts() {
 #[test]
 fn execute_trace_surfaces_artifacts_when_present() {
     let response = CodeModeExecutionResponse {
+        execution_id: None,
         ui: None,
         result: Some(json!({ "ok": true })),
         calls: vec![],
@@ -604,6 +720,7 @@ fn execute_trace_surfaces_artifacts_when_present() {
 #[test]
 fn execute_trace_omits_artifacts_when_empty() {
     let response = CodeModeExecutionResponse {
+        execution_id: None,
         ui: None,
         result: Some(json!({ "ok": true })),
         calls: vec![],
@@ -1254,6 +1371,7 @@ fn binary_search_log_truncation_boundary_is_tight() {
     let line_count = 50usize;
     let line_payload = "B".repeat(70);
     let make_response = || CodeModeExecutionResponse {
+        execution_id: None,
         ui: None,
         result: Some(json!({"ok": true})),
         calls: vec![CodeModeExecutedCall {

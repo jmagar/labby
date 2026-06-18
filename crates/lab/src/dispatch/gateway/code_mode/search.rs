@@ -1,9 +1,13 @@
 //! `CodeModeBroker::search` and live in-sandbox discovery catalog construction.
 
+use std::path::{Path, PathBuf};
+
 use serde_json::Value;
 
 use crate::dispatch::error::ToolError;
 use crate::dispatch::gateway::manager::GatewayManager;
+use crate::dispatch::helpers::lab_home;
+use crate::dispatch::snippets::store::{builtin_snippet_dir, list_snippets};
 use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
 
 use super::CodeModeBroker;
@@ -53,6 +57,7 @@ impl CodeModeBroker<'_> {
         let oauth_subject = caller.oauth_subject();
         // Returns (entries, catalog_json, serialized_size) — all from the
         // render cache when the healthy tool set has not changed.
+        let include_snippets = caller.can_use_snippets() && allowed_upstreams.is_none();
         let (catalog, catalog_json, serialized_size) = self
             .code_mode_catalog_allowed(
                 manager,
@@ -60,6 +65,7 @@ impl CodeModeBroker<'_> {
                 &owner,
                 oauth_subject,
                 allowed_upstreams,
+                include_snippets,
             )
             .await?;
         tracing::info!(
@@ -118,8 +124,35 @@ impl CodeModeBroker<'_> {
         owner: &UpstreamRuntimeOwner,
         oauth_subject: Option<&str>,
     ) -> Result<(Vec<CodeModeCatalogEntry>, String, usize), ToolError> {
-        self.code_mode_catalog_allowed(manager, allow_cold_connect, owner, oauth_subject, None)
-            .await
+        self.code_mode_catalog_allowed(
+            manager,
+            allow_cold_connect,
+            owner,
+            oauth_subject,
+            None,
+            false,
+        )
+        .await
+    }
+
+    pub(in crate::dispatch::gateway::code_mode) async fn code_mode_catalog_for_proxy(
+        &self,
+        manager: &GatewayManager,
+        allow_cold_connect: bool,
+        owner: &UpstreamRuntimeOwner,
+        oauth_subject: Option<&str>,
+        allowed_upstreams: Option<&std::collections::BTreeSet<String>>,
+        include_snippets: bool,
+    ) -> Result<(Vec<CodeModeCatalogEntry>, String, usize), ToolError> {
+        self.code_mode_catalog_allowed(
+            manager,
+            allow_cold_connect,
+            owner,
+            oauth_subject,
+            allowed_upstreams,
+            include_snippets,
+        )
+        .await
     }
 
     pub(in crate::dispatch::gateway::code_mode) async fn code_mode_catalog_allowed(
@@ -129,6 +162,7 @@ impl CodeModeBroker<'_> {
         owner: &UpstreamRuntimeOwner,
         oauth_subject: Option<&str>,
         allowed_upstreams: Option<&std::collections::BTreeSet<String>>,
+        include_snippets: bool,
     ) -> Result<(Vec<CodeModeCatalogEntry>, String, usize), ToolError> {
         let raw_tools = manager
             .code_mode_catalog_tools_allowed(
@@ -144,13 +178,21 @@ impl CodeModeBroker<'_> {
         // detects upstream additions/removals/renames without needing a pool
         // generation counter. The sort makes the fingerprint order-independent
         // (the pool may return tools in any order).
+        let snippet_fingerprint = if include_snippets {
+            snippet_directory_fingerprint("admin")
+                .await?
+                .unwrap_or_else(|| "snippets:absent".to_string())
+        } else {
+            "snippets:hidden".to_string()
+        };
+
         let fingerprint = {
             let mut ids: Vec<String> = raw_tools
                 .iter()
                 .map(|t| format!("{}::{}", t.upstream_name, t.tool.name))
                 .collect();
             ids.sort_unstable();
-            ids.join("\n")
+            format!("tools:\n{}\n{snippet_fingerprint}", ids.join("\n"))
         };
 
         // Check the manager-level render cache before re-building entries
@@ -190,10 +232,17 @@ impl CodeModeBroker<'_> {
             })
             .collect::<Vec<_>>();
 
+        if include_snippets {
+            let snippets = snippet_metadata_for_catalog(manager, &snippet_fingerprint).await?;
+            entries.extend(snippets.iter().map(CodeModeCatalogEntry::snippet));
+        }
+
         entries.sort_by(|a, b| {
-            a.upstream
-                .cmp(&b.upstream)
-                .then_with(|| a.name.cmp(&b.name))
+            a.kind.cmp(&b.kind).then_with(|| {
+                a.upstream
+                    .cmp(&b.upstream)
+                    .then_with(|| a.name.cmp(&b.name))
+            })
         });
 
         // The catalog is injected as `const tools` into the javy runner and
@@ -219,4 +268,129 @@ impl CodeModeBroker<'_> {
 
         Ok((entries, catalog_json, serialized_size))
     }
+}
+
+async fn snippet_metadata_for_catalog(
+    manager: &GatewayManager,
+    fingerprint: &str,
+) -> Result<Vec<crate::dispatch::snippets::store::SnippetInfo>, ToolError> {
+    if let Some(snippets) = manager.cached_snippet_metadata(fingerprint).await {
+        return Ok(snippets);
+    }
+
+    let lab_home = lab_home();
+    let builtin_dir = builtin_snippet_dir();
+    let snippets = tokio::task::spawn_blocking(move || list_snippets(&lab_home, &builtin_dir))
+        .await
+        .map_err(|err| {
+            ToolError::internal_message(format!("snippet metadata task failed: {err}"))
+        })??;
+
+    manager
+        .store_snippet_metadata_cache(super::SnippetMetadataCache {
+            fingerprint: fingerprint.to_string(),
+            entries: snippets.clone(),
+        })
+        .await;
+    Ok(snippets)
+}
+
+async fn snippet_directory_fingerprint(policy: &str) -> Result<Option<String>, ToolError> {
+    let lab_home = lab_home();
+    let user_dir = crate::dispatch::snippets::store::user_snippet_dir(&lab_home);
+    let builtin_dir = builtin_snippet_dir();
+    let policy = policy.to_string();
+    tokio::task::spawn_blocking(move || {
+        let mut parts = vec![format!("snippet_policy:{policy}")];
+        let mut saw_dir = false;
+        for dir in [user_dir, builtin_dir] {
+            match directory_fingerprint_part(&dir)? {
+                Some(part) => {
+                    saw_dir = true;
+                    parts.push(part);
+                }
+                None => parts.push(format!("{}:absent", dir.display())),
+            }
+        }
+        Ok::<_, ToolError>(saw_dir.then(|| parts.join("\n")))
+    })
+    .await
+    .map_err(|err| ToolError::internal_message(format!("snippet fingerprint task failed: {err}")))?
+}
+
+fn directory_fingerprint_part(dir: &Path) -> Result<Option<String>, ToolError> {
+    let metadata = match std::fs::metadata(dir) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(ToolError::internal_message(format!(
+                "read snippets directory `{}` metadata failed: {err}",
+                dir.display()
+            )));
+        }
+    };
+    if !metadata.is_dir() {
+        return Ok(None);
+    }
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let entries = directory_entries_fingerprint(dir)?;
+    Ok(Some(format!(
+        "{}:{}:{}:{}",
+        normalize_path(dir),
+        modified,
+        metadata.len(),
+        entries.join("|")
+    )))
+}
+
+fn directory_entries_fingerprint(dir: &Path) -> Result<Vec<String>, ToolError> {
+    let entries = std::fs::read_dir(dir).map_err(|err| {
+        ToolError::internal_message(format!(
+            "read snippets directory `{}` failed: {err}",
+            dir.display()
+        ))
+    })?;
+    let mut parts = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| {
+            ToolError::internal_message(format!(
+                "read snippets directory `{}` entry failed: {err}",
+                dir.display()
+            ))
+        })?;
+        let path = entry.path();
+        let metadata = entry.metadata().map_err(|err| {
+            ToolError::internal_message(format!(
+                "read snippet entry `{}` metadata failed: {err}",
+                path.display()
+            ))
+        })?;
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        parts.push(format!(
+            "{}:{}:{}:{}",
+            entry.file_name().to_string_lossy(),
+            metadata.is_file(),
+            metadata.len(),
+            modified
+        ));
+    }
+    parts.sort_unstable();
+    Ok(parts)
+}
+
+fn normalize_path(path: &Path) -> String {
+    path.canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(path))
+        .display()
+        .to_string()
 }
