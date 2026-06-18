@@ -1,14 +1,12 @@
 //! `CodeModeBroker::run_in_runner`: spawn the runner subprocess and drive the
 //! tool-call/log/completion protocol loop.
 //!
-//! The public entry point is `run_in_runner`, which accepts the same
-//! positional parameters as before (preserving all call sites) but
-//! immediately packs them into a `RunnerConfig` struct and delegates to
-//! `run_in_runner_with_config`. Each major event arm (`Done`, `ToolCall`,
-//! `ArtifactWrite`, `Error`) is handled by a named async helper to keep the
+//! The public entry point is `run_in_runner`, which packs runtime parameters
+//! into a `RunnerConfig` struct and delegates to `run_in_runner_with_config`.
+//! Each major event arm (`Done`, `ToolCall`, `ArtifactWrite`,
+//! `SnippetResolve`, `Error`) is handled by a named async helper to keep the
 //! select loop readable.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -85,15 +83,6 @@ struct DriveState {
     artifact_root: PathBuf,
     snippet_resolves: usize,
     snippet_resolved_bytes: usize,
-    snippet_code_cache: HashMap<String, CachedSnippetCode>,
-}
-
-#[derive(Debug, Clone)]
-struct CachedSnippetCode {
-    code: String,
-    mtime_ns: u128,
-    len: u64,
-    path: PathBuf,
 }
 
 impl DriveState {
@@ -108,7 +97,6 @@ impl DriveState {
             artifact_root,
             snippet_resolves: 0,
             snippet_resolved_bytes: 0,
-            snippet_code_cache: HashMap::new(),
         }
     }
 }
@@ -330,7 +318,7 @@ impl CodeModeBroker<'_> {
 
                     match msg {
                         CodeModeRunnerOutput::ToolCall { seq, id, params } => {
-                            if let Err(err) = enqueue_tool_call(
+                            enqueue_tool_call(
                                 self,
                                 seq,
                                 id,
@@ -338,11 +326,7 @@ impl CodeModeBroker<'_> {
                                 deadline,
                                 cfg,
                                 &mut pending_tool_calls,
-                            )
-                            .await
-                            {
-                                return DriveOutcome::RunnerUnhealthy(err);
-                            }
+                            );
                         }
                         CodeModeRunnerOutput::ArtifactWrite {
                             seq,
@@ -513,7 +497,7 @@ fn classify_line_result(
 /// Free function (not `&self` method) so the returned future can capture
 /// `broker` with the same lifetime as the enclosing `run_in_runner_with_config`
 /// rather than being forced to `'static`.
-async fn enqueue_tool_call<'a>(
+fn enqueue_tool_call<'a>(
     broker: &'a CodeModeBroker<'a>,
     seq: u64,
     id: String,
@@ -521,7 +505,7 @@ async fn enqueue_tool_call<'a>(
     deadline: tokio::time::Instant,
     cfg: &RunnerConfig,
     pending_tool_calls: &mut FuturesUnordered<ToolCallFut<'a>>,
-) -> Result<(), CodeModeExecutionError> {
+) {
     let call_id = id.clone();
     let redacted_params = super::trace::redact_trace_params(&params, cfg.trace_params);
     let caller = cfg.caller.clone();
@@ -542,7 +526,6 @@ async fn enqueue_tool_call<'a>(
         let elapsed_ms = call_start.elapsed().as_millis();
         (seq, call_id, redacted_params, result, elapsed_ms)
     }));
-    Ok(())
 }
 
 /// Handle an `ArtifactWrite` event from the runner.
@@ -679,45 +662,13 @@ async fn resolve_snippet_for_runner(
         let resolved =
             crate::dispatch::snippets::store::resolve_snippet(&lab_home, &builtin_dir, &name)?;
         let input = crate::dispatch::snippets::store::merge_snippet_input(&resolved, input)?;
-        let metadata = std::fs::metadata(&resolved.path).map_err(|err| {
-            ToolError::internal_message(format!(
-                "read snippet metadata `{}` failed: {err}",
-                resolved.path.display()
-            ))
-        })?;
-        let mtime_ns = metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|duration| duration.as_nanos())
-            .unwrap_or(0);
-        let len = metadata.len();
         let code = crate::dispatch::snippets::store::code_for_snippet(&resolved)?;
-        Ok::<_, ToolError>((resolved.name, resolved.path, mtime_ns, len, code, input))
+        Ok::<_, ToolError>((resolved.name, code, input))
     })
     .await
     .map_err(|err| ToolError::internal_message(format!("snippet resolve task failed: {err}")))??;
 
-    let (name, path, mtime_ns, len, code, input) = resolved;
-    let cache_key = format!("{}:{}:{}:{}", name, path.display(), mtime_ns, len);
-    let code = if let Some(cached) = state.snippet_code_cache.get(&cache_key) {
-        if cached.path == path && cached.mtime_ns == mtime_ns && cached.len == len {
-            cached.code.clone()
-        } else {
-            code
-        }
-    } else {
-        state.snippet_code_cache.insert(
-            cache_key,
-            CachedSnippetCode {
-                code: code.clone(),
-                mtime_ns,
-                len,
-                path: path.clone(),
-            },
-        );
-        code
-    };
+    let (name, code, input) = resolved;
 
     state.snippet_resolved_bytes = state.snippet_resolved_bytes.saturating_add(code.len());
     if state.snippet_resolved_bytes > MAX_SNIPPET_RESOLVED_BYTES_PER_RUN {

@@ -47,31 +47,47 @@ struct PromoteParams {
     force: bool,
     #[serde(default)]
     shadow_builtin: bool,
-    #[serde(default)]
-    route_scope: Option<String>,
-    #[serde(default)]
-    actor_key: Option<String>,
-    #[serde(default)]
-    capability_filter_fingerprint: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SnippetPromotionContext {
+    pub actor_key: Option<String>,
+    pub is_admin: bool,
+    pub route_scope: String,
+    pub capability_filter_fingerprint: String,
+}
+
+impl SnippetPromotionContext {
+    #[must_use]
+    pub fn trusted_local() -> Self {
+        Self {
+            actor_key: None,
+            is_admin: true,
+            route_scope: "root".to_string(),
+            capability_filter_fingerprint: CodeModeCapabilityFilter::default().fingerprint(),
+        }
+    }
 }
 
 pub async fn dispatch(action: &str, params: Value) -> Result<Value, ToolError> {
     let manager = crate::dispatch::gateway::current_gateway_manager();
-    dispatch_inner(manager.as_deref(), action, params).await
+    dispatch_inner(manager.as_deref(), action, params, None).await
 }
 
-pub async fn dispatch_with_manager(
+pub async fn dispatch_with_manager_and_context(
     manager: &crate::dispatch::gateway::manager::GatewayManager,
     action: &str,
     params: Value,
+    promotion_context: Option<SnippetPromotionContext>,
 ) -> Result<Value, ToolError> {
-    dispatch_inner(Some(manager), action, params).await
+    dispatch_inner(Some(manager), action, params, promotion_context).await
 }
 
 async fn dispatch_inner(
     manager: Option<&crate::dispatch::gateway::manager::GatewayManager>,
     action: &str,
     params: Value,
+    promotion_context: Option<SnippetPromotionContext>,
 ) -> Result<Value, ToolError> {
     match action {
         "help" => Ok(help_payload("snippets", ACTIONS)),
@@ -99,7 +115,7 @@ async fn dispatch_inner(
         }
         "snippets.promote" => {
             let params: PromoteParams = parse_params(params)?;
-            promote_snippet(manager, params).await
+            promote_snippet(manager, params, promotion_context).await
         }
         "snippets.validate" => {
             let params: ValidateParams = parse_params(params)?;
@@ -116,10 +132,7 @@ async fn dispatch_inner(
         "snippets.exec" => {
             let params: ExecParams = parse_params(params)?;
             let Some(name) = params.name else {
-                return Err(ToolError::MissingParam {
-                    message: "missing required parameter `name`".to_string(),
-                    param: "name".to_string(),
-                });
+                return Err(missing_param("missing required parameter `name`", "name"));
             };
             execute_snippet(manager, &name, params.params).await
         }
@@ -129,17 +142,13 @@ async fn dispatch_inner(
                 return test_all_snippets(manager).await;
             }
             let Some(name) = params.name else {
-                return Err(ToolError::MissingParam {
-                    message: "missing required parameter `name` or set `all: true`".to_string(),
-                    param: "name".to_string(),
-                });
+                return Err(missing_param(
+                    "missing required parameter `name` or set `all: true`",
+                    "name",
+                ));
             };
             let response = execute_snippet(manager, &name, params.params).await?;
-            let passed = response
-                .get("result")
-                .and_then(|result| result.get("ok"))
-                .and_then(Value::as_bool)
-                .unwrap_or(true);
+            let passed = snippet_response_passed(&response);
             to_json(json!({
                 "name": name,
                 "passed": passed,
@@ -157,22 +166,22 @@ async fn dispatch_inner(
 async fn promote_snippet(
     manager: Option<&crate::dispatch::gateway::manager::GatewayManager>,
     params: PromoteParams,
+    promotion_context: Option<SnippetPromotionContext>,
 ) -> Result<Value, ToolError> {
     validate_snippet_name(&params.name)?;
     let manager = manager.ok_or_else(|| ToolError::Sdk {
         sdk_kind: "gateway_unavailable".to_string(),
         message: "snippets.promote requires the live gateway manager source store".to_string(),
     })?;
+    let context = promotion_context.unwrap_or_else(SnippetPromotionContext::trusted_local);
     let source = manager
         .resolve_code_mode_source(
             &params.execution_id,
             &CodeModeSourceLookup {
-                actor_key: params.actor_key.clone(),
-                is_admin: true,
-                route_scope: params.route_scope.unwrap_or_else(|| "root".to_string()),
-                capability_filter_fingerprint: params
-                    .capability_filter_fingerprint
-                    .unwrap_or_else(|| CodeModeCapabilityFilter::default().fingerprint()),
+                actor_key: context.actor_key,
+                is_admin: context.is_admin,
+                route_scope: context.route_scope,
+                capability_filter_fingerprint: context.capability_filter_fingerprint,
             },
         )
         .await?;
@@ -202,9 +211,11 @@ async fn promote_snippet(
 
 fn validate_snippet(name: Option<&str>, body: Option<&str>) -> Result<Value, ToolError> {
     if let Some(body) = body {
-        let name = name.ok_or_else(|| ToolError::MissingParam {
-            message: "missing required parameter `name` when validating a body".to_string(),
-            param: "name".to_string(),
+        let name = name.ok_or_else(|| {
+            missing_param(
+                "missing required parameter `name` when validating a body",
+                "name",
+            )
         })?;
         validate_snippet_name(name)?;
         validate_snippet_body(name, body)?;
@@ -215,10 +226,8 @@ fn validate_snippet(name: Option<&str>, body: Option<&str>) -> Result<Value, Too
         }));
     }
 
-    let name = name.ok_or_else(|| ToolError::MissingParam {
-        message: "missing required parameter `name` or `body`".to_string(),
-        param: "name".to_string(),
-    })?;
+    let name =
+        name.ok_or_else(|| missing_param("missing required parameter `name` or `body`", "name"))?;
     let snippet = resolve_snippet(&lab_home(), &builtin_snippet_dir(), name)?;
     let _code = code_for_snippet(&snippet)?;
     to_json(json!({
@@ -238,11 +247,7 @@ async fn test_all_snippets(
     for snippet in snippets {
         match execute_snippet(manager, &snippet.name, Value::Object(Default::default())).await {
             Ok(response) => {
-                let passed = response
-                    .get("result")
-                    .and_then(|result| result.get("ok"))
-                    .and_then(Value::as_bool)
-                    .unwrap_or(true);
+                let passed = snippet_response_passed(&response);
                 results.push(json!({
                     "name": snippet.name,
                     "passed": passed,
@@ -268,6 +273,14 @@ async fn test_all_snippets(
         "passed": passed,
         "results": results,
     }))
+}
+
+fn snippet_response_passed(response: &Value) -> bool {
+    response
+        .get("result")
+        .and_then(|result| result.get("ok"))
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
 }
 
 async fn execute_snippet(
@@ -317,4 +330,11 @@ fn parse_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T, Tool
         message: format!("invalid snippets params: {e}"),
         param: "params".to_string(),
     })
+}
+
+fn missing_param(message: &str, param: &str) -> ToolError {
+    ToolError::MissingParam {
+        message: message.to_string(),
+        param: param.to_string(),
+    }
 }

@@ -135,9 +135,9 @@ same catalog source, so helper visibility and direct `callTool` routing stay
 aligned.
 
 `gateway.reload` swaps in a freshly seeded lazy upstream pool. The next Code Mode
-`codemode`, `search`, or `execute` call reprobes the relevant live upstreams and should see
-tool-list changes such as the agent-os Windows-MCP `PowerShell`, `FileSystem`,
-`Snapshot`, and `Wait` tools without requiring a process restart.
+execution or compatibility catalog call reprobes the relevant live upstreams and
+should see tool-list changes such as the agent-os Windows-MCP `PowerShell`,
+`FileSystem`, `Snapshot`, and `Wait` tools without requiring a process restart.
 
 ## Catalog Drift Diagnostics
 

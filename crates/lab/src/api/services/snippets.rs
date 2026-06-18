@@ -66,6 +66,16 @@ async fn handle(
     let request_id = headers.get("x-request-id").and_then(|v| v.to_str().ok());
     require_snippets_admin(&req.action, request_id, auth.as_ref())?;
     let manager = state.gateway_manager.clone();
+    let promotion_context = crate::dispatch::snippets::dispatch::SnippetPromotionContext {
+        actor_key: auth
+            .as_ref()
+            .and_then(|value| value.0.actor_key.as_deref())
+            .map(ToOwned::to_owned),
+        is_admin: has_admin_scope(auth.as_ref()),
+        route_scope: "root".to_string(),
+        capability_filter_fingerprint:
+            crate::dispatch::gateway::code_mode::CodeModeCapabilityFilter::default().fingerprint(),
+    };
 
     handle_action_with_meta(
         "snippets",
@@ -78,12 +88,20 @@ async fn handle(
         req,
         crate::dispatch::snippets::ACTIONS,
         move |action, params| async move {
-            if matches!(action.as_str(), "snippets.exec" | "snippets.test") {
+            if matches!(
+                action.as_str(),
+                "snippets.exec" | "snippets.test" | "snippets.promote"
+            ) {
                 let manager = manager
                     .as_ref()
                     .ok_or_else(|| ToolError::internal_message("gateway manager not wired"))?;
-                return crate::dispatch::snippets::dispatch::dispatch_with_manager(
-                    manager, &action, params,
+                let promotion_context =
+                    (action == "snippets.promote").then(|| promotion_context.clone());
+                return crate::dispatch::snippets::dispatch::dispatch_with_manager_and_context(
+                    manager,
+                    &action,
+                    params,
+                    promotion_context,
                 )
                 .await;
             }

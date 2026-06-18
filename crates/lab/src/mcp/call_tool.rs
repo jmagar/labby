@@ -426,6 +426,67 @@ impl LabMcpServer {
                 route = "builtin",
                 "dispatch route selected"
             );
+            #[cfg(feature = "gateway")]
+            if service == "snippets" && action == "snippets.promote" {
+                let Some(manager) = &self.gateway_manager else {
+                    let envelope = build_error(
+                        &service,
+                        &action,
+                        "internal_error",
+                        "gateway manager not wired",
+                    );
+                    return Ok(CallToolResult::error(vec![Content::text(
+                        envelope.to_string(),
+                    )]));
+                };
+                let auth = auth_context_from_extensions(&context.extensions);
+                let capability_filter_fingerprint = self
+                    .route_scope
+                    .allowed_upstreams()
+                    .map(|allowed| {
+                        crate::dispatch::gateway::code_mode::CodeModeCapabilityFilter::scoped_upstreams(
+                            allowed.iter().cloned().collect(),
+                            Vec::new(),
+                        )
+                        .fingerprint()
+                    })
+                    .unwrap_or_else(|| {
+                        crate::dispatch::gateway::code_mode::CodeModeCapabilityFilter::default()
+                            .fingerprint()
+                    });
+                let promotion_context =
+                    crate::dispatch::snippets::dispatch::SnippetPromotionContext {
+                        actor_key: actor_key.map(ToOwned::to_owned),
+                        is_admin: auth.is_none_or(|auth| {
+                            auth.scopes.iter().any(|scope| scope == "lab:admin")
+                        }),
+                        route_scope: self.route_scope.label(),
+                        capability_filter_fingerprint,
+                    };
+                let result =
+                    crate::dispatch::snippets::dispatch::dispatch_with_manager_and_context(
+                        manager,
+                        &action,
+                        params,
+                        Some(promotion_context),
+                    )
+                    .await
+                    .map_err(|te| anyhow::Error::from(DispatchError::from(te)));
+                let elapsed_ms = start.elapsed().as_millis();
+                let input_tokens = estimate_tokens_args(&args);
+                let (result, outcome) = format_dispatch_result(
+                    result,
+                    &service,
+                    &action,
+                    elapsed_ms,
+                    &subject,
+                    actor_key,
+                    input_tokens,
+                );
+                self.emit_dispatch_notification(&context, &service, &action, elapsed_ms, outcome)
+                    .await;
+                return Ok(result);
+            }
             let params = if service == "gateway" {
                 inject_gateway_origin_param(params, self.request_subject(&context))
             } else {

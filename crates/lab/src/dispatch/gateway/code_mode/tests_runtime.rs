@@ -124,6 +124,62 @@ fn code_mode_source_store_rejects_unknown_and_cross_route() {
 }
 
 #[test]
+fn code_mode_source_store_allows_narrower_capability_filter() {
+    let mut store = CodeModeSourceStore::new(4, 4096);
+    store.push(CodeModeExecutionSource {
+        execution_id: "01JTEST".to_string(),
+        created_at_ms: 1,
+        actor_key: Some("actor-a".to_string()),
+        is_admin: true,
+        route_scope: "protected".to_string(),
+        surface: CodeModeSurface::Mcp,
+        capability_filter_fingerprint: "upstreams=github;tools=github::search_issues".to_string(),
+        code: "async () => ({ ok: true })".to_string(),
+    });
+
+    let source = store
+        .resolve(
+            "01JTEST",
+            &CodeModeSourceLookup {
+                actor_key: Some("actor-a".to_string()),
+                is_admin: true,
+                route_scope: "protected".to_string(),
+                capability_filter_fingerprint: "upstreams=github;tools=".to_string(),
+            },
+        )
+        .unwrap();
+    assert_eq!(source.execution_id, "01JTEST");
+}
+
+#[test]
+fn code_mode_source_store_rejects_wider_source_capability_filter() {
+    let mut store = CodeModeSourceStore::new(4, 4096);
+    store.push(CodeModeExecutionSource {
+        execution_id: "01JTEST".to_string(),
+        created_at_ms: 1,
+        actor_key: Some("actor-a".to_string()),
+        is_admin: true,
+        route_scope: "protected".to_string(),
+        surface: CodeModeSurface::Mcp,
+        capability_filter_fingerprint: CodeModeCapabilityFilter::default().fingerprint(),
+        code: "async () => ({ ok: true })".to_string(),
+    });
+
+    let err = store
+        .resolve(
+            "01JTEST",
+            &CodeModeSourceLookup {
+                actor_key: Some("actor-a".to_string()),
+                is_admin: true,
+                route_scope: "protected".to_string(),
+                capability_filter_fingerprint: "upstreams=github;tools=".to_string(),
+            },
+        )
+        .unwrap_err();
+    assert_eq!(err.kind(), "forbidden");
+}
+
+#[test]
 fn code_mode_runner_wrapper_exposes_write_artifact() {
     let wrapped = runner::wrap_code_mode_for_test("async () => 'ok'", "var codemode = {};");
 

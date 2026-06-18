@@ -246,13 +246,16 @@ Successful admin/trusted-local Code Mode executions return an `execution_id`.
 Promote a prior execution through the live gateway snippets action, not a
 standalone local CLI command:
 
-```js
-snippets({ action: "snippets.promote", params: {
-  execution_id: "01JEXAMPLE",
-  name: "gateway-summary",
-  description: "Summarize gateway health",
-  confirm: true
-}})
+```json
+{
+  "action": "snippets.promote",
+  "params": {
+    "execution_id": "01JEXAMPLE",
+    "name": "gateway-summary",
+    "description": "Summarize gateway health",
+    "confirm": true
+  }
+}
 ```
 
 Promotion is ephemeral and live-gateway scoped: the raw Code Mode source is kept

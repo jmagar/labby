@@ -617,7 +617,10 @@ impl CodeModeSourceStore {
             });
         }
         if source.route_scope != lookup.route_scope
-            || source.capability_filter_fingerprint != lookup.capability_filter_fingerprint
+            || !source_capability_within_lookup(
+                &source.capability_filter_fingerprint,
+                &lookup.capability_filter_fingerprint,
+            )
         {
             return Err(ToolError::Forbidden {
                 message: "Code Mode promotion source is outside this route or capability scope"
@@ -625,10 +628,7 @@ impl CodeModeSourceStore {
                 required_scopes: vec!["lab:admin".to_string()],
             });
         }
-        if source.actor_key.is_some()
-            && lookup.actor_key.is_some()
-            && source.actor_key != lookup.actor_key
-        {
+        if source.actor_key != lookup.actor_key {
             return Err(ToolError::Forbidden {
                 message: "Code Mode promotion source belongs to a different actor".to_string(),
                 required_scopes: vec!["lab:admin".to_string()],
@@ -636,6 +636,41 @@ impl CodeModeSourceStore {
         }
         Ok(source)
     }
+}
+
+fn source_capability_within_lookup(source: &str, lookup: &str) -> bool {
+    if source == lookup {
+        return true;
+    }
+
+    let Some(source_upstreams) = capability_fingerprint_upstreams(source) else {
+        return false;
+    };
+    let Some(lookup_upstreams) = capability_fingerprint_upstreams(lookup) else {
+        return false;
+    };
+
+    match (source_upstreams, lookup_upstreams) {
+        (_, None) => true,
+        (None, Some(_)) => false,
+        (Some(source), Some(lookup)) => source.is_subset(&lookup),
+    }
+}
+
+fn capability_fingerprint_upstreams(fingerprint: &str) -> Option<Option<BTreeSet<String>>> {
+    let upstreams = fingerprint
+        .split(';')
+        .find_map(|part| part.strip_prefix("upstreams="))?;
+    if upstreams == "*" {
+        return Some(None);
+    }
+    let set = upstreams
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<BTreeSet<_>>();
+    Some(Some(set))
 }
 
 /// Serialized byte size of a single history entry.

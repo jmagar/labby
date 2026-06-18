@@ -198,15 +198,12 @@ pub fn create_user_snippet(
     }
     let body = render_user_snippet_body(name, body, description)?;
     atomic_write_snippet(&path, &body)?;
-    let metadata = frontmatter(&body).ok().flatten();
+    let (description, tags, inputs) = snippet_metadata_fields(frontmatter(&body).ok().flatten());
     Ok(SnippetInfo {
         name: name.to_string(),
-        description: metadata.as_ref().map(|m| m.description.clone()),
-        tags: metadata
-            .as_ref()
-            .map(|m| m.tags.clone())
-            .unwrap_or_default(),
-        inputs: metadata.map(|m| m.inputs).unwrap_or_default(),
+        description,
+        tags,
+        inputs,
         source: SnippetSource::User,
         path,
         shadowed: false,
@@ -336,15 +333,13 @@ fn collect_snippets(
         if validate_snippet_body(stem, &body).is_err() {
             continue;
         }
-        let metadata = frontmatter(&body).ok().flatten();
+        let (description, tags, inputs) =
+            snippet_metadata_fields(frontmatter(&body).ok().flatten());
         out.push(SnippetInfo {
             name: stem.to_string(),
-            description: metadata.as_ref().map(|m| m.description.clone()),
-            tags: metadata
-                .as_ref()
-                .map(|m| m.tags.clone())
-                .unwrap_or_default(),
-            inputs: metadata.map(|m| m.inputs).unwrap_or_default(),
+            description,
+            tags,
+            inputs,
             source,
             path,
             shadowed: false,
@@ -373,15 +368,13 @@ fn read_resolved(
 ) -> Result<ResolvedSnippet, ToolError> {
     let body = fs::read_to_string(&path).map_err(|e| io_error("read snippet", &path, e))?;
     validate_snippet_body(name, &body)?;
-    let metadata = frontmatter(&body)?.filter(|m| m.name == name);
+    let (description, tags, inputs) =
+        snippet_metadata_fields(frontmatter(&body)?.filter(|m| m.name == name));
     Ok(ResolvedSnippet {
         name: name.to_string(),
-        description: metadata.as_ref().map(|m| m.description.clone()),
-        tags: metadata
-            .as_ref()
-            .map(|m| m.tags.clone())
-            .unwrap_or_default(),
-        inputs: metadata.map(|m| m.inputs).unwrap_or_default(),
+        description,
+        tags,
+        inputs,
         source,
         path,
         body,
@@ -400,6 +393,18 @@ fn io_error(action: &str, path: &Path, error: std::io::Error) -> ToolError {
         sdk_kind: "internal_error".to_string(),
         message: format!("{action} `{}` failed: {error}", path.display()),
     }
+}
+
+fn snippet_metadata_fields(
+    metadata: Option<SnippetFrontmatter>,
+) -> (
+    Option<String>,
+    Vec<String>,
+    BTreeMap<String, SnippetInputSpec>,
+) {
+    metadata
+        .map(|metadata| (Some(metadata.description), metadata.tags, metadata.inputs))
+        .unwrap_or_default()
 }
 
 pub fn validate_snippet_body(name: &str, body: &str) -> Result<(), ToolError> {

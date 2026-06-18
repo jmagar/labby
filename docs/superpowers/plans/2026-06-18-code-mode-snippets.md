@@ -323,10 +323,11 @@
     ```
     ```js
     // Through the live gateway snippets action, not a standalone local CLI:
-    snippets({ action: "promote", params: {
+    snippets({ action: "snippets.promote", params: {
       execution_id: "01JEXAMPLE",
       name: "gateway-summary",
-      description: "Summarize gateway health"
+      description: "Summarize gateway health",
+      confirm: true
     }})
     ```
   - Document that promoted source is written as plaintext executable snippet content and may contain anything the original Code Mode source contained.
@@ -379,12 +380,13 @@
   - Promote a successful prior execution through the live gateway snippets action, with destructive/admin confirmation as required:
     ```json
     {
-      "action": "promote",
+      "action": "snippets.promote",
       "params": {
         "execution_id": "<execution-id>",
         "name": "promoted-smoke",
         "description": "Promoted smoke snippet",
-        "force": true
+        "force": true,
+        "confirm": true
       }
     }
     ```

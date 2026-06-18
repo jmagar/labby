@@ -8,7 +8,7 @@ use crate::dispatch::error::ToolError;
 use crate::dispatch::gateway::manager::GatewayManager;
 use crate::dispatch::helpers::lab_home;
 use crate::dispatch::snippets::store::{builtin_snippet_dir, list_snippets};
-use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
+use crate::dispatch::upstream::types::{UpstreamRuntimeOwner, UpstreamTool};
 
 use super::CodeModeBroker;
 use super::protocol::CODE_MODE_DISCOVERY_TIMEOUT;
@@ -155,6 +155,20 @@ impl CodeModeBroker<'_> {
         .await
     }
 
+    pub(in crate::dispatch::gateway::code_mode) async fn cached_code_mode_catalog_for_proxy(
+        &self,
+        manager: &GatewayManager,
+        owner: &UpstreamRuntimeOwner,
+        oauth_subject: Option<&str>,
+        include_snippets: bool,
+    ) -> Result<(Vec<CodeModeCatalogEntry>, String, usize), ToolError> {
+        let raw_tools = manager
+            .code_mode_catalog_tools_cached(Some(owner), oauth_subject)
+            .await?;
+        self.code_mode_catalog_from_tools(manager, raw_tools, include_snippets)
+            .await
+    }
+
     pub(in crate::dispatch::gateway::code_mode) async fn code_mode_catalog_allowed(
         &self,
         manager: &GatewayManager,
@@ -172,7 +186,16 @@ impl CodeModeBroker<'_> {
                 allowed_upstreams,
             )
             .await?;
+        self.code_mode_catalog_from_tools(manager, raw_tools, include_snippets)
+            .await
+    }
 
+    async fn code_mode_catalog_from_tools(
+        &self,
+        manager: &GatewayManager,
+        raw_tools: Vec<UpstreamTool>,
+        include_snippets: bool,
+    ) -> Result<(Vec<CodeModeCatalogEntry>, String, usize), ToolError> {
         // --- P-H3: catalog render cache ---
         // Compute a cheap fingerprint from the sorted healthy tool ids. This
         // detects upstream additions/removals/renames without needing a pool

@@ -107,16 +107,26 @@ impl CodeModeBroker<'_> {
         let include_snippets =
             caller.can_use_snippets() && !capability_filter.is_scoped_to_upstreams();
         let allowed_upstreams = capability_filter.allowed_upstreams();
-        let (catalog, _catalog_json, _serialized_size) = self
-            .code_mode_catalog_for_proxy(
-                manager,
-                allow_cold_connect,
-                &owner,
-                oauth_subject,
-                allowed_upstreams,
-                include_snippets,
-            )
-            .await?;
+        let (catalog, _catalog_json, _serialized_size) =
+            if surface == CodeModeSurface::Cli && allowed_upstreams.is_none() {
+                self.cached_code_mode_catalog_for_proxy(
+                    manager,
+                    &owner,
+                    oauth_subject,
+                    include_snippets,
+                )
+                .await?
+            } else {
+                self.code_mode_catalog_for_proxy(
+                    manager,
+                    allow_cold_connect,
+                    &owner,
+                    oauth_subject,
+                    allowed_upstreams,
+                    include_snippets,
+                )
+                .await?
+            };
         let catalog = catalog
             .into_iter()
             .filter(|entry| {
