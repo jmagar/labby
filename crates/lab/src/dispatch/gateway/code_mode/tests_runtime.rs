@@ -55,7 +55,7 @@ fn code_mode_artifact_root_uses_run_id_under_lab_home() {
 }
 
 #[test]
-fn truncates_code_execute_final_result_when_oversized() {
+fn truncates_codemode_final_result_when_oversized() {
     // calls[] carry lightweight metadata only — truncation caps the FINAL
     // result. An oversized final result is replaced with a truncation marker;
     // the calls metadata is preserved untouched.
@@ -386,7 +386,7 @@ fn code_mode_history_bounds_by_bytes() {
         history.push(CodeModeHistoryEntry {
             seq: 0,
             route_scope: "root".to_string(),
-            kind: CodeModeHistoryKind::Search,
+            kind: CodeModeHistoryKind::Execute,
             ok: true,
             elapsed_ms: idx,
             error_kind: None,

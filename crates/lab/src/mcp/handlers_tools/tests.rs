@@ -9,13 +9,8 @@ use crate::dispatch::upstream::pool::UpstreamPool;
 use crate::dispatch::upstream::types::{
     ToolExposurePolicy, UpstreamEntry, UpstreamHealth, UpstreamTool,
 };
-use crate::mcp::catalog::{
-    CODE_MODE_SEARCH_TOOL_NAME, CODE_MODE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME,
-};
-use crate::mcp::handlers_resources::{
-    CODE_MODE_APP_SKYBRIDGE_URI, CODE_MODE_APP_URI, CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI,
-    CODE_MODE_EXECUTE_APP_URI, CODE_MODE_SEARCH_APP_SKYBRIDGE_URI, CODE_MODE_SEARCH_APP_URI,
-};
+use crate::mcp::catalog::CODE_MODE_TOOL_NAME;
+use crate::mcp::handlers_resources::{CODE_MODE_APP_SKYBRIDGE_URI, CODE_MODE_APP_URI};
 use crate::mcp::handlers_tools::{code_mode_tool_meta, code_mode_trace_output_schema};
 use crate::mcp::logging::logging_level_rank;
 use crate::mcp::server::LabMcpServer;
@@ -283,8 +278,6 @@ fn scoped_context(
 #[test]
 fn code_mode_tool_meta_points_to_canonical_ui_resource() {
     let codemode = code_mode_tool_meta(CODE_MODE_TOOL_NAME);
-    let search = code_mode_tool_meta(CODE_MODE_SEARCH_TOOL_NAME);
-    let execute = code_mode_tool_meta(TOOL_EXECUTE_TOOL_NAME);
 
     // The binding URI carries a `?v=<hash>` cache-bust token (so a rebuilt widget
     // forces the host to refetch), but resolves to the canonical base URI.
@@ -293,16 +286,6 @@ fn code_mode_tool_meta_points_to_canonical_ui_resource() {
         .expect("codemode resourceUri");
     assert!(codemode_ui.starts_with(CODE_MODE_APP_URI));
     assert!(codemode_ui.contains("?v="));
-    let search_ui = search.0["ui"]["resourceUri"]
-        .as_str()
-        .expect("search resourceUri");
-    assert!(search_ui.starts_with(CODE_MODE_SEARCH_APP_URI));
-    assert!(search_ui.contains("?v="));
-    let execute_ui = execute.0["ui"]["resourceUri"]
-        .as_str()
-        .expect("execute resourceUri");
-    assert!(execute_ui.starts_with(CODE_MODE_EXECUTE_APP_URI));
-    assert!(execute_ui.contains("?v="));
     // OpenAI Apps hosts (ChatGPT / Codex) bind widgets via `openai/outputTemplate`
     // rather than `_meta.ui`. It points at the skybridge variant (same HTML, the
     // `text/html+skybridge` MIME those hosts expect) so the Claude resource is
@@ -317,26 +300,6 @@ fn code_mode_tool_meta_points_to_canonical_ui_resource() {
         "codemode tool must expose the OpenAI Apps output template"
     );
     assert!(codemode_skybridge.contains("?v="));
-    let search_skybridge = search
-        .0
-        .get("openai/outputTemplate")
-        .and_then(|value| value.as_str())
-        .expect("search openai/outputTemplate");
-    assert!(
-        search_skybridge.starts_with(CODE_MODE_SEARCH_APP_SKYBRIDGE_URI),
-        "search tool must expose the OpenAI Apps output template"
-    );
-    assert!(search_skybridge.contains("?v="));
-    let execute_skybridge = execute
-        .0
-        .get("openai/outputTemplate")
-        .and_then(|value| value.as_str())
-        .expect("execute openai/outputTemplate");
-    assert!(
-        execute_skybridge.starts_with(CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI),
-        "execute tool must expose the OpenAI Apps output template"
-    );
-    assert!(execute_skybridge.contains("?v="));
 }
 
 #[test]
@@ -349,10 +312,7 @@ fn code_mode_trace_output_schema_advertises_structured_trace_kinds() {
         .iter()
         .filter_map(|variant| variant["properties"]["kind"]["const"].as_str())
         .collect::<Vec<_>>();
-    assert_eq!(
-        kinds,
-        vec!["code_mode_search_trace", "code_mode_execute_trace"]
-    );
+    assert_eq!(kinds, vec!["code_mode_execute_trace"]);
 }
 
 #[tokio::test]
@@ -382,36 +342,19 @@ async fn list_tools_advertises_code_mode_output_schemas() {
         .iter()
         .find(|tool| tool.name.as_ref() == CODE_MODE_TOOL_NAME)
         .expect("codemode tool");
-    let search = result
-        .tools
+    assert_eq!(
+        codemode.input_schema["properties"]["code"]["minLength"],
+        serde_json::json!(1),
+        "codemode must advertise non-empty code"
+    );
+    let schema = codemode.output_schema.as_ref().expect("outputSchema");
+    let kinds = schema["oneOf"]
+        .as_array()
+        .expect("oneOf variants")
         .iter()
-        .find(|tool| tool.name.as_ref() == CODE_MODE_SEARCH_TOOL_NAME)
-        .expect("search tool");
-    let execute = result
-        .tools
-        .iter()
-        .find(|tool| tool.name.as_ref() == TOOL_EXECUTE_TOOL_NAME)
-        .expect("execute tool");
-
-    for tool in [codemode, search, execute] {
-        assert_eq!(
-            tool.input_schema["properties"]["code"]["minLength"],
-            serde_json::json!(1),
-            "{} must advertise non-empty code",
-            tool.name
-        );
-        let schema = tool.output_schema.as_ref().expect("outputSchema");
-        let kinds = schema["oneOf"]
-            .as_array()
-            .expect("oneOf variants")
-            .iter()
-            .filter_map(|variant| variant["properties"]["kind"]["const"].as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            kinds,
-            vec!["code_mode_search_trace", "code_mode_execute_trace"]
-        );
-    }
+        .filter_map(|variant| variant["properties"]["kind"]["const"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(kinds, vec!["code_mode_execute_trace"]);
 }
 
 #[tokio::test]
@@ -465,8 +408,6 @@ async fn list_tools_promotes_upstream_mcp_app_tools_when_raw_tools_are_hidden() 
     assert!(names.contains(&"youtube_search_ui"));
     assert!(!names.contains(&"youtube_probe"));
     assert!(names.contains(&CODE_MODE_TOOL_NAME));
-    assert!(names.contains(&CODE_MODE_SEARCH_TOOL_NAME));
-    assert!(names.contains(&TOOL_EXECUTE_TOOL_NAME));
     assert!(!names.contains(&"radarr"));
 }
 
@@ -576,8 +517,6 @@ async fn protected_code_mode_list_tools_hides_raw_siblings_and_disallowed_builti
     assert!(!names.contains(&"radarr"));
     assert!(!names.contains(&"sonarr"));
     assert!(names.contains(&CODE_MODE_TOOL_NAME));
-    assert!(names.contains(&CODE_MODE_SEARCH_TOOL_NAME));
-    assert!(names.contains(&TOOL_EXECUTE_TOOL_NAME));
     assert!(names.contains(&"youtube_search_ui"));
     assert!(!names.contains(&"youtube_probe"));
 }
@@ -618,8 +557,6 @@ async fn protected_list_tools_filters_disallowed_builtins_when_code_mode_is_off(
     assert!(names.contains(&"radarr"));
     assert!(!names.contains(&"sonarr"));
     assert!(!names.contains(&CODE_MODE_TOOL_NAME));
-    assert!(!names.contains(&CODE_MODE_SEARCH_TOOL_NAME));
-    assert!(!names.contains(&TOOL_EXECUTE_TOOL_NAME));
 }
 
 #[tokio::test]
@@ -1101,7 +1038,7 @@ async fn codemode_allows_execute_scope_to_reach_runner_path() {
 }
 
 #[tokio::test]
-async fn execute_and_codemode_route_to_same_execute_path() {
+async fn codemode_routes_to_code_mode_path() {
     let server = test_server(
         completion_test_registry(),
         Some(code_mode_manager(true).await),
@@ -1113,41 +1050,39 @@ async fn execute_and_codemode_route_to_same_execute_path() {
         server, transport, None,
     );
 
-    for tool in [CODE_MODE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME] {
-        let result = running
-            .service()
-            .call_tool_impl(
-                CallToolRequestParams::new(tool).with_arguments(
-                    serde_json::json!({ "code": "async () => 1" })
-                        .as_object()
-                        .expect("object")
-                        .clone(),
-                ),
-                scoped_context(running.peer().clone(), &["lab"]),
-            )
-            .await
-            .expect("call result");
+    let result = running
+        .service()
+        .call_tool_impl(
+            CallToolRequestParams::new(CODE_MODE_TOOL_NAME).with_arguments(
+                serde_json::json!({ "code": "async () => 1" })
+                    .as_object()
+                    .expect("object")
+                    .clone(),
+            ),
+            scoped_context(running.peer().clone(), &["lab"]),
+        )
+        .await
+        .expect("call result");
 
-        let text: &str = result.content[0].as_text().expect("text").text.as_ref();
+    let text: &str = result.content[0].as_text().expect("text").text.as_ref();
+    assert!(
+        !text.contains("\"kind\":\"forbidden\""),
+        "codemode should pass execute auth: {text}"
+    );
+    if result.is_error.unwrap_or(false) {
         assert!(
-            !text.contains("\"kind\":\"forbidden\""),
-            "{tool} should pass execute auth: {text}"
+            text.contains("\"service\":\"codemode\""),
+            "codemode should preserve the called tool name in error envelopes: {text}"
         );
-        if result.is_error.unwrap_or(false) {
-            assert!(
-                text.contains(&format!("\"service\":\"{tool}\"")),
-                "{tool} should preserve the called tool name in execute envelopes: {text}"
-            );
-        } else {
-            assert_eq!(
-                result
-                    .structured_content
-                    .as_ref()
-                    .and_then(|value| value["kind"].as_str()),
-                Some("code_mode_execute_trace"),
-                "{tool} should return execute trace structured content"
-            );
-        }
+    } else {
+        assert_eq!(
+            result
+                .structured_content
+                .as_ref()
+                .and_then(|value| value["kind"].as_str()),
+            Some("code_mode_execute_trace"),
+            "codemode should return runtime trace structured content"
+        );
     }
 }
 
@@ -2012,25 +1947,10 @@ async fn snapshot_catalog_hides_builtin_tools_when_code_mode_is_enabled() {
 
     let snapshot = server.snapshot_catalog().await;
 
-    // Code Mode mode: exactly primary `codemode` plus compatibility `search` +
-    // `execute`. NO code_search, code_execute, or code.
+    // Code Mode mode: exactly the primary `codemode` tool. NO legacy aliases.
     assert_eq!(
         snapshot.tools,
-        [
-            "codemode".to_string(),
-            "execute".to_string(),
-            "search".to_string()
-        ]
-        .into_iter()
-        .collect()
-    );
-    assert!(
-        !snapshot.tools.contains("code_search"),
-        "code_search must not appear in Code Mode mode"
-    );
-    assert!(
-        !snapshot.tools.contains("code_execute"),
-        "code_execute must not appear in Code Mode mode"
+        ["codemode".to_string()].into_iter().collect()
     );
     assert!(
         !snapshot.tools.contains("code"),
@@ -2040,9 +1960,8 @@ async fn snapshot_catalog_hides_builtin_tools_when_code_mode_is_enabled() {
 
 #[tokio::test]
 async fn snapshot_catalog_shows_no_gateway_tools_when_surface_is_disabled() {
-    // When code_mode.enabled=false, none of the gateway meta-tools
-    // (search, execute, code, code_search, code_execute) should appear in
-    // the snapshot.
+    // When code_mode.enabled=false, none of the gateway Code Mode tool names
+    // should appear in the snapshot.
     let server = test_server(
         completion_test_registry(),
         Some(code_mode_manager(false).await),
@@ -2053,14 +1972,7 @@ async fn snapshot_catalog_shows_no_gateway_tools_when_surface_is_disabled() {
     let snapshot = server.snapshot_catalog().await;
 
     // Raw mode — none of the gateway meta-tools should appear.
-    for meta_tool in [
-        "codemode",
-        "search",
-        "execute",
-        "code",
-        "code_search",
-        "code_execute",
-    ] {
+    for meta_tool in ["codemode", "search", "execute", "code"] {
         assert!(
             !snapshot.tools.contains(meta_tool),
             "gateway meta-tool '{meta_tool}' must not appear when neither mode is enabled"
@@ -2090,11 +2002,7 @@ async fn protected_scope_denies_direct_code_mode_calls_when_hidden() {
         running.peer().clone(),
     );
 
-    for tool_name in [
-        CODE_MODE_TOOL_NAME,
-        CODE_MODE_SEARCH_TOOL_NAME,
-        TOOL_EXECUTE_TOOL_NAME,
-    ] {
+    for tool_name in [CODE_MODE_TOOL_NAME] {
         let result = Box::pin(
             running
                 .service()

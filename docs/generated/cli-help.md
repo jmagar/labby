@@ -1490,7 +1490,7 @@ Options:
           Built-in Lab service names to expose for --gateway-subset. Repeat or comma-separate
 
       --expose-code-mode
-          Expose Code Mode search/execute on this gateway subset
+          Expose codemode on this gateway subset
 
   -h, --help
           Print help
@@ -1551,7 +1551,7 @@ Options:
           Built-in Lab service names to expose for --gateway-subset. Repeat or comma-separate
 
       --expose-code-mode
-          Expose Code Mode search/execute on this gateway subset
+          Expose codemode on this gateway subset
 
   -h, --help
           Print help
@@ -1633,7 +1633,7 @@ Options:
           Built-in Lab service names to expose for --gateway-subset. Repeat or comma-separate
 
       --expose-code-mode
-          Expose Code Mode search/execute on this gateway subset
+          Expose codemode on this gateway subset
 
   -h, --help
           Print help
@@ -2227,8 +2227,8 @@ Usage: code [OPTIONS] <COMMAND>
 
 Commands:
   status   Read gateway-wide Code Mode settings
-  enable   Enable the gateway Code Mode search/execute MCP surface
-  disable  Disable the gateway Code Mode search/execute MCP surface
+  enable   Enable the gateway codemode MCP surface
+  disable  Disable the gateway codemode MCP surface
   exec     Execute a sandboxed JavaScript snippet that calls the typed `codemode.<upstream>.<tool>` helpers (or `callTool` directly)
   help     Print this message or the help of the given subcommand(s)
 
@@ -2270,7 +2270,7 @@ Options:
 ## `labby gateway code enable`
 
 ```text
-Enable the gateway Code Mode search/execute MCP surface
+Enable the gateway codemode MCP surface
 
 Usage: enable [OPTIONS]
 
@@ -2291,7 +2291,7 @@ Options:
 ## `labby gateway code disable`
 
 ```text
-Disable the gateway Code Mode search/execute MCP surface
+Disable the gateway codemode MCP surface
 
 Usage: disable [OPTIONS]
 

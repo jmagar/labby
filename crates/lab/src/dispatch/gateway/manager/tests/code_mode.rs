@@ -83,8 +83,8 @@ async fn resolve_code_mode_upstream_tool_hides_priority_zero_upstreams() {
 
 #[tokio::test]
 async fn resolve_code_mode_upstream_tool_resolves_requested_upstream() {
-    // resolve_code_mode_upstream_tool requires the search/execute surface —
-    // gated solely by code_mode.enabled — to be active.
+    // resolve_code_mode_upstream_tool requires the codemode surface, gated
+    // solely by code_mode.enabled, to be active.
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
     let runtime = GatewayRuntimeHandle::default();

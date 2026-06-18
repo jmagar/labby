@@ -45,7 +45,6 @@ mod process;
 mod registry;
 #[cfg(test)]
 mod test_support;
-mod tool_names;
 #[cfg(feature = "fs")]
 mod workspace;
 

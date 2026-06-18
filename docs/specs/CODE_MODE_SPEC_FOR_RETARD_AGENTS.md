@@ -4,45 +4,41 @@ This specification describes the current Lab implementation. Older design notes 
 
 ## Current Surface
 
-Code Mode is exposed through the gateway `search` and `execute` MCP tools when `[code_mode].enabled = true`.
+Code Mode is exposed through the gateway `codemode` MCP tool when `[code_mode].enabled = true`.
 
 | Tool | Input | Behavior |
 |------|-------|----------|
-| `search` | `{ "code": string }` | Runs a JavaScript async arrow function against an injected `tools` catalog. |
-| `execute` | `{ "code": string, "upstreams"?: string[], "tools"?: string[] }` | Runs a JavaScript async arrow function in the execution sandbox and brokers upstream calls. |
+| `codemode` | `{ "code": string, "upstreams"?: string[], "tools"?: string[] }` | Runs a JavaScript async arrow function in the Javy/QuickJS sandbox, supports in-sandbox discovery, and brokers upstream calls. |
 
-The gateway does not advertise a `code` MCP tool. The old `code_search` / `code_execute` split is removed. The old `code_mode` / `tool_execute` names are legacy aliases for the canonical `search` / `execute` tools.
+The gateway does not advertise compatibility Code Mode MCP tools.
 
 ## Catalog Discovery
 
-`search` injects `const tools = [...]`, where each entry contains:
+Discovery happens inside the `codemode` sandbox:
 
-- `id`
-- `upstream`
-- `name`
-- `description`
-- `schema`
-- `output_schema`
-- `signature`
-- `dts`
+- `await codemode.search({ query, limit })` returns compact candidate hits.
+- `await codemode.describe(path)` returns full schema, output schema, signature, and TypeScript declaration details for an exact target.
 
 The expected agent flow is:
 
-1. Call `search` with a filtering/projection function.
-2. Use the returned `id`, `signature`, or `dts`.
-3. Call `execute` with `callTool(id, params)` or a generated `codemode.<upstream>.<tool>()` helper.
+1. Call `codemode`.
+2. Use `codemode.search()` for a small candidate list.
+3. Use `codemode.describe()` for the full contract of the chosen tool.
+4. Call the tool with `callTool(id, params)` or a generated `codemode.<upstream>.<tool>()` helper.
 
 Example:
 
 ```js
-async () => tools
-  .filter(t => t.upstream === "github" && /issue/i.test(t.description))
-  .map(t => ({ id: t.id, signature: t.signature, dts: t.dts }))
+async () => {
+  const hits = await codemode.search({ query: "github issues", limit: 5 });
+  const docs = await codemode.describe(hits.results[0].path);
+  return { path: docs.path, schema: docs.schema, signature: docs.signature };
+}
 ```
 
 ## Execution
 
-`execute` receives JavaScript and wraps it in the Code Mode runner. The runner exposes:
+`codemode` receives JavaScript and wraps it in the Code Mode runner. The runner exposes:
 
 ```ts
 declare function callTool<T = unknown>(
@@ -90,14 +86,13 @@ max_log_entries = 1000
 max_log_bytes = 65536
 ```
 
-There is no search-ranking or top-k config. `search` is JavaScript over the live
-catalog, so callers control filtering in their own code.
+There is no search-ranking config. `codemode.search()` is an in-sandbox helper
+over the live catalog; callers control narrowing in their own code.
 
 ## Enforcement
 
-- `search` is read-only and accepts `lab:read`, `lab`, or `lab:admin`.
-- `codemode` and `execute` require `lab` or `lab:admin`.
-- `codemode` and `execute` have no filesystem, environment, host network, Node, or Deno APIs.
+- `codemode` requires `lab` or `lab:admin`.
+- `codemode` has no filesystem, environment, host network, Node, or Deno APIs.
 - Host calls are brokered by the parent gateway and retain upstream visibility, auth, destructive-action, schema-validation, and response-budget checks.
 - `timeout_ms` kills runaway executions.
 - `max_tool_calls` is enforced in the parent before each brokered upstream call.

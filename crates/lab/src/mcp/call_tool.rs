@@ -1,5 +1,5 @@
 //! `call_tool` dispatch entry: arg parse + service lookup, the gateway
-//! meta-tool routing (search/execute), the post-meta-tool gates
+//! meta-tool routing, the post-meta-tool gates
 //! (visibility / action-allowed / code_mode-hidden / admin-scope /
 //! destructive elicitation), the builtin dispatch branch, and the
 //! fall-through to the upstream proxy tail.
@@ -8,9 +8,9 @@
 //! `impl LabMcpServer` method. The `ServerHandler` trait impl in
 //! `server.rs` keeps a one-line delegator.
 //!
-//! Preserves the exact early-return ordering (search → execute →
-//! visibility → action → code_mode-hidden → admin-scope → elicitation
-//! → builtin → upstream tail). The codemode and upstream branches live in
+//! Preserves the exact early-return ordering (codemode → visibility → action →
+//! code_mode-hidden → admin-scope → elicitation → builtin → upstream tail). The
+//! codemode and upstream branches live in
 //! `call_tool_codemode.rs` / `call_tool_upstream.rs`. No behavior change.
 
 use std::time::Instant;
@@ -31,9 +31,7 @@ use crate::dispatch::upstream::types::UpstreamTool;
 #[cfg(feature = "gateway")]
 use crate::mcp::call_tool_upstream::PreResolvedUpstreamTool;
 #[cfg(feature = "gateway")]
-use crate::mcp::catalog::{
-    CODE_MODE_SEARCH_TOOL_NAME, CODE_MODE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME,
-};
+use crate::mcp::catalog::CODE_MODE_TOOL_NAME;
 use crate::mcp::context::{
     auth_context_from_extensions, tool_execute_builtin_action_allowed, tool_execute_scope_allowed,
 };
@@ -167,8 +165,8 @@ impl LabMcpServer {
 
         #[cfg(feature = "gateway")]
         {
-            // ── Gateway `search` tool: run caller's JS over the upstream catalog ──
-            if service == CODE_MODE_SEARCH_TOOL_NAME {
+            // ── Gateway `codemode` tool: run caller's JS in the subprocess sandbox.
+            if service == CODE_MODE_TOOL_NAME {
                 if !self.route_scope.exposes_code_mode() {
                     let elapsed_ms = start.elapsed().as_millis();
                     self.log_route_scope_denial(
@@ -184,28 +182,9 @@ impl LabMcpServer {
                         "Code Mode is not exposed on this MCP route".to_string(),
                     ));
                 }
-                return self.call_code_mode_impl(&service, &args, &context).await;
-            }
-
-            // ── Gateway `codemode` / `execute` tool: run caller's JS in the
-            // subprocess sandbox. `execute` remains as a compatibility alias.
-            if service == CODE_MODE_TOOL_NAME || service == TOOL_EXECUTE_TOOL_NAME {
-                if !self.route_scope.exposes_code_mode() {
-                    let elapsed_ms = start.elapsed().as_millis();
-                    self.log_route_scope_denial(
-                        &context,
-                        &service,
-                        "call_tool",
-                        "Code Mode is not exposed on this MCP route",
-                        elapsed_ms,
-                    );
-                    return Ok(route_scope_denied_result(
-                        &service,
-                        "call_tool",
-                        "Code Mode is not exposed on this MCP route".to_string(),
-                    ));
-                }
-                return self.call_tool_execute_impl(&service, &args, &context).await;
+                return self
+                    .call_tool_codemode_impl(&service, &args, &context)
+                    .await;
             }
         }
 

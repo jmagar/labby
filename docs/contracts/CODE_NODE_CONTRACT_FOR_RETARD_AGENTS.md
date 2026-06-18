@@ -4,15 +4,13 @@ This document describes the current Lab gateway Code Mode surface exposed to MCP
 
 ## Advertised Tools
 
-When gateway-wide `[code_mode].enabled = true`, Lab hides raw upstream tools and advertises the primary synthetic `codemode` MCP tool plus compatibility tools:
+When gateway-wide `[code_mode].enabled = true`, Lab hides raw upstream tools and advertises the single synthetic `codemode` MCP tool:
 
 | Tool | Scope | Purpose |
 |------|-------|---------|
 | `codemode` | `lab` or `lab:admin` | Run JavaScript in the Code Mode sandbox, discover upstream tools with `codemode.search()` / `codemode.describe()`, and broker upstream `callTool()` calls. |
-| `search` | `lab:read`, `lab`, or `lab:admin` | Compatibility tool: run JavaScript against the full live upstream tool catalog. |
-| `execute` | `lab` or `lab:admin` | Compatibility tool: run JavaScript in the Code Mode sandbox and broker upstream `callTool()` calls. |
 
-There is no advertised `code` MCP tool. There is no `code_search` or `code_execute` tool. New clients must use `codemode`.
+There are no advertised compatibility Code Mode MCP tools. Clients must use `codemode`.
 
 ## Discover Inside Codemode
 
@@ -24,42 +22,9 @@ Call `codemode` and use in-sandbox discovery before making upstream calls:
 
 `codemode.search()` uses a reduced per-execution catalog with `id`, `path`, `upstream`, `name`, `description`, and `signature`.
 
-## Compatibility Search
+## Codemode Calls
 
-Call `search` before `execute` to discover the live IDs and TypeScript signatures.
-
-`search` accepts:
-
-```json
-{ "code": "async () => tools.filter(t => t.upstream === \"github\")" }
-```
-
-The search sandbox injects:
-
-```ts
-const tools: Array<{
-  id: string;
-  upstream: string;
-  name: string;
-  description: string;
-  schema: unknown;
-  output_schema: unknown;
-  signature: string;
-  dts: string;
-}>;
-```
-
-Good search snippets return a small filtered projection:
-
-```ts
-async () => tools
-  .filter(t => /issue/i.test(t.description))
-  .map(t => ({ id: t.id, signature: t.signature, dts: t.dts }))
-```
-
-## Codemode / Compatibility Execute
-
-`codemode` and compatibility `execute` accept:
+`codemode` accepts:
 
 ```json
 {

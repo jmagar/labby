@@ -68,14 +68,13 @@ impl GatewayManager {
         oauth_subject: Option<&str>,
     ) -> Result<UpstreamTool, ToolError> {
         let cfg = self.config.read().await;
-        // The gateway search/execute surface is gated by the single `code_mode.enabled`
-        // toggle, which also exposes the tools. `execute` is only reachable when the
-        // surface is exposed, so reject when it is off. This is the single-surface
-        // (Cloudflare-parity) model: when search + execute are on, callTool resolution works.
+        // The gateway Code Mode surface is gated by the single `code_mode.enabled`
+        // toggle, which also exposes `codemode`. callTool resolution is reachable
+        // only from that surface, so reject when it is off.
         if !cfg.code_mode.enabled {
             return Err(ToolError::Sdk {
                 sdk_kind: "unknown_tool".to_string(),
-                message: "the gateway search/execute surface is not enabled; \
+                message: "the gateway codemode surface is not enabled; \
                     set [code_mode] enabled = true in config"
                     .to_string(),
             });

@@ -347,7 +347,7 @@ async fn previous_completion_actor_ids_uses_distinct_actor_keys() {
 #[test]
 fn tier_two_fields_populate_actor_ip_and_code_mode_metrics() {
     let now = 1_000_000_000_000;
-    let mut device_call = call_event(now - 1000, "api", "code_execute", true, 120, 80, 400);
+    let mut device_call = call_event(now - 1000, "api", "codemode", true, 120, 80, 400);
     device_call.actor_key = Some("device-1".to_string());
     device_call.fields_json["actor_label"] = json!("Pixel browser");
     device_call.fields_json["agent_kind"] = json!("device");

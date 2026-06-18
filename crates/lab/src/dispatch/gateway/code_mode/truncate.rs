@@ -176,7 +176,7 @@ fn truncation_marker(
         "original_tokens": estimated_tokens(serialized.len(), token_estimate_divisor),
         "preview": preview,
         "artifacts": artifacts,
-        "next_action": "Use a narrower query, request fewer fields, or split the work across multiple code_execute calls."
+        "next_action": "Use a narrower query, request fewer fields, or split the work across multiple codemode calls."
     })
 }
 

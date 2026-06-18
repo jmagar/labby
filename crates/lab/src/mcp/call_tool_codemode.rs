@@ -1,16 +1,13 @@
-//! Code Mode gateway meta-tool branches of `call_tool`: `search` (Boa JS
-//! over the upstream catalog) and `execute` (subprocess sandbox).
+//! Code Mode gateway tool branch of `call_tool`.
 //!
 //! Extracted from `server.rs` (bead `lab-kvji.24.1.5`) as inherent
 //! `impl LabMcpServer` helpers. Each helper is reached only after the
 //! service-name match in `call_tool_impl` and self-`return`s its result.
-//! Owns the single definitions of `CODE_EXECUTE_DESCRIPTION` and
+//! Owns the single definition of `CODE_MODE_DESCRIPTION` and
 //! `CODE_MODE_MAX_CODE_BYTES`, plus `string_array_arg`.
 //!
-//! These branches log via `tracing` directly (not
-//! `emit_dispatch_notification`) and the `execute` branch fires
-//! `notify_catalog_changes` around the broker call — preserved
-//! byte-identically. No behavior change.
+//! This branch logs via `tracing` directly (not `emit_dispatch_notification`)
+//! and fires `notify_catalog_changes` around the broker call.
 
 use std::collections::BTreeSet;
 use std::time::Instant;
@@ -24,11 +21,9 @@ use serde_json::Value;
 use crate::dispatch::error::ToolError as DispatchToolError;
 use crate::dispatch::gateway::code_mode::{
     CodeModeBroker, CodeModeCaller, CodeModeCapabilityFilter, CodeModeHistoryEntry,
-    CodeModeHistoryKind, code_mode_execute_trace, code_mode_search_trace,
+    CodeModeHistoryKind, code_mode_execute_trace,
 };
-use crate::mcp::context::{
-    auth_context_from_extensions, code_mode_search_scope_allowed, tool_execute_scope_allowed,
-};
+use crate::mcp::context::{auth_context_from_extensions, tool_execute_scope_allowed};
 use crate::mcp::envelope::{build_error, build_error_extra};
 use crate::mcp::result_format::{
     estimate_tokens, estimate_tokens_args, hash_arguments, tool_error_envelope,
@@ -47,8 +42,6 @@ Inside the sandbox:
 - `await codemode.describe(\"upstream.tool\")` returns compact docs for an exact tool target.
 - `await codemode.<upstream>.<tool>(params)` calls a discovered upstream method.
 - `await callTool(\"upstream::tool\", params)` is the raw escape hatch.
-
-`execute` remains as a compatibility alias. `search` remains as the legacy catalog-filter tool.
 
 Pass `code` as `async () => { ... }` — the sandbox awaits its return value. \
 Every upstream MCP tool is callable two ways: `callTool(id, params)`, or the \
@@ -92,8 +85,7 @@ A failed callTool rejects only its own promise — the run continues, so catch i
 proceed. For catch-and-continue fan-out, prefer `Promise.allSettled` so every call \
 settles before you return.
 
-Scope: legacy `search` accepts `lab:read`; `codemode` and compatibility `execute` \
-require `lab` or `lab:admin`.
+Scope: `codemode` requires `lab` or `lab:admin`.
 
 Results are capped to the configured envelope budget (default 24 KB / 6000 tokens). \
 Oversized results are replaced with a truncation marker containing `truncated`, \
@@ -114,9 +106,6 @@ or split into multiple `codemode` calls.
 
 Lab actions (`lab::*` tool IDs) are not available in Code Mode. For Lab built-in \
 actions, use the native Lab service tools instead of Code Mode.";
-
-/// Compatibility description for the `execute` MCP tool (Code Mode sandbox).
-pub(crate) const CODE_EXECUTE_DESCRIPTION: &str = CODE_MODE_DESCRIPTION;
 
 pub(crate) fn string_array_arg(
     args: &serde_json::Map<String, Value>,
@@ -190,185 +179,8 @@ fn route_scoped_capability_filter(
 }
 
 impl LabMcpServer {
-    /// `search` gateway meta-tool branch. Self-returns.
-    pub(crate) async fn call_code_mode_impl(
-        &self,
-        service: &str,
-        args: &JsonObject,
-        context: &RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let started = Instant::now();
-        let input_tokens = estimate_tokens_args(args);
-        let subject = self.request_subject_log_tag(context);
-        let actor_key = self.request_actor_key(context);
-        let auth = auth_context_from_extensions(&context.extensions);
-        if !code_mode_search_scope_allowed(auth) {
-            let required_scopes = vec![
-                "lab:read".to_string(),
-                "lab".to_string(),
-                "lab:admin".to_string(),
-            ];
-            let err = DispatchToolError::Forbidden {
-                message: "code_search requires one of scopes: lab:read, lab, lab:admin".to_string(),
-                required_scopes: required_scopes.clone(),
-            };
-            tracing::warn!(
-                surface = "mcp",
-                service = %service,
-                code_mode_tool = %service,
-                action = "call_tool",
-                subject,
-                actor_key,
-                actor_label = subject,
-                agent_kind = "agent",
-                elapsed_ms = started.elapsed().as_millis(),
-                input_tokens,
-                kind = "forbidden",
-                "gateway code search denied by scope"
-            );
-            let env = tool_error_envelope(service, "call_tool", &err);
-            return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
-        }
-        let code = match code_arg(args) {
-            Ok(code) => code.to_string(),
-            Err(err) => {
-                let env = tool_error_envelope(service, "call_tool", &err);
-                return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
-            }
-        };
-        let code_hash = hash_arguments(&Value::String(code.clone()));
-        let Some(manager) = &self.gateway_manager else {
-            let envelope = build_error(
-                service,
-                "call_tool",
-                "unknown_tool",
-                "code search is not enabled",
-            );
-            return Ok(CallToolResult::error(vec![Content::text(
-                envelope.to_string(),
-            )]));
-        };
-        tracing::info!(
-            surface = "mcp",
-            service = "code_search",
-            action = "call_tool",
-            subject,
-            actor_key,
-            actor_label = subject,
-            agent_kind = "agent",
-            code_hash = %code_hash,
-            code_len = code.len(),
-            input_tokens,
-            "gateway code search start"
-        );
-        let broker = CodeModeBroker::new(&self.registry, Some(manager));
-        let caller = auth.map_or(CodeModeCaller::TrustedLocal, |auth| {
-            CodeModeCaller::Scoped {
-                scopes: auth.scopes.clone(),
-                sub: self.request_subject(context).map(ToOwned::to_owned),
-            }
-        });
-        match broker
-            .search_allowed(
-                &code,
-                caller,
-                self.code_mode_surface(),
-                self.route_scope.allowed_upstreams(),
-            )
-            .await
-        {
-            Ok(response) => {
-                let output =
-                    serde_json::to_string(&response).unwrap_or_else(|_| "null".to_string());
-                let elapsed_ms = started.elapsed().as_millis();
-                manager
-                    .record_code_mode_history(CodeModeHistoryEntry {
-                        seq: 0,
-                        route_scope: self.route_scope.label(),
-                        kind: CodeModeHistoryKind::Search,
-                        ok: true,
-                        elapsed_ms,
-                        error_kind: None,
-                        calls: Vec::new(),
-                        match_count: response.as_array().map(Vec::len),
-                    })
-                    .await;
-                let structured = code_mode_search_trace(&response, elapsed_ms);
-                let output_tokens = estimate_tokens(&output);
-                let trace_match_count = structured
-                    .get("match_count")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0);
-                let trace_displayed_count = structured
-                    .get("displayed_count")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0);
-                let trace_has_result = structured.get("result").is_some();
-                let trace_result_type = structured
-                    .get("result_shape")
-                    .and_then(|shape| shape.get("type"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("<unknown>");
-                tracing::info!(
-                    surface = "mcp",
-                    service = "code_search",
-                    action = "call_tool",
-                    subject,
-                    actor_key,
-                    actor_label = subject,
-                    agent_kind = "agent",
-                    code_hash = %code_hash,
-                    code_len = code.len(),
-                    elapsed_ms = started.elapsed().as_millis(),
-                    input_tokens,
-                    output_tokens,
-                    trace_match_count,
-                    trace_displayed_count,
-                    trace_has_result,
-                    trace_result_type,
-                    "gateway code search ok"
-                );
-                // `search` never surfaces a widget — it runs pure catalog JS.
-                Ok(call_result_with_structured(output, structured, None))
-            }
-            Err(err) => {
-                let elapsed_ms = started.elapsed().as_millis();
-                manager
-                    .record_code_mode_history(CodeModeHistoryEntry {
-                        seq: 0,
-                        route_scope: self.route_scope.label(),
-                        kind: CodeModeHistoryKind::Search,
-                        ok: false,
-                        elapsed_ms,
-                        error_kind: Some(err.kind().to_string()),
-                        calls: Vec::new(),
-                        match_count: None,
-                    })
-                    .await;
-                tracing::warn!(
-                    surface = "mcp",
-                    service = "code_search",
-                    action = "call_tool",
-                    subject,
-                    actor_key,
-                    actor_label = subject,
-                    agent_kind = "agent",
-                    code_hash = %code_hash,
-                    code_len = code.len(),
-                    elapsed_ms,
-                    input_tokens,
-                    kind = err.kind(),
-                    error = %err,
-                    "gateway code search failed"
-                );
-                let env = tool_error_envelope(service, "call_tool", &err);
-                Ok(CallToolResult::error(vec![Content::text(env.to_string())]))
-            }
-        }
-    }
-
-    /// `execute` gateway meta-tool branch. Self-returns.
-    pub(crate) async fn call_tool_execute_impl(
+    /// `codemode` gateway tool branch. Self-returns.
+    pub(crate) async fn call_tool_codemode_impl(
         &self,
         service: &str,
         args: &JsonObject,
@@ -381,7 +193,7 @@ impl LabMcpServer {
         let auth = auth_context_from_extensions(&context.extensions);
         if !tool_execute_scope_allowed(auth) {
             let err = DispatchToolError::Forbidden {
-                message: "code_execute requires one of scopes: lab, lab:admin".to_string(),
+                message: "codemode requires one of scopes: lab, lab:admin".to_string(),
                 required_scopes: vec!["lab".to_string(), "lab:admin".to_string()],
             };
             tracing::warn!(
@@ -395,7 +207,7 @@ impl LabMcpServer {
                 elapsed_ms = started.elapsed().as_millis(),
                 input_tokens,
                 kind = "forbidden",
-                "gateway code execute denied by scope"
+                "gateway codemode denied by scope"
             );
             let env = tool_error_envelope(service, "call_tool", &err);
             return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
@@ -405,7 +217,7 @@ impl LabMcpServer {
                 service,
                 "call_tool",
                 "unknown_tool",
-                "code execute is not enabled",
+                "codemode is not enabled",
             );
             return Ok(CallToolResult::error(vec![Content::text(
                 envelope.to_string(),
@@ -443,7 +255,7 @@ impl LabMcpServer {
         let code_hash = hash_arguments(&Value::String(code.to_string()));
         tracing::info!(
             surface = "mcp",
-            service = "code_execute",
+            service = "codemode",
             code_mode_tool = %service,
             action = "call_tool",
             subject,
@@ -453,7 +265,7 @@ impl LabMcpServer {
             code_hash = %code_hash,
             max_tool_calls = requested_max_tool_calls,
             input_tokens,
-            "gateway code execute start"
+            "gateway codemode start"
         );
         let broker = CodeModeBroker::new(&self.registry, Some(manager));
         let caller = auth.map_or(CodeModeCaller::TrustedLocal, |auth| {
@@ -487,7 +299,7 @@ impl LabMcpServer {
                 let elapsed_ms = started.elapsed().as_millis();
                 tracing::warn!(
                     surface = "mcp",
-                    service = "code_execute",
+                    service = "codemode",
                     code_mode_tool = %service,
                     action = "call_tool",
                     subject,
@@ -500,7 +312,7 @@ impl LabMcpServer {
                     input_tokens,
                     output_tokens = 0,
                     kind = error_kind.as_str(),
-                    "gateway code execute failed"
+                    "gateway codemode failed"
                 );
                 let tool_error = err.into_tool_error();
                 manager
@@ -531,10 +343,10 @@ impl LabMcpServer {
                 match_count: None,
             })
             .await;
-        // Mirror the upstream's `_meta.ui` verbatim onto the execute result so
+        // Mirror the upstream's `_meta.ui` verbatim onto the codemode result so
         // the host renders the native mcp-ui widget (last-wins). The widget
         // itself is driven by the `ui://` resource read, not by inline content,
-        // so the execute trace content is left intact.
+        // so the Code Mode trace content is left intact.
         let ui_meta = response.ui.as_ref().map(|ui| {
             let mut map = serde_json::Map::new();
             map.insert("ui".to_string(), ui.ui_meta.clone());
@@ -548,7 +360,7 @@ impl LabMcpServer {
         if response.ui.is_some() {
             tracing::info!(
                 surface = "mcp",
-                service = "code_execute",
+                service = "codemode",
                 code_mode_tool = %service,
                 action = "mcp_app.mirror",
                 subject,
@@ -556,7 +368,7 @@ impl LabMcpServer {
                 actor_label = subject,
                 agent_kind = "agent",
                 resource_uri = mirrored_resource_uri.unwrap_or("<unknown>"),
-                "mirroring upstream MCP App widget metadata onto execute result"
+                "mirroring upstream MCP App widget metadata onto codemode result"
             );
         }
         let output = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
@@ -576,7 +388,7 @@ impl LabMcpServer {
             .unwrap_or(false);
         tracing::info!(
             surface = "mcp",
-            service = "code_execute",
+            service = "codemode",
             code_mode_tool = %service,
             action = "call_tool",
             subject,
@@ -593,7 +405,7 @@ impl LabMcpServer {
             trace_has_result,
             trace_result_type,
             mirrored_ui_resource_uri = mirrored_resource_uri.unwrap_or("<none>"),
-            "gateway code execute ok"
+            "gateway codemode ok"
         );
         Ok(call_result_with_structured(output, structured, ui_meta))
     }

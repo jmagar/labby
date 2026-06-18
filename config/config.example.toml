@@ -152,13 +152,15 @@
 # ── Gateway Code Mode ──────────────────────────────────────────────────────
 
 [code_mode]
-# Execution limits for the gateway `search`/`execute` Code Mode sandbox.
-# enabled = false                         # default: false; advertises `search` + `execute`
+# Preferences for the gateway `codemode` sandbox.
+# These are product knobs, not secrets/URLs/runtime-discovery values, so keep
+# them here rather than in .env.
+# enabled = false                         # default: false; advertises `codemode`
 # trace_params = true                     # default: true; stores only redacted/capped call params in traces/history
-# `search` runs a JS arrow function over the upstream tool catalog; `execute`
-# runs a JS arrow function with `callTool(id, params)` and a typed
-# `codemode.<upstream>.<tool>(params)` runtime namespace generated from the
-# connected servers' inputSchemas. These knobs bound one `execute` run.
+# `codemode` runs a JS async arrow function in the Javy/QuickJS sandbox with
+# in-sandbox discovery (`codemode.search()` / `codemode.describe()`), raw
+# `callTool(id, params)`, and typed `codemode.<upstream>.<tool>(params)`
+# helpers generated from connected servers' inputSchemas.
 # timeout_ms = 30000                        # valid range: 1..=60000  (wall-clock budget)
 # max_tool_calls = 1000                     # valid range: 1..=10000  (safety ceiling; timeout is the real bound)
 # max_response_bytes = 24576                # valid range: 1024..=1048576

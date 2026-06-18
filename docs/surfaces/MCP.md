@@ -90,7 +90,7 @@ services = ["gateway"]
 expose_code_mode = true
 ```
 
-The route above exposes only the listed upstreams, the listed built-in Lab services, and Code Mode if `expose_code_mode = true`. The allowlist is enforced for `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`, Code Mode `search`, and Code Mode `execute`.
+The route above exposes only the listed upstreams, the listed built-in Lab services, and Code Mode if `expose_code_mode = true`. The allowlist is enforced for `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`, and `codemode`.
 
 The OAuth protected resource remains route-specific: `https://mcp.example.com/media`. A token for one protected route does not authorize another route with a different resource or scope set.
 
@@ -224,10 +224,9 @@ Error shape:
 
 The envelope is intended to be the only thing an MCP client needs to parse. Multi-block or prose-heavy responses are explicitly not the default contract.
 
-Code Mode `search` and `execute` preserve their normal text JSON fallback for
-non-MCP-Apps clients and add MCP `structuredContent` for the call inspector:
+Code Mode `codemode` preserves its normal text JSON fallback for non-MCP-Apps
+clients and adds MCP `structuredContent` for the call inspector:
 
-- `code_mode_search_trace` summarizes catalog-filter matches and result shape.
 - `code_mode_execute_trace` summarizes broker-observed runtime calls, redacted
   params, status, duration, error kind, result shape, and log count.
 
@@ -235,8 +234,8 @@ Structured traces are summary-only. They do not duplicate raw upstream result
 payloads, and raw tool params never leave the broker boundary. If
 `code_mode.trace_params = false`, params are omitted from traces entirely.
 
-When Code Mode mode advertises synthetic `search` and `execute`, only those two
-tool definitions include canonical nested `_meta.ui.resourceUri` metadata. Lab
+When Code Mode mode advertises synthetic `codemode`, only that tool definition
+includes canonical nested `_meta.ui.resourceUri` metadata. Lab
 does not add flat compatibility aliases such as `_meta["openai/outputTemplate"]`
 without host evidence. The v1 MCP App is read-only and does not initiate tools
 from the iframe.

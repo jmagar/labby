@@ -22,12 +22,10 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use serde_json::{Value, json};
 
-use crate::mcp::catalog::{
-    CODE_MODE_SEARCH_TOOL_NAME, CODE_MODE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME,
-};
+use crate::mcp::catalog::CODE_MODE_TOOL_NAME;
 #[cfg(feature = "gateway")]
 use crate::mcp::context::oauth_upstream_subject_for_request;
-use crate::mcp::context::{auth_context_from_extensions, code_mode_search_scope_allowed};
+use crate::mcp::context::{auth_context_from_extensions, code_mode_read_scope_allowed};
 use crate::mcp::logging::DispatchLogOutcome;
 use crate::mcp::server::LabMcpServer;
 
@@ -40,13 +38,9 @@ pub(crate) const CODE_MODE_APP_SKYBRIDGE_MIME: &str = "text/html+skybridge";
 /// Any other `ui://` is an upstream mcp-ui widget resource routed to its peer.
 pub(crate) const CODE_MODE_APP_URI_PREFIX: &str = "ui://lab/code-mode/";
 pub(crate) const CODE_MODE_APP_URI: &str = "ui://lab/code-mode/codemode";
-pub(crate) const CODE_MODE_SEARCH_APP_URI: &str = "ui://lab/code-mode/search";
-pub(crate) const CODE_MODE_EXECUTE_APP_URI: &str = "ui://lab/code-mode/execute";
 pub(crate) const CODE_MODE_HISTORY_APP_URI: &str = "ui://lab/code-mode/history";
 /// OpenAI Apps skybridge variants — same HTML, served under the skybridge MIME.
 pub(crate) const CODE_MODE_APP_SKYBRIDGE_URI: &str = "ui://lab/code-mode/codemode.skybridge";
-pub(crate) const CODE_MODE_SEARCH_APP_SKYBRIDGE_URI: &str = "ui://lab/code-mode/search.skybridge";
-pub(crate) const CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI: &str = "ui://lab/code-mode/execute.skybridge";
 
 /// Host runtime a Code Mode widget resource targets. The runtime is the single
 /// discriminant: it derives the served MIME, whether the resource is listed, and
@@ -95,40 +89,16 @@ pub(crate) const CODE_MODE_APP_RESOURCE_DESCRIPTORS: &[CodeModeAppResourceDescri
         tool_name: Some(CODE_MODE_TOOL_NAME),
     },
     CodeModeAppResourceDescriptor {
-        uri: CODE_MODE_SEARCH_APP_URI,
-        name: "code-mode/search",
-        runtime: CodeModeRuntime::McpApp,
-        tool_name: Some(CODE_MODE_SEARCH_TOOL_NAME),
-    },
-    CodeModeAppResourceDescriptor {
-        uri: CODE_MODE_EXECUTE_APP_URI,
-        name: "code-mode/execute",
-        runtime: CodeModeRuntime::McpApp,
-        tool_name: Some(TOOL_EXECUTE_TOOL_NAME),
-    },
-    CodeModeAppResourceDescriptor {
         uri: CODE_MODE_HISTORY_APP_URI,
         name: "code-mode/history",
         runtime: CodeModeRuntime::McpApp,
         tool_name: None,
     },
     CodeModeAppResourceDescriptor {
-        uri: CODE_MODE_SEARCH_APP_SKYBRIDGE_URI,
-        name: "code-mode/search.skybridge",
-        runtime: CodeModeRuntime::Skybridge,
-        tool_name: Some(CODE_MODE_SEARCH_TOOL_NAME),
-    },
-    CodeModeAppResourceDescriptor {
         uri: CODE_MODE_APP_SKYBRIDGE_URI,
         name: "code-mode/codemode.skybridge",
         runtime: CodeModeRuntime::Skybridge,
         tool_name: Some(CODE_MODE_TOOL_NAME),
-    },
-    CodeModeAppResourceDescriptor {
-        uri: CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI,
-        name: "code-mode/execute.skybridge",
-        runtime: CodeModeRuntime::Skybridge,
-        tool_name: Some(TOOL_EXECUTE_TOOL_NAME),
     },
 ];
 
@@ -303,7 +273,7 @@ impl LabMcpServer {
         #[cfg(feature = "gateway")]
         if uri.starts_with("ui://") {
             let auth = auth_context_from_extensions(&context.extensions);
-            if !code_mode_search_scope_allowed(auth) {
+            if !code_mode_read_scope_allowed(auth) {
                 return Err(ErrorData::invalid_params(
                     "UI resources require one of scopes: lab:read, lab, lab:admin",
                     Some(json!({
@@ -462,7 +432,7 @@ impl LabMcpServer {
             ));
         }
         let auth = auth_context_from_extensions(&context.extensions);
-        if !code_mode_search_scope_allowed(auth) {
+        if !code_mode_read_scope_allowed(auth) {
             let elapsed_ms = start.elapsed().as_millis();
             tracing::warn!(
                 surface = "mcp",
@@ -608,7 +578,7 @@ fn code_mode_app_resources_visible(
     exposes_synthetic_tools: bool,
     auth: Option<&crate::api::oauth::AuthContext>,
 ) -> bool {
-    exposes_synthetic_tools && code_mode_search_scope_allowed(auth)
+    exposes_synthetic_tools && code_mode_read_scope_allowed(auth)
 }
 
 fn code_mode_app_resources() -> Vec<rmcp::model::Resource> {
@@ -730,10 +700,10 @@ mod tests {
 
     #[test]
     fn code_mode_app_resource_meta_uses_mcp_app_mime_and_csp() {
-        let meta = code_mode_app_resource_meta(CODE_MODE_SEARCH_APP_URI);
+        let meta = code_mode_app_resource_meta(CODE_MODE_APP_URI);
         assert_eq!(
             meta.0["ui"]["resourceUri"].as_str(),
-            Some(CODE_MODE_SEARCH_APP_URI)
+            Some(CODE_MODE_APP_URI)
         );
         assert_eq!(
             meta.0["ui"]["mimeTypes"][0].as_str(),
@@ -789,12 +759,7 @@ mod tests {
                 .iter()
                 .map(|uri| strip_app_version(uri))
                 .collect::<Vec<_>>(),
-            vec![
-                CODE_MODE_APP_URI,
-                CODE_MODE_SEARCH_APP_URI,
-                CODE_MODE_EXECUTE_APP_URI,
-                CODE_MODE_HISTORY_APP_URI
-            ]
+            vec![CODE_MODE_APP_URI, CODE_MODE_HISTORY_APP_URI]
         );
         assert!(
             code_mode_uris.iter().all(|uri| uri.contains("?v=")),
@@ -873,12 +838,12 @@ mod tests {
             .record_code_mode_history(crate::dispatch::gateway::code_mode::CodeModeHistoryEntry {
                 seq: 0,
                 route_scope: "root".to_string(),
-                kind: crate::dispatch::gateway::code_mode::CodeModeHistoryKind::Search,
+                kind: crate::dispatch::gateway::code_mode::CodeModeHistoryKind::Execute,
                 ok: true,
                 elapsed_ms: 7,
                 error_kind: None,
                 calls: Vec::new(),
-                match_count: Some(7),
+                match_count: None,
             })
             .await;
         let (transport, _client_transport) = tokio::io::duplex(64);
@@ -920,7 +885,7 @@ mod tests {
         let allowed = running
             .service()
             .read_resource_impl(
-                ReadResourceRequestParams::new(CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI),
+                ReadResourceRequestParams::new(CODE_MODE_APP_SKYBRIDGE_URI),
                 scoped_context(running.peer().clone(), &["lab:read"]),
             )
             .await
@@ -934,7 +899,7 @@ mod tests {
         else {
             panic!("expected text resource");
         };
-        assert_eq!(uri, CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI);
+        assert_eq!(uri, CODE_MODE_APP_SKYBRIDGE_URI);
         assert_eq!(mime_type.as_deref(), Some(CODE_MODE_APP_SKYBRIDGE_MIME));
         assert!(text.contains("Lab Code Mode Inspector"));
         assert!(
@@ -948,7 +913,7 @@ mod tests {
         let denied = running
             .service()
             .read_resource_impl(
-                ReadResourceRequestParams::new(CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI),
+                ReadResourceRequestParams::new(CODE_MODE_APP_SKYBRIDGE_URI),
                 scoped_context(running.peer().clone(), &["profile"]),
             )
             .await
@@ -988,11 +953,7 @@ mod tests {
         // The one convention left is the tool↔descriptor mapping: every Code Mode
         // tool must have exactly one MCP (Claude) descriptor and exactly one
         // skybridge (OpenAI) descriptor, or it silently loses one runtime's binding.
-        for tool in [
-            CODE_MODE_TOOL_NAME,
-            CODE_MODE_SEARCH_TOOL_NAME,
-            TOOL_EXECUTE_TOOL_NAME,
-        ] {
+        for tool in [CODE_MODE_TOOL_NAME] {
             assert_eq!(
                 CODE_MODE_APP_RESOURCE_DESCRIPTORS
                     .iter()
@@ -1049,12 +1010,12 @@ mod tests {
         // The host fetches the advertised (versioned) URI. It must resolve to the
         // same descriptor/HTML as the base URI so the cache-bust token is purely a
         // cache key, not a new resource the read path can't find.
-        let versioned = versioned_app_uri(CODE_MODE_SEARCH_APP_URI);
-        assert!(versioned.starts_with(CODE_MODE_SEARCH_APP_URI));
+        let versioned = versioned_app_uri(CODE_MODE_APP_URI);
+        assert!(versioned.starts_with(CODE_MODE_APP_URI));
         assert!(versioned.contains("?v="));
-        assert_eq!(strip_app_version(&versioned), CODE_MODE_SEARCH_APP_URI);
+        assert_eq!(strip_app_version(&versioned), CODE_MODE_APP_URI);
 
-        let from_base = code_mode_app_html(CODE_MODE_SEARCH_APP_URI, None).expect("base resource");
+        let from_base = code_mode_app_html(CODE_MODE_APP_URI, None).expect("base resource");
         let from_versioned = code_mode_app_html(&versioned, None).expect("versioned resource");
         assert_eq!(from_base, from_versioned);
 
@@ -1065,10 +1026,7 @@ mod tests {
         );
 
         // A base URI with no query is returned unchanged.
-        assert_eq!(
-            strip_app_version(CODE_MODE_SEARCH_APP_URI),
-            CODE_MODE_SEARCH_APP_URI
-        );
+        assert_eq!(strip_app_version(CODE_MODE_APP_URI), CODE_MODE_APP_URI);
 
         // An un-tabled URI is still rejected even with a cache-bust suffix.
         let bogus = versioned_app_uri("ui://lab/code-mode/nope");
@@ -1077,7 +1035,7 @@ mod tests {
 
     #[test]
     fn code_mode_app_html_accepts_known_ui_resources_and_rejects_unknown() {
-        let html = code_mode_app_html(CODE_MODE_EXECUTE_APP_URI, None).expect("known resource");
+        let html = code_mode_app_html(CODE_MODE_APP_URI, None).expect("known resource");
         assert!(html.contains("Lab Code Mode Inspector"));
         // The bundle hydrates natively under the OpenAI Apps runtime
         // (ChatGPT / Codex) via window.openai.toolOutput + openai:set_globals.
@@ -1099,8 +1057,8 @@ mod tests {
         );
 
         // The skybridge variant serves the same HTML under the OpenAI MIME.
-        let skybridge = code_mode_app_html(CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI, None)
-            .expect("skybridge resource");
+        let skybridge =
+            code_mode_app_html(CODE_MODE_APP_SKYBRIDGE_URI, None).expect("skybridge resource");
         assert!(skybridge.contains("Lab Code Mode Inspector"));
 
         let err = code_mode_app_html("ui://lab/code-mode/nope", None).expect_err("unknown");
@@ -1110,7 +1068,7 @@ mod tests {
     #[test]
     fn skybridge_and_mcp_app_resource_meta_diverge_by_runtime() {
         // OpenAI skybridge resource: skybridge MIME + model-facing description.
-        let skybridge = code_mode_app_resource_meta(CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI);
+        let skybridge = code_mode_app_resource_meta(CODE_MODE_APP_SKYBRIDGE_URI);
         assert_eq!(
             skybridge.0["ui"]["mimeTypes"][0].as_str(),
             Some(CODE_MODE_APP_SKYBRIDGE_MIME)
@@ -1121,7 +1079,7 @@ mod tests {
         );
 
         // Claude resource: MCP Apps MIME, and byte-identical (no openai/* keys).
-        let mcp_app = code_mode_app_resource_meta(CODE_MODE_EXECUTE_APP_URI);
+        let mcp_app = code_mode_app_resource_meta(CODE_MODE_APP_URI);
         assert_eq!(
             mcp_app.0["ui"]["mimeTypes"][0].as_str(),
             Some(CODE_MODE_APP_MIME)
@@ -1149,7 +1107,7 @@ mod tests {
         };
         assert!(
             code_mode_app_resources_visible(true, Some(&read_auth)),
-            "Code Mode app resources should be listed with synthetic search/execute tools"
+            "Code Mode app resources should be listed with the synthetic codemode tool"
         );
         assert!(
             !code_mode_app_resources_visible(true, Some(&denied_auth)),
@@ -1164,29 +1122,13 @@ mod tests {
             .iter()
             .map(|resource| strip_app_version(&resource.uri).to_string())
             .collect::<Vec<_>>();
-        assert_eq!(
-            uris,
-            vec![
-                CODE_MODE_APP_URI,
-                CODE_MODE_SEARCH_APP_URI,
-                CODE_MODE_EXECUTE_APP_URI,
-                CODE_MODE_HISTORY_APP_URI
-            ]
-        );
+        assert_eq!(uris, vec![CODE_MODE_APP_URI, CODE_MODE_HISTORY_APP_URI]);
         // The tool-binding URI carries the cache-bust token but resolves to the
         // canonical base after stripping it.
         let codemode_uri =
             code_mode_app_resource_uri_for_tool(CODE_MODE_TOOL_NAME).expect("codemode uri");
         assert!(codemode_uri.contains("?v="));
         assert_eq!(strip_app_version(&codemode_uri), CODE_MODE_APP_URI);
-        let search_uri =
-            code_mode_app_resource_uri_for_tool(CODE_MODE_SEARCH_TOOL_NAME).expect("search uri");
-        assert!(search_uri.contains("?v="));
-        assert_eq!(strip_app_version(&search_uri), CODE_MODE_SEARCH_APP_URI);
-        let execute_uri =
-            code_mode_app_resource_uri_for_tool(TOOL_EXECUTE_TOOL_NAME).expect("execute uri");
-        assert!(execute_uri.contains("?v="));
-        assert_eq!(strip_app_version(&execute_uri), CODE_MODE_EXECUTE_APP_URI);
     }
 
     #[test]
@@ -1208,7 +1150,7 @@ mod tests {
     #[test]
     fn code_mode_app_html_uses_current_trace_field_names() {
         let html = code_mode_app_html(
-            CODE_MODE_EXECUTE_APP_URI,
+            CODE_MODE_APP_URI,
             Some(&json!({
                 "kind": "code_mode_execute_trace",
                 "call_count": 1,
@@ -1222,7 +1164,7 @@ mod tests {
                 }],
             })),
         )
-        .expect("execute resource");
+        .expect("codemode resource");
 
         assert!(html.contains("statusLabel"));
         assert!(html.contains("call.ok"));
@@ -1238,23 +1180,8 @@ mod tests {
     }
 
     #[test]
-    fn code_mode_app_html_renders_reduced_search_result_fallback() {
-        // The bundle is hand-maintained vanilla JS with no test harness, so guard
-        // the no-match search path that shows the returned value/shape instead of
-        // a bare "No matches" when the snippet returned a reduced/aggregate value.
-        let html = code_mode_app_html(CODE_MODE_SEARCH_APP_URI, None).expect("search resource");
-        assert!(
-            html.contains("Search result"),
-            "bundle must render the reduced-result panel for matchless searches"
-        );
-        assert!(
-            html.contains("shapeDetail"),
-            "bundle must describe the returned value's shape"
-        );
-        assert!(
-            html.contains("t.result"),
-            "bundle must embed the actual returned value when no rows match"
-        );
+    fn code_mode_app_html_gates_connected_state_on_bridge_handshake() {
+        let html = code_mode_app_html(CODE_MODE_APP_URI, None).expect("codemode resource");
         // Status must not be claimed "connected" before the bridge resolves.
         assert!(
             html.contains("\"connecting\""),

@@ -37,10 +37,10 @@ fn parse_rejects_lab_id() {
         ToolError::Sdk { sdk_kind, message } => {
             assert_eq!(sdk_kind, "unknown_tool");
             assert!(message.contains("lab::"));
-            // Message references canonical tool name "execute" (Cloudflare-parity rename
-            // from legacy "tool_execute"). The hint also mentions "search" for discovery.
-            assert!(message.contains("execute"));
-            assert!(message.contains("\"radarr\""));
+            // Message points callers at the native Lab service tool, not back
+            // through Code Mode.
+            assert!(message.contains("native Lab service tool"));
+            assert!(message.contains("radarr"));
         }
         other => panic!("expected unknown_tool, got {other:?}"),
     }

@@ -47,75 +47,13 @@ pub(in crate::dispatch::gateway::code_mode) fn redact_trace_value(
     })
 }
 
-#[must_use]
-pub(crate) fn code_mode_search_trace(response: &Value, elapsed_ms: u128) -> Value {
-    let matches = response
-        .as_array()
-        .map(|items| {
-            items
-                .iter()
-                .take(50)
-                .filter_map(search_match_summary)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let match_count = response.as_array().map_or(0, Vec::len);
-    let displayed_count = matches.len();
-    let mut trace = json!({
-        "kind": "code_mode_search_trace",
-        "query_kind": "catalog_filter",
-        "elapsed_ms": elapsed_ms,
-        "match_count": match_count,
-        "displayed_count": displayed_count,
-        "truncated": match_count > displayed_count,
-        "matches": matches,
-        "result_shape": compact_result_shape(response),
-    });
-    // Always carry the actual search return value in structuredContent. The
-    // `matches` field is a compact UI summary, but agents often prefer
-    // structuredContent over text content; omitting `result` for real matches
-    // made schemas/signatures appear "compressed" to the agent even though the
-    // text block still contained the full catalog rows.
-    if let Some(object) = trace.as_object_mut() {
-        object.insert("result".to_string(), response.clone());
-    }
-    trace
-}
-
-fn search_match_summary(value: &Value) -> Option<Value> {
-    let object = value.as_object()?;
-    Some(json!({
-        "id": object.get("id").and_then(Value::as_str).unwrap_or_default(),
-        "upstream": object.get("upstream").and_then(Value::as_str).unwrap_or_default(),
-        "tool": object.get("name").and_then(Value::as_str).unwrap_or_default(),
-        "description": object
-            .get("description")
-            .and_then(Value::as_str)
-            .map(|description| truncate_trace_string(description, 240))
-            .unwrap_or_default(),
-        "has_schema": object.get("schema").is_some_and(|value| !value.is_null()),
-        "has_output_schema": object.get("output_schema").is_some_and(|value| !value.is_null()),
-    }))
-}
-
-fn truncate_trace_string(value: &str, max_chars: usize) -> String {
-    let mut chars = value.chars();
-    let prefix = chars.by_ref().take(max_chars).collect::<String>();
-    if chars.next().is_some() {
-        format!("{prefix}...")
-    } else {
-        value.to_string()
-    }
-}
-
-/// Build the structured-content trace for an `execute` result.
+/// Build the structured-content trace for a Code Mode result.
 ///
 /// The trace carries the **actual** `result` verbatim — not just its shape —
 /// because most MCP clients (Claude Code included) surface `structuredContent`
 /// over the text content block. Emitting only a `result_shape` here means a
 /// structured-content-preferring client never sees the value the model asked
-/// for. This mirrors [`code_mode_search_trace`], which embeds the real
-/// `matches`, and matches Cloudflare's Code Mode, where the executed function's
+/// for. This matches Cloudflare's Code Mode, where the executed function's
 /// return value is surfaced verbatim and bounded only by the response budget
 /// (`packages/codemode/src/mcp.ts::truncateResponse`).
 ///

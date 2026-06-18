@@ -96,7 +96,7 @@ pub(in crate::dispatch::gateway::code_mode) fn artifact_retention_runs() -> usiz
             tracing::warn!(
                 surface = "dispatch",
                 service = "code_mode",
-                action = "code_execute",
+                action = "codemode",
                 value = %raw,
                 default = DEFAULT_ARTIFACT_RETENTION_RUNS,
                 "ignoring unparseable LAB_CODE_MODE_ARTIFACT_RETENTION_RUNS; using default"
@@ -123,7 +123,7 @@ pub(in crate::dispatch::gateway::code_mode) fn artifact_max_bytes() -> usize {
             tracing::warn!(
                 surface = "dispatch",
                 service = "code_mode",
-                action = "code_execute",
+                action = "codemode",
                 value = %raw,
                 default_mib = DEFAULT_ARTIFACT_MAX_MIB,
                 "ignoring invalid LAB_CODE_MODE_ARTIFACT_MAX_MIB; using default"
@@ -150,7 +150,7 @@ pub(in crate::dispatch::gateway::code_mode) fn artifact_max_store_bytes() -> u64
             tracing::warn!(
                 surface = "dispatch",
                 service = "code_mode",
-                action = "code_execute",
+                action = "codemode",
                 value = %raw,
                 default_mib = DEFAULT_ARTIFACT_MAX_STORE_MIB,
                 "ignoring unparseable LAB_CODE_MODE_ARTIFACT_MAX_STORE_MIB; using default"
@@ -285,7 +285,7 @@ pub(in crate::dispatch::gateway::code_mode) async fn prune_artifact_runs_in(
             tracing::warn!(
                 surface = "dispatch",
                 service = "code_mode",
-                action = "code_execute",
+                action = "codemode",
                 error = %err,
                 "code-mode artifact retention disabled: cannot read store directory"
             );
@@ -303,7 +303,7 @@ pub(in crate::dispatch::gateway::code_mode) async fn prune_artifact_runs_in(
                 tracing::warn!(
                     surface = "dispatch",
                     service = "code_mode",
-                    action = "code_execute",
+                    action = "codemode",
                     error = %err,
                     "code-mode artifact retention: store enumeration interrupted; store may be under-pruned"
                 );
@@ -371,7 +371,7 @@ pub(in crate::dispatch::gateway::code_mode) async fn prune_artifact_runs_in(
             tracing::debug!(
                 surface = "dispatch",
                 service = "code_mode",
-                action = "code_execute",
+                action = "codemode",
                 error = %err,
                 "failed to prune old code-mode artifact directory"
             );

@@ -10,19 +10,14 @@ use crate::mcp::prompts::list_all as list_builtin_prompts;
 
 /// Primary Cloudflare-style Code Mode tool name.
 pub(crate) const CODE_MODE_TOOL_NAME: &str = "codemode";
-/// Compatibility tool name for catalog JS filtering.
-pub(crate) const CODE_MODE_SEARCH_TOOL_NAME: &str = "search";
-/// Compatibility tool name for direct Code Mode execution.
-pub(crate) const TOOL_EXECUTE_TOOL_NAME: &str = "execute";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CodeModeVisibility {
     Raw,
-    /// Full gateway broker — advertises primary `codemode` plus compatibility
-    /// `search` + `execute`.
+    /// Full gateway broker — advertises the primary `codemode` tool.
     RootSynthetic,
-    /// In-process peer mode — same tool surface as RootSynthetic but without
-    /// a live gateway_manager.
+    /// In-process peer mode — same tool surface as RootSynthetic but without a
+    /// live gateway_manager.
     InProcessPeer,
 }
 
@@ -31,8 +26,7 @@ impl CodeModeVisibility {
         !matches!(self, Self::Raw)
     }
 
-    /// Returns true when the mode registers the gateway surface (`codemode`
-    /// plus compatibility `search` + `execute`).
+    /// Returns true when the mode registers the gateway Code Mode surface.
     pub(crate) fn exposes_synthetic_tools(self) -> bool {
         matches!(self, Self::RootSynthetic | Self::InProcessPeer)
     }
@@ -229,11 +223,7 @@ impl LabMcpServer {
         let visibility = self.code_mode_visibility().await;
         let mut tools = BTreeSet::new();
         if visibility.exposes_synthetic_tools() {
-            // Gateway mode — advertise primary `codemode` plus compatibility
-            // `search` + `execute`.
             tools.insert(CODE_MODE_TOOL_NAME.to_string());
-            tools.insert(CODE_MODE_SEARCH_TOOL_NAME.to_string());
-            tools.insert(TOOL_EXECUTE_TOOL_NAME.to_string());
         } else {
             for svc in self.registry.services() {
                 if !visibility.hides_raw_tools() && self.service_visible_on_mcp(svc.name).await {
@@ -302,19 +292,11 @@ mod tests {
     // ── Tool name constants (Cloudflare-parity, no aliases) ─────────────────
 
     #[test]
-    fn canonical_tool_names_are_codemode_search_and_execute() {
+    fn canonical_tool_name_is_codemode() {
         // PRESENCE: canonical names match expected Cloudflare-parity values
         assert_eq!(
             CODE_MODE_TOOL_NAME, "codemode",
             "primary Code Mode tool name must be 'codemode'"
-        );
-        assert_eq!(
-            CODE_MODE_SEARCH_TOOL_NAME, "search",
-            "canonical search tool name must be 'search'"
-        );
-        assert_eq!(
-            TOOL_EXECUTE_TOOL_NAME, "execute",
-            "canonical execute tool name must be 'execute'"
         );
     }
 

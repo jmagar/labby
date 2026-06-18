@@ -42,11 +42,8 @@ async () => {
 calls. A failed `callTool` rejects only that promise; catch locally when partial
 success is useful.
 
-`search` and `execute` remain available for older clients during the migration.
-New agent instructions should prefer `codemode` because it keeps discovery, tool
-calls, and intermediate values inside one sandbox execution. Legacy `search`
-still exposes the full catalog JS filter for compatibility and for callers that
-need full schema/dts metadata.
+The gateway exposes only `codemode`. Discovery, schema inspection, tool calls,
+and intermediate values stay inside one sandbox execution.
 
 ## Tool IDs and Helpers
 
@@ -138,7 +135,7 @@ When search results do not match live execution, check the layers in order:
    still sees stale search results while execute is fresh, reconnect that MCP
    client session so it receives the current gateway manager state.
 
-`codemode` and compatibility `execute` accept optional `upstreams` and `tools` arrays to narrow the per-run
+`codemode` accepts optional `upstreams` and `tools` arrays to narrow the per-run
 capability set. When present, each filter must be a JSON array of strings; other
 shapes reject with `invalid_param`. Empty strings are ignored. The injected proxy only
 includes allowed tools, and direct `callTool` IDs outside the allowlist reject as
@@ -153,7 +150,7 @@ Successful upstream tool calls resolve to the payload, never the raw MCP
 2. Otherwise the first text content block, parsed as JSON when possible.
 3. Otherwise raw text, `null`, or non-text content blocks as JSON.
 
-`codemode` and compatibility `execute` return a capped envelope with:
+`codemode` returns a capped envelope with:
 
 - `result` — the JavaScript function return value.
 - `calls[]` — lightweight per-call metadata: `id`, `ok`, `elapsed_ms`, and
@@ -281,8 +278,7 @@ operator-driven.
 
 ## Scope
 
-- `lab:read` can use compatibility `search`.
-- `lab` or `lab:admin` can use `codemode` and compatibility `execute`.
+- `lab` or `lab:admin` can use `codemode`.
 
 OAuth callers retain their subject attribution when Code Mode calls upstream tools.
 Trusted local callers use the shared gateway subject.
@@ -334,16 +330,14 @@ run, so isolation holds by construction.
     runners (default `8`).
 
   The conservative default (`size = 2`) keeps idle memory bounded while absorbing
-  typical `codemode` plus compatibility `search`/`execute` bursts. The security invariants (`env_clear`,
+  typical `codemode` bursts. The security invariants (`env_clear`,
   process-group/Job-Object reaping, `kill_on_drop`, `PR_SET_DUMPABLE`) are set
   once at spawn and therefore hold for the pooled process's whole lifetime.
 
 Code Mode always uses Javy/QuickJS for snippet execution — it is the **sole live
-engine**, with no Boa fallback and no `code_mode_wasm` feature. `codemode`,
-compatibility `execute`, and compatibility `search` run in the Javy/QuickJS
-child runner over stdio. Legacy `search` injects the tool catalog as
-`const tools` and runs with `max_tool_calls = 0`. The Javy toolchain is pulled in
-by the `gateway` feature.
+engine**, with no Boa fallback and no `code_mode_wasm` feature. `codemode` runs
+in the Javy/QuickJS child runner over stdio. The Javy toolchain is pulled in by
+the `gateway` feature.
 
 The runner starts with an empty environment in a temporary directory. It does not
 provide Node, Deno, Bun, `fetch`, `connect`, `XMLHttpRequest`, `require`, or host

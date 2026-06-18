@@ -71,7 +71,7 @@ fn tool_upstream(tool: &str) -> &str {
     match tool {
         "radarr" | "sonarr" => "media-stack",
         "qbittorrent" => "downloads",
-        "code_execute" | "code_search" => "code-mode",
+        "codemode" => "code-mode",
         other => other,
     }
 }
@@ -530,11 +530,8 @@ pub fn aggregate_with_previous(
         }
     }
 
-    // Code Mode fan-out (events with service == code_execute carry call_count).
-    let code_runs: Vec<&Call> = calls
-        .iter()
-        .filter(|c| c.service == "code_execute")
-        .collect();
+    // Code Mode fan-out (events with service == codemode carry call_count).
+    let code_runs: Vec<&Call> = calls.iter().filter(|c| c.service == "codemode").collect();
     let runs = code_runs.len() as u64;
     let fan_total: u64 = code_runs.iter().filter_map(|c| c.call_count).sum();
     let timeouts = code_runs

@@ -131,13 +131,12 @@ pub(crate) fn tool_execute_scope_allowed(auth: Option<&crate::api::oauth::AuthCo
     })
 }
 
-/// Returns `true` when the caller is allowed to invoke the code_mode tool.
+/// Returns `true` when the caller is allowed to read Code Mode resources.
 ///
-/// code_mode requires at least `lab:read`; tool_execute requires the stronger `lab` or `lab:admin`.
+/// Code Mode app resources require at least `lab:read`; executable Code Mode
+/// calls require the stronger `lab` or `lab:admin`.
 /// `None` auth means stdio transport — trusted by design (no per-request AuthContext).
-pub(crate) fn code_mode_search_scope_allowed(
-    auth: Option<&crate::api::oauth::AuthContext>,
-) -> bool {
+pub(crate) fn code_mode_read_scope_allowed(auth: Option<&crate::api::oauth::AuthContext>) -> bool {
     auth.is_none_or(|auth| {
         auth.scopes
             .iter()

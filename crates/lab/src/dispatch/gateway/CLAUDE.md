@@ -44,8 +44,8 @@ keeping each file under ~500 LOC.
 | `manager/core.rs` | `new()`, `with_*` builder chain, `builtin_service_registry()`. |
 | `manager/config_ops.rs` | Config reads/writes: `get_config`, `set_config`, `update_upstream`, `remove_upstream`, reload path. |
 | `manager/pool_lifecycle.rs` | Pool bootstrap, `reload()`, `reload_pool()`, swap-and-drain. `GatewayCatalogSnapshot` / `diff_catalogs`. |
-| `manager/code_mode_runtime.rs` | `execute()` / `search()` — Code Mode request dispatch to the runner subprocess. |
-| `manager/code_mode_resolve.rs` | Upstream catalog projection for Code Mode `search` pre-pass. |
+| `manager/code_mode_runtime.rs` | Code Mode request dispatch to the runner subprocess. |
+| `manager/code_mode_resolve.rs` | Upstream catalog projection for Code Mode discovery. |
 | `manager/persist.rs` | `save_config()`, `load_config()`, atomic TOML write. |
 | `manager/imports.rs` | `import_from_discovery`, `tombstone_upstream`. |
 | `manager/import_matchers.rs` | `ImportTombstoneSelector`, `partition_discovered_for_import`, `discovered_is_tombstoned`. |

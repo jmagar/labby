@@ -1,9 +1,9 @@
-//! Shared JS wrapper constants and the execute-wrapper body builder.
+//! Shared JS wrapper constants and the Code Mode wrapper body builder.
 
-/// The single contract error message for the execute wrapper, defined once for
+/// The single contract error message for the Code Mode wrapper, defined once for
 /// the javy runner so the shape contract has a single source of truth.
 const CODE_MODE_MAIN_SHAPE_ERROR: &str =
-    "code_execute code must evaluate to an async arrow function: async () => { ... }";
+    "codemode code must evaluate to an async arrow function: async () => { ... }";
 
 pub(in crate::dispatch::gateway::code_mode) const CODE_MODE_VALUE_CODEC_JS: &str = r#"
 function __labBase64FromBytes(bytes) {
@@ -128,9 +128,8 @@ pub(in crate::dispatch::gateway::code_mode) fn code_mode_main_invoker(code: &str
     // Embed the shared message as a JSON string literal — valid JS and safely
     // quoted regardless of its contents.
     body.push_str(
-        &serde_json::to_string(CODE_MODE_MAIN_SHAPE_ERROR).unwrap_or_else(|_| {
-            "\"code_execute code must be an async arrow function\"".to_string()
-        }),
+        &serde_json::to_string(CODE_MODE_MAIN_SHAPE_ERROR)
+            .unwrap_or_else(|_| "\"codemode code must be an async arrow function\"".to_string()),
     );
     body.push_str(");\n");
     body.push_str("  }\n");

@@ -99,13 +99,11 @@ Typical patch payloads:
 ## Gateway Code Mode
 
 When enabled, Lab hides raw proxied upstream tools from MCP `list_tools()` and exposes
-the primary synthetic `codemode` gateway tool plus compatibility tools:
+the single synthetic `codemode` gateway tool:
 
 | Tool | Purpose | Status |
 |------|---------|------|
 | `codemode` | Run one JavaScript async arrow function in the Code Mode sandbox. Use `codemode.search()` and `codemode.describe()` inside the same execution to discover upstream tools, then call them through generated helpers or `callTool(id, params)`. | Primary |
-| `search` | Run a JavaScript async arrow function against the full live upstream tool catalog. | Compatibility |
-| `execute` | Run a JavaScript async arrow function in the Code Mode sandbox and broker calls to upstream tools. | Compatibility |
 
 This keeps the MCP catalog small while still allowing clients to reach every exposed upstream tool.
 Per-upstream `expose_tools` filters still apply before tools enter the searchable catalog.
@@ -144,24 +142,10 @@ HTTP/MCP gateway management actions:
 { "action": "gateway.code_mode.set", "params": { "enabled": true, "trace_params": true, "timeout_ms": 5000, "max_tool_calls": 8, "max_log_entries": 100 } }
 ```
 
-MCP `search` call shape:
-
-```json
-{ "code": "async () => tools.filter(t => t.upstream === \"github\").map(t => ({ id: t.id, signature: t.signature }))" }
-```
-
 MCP `codemode` call shape:
 
 ```json
-{ "code": "async () => { const matches = await codemode.search(\"github issues\"); return matches.results; }" }
-```
-
-MCP `execute` call shape:
-
-```json
-{
-  "code": "async () => { const result = await callTool('github::search_issues', {\"query\":\"repo:jmagar/lab gateway\"}); return result; }"
-}
+{ "code": "async () => { const matches = await codemode.search(\"github issues\"); const docs = await codemode.describe(matches.results[0].path); return { docs, issues: await codemode.github.search_issues({ q: \"repo:jmagar/lab gateway\" }) }; }" }
 ```
 
 Execution runs in a short-lived child process with an embedded JavaScript engine.
@@ -174,13 +158,10 @@ exposure checks. `params` must be JSON-serializable.
 
 ### Code Mode Call Inspector
 
-When Code Mode is enabled, the synthetic MCP `codemode`, `search`, and
-`execute` tools also advertise a read-only MCP App inspector through
-`_meta.ui.resourceUri`.
+When Code Mode is enabled, the synthetic MCP `codemode` tool advertises a
+read-only MCP App inspector through `_meta.ui.resourceUri`.
 
 - `codemode` attaches `ui://lab/code-mode/codemode`
-- `search` attaches `ui://lab/code-mode/search`
-- `execute` attaches `ui://lab/code-mode/execute`
 - recent in-memory history is available at `ui://lab/code-mode/history`
 
 The inspector is passive observability only. It renders tool-result
@@ -191,14 +172,11 @@ resolve exported Next.js chunk assets from the resource body. The Next route in
 `apps/gateway-admin/app/mcp/code-mode/` remains available for browser/static
 build verification.
 
-The trace shapes are intentionally different:
-
-- `search` emits a catalog trace (`code_mode_search_trace`) with matched
-  upstream/tool metadata and result shape. It is inferred from the filtered
-  catalog, not broker-observed runtime telemetry.
-- `execute` emits a runtime trace (`code_mode_execute_trace`) from the broker's
-  actual upstream calls, including upstream, tool, status, elapsed time, error
-  kind, compact result shape, and optional params.
+`codemode` emits a runtime trace (`code_mode_execute_trace`) from the broker's
+actual upstream calls, including upstream, tool, status, elapsed time, error
+kind, compact result shape, and optional params. In-sandbox
+`codemode.search()` and `codemode.describe()` are discovery helpers, not
+separate MCP tools or separate structured trace kinds.
 
 Trace params are redacted and capped before leaving the broker boundary. Raw
 params are consumed only for upstream dispatch; they must not enter public
@@ -216,12 +194,11 @@ Advertised tools per active mode:
 
 | Mode | Advertised MCP tools |
 |------|---------------------|
-| `[code_mode].enabled = true` | `codemode`, `search`, `execute` |
+| `[code_mode].enabled = true` | `codemode` |
 | Neither | raw Lab service tools + healthy upstream tools |
 
-Use canonical MCP tool names in new clients: `codemode` for primary execution,
-`search` for compatibility catalog filtering, and `execute` for compatibility
-sandbox execution.
+Use `codemode` for gateway Code Mode. Discovery happens inside the sandbox with
+`codemode.search()` and `codemode.describe()`.
 
 Rules:
 
@@ -232,12 +209,11 @@ Rules:
 - `code_mode.token_estimate_divisor` is validated in the range `1..=64`
 - `code_mode.max_log_entries` is validated in the range `1..=100000`
 - `code_mode.max_log_bytes` is validated in the range `1..=104857600`
-- `codemode`, `search`, and `execute` all require a non-empty `code` string
-- `search` is read-only discovery and accepts `lab:read`, `lab`, or `lab:admin`
-- `codemode` and `execute` require `lab` or `lab:admin` and broker calls through the same gateway visibility checks as legacy `tool_execute`
+- `codemode` requires a non-empty `code` string
+- `codemode` requires `lab` or `lab:admin` and broker calls through the gateway visibility checks
 - Lab actions are not supported inside Code Mode `callTool`
 - gateway action provenance fields (`origin` and `owner`) are reserved in Code Mode and are overwritten by the broker
-- `execute` enforces `timeout_ms` by killing the child process and enforces `max_tool_calls` in the parent before brokering each call
+- `codemode` enforces `timeout_ms` by killing the child process and enforces `max_tool_calls` in the parent before brokering each call
 - invalid Code Mode ids return `invalid_code_mode_id`
 - unavailable or overlarge upstream schemas may be omitted; generated signatures fall back to `unknown`
 - old `[[upstream]].code_mode` blocks are accepted only as migration input and are dropped on the next gateway config write
@@ -275,7 +251,7 @@ Every mutating action follows the same sequence:
 2. write `~/.config/lab/config.toml` with temp-file-in-same-dir plus rename
 3. build and lazy-seed a fresh upstream pool outside the config mutation lock
 4. atomically swap the runtime handle
-5. leave Code Mode catalog refresh to the next `codemode`, `search`, or `execute` call, which
+5. leave Code Mode catalog refresh to the next `codemode` call, which
    reprobes live upstream metadata through the gateway manager
 6. notify connected MCP peers when visible tool/resource/prompt catalogs changed
 

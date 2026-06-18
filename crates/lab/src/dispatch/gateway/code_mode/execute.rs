@@ -20,7 +20,7 @@ use super::types::{
     destructive_permitted,
 };
 
-/// Compatibility key a Code Mode `execute` snippet can return
+/// Compatibility key a Code Mode snippet can return
 /// (`return { __ui: <result> }`) to unwrap the final result payload while using
 /// the last-wins captured mcp-ui widget link.
 const UI_OPT_IN_KEY: &str = "__ui";
@@ -35,15 +35,13 @@ impl CodeModeBroker<'_> {
         config: crate::config::CodeModeConfig,
         capability_filter: CodeModeCapabilityFilter,
     ) -> Result<CodeModeExecutionResponse, CodeModeExecutionError> {
-        // `execute` is exposed only when the gateway search/execute surface is
-        // enabled (code_mode.enabled → RootSynthetic), and the MCP handler
-        // gates on `exposes_synthetic_tools()` before reaching here. There is no
-        // separate per-tool enable: when the surface is on, both `search` and
-        // `execute` work (subject to scope), exactly like the Cloudflare blog.
+        // `codemode` is exposed only when the gateway Code Mode surface is
+        // enabled (code_mode.enabled -> RootSynthetic), and the MCP handler
+        // gates on `exposes_synthetic_tools()` before reaching here.
         if !caller.can_execute() {
             return Err(ToolError::Sdk {
                 sdk_kind: "forbidden".to_string(),
-                message: "code_execute requires one of scopes: lab, lab:admin".to_string(),
+                message: "codemode requires one of scopes: lab, lab:admin".to_string(),
             }
             .into());
         }
@@ -81,7 +79,7 @@ impl CodeModeBroker<'_> {
         tracing::info!(
             surface = "dispatch",
             service = "code_mode",
-            action = "code_execute",
+            action = "codemode",
             tool_calls = response.calls.len(),
             elapsed_ms = started.elapsed().as_millis(),
             result_bytes = response
@@ -359,7 +357,7 @@ impl CodeModeBroker<'_> {
             tracing::warn!(
                 surface = "dispatch",
                 service = "code_mode",
-                action = "code_execute",
+                action = "codemode",
                 upstream = upstream,
                 tool = tool,
                 kind = "forbidden",

@@ -250,17 +250,17 @@ Rules:
 ### `[code_mode]`
 
 Gateway-wide Code Mode exposure and execution limits. When enabled, raw gateway
-tools are hidden from MCP `list_tools()` and the gateway advertises the
-canonical `search` and `execute` tools instead.
+tools are hidden from MCP `list_tools()` and the gateway advertises the single
+synthetic `codemode` tool instead.
 
 | Key | Env override | Default | Description |
 |-----|-------------|---------|-------------|
-| `enabled` | — | `false` | Replace raw proxied upstream tools with the synthetic Code Mode `search` and `execute` tools for the gateway. `search`/`execute` build over a transient live catalog refreshed from gateway metadata on each call. |
+| `enabled` | — | `false` | Replace raw proxied upstream tools with the synthetic Code Mode `codemode` tool for the gateway. Discovery happens inside the sandbox with `codemode.search()` and `codemode.describe()`. |
 | `trace_params` | — | `true` | Include only redacted and capped upstream tool params in Code Mode call traces and history. Set false to omit params from traces entirely. |
 | `timeout_ms` | — | `30000` | Maximum wall-clock time for one Code Mode execution. Valid range: 1-60000. |
 | `max_tool_calls` | — | `1000` | Maximum host-brokered upstream tool calls allowed in one execution. Valid range: 1-10000. |
-| `max_response_bytes` | — | `24576` | Maximum serialized response envelope size returned by `execute`. Valid range: 1024-1048576. |
-| `max_response_tokens` | — | `6000` | Approximate maximum response tokens returned by `execute`. Valid range: 256-256000. |
+| `max_response_bytes` | — | `24576` | Maximum serialized response envelope size returned by `codemode`. Valid range: 1024-1048576. |
+| `max_response_tokens` | — | `6000` | Approximate maximum response tokens returned by `codemode`. Valid range: 256-256000. |
 | `token_estimate_divisor` | — | `4` | Byte-to-token estimate divisor for response limiting. Valid range: 1-64. |
 | `max_log_entries` | — | `1000` | Maximum captured console log lines per execution. Valid range: 1-100000. |
 | `max_log_bytes` | — | `65536` | Maximum captured console log bytes per execution. Valid range: 1-104857600. |
@@ -287,7 +287,7 @@ configuration.
 
 #### Code Mode Artifacts
 
-`execute` exposes a sandbox helper for large outputs:
+`codemode` exposes a sandbox helper for large outputs:
 
 ```js
 const artifact = await writeArtifact("reports/brief.md", markdown, {

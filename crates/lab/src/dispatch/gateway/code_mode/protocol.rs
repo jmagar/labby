@@ -128,8 +128,8 @@ thread_local! {
 // operand-stack overflow on a single callTool.
 pub(in crate::dispatch::gateway::code_mode) const CODE_MODE_STACK_SIZE_LIMIT: usize = 256 * 1024;
 
-/// Wall-clock budget for a `search` filter run in the Javy runner. Search does
-/// pure computation over the catalog (no tool calls), so this is shorter than
-/// the configurable `execute` timeout.
-pub(in crate::dispatch::gateway::code_mode) const CODE_MODE_SEARCH_TIMEOUT: Duration =
+/// Wall-clock budget for a discovery filter run in the Javy runner. Discovery
+/// does pure computation over the catalog (no tool calls), so this is shorter
+/// than the configurable Code Mode timeout.
+pub(in crate::dispatch::gateway::code_mode) const CODE_MODE_DISCOVERY_TIMEOUT: Duration =
     Duration::from_secs(15);

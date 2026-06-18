@@ -4,7 +4,7 @@
 #[cfg(feature = "gateway")]
 use super::oauth_upstream_subject_for_request;
 use super::{
-    actor_key_from_extensions, code_mode_search_scope_allowed, subject_from_extensions,
+    actor_key_from_extensions, code_mode_read_scope_allowed, subject_from_extensions,
     tool_execute_builtin_action_allowed, tool_execute_scope_allowed,
 };
 use crate::dispatch::error::ToolError;
@@ -209,16 +209,16 @@ fn code_mode_scope_allows_read_but_tool_execute_does_not() {
         ..base.clone()
     };
 
-    assert!(code_mode_search_scope_allowed(None));
-    assert!(code_mode_search_scope_allowed(Some(&base)));
-    assert!(code_mode_search_scope_allowed(Some(&lab)));
-    assert!(code_mode_search_scope_allowed(Some(&admin)));
-    assert!(!code_mode_search_scope_allowed(Some(&empty)));
-    assert!(!code_mode_search_scope_allowed(Some(&unrelated)));
+    assert!(code_mode_read_scope_allowed(None));
+    assert!(code_mode_read_scope_allowed(Some(&base)));
+    assert!(code_mode_read_scope_allowed(Some(&lab)));
+    assert!(code_mode_read_scope_allowed(Some(&admin)));
+    assert!(!code_mode_read_scope_allowed(Some(&empty)));
+    assert!(!code_mode_read_scope_allowed(Some(&unrelated)));
 
     assert!(
         !tool_execute_scope_allowed(Some(&base)),
-        "lab:read can search but cannot execute"
+        "lab:read can read Code Mode resources but cannot execute"
     );
 }
 
@@ -301,46 +301,46 @@ fn oauth_upstream_subject_preserves_non_admin_request_subjects() {
 }
 
 #[test]
-fn code_mode_search_scope_allowed_permits_all_expected_scopes() {
+fn code_mode_read_scope_allowed_permits_all_expected_scopes() {
     // None = stdio transport → trusted (always permitted)
-    assert!(code_mode_search_scope_allowed(None));
+    assert!(code_mode_read_scope_allowed(None));
 
-    // lab:read is the minimum acceptable scope for code_mode
+    // lab:read is the minimum acceptable scope for Code Mode resources.
     let read_only = make_auth(&["lab:read"]);
-    assert!(code_mode_search_scope_allowed(Some(&read_only)));
+    assert!(code_mode_read_scope_allowed(Some(&read_only)));
 
-    // bare lab must also pass code_mode
+    // Bare lab must also pass Code Mode resource reads.
     let lab = make_auth(&["lab"]);
-    assert!(code_mode_search_scope_allowed(Some(&lab)));
+    assert!(code_mode_read_scope_allowed(Some(&lab)));
 
-    // lab:admin must pass code_mode (identified as a gap in the original review)
+    // lab:admin must pass Code Mode resource reads.
     let admin = make_auth(&["lab:admin"]);
-    assert!(code_mode_search_scope_allowed(Some(&admin)));
+    assert!(code_mode_read_scope_allowed(Some(&admin)));
 
     // empty scopes → denied
     let no_scopes = make_auth(&[]);
-    assert!(!code_mode_search_scope_allowed(Some(&no_scopes)));
+    assert!(!code_mode_read_scope_allowed(Some(&no_scopes)));
 
     // unrelated scope → denied
     let unrelated = make_auth(&["mcp:read"]);
-    assert!(!code_mode_search_scope_allowed(Some(&unrelated)));
+    assert!(!code_mode_read_scope_allowed(Some(&unrelated)));
 }
 
 #[test]
-fn code_mode_allows_lab_read_but_execute_requires_lab() {
-    // Intentional asymmetry: code_mode is a read-only discovery operation and therefore
-    // accepts lab:read in addition to the stronger lab / lab:admin.
-    // tool_execute must NOT accept lab:read — it executes upstream tools
-    // which may have side effects.
+fn code_mode_resources_allow_lab_read_but_tool_calls_require_lab() {
+    // Intentional asymmetry: Code Mode resources are read-only and therefore
+    // accept lab:read in addition to the stronger lab / lab:admin.
+    // Executable tool calls must NOT accept lab:read because they can broker
+    // upstream side effects.
     let read_only = make_auth(&["lab:read"]);
 
-    // code_mode: lab:read is permitted
+    // Code Mode resource read: lab:read is permitted.
     assert!(
-        code_mode_search_scope_allowed(Some(&read_only)),
-        "code_mode should accept lab:read"
+        code_mode_read_scope_allowed(Some(&read_only)),
+        "Code Mode resource reads should accept lab:read"
     );
 
-    // tool_execute: lab:read must NOT be sufficient
+    // Executable tool calls: lab:read must NOT be sufficient.
     assert!(
         !tool_execute_scope_allowed(Some(&read_only)),
         "tool_execute must reject lab:read — requires lab or lab:admin"

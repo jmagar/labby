@@ -158,43 +158,17 @@ function resultCard(t){
   const detail=shapeDetail(t.result_shape);
   return card(`<div class="name">Returned value</div>${detail?`<div class="meta">${esc(detail)}</div>`:""}<details><summary>Result</summary><pre>${esc(json(t.result))}</pre></details>`);
 }
-function matchRow(match){return card(`<div class="row"><div class="name">${esc(match.id||match.name||"match")}</div><div class="pill info">${esc(match.upstream||"")}</div></div><div class="meta">${esc(match.description||"")}</div>`)}
 function historyRow(entry){
   const count=Array.isArray(entry.calls)?entry.calls.length:0;
   const status=entry.ok?`<span class="ok" role="img" aria-label="success">✓</span>`:`<span class="pill err">${esc(statusLabel(entry))}</span>`;
   return card(`<div class="row"><div class="name">${esc(entry.kind||"entry")}</div>${status}</div><div class="meta">${esc(entry.elapsed_ms??0)} ms / ${count} calls${entry.match_count!==undefined?` / ${esc(entry.match_count)} matches`:""}</div>`);
 }
-function searchCount(t){const displayed=t.displayed_count??(Array.isArray(t.matches)?t.matches.length:0);return (t.truncated||displayed!==t.match_count)?`${displayed} of ${t.match_count||0}`:`${t.match_count||0}`;}
 // Returns true when `trace` matched a known Code Mode trace kind, false for the
 // empty placeholder or an unrecognized shape (rendered as a raw JSON dump).
 function render(trace){
   const t=trace&&trace.structuredContent?trace.structuredContent:trace;
-  if(!t||!t.kind){clearStats();content.innerHTML=card('<div class="meta">Run Code Mode search or execute to populate the inspector.</div>');return false;}
+  if(!t||!t.kind){clearStats();content.innerHTML=card('<div class="meta">Run codemode to populate the inspector.</div>');return false;}
   if(t.kind==="code_mode_execute_trace"){const rows=(t.calls||[]).map(callRow).join("")||card('<div class="meta">No calls were made.</div>');const result=resultCard(t);summary.textContent=`${t.call_count||0} calls captured`;renderStats([["Execute calls",t.call_count||0],["Catalog matches",0],["History entries",0]]);content.innerHTML=panel("Execute trace",t.call_count||0,rows+result);return true;}
-  if(t.kind==="code_mode_search_trace"){
-    const matchRows=(t.matches||[]);
-    if(matchRows.length>0){
-      const count=searchCount(t);
-      const shown=`${matchRows.length} shown`;
-      summary.textContent=t.truncated?"Search matches truncated to the current display window":"Search matches from current search";
-      renderStats([["Execute calls",0],["Catalog matches",count],["History entries",0]]);
-      content.innerHTML=panel("Search matches",t.truncated?shown:count,matchRows.map(matchRow).join(""));
-      return true;
-    }
-    // No tool rows summarized: the snippet returned a reduced/aggregate value
-    // (or an array of non-entry items). Show WHAT it returned instead of a bare
-    // "No matches" — the encouraged "reduce inside the sandbox" pattern lands here.
-    const s=t.result_shape;
-    const headline=s&&s.type==="array"
-      ?(t.match_count>0?`Search returned ${t.match_count} array items, but none are tool-entry objects.`:"Search returned an empty list — no tools matched.")
-      :"Search returned a reduced value, not a tool list — the matches panel only lists tool-entry objects.";
-    const detail=shapeDetail(s);
-    const value=t.result!==undefined?`<details><summary>Returned value</summary><pre>${esc(json(t.result))}</pre></details>`:"";
-    summary.textContent="Search returned a value with no tool rows to list";
-    renderStats([["Execute calls",0],["Catalog matches",searchCount(t)],["History entries",0]]);
-    content.innerHTML=panel("Search result",(s&&s.type)||"empty",card(`<div class="name">${esc(headline)}</div>${detail?`<div class="meta">${esc(detail)}</div>`:""}${value}`));
-    return true;
-  }
   if(t.kind==="code_mode_history"){const rows=(t.entries||[]).map(historyRow).join("")||card('<div class="meta">History is empty.</div>');summary.textContent=`${(t.entries||[]).length} bounded history entries`;renderStats([["Execute calls",0],["Catalog matches",0],["History entries",(t.entries||[]).length]]);content.innerHTML=panel("Recent history",(t.entries||[]).length,rows);return true;}
   clearStats();content.innerHTML=card(`<pre>${esc(json(t))}</pre>`);return false;
 }
@@ -240,7 +214,7 @@ if (window.openai) {
     setState("waiting", false);
   }
 } else {
-  // MCP Apps bridge (Claude): live search/execute traces arrive via ontoolresult.
+  // MCP Apps bridge (Claude): live codemode traces arrive via ontoolresult.
   const app = new App({ name: "LabCodeModeInspector", version: "1.0.0" }, {});
   app.onhostcontextchanged = (ctx) => { if (ctx && ctx.theme) { document.documentElement.classList.toggle("dark", ctx.theme === "dark"); } };
   let hydrated = false;

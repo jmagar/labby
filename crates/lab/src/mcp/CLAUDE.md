@@ -22,19 +22,13 @@ For normal services, `dispatch/<service>/dispatch.rs` owns action routing, catal
 - `deploy` sets the MCP elicitation context before calling shared deploy dispatch.
 - `fs` filters `fs.preview` out of MCP discovery and execution.
 - `nodes` owns MCP-only enrollment actions.
-- `code_mode` and `tool_execute` are registered directly in `mcp/server.rs` as
-  gateway meta-tools and bypass both `dispatch/` and `mcp/services/`.
-  They expose the upstream MCP proxy surface to clients. Parameter
-  shapes (`query`/`top_k`/`include_schema`; `name`/`arguments`) are
-  incompatible with the action+params contract. Business logic lives in
-  `GatewayManager::search_tools()` / `execute_tool()` in
-  `dispatch/gateway/manager.rs`, called directly. No CLI or HTTP
-  equivalent is planned. The rejection guard test in
-  `dispatch/gateway/dispatch.rs` enforces the non-dispatch boundary. Do
-  not add `dispatch/gateway-code-mode/` unless a second surface consumer is
-  confirmed.
-- `code_search` and `code_execute` are registered directly in
-  `mcp/server.rs` as gateway Code Mode meta-tools. MCP owns
+- `codemode` is registered directly in the MCP layer as a gateway meta-tool and
+  bypasses both `dispatch/` and `mcp/services/`. It exposes the upstream MCP
+  proxy surface to clients through JavaScript snippets rather than the
+  action+params contract. Code Mode business logic lives in
+  `dispatch/gateway/code_mode.rs`.
+- `codemode` is registered directly in the MCP layer as the gateway Code Mode
+  tool. MCP owns
   tool registration, scope extraction, MCP request parsing, and
   `CallToolResult` envelope conversion. Code Mode business logic lives
   in `dispatch/gateway/code_mode.rs` so the native CLI can call the same

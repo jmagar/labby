@@ -157,7 +157,7 @@ fn tool_error_envelope_preserves_structured_extras() {
         param: "query".to_string(),
     };
 
-    let envelope = tool_error_envelope("code_search", "call_tool", &err);
+    let envelope = tool_error_envelope("codemode", "call_tool", &err);
 
     assert_eq!(
         envelope.pointer("/error/kind"),

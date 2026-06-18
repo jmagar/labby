@@ -105,10 +105,10 @@ pub struct GatewayManager {
     /// runs at a time. Subsequent callers that arrive while a refresh is in
     /// progress wait for it to finish rather than spawning a second reprobe.
     pub(super) code_mode_refresh_inflight: Arc<Mutex<()>>,
-    /// Cached rendered Code Mode search catalog, keyed by a fingerprint of
+    /// Cached rendered Code Mode discovery catalog, keyed by a fingerprint of
     /// the live healthy tool list. Avoids regenerating `CodeModeCatalogEntry`
     /// structs (including TS `.signature`/`.dts` via `generate_tool_types`),
-    /// the serialized JSON blob, and the JS proxy string on every search when
+    /// the serialized JSON blob, and the JS proxy string on every lookup when
     /// the upstream catalog has not changed between calls.
     pub(super) code_mode_catalog_render_cache:
         Arc<Mutex<Option<crate::dispatch::gateway::code_mode::CatalogRenderCache>>>,

@@ -260,8 +260,8 @@ mod tests {
             ])
             .is_ok()
         );
-        // Cloudflare-parity: only `gateway code exec` survives. There is no
-        // `gateway code search` (that was the dead `code_search` pattern).
+        // Cloudflare-parity: only `gateway code exec` survives. Discovery stays
+        // inside the Code Mode runtime.
         assert!(
             Cli::try_parse_from([
                 "lab",

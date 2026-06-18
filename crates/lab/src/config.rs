@@ -60,8 +60,8 @@ pub(crate) fn env_flag_enabled(name: &str) -> bool {
         .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
 }
 
-/// Whether mcp-ui widget → host tool callbacks are permitted while the Code
-/// Mode synthetic surface (`search`/`execute`) is active.
+/// Whether mcp-ui widget -> host tool callbacks are permitted while the Code
+/// Mode synthetic surface (`codemode`) is active.
 ///
 /// Default: **off**. When the synthetic surface is on, raw upstream tools are
 /// hidden from `list_tools` and normally not callable by name. Setting
@@ -712,7 +712,7 @@ fn default_max_log_bytes() -> usize {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeModeConfig {
-    /// Whether the MCP gateway advertises Code Mode `search` and `execute`.
+    /// Whether the MCP gateway advertises `codemode`.
     #[serde(default)]
     pub enabled: bool,
     /// Whether Code Mode call traces include redacted/capped tool params.
@@ -724,10 +724,10 @@ pub struct CodeModeConfig {
     /// Maximum host-brokered tool calls allowed in one Code Mode execution.
     #[serde(default = "default_code_mode_max_tool_calls")]
     pub max_tool_calls: usize,
-    /// Maximum serialized response envelope size returned by code_execute.
+    /// Maximum serialized response envelope size returned by codemode.
     #[serde(default = "default_code_mode_max_response_bytes")]
     pub max_response_bytes: usize,
-    /// Approximate maximum response tokens returned by code_execute.
+    /// Approximate maximum response tokens returned by codemode.
     #[serde(default = "default_code_mode_max_response_tokens")]
     pub max_response_tokens: usize,
     /// Token estimation divisor. bytes/4 is intentionally conservative (real

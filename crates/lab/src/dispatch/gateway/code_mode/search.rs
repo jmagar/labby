@@ -1,4 +1,4 @@
-//! `CodeModeBroker::search` and live read-only catalog construction.
+//! `CodeModeBroker::search` and live in-sandbox discovery catalog construction.
 
 use serde_json::Value;
 
@@ -7,7 +7,7 @@ use crate::dispatch::gateway::manager::GatewayManager;
 use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
 
 use super::CodeModeBroker;
-use super::protocol::CODE_MODE_SEARCH_TIMEOUT;
+use super::protocol::CODE_MODE_DISCOVERY_TIMEOUT;
 use super::types::{
     CodeModeCaller, CodeModeCapabilityFilter, CodeModeCatalogEntry, CodeModeSurface,
     sanitize_code_mode_schema,
@@ -35,7 +35,8 @@ impl CodeModeBroker<'_> {
         if !caller.can_read() {
             return Err(ToolError::Sdk {
                 sdk_kind: "forbidden".to_string(),
-                message: "code_search requires one of scopes: lab:read, lab, lab:admin".to_string(),
+                message: "codemode.search requires one of scopes: lab:read, lab, lab:admin"
+                    .to_string(),
             });
         }
 
@@ -53,7 +54,7 @@ impl CodeModeBroker<'_> {
         // Returns (entries, catalog_json, serialized_size) — all from the
         // render cache when the healthy tool set has not changed.
         let (catalog, catalog_json, serialized_size) = self
-            .code_search_catalog_allowed(
+            .code_mode_catalog_allowed(
                 manager,
                 require_fresh_catalog,
                 &owner,
@@ -63,26 +64,26 @@ impl CodeModeBroker<'_> {
             .await?;
         tracing::info!(
             surface = "dispatch",
-            service = "code_search",
+            service = "codemode",
             action = "catalog.build",
             catalog_size_bytes = serialized_size,
             entry_count = catalog.len(),
-            "Code Mode search catalog ready"
+            "Code Mode discovery catalog ready"
         );
 
         // Run the caller's JS filter over the catalog inside the Javy runner. The
-        // catalog is injected as a global `const tools = [...]`, mirroring the
-        // typed proxy `execute` injects. `max_tool_calls = 0` means any stray
-        // `callTool` in the search filter errors out — search must not call tools.
+        // catalog is injected as a global `const tools = [...]`. `max_tool_calls = 0`
+        // means any stray `callTool` in the discovery filter errors out — discovery
+        // must not call tools.
         //
         // Use the pre-serialized `catalog_json` from the render cache so we do
         // not pay `serde_json::to_string` again when the catalog is unchanged.
         let proxy = format!("const tools = {catalog_json};\n");
-        // Search passes the caller's code to the runner *raw* (no
+        // Discovery passes the caller's code to the runner *raw* (no
         // `normalize_user_code`). The runner's invoker requires the code to
         // evaluate to a function and throws otherwise, so a non-function search
         // input still surfaces as `server_error` — preserving the contract the
-        // old in-process `evaluate_code_search` enforced. Normalizing here would
+        // old in-process `evaluate_code_mode_catalog` enforced. Normalizing here would
         // wrap a bare expression like `42` into `async () => 42`, silently
         // turning a contract violation into a successful run.
         let response = self
@@ -90,7 +91,7 @@ impl CodeModeBroker<'_> {
                 code.to_string(),
                 proxy,
                 0,
-                CODE_MODE_SEARCH_TIMEOUT,
+                CODE_MODE_DISCOVERY_TIMEOUT,
                 caller,
                 surface,
                 0,
@@ -100,11 +101,11 @@ impl CodeModeBroker<'_> {
             )
             .await
             .map_err(super::types::CodeModeExecutionError::into_tool_error)?;
-        // search must return an array/Value; undefined/None → [].
+        // Discovery must return an array/Value; undefined/None -> [].
         Ok(response.result.unwrap_or_else(|| Value::Array(Vec::new())))
     }
 
-    /// Build or return the cached Code Mode search catalog.
+    /// Build or return the cached Code Mode discovery catalog.
     ///
     /// Returns `(entries, catalog_json, serialized_size)`. The `catalog_json`
     /// is the pre-serialized `serde_json::to_string(&entries)` string, ready
@@ -112,18 +113,18 @@ impl CodeModeBroker<'_> {
     /// the manager-level render cache when the healthy tool fingerprint matches,
     /// avoiding repeated `generate_tool_types` calls and JSON serialization.
     #[allow(dead_code)]
-    pub(in crate::dispatch::gateway::code_mode) async fn code_search_catalog(
+    pub(in crate::dispatch::gateway::code_mode) async fn code_mode_catalog(
         &self,
         manager: &GatewayManager,
         allow_cold_connect: bool,
         owner: &UpstreamRuntimeOwner,
         oauth_subject: Option<&str>,
     ) -> Result<(Vec<CodeModeCatalogEntry>, String, usize), ToolError> {
-        self.code_search_catalog_allowed(manager, allow_cold_connect, owner, oauth_subject, None)
+        self.code_mode_catalog_allowed(manager, allow_cold_connect, owner, oauth_subject, None)
             .await
     }
 
-    pub(in crate::dispatch::gateway::code_mode) async fn code_search_catalog_allowed(
+    pub(in crate::dispatch::gateway::code_mode) async fn code_mode_catalog_allowed(
         &self,
         manager: &GatewayManager,
         allow_cold_connect: bool,
@@ -161,10 +162,10 @@ impl CodeModeBroker<'_> {
         {
             tracing::debug!(
                 surface = "dispatch",
-                service = "code_search",
+                service = "codemode",
                 action = "catalog.build",
                 entry_count = entries.len(),
-                "Code Mode search catalog served from render cache"
+                "Code Mode discovery catalog served from render cache"
             );
             return Ok((entries, catalog_json, serialized_size));
         }
@@ -205,10 +206,10 @@ impl CodeModeBroker<'_> {
         // state reuse this string directly.
         let catalog_json = serde_json::to_string(&entries).map_err(|err| ToolError::Sdk {
             sdk_kind: "internal_error".to_string(),
-            message: format!("failed to serialize Code Mode search catalog: {err}"),
+            message: format!("failed to serialize Code Mode discovery catalog: {err}"),
         })?;
 
-        // Store the render for the next search call.
+        // Store the render for the next discovery lookup.
         manager
             .store_catalog_render_cache(super::CatalogRenderCache {
                 fingerprint,

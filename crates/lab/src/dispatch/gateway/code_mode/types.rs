@@ -269,7 +269,6 @@ impl From<ToolError> for CodeModeExecutionError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CodeModeHistoryKind {
-    Search,
     Execute,
 }
 

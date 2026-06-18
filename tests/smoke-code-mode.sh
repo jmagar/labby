@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test for lab code mode: code(search), code(execute), code(execute+callTool)
+# Smoke test for lab code mode: codemode discovery, callTool, and helpers.
 # Usage: ./tests/smoke-code-mode.sh [server]   (default: lab)
 #
 # Prerequisites:
@@ -18,36 +18,35 @@ esac
 SERVER=${1:-lab}
 TIMEOUT_MS=${TIMEOUT_MS:-20000}
 VERBOSE=${VERBOSE:-0}
-NO_PREFLIGHT=${NO_PREFLIGHT:-1}   # code tool has complex nested schema; skip key preflight
+NO_PREFLIGHT=${NO_PREFLIGHT:-1}   # codemode has complex nested schema; skip key preflight
 
 # ---- cases -------------------------------------------------------------------
 # Tests cover the { code } only contract — no action discriminator.
-#   1. code(catalog) — pass a filter function; tools array injected into sandbox
-#   2. code(callTool) — direct callTool() broker call works end-to-end
-#   3. code(codemode proxy) — snake_case namespace proxy: resolve_library_id is valid JS
-#   4. code missing required field — MCP schema rejects empty object with invalid_param
+#   1. codemode(discovery) — in-sandbox codemode.search() returns compact hits
+#   2. codemode(callTool) — direct callTool() broker call works end-to-end
+#   3. codemode(helper) — snake_case namespace proxy: resolve_library_id is valid JS
+#   4. codemode missing required field — MCP schema rejects empty object with invalid_param
 declare -a CASES=(
-  # Case 1: catalog is available via the injected `tools` variable.
-  # The function receives the full catalog; '() => tools' returns all entries.
-  # Assert any upstream name is present in the serialized output.
-  "code|--args '{\"code\":\"() => tools\"}' |contains: upstream"
+  # Case 1: discovery is available through codemode.search().
+  # Assert the compact result shape is present.
+  "codemode|--args '{\"code\":\"async () => codemode.search({ query: \\\"context7\\\", limit: 3 })\"}' |contains: results"
 
   # Case 2: direct callTool() — verifies runner + broker loop.
   # Uses context7 resolve-library-id (available in the pool without OAuth).
   # The raw callTool path bypasses the snake_case preamble — tests broker wiring.
   # Assert 'context7.com' which appears in both success and quota-exceeded responses.
-  "code|--args '{\"code\":\"return await callTool(\\\"context7::resolve-library-id\\\", {libraryName: \\\"react\\\", query: \\\"react hooks\\\"})\"}' |contains: context7.com"
+  "codemode|--args '{\"code\":\"async () => await callTool(\\\"context7::resolve-library-id\\\", {libraryName: \\\"react\\\", query: \\\"react hooks\\\"})\"}' |contains: context7.com"
 
   # Case 3: codemode proxy — validates the property-key quoting fix.
   # 'resolve-library-id' → resolve_library_id via tool_name_to_snake + serde_json::to_string.
   # Before the fix: QuickJS threw SyntaxError on the unquoted 'resolve-library-id:' key.
   # After the fix: the preamble uses \"resolve_library_id\": which is valid JS.
   # A response from context7 (even quota-exceeded) proves the snake_case proxy wired correctly.
-  "code|--args '{\"code\":\"return await codemode.context7.resolve_library_id({libraryName: \\\"react\\\", query: \\\"react hooks\\\"})\"}' |contains: context7.com"
+  "codemode|--args '{\"code\":\"async () => await codemode.context7.resolve_library_id({libraryName: \\\"react\\\", query: \\\"react hooks\\\"})\"}' |contains: context7.com"
 
   # Case 4: missing required 'code' field → MCP schema validation error (invalid_param).
   # With the action discriminator removed, schema rejects {} as missing required field.
-  "code|--args '{}' |error: invalid_param"
+  "codemode|--args '{}' |error: invalid_param"
 )
 # ------------------------------------------------------------------------------
 

@@ -479,8 +479,9 @@ impl GatewayManager {
 
     /// Store a freshly rendered catalog in the manager-level render cache.
     ///
-    /// Called by `code_search_catalog` after a cache miss so subsequent searches
-    /// within the same healthy-tool fingerprint skip `generate_tool_types` per entry.
+    /// Called by Code Mode catalog discovery after a cache miss so subsequent
+    /// lookups within the same healthy-tool fingerprint skip `generate_tool_types`
+    /// per entry.
     pub async fn store_catalog_render_cache(
         &self,
         cache: crate::dispatch::gateway::code_mode::CatalogRenderCache,

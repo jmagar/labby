@@ -5,11 +5,6 @@
 //! `gateway_manager` field) and re-exports the public surface consumed by the
 //! MCP/CLI adapters and integration tests.
 
-// Tool-name consts come from the layer-neutral `crate::tool_names` module, not
-// the MCP surface — the dispatch layer must not import `crate::mcp` (enforced by
-// tests/architecture_boundaries.rs).
-use crate::tool_names::{CODE_MODE_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME};
-
 // Used in-crate by the `CodeModeBroker` struct/`new`; also re-exported so the
 // in-crate test modules can reach them via `super::` exactly as the old nested
 // `mod tests` did.
@@ -70,7 +65,7 @@ pub use normalize::normalize_user_code;
 // hold the shared, long-lived warm-runner pool in a field.
 pub(crate) use pool::RunnerPool;
 pub use runner::run_code_mode_runner_stdio;
-pub(crate) use trace::{code_mode_execute_trace, code_mode_search_trace};
+pub(crate) use trace::code_mode_execute_trace;
 pub(crate) use types::split_upstream_tool;
 pub use types::{CodeModeCaller, CodeModeCapabilityFilter, CodeModeSurface, upstream_tool_id}; // shared upstream::tool splitter
 // Re-export so `GatewayManager` (in `manager.rs`, a sibling of `code_mode.rs`)
@@ -78,10 +73,10 @@ pub use types::{CodeModeCaller, CodeModeCapabilityFilter, CodeModeSurface, upstr
 // reaching into the private `types` submodule.
 pub(crate) use types::CodeModeCatalogEntry;
 
-/// Cached rendered Code Mode search catalog.
+/// Cached rendered Code Mode discovery catalog.
 ///
 /// Keyed by a fingerprint string (sorted `upstream::tool` ids joined with `\n`).
-/// When the pool's healthy tool set has not changed between searches, this
+/// When the pool's healthy tool set has not changed between lookups, this
 /// avoids re-running `generate_tool_types` for every entry, re-serializing the
 /// catalog JSON, and re-generating the JS proxy string.
 pub struct CatalogRenderCache {
@@ -123,23 +118,19 @@ pub(in crate::dispatch::gateway::code_mode) use truncate::{
 #[cfg(test)]
 pub(in crate::dispatch::gateway::code_mode) use types::destructive_permitted;
 
-// Tool name strings are sourced from mcp/catalog.rs constants at runtime to
-// avoid stale literal references when tool names change.
 pub(in crate::dispatch::gateway::code_mode) fn lab_action_unknown_tool_hint() -> String {
-    format!(
-        "Code Mode handles upstream MCP tools only. For Lab actions, use the `{TOOL_EXECUTE_TOOL_NAME}` MCP tool \
-         (use `{CODE_MODE_SEARCH_TOOL_NAME}` first to discover available tools): \
-         name=<service> (e.g. \"radarr\"), arguments={{action: \"<dotted.action>\", params: {{...}}}}. \
-         Example: {TOOL_EXECUTE_TOOL_NAME}(name=\"radarr\", arguments={{action:\"movie.search\", params:{{query:\"Matrix\"}}}})."
-    )
+    "Code Mode handles upstream MCP tools only. For Lab actions, call the native \
+     Lab service tool with arguments={action:<dotted.action>, params:{...}}. \
+     Example: radarr(arguments={action:\"movie.search\", params:{query:\"Matrix\"}})."
+        .to_string()
 }
 
 pub struct CodeModeBroker<'a> {
     gateway_manager: Option<&'a GatewayManager>,
     /// Run-scoped sink for the last upstream MCP Apps (mcp-ui) widget link seen
     /// during this execution. Recorded at the `call_upstream_tool` boundary
-    /// (last-wins) before the envelope is unwrapped, then surfaced in
-    /// `execute()`. A fresh broker is constructed per request, so this is
+    /// (last-wins) before the envelope is unwrapped, then surfaced in the
+    /// Code Mode result. A fresh broker is constructed per request, so this is
     /// naturally scoped to a single run.
     ui_capture: std::sync::Arc<std::sync::Mutex<Option<types::UiLink>>>,
 }

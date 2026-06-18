@@ -1,4 +1,4 @@
-//! Tests: broker search/execute/call_tool over a live upstream catalog.
+//! Tests: broker discovery/catalog/call_tool over a live upstream catalog.
 #![cfg(test)]
 #![allow(clippy::panic)]
 
@@ -309,8 +309,8 @@ async fn broker_search_exposes_typed_schema_metadata_from_live_catalog() {
     // The JS evaluation step now runs in a subprocess (Javy runner) that lib
     // unit tests cannot spawn (`current_exe()` is the test harness, not
     // labby). The catalog projection (`schema`/`signature`/`dts`) is what this
-    // test actually covers, so assert directly on `code_search_catalog` — the
-    // same source `search` serializes into the runner as `const tools`.
+    // test actually covers, so assert directly on `code_mode_catalog` — the
+    // same source in-sandbox discovery serializes into the runner as `const tools`.
     let caller = super::CodeModeCaller::Scoped {
         scopes: vec!["lab:read".to_string()],
         sub: None,
@@ -319,7 +319,7 @@ async fn broker_search_exposes_typed_schema_metadata_from_live_catalog() {
     let owner = caller.runtime_owner(surface);
     let oauth_subject = caller.oauth_subject();
     let (entries, _catalog_json, _size) = broker
-        .code_search_catalog(&manager, true, &owner, oauth_subject)
+        .code_mode_catalog(&manager, true, &owner, oauth_subject)
         .await
         .expect("catalog builds over live catalog");
     let result = serde_json::to_value(&entries).expect("serialize catalog");
@@ -403,8 +403,8 @@ async fn broker_search_refreshes_read_only_catalog_after_upstream_tool_expansion
         sub: None,
     };
     let surface = super::CodeModeSurface::Mcp;
-    // The catalog-refresh behavior under test is in-process (`code_search_catalog`
-    // re-resolves the live catalog on each call). The JS name-filter `search`
+    // The catalog-refresh behavior under test is in-process (`code_mode_catalog`
+    // re-resolves the live catalog on each call). The JS name-filter discovery
     // previously applied is now an in-test projection: collect agent-os tool
     // names from the freshly built catalog. (The runner that runs the JS filter
     // cannot be spawned from lib unit tests; see the sibling test.)
@@ -421,7 +421,7 @@ async fn broker_search_refreshes_read_only_catalog_after_upstream_tool_expansion
     };
 
     let (initial, _catalog_json, _size) = broker
-        .code_search_catalog(&manager, true, &owner, oauth_subject)
+        .code_mode_catalog(&manager, true, &owner, oauth_subject)
         .await
         .expect("initial read-only catalog builds over partial catalog");
     assert_eq!(agent_os_names(&initial), vec!["Wait".to_string()]);
@@ -434,7 +434,7 @@ async fn broker_search_refreshes_read_only_catalog_after_upstream_tool_expansion
     ];
 
     let (refreshed, _catalog_json, _size) = broker
-        .code_search_catalog(&manager, true, &owner, oauth_subject)
+        .code_mode_catalog(&manager, true, &owner, oauth_subject)
         .await
         .expect("read-only catalog refreshes expanded live catalog");
     assert_eq!(
@@ -531,7 +531,7 @@ async fn broker_call_tool_validates_schema_before_upstream_dispatch() {
 }
 
 #[tokio::test]
-async fn code_execute_call_tool_lab_id_returns_unknown_tool() {
+async fn codemode_call_tool_lab_id_returns_unknown_tool() {
     let registry = super::ToolRegistry::new();
     let broker = super::CodeModeBroker::new(&registry, None);
 
@@ -549,15 +549,14 @@ async fn code_execute_call_tool_lab_id_returns_unknown_tool() {
     match err {
         super::ToolError::Sdk { sdk_kind, message } => {
             assert_eq!(sdk_kind, "unknown_tool");
-            // Message references canonical tool name "execute" (Cloudflare-parity rename).
-            assert!(message.contains("execute"));
-            assert!(message.contains("\"radarr\""));
+            assert!(message.contains("native Lab service tool"));
+            assert!(message.contains("radarr"));
         }
         other => panic!("expected unknown_tool, got {other:?}"),
     }
 }
 
-/// When the search/execute surface is enabled (`code_mode.enabled=true`),
+/// When the Code Mode surface is enabled (`code_mode.enabled=true`),
 /// `resolve_code_mode_upstream_tool` must NOT reject calls with a surface guard.
 /// With a live (healthy) `testup` entry seeded in the pool, requesting a tool
 /// that entry does not expose must surface a genuine `unknown_tool` lookup miss

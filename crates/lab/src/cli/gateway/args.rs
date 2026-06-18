@@ -50,9 +50,9 @@ pub struct GatewayCodeArgs {
 pub enum GatewayCodeCommand {
     /// Read gateway-wide Code Mode settings.
     Status,
-    /// Enable the gateway Code Mode search/execute MCP surface.
+    /// Enable the gateway codemode MCP surface.
     Enable,
-    /// Disable the gateway Code Mode search/execute MCP surface.
+    /// Disable the gateway codemode MCP surface.
     Disable,
     /// Execute a sandboxed JavaScript snippet that calls the typed
     /// `codemode.<upstream>.<tool>` helpers (or `callTool` directly).
@@ -254,7 +254,7 @@ pub struct GatewayProtectedRouteUpdateArgs {
     /// Built-in Lab service names to expose for --gateway-subset. Repeat or comma-separate.
     #[arg(long, value_delimiter = ',')]
     pub target_service: Vec<String>,
-    /// Expose Code Mode search/execute on this gateway subset.
+    /// Expose codemode on this gateway subset.
     #[arg(long)]
     pub expose_code_mode: bool,
 }
@@ -288,7 +288,7 @@ pub struct GatewayProtectedRouteUpsertArgs {
     /// Built-in Lab service names to expose for --gateway-subset. Repeat or comma-separate.
     #[arg(long, value_delimiter = ',')]
     pub target_service: Vec<String>,
-    /// Expose Code Mode search/execute on this gateway subset.
+    /// Expose codemode on this gateway subset.
     #[arg(long)]
     pub expose_code_mode: bool,
 }
