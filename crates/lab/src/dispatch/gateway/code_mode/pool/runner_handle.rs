@@ -236,12 +236,18 @@ impl PooledRunner {
         }
         #[cfg(windows)]
         {
-            // `timeout` refuses redirected stdin. Use an absolute PowerShell
-            // path because this stub is spawned with `env_clear()`, so PATH is
-            // unavailable on Windows CI.
+            // `timeout` refuses redirected stdin, and PowerShell startup can be
+            // noisy/host-dependent on self-hosted CI. `cmd /C ping ... >NUL`
+            // is quiet, long-lived, and uses absolute System32 paths because
+            // this stub runs under `env_clear()`.
             Self::spawn_stub_command(
-                r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
-                &["-NoProfile", "-Command", "Start-Sleep -Seconds 3600"],
+                r"C:\Windows\System32\cmd.exe",
+                &[
+                    "/D",
+                    "/Q",
+                    "/C",
+                    r"C:\Windows\System32\ping.exe -n 3600 127.0.0.1 >NUL",
+                ],
             )
         }
     }
