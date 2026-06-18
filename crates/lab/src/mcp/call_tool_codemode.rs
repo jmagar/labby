@@ -58,8 +58,10 @@ the same callTool, named from the live catalog).
 ```ts
 // code is an async arrow function; whatever it returns becomes `result`.
 async () => {
-  const issues = await callTool('github::search_issues', { q: 'bug' });
-  return issues.items.length;
+  const hits = await codemode.search({ query: 'github issues', limit: 1 });
+  const docs = await codemode.describe(hits.results[0].path);
+  const issues = await codemode.github.search_issues({ q: 'bug' });
+  return { tool: docs.path, count: issues.items.length };
 }
 ```
 
@@ -67,9 +69,9 @@ async () => {
 reads instead of awaiting serially.
 
 ```ts
-// codemode.<upstream>.<tool>() helpers are auto-generated from the live catalog and
-// match the signatures returned by search.dts. callTool is the direct form and the
-// escape hatch for dynamic ids.
+// codemode.<upstream>.<tool>() helpers are auto-generated from the live catalog.
+// Use codemode.search() / codemode.describe() for compact docs, and callTool for
+// dynamic ids.
 declare function callTool<T = unknown>(
   id: `${string}::${string}`,
   params: Record<string, unknown>
@@ -90,7 +92,8 @@ A failed callTool rejects only its own promise — the run continues, so catch i
 proceed. For catch-and-continue fan-out, prefer `Promise.allSettled` so every call \
 settles before you return.
 
-Scope: `lab:read` — catalog read only. `lab` / `lab:admin` — callTool execution.
+Scope: legacy `search` accepts `lab:read`; `codemode` and compatibility `execute` \
+require `lab` or `lab:admin`.
 
 Results are capped to the configured envelope budget (default 24 KB / 6000 tokens). \
 Oversized results are replaced with a truncation marker containing `truncated`, \
@@ -107,10 +110,10 @@ configured maximum; omit it to use the server default.
 processed inside the sandbox if the runner exits with `server_error`.
 - Stack: QuickJS enforces a native stack depth limit; avoid deep recursion.
 - The only recoverable budget kind is `timeout` — retry with a smaller payload \
-or split into multiple `execute` calls.
+or split into multiple `codemode` calls.
 
 Lab actions (`lab::*` tool IDs) are not available in Code Mode. For Lab built-in \
-actions use the `execute` tool in Code Mode mode.";
+actions, use the native Lab service tools instead of Code Mode.";
 
 /// Compatibility description for the `execute` MCP tool (Code Mode sandbox).
 pub(crate) const CODE_EXECUTE_DESCRIPTION: &str = CODE_MODE_DESCRIPTION;

@@ -83,6 +83,18 @@ fn code_execute_description_contains_protocol_contract() {
         "description must explain the codemode typed helper namespace"
     );
     assert!(
+        CODE_EXECUTE_DESCRIPTION.contains("codemode.search()"),
+        "description must make in-sandbox discovery primary"
+    );
+    assert!(
+        !CODE_EXECUTE_DESCRIPTION.contains("search.dts"),
+        "description must not imply primary codemode discovery returns legacy dts"
+    );
+    assert!(
+        !CODE_EXECUTE_DESCRIPTION.contains("For Lab built-in actions use the `execute` tool"),
+        "description must not point codemode callers back to the compatibility execute tool"
+    );
+    assert!(
         !CODE_EXECUTE_DESCRIPTION.contains("code_search"),
         "description must not reference the deprecated code_search tool"
     );
