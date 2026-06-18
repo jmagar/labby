@@ -109,6 +109,5 @@
       "Take a screenshot of the agent-os desktop."
     ],
     "brandColor": "#60A5FA"
-  },
-  "mcpServers": "./.mcp.json"
+  }
 }

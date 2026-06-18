@@ -1,7 +1,0 @@
-{
-  "mcpServers": {
-    "bitwarden": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/bin/bitwarden-mcp"
-    }
-  }
-}
