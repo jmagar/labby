@@ -16,7 +16,6 @@
     "containers",
     "homelab"
   ],
-  "mcpServers": "./.mcp.json",
   "userConfig": {
     "dozzle_mcp_url": {
       "type": "string",

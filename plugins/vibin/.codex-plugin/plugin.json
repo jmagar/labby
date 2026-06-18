@@ -56,6 +56,5 @@
       "Save this session to Markdown."
     ],
     "brandColor": "#D946EF"
-  },
-  "mcpServers": "./.mcp.json"
+  }
 }

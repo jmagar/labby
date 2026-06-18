@@ -40,6 +40,5 @@
       "Help debug a container error from Dozzle logs."
     ],
     "brandColor": "#F97316"
-  },
-  "mcpServers": "./.mcp.json"
+  }
 }
