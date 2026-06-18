@@ -219,7 +219,7 @@ impl PooledRunner {
         {
             // `findstr ^` matches every line and reads stdin until EOF, so it
             // parks on an open-but-idle stdin pipe just like `cat`.
-            Self::spawn_stub_command("findstr", &["^"])
+            Self::spawn_stub_command(r"C:\Windows\System32\findstr.exe", &["^"])
         }
     }
 
@@ -236,10 +236,11 @@ impl PooledRunner {
         }
         #[cfg(windows)]
         {
-            // `timeout` refuses redirected stdin; `powershell -Command Start-Sleep`
-            // is silent, ignores stdin, and resolves from System32 under env_clear.
+            // `timeout` refuses redirected stdin. Use an absolute PowerShell
+            // path because this stub is spawned with `env_clear()`, so PATH is
+            // unavailable on Windows CI.
             Self::spawn_stub_command(
-                "powershell",
+                r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
                 &["-NoProfile", "-Command", "Start-Sleep -Seconds 3600"],
             )
         }
