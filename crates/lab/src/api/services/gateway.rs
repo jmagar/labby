@@ -687,7 +687,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gateway_destructive_routes_require_confirm() {
+    async fn gateway_routes_do_not_require_destructive_confirm_under_data_loss_definition() {
         let manager = test_manager();
         let app = test_app_with_auth_context(manager, admin_auth_context());
         let response = post_gateway(
@@ -698,7 +698,7 @@ mod tests {
             }),
         )
         .await;
-        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]
