@@ -410,7 +410,6 @@ impl GatewayManager {
             enabled = next.enabled,
             previous = old_enabled,
             timeout_ms = next.timeout_ms,
-            max_tool_calls = next.max_tool_calls,
             max_response_bytes = next.max_response_bytes,
             max_response_tokens = next.max_response_tokens,
             "gateway mode changed"

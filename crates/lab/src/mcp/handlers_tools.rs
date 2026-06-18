@@ -100,13 +100,6 @@ impl LabMcpServer {
                         "type": "array",
                         "items": { "type": "string" },
                         "description": "Optional tool allowlist for this execution. Accepts raw tool names or <upstream>::<tool> ids."
-                    },
-                    "max_tool_calls": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "description": "Maximum number of upstream callTool() calls permitted in this execution. \
-                            Capped at the server-side configured maximum. \
-                            Omit to use the server default. Use a lower value to bound cost on large fan-out scripts."
                     }
                 },
                 "required": ["code"]

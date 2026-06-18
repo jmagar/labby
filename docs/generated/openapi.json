@@ -1529,9 +1529,6 @@
           "max_response_tokens": {
             "type": "integer"
           },
-          "max_tool_calls": {
-            "type": "integer"
-          },
           "timeout_ms": {
             "type": "integer"
           },
@@ -3225,9 +3222,6 @@
           "name"
         ],
         "properties": {
-          "max_tool_calls": {
-            "type": "integer"
-          },
           "name": {
             "type": "string"
           },

@@ -57,12 +57,6 @@ pub const ACTIONS: &[ActionSpec] = &[
                 description: "Snippet name",
             },
             ParamSpec {
-                name: "max_tool_calls",
-                ty: "integer",
-                required: false,
-                description: "Optional max tool-call cap for this run",
-            },
-            ParamSpec {
                 name: "params",
                 ty: "object",
                 required: false,

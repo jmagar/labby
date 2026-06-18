@@ -59,7 +59,6 @@ type ToolCallFut<'a> = std::pin::Pin<
 pub(in crate::dispatch::gateway::code_mode) struct RunnerConfig {
     pub code_to_run: String,
     pub proxy: String,
-    pub max_tool_calls: usize,
     pub timeout: Duration,
     pub caller: CodeModeCaller,
     pub surface: CodeModeSurface,
@@ -77,8 +76,6 @@ pub(in crate::dispatch::gateway::code_mode) struct RunnerConfig {
 
 struct DriveState {
     calls: Vec<(u64, CodeModeExecutedCall)>,
-    started_tool_calls: usize,
-    started_artifact_writes: usize,
     artifacts: Vec<CodeModeArtifactReceipt>,
     artifact_store_pruned: bool,
     artifact_max_bytes: usize,
@@ -91,8 +88,6 @@ impl DriveState {
         let artifact_max_bytes = super::artifacts::artifact_max_bytes();
         Self {
             calls: Vec::new(),
-            started_tool_calls: 0,
-            started_artifact_writes: 0,
             artifacts: Vec::new(),
             artifact_store_pruned: false,
             artifact_max_bytes,
@@ -110,16 +105,14 @@ impl CodeModeBroker<'_> {
     /// tool-call/artifact/completion protocol loop until the runner exits
     /// or the wall-clock deadline fires.
     ///
-    /// The signature is kept identical to the original (10 positional params)
-    /// so all call sites compile unchanged. Internally the params are packed
-    /// into [`RunnerConfig`] and the loop arms are delegated to named helpers.
-    /// All timeout, killpg, and budget-gate invariants are preserved exactly.
+    /// The runtime params are packed into [`RunnerConfig`] and the loop arms
+    /// are delegated to named helpers. Timeout and killpg invariants are
+    /// preserved exactly.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::dispatch::gateway::code_mode) async fn run_in_runner(
         &self,
         code_to_run: String,
         proxy: String,
-        max_tool_calls: usize,
         timeout: Duration,
         caller: CodeModeCaller,
         surface: CodeModeSurface,
@@ -131,7 +124,6 @@ impl CodeModeBroker<'_> {
         let cfg = RunnerConfig {
             code_to_run,
             proxy,
-            max_tool_calls,
             timeout,
             caller,
             surface,
@@ -326,16 +318,12 @@ impl CodeModeBroker<'_> {
                                 seq,
                                 id,
                                 params,
-                                child,
-                                child_pid,
                                 deadline,
                                 cfg,
-                                &mut state,
                                 &mut pending_tool_calls,
                             )
                             .await
                             {
-                                // The limit gate already terminated the runner.
                                 return DriveOutcome::RunnerUnhealthy(err);
                             }
                         }
@@ -495,23 +483,10 @@ async fn enqueue_tool_call<'a>(
     seq: u64,
     id: String,
     params: Value,
-    child: &mut tokio::process::Child,
-    child_pid: Option<u32>,
     deadline: tokio::time::Instant,
     cfg: &RunnerConfig,
-    state: &mut DriveState,
     pending_tool_calls: &mut FuturesUnordered<ToolCallFut<'a>>,
 ) -> Result<(), CodeModeExecutionError> {
-    if let Err(err) = ensure_within_limit(
-        state.started_tool_calls,
-        cfg.max_tool_calls,
-        "tool call",
-        &state.calls,
-    ) {
-        terminate_code_mode_runner(child, child_pid).await;
-        return Err(err);
-    }
-    state.started_tool_calls += 1;
     let call_id = id.clone();
     let redacted_params = super::trace::redact_trace_params(&params, cfg.trace_params);
     let caller = cfg.caller.clone();
@@ -548,16 +523,6 @@ async fn handle_artifact_write_event(
     cfg: &RunnerConfig,
     state: &mut DriveState,
 ) -> Result<(), CodeModeExecutionError> {
-    if let Err(err) = ensure_within_limit(
-        state.started_artifact_writes,
-        cfg.max_tool_calls,
-        "artifact write",
-        &state.calls,
-    ) {
-        terminate_code_mode_runner(child, child_pid).await;
-        return Err(err);
-    }
-    state.started_artifact_writes += 1;
     // Prune (lazy, once per run) and the write are host-side filesystem work;
     // bound them by the run deadline just like tool calls so a hung or slow
     // disk can't outlive `timeout_ms`.
@@ -714,40 +679,6 @@ fn code_mode_timeout_error(calls: &[(u64, CodeModeExecutedCall)]) -> CodeModeExe
     )
 }
 
-/// Shared budget gate for the two host-brokered operations. Tool calls and
-/// artifact writes each pass their own running count and share the
-/// `max_tool_calls` limit, so neither starves the other. `noun` names the
-/// operation in the error message; both reuse the `tool_call_limit_exceeded`
-/// kind (HTTP 429) per the error contract.
-fn ensure_within_limit(
-    started: usize,
-    limit: usize,
-    noun: &str,
-    calls: &[(u64, CodeModeExecutedCall)],
-) -> Result<(), CodeModeExecutionError> {
-    if started < limit {
-        return Ok(());
-    }
-
-    Err(CodeModeExecutionError::with_trace(
-        ToolError::Sdk {
-            sdk_kind: "tool_call_limit_exceeded".to_string(),
-            message: format!("Code Mode execution exceeded the {noun} limit of {limit}"),
-        },
-        sorted_calls(calls),
-    ))
-}
-
-/// Test seam for the shared budget gate. Keeps the trace argument out of the
-/// assertion.
-#[cfg(test)]
-pub(in crate::dispatch::gateway::code_mode) fn ensure_call_budget_for_test(
-    started: usize,
-    limit: usize,
-) -> Result<(), CodeModeExecutionError> {
-    ensure_within_limit(started, limit, "tool call", &[])
-}
-
 async fn handle_artifact_write(
     stdin: &mut ChildStdin,
     artifact_root: &Path,
@@ -834,7 +765,6 @@ mod tests {
         RunnerConfig {
             code_to_run: "async () => 1".to_string(),
             proxy: String::new(),
-            max_tool_calls: 1,
             timeout,
             caller: CodeModeCaller::TrustedLocal,
             surface: CodeModeSurface::Cli,

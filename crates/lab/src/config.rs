@@ -682,14 +682,6 @@ fn default_code_mode_timeout_ms() -> u64 {
     30_000
 }
 
-fn default_code_mode_max_tool_calls() -> usize {
-    // Cloudflare Code Mode parity: the 30s wall-clock timeout + 64 MiB memory
-    // cap are the real bounds, not a small per-run call cap. This is a high
-    // safety ceiling that still stops a runaway loop without blocking
-    // legitimate fan-out.
-    1000
-}
-
 fn default_code_mode_max_response_bytes() -> usize {
     24 * 1024
 }
@@ -721,9 +713,6 @@ pub struct CodeModeConfig {
     /// Maximum wall-clock time for one Code Mode execution.
     #[serde(default = "default_code_mode_timeout_ms")]
     pub timeout_ms: u64,
-    /// Maximum host-brokered tool calls allowed in one Code Mode execution.
-    #[serde(default = "default_code_mode_max_tool_calls")]
-    pub max_tool_calls: usize,
     /// Maximum serialized response envelope size returned by codemode.
     #[serde(default = "default_code_mode_max_response_bytes")]
     pub max_response_bytes: usize,
@@ -751,7 +740,6 @@ impl Default for CodeModeConfig {
             enabled: false,
             trace_params: default_code_mode_trace_params(),
             timeout_ms: default_code_mode_timeout_ms(),
-            max_tool_calls: default_code_mode_max_tool_calls(),
             max_response_bytes: default_code_mode_max_response_bytes(),
             max_response_tokens: default_code_mode_max_response_tokens(),
             token_estimate_divisor: default_token_estimate_divisor(),
@@ -766,11 +754,6 @@ impl CodeModeConfig {
         if !(1..=60_000).contains(&self.timeout_ms) {
             return Err(ConfigError::InvalidCodeModeTimeout {
                 value: self.timeout_ms,
-            });
-        }
-        if !(1..=10_000).contains(&self.max_tool_calls) {
-            return Err(ConfigError::InvalidCodeModeMaxToolCalls {
-                value: self.max_tool_calls,
             });
         }
         if !(1024..=1024 * 1024).contains(&self.max_response_bytes) {
@@ -1183,8 +1166,6 @@ pub enum ConfigError {
     MissingOauthUrl { name: String },
     #[error("gateway code_mode.timeout_ms={value} is invalid — expected 1..=60000")]
     InvalidCodeModeTimeout { value: u64 },
-    #[error("gateway code_mode.max_tool_calls={value} is invalid — expected 1..=10000")]
-    InvalidCodeModeMaxToolCalls { value: usize },
     #[error("gateway code_mode.max_response_bytes={value} is invalid — expected 1024..=1048576")]
     InvalidCodeModeMaxResponseBytes { value: usize },
     #[error("gateway code_mode.max_response_tokens={value} is invalid — expected 256..=256000")]
@@ -2074,7 +2055,6 @@ pub(crate) fn config_json_value_for_path(cfg: &LabConfig, path: &str) -> serde_j
         "admin.enabled" => serde_json::json!(cfg.admin.enabled),
         "code_mode.trace_params" => serde_json::json!(cfg.code_mode.trace_params),
         "code_mode.timeout_ms" => serde_json::json!(cfg.code_mode.timeout_ms),
-        "code_mode.max_tool_calls" => serde_json::json!(cfg.code_mode.max_tool_calls),
         "code_mode.max_response_bytes" => serde_json::json!(cfg.code_mode.max_response_bytes),
         "code_mode.max_response_tokens" => serde_json::json!(cfg.code_mode.max_response_tokens),
         "code_mode.token_estimate_divisor" => {
@@ -3626,7 +3606,6 @@ strategy = "dynamic"
 [code_mode]
 enabled = true
 timeout_ms = 2500
-max_tool_calls = 3
 
 [[upstream]]
 name = "acme"
@@ -3637,7 +3616,6 @@ url = "https://acme.example.com/mcp"
 
         assert!(cfg.code_mode.enabled);
         assert_eq!(cfg.code_mode.timeout_ms, 2500);
-        assert_eq!(cfg.code_mode.max_tool_calls, 3);
         cfg.validate().expect("root code_mode validates");
     }
 
@@ -3645,7 +3623,6 @@ url = "https://acme.example.com/mcp"
     fn code_mode_is_root_level_config_with_default_limits() {
         let default_cfg = LabConfig::default();
         assert_eq!(default_cfg.code_mode.timeout_ms, 30_000);
-        assert_eq!(default_cfg.code_mode.max_tool_calls, 1000);
         assert_eq!(default_cfg.code_mode.max_response_bytes, 24 * 1024);
         assert_eq!(default_cfg.code_mode.max_response_tokens, 6000);
 
@@ -3653,7 +3630,6 @@ url = "https://acme.example.com/mcp"
             r"
 [code_mode]
 timeout_ms = 2500
-max_tool_calls = 3
 max_response_bytes = 12000
 max_response_tokens = 3000
 ",
@@ -3661,7 +3637,6 @@ max_response_tokens = 3000
         .expect("root code_mode parses");
 
         assert_eq!(cfg.code_mode.timeout_ms, 2500);
-        assert_eq!(cfg.code_mode.max_tool_calls, 3);
         assert_eq!(cfg.code_mode.max_response_bytes, 12000);
         assert_eq!(cfg.code_mode.max_response_tokens, 3000);
     }
@@ -3695,7 +3670,6 @@ upstream_request_timeout_ms = 60000
             r"
 [code_mode]
 timeout_ms = 0
-max_tool_calls = 8
 ",
         )
         .expect("code_mode parses");
@@ -3708,20 +3682,6 @@ max_tool_calls = 8
             r"
 [code_mode]
 timeout_ms = 5000
-max_tool_calls = 0
-",
-        )
-        .expect("code_mode parses");
-        assert!(matches!(
-            cfg.validate(),
-            Err(ConfigError::InvalidCodeModeMaxToolCalls { value: 0 })
-        ));
-
-        let cfg = toml::from_str::<LabConfig>(
-            r"
-[code_mode]
-timeout_ms = 5000
-max_tool_calls = 8
 max_response_bytes = 100
 ",
         )
@@ -3735,7 +3695,6 @@ max_response_bytes = 100
             r"
 [code_mode]
 timeout_ms = 5000
-max_tool_calls = 8
 max_response_tokens = 100
 ",
         )
@@ -4061,16 +4020,12 @@ service_scope = "user"
     #[test]
     fn code_mode_config_defaults_are_sane() {
         let config = CodeModeConfig::default();
-        // PRESENCE: timeout and call limits are positive
+        // PRESENCE: timeout and output limits are positive
         assert!(config.timeout_ms > 0);
-        assert!(config.max_tool_calls > 0);
         assert!(config.max_response_bytes > 0);
         assert!(config.max_response_tokens > 0);
         // ABSENCE: not wildly large (sanity bounds)
         assert!(config.timeout_ms <= 60_000);
-        // High safety ceiling — the 30s wall-clock timeout is the meaningful
-        // bound, not a small per-run call cap (Cloudflare Code Mode parity).
-        assert!(config.max_tool_calls <= 10_000);
     }
 
     // ── Process-wide atomic flags ─────────────────────────────────────────────

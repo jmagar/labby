@@ -44,9 +44,6 @@ pub struct SnippetExecArgs {
     /// Input values passed to the snippet as key=value pairs.
     #[arg(long = "param", value_name = "KEY=VALUE")]
     pub params: Vec<String>,
-    /// Override the configured Code Mode max tool-call cap for this run.
-    #[arg(long)]
-    pub max_tool_calls: Option<usize>,
 }
 
 #[derive(Debug, Args)]
@@ -125,7 +122,6 @@ pub async fn run(args: SnippetsArgs, format: OutputFormat, config: &LabConfig) -
             json!({
                 "name": args.name,
                 "params": crate::cli::params::parse_kv_params(args.params)?,
-                "max_tool_calls": args.max_tool_calls,
             }),
             true,
             false,

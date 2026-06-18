@@ -29,7 +29,6 @@ impl CodeModeBroker<'_> {
     pub(crate) async fn execute(
         &self,
         code: &str,
-        max_tool_calls: usize,
         caller: CodeModeCaller,
         surface: CodeModeSurface,
         config: crate::config::CodeModeConfig,
@@ -49,7 +48,6 @@ impl CodeModeBroker<'_> {
         let mut response = self
             .execute_sandboxed(
                 code,
-                max_tool_calls.max(1).min(config.max_tool_calls.max(1)),
                 Duration::from_millis(config.timeout_ms.max(1)),
                 caller,
                 surface,
@@ -201,7 +199,6 @@ impl CodeModeBroker<'_> {
     async fn execute_sandboxed(
         &self,
         code: &str,
-        max_tool_calls: usize,
         timeout: Duration,
         caller: CodeModeCaller,
         surface: CodeModeSurface,
@@ -258,7 +255,6 @@ impl CodeModeBroker<'_> {
         self.run_in_runner(
             code_to_run,
             proxy,
-            max_tool_calls,
             remaining,
             caller,
             surface,

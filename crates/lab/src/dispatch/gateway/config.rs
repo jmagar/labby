@@ -570,10 +570,6 @@ pub fn validate_code_mode(code_mode: &crate::config::CodeModeConfig) -> Result<(
             message: e.to_string(),
             param: "code_mode.timeout_ms".to_string(),
         },
-        crate::config::ConfigError::InvalidCodeModeMaxToolCalls { .. } => ToolError::InvalidParam {
-            message: e.to_string(),
-            param: "code_mode.max_tool_calls".to_string(),
-        },
         crate::config::ConfigError::InvalidCodeModeMaxResponseBytes { .. } => {
             ToolError::InvalidParam {
                 message: e.to_string(),

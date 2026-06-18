@@ -95,9 +95,9 @@ the sandbox before returning — that is the point of Code Mode.
 Budget:
 - Time: a 30 s wall-clock timeout bounds the whole run. Split work across \
 calls or reduce local computation if the `timeout` kind is returned.
-- Tool calls: the optional `max_tool_calls` param bounds how many upstream \
-callTool() invocations this run may make. It is capped at the server-side \
-configured maximum; omit it to use the server default.
+- Tool calls: Code Mode does not impose a per-run call-count cap. The whole \
+run remains bounded by wall-clock time, sandbox memory/stack, output caps, and \
+host-side tool policy.
 - Memory: 64 MiB heap limit enforced by the QuickJS runtime. Reduce the data \
 processed inside the sandbox if the runner exits with `server_error`.
 - Stack: QuickJS enforces a native stack depth limit; avoid deep recursion.
@@ -237,13 +237,6 @@ impl LabMcpServer {
                 return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
             }
         };
-        let requested_max_tool_calls = args
-            .get("max_tool_calls")
-            .and_then(Value::as_u64)
-            .map(|value| value as usize)
-            .unwrap_or(config.max_tool_calls)
-            .max(1)
-            .min(config.max_tool_calls.max(1));
         let capability_filter =
             match route_scoped_capability_filter(args, self.route_scope.allowed_upstreams()) {
                 Ok(filter) => filter,
@@ -263,7 +256,6 @@ impl LabMcpServer {
             actor_label = subject,
             agent_kind = "agent",
             code_hash = %code_hash,
-            max_tool_calls = requested_max_tool_calls,
             input_tokens,
             "gateway codemode start"
         );
@@ -278,7 +270,6 @@ impl LabMcpServer {
         let response = match broker
             .execute(
                 code,
-                requested_max_tool_calls,
                 caller,
                 self.code_mode_surface(),
                 config,

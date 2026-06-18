@@ -785,16 +785,6 @@ pub fn settings_fields() -> Vec<SettingsFieldSpec> {
         ),
         number_editable(
             "advanced",
-            "code_mode.max_tool_calls",
-            "Code Mode max tool calls",
-            "Maximum host-brokered tool calls per execution.",
-            SettingsApplyMode::Partial,
-            1,
-            10_000,
-            Some("100"),
-        ),
-        number_editable(
-            "advanced",
             "code_mode.max_response_bytes",
             "Code Mode max response bytes",
             "Maximum serialized response envelope size.",

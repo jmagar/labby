@@ -96,7 +96,6 @@ async fn gateway_code_mode_set_accepts_all_public_config_fields() {
             "enabled": true,
             "trace_params": false,
             "timeout_ms": 5000,
-            "max_tool_calls": 8,
             "max_response_bytes": 4096,
             "max_response_tokens": 1024,
             "token_estimate_divisor": 2,
@@ -110,7 +109,6 @@ async fn gateway_code_mode_set_accepts_all_public_config_fields() {
     assert_eq!(value["enabled"], true);
     assert_eq!(value["trace_params"], false);
     assert_eq!(value["timeout_ms"], 5000);
-    assert_eq!(value["max_tool_calls"], 8);
     assert_eq!(value["max_response_bytes"], 4096);
     assert_eq!(value["max_response_tokens"], 1024);
     assert_eq!(value["token_estimate_divisor"], 2);

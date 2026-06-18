@@ -111,7 +111,6 @@ Configuration lives at root `[code_mode]` in `config.toml`:
 enabled = true
 trace_params = true
 timeout_ms = 30000
-max_tool_calls = 1000
 max_response_bytes = 24576
 max_response_tokens = 6000
 token_estimate_divisor = 4
@@ -135,7 +134,7 @@ HTTP/MCP gateway management actions:
 ```
 
 ```json
-{ "action": "gateway.code_mode.set", "params": { "enabled": true, "trace_params": true, "timeout_ms": 5000, "max_tool_calls": 8, "max_log_entries": 100 } }
+{ "action": "gateway.code_mode.set", "params": { "enabled": true, "trace_params": true, "timeout_ms": 5000, "max_log_entries": 100 } }
 ```
 
 MCP `codemode` call shape:
@@ -199,7 +198,6 @@ Use `codemode` for gateway Code Mode. Discovery happens inside the sandbox with
 Rules:
 
 - `code_mode.timeout_ms` is validated in the range `1..=60000`
-- `code_mode.max_tool_calls` is validated in the range `1..=10000`
 - `code_mode.max_response_bytes` is validated in the range `1024..=1048576`
 - `code_mode.max_response_tokens` is validated in the range `256..=256000`
 - `code_mode.token_estimate_divisor` is validated in the range `1..=64`
@@ -209,7 +207,7 @@ Rules:
 - `codemode` requires `lab` or `lab:admin` and broker calls through the gateway visibility checks
 - Lab actions are not supported inside Code Mode `callTool`
 - gateway action provenance fields (`origin` and `owner`) are reserved in Code Mode and are overwritten by the broker
-- `codemode` enforces `timeout_ms` by killing the child process and enforces `max_tool_calls` in the parent before brokering each call
+- `codemode` enforces `timeout_ms` by killing the child process; tool calls are bounded by the run deadline and host-side tool policy, not by a per-run call-count cap
 - invalid Code Mode ids return `invalid_code_mode_id`
 - unavailable or overlarge upstream schemas may be omitted; generated signatures fall back to `unknown`
 - old `[[upstream]].code_mode` blocks are accepted only as migration input and are dropped on the next gateway config write

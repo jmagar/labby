@@ -1368,16 +1368,6 @@ fn classify_rejection_preserves_kind_with_multiline_message() {
     );
 }
 
-#[test]
-fn ensure_call_budget_blocks_at_limit() {
-    // Budget gate shared by tool calls AND artifact writes: below the cap is Ok,
-    // at/above the cap returns tool_call_limit_exceeded.
-    assert!(runner_drive::ensure_call_budget_for_test(2, 3).is_ok());
-    let err =
-        runner_drive::ensure_call_budget_for_test(3, 3).expect_err("at the cap must be rejected");
-    assert_eq!(err.kind(), "tool_call_limit_exceeded");
-}
-
 #[tokio::test]
 async fn write_code_mode_artifact_persists_content_and_returns_receipt() {
     let root = TempDir::new().expect("temp root");

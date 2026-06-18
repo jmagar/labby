@@ -251,8 +251,6 @@ pub struct CodeModeSetParams {
     #[serde(default)]
     pub timeout_ms: Option<u64>,
     #[serde(default)]
-    pub max_tool_calls: Option<usize>,
-    #[serde(default)]
     pub max_response_bytes: Option<usize>,
     #[serde(default)]
     pub max_response_tokens: Option<usize>,

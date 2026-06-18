@@ -2470,9 +2470,6 @@ Options:
           [default: auto]
           [possible values: auto, plain, color]
 
-      --max-tool-calls <MAX_TOOL_CALLS>
-          Override the configured Code Mode max tool-call cap for this run
-
   -h, --help
           Print help
 ```

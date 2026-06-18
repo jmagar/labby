@@ -27,7 +27,6 @@ struct ExecParams {
     name: Option<String>,
     #[serde(default)]
     params: Value,
-    max_tool_calls: Option<usize>,
     #[serde(default)]
     all: bool,
 }
@@ -100,7 +99,7 @@ async fn dispatch_inner(
                     param: "name".to_string(),
                 });
             };
-            execute_snippet(manager, &name, params.params, params.max_tool_calls).await
+            execute_snippet(manager, &name, params.params).await
         }
         "snippets.test" => {
             let params: ExecParams = parse_params(params)?;
@@ -113,7 +112,7 @@ async fn dispatch_inner(
                     param: "name".to_string(),
                 });
             };
-            let response = execute_snippet(manager, &name, params.params, None).await?;
+            let response = execute_snippet(manager, &name, params.params).await?;
             let passed = response
                 .get("result")
                 .and_then(|result| result.get("ok"))
@@ -169,14 +168,7 @@ async fn test_all_snippets(
     let snippets = list_snippets(&lab_home(), &builtin_snippet_dir())?;
     let mut results = Vec::with_capacity(snippets.len());
     for snippet in snippets {
-        match execute_snippet(
-            manager,
-            &snippet.name,
-            Value::Object(Default::default()),
-            None,
-        )
-        .await
-        {
+        match execute_snippet(manager, &snippet.name, Value::Object(Default::default())).await {
             Ok(response) => {
                 let passed = response
                     .get("result")
@@ -214,7 +206,6 @@ async fn execute_snippet(
     manager: Option<&crate::dispatch::gateway::manager::GatewayManager>,
     name: &str,
     input: Value,
-    max_tool_calls: Option<usize>,
 ) -> Result<Value, ToolError> {
     let owned_manager;
     let manager = if let Some(manager) = manager {
@@ -233,7 +224,6 @@ async fn execute_snippet(
     let response = broker
         .execute(
             &code,
-            max_tool_calls.unwrap_or(config.max_tool_calls),
             CodeModeCaller::TrustedLocal,
             CodeModeSurface::Cli,
             config,

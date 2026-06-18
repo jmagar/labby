@@ -39,11 +39,9 @@ pub(super) async fn run_gateway_code(
         GatewayCodeCommand::Exec { code, file } => {
             let code = read_code_mode_source(code, file, CODE_MODE_CLI_MAX_SOURCE_BYTES)?;
             let config = manager.code_mode_config().await;
-            let max_tool_calls = config.max_tool_calls;
             let response = broker
                 .execute(
                     &code,
-                    max_tool_calls,
                     caller,
                     surface,
                     config,

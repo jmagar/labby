@@ -351,9 +351,6 @@ async fn handle_tool_actions(
             if let Some(timeout_ms) = params.timeout_ms {
                 next.timeout_ms = timeout_ms;
             }
-            if let Some(max_tool_calls) = params.max_tool_calls {
-                next.max_tool_calls = max_tool_calls;
-            }
             if let Some(max_response_bytes) = params.max_response_bytes {
                 next.max_response_bytes = max_response_bytes;
             }

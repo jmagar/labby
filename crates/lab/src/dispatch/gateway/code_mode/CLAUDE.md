@@ -129,7 +129,7 @@ items.
 | Per-run cwd isolation | Each runner has a long-lived spawn `TempDir`; the runner creates a FRESH per-execution jail subdir under it on every `Start` and removes the previous one (`runner.rs::reset_execution_jail`), so a pooled process never accumulates cwd state across runs. The `TempDir` is removed when the runner handle drops. |
 | Artifact path containment | Enforced: `artifacts.rs` checks `canonicalize` + `starts_with(jail_root)`, rejects symlinks |
 | Artifact size cap | Enforced: 8 MiB default (`LAB_CODE_MODE_ARTIFACT_MAX_MIB`) |
-| Tool call budget | Enforced: `max_tool_calls` counter, emits `tool_call_limit_exceeded` |
+| Tool call budget | Not enforced. Code Mode is bounded by wall-clock timeout, sandbox memory/stack, output/log/artifact caps, and host-side tool policy. |
 
 **Writing tests that assert on env isolation:** `env_clear()` has landed, so a
 test asserting the runner child has a minimal/empty environment reflects real
@@ -184,5 +184,5 @@ env_clear lands" comment — that state is in the past.
 ## Related Docs
 
 - `docs/dev/CODE_MODE.md` — surface documentation and examples (authoritative)
-- `docs/dev/ERRORS.md` — `"timeout"`, `"tool_call_limit_exceeded"`, artifact kinds
+- `docs/dev/ERRORS.md` — `"timeout"` and artifact kinds
 - Parent: `crates/lab/src/dispatch/gateway/CLAUDE.md` — trust model, runner env isolation (`env_clear`)

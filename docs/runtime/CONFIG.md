@@ -258,7 +258,6 @@ synthetic `codemode` tool instead.
 | `enabled` | — | `false` | Replace raw proxied upstream tools with the synthetic Code Mode `codemode` tool for the gateway. Discovery happens inside the sandbox with `codemode.search()` and `codemode.describe()`. |
 | `trace_params` | — | `true` | Include only redacted and capped upstream tool params in Code Mode call traces and history. Set false to omit params from traces entirely. |
 | `timeout_ms` | — | `30000` | Maximum wall-clock time for one Code Mode execution. Valid range: 1-60000. |
-| `max_tool_calls` | — | `1000` | Maximum host-brokered upstream tool calls allowed in one execution. Valid range: 1-10000. |
 | `max_response_bytes` | — | `24576` | Maximum serialized response envelope size returned by `codemode`. Valid range: 1024-1048576. |
 | `max_response_tokens` | — | `6000` | Approximate maximum response tokens returned by `codemode`. Valid range: 256-256000. |
 | `token_estimate_divisor` | — | `4` | Byte-to-token estimate divisor for response limiting. Valid range: 1-64. |
@@ -271,7 +270,6 @@ Example:
 [code_mode]
 enabled = true
 trace_params = true
-max_tool_calls = 1000
 timeout_ms = 30000
 max_response_bytes = 24576
 max_response_tokens = 6000
@@ -322,11 +320,10 @@ single artifact defaults to a **8 MiB** cap, overridable with
 and fails cleanly instead of as an opaque out-of-memory trap. `options.contentType`
 defaults to `text/plain` when omitted or blank and is itself capped at 256 bytes
 (it *does* ride the receipt back into the response). Artifact writes do not
-bypass `timeout_ms` or final response caps. Each write counts against a
-**separate** budget from tool calls — both are bounded by `max_tool_calls`
-(default `1000`), but artifact writes and upstream tool calls have independent
-counters, so a write-heavy run never starves its tool-call allowance and vice
-versa. They are the preferred way to keep large markdown reports, source tables,
+bypass `timeout_ms` or final response caps. Artifact writes and upstream tool
+calls do not have per-run count caps; the run is bounded by wall-clock time,
+sandbox memory/stack, artifact size/store limits, and host-side tool policy.
+Artifacts are the preferred way to keep large markdown reports, source tables,
 crawl manifests, and follow-up snippets out of the final JSON response while
 still making them available on disk.
 

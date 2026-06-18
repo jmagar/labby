@@ -71,12 +71,6 @@ pub const ACTIONS: &[ActionSpec] = &[
                 description: "Maximum wall-clock time for one Code Mode execution",
             },
             ParamSpec {
-                name: "max_tool_calls",
-                ty: "integer",
-                required: false,
-                description: "Maximum host-brokered tool calls allowed in one execution",
-            },
-            ParamSpec {
                 name: "max_response_bytes",
                 ty: "integer",
                 required: false,
@@ -900,7 +894,6 @@ mod tests {
             "enabled",
             "trace_params",
             "timeout_ms",
-            "max_tool_calls",
             "max_response_bytes",
             "max_response_tokens",
             "token_estimate_divisor",

@@ -72,9 +72,8 @@ impl CodeModeBroker<'_> {
         );
 
         // Run the caller's JS filter over the catalog inside the Javy runner. The
-        // catalog is injected as a global `const tools = [...]`. `max_tool_calls = 0`
-        // means any stray `callTool` in the discovery filter errors out — discovery
-        // must not call tools.
+        // catalog is injected as a global `const tools = [...]`. The discovery
+        // proxy exposes no host tool-call helpers, so discovery cannot call tools.
         //
         // Use the pre-serialized `catalog_json` from the render cache so we do
         // not pay `serde_json::to_string` again when the catalog is unchanged.
@@ -90,7 +89,6 @@ impl CodeModeBroker<'_> {
             .run_in_runner(
                 code.to_string(),
                 proxy,
-                0,
                 CODE_MODE_DISCOVERY_TIMEOUT,
                 caller,
                 surface,
