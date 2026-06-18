@@ -288,6 +288,8 @@ fn code_mode_trace_output_schema() -> Arc<serde_json::Map<String, Value>> {
                 "properties": {
                     "kind": { "const": "code_mode_execute_trace" },
                     "call_count": { "type": "integer", "minimum": 0 },
+                    "input_tokens": { "type": "integer", "minimum": 0 },
+                    "output_tokens": { "type": "integer", "minimum": 0 },
                     "calls": { "type": "array", "items": { "type": "object" } },
                     "result": {},
                     "result_shape": { "type": "object" },

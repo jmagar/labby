@@ -841,6 +841,8 @@ mod tests {
                 kind: crate::dispatch::gateway::code_mode::CodeModeHistoryKind::Execute,
                 ok: true,
                 elapsed_ms: 7,
+                input_tokens: Some(3),
+                output_tokens: Some(5),
                 error_kind: None,
                 calls: Vec::new(),
                 match_count: None,

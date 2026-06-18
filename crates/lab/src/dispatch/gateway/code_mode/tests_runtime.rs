@@ -355,6 +355,8 @@ fn code_mode_history_bounds_entries_and_keeps_redacted_params_only() {
             kind: CodeModeHistoryKind::Execute,
             ok: true,
             elapsed_ms: idx,
+            input_tokens: Some(idx as usize + 1),
+            output_tokens: Some(idx as usize + 2),
             error_kind: None,
             calls: vec![CodeModeExecutedCall {
                 id: format!("test::tool_{idx}"),
@@ -377,6 +379,8 @@ fn code_mode_history_bounds_entries_and_keeps_redacted_params_only() {
     let serialized = serde_json::to_string(&snapshot).unwrap();
     assert!(serialized.contains("[redacted]"));
     assert!(!serialized.contains("raw-secret-token"));
+    assert!(serialized.contains("input_tokens"));
+    assert!(serialized.contains("output_tokens"));
 }
 
 #[test]
@@ -389,6 +393,8 @@ fn code_mode_history_bounds_by_bytes() {
             kind: CodeModeHistoryKind::Execute,
             ok: true,
             elapsed_ms: idx,
+            input_tokens: Some(idx as usize + 1),
+            output_tokens: Some(idx as usize + 2),
             error_kind: None,
             calls: vec![CodeModeExecutedCall {
                 id: format!("test::tool_{idx}"),
@@ -421,6 +427,8 @@ fn code_mode_history_replaces_single_oversized_entry_with_bounded_sentinel() {
         kind: CodeModeHistoryKind::Execute,
         ok: false,
         elapsed_ms: 99,
+        input_tokens: Some(99),
+        output_tokens: Some(0),
         error_kind: Some("server_error".to_string()),
         calls: vec![CodeModeExecutedCall {
             id: "test::oversized".to_string(),

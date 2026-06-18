@@ -161,14 +161,15 @@ function resultCard(t){
 function historyRow(entry){
   const count=Array.isArray(entry.calls)?entry.calls.length:0;
   const status=entry.ok?`<span class="ok" role="img" aria-label="success">✓</span>`:`<span class="pill err">${esc(statusLabel(entry))}</span>`;
-  return card(`<div class="row"><div class="name">${esc(entry.kind||"entry")}</div>${status}</div><div class="meta">${esc(entry.elapsed_ms??0)} ms / ${count} calls${entry.match_count!==undefined?` / ${esc(entry.match_count)} matches`:""}</div>`);
+  const tokens=`${entry.input_tokens!==undefined?` / in ${esc(entry.input_tokens)} tok`:""}${entry.output_tokens!==undefined?` / out ${esc(entry.output_tokens)} tok`:""}`;
+  return card(`<div class="row"><div class="name">${esc(entry.kind||"entry")}</div>${status}</div><div class="meta">${esc(entry.elapsed_ms??0)} ms / ${count} calls${tokens}${entry.match_count!==undefined?` / ${esc(entry.match_count)} matches`:""}</div>`);
 }
 // Returns true when `trace` matched a known Code Mode trace kind, false for the
 // empty placeholder or an unrecognized shape (rendered as a raw JSON dump).
 function render(trace){
   const t=trace&&trace.structuredContent?trace.structuredContent:trace;
   if(!t||!t.kind){clearStats();content.innerHTML=card('<div class="meta">Run codemode to populate the inspector.</div>');return false;}
-  if(t.kind==="code_mode_execute_trace"){const rows=(t.calls||[]).map(callRow).join("")||card('<div class="meta">No calls were made.</div>');const result=resultCard(t);summary.textContent=`${t.call_count||0} calls captured`;renderStats([["Execute calls",t.call_count||0],["Catalog matches",0],["History entries",0]]);content.innerHTML=panel("Execute trace",t.call_count||0,rows+result);return true;}
+  if(t.kind==="code_mode_execute_trace"){const rows=(t.calls||[]).map(callRow).join("")||card('<div class="meta">No calls were made.</div>');const result=resultCard(t);summary.textContent=`${t.call_count||0} calls captured`;renderStats([["Execute calls",t.call_count||0],["Input tokens",t.input_tokens||0],["Output tokens",t.output_tokens||0]]);content.innerHTML=panel("Execute trace",t.call_count||0,rows+result);return true;}
   if(t.kind==="code_mode_history"){const rows=(t.entries||[]).map(historyRow).join("")||card('<div class="meta">History is empty.</div>');summary.textContent=`${(t.entries||[]).length} bounded history entries`;renderStats([["Execute calls",0],["Catalog matches",0],["History entries",(t.entries||[]).length]]);content.innerHTML=panel("Recent history",(t.entries||[]).length,rows);return true;}
   clearStats();content.innerHTML=card(`<pre>${esc(json(t))}</pre>`);return false;
 }

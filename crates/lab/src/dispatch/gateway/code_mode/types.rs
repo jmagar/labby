@@ -280,6 +280,10 @@ pub struct CodeModeHistoryEntry {
     pub ok: bool,
     pub elapsed_ms: u128,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error_kind: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub calls: Vec<CodeModeExecutedCall>,
@@ -384,6 +388,8 @@ impl CodeModeHistory {
             kind,
             ok: false,
             elapsed_ms: 0,
+            input_tokens: None,
+            output_tokens: None,
             error_kind: Some("history_entry_too_large".to_string()),
             calls: Vec::new(),
             match_count: None,

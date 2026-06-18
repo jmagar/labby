@@ -322,6 +322,8 @@ impl LabMcpServer {
                         kind: CodeModeHistoryKind::Execute,
                         ok: false,
                         elapsed_ms,
+                        input_tokens: Some(input_tokens),
+                        output_tokens: Some(0),
                         error_kind: Some(error_kind),
                         calls,
                         match_count: None,
@@ -331,18 +333,6 @@ impl LabMcpServer {
                 return Ok(CallToolResult::error(vec![Content::text(env.to_string())]));
             }
         };
-        manager
-            .record_code_mode_history(CodeModeHistoryEntry {
-                seq: 0,
-                route_scope: self.route_scope.label(),
-                kind: CodeModeHistoryKind::Execute,
-                ok: true,
-                elapsed_ms: started.elapsed().as_millis(),
-                error_kind: None,
-                calls: response.calls.clone(),
-                match_count: None,
-            })
-            .await;
         // Mirror the upstream's `_meta.ui` verbatim onto the codemode result so
         // the host renders the native mcp-ui widget (last-wins). The widget
         // itself is driven by the `ui://` resource read, not by inline content,
@@ -372,8 +362,29 @@ impl LabMcpServer {
             );
         }
         let output = serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string());
-        let structured = code_mode_execute_trace(&response);
         let output_tokens = estimate_tokens(&output);
+        manager
+            .record_code_mode_history(CodeModeHistoryEntry {
+                seq: 0,
+                route_scope: self.route_scope.label(),
+                kind: CodeModeHistoryKind::Execute,
+                ok: true,
+                elapsed_ms: started.elapsed().as_millis(),
+                input_tokens: Some(input_tokens),
+                output_tokens: Some(output_tokens),
+                error_kind: None,
+                calls: response.calls.clone(),
+                match_count: None,
+            })
+            .await;
+        let mut structured = code_mode_execute_trace(&response);
+        if let Some(object) = structured.as_object_mut() {
+            object.insert("input_tokens".to_string(), Value::from(input_tokens as u64));
+            object.insert(
+                "output_tokens".to_string(),
+                Value::from(output_tokens as u64),
+            );
+        }
         let trace_result_type = structured
             .get("result_shape")
             .and_then(|shape| shape.get("type"))
