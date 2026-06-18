@@ -1,8 +1,8 @@
 # Code Mode
 
-Code Mode is the JavaScript execution surface behind the MCP `search` and `execute`
-tools. It lets an agent discover upstream MCP tools with a small catalog query, then
-run one async JavaScript function in a sandbox that can call those upstream tools.
+Code Mode is the JavaScript execution surface behind the MCP `codemode` tool. It
+lets an agent discover upstream MCP tools, inspect compact docs, and run one async
+JavaScript function in a sandbox that can call those upstream tools.
 
 Lab actions are intentionally not exposed through Code Mode. Call Lab built-in
 service tools directly when raw tools are visible, or use the native gateway
@@ -10,35 +10,43 @@ management/API surfaces for Lab actions.
 
 ## Surface
 
-Code Mode has two MCP tools:
+Code Mode's primary MCP surface is `codemode({ code })`. The code runs as one
+async JavaScript function in the sandbox. Discovery, focused compact docs,
+upstream calls, fan-out, filtering, and final result shaping all happen inside
+that same execution.
 
-- `search` — runs a JavaScript async arrow function over a projected catalog:
-  `const tools = [...]`. Use it to find upstream tool IDs and inspect their input
-  schemas.
-- `execute` — runs a JavaScript async arrow function in the Code Mode sandbox.
-  The sandbox can call upstream tools with `callTool(id, params)` or with the
-  generated `codemode.<upstream>.<tool>(params)` helper.
+Inside the sandbox:
 
-Example search:
+- `await codemode.search("github pull requests")` searches the reduced
+  in-execution catalog.
+- `await codemode.describe("github.list_pull_requests")` returns compact docs
+  for an exact tool target.
+- `await codemode.github.list_pull_requests(params)` calls the generated helper.
+- `await callTool("github::list_pull_requests", params)` calls the raw bridge.
 
-```ts
-async () => tools
-  .filter(t => /issue/i.test(t.description))
-  .map(t => ({ id: t.id, schema: t.schema }))
-```
-
-Example execute:
+Example:
 
 ```ts
 async () => {
-  const issues = await callTool("github::search_issues", { q: "bug" });
-  return issues.items.length;
+  const matches = await codemode.search({ query: "github pull requests", limit: 1 });
+  const docs = await codemode.describe(matches.results[0].path);
+  const pulls = await codemode.github.list_pull_requests({ state: "open" });
+  return {
+    docs: docs.path,
+    open: pulls.items.map(pr => ({ number: pr.number, title: pr.title }))
+  };
 }
 ```
 
 `Promise.all([...])` and `Promise.allSettled([...])` fan out independent upstream
 calls. A failed `callTool` rejects only that promise; catch locally when partial
 success is useful.
+
+`search` and `execute` remain available for older clients during the migration.
+New agent instructions should prefer `codemode` because it keeps discovery, tool
+calls, and intermediate values inside one sandbox execution. Legacy `search`
+still exposes the full catalog JS filter for compatibility and for callers that
+need full schema/dts metadata.
 
 ## Tool IDs and Helpers
 
@@ -48,36 +56,37 @@ Upstream tool IDs use:
 <upstream-name>::<tool-name>
 ```
 
-`execute` injects a runtime proxy generated from the live readable catalog, so
+`codemode` injects a runtime proxy generated from the live readable catalog, so
 `codemode.github.search_issues(params)` calls the same bridge as:
 
 ```ts
 callTool("github::search_issues", params)
 ```
 
-Search entries include both raw JSON Schemas and generated TypeScript:
+Legacy `search` entries include both raw JSON Schemas and generated TypeScript:
 
 - `schema` — input JSON Schema.
 - `output_schema` — output JSON Schema when the upstream tool declares one.
 - `signature` — one-line TypeScript call signature.
 - `dts` — focused TypeScript declarations with JSDoc for that tool.
 
-The execute proxy is runtime JavaScript; the TypeScript surface is delivered by
-`search` so agents can request only the declarations they need instead of loading
-the entire upstream catalog into one tool description. When a schema is missing or
-too complex for the TypeScript emitter, the generated declaration falls back to
-`unknown`.
+The `codemode.search` helper uses a reduced in-execution catalog (`id`, `path`,
+`upstream`, `name`, `description`, and `signature`) so normal runs do not inject
+full schema, output schema, or dts payloads. Legacy `search` remains available
+when callers need those full metadata fields. When a schema is missing or too
+complex for the TypeScript emitter, generated signatures fall back to `unknown`.
 
 ## Catalog Freshness
 
 Code Mode does not build or read a durable vector, lexical, or RRF index. Each
-`search` call projects a transient catalog from the gateway runtime and refreshes
-enabled upstream tool metadata through the gateway manager before evaluating the
-caller JavaScript. The `execute` proxy is generated from the same refreshed
-catalog source, so helper visibility and direct `callTool` routing stay aligned.
+`codemode` execution projects a transient catalog from the gateway runtime and
+refreshes enabled upstream tool metadata through the gateway manager before
+building the local discovery helpers and runtime proxy. Legacy `search` uses the
+same catalog source, so helper visibility and direct `callTool` routing stay
+aligned.
 
 `gateway.reload` swaps in a freshly seeded lazy upstream pool. The next Code Mode
-`search` or `execute` call reprobes the relevant live upstreams and should see
+`codemode`, `search`, or `execute` call reprobes the relevant live upstreams and should see
 tool-list changes such as the agent-os Windows-MCP `PowerShell`, `FileSystem`,
 `Snapshot`, and `Wait` tools without requiring a process restart.
 
@@ -94,7 +103,7 @@ When search results do not match live execution, check the layers in order:
    Confirm the upstream reports the expected discovered tool count and is not
    carrying a tools-capability error.
 
-2. Code Mode execute proxy:
+2. Code Mode `codemode` proxy:
 
    ```ts
    async () => Object.keys(codemode.agent_os_windows_mcp).sort()
@@ -114,7 +123,7 @@ When search results do not match live execution, check the layers in order:
    If this succeeds while search is stale, the upstream is callable and the
    issue is catalog visibility rather than tool execution.
 
-4. MCP search injected catalog:
+4. MCP legacy `search` injected catalog:
 
    ```ts
    async () => tools
@@ -129,7 +138,7 @@ When search results do not match live execution, check the layers in order:
    still sees stale search results while execute is fresh, reconnect that MCP
    client session so it receives the current gateway manager state.
 
-`execute` accepts optional `upstreams` and `tools` arrays to narrow the per-run
+`codemode` and compatibility `execute` accept optional `upstreams` and `tools` arrays to narrow the per-run
 capability set. When present, each filter must be a JSON array of strings; other
 shapes reject with `invalid_param`. Empty strings are ignored. The injected proxy only
 includes allowed tools, and direct `callTool` IDs outside the allowlist reject as
@@ -144,7 +153,7 @@ Successful upstream tool calls resolve to the payload, never the raw MCP
 2. Otherwise the first text content block, parsed as JSON when possible.
 3. Otherwise raw text, `null`, or non-text content blocks as JSON.
 
-`execute` itself returns a capped envelope with:
+`codemode` and compatibility `execute` return a capped envelope with:
 
 - `result` — the JavaScript function return value.
 - `calls[]` — lightweight per-call metadata: `id`, `ok`, `elapsed_ms`, and
@@ -180,7 +189,7 @@ An upstream tool can return a native MCP Apps (mcp-ui) widget by carrying
 `text/html;profile=mcp-app`). Inside `execute`, the unwrapped `callTool` payload
 drops that envelope metadata, so a widget would otherwise collapse to plain JSON.
 
-When a snippet calls a widget-bearing upstream tool, `execute` surfaces the most
+When a snippet calls a widget-bearing upstream tool, `codemode` surfaces the most
 recent captured widget metadata on the final tool result. The caller can also
 return an object with a `__ui` key to unwrap a specific payload shape while
 rendering the captured widget:
@@ -211,9 +220,10 @@ Semantics:
 
 ### Widget → host callbacks
 
-While the synthetic `search`/`execute` surface is active, raw upstream tools stay
-hidden from `list_tools`. MCP App tools that carry `_meta.ui.resourceUri` may
-still be advertised so the host can render the widget.
+While the synthetic `codemode` surface is active, raw upstream tools stay hidden
+from `list_tools`. Compatibility `search` and `execute` remain listed during the
+migration window. MCP App tools that carry `_meta.ui.resourceUri` may still be
+advertised so the host can render the widget.
 
 A rendered MCP App can call back to its server only through host
 `callServerTool` / `tools/call`. Lab allows those callback calls through Code
@@ -227,7 +237,7 @@ Mode's raw-tool gate only when all of these are true:
 The callback exemption changes callability only. It does not put sibling tools
 back into `list_tools`, so the model-facing surface remains collapsed.
 Destructive sibling callbacks return `confirmation_required`; callers should use
-the `execute` tool with `confirm:true` for destructive upstream actions.
+the `codemode` tool with `confirm:true` for destructive upstream actions.
 
 `LAB_CODE_MODE_WIDGET_CALLBACKS=1` remains as a broader legacy operator bypass.
 With that variable set, any known exposed non-destructive upstream tool may pass
@@ -262,17 +272,17 @@ Canonical recovery buckets:
   `internal_error`
 
 Destructive upstream tools are gated by host-side metadata before dispatch. In
-the MCP `execute` surface, callers can explicitly confirm the whole Code Mode run
-with top-level `confirm: true`. Execute-capable scopes (`lab` or `lab:admin`)
-authorize Code Mode execution, but do not implicitly confirm destructive upstream
-effects. Unconfirmed MCP destructive calls fail as `confirmation_required`. CLI
-Code Mode execution permits destructive upstream calls because it is
+the MCP `codemode` surface, callers can explicitly confirm the whole Code Mode
+run with top-level `confirm: true`. Execute-capable scopes (`lab` or
+`lab:admin`) authorize Code Mode execution, but do not implicitly confirm
+destructive upstream effects. Unconfirmed MCP destructive calls fail as
+`confirmation_required`. CLI Code Mode execution permits destructive upstream calls because it is
 operator-driven.
 
 ## Scope
 
-- `lab:read` can use `search`.
-- `lab` or `lab:admin` can use `execute`.
+- `lab:read` can use compatibility `search`.
+- `lab` or `lab:admin` can use `codemode` and compatibility `execute`.
 
 OAuth callers retain their subject attribution when Code Mode calls upstream tools.
 Trusted local callers use the shared gateway subject.
@@ -324,15 +334,16 @@ run, so isolation holds by construction.
     runners (default `8`).
 
   The conservative default (`size = 2`) keeps idle memory bounded while absorbing
-  typical `search` + `execute` bursts. The security invariants (`env_clear`,
+  typical `codemode` plus compatibility `search`/`execute` bursts. The security invariants (`env_clear`,
   process-group/Job-Object reaping, `kill_on_drop`, `PR_SET_DUMPABLE`) are set
   once at spawn and therefore hold for the pooled process's whole lifetime.
 
 Code Mode always uses Javy/QuickJS for snippet execution — it is the **sole live
-engine**, with no Boa fallback and no `code_mode_wasm` feature. Both `execute`
-and `search` run in the Javy/QuickJS child runner over stdio (search injects the
-tool catalog as `const tools` and runs with `max_tool_calls = 0`). The Javy
-toolchain is pulled in by the `gateway` feature.
+engine**, with no Boa fallback and no `code_mode_wasm` feature. `codemode`,
+compatibility `execute`, and compatibility `search` run in the Javy/QuickJS
+child runner over stdio. Legacy `search` injects the tool catalog as
+`const tools` and runs with `max_tool_calls = 0`. The Javy toolchain is pulled in
+by the `gateway` feature.
 
 The runner starts with an empty environment in a temporary directory. It does not
 provide Node, Deno, Bun, `fetch`, `connect`, `XMLHttpRequest`, `require`, or host

@@ -11,6 +11,7 @@
 //! machinery from commit 780c67d3). Surfacing types/schemas via `search` is a
 //! separate follow-up; this module only restores the executable proxy.
 
+use super::types::CodeModeDiscoveryEntry;
 use crate::dispatch::upstream::types::UpstreamTool;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -150,6 +151,106 @@ pub fn tool_name_to_snake(name: &str) -> String {
 // JS proxy generation (runtime executable, not type declarations)
 // ────────────────────────────────────────────────────────────────────────────
 
+pub(crate) fn generate_discovery_js(entries: &[CodeModeDiscoveryEntry]) -> Result<String, String> {
+    let json = serde_json::to_string(entries)
+        .map_err(|err| format!("failed to serialize Code Mode discovery catalog: {err}"))?;
+    Ok(format!(
+        r##"
+globalThis.codemode = globalThis.codemode || {{}};
+var codemode = globalThis.codemode;
+var __codemodeDiscovery = {json};
+function __codemodeNormalize(value) {{
+  return String(value == null ? "" : value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}}
+function __codemodeTokens(value) {{
+  var normalized = __codemodeNormalize(value);
+  return normalized ? normalized.split(/\s+/g) : [];
+}}
+codemode.search = function(input) {{
+  var query = typeof input === "object" && input !== null ? String(input.query || "") : String(input || "");
+  var limit = typeof input === "object" && input !== null && Number.isFinite(Number(input.limit))
+    ? Math.max(1, Math.min(50, Number(input.limit)))
+    : 50;
+  var tokens = __codemodeTokens(query);
+  if (!tokens.length) return Promise.resolve({{ results: [], total: 0, truncated: false }});
+  var scored = [];
+  for (var i = 0; i < __codemodeDiscovery.length; i++) {{
+    var entry = __codemodeDiscovery[i];
+    var fields = [
+      [__codemodeNormalize(entry.path), 12],
+      [__codemodeNormalize(entry.name), 10],
+      [__codemodeNormalize(entry.upstream), 8],
+      [__codemodeNormalize(entry.description), 5]
+    ];
+    var covered = 0;
+    var score = 0;
+    for (var t = 0; t < tokens.length; t++) {{
+      var tokenScore = 0;
+      for (var f = 0; f < fields.length; f++) {{
+        if (fields[f][0].indexOf(tokens[t]) !== -1 && fields[f][1] > tokenScore) tokenScore = fields[f][1];
+      }}
+      if (tokenScore > 0) {{
+        covered++;
+        score += tokenScore;
+      }}
+    }}
+    var required = tokens.length <= 2 ? tokens.length : Math.ceil(tokens.length * 0.6);
+    if (covered >= required) {{
+      scored.push({{
+        path: entry.path,
+        id: entry.id,
+        upstream: entry.upstream,
+        name: entry.name,
+        description: entry.description,
+        signature: entry.signature,
+        score: score
+      }});
+    }}
+  }}
+  scored.sort(function(a, b) {{
+    if (b.score !== a.score) return b.score - a.score;
+    return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+  }});
+  var total = scored.length;
+  return Promise.resolve({{ results: scored.slice(0, limit), total: total, truncated: total > limit }});
+}};
+codemode.describe = function(target) {{
+  var raw = String(target == null ? "" : target).trim();
+  var matches = [];
+  for (var i = 0; i < __codemodeDiscovery.length; i++) {{
+    var entry = __codemodeDiscovery[i];
+    if (raw === entry.id || raw === entry.path || raw === entry.helper) matches.push(entry);
+    if (raw === entry.upstream) matches.push({{ __ambiguous: true, path: entry.path }});
+  }}
+  var ambiguous = matches.filter(function(item) {{ return item.__ambiguous; }});
+  if (ambiguous.length) {{
+    throw new Error(JSON.stringify({{
+      kind: "ambiguous_target",
+      message: "codemode.describe requires an exact tool id, upstream.tool path, or helper path",
+      valid: ambiguous.map(function(item) {{ return item.path; }}).sort()
+    }}));
+  }}
+  if (!matches.length) {{
+    throw new Error(JSON.stringify({{ kind: "unknown_tool", message: "No Code Mode discovery target matched `" + raw + "`" }}));
+  }}
+  var entry = matches[0];
+  return Promise.resolve({{
+    path: entry.path,
+    id: entry.id,
+    markdown: "# " + entry.path + "\n\n" + entry.description + "\n\n- id: `" + entry.id + "`\n- helper: `" + entry.helper + "`\n- signature: `" + entry.signature + "`\n"
+  }});
+}};
+codemode.step = function(name, fn) {{
+  if (typeof fn !== "function") throw new Error("codemode.step requires a function");
+  return Promise.resolve().then(fn);
+}};
+"##
+    ))
+}
+
 /// Generate a JavaScript preamble string that defines the `codemode` proxy
 /// namespace, plus `codemode.__meta__.upstreams()` and a `__upstreams__`
 /// script-global, for use inside the sandbox.
@@ -252,7 +353,8 @@ pub fn generate_js_proxy(tools: &[UpstreamTool], upstreams: &[String]) -> Result
 
     Ok(format!(
         "// Code Mode proxy — auto-generated\n\
-         var codemode = {{}};\n\
+         globalThis.codemode = globalThis.codemode || {{}};\n\
+         var codemode = globalThis.codemode;\n\
          {parts}\
          codemode.__meta__ = {{ upstreams: function() {{ return Promise.resolve({upstreams_json}); }} }};\n\
          var __upstreams__ = {upstreams_json};\n"
@@ -312,6 +414,43 @@ mod tests {
     // ── generate_js_proxy ─────────────────────────────────────────────────────
 
     #[test]
+    fn discovery_preamble_preserves_existing_codemode_object() {
+        let entries = vec![CodeModeDiscoveryEntry {
+            id: "arcane::containers".to_string(),
+            path: "arcane.containers".to_string(),
+            upstream: "arcane".to_string(),
+            name: "containers".to_string(),
+            helper: "codemode.arcane.containers".to_string(),
+            description: "List containers".to_string(),
+            signature: "codemode.arcane.containers(params: unknown): Promise<unknown>".to_string(),
+        }];
+        let js = generate_discovery_js(&entries).expect("js");
+        assert!(js.contains("globalThis.codemode = globalThis.codemode || {}"));
+        assert!(js.contains("codemode.search"));
+        assert!(js.contains("codemode.describe"));
+        assert!(!js.contains("schema"));
+        assert!(!js.contains("output_schema"));
+        assert!(!js.contains("dts"));
+    }
+
+    #[test]
+    fn discovery_describe_rejects_upstream_only_targets() {
+        let entries = vec![CodeModeDiscoveryEntry {
+            id: "github::search_issues".to_string(),
+            path: "github.search_issues".to_string(),
+            upstream: "github".to_string(),
+            name: "search_issues".to_string(),
+            helper: "codemode.github.search_issues".to_string(),
+            description: "Search issues".to_string(),
+            signature: "codemode.github.search_issues(params: unknown): Promise<unknown>"
+                .to_string(),
+        }];
+        let js = generate_discovery_js(&entries).expect("js");
+        assert!(js.contains("ambiguous_target"));
+        assert!(js.contains("github.search_issues"));
+    }
+
+    #[test]
     fn generate_js_proxy_quoted_keys_tolerate_special_chars() {
         // Tool with a slash in the name — previously caused "Exception generated
         // by QuickJS" because the unquoted key was a JS syntax error.
@@ -364,8 +503,19 @@ mod tests {
         };
         let js = generate_js_proxy(&[tool], &["radarr".to_string()]).expect("proxy");
 
-        // PRESENCE: declares the script-global `var codemode`
-        assert!(js.contains("var codemode = {}"), "must declare codemode");
+        // PRESENCE: preserves the platform-created codemode object
+        assert!(
+            js.contains("globalThis.codemode = globalThis.codemode || {}"),
+            "must preserve codemode object"
+        );
+        assert!(
+            js.contains("var codemode = globalThis.codemode"),
+            "must bind preserved codemode object"
+        );
+        assert!(
+            !js.contains("var codemode = {}"),
+            "must not replace codemode"
+        );
         // PRESENCE: snake_case method routes to the dotted upstream id
         assert!(
             js.contains("radarr::movie.search"),

@@ -138,6 +138,17 @@ impl CodeModeCatalogEntry {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct CodeModeDiscoveryEntry {
+    pub(crate) id: String,
+    pub(crate) path: String,
+    pub(crate) upstream: String,
+    pub(crate) name: String,
+    pub(crate) helper: String,
+    pub(crate) description: String,
+    pub(crate) signature: String,
+}
+
 /// A captured upstream MCP Apps (mcp-ui) widget link.
 ///
 /// Recorded at the broker boundary when an upstream tool result carries

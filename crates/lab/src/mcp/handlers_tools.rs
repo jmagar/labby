@@ -18,8 +18,10 @@ use rmcp::service::RequestContext;
 use serde_json::Value;
 
 #[cfg(feature = "gateway")]
-use crate::mcp::call_tool_codemode::CODE_EXECUTE_DESCRIPTION;
-use crate::mcp::catalog::{CODE_MODE_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME};
+use crate::mcp::call_tool_codemode::{CODE_EXECUTE_DESCRIPTION, CODE_MODE_DESCRIPTION};
+use crate::mcp::catalog::{
+    CODE_MODE_SEARCH_TOOL_NAME, CODE_MODE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME,
+};
 use crate::mcp::completion::action_schema;
 use crate::mcp::context::auth_context_from_extensions;
 #[cfg(feature = "gateway")]
@@ -79,53 +81,12 @@ impl LabMcpServer {
         }
         #[cfg(feature = "gateway")]
         if visibility.exposes_synthetic_tools() {
-            // ── Gateway meta-tools: search (Boa JS against upstream catalog) +
-            // execute (subprocess sandbox). Both take `{ code: string }`.
+            // ── Gateway meta-tools: codemode (primary subprocess sandbox),
+            // search (Boa JS against upstream catalog), and execute
+            // (compatibility subprocess sandbox). All take `{ code: string }`.
             // See mcp/CLAUDE.md for the exception rationale and
             // dispatch/gateway/dispatch.rs guard.
-            let search_schema = match serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "code": {
-                        "type": "string",
-                        "description": "JavaScript async arrow function to search the upstream MCP tool catalog. \
-                            The sandbox injects `const tools = [...]` where each entry has id, upstream, \
-                            name, description, schema, output_schema, signature, and dts. Return JSON-serializable results. \
-                            Examples: \
-                            `async () => tools.filter(t => /container.*log/i.test(t.description)).map(t => ({id:t.id, signature:t.signature, dts:t.dts}))`; \
-                            `async () => tools.find(t => t.id === \"github::search_issues\")`; \
-                            `async () => tools.filter(t => t.upstream === \"github\").slice(0, 20)`."
-                    }
-                },
-                "required": ["code"]
-            }) {
-                Value::Object(map) => Arc::new(map),
-                _ => unreachable!("search schema must be an object"),
-            };
             let trace_output_schema = code_mode_trace_output_schema();
-            tools.push(Tool::new(
-                CODE_MODE_SEARCH_TOOL_NAME,
-                "Filter the upstream MCP tool catalog with JavaScript. Write an async arrow function \
-                that filters `const tools = [...]` (each entry: id, upstream, name, description, schema, output_schema, signature, dts) \
-                and returns what you need. Use before execute() to discover the right tool id.",
-                search_schema,
-            ).with_raw_output_schema(Arc::clone(&trace_output_schema))
-                .with_meta(code_mode_tool_meta(CODE_MODE_SEARCH_TOOL_NAME)));
-            gateway_tool_count += 1;
-            let search_resource_uri =
-                code_mode_app_resource_uri_for_tool(CODE_MODE_SEARCH_TOOL_NAME)
-                    .unwrap_or_else(|| "<missing>".to_string());
-            let search_skybridge_uri =
-                code_mode_app_skybridge_uri_for_tool(CODE_MODE_SEARCH_TOOL_NAME)
-                    .unwrap_or_else(|| "<missing>".to_string());
-            tracing::info!(
-                surface = "mcp",
-                service = "search",
-                action = "mcp_app.advertise",
-                resource_uri = %search_resource_uri,
-                skybridge_uri = %search_skybridge_uri,
-                "advertised Code Mode MCP app metadata"
-            );
             let execute_schema = match serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -156,6 +117,78 @@ impl LabMcpServer {
                 Value::Object(map) => Arc::new(map),
                 _ => unreachable!("execute schema must be an object"),
             };
+            debug_assert!(CODE_MODE_DESCRIPTION.len() < 8192);
+            tracing::info!(
+                surface = "mcp",
+                service = "codemode",
+                action = "tool.describe",
+                description_bytes = CODE_MODE_DESCRIPTION.len(),
+                "registered primary Code Mode description"
+            );
+            let codemode_resource_uri = code_mode_app_resource_uri_for_tool(CODE_MODE_TOOL_NAME)
+                .unwrap_or_else(|| "<missing>".to_string());
+            let codemode_skybridge_uri = code_mode_app_skybridge_uri_for_tool(CODE_MODE_TOOL_NAME)
+                .unwrap_or_else(|| "<missing>".to_string());
+            tracing::info!(
+                surface = "mcp",
+                service = "codemode",
+                action = "mcp_app.advertise",
+                resource_uri = %codemode_resource_uri,
+                skybridge_uri = %codemode_skybridge_uri,
+                "advertised primary Code Mode MCP app metadata"
+            );
+            tools.push(
+                Tool::new(
+                    CODE_MODE_TOOL_NAME,
+                    CODE_MODE_DESCRIPTION,
+                    Arc::clone(&execute_schema),
+                )
+                .with_raw_output_schema(Arc::clone(&trace_output_schema))
+                .with_meta(code_mode_tool_meta(CODE_MODE_TOOL_NAME)),
+            );
+            gateway_tool_count += 1;
+            let search_schema = match serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "JavaScript async arrow function to search the upstream MCP tool catalog. \
+                            The sandbox injects `const tools = [...]` where each entry has id, upstream, \
+                            name, description, schema, output_schema, signature, and dts. Return JSON-serializable results. \
+                            Examples: \
+                            `async () => tools.filter(t => /container.*log/i.test(t.description)).map(t => ({id:t.id, signature:t.signature, dts:t.dts}))`; \
+                            `async () => tools.find(t => t.id === \"github::search_issues\")`; \
+                            `async () => tools.filter(t => t.upstream === \"github\").slice(0, 20)`."
+                    }
+                },
+                "required": ["code"]
+            }) {
+                Value::Object(map) => Arc::new(map),
+                _ => unreachable!("search schema must be an object"),
+            };
+            tools.push(Tool::new(
+                CODE_MODE_SEARCH_TOOL_NAME,
+                "Filter the upstream MCP tool catalog with JavaScript. Write an async arrow function \
+                that filters `const tools = [...]` (each entry: id, upstream, name, description, schema, output_schema, signature, dts) \
+                and returns what you need. Compatibility tool; prefer codemode.search() inside codemode for new scripts.",
+                search_schema,
+            ).with_raw_output_schema(Arc::clone(&trace_output_schema))
+                .with_meta(code_mode_tool_meta(CODE_MODE_SEARCH_TOOL_NAME)));
+            gateway_tool_count += 1;
+            let search_resource_uri =
+                code_mode_app_resource_uri_for_tool(CODE_MODE_SEARCH_TOOL_NAME)
+                    .unwrap_or_else(|| "<missing>".to_string());
+            let search_skybridge_uri =
+                code_mode_app_skybridge_uri_for_tool(CODE_MODE_SEARCH_TOOL_NAME)
+                    .unwrap_or_else(|| "<missing>".to_string());
+            tracing::info!(
+                surface = "mcp",
+                service = "search",
+                action = "mcp_app.advertise",
+                resource_uri = %search_resource_uri,
+                skybridge_uri = %search_skybridge_uri,
+                "advertised Code Mode compatibility search MCP app metadata"
+            );
             debug_assert!(CODE_EXECUTE_DESCRIPTION.len() < 8192);
             tracing::info!(
                 surface = "mcp",
@@ -181,7 +214,7 @@ impl LabMcpServer {
                 Tool::new(
                     TOOL_EXECUTE_TOOL_NAME,
                     CODE_EXECUTE_DESCRIPTION,
-                    execute_schema,
+                    Arc::clone(&execute_schema),
                 )
                 .with_raw_output_schema(Arc::clone(&trace_output_schema))
                 .with_meta(code_mode_tool_meta(TOOL_EXECUTE_TOOL_NAME)),

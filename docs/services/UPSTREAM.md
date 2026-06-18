@@ -4,7 +4,10 @@ Lab can act as an MCP gateway, proxying tool calls and resource reads to upstrea
 
 Upstream servers are first-class providers in the merged MCP tool catalog. After discovery, their tools appear in `list_tools()` beside built-in `lab` tools. Callers do not need a separate tool or namespace to invoke proxied upstream tools themselves.
 
-If gateway-wide `[code_mode].enabled = true`, raw upstream tools are hidden from `list_tools()` and exposed through synthetic `search` / `execute` helpers instead. That mode is documented in [GATEWAY.md](./GATEWAY.md#gateway-search-and-execute-mode).
+If gateway-wide `[code_mode].enabled = true`, raw upstream tools are hidden from
+`list_tools()` and exposed through the primary synthetic `codemode` tool.
+Compatibility `search` and `execute` tools remain available during the migration
+window. That mode is documented in [GATEWAY.md](./GATEWAY.md#gateway-code-mode).
 
 `lab` also exposes a separate `gateway` management surface for editing and reloading upstream definitions. That management surface is documented in [GATEWAY.md](./GATEWAY.md).
 

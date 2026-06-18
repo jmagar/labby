@@ -15,8 +15,9 @@ use super::runner_io::code_mode_upstream_error_info;
 use super::schema::{unwrap_code_mode_upstream_result, validate_code_mode_params_against_schema};
 use super::truncate::{response_within_budget, truncate_execution_response};
 use super::types::{
-    CodeModeCaller, CodeModeCapabilityFilter, CodeModeExecutionError, CodeModeExecutionResponse,
-    CodeModeSurface, CodeModeToolId, CodeModeToolRef, UiLink, destructive_permitted,
+    CodeModeCaller, CodeModeCapabilityFilter, CodeModeDiscoveryEntry, CodeModeExecutionError,
+    CodeModeExecutionResponse, CodeModeSurface, CodeModeToolId, CodeModeToolRef, UiLink,
+    destructive_permitted,
 };
 
 /// Compatibility key a Code Mode `execute` snippet can return
@@ -129,17 +130,71 @@ impl CodeModeBroker<'_> {
                 capability_filter.allows(tool.upstream_name.as_ref(), tool.tool.name.as_ref())
             })
             .collect::<Vec<_>>();
-        if tools.is_empty() {
-            return Ok(String::new());
-        }
         let mut upstreams: Vec<String> =
             tools.iter().map(|t| t.upstream_name.to_string()).collect();
         upstreams.sort();
         upstreams.dedup();
-        super::preamble::generate_js_proxy(&tools, &upstreams).map_err(|message| ToolError::Sdk {
-            sdk_kind: "invalid_param".to_string(),
-            message,
-        })
+
+        let discovery_entries = tools
+            .iter()
+            .map(|tool| {
+                let upstream = tool.upstream_name.to_string();
+                let name = tool.tool.name.to_string();
+                let upstream_snake = super::preamble::tool_name_to_snake(&upstream);
+                let name_snake = super::preamble::tool_name_to_snake(&name);
+                let description = tool
+                    .tool
+                    .description
+                    .as_ref()
+                    .map(|description| {
+                        crate::dispatch::gateway::projection::sanitize_tool_text(description, 1024)
+                    })
+                    .unwrap_or_default();
+                let signature = super::ts_signatures::generate_tool_types(
+                    &upstream,
+                    &name,
+                    &description,
+                    tool.input_schema.as_ref(),
+                    tool.output_schema.as_ref(),
+                )
+                .signature;
+                CodeModeDiscoveryEntry {
+                    id: super::types::upstream_tool_id(&upstream, &name),
+                    path: format!("{upstream_snake}.{name_snake}"),
+                    upstream,
+                    name,
+                    helper: format!("codemode.{upstream_snake}.{name_snake}"),
+                    description,
+                    signature,
+                }
+            })
+            .collect::<Vec<_>>();
+        let discovery_js =
+            super::preamble::generate_discovery_js(&discovery_entries).map_err(|message| {
+                ToolError::Sdk {
+                    sdk_kind: "invalid_param".to_string(),
+                    message,
+                }
+            })?;
+        let namespace_js =
+            super::preamble::generate_js_proxy(&tools, &upstreams).map_err(|message| {
+                ToolError::Sdk {
+                    sdk_kind: "invalid_param".to_string(),
+                    message,
+                }
+            })?;
+        Ok(format!("{discovery_js}\n{namespace_js}"))
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn build_code_mode_proxy_for_tests(
+        &self,
+        caller: &CodeModeCaller,
+        surface: CodeModeSurface,
+        capability_filter: &CodeModeCapabilityFilter,
+    ) -> Result<String, ToolError> {
+        self.build_code_mode_proxy(caller, surface, capability_filter)
+            .await
     }
 
     async fn execute_sandboxed(

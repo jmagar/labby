@@ -96,15 +96,16 @@ Typical patch payloads:
 { "action": "gateway.update", "params": { "confirm": true, "name": "github", "patch": { "expose_tools": null } } }
 ```
 
-## Gateway Search And Execute Mode
+## Gateway Code Mode
 
 When enabled, Lab hides raw proxied upstream tools from MCP `list_tools()` and exposes
-**exactly two** synthetic gateway tools:
+the primary synthetic `codemode` gateway tool plus compatibility tools:
 
-| Tool | Purpose | Legacy aliases (callable, hidden from `list_tools`) |
+| Tool | Purpose | Status |
 |------|---------|------|
-| `search` | Run a JavaScript async arrow function against the live upstream tool catalog. | `code_mode` |
-| `execute` | Run a JavaScript async arrow function in the Code Mode sandbox and broker calls to upstream tools. | `tool_execute`, `invoke`, `tool_invoke` |
+| `codemode` | Run one JavaScript async arrow function in the Code Mode sandbox. Use `codemode.search()` and `codemode.describe()` inside the same execution to discover upstream tools, then call them through generated helpers or `callTool(id, params)`. | Primary |
+| `search` | Run a JavaScript async arrow function against the full live upstream tool catalog. | Compatibility |
+| `execute` | Run a JavaScript async arrow function in the Code Mode sandbox and broker calls to upstream tools. | Compatibility |
 
 This keeps the MCP catalog small while still allowing clients to reach every exposed upstream tool.
 Per-upstream `expose_tools` filters still apply before tools enter the searchable catalog.
@@ -147,6 +148,12 @@ MCP `search` call shape:
 
 ```json
 { "code": "async () => tools.filter(t => t.upstream === \"github\").map(t => ({ id: t.id, signature: t.signature }))" }
+```
+
+MCP `codemode` call shape:
+
+```json
+{ "code": "async () => { const matches = await codemode.search(\"github issues\"); return matches.results; }" }
 ```
 
 MCP `execute` call shape:

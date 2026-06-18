@@ -4,16 +4,27 @@ This document describes the current Lab gateway Code Mode surface exposed to MCP
 
 ## Advertised Tools
 
-When gateway-wide `[code_mode].enabled = true`, Lab hides raw upstream tools and advertises exactly two synthetic MCP tools:
+When gateway-wide `[code_mode].enabled = true`, Lab hides raw upstream tools and advertises the primary synthetic `codemode` MCP tool plus compatibility tools:
 
 | Tool | Scope | Purpose |
 |------|-------|---------|
-| `search` | `lab:read`, `lab`, or `lab:admin` | Run JavaScript against the live upstream tool catalog. |
-| `execute` | `lab` or `lab:admin` | Run JavaScript in the Code Mode sandbox and broker upstream `callTool()` calls. |
+| `codemode` | `lab` or `lab:admin` | Run JavaScript in the Code Mode sandbox, discover upstream tools with `codemode.search()` / `codemode.describe()`, and broker upstream `callTool()` calls. |
+| `search` | `lab:read`, `lab`, or `lab:admin` | Compatibility tool: run JavaScript against the full live upstream tool catalog. |
+| `execute` | `lab` or `lab:admin` | Compatibility tool: run JavaScript in the Code Mode sandbox and broker upstream `callTool()` calls. |
 
-There is no advertised `code` MCP tool. There is no `code_search` or `code_execute` tool. Legacy aliases for the old gateway search/execute names may still be callable when exposed by a client, but new clients must use `search` and `execute`.
+There is no advertised `code` MCP tool. There is no `code_search` or `code_execute` tool. New clients must use `codemode`.
 
-## Search First
+## Discover Inside Codemode
+
+Call `codemode` and use in-sandbox discovery before making upstream calls:
+
+```json
+{ "code": "async () => { const hits = await codemode.search('github issues'); return hits.results; }" }
+```
+
+`codemode.search()` uses a reduced per-execution catalog with `id`, `path`, `upstream`, `name`, `description`, and `signature`.
+
+## Compatibility Search
 
 Call `search` before `execute` to discover the live IDs and TypeScript signatures.
 
@@ -46,9 +57,9 @@ async () => tools
   .map(t => ({ id: t.id, signature: t.signature, dts: t.dts }))
 ```
 
-## Execute
+## Codemode / Compatibility Execute
 
-`execute` accepts:
+`codemode` and compatibility `execute` accept:
 
 ```json
 {
@@ -60,7 +71,7 @@ async () => tools
 
 `upstreams` and `tools` are optional allowlists for that execution.
 
-Inside `execute`, every visible upstream MCP tool is callable two ways:
+Inside `codemode`, every visible upstream MCP tool is callable two ways:
 
 ```ts
 declare function callTool<T = unknown>(
@@ -75,7 +86,7 @@ declare namespace codemode {
 }
 ```
 
-The `codemode.<upstream>.<tool>()` helpers are generated from the live catalog. Use `search` to inspect the exact helper names before relying on them.
+The `codemode.<upstream>.<tool>()` helpers are generated from the live catalog. Use `codemode.search()` and `codemode.describe()` to inspect exact helper names before relying on them.
 
 ## IDs
 

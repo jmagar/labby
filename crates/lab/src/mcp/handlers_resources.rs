@@ -22,7 +22,9 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use serde_json::{Value, json};
 
-use crate::mcp::catalog::{CODE_MODE_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME};
+use crate::mcp::catalog::{
+    CODE_MODE_SEARCH_TOOL_NAME, CODE_MODE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME,
+};
 #[cfg(feature = "gateway")]
 use crate::mcp::context::oauth_upstream_subject_for_request;
 use crate::mcp::context::{auth_context_from_extensions, code_mode_search_scope_allowed};
@@ -37,10 +39,12 @@ pub(crate) const CODE_MODE_APP_SKYBRIDGE_MIME: &str = "text/html+skybridge";
 /// URI namespace reserved for Lab's own Code Mode app resources, served locally.
 /// Any other `ui://` is an upstream mcp-ui widget resource routed to its peer.
 pub(crate) const CODE_MODE_APP_URI_PREFIX: &str = "ui://lab/code-mode/";
+pub(crate) const CODE_MODE_APP_URI: &str = "ui://lab/code-mode/codemode";
 pub(crate) const CODE_MODE_SEARCH_APP_URI: &str = "ui://lab/code-mode/search";
 pub(crate) const CODE_MODE_EXECUTE_APP_URI: &str = "ui://lab/code-mode/execute";
 pub(crate) const CODE_MODE_HISTORY_APP_URI: &str = "ui://lab/code-mode/history";
 /// OpenAI Apps skybridge variants — same HTML, served under the skybridge MIME.
+pub(crate) const CODE_MODE_APP_SKYBRIDGE_URI: &str = "ui://lab/code-mode/codemode.skybridge";
 pub(crate) const CODE_MODE_SEARCH_APP_SKYBRIDGE_URI: &str = "ui://lab/code-mode/search.skybridge";
 pub(crate) const CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI: &str = "ui://lab/code-mode/execute.skybridge";
 
@@ -85,6 +89,12 @@ pub(crate) struct CodeModeAppResourceDescriptor {
 
 pub(crate) const CODE_MODE_APP_RESOURCE_DESCRIPTORS: &[CodeModeAppResourceDescriptor] = &[
     CodeModeAppResourceDescriptor {
+        uri: CODE_MODE_APP_URI,
+        name: "code-mode/codemode",
+        runtime: CodeModeRuntime::McpApp,
+        tool_name: Some(CODE_MODE_TOOL_NAME),
+    },
+    CodeModeAppResourceDescriptor {
         uri: CODE_MODE_SEARCH_APP_URI,
         name: "code-mode/search",
         runtime: CodeModeRuntime::McpApp,
@@ -107,6 +117,12 @@ pub(crate) const CODE_MODE_APP_RESOURCE_DESCRIPTORS: &[CodeModeAppResourceDescri
         name: "code-mode/search.skybridge",
         runtime: CodeModeRuntime::Skybridge,
         tool_name: Some(CODE_MODE_SEARCH_TOOL_NAME),
+    },
+    CodeModeAppResourceDescriptor {
+        uri: CODE_MODE_APP_SKYBRIDGE_URI,
+        name: "code-mode/codemode.skybridge",
+        runtime: CodeModeRuntime::Skybridge,
+        tool_name: Some(CODE_MODE_TOOL_NAME),
     },
     CodeModeAppResourceDescriptor {
         uri: CODE_MODE_EXECUTE_APP_SKYBRIDGE_URI,
@@ -774,6 +790,7 @@ mod tests {
                 .map(|uri| strip_app_version(uri))
                 .collect::<Vec<_>>(),
             vec![
+                CODE_MODE_APP_URI,
                 CODE_MODE_SEARCH_APP_URI,
                 CODE_MODE_EXECUTE_APP_URI,
                 CODE_MODE_HISTORY_APP_URI
@@ -971,7 +988,11 @@ mod tests {
         // The one convention left is the tool↔descriptor mapping: every Code Mode
         // tool must have exactly one MCP (Claude) descriptor and exactly one
         // skybridge (OpenAI) descriptor, or it silently loses one runtime's binding.
-        for tool in [CODE_MODE_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME] {
+        for tool in [
+            CODE_MODE_TOOL_NAME,
+            CODE_MODE_SEARCH_TOOL_NAME,
+            TOOL_EXECUTE_TOOL_NAME,
+        ] {
             assert_eq!(
                 CODE_MODE_APP_RESOURCE_DESCRIPTORS
                     .iter()
@@ -1146,6 +1167,7 @@ mod tests {
         assert_eq!(
             uris,
             vec![
+                CODE_MODE_APP_URI,
                 CODE_MODE_SEARCH_APP_URI,
                 CODE_MODE_EXECUTE_APP_URI,
                 CODE_MODE_HISTORY_APP_URI
@@ -1153,6 +1175,10 @@ mod tests {
         );
         // The tool-binding URI carries the cache-bust token but resolves to the
         // canonical base after stripping it.
+        let codemode_uri =
+            code_mode_app_resource_uri_for_tool(CODE_MODE_TOOL_NAME).expect("codemode uri");
+        assert!(codemode_uri.contains("?v="));
+        assert_eq!(strip_app_version(&codemode_uri), CODE_MODE_APP_URI);
         let search_uri =
             code_mode_app_resource_uri_for_tool(CODE_MODE_SEARCH_TOOL_NAME).expect("search uri");
         assert!(search_uri.contains("?v="));

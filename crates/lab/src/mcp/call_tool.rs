@@ -31,7 +31,9 @@ use crate::dispatch::upstream::types::UpstreamTool;
 #[cfg(feature = "gateway")]
 use crate::mcp::call_tool_upstream::PreResolvedUpstreamTool;
 #[cfg(feature = "gateway")]
-use crate::mcp::catalog::{CODE_MODE_SEARCH_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME};
+use crate::mcp::catalog::{
+    CODE_MODE_SEARCH_TOOL_NAME, CODE_MODE_TOOL_NAME, TOOL_EXECUTE_TOOL_NAME,
+};
 use crate::mcp::context::{
     auth_context_from_extensions, tool_execute_builtin_action_allowed, tool_execute_scope_allowed,
 };
@@ -185,8 +187,9 @@ impl LabMcpServer {
                 return self.call_code_mode_impl(&service, &args, &context).await;
             }
 
-            // ── Gateway `execute` tool: run caller's JS in the subprocess sandbox ─
-            if service == TOOL_EXECUTE_TOOL_NAME {
+            // ── Gateway `codemode` / `execute` tool: run caller's JS in the
+            // subprocess sandbox. `execute` remains as a compatibility alias.
+            if service == CODE_MODE_TOOL_NAME || service == TOOL_EXECUTE_TOOL_NAME {
                 if !self.route_scope.exposes_code_mode() {
                     let elapsed_ms = start.elapsed().as_millis();
                     self.log_route_scope_denial(

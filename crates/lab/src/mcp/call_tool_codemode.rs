@@ -36,17 +36,24 @@ use crate::mcp::result_format::{
 use crate::mcp::server::LabMcpServer;
 
 pub(crate) const CODE_MODE_MAX_CODE_BYTES: usize = 20_000;
-/// Tool description for the `execute` MCP tool (Code Mode sandbox).
+/// Tool description for the primary `codemode` MCP tool.
 ///
 /// This description is what the model receives. Keep it under 8192 bytes.
-pub(crate) const CODE_EXECUTE_DESCRIPTION: &str = "\
-Execute a JavaScript async arrow function in the Code Mode sandbox. Pass `code` as \
-`async () => { ... }` — the sandbox awaits its return value (same shape as search). \
-Discover tool ids and TypeScript signatures with `search` FIRST — search entries \
-include `schema`, `output_schema`, `signature`, and `dts`. Every upstream MCP tool is \
-then callable two ways: `callTool(id, params)`, or the auto-generated \
-`codemode.<upstream>.<tool>(params)` helper (a thin wrapper over the same callTool, \
-named from the live catalog — handy once `search` has told you the id).
+pub(crate) const CODE_MODE_DESCRIPTION: &str = "\
+Execute a JavaScript async arrow function in the Code Mode sandbox. This is the primary Lab gateway tool.
+
+Inside the sandbox:
+- `await codemode.search(\"short intent phrase\")` searches the reduced in-execution catalog.
+- `await codemode.describe(\"upstream.tool\")` returns compact docs for an exact tool target.
+- `await codemode.<upstream>.<tool>(params)` calls a discovered upstream method.
+- `await callTool(\"upstream::tool\", params)` is the raw escape hatch.
+
+`execute` remains as a compatibility alias. `search` remains as the legacy catalog-filter tool.
+
+Pass `code` as `async () => { ... }` — the sandbox awaits its return value. \
+Every upstream MCP tool is callable two ways: `callTool(id, params)`, or the \
+auto-generated `codemode.<upstream>.<tool>(params)` helper (a thin wrapper over \
+the same callTool, named from the live catalog).
 
 ```ts
 // code is an async arrow function; whatever it returns becomes `result`.
@@ -104,6 +111,9 @@ or split into multiple `execute` calls.
 
 Lab actions (`lab::*` tool IDs) are not available in Code Mode. For Lab built-in \
 actions use the `execute` tool in Code Mode mode.";
+
+/// Compatibility description for the `execute` MCP tool (Code Mode sandbox).
+pub(crate) const CODE_EXECUTE_DESCRIPTION: &str = CODE_MODE_DESCRIPTION;
 
 pub(crate) fn string_array_arg(
     args: &serde_json::Map<String, Value>,
@@ -185,6 +195,7 @@ impl LabMcpServer {
             tracing::warn!(
                 surface = "mcp",
                 service = %service,
+                code_mode_tool = %service,
                 action = "call_tool",
                 subject,
                 actor_key,
@@ -419,6 +430,7 @@ impl LabMcpServer {
         tracing::info!(
             surface = "mcp",
             service = "code_execute",
+            code_mode_tool = %service,
             action = "call_tool",
             subject,
             actor_key,
@@ -462,6 +474,7 @@ impl LabMcpServer {
                 tracing::warn!(
                     surface = "mcp",
                     service = "code_execute",
+                    code_mode_tool = %service,
                     action = "call_tool",
                     subject,
                     actor_key,
@@ -522,6 +535,7 @@ impl LabMcpServer {
             tracing::info!(
                 surface = "mcp",
                 service = "code_execute",
+                code_mode_tool = %service,
                 action = "mcp_app.mirror",
                 subject,
                 actor_key,
@@ -549,6 +563,7 @@ impl LabMcpServer {
         tracing::info!(
             surface = "mcp",
             service = "code_execute",
+            code_mode_tool = %service,
             action = "call_tool",
             subject,
             actor_key,

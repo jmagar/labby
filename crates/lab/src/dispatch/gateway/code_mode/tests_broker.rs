@@ -49,6 +49,60 @@ fn fixture_catalog_tool(
     }
 }
 
+fn fixture_http_upstream(name: &str) -> crate::config::UpstreamConfig {
+    crate::config::UpstreamConfig {
+        enabled: true,
+        name: name.to_string(),
+        url: Some("http://127.0.0.1:9/mcp".to_string()),
+        bearer_token_env: None,
+        command: None,
+        args: Vec::new(),
+        env: std::collections::BTreeMap::new(),
+        proxy_resources: false,
+        proxy_prompts: false,
+        expose_tools: None,
+        expose_resources: None,
+        expose_prompts: None,
+        oauth: None,
+        imported_from: None,
+        priority: 1.0,
+    }
+}
+
+async fn code_mode_manager_with_upstreams(
+    upstreams: Vec<crate::config::UpstreamConfig>,
+) -> (
+    super::GatewayManager,
+    Arc<crate::dispatch::upstream::pool::UpstreamPool>,
+) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let runtime = super::super::runtime::GatewayRuntimeHandle::default();
+    let pool = Arc::new(crate::dispatch::upstream::pool::UpstreamPool::new());
+    runtime.swap(Some(Arc::clone(&pool))).await;
+    let manager = super::GatewayManager::new(dir.path().join("config.toml"), runtime);
+    manager
+        .seed_config(crate::config::LabConfig {
+            code_mode: crate::config::CodeModeConfig {
+                enabled: true,
+                ..crate::config::CodeModeConfig::default()
+            },
+            upstream: upstreams,
+            ..crate::config::LabConfig::default()
+        })
+        .await;
+    (manager, pool)
+}
+
+fn healthy_entry_with_tool(
+    upstream: &str,
+    tool: &str,
+) -> crate::dispatch::upstream::types::UpstreamEntry {
+    fixture_upstream_entry(
+        upstream,
+        HashMap::from([(tool.to_string(), fixture_catalog_tool(upstream, tool))]),
+    )
+}
+
 #[tokio::test]
 async fn search_without_manager_returns_empty_array() {
     // No gateway manager → no upstream catalog → search returns an empty
@@ -66,6 +120,60 @@ async fn search_without_manager_returns_empty_array() {
         .expect("search ok without manager");
 
     assert_eq!(result, serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn execute_proxy_embeds_local_discovery_helpers_without_host_callbacks() {
+    let (manager, pool) =
+        code_mode_manager_with_upstreams(vec![fixture_http_upstream("alpha")]).await;
+    pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
+        .await;
+    let registry = super::ToolRegistry::new();
+    let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+
+    let proxy = broker
+        .build_code_mode_proxy_for_tests(
+            &super::CodeModeCaller::TrustedLocal,
+            super::CodeModeSurface::Mcp,
+            &super::CodeModeCapabilityFilter::default(),
+        )
+        .await
+        .expect("proxy");
+
+    assert!(proxy.contains("__codemodeDiscovery"));
+    assert!(proxy.contains("codemode.search"));
+    assert!(proxy.contains("codemode.describe"));
+    assert!(proxy.contains("ambiguous_target"));
+    assert!(proxy.contains("alpha::ping"));
+    assert!(proxy.contains("alpha.ping"));
+    assert!(proxy.contains("globalThis.codemode = globalThis.codemode || {}"));
+    assert!(proxy.contains("var codemode = globalThis.codemode"));
+}
+
+#[tokio::test]
+async fn execute_proxy_embeds_only_reduced_discovery_catalog() {
+    let (manager, pool) =
+        code_mode_manager_with_upstreams(vec![fixture_http_upstream("alpha")]).await;
+    pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
+        .await;
+    let registry = super::ToolRegistry::new();
+    let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+
+    let proxy = broker
+        .build_code_mode_proxy_for_tests(
+            &super::CodeModeCaller::TrustedLocal,
+            super::CodeModeSurface::Mcp,
+            &super::CodeModeCapabilityFilter::default(),
+        )
+        .await
+        .expect("proxy");
+
+    assert!(proxy.contains("__codemodeDiscovery"));
+    assert!(proxy.contains("alpha::ping"));
+    assert!(proxy.contains("codemode.search"));
+    assert!(!proxy.contains("\"schema\""));
+    assert!(!proxy.contains("\"output_schema\""));
+    assert!(!proxy.contains("\"dts\""));
 }
 
 #[tokio::test]

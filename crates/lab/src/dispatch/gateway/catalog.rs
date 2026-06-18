@@ -56,7 +56,7 @@ pub const ACTIONS: &[ActionSpec] = &[
                 name: "enabled",
                 ty: "boolean",
                 required: false,
-                description: "Whether the gateway advertises Code Mode search and execute tools",
+                description: "Whether the gateway advertises the Code Mode codemode surface",
             },
             ParamSpec {
                 name: "trace_params",
