@@ -140,7 +140,7 @@ pub struct GatewayUpdatePatch {
     pub command: Option<Option<String>>,
     #[serde(default)]
     pub args: Option<Vec<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_nullable")]
     pub bearer_token_env: Option<Option<String>>,
     #[serde(default)]
     pub proxy_resources: Option<bool>,
@@ -173,6 +173,18 @@ where
     D: Deserializer<'de>,
 {
     Ok(Some(Option::deserialize(deserializer)?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GatewayUpdatePatch;
+
+    #[test]
+    fn gateway_update_patch_can_clear_bearer_token_env() {
+        let patch: GatewayUpdatePatch =
+            serde_json::from_str(r#"{"bearer_token_env": null}"#).expect("patch");
+        assert_eq!(patch.bearer_token_env, Some(None));
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

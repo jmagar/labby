@@ -250,7 +250,7 @@ Destructive actions must log:
 
 Intent logs must make it clear which action is about to mutate state. Outcome logs must indicate success or failure.
 
-Gateway reconcile actions are destructive in this contract:
+Gateway reconcile actions must log their mutation intent and outcome:
 
 - `gateway.add`
 - `gateway.update`

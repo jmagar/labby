@@ -232,18 +232,17 @@ fn quarantine_migration_is_noop_when_only_existing_quarantine_remains() {
     assert_eq!(migrated.quarantined_virtual_servers.len(), 1);
 }
 
-// T7 — reload availability: unaffected upstream catalog entry survives a
-// single-upstream config change.
+// T7 — reload availability: unaffected upstream catalog entries and their live
+// pool survive a single-upstream config change.
 //
 // The reconciliation property: after a reload that only adds one new upstream,
-// the catalog entry for the *unchanged* upstream is still present in the fresh
-// pool.  We assert connection-object identity (by checking both pool snapshots
-// contain the same upstream name) rather than running concurrent calls, which
-// would require live MCP servers and be inherently flaky in CI.
+// the catalog entries for unchanged upstreams remain in the same live pool
+// instead of forcing a full swap-and-drain.
 //
-// Why this captures the intent: `pool_lifecycle.rs` seeds ALL upstreams lazily
-// into the new pool.  If the reconciliation regresses to a selective rebuild
-// that drops entries for unchanged upstreams, this test will fail.
+// Why this captures the intent: `pool_lifecycle.rs` now evicts only changed
+// upstream names, then lazy-seeds the updated config into the existing pool.
+// If reconciliation regresses to dropping unchanged entries or rebuilding the
+// whole pool, this test will fail.
 #[tokio::test]
 async fn reload_unaffected_upstream_catalog_entry_survives_single_upstream_change() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -314,7 +313,7 @@ async fn reload_unaffected_upstream_catalog_entry_survives_single_upstream_chang
         .expect("pool after second reload");
 
     // The reconciliation property: alpha and bravo are still present in the
-    // freshly built pool even though only charlie was added.
+    // preserved pool even though only charlie was added.
     assert!(
         pool_after_second
             .cached_upstream_summary("alpha")
@@ -337,11 +336,113 @@ async fn reload_unaffected_upstream_catalog_entry_survives_single_upstream_chang
         "charlie must be seeded in the new pool"
     );
 
-    // The new pool is a fresh Arc — not the same object.  Confirm the swap
-    // happened so we know we tested the post-reload pool, not a stale one.
     assert!(
-        !Arc::ptr_eq(&pool_after_first, &pool_after_second),
-        "reload must swap the pool (new Arc expected)"
+        Arc::ptr_eq(&pool_after_first, &pool_after_second),
+        "single-upstream changes must selectively reconcile without swapping the pool"
+    );
+}
+
+#[tokio::test]
+async fn reload_changed_upstream_rebuilds_pool_instead_of_reusing_stale_runtime() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+
+    write_gateway_config(
+        &path,
+        &LabConfig {
+            upstream: vec![
+                fixture_http_upstream("alpha"),
+                fixture_http_upstream("bravo"),
+            ],
+            ..LabConfig::default()
+        },
+    )
+    .expect("write initial config");
+
+    let manager = GatewayManager::new(path.clone(), GatewayRuntimeHandle::default());
+    manager
+        .reload_with_origin(None, None)
+        .await
+        .expect("initial reload");
+    let pool_before = manager
+        .current_pool()
+        .await
+        .expect("pool after first reload");
+
+    let mut changed_alpha = fixture_http_upstream("alpha");
+    changed_alpha.url = Some("http://127.0.0.1:9100".to_string());
+    write_gateway_config(
+        &path,
+        &LabConfig {
+            upstream: vec![changed_alpha, fixture_http_upstream("bravo")],
+            ..LabConfig::default()
+        },
+    )
+    .expect("write updated config");
+
+    manager
+        .reload_with_origin(None, None)
+        .await
+        .expect("second reload");
+    let pool_after = manager
+        .current_pool()
+        .await
+        .expect("pool after second reload");
+
+    assert!(
+        !Arc::ptr_eq(&pool_before, &pool_after),
+        "modified upstreams must rebuild the pool to avoid stale runtime state"
+    );
+}
+
+#[tokio::test]
+async fn reload_removed_upstream_rebuilds_pool_instead_of_reusing_stale_runtime() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+
+    write_gateway_config(
+        &path,
+        &LabConfig {
+            upstream: vec![
+                fixture_http_upstream("alpha"),
+                fixture_http_upstream("bravo"),
+            ],
+            ..LabConfig::default()
+        },
+    )
+    .expect("write initial config");
+
+    let manager = GatewayManager::new(path.clone(), GatewayRuntimeHandle::default());
+    manager
+        .reload_with_origin(None, None)
+        .await
+        .expect("initial reload");
+    let pool_before = manager
+        .current_pool()
+        .await
+        .expect("pool after first reload");
+
+    write_gateway_config(
+        &path,
+        &LabConfig {
+            upstream: vec![fixture_http_upstream("bravo")],
+            ..LabConfig::default()
+        },
+    )
+    .expect("write updated config");
+
+    manager
+        .reload_with_origin(None, None)
+        .await
+        .expect("second reload");
+    let pool_after = manager
+        .current_pool()
+        .await
+        .expect("pool after second reload");
+
+    assert!(
+        !Arc::ptr_eq(&pool_before, &pool_after),
+        "removed upstreams must rebuild the pool to avoid stale runtime state"
     );
 }
 
@@ -350,14 +451,14 @@ async fn reload_unaffected_upstream_catalog_entry_survives_single_upstream_chang
 // fingerprint-gated short-circuit in `pool_lifecycle.rs`
 // (`upstream_runtime_fingerprint` + the `pool_inputs_unchanged` branch that logs
 // `pool_rebuild_skipped=true`) is what keeps lazily-spawned stdio children alive
-// across unrelated reloads. Without this, every reload would tear down and rebuild
-// the pool, forcing a re-handshake on next use.
+// across unrelated reloads. Without this, every reload would tear down and
+// rebuild the pool, forcing a re-handshake on next use.
 //
-// This is the POSITIVE counterpart to
-// `reload_unaffected_upstream_catalog_entry_survives_single_upstream_change`,
-// whose only `Arc::ptr_eq` assertion is the NEGATIVE one (rebuild-on-add). We have
-// no log-capture infra wired in this tree, so the `Arc::ptr_eq` identity assertion
-// is the core contract: same Arc ⇒ the rebuild was skipped.
+// This is the no-op counterpart to
+// `reload_unaffected_upstream_catalog_entry_survives_single_upstream_change`.
+// We have no log-capture infra wired in this tree, so the `Arc::ptr_eq`
+// identity assertion is the core contract: same Arc means the rebuild was
+// skipped.
 #[tokio::test]
 async fn reload_noop_preserves_live_pool() {
     let dir = tempfile::tempdir().expect("tempdir");

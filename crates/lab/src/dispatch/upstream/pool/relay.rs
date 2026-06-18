@@ -398,6 +398,27 @@ impl UpstreamPool {
         }
     }
 
+    /// Evict every cached relay connection for one upstream.
+    pub(super) async fn evict_relay_connections_for(&self, upstream_name: &str) {
+        let drained: Vec<_> = {
+            let mut cache = self.relay_connections.write().await;
+            let keys = cache
+                .keys()
+                .filter(|(name, _)| name == upstream_name)
+                .cloned()
+                .collect::<Vec<_>>();
+            keys.into_iter()
+                .filter_map(|key| cache.remove(&key).map(|entry| (key, entry)))
+                .collect()
+        };
+        for ((name, _session), entry) in drained {
+            entry
+                ._connection
+                .shutdown(&name, "relay.cache.upstream_reconcile")
+                .await;
+        }
+    }
+
     /// Evict all cached relay connections (called during pool drain).
     pub(super) async fn evict_all_relay_connections(&self) {
         let drained: Vec<_> = self.relay_connections.write().await.drain().collect();

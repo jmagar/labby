@@ -48,7 +48,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.code_mode.set",
         description: "Configure gateway code execution limits",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "CodeModeConfig",
         params: &[
@@ -148,7 +148,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.protected_route.add",
         description: "Add a Gateway-managed protected MCP route",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "ProtectedMcpRouteConfig",
         params: &[ParamSpec {
@@ -161,7 +161,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.protected_route.update",
         description: "Replace a Gateway-managed protected MCP route",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "ProtectedMcpRouteConfig",
         params: &[
@@ -177,7 +177,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.protected_route.remove",
         description: "Remove a Gateway-managed protected MCP route",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "ProtectedMcpRouteConfig",
         params: &[NAME_PARAM],
@@ -198,7 +198,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.virtual_server.enable",
         description: "Enable a configured Lab-backed service as a virtual server",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "ServerView",
         params: &[ParamSpec {
@@ -211,7 +211,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.virtual_server.disable",
         description: "Disable a Lab-backed virtual server without removing its config",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "ServerView",
         params: &[ParamSpec {
@@ -224,7 +224,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.virtual_server.remove",
         description: "Remove a Lab-backed virtual server config entry",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "ServerView",
         params: &[ParamSpec {
@@ -245,7 +245,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.virtual_server.quarantine.restore",
         description: "Restore a quarantined Lab-backed virtual server into the active gateway list",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "ServerView",
         params: &[ParamSpec {
@@ -258,7 +258,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.virtual_server.set_surface",
         description: "Enable or disable one surface on a Lab-backed virtual server",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "ServerView",
         params: &[
@@ -298,7 +298,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.virtual_server.set_mcp_policy",
         description: "Replace the MCP action allowlist for a Lab-backed virtual server",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "VirtualServerMcpPolicyView",
         params: &[
@@ -345,7 +345,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.service_config.set",
         description: "Write canonical config for one Lab-backed service",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "ServiceConfigView",
         params: &[
@@ -381,11 +381,8 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "gateway.test",
-        // Destructive because probing a stdio gateway spawns the configured
-        // local command. The confirmation gate is the only thing standing
-        // between a remote caller and arbitrary local command execution.
         description: "Test a configured or proposed gateway without saving it (probing a stdio gateway runs its local command)",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "GatewayTestResult",
         params: &[
@@ -427,7 +424,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.import",
         description: "Import discovered MCP servers into the gateway config as disabled-by-default entries. Servers are marked with their discovery source.",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "ImportResultView",
         params: &[
@@ -462,7 +459,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.import_pending.approve",
         description: "Approve a pending discovered server and add it to the gateway config as disabled-by-default",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "PendingImportView",
         params: &[ParamSpec {
@@ -475,7 +472,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.import_pending.reject",
         description: "Reject a pending discovered server and tombstone it so it never re-appears",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "PendingImportView",
         params: &[ParamSpec {
@@ -496,7 +493,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.import_tombstones.clear",
         description: "Clear one import tombstone so a previously deleted imported server can be imported again",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "ImportTombstoneView[]",
         params: &[
@@ -530,7 +527,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.import_tombstones.restore",
         description: "Atomically clear one import tombstone and restore the matching discovered server as disabled",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "GatewayView",
         params: &[
@@ -564,7 +561,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.add",
         description: "Add a gateway and reconcile runtime state",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "GatewayView",
         params: &[
@@ -591,7 +588,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.update",
         description: "Update a gateway and reconcile runtime state",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "GatewayView",
         params: &[
@@ -617,7 +614,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.remove",
         description: "Remove a gateway and reconcile runtime state",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "GatewayView",
         params: &[NAME_PARAM],
@@ -625,7 +622,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.reload",
         description: "Reload gateways from config and reconcile runtime state",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "GatewayCatalogDiff",
         params: &[],
@@ -696,7 +693,7 @@ pub const ACTIONS: &[ActionSpec] = &[
                        Rejects userinfo, query strings, and fragments. Registers a transient \
                        OAuth manager keyed by URL host, port, and path; it is persisted only \
                        after a successful callback updates gateway config.",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "ProbeResult",
         params: &[ParamSpec {
@@ -751,7 +748,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.oauth.clear",
         description: "Clear stored upstream OAuth credentials for the shared gateway credential",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "ok",
         params: &[
@@ -801,7 +798,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.mcp.enable",
         description: "Enable an upstream MCP server so new sessions discover and proxy it again",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "GatewayView",
         params: &[NAME_PARAM],
@@ -817,7 +814,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.mcp.disable",
         description: "Disable an upstream MCP server and optionally clean up running processes",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "GatewayView + optional cleanup result",
         params: &[
@@ -839,7 +836,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.mcp.cleanup",
         description: "Kill or preview running processes associated with one upstream MCP server",
-        destructive: true,
+        destructive: false,
         requires_admin: true,
         returns: "GatewayCleanupView",
         params: &[
@@ -875,45 +872,13 @@ mod tests {
     use super::ACTIONS;
 
     #[test]
-    fn gateway_reconciliation_actions_are_marked_destructive() {
-        for action in [
-            "gateway.add",
-            "gateway.update",
-            "gateway.remove",
-            "gateway.reload",
-            "gateway.oauth.probe",
-            "gateway.import",
-            "gateway.import_tombstones.clear",
-            "gateway.import_tombstones.restore",
-        ] {
-            let spec = ACTIONS
-                .iter()
-                .find(|spec| spec.name == action)
-                .expect("gateway action");
-            assert!(spec.destructive, "{action} should be destructive");
-        }
-    }
-
-    #[test]
-    fn gateway_read_actions_remain_non_destructive() {
-        for action in [
-            "gateway.list",
-            "gateway.code_mode.get",
-            "gateway.get",
-            "gateway.status",
-            "gateway.virtual_server.quarantine.list",
-            "gateway.discovered_tools",
-            "gateway.discovered_resources",
-            "gateway.discovered_prompts",
-            "gateway.mcp.list",
-            "gateway.discover",
-            "gateway.import_tombstones.list",
-        ] {
-            let spec = ACTIONS
-                .iter()
-                .find(|spec| spec.name == action)
-                .expect("gateway action");
-            assert!(!spec.destructive, "{action} should remain non-destructive");
+    fn gateway_actions_are_not_destructive_under_data_loss_definition() {
+        for spec in ACTIONS {
+            assert!(
+                !spec.destructive,
+                "{} must not be destructive unless it risks permanent, hard-to-recreate data loss",
+                spec.name
+            );
         }
     }
 
@@ -929,7 +894,7 @@ mod tests {
             .iter()
             .find(|spec| spec.name == "gateway.code_mode.set")
             .expect("gateway.code_mode.set catalog entry");
-        assert!(set.destructive);
+        assert!(!set.destructive);
         let params: Vec<&str> = set.params.iter().map(|param| param.name).collect();
         for param in [
             "enabled",
@@ -961,7 +926,7 @@ mod tests {
             .iter()
             .find(|spec| spec.name == "gateway.code_mode.set")
             .expect("gateway.code_mode.set catalog entry");
-        assert!(set.destructive);
+        assert!(!set.destructive);
     }
 
     // ── A-H2 / S5: requires_admin field tests ────────────────────────────────

@@ -1,7 +1,7 @@
 //! Pool bootstrap and reload: swap-and-drain reconciliation, catalog snapshot
 //! diffing, and quarantine of virtual servers with unregistered services.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
 use futures::StreamExt as _;
@@ -101,26 +101,19 @@ impl GatewayManager {
         );
         self.reconcile_upstream_oauth_managers(&cfg);
 
-        // C1(b): diff-aware reload. The full path below tears down the live
-        // upstream pool and builds a fresh one, which drops every lazily-spawned
-        // stdio child and forces a re-handshake on next use — even when the
-        // logical change (e.g. a `protected_mcp_routes` edit, or a no-op reload)
-        // left every upstream untouched. When the upstream set, gateway spawn
-        // prefs, and code-mode settings are byte-identical between the live
-        // in-memory config and the freshly-loaded one, keep the existing pool and
-        // only reconcile the cheap in-memory state (protected routes + config
-        // swap). Per-upstream *partial* diffing (reconnect only the changed
-        // upstreams while preserving the rest) would require carrying live
-        // connections across the build-first/swap/drain boundary in
-        // `pool/lifecycle.rs` + `pool/ensure.rs`, which are outside this change's
-        // scope — so this implements the all-or-nothing safe subset and leaves
-        // the partial-reconnect gap documented here.
-        let pool_inputs_unchanged = {
+        let (pool_settings_unchanged, changed_upstreams, changed_upstreams_add_only) = {
             let current = self.config.read().await;
-            upstream_runtime_fingerprint(&current) == upstream_runtime_fingerprint(&cfg)
+            let changed_upstreams = upstream_changed_names(&current, &cfg);
+            let changed_upstreams_add_only =
+                upstream_changes_are_add_only(&current, &changed_upstreams);
+            (
+                pool_settings_fingerprint(&current) == pool_settings_fingerprint(&cfg),
+                changed_upstreams,
+                changed_upstreams_add_only,
+            )
         };
         let existing_pool = self.runtime.current_pool().await;
-        if pool_inputs_unchanged && existing_pool.is_some() {
+        if pool_settings_unchanged && existing_pool.is_some() && changed_upstreams.is_empty() {
             *self.protected_route_index.write().await =
                 ProtectedRouteIndex::from_routes(&cfg.protected_mcp_routes);
             let current_pool = existing_pool;
@@ -138,6 +131,54 @@ impl GatewayManager {
                 pool_rebuild_skipped = true,
                 elapsed_ms = started.elapsed().as_millis(),
                 "gateway reconcile (upstream runtime inputs unchanged; live pool preserved)"
+            );
+            return Ok(diff);
+        }
+        let expected_runtime_origin = runtime_origin_tag(origin);
+        let pool_runtime_identity_matches = existing_pool.as_ref().is_some_and(|pool| {
+            pool.runtime_identity_matches(&expected_runtime_origin, owner.as_ref())
+        });
+        if pool_settings_unchanged
+            && changed_upstreams_add_only
+            && pool_runtime_identity_matches
+            && let Some(current_pool) = existing_pool.clone()
+        {
+            let before = snapshot_from_pool(Some(Arc::clone(&current_pool))).await;
+            current_pool
+                .reconcile_lazy_upstreams(
+                    &cfg.upstream,
+                    &changed_upstreams,
+                    "gateway.reload.selective_reconcile",
+                )
+                .await;
+            let after = snapshot_from_pool(Some(Arc::clone(&current_pool))).await;
+            *self.protected_route_index.write().await =
+                ProtectedRouteIndex::from_routes(&cfg.protected_mcp_routes);
+            *self.config.write().await = cfg;
+            let current_cfg = self.config.read().await.clone();
+            self.reconcile_runtime_state(&current_cfg, Some(current_pool.as_ref()))
+                .await?;
+            let diff = diff_catalogs(&before, &after);
+            self.notify_catalog_changes(&diff);
+            tracing::info!(
+                surface = "dispatch",
+                service = "gateway",
+                action = "gateway.reload",
+                event = "catalog.refresh.finish",
+                phase = "finish",
+                pool_rebuild_skipped = true,
+                selectively_reconciled_upstream_count = changed_upstreams.len(),
+                tools_changed = diff.tools_changed,
+                resources_changed = diff.resources_changed,
+                prompts_changed = diff.prompts_changed,
+                before_tool_count = before.tools.len(),
+                after_tool_count = after.tools.len(),
+                before_resource_count = before.resources.len(),
+                after_resource_count = after.resources.len(),
+                before_prompt_count = before.prompts.len(),
+                after_prompt_count = after.prompts.len(),
+                elapsed_ms = started.elapsed().as_millis(),
+                "gateway reconcile (upstream changes selectively reconciled; live pool preserved)"
             );
             return Ok(diff);
         }
@@ -336,27 +377,15 @@ pub(super) fn quarantine_unregistered_virtual_servers(
     (cfg, migration)
 }
 
-/// Fingerprint of the config inputs that determine upstream-pool runtime shape.
+/// Fingerprint of pool-wide settings that require rebuilding the whole pool.
 ///
-/// Two configs with the same fingerprint seed the identical pool (same upstream
-/// set, same spawn-guard prefs, same code-mode toggle / request timeout), so a
-/// reload between them can keep the live pool instead of draining and rebuilding
-/// it. Fields that do not affect the pool (protected routes, virtual servers,
-/// tombstones, public URLs) are intentionally excluded — they are reconciled
-/// separately and must not force a pool rebuild.
-fn upstream_runtime_fingerprint(cfg: &LabConfig) -> String {
+/// Per-upstream add/update/remove is handled by selective reconciliation. These
+/// settings apply to the pool object itself, so changing them still forces a
+/// full swap-and-drain.
+fn pool_settings_fingerprint(cfg: &LabConfig) -> String {
     use sha2::{Digest, Sha256};
 
     let mut hasher = Sha256::new();
-    // Per-upstream fingerprints reuse the canonical helper so this matches the
-    // catalog cache's notion of "this upstream changed".
-    for upstream in &cfg.upstream {
-        hasher.update(
-            crate::dispatch::gateway::code_mode::catalog_cache::fingerprint(upstream).as_bytes(),
-        );
-        hasher.update([0u8]);
-    }
-    // Pool-shaping config beyond the upstream list.
     hasher.update(serde_json::to_vec(&cfg.gateway).unwrap_or_default());
     hasher.update([0u8]);
     hasher.update(serde_json::to_vec(&cfg.code_mode).unwrap_or_default());
@@ -366,6 +395,39 @@ fn upstream_runtime_fingerprint(cfg: &LabConfig) -> String {
         .finalize()
         .iter()
         .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+fn upstream_changed_names(current: &LabConfig, next: &LabConfig) -> HashSet<String> {
+    let current = upstream_fingerprint_map(current);
+    let next = upstream_fingerprint_map(next);
+    current
+        .keys()
+        .chain(next.keys())
+        .filter(|name| current.get(*name) != next.get(*name))
+        .cloned()
+        .collect()
+}
+
+fn upstream_changes_are_add_only(current: &LabConfig, changed_names: &HashSet<String>) -> bool {
+    !changed_names.is_empty()
+        && changed_names.iter().all(|name| {
+            current
+                .upstream
+                .iter()
+                .all(|upstream| upstream.name != *name)
+        })
+}
+
+fn upstream_fingerprint_map(cfg: &LabConfig) -> BTreeMap<String, String> {
+    cfg.upstream
+        .iter()
+        .map(|upstream| {
+            (
+                upstream.name.clone(),
+                crate::dispatch::gateway::code_mode::catalog_cache::fingerprint(upstream),
+            )
+        })
         .collect()
 }
 

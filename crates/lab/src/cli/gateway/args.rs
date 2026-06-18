@@ -158,17 +158,26 @@ pub struct GatewayUpdateArgs {
     #[arg(long)]
     pub new_name: Option<String>,
     /// New HTTP(S) URL for a remote MCP server.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "command")]
     pub url: Option<String>,
+    /// Clear the HTTP(S) URL from this gateway.
+    #[arg(long, conflicts_with = "url")]
+    pub clear_url: bool,
     /// New stdio command for a local MCP server.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "url")]
     pub command: Option<String>,
+    /// Clear the stdio command from this gateway.
+    #[arg(long, conflicts_with = "command")]
+    pub clear_command: bool,
     /// Replace all command arguments with these values (repeat for multiple).
     #[arg(long = "arg")]
     pub args: Vec<String>,
     /// Environment variable name whose value is used as the upstream bearer token.
     #[arg(long)]
     pub bearer_token_env: Option<String>,
+    /// Clear the upstream bearer token environment variable name.
+    #[arg(long, conflicts_with = "bearer_token_env")]
+    pub clear_bearer_token_env: bool,
     #[arg(long)]
     pub proxy_resources: Option<bool>,
 }

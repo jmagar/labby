@@ -21,7 +21,18 @@ impl CatalogChangeNotifier {
     }
 
     pub fn notify_catalog_changes(&self, diff: &GatewayCatalogDiff) {
-        let _ = self.tx.send(diff.clone());
+        if let Err(err) = self.tx.send(diff.clone()) {
+            tracing::warn!(
+                surface = "dispatch",
+                service = "gateway",
+                action = "catalog.notify",
+                tools_changed = diff.tools_changed,
+                resources_changed = diff.resources_changed,
+                prompts_changed = diff.prompts_changed,
+                error = %err,
+                "failed to enqueue catalog-change notification"
+            );
+        }
     }
 }
 

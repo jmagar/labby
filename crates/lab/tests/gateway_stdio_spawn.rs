@@ -26,12 +26,11 @@
 //!     required of `pool/connect_stdio.rs`'s `ProcessGuard`, which kills the
 //!     process group on drop.
 //!
-//! (b) **Minimal child environment (DOCUMENTED INTENT — not yet enforced)**
-//!     The intended hardened state after the SEC `env_clear` work item is that
-//!     the runner child does NOT inherit secret env vars from labby.  The
-//!     assertion below is written against that intended state and is disabled
-//!     until the work item lands.  Do NOT delete this test — it documents the
-//!     gap and will catch regressions once hardening is implemented.
+//! (b) **Minimal child environment**
+//!     The stdio spawn path now uses `env_clear()` plus a small allowlist, so
+//!     children do not inherit ambient `LAB_*` secrets from labby.  The ignored
+//!     real-spawn test and the Linux `/proc/<pid>/environ` regression test below
+//!     cover that hardened contract.
 //!
 //! (c) **MCP initialize round-trip** — sends a JSON-RPC `initialize` request
 //!     over stdin and asserts a valid response arrives on stdout, validating

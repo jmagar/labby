@@ -28,23 +28,19 @@ The complete gateway action inventory is generated from `ActionSpec`:
 - [generated action catalog](../generated/action-catalog.md)
 - [generated action catalog JSON](../generated/action-catalog.json)
 
-`gateway.test`, `gateway.add`, `gateway.update`, `gateway.remove`, and
-`gateway.reload` are destructive actions in shared action metadata. HTTP callers
-must send `params.confirm = true`, CLI callers must confirm interactively or use
-`--yes` / `-y`, and MCP callers must go through elicitation when supported.
+Lab uses `destructive` only for actions that can permanently lose data that
+cannot be quickly and easily regenerated with minimal effort. Reversible gateway
+lifecycle work is still admin-gated, but it is not destructive under that
+definition. In particular, clearing OAuth tokens, enabling/disabling an
+upstream, and killing restartable upstream processes do not require destructive
+confirmation.
 
 ### Stdio Gateways
 
 Stdio upstreams run a configured command on the local host running `lab` when
-they are tested or reconciled. There is no separate stdio acknowledgement — they
-are gated only by the normal destructive confirmation (`confirm: true` /
-`--yes` / elicitation).
-
-`gateway.test` is marked destructive specifically because probing a stdio
-gateway spawns its local command. Unlike `add`/`update`, a test performs no
-config mutation, but it can still execute a local process — so the confirmation
-gate is what keeps a read-only-looking call from running arbitrary commands on
-behalf of a remote HTTP/MCP caller.
+they are tested or reconciled. This is an admin-gated execution path, but it is
+not marked destructive unless the action risks permanent, hard-to-recreate data
+loss.
 
 #### Spawn Guard
 
@@ -89,11 +85,11 @@ expose_tools = ["search_repos", "github_*"]
 Typical patch payloads:
 
 ```json
-{ "action": "gateway.update", "params": { "confirm": true, "name": "github", "patch": { "expose_tools": ["search_repos", "github_*"] } } }
+{ "action": "gateway.update", "params": { "name": "github", "patch": { "expose_tools": ["search_repos", "github_*"] } } }
 ```
 
 ```json
-{ "action": "gateway.update", "params": { "confirm": true, "name": "github", "patch": { "expose_tools": null } } }
+{ "action": "gateway.update", "params": { "name": "github", "patch": { "expose_tools": null } } }
 ```
 
 ## Gateway Search And Execute Mode
@@ -258,9 +254,8 @@ Tool-search observability:
 - RFC1918 and other private-network URLs are allowed
 - stdio gateways are allowed. Proposed or persisted enabled stdio specs can
   execute local commands during `gateway.test`, `gateway.add`, and
-  `gateway.update`; all three are marked destructive and gated by the normal
-  destructive confirmation. `gateway.test` is destructive even though it never
-  mutates config, because probing a stdio gateway spawns its local command.
+  `gateway.update`; these paths require admin scope but are not marked
+  destructive under Lab's permanent-data-loss definition.
 
 ## Reconcile Model
 
@@ -301,6 +296,9 @@ labby gateway add --name remote-lab --url https://lab2.example.com/mcp --bearer-
 labby gateway add --name deepwiki --url https://mcp.deepwiki.com/mcp
 labby gateway add --name local-tools --command local-mcp-server
 labby gateway update remote-lab --proxy-resources true
+labby gateway update remote-lab --command local-mcp-server --arg=--stdio
+labby gateway update local-tools --url https://lab2.example.com/mcp
+labby gateway update remote-lab --clear-bearer-token-env
 labby gateway remove remote-lab
 labby gateway reload
 ```
@@ -309,10 +307,10 @@ labby gateway reload
 
 ```json
 { "tool": "gateway", "input": { "action": "gateway.list", "params": {} } }
-{ "tool": "gateway", "input": { "action": "gateway.add", "params": { "confirm": true, "spec": { "name": "remote-lab", "url": "https://lab2.example.com/mcp", "bearer_token_env": "REMOTE_LAB_TOKEN" } } } }
-{ "tool": "gateway", "input": { "action": "gateway.add", "params": { "confirm": true, "spec": { "name": "deepwiki", "url": "https://mcp.deepwiki.com/mcp" } } } }
-{ "tool": "gateway", "input": { "action": "gateway.add", "params": { "confirm": true, "spec": { "name": "local-tools", "command": "local-mcp-server" } } } }
-{ "tool": "gateway", "input": { "action": "gateway.reload", "params": { "confirm": true } } }
+{ "tool": "gateway", "input": { "action": "gateway.add", "params": { "spec": { "name": "remote-lab", "url": "https://lab2.example.com/mcp", "bearer_token_env": "REMOTE_LAB_TOKEN" } } } }
+{ "tool": "gateway", "input": { "action": "gateway.add", "params": { "spec": { "name": "deepwiki", "url": "https://mcp.deepwiki.com/mcp" } } } }
+{ "tool": "gateway", "input": { "action": "gateway.add", "params": { "spec": { "name": "local-tools", "command": "local-mcp-server" } } } }
+{ "tool": "gateway", "input": { "action": "gateway.reload", "params": {} } }
 ```
 
 For public streamable HTTP upstreams that require no upstream auth, omit
@@ -328,7 +326,15 @@ POST /v1/gateway
 
 ```json
 POST /v1/gateway
-{ "action": "gateway.update", "params": { "confirm": true, "name": "remote-lab", "patch": { "proxy_resources": true } } }
+{ "action": "gateway.update", "params": { "name": "remote-lab", "patch": { "proxy_resources": true } } }
+```
+
+To switch transports over HTTP/MCP, set the new transport field and explicitly
+clear the old one with `null`:
+
+```json
+{ "action": "gateway.update", "params": { "name": "remote-lab", "patch": { "command": "local-mcp-server", "args": ["--stdio"], "url": null } } }
+{ "action": "gateway.update", "params": { "name": "local-tools", "patch": { "url": "https://lab2.example.com/mcp", "command": null, "args": [] } } }
 ```
 
 ## Gateway-Managed Protected MCP Routes
@@ -733,7 +739,7 @@ session and the master-only middleware; non-master sessions get `403`.
 | `POST` | `/v1/gateway/oauth/start` | Begin authorization for the shared gateway subject `gateway`. Body `{ "upstream": "<name>" }`. Returns `{ "authorization_url": "..." }` (JSON only — no browser-redirect mode). |
 | `GET` | `/auth/upstream/callback` | Authorization-code callback. Validates the authenticated session, atomically takes the pending state row (bound to `(upstream, subject)`), exchanges the code, persists encrypted credentials, redirects to `/gateway/oauth/result?upstream=<name>&status=<ok\|fail>`. |
 | `GET` | `/v1/gateway/oauth/status?upstream=<name>` | Returns `{ "authenticated": bool, "upstream": "<name>", "expires_within_5m": bool }`. Deliberately omits subject and raw expiry timestamp to avoid enumeration and fingerprinting. |
-| `POST` | `/v1/gateway/oauth/clear?upstream=<name>&confirm=true` | Destructive. Requires both `upstream` (the upstream name) and `confirm=true` as query parameters. Without `confirm=true`, returns `422` with JSON `{ "kind": "confirmation_required", ... }`. With confirm, deletes persisted credentials and evicts the cached `AuthClient`. In-flight requests complete naturally under the old credential (graceful drain by Rust ownership — not a designed protocol). |
+| `POST` | `/v1/gateway/oauth/clear?upstream=<name>` | Requires `upstream` (the upstream name). Deletes persisted credentials and evicts the cached `AuthClient`. In-flight requests complete naturally under the old credential (graceful drain by Rust ownership — not a designed protocol). |
 
 ### OAuth Operator Examples
 
@@ -751,7 +757,7 @@ MCP tool calls:
 ```json
 { "tool": "gateway", "input": { "action": "gateway.oauth.start", "params": { "upstream": "chrome-devtools" } } }
 { "tool": "gateway", "input": { "action": "gateway.oauth.status", "params": { "upstream": "chrome-devtools" } } }
-{ "tool": "gateway", "input": { "action": "gateway.oauth.clear", "params": { "confirm": true, "upstream": "chrome-devtools" } } }
+{ "tool": "gateway", "input": { "action": "gateway.oauth.clear", "params": { "upstream": "chrome-devtools" } } }
 ```
 
 These actions now operate on the shared gateway OAuth subject `gateway`, so the

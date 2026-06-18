@@ -13,8 +13,18 @@ pub struct ActionSpec {
     pub name: &'static str,
     /// One-line human-readable description.
     pub description: &'static str,
-    /// True if this action mutates external state. Drives both MCP elicitation
-    /// and CLI confirmation prompts — a single source of truth.
+    /// True if this action can cause permanent loss of data that cannot be
+    /// quickly and easily regenerated or recreated with minimal effort.
+    ///
+    /// This is intentionally narrower than "mutates state": restarting a
+    /// process, toggling a gateway, removing a disposable container, or clearing
+    /// an OAuth token may change state but is not destructive under Lab's
+    /// policy. Formatting a drive, deleting a source tree, hard-resetting away
+    /// unrecoverable work, or deleting a whole irreplaceable media folder is
+    /// destructive.
+    ///
+    /// Drives both MCP elicitation and CLI confirmation prompts as the single
+    /// source of truth.
     pub destructive: bool,
     /// True if this action requires the `lab:admin` scope on authenticated HTTP
     /// and MCP transports. Defaults to `false` for all services except gateway,

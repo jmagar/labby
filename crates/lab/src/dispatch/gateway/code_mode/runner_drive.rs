@@ -386,7 +386,7 @@ impl CodeModeBroker<'_> {
                             // output emitted before Done.
                             stderr.flush_settle().await;
                             let mut all_logs = response.logs.clone();
-                            all_logs.extend(stderr.since(stderr_start).await);
+                            all_logs.extend(stderr.take_since_and_clear(stderr_start).await);
                             let all_logs = apply_log_caps(
                                 all_logs,
                                 cfg.max_log_entries,
@@ -410,6 +410,8 @@ impl CodeModeBroker<'_> {
                             // (it does NOT exit), so it is safe to reuse — return
                             // ExecutionError so the pool releases rather than
                             // evicts.
+                            stderr.flush_settle().await;
+                            stderr.clear().await;
                             return DriveOutcome::ExecutionError(
                                 CodeModeExecutionError::with_trace(
                                     ToolError::Sdk {

@@ -335,6 +335,15 @@ Rules:
 
 Destructive operations are marked in `ActionSpec.destructive`.
 
+Lab defines a destructive action as one that can cause permanent loss of data
+that cannot be quickly and easily regenerated or recreated with minimal effort.
+This is narrower than "mutates state": clearing OAuth tokens, enabling or
+disabling a gateway, stopping a process, or removing a disposable container may
+change state, but those actions are not destructive when the state is easily
+recreated. Formatting a drive, deleting a source tree, hard-resetting away
+unrecoverable work, or deleting an entire irreplaceable media folder is
+destructive.
+
 That one flag drives:
 
 - MCP elicitation prompts

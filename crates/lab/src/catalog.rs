@@ -53,7 +53,8 @@ pub struct ActionEntry {
     pub name: String,
     /// Short description.
     pub description: String,
-    /// Whether the action mutates state and requires confirmation.
+    /// Whether the action can cause permanent, hard-to-recreate data loss and
+    /// therefore requires destructive-action confirmation.
     pub destructive: bool,
     /// Declared parameters for this action. Empty when the action takes no params.
     pub params: Vec<ParamEntry>,

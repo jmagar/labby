@@ -1,13 +1,114 @@
-//! Pool lifecycle: `drain_for_swap` tears down all connections, probe tasks, and
-//! catalog state when the pool is swapped out (e.g. on config reload).
+//! Pool lifecycle: selective upstream reconciliation plus `drain_for_swap`, which
+//! tears down all connections, probe tasks, and catalog state when the pool is
+//! swapped out (e.g. on config reload).
 
+use std::collections::HashSet;
 use std::time::Instant;
 
 use futures::future::join_all;
 
+use crate::config::UpstreamConfig;
+
 use super::UpstreamPool;
 
 impl UpstreamPool {
+    pub fn runtime_identity_matches(
+        &self,
+        origin: &Option<String>,
+        owner: Option<&crate::dispatch::upstream::types::UpstreamRuntimeOwner>,
+    ) -> bool {
+        self.runtime_origin == *origin && self.runtime_owner.as_ref() == owner
+    }
+
+    pub async fn reconcile_lazy_upstreams(
+        &self,
+        configs: &[UpstreamConfig],
+        reconnect_names: &HashSet<String>,
+        reason: &'static str,
+    ) {
+        let started = Instant::now();
+        tracing::info!(
+            surface = "dispatch",
+            service = "upstream.pool",
+            action = "upstream.pool.reconcile",
+            event = "start",
+            operation = "pool.reconcile",
+            reason,
+            reconnect_count = reconnect_names.len(),
+            "upstream pool selective reconcile start"
+        );
+
+        for upstream_name in reconnect_names {
+            self.evict_subject_connections_for(upstream_name).await;
+            self.evict_relay_connections_for(upstream_name).await;
+        }
+
+        let cancelled_probe_count = {
+            let mut tasks = self.probe_tasks.write().await;
+            let mut count = 0usize;
+            for upstream_name in reconnect_names {
+                if let Some(cancel) = tasks.remove(upstream_name) {
+                    cancel.cancel();
+                    count += 1;
+                }
+            }
+            count
+        };
+        let drained_connection_count = {
+            let mut connections = self.connections.write().await;
+            let drained = reconnect_names
+                .iter()
+                .filter_map(|name| {
+                    connections
+                        .remove(name)
+                        .map(|connection| (name.clone(), connection))
+                })
+                .collect::<Vec<_>>();
+            let count = drained.len();
+            drop(connections);
+            let futs = drained
+                .into_iter()
+                .map(|(upstream_name, connection)| async move {
+                    connection.shutdown(&upstream_name, reason).await;
+                })
+                .collect::<Vec<_>>();
+            join_all(futs).await;
+            count
+        };
+        let removed_catalog_count = {
+            let mut catalog = self.catalog.write().await;
+            let mut count = 0usize;
+            for upstream_name in reconnect_names {
+                if catalog.remove(upstream_name).is_some() {
+                    count += 1;
+                }
+            }
+            count
+        };
+        {
+            let mut locks = self.lazy_connect_locks.write().await;
+            for upstream_name in reconnect_names {
+                locks.remove(upstream_name);
+            }
+        }
+
+        self.seed_lazy_upstreams(configs).await;
+
+        tracing::info!(
+            surface = "dispatch",
+            service = "upstream.pool",
+            action = "upstream.pool.reconcile",
+            event = "finish",
+            operation = "pool.reconcile",
+            reason,
+            elapsed_ms = started.elapsed().as_millis(),
+            removed_catalog_count,
+            drained_connection_count,
+            cancelled_probe_count,
+            "upstream pool selective reconcile finish"
+        );
+    }
+
     pub async fn drain_for_swap(&self, reason: &'static str) {
         let started = Instant::now();
         let catalog_count = self.catalog.read().await.len();

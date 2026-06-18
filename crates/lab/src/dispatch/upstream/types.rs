@@ -39,7 +39,7 @@ pub struct UpstreamToolExposureRow {
 }
 
 /// Runtime metadata for process-backed upstream connections.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UpstreamRuntimeOwner {
     pub surface: String,
     pub subject: Option<String>,
