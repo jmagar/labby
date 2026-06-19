@@ -135,8 +135,9 @@ Any doc or comment that says "Wasmtime", "fuel budget", or
 `code_mode_fuel_exhausted` on an active code path is wrong and must be corrected.
 
 **Runner process hardening is IMPLEMENTED (not "planned").** The Code Mode
-runner subprocess is spawned with `env_clear()` (`runner_drive.rs:163` — the
-child inherits *no* labby environment, so `LAB_*` secrets cannot leak) and on
+runner subprocess is spawned with `env_clear()` (`pool/runner_handle.rs`, in
+`PooledRunner::spawn` — the child inherits *no* labby environment, so `LAB_*`
+secrets cannot leak) and on
 Linux calls `prctl(PR_SET_DUMPABLE, 0)` as its first act (`runner.rs:22`) to
 block `/proc/<pid>/environ` readback. Combined with the per-run `TempDir` cwd
 and the process-group/`killpg` guard, this is the current hardened state. See

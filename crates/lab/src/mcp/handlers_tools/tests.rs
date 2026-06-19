@@ -958,6 +958,57 @@ async fn call_tool_requires_execute_scope_for_hidden_mcp_app_sibling_callbacks()
     );
 }
 
+/// The legacy `LAB_CODE_MODE_WIDGET_CALLBACKS` bypass surfaces ANY exposed
+/// non-destructive upstream tool — including one with no MCP App UI resource that
+/// is therefore NOT advertised in `list_tools`. Calling such a hidden tool via
+/// the bypass with an authenticated-but-insufficient scope must be rejected, not
+/// silently allowed. This pins the `requires_scope_check` flag on the legacy
+/// path (it was previously `false`, which let a `lab:read` caller through).
+#[tokio::test]
+async fn call_tool_requires_execute_scope_for_legacy_widget_callbacks() {
+    let upstream_name: Arc<str> = Arc::from("apps");
+    // A plain tool with no UI sibling: only the legacy "any exposed tool" rule
+    // makes it callable via the widget-callback gate.
+    let plain_tool = fixture_upstream_tool(&upstream_name, "youtube_probe", None);
+    let pool = Arc::new(UpstreamPool::new());
+    pool.insert_entry_for_test(
+        "apps",
+        fixture_upstream_entry(
+            "apps",
+            HashMap::from([("youtube_probe".to_string(), plain_tool)]),
+        ),
+    )
+    .await;
+    let manager = code_mode_manager_with_pool(true, fixture_upstream_config("apps"), pool).await;
+    let mut server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    server.code_mode_widget_callbacks_enabled_for_test = true;
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+
+    let result = Box::pin(running.service().call_tool_impl(
+        CallToolRequestParams::new("youtube_probe"),
+        scoped_context(running.peer().clone(), &["lab:read"]),
+    ))
+    .await
+    .expect("call tool result");
+
+    assert!(result.is_error.unwrap_or(false));
+    let text = result.content[0].as_text().expect("text").text.as_str();
+    let envelope: Value = serde_json::from_str(text).expect("error envelope");
+    assert_eq!(envelope["error"]["kind"], "forbidden");
+    assert_eq!(
+        envelope["error"]["required_scopes"],
+        serde_json::json!(["lab", "lab:admin"])
+    );
+}
+
 #[tokio::test]
 async fn codemode_requires_execute_scope_not_read_scope() {
     let server = test_server(

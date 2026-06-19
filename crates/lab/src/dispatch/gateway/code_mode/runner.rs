@@ -112,9 +112,11 @@ thread_local! {
 }
 
 /// Create a fresh empty per-execution working directory and `chdir` into it,
-/// removing the previous execution's directory first. Best-effort: any failure
-/// leaves the process in its existing (already-isolated) cwd. See the call site
-/// for why this is defense-in-depth rather than a hard containment boundary.
+/// removing the previous execution's directory first. Best-effort: on any
+/// failure the process is left in a still-valid isolated cwd — the prior jail if
+/// it was never touched, otherwise the stable spawn base (the per-runner
+/// `TempDir`), since the prior jail is removed up front. See the call site for
+/// why this is defense-in-depth rather than a hard containment boundary.
 fn reset_execution_jail() {
     // Resolve (and remember) the stable base = the spawn cwd. The first call
     // captures it before we ever chdir into a subdir, so subsequent jails are
@@ -140,13 +142,20 @@ fn reset_execution_jail() {
         let unique = format!("exec-{}-{}", std::process::id(), next_jail_seq());
         let jail = base.join(unique);
         if std::fs::create_dir(&jail).is_err() {
+            // We already removed the previous jail above, so the process must not
+            // be left `chdir`'d inside a now-deleted directory. Fall back to the
+            // stable base (the per-runner spawn TempDir) so cwd stays valid and
+            // isolated. `*cell` is already `None` (taken above).
+            drop(std::env::set_current_dir(&base));
             return;
         }
         if std::env::set_current_dir(&jail).is_ok() {
             *cell = Some(jail);
         } else {
-            // Could not enter the jail; clean it up and stay put.
+            // Could not enter the jail; clean it up and fall back to the stable
+            // base rather than the just-removed previous jail.
             drop(std::fs::remove_dir_all(&jail));
+            drop(std::env::set_current_dir(&base));
         }
     });
 }
@@ -220,6 +229,12 @@ fn extract_structured_kind(message: &str) -> Option<String> {
 ///    serialized — a caller mistake → `invalid_param`.
 /// 3. Otherwise it is a runtime throw (e.g. the non-function TypeError) →
 ///    `server_error`.
+///
+/// Note: a caller can deliberately set its own execution's error kind by throwing
+/// a structured `{kind,message}` Error (intentional, see the
+/// `..._preserves_kind_from_uncaught_structured_rejection` integration test). The
+/// extracted kind is the caller's OWN result, not a cross-trust signal, so this
+/// is by design rather than a forgery boundary.
 fn classify_rejection(message: String) -> CodeModeRunnerError {
     if let Some(kind) = extract_structured_kind(&message) {
         return CodeModeRunnerError { kind, message };
