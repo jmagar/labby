@@ -43,10 +43,11 @@ pub(in crate::dispatch::gateway::code_mode) async fn terminate_code_mode_runner(
             let _ = nix::sys::signal::killpg(Pid::from_raw(raw_pid as i32), Signal::SIGKILL);
         }
     }
-    // On Windows, the `_runner_job_guard` in `run_in_runner_with_config` owns
-    // a Job Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. Dropping that guard
-    // (which happens on every return path, including timeout) lets the OS
-    // terminate the whole descendant tree. This kill() call is therefore a
+    // On Windows, the `PooledRunner._job_guard` (a `JobObjectGuard` armed at
+    // spawn in `pool/runner_handle.rs`) owns a Job Object with
+    // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. Dropping that guard when the runner
+    // handle drops (on eviction, including after a timeout) lets the OS terminate
+    // the whole descendant tree. This kill() call is therefore a
     // belt-and-suspenders direct kill of the immediate child process.
     drop(child.kill().await);
     drop(child.wait().await);
@@ -71,7 +72,12 @@ fn code_mode_canonical_error_kind(s: &str) -> &'static str {
         "internal_error" => "internal_error",
         "upstream_error" => "upstream_error",
         "code_mode_timeout" => "code_mode_timeout",
-        "code_mode_fuel_exhausted" => "code_mode_fuel_exhausted",
+        // `code_mode_fuel_exhausted` is intentionally NOT mapped here: it is a
+        // reserved kind belonging to the dead Wasmtime/fuel path and is never
+        // emitted on the live Javy/QuickJS path (see docs/dev/ERRORS.md and
+        // code_mode/CLAUDE.md). An upstream that returns it as its own error
+        // `kind` is normalized to `internal_error` rather than passed through
+        // verbatim, so a reserved/dead kind cannot reach the caller.
         _ => "internal_error",
     }
 }

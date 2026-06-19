@@ -101,6 +101,15 @@ deploy, or a different gateway process handles the promotion request. Promoted
 source is written as plaintext executable snippet content under the user snippet
 directory and may contain anything the original Code Mode source contained.
 
+> **Persistence caveat.** Promotion writes the source **verbatim and unredacted**
+> as a plaintext file on disk (`$LAB_HOME/snippets/<name>.md`, subject to the
+> process umask). If the original Code Mode source embedded a literal secret,
+> token, or captured credential, that value is now persisted in cleartext and
+> survives restarts until the snippet is removed. Promotion is `destructive: true`
+> (elicitation / `confirm:true` gated) precisely because it is a persistence
+> action — do not promote sources that carry inline secrets; pass them through
+> snippet `input`/params at run time instead.
+
 ## Tool IDs and Helpers
 
 Upstream tool IDs use:

@@ -47,7 +47,13 @@ use crate::mcp::server::LabMcpServer;
 enum WidgetCallbackGate {
     Allowed {
         resolved: Box<PreResolvedUpstreamTool>,
-        hidden_sibling: bool,
+        /// True when the callback target is a tool that Code Mode keeps hidden
+        /// from `list_tools` (an MCP App sibling, or any exposed tool surfaced
+        /// only through the legacy `LAB_CODE_MODE_WIDGET_CALLBACKS` bypass).
+        /// Calling such a hidden tool via the bypass requires the `lab`/
+        /// `lab:admin` scope check below. It is `false` only for `DirectMcpApp`
+        /// candidates, which are already advertised in `list_tools`.
+        requires_scope_check: bool,
     },
     Ambiguous {
         valid: Vec<String>,
@@ -277,9 +283,9 @@ impl LabMcpServer {
                 }
                 Some(WidgetCallbackGate::Allowed {
                     resolved,
-                    hidden_sibling,
+                    requires_scope_check,
                 }) => {
-                    if hidden_sibling
+                    if requires_scope_check
                         && !tool_execute_scope_allowed(auth_context_from_extensions(
                             &context.extensions,
                         ))
@@ -288,7 +294,7 @@ impl LabMcpServer {
                             &service,
                             &action,
                             "forbidden",
-                            "MCP App sibling callbacks require one of scopes: lab, lab:admin",
+                            "hidden-tool widget callbacks require one of scopes: lab, lab:admin",
                             &serde_json::json!({
                                 "required_scopes": ["lab", "lab:admin"],
                             }),
@@ -572,9 +578,16 @@ impl LabMcpServer {
                     CallbackToolLookup::LegacyAnyExposed,
                 )
                 .await?;
+            // Legacy mode surfaces ANY exposed non-destructive upstream tool,
+            // including ones with no MCP App UI resource that are therefore NOT
+            // advertised in `list_tools`. Calling such a hidden tool through the
+            // bypass must require the `lab`/`lab:admin` scope check, so this path
+            // sets `requires_scope_check = true` (matching the sibling path),
+            // rather than the `false` that is only correct for advertised
+            // `DirectMcpApp` candidates.
             return Ok(classify_widget_callback_candidates(
                 "upstream_widget_callback_legacy",
-                false,
+                true,
                 candidates,
             ));
         }
@@ -625,7 +638,7 @@ impl LabMcpServer {
 #[cfg(feature = "gateway")]
 fn classify_widget_callback_candidates(
     route: &'static str,
-    hidden_sibling: bool,
+    requires_scope_check: bool,
     candidates: Vec<(String, UpstreamTool)>,
 ) -> Option<WidgetCallbackGate> {
     if candidates.is_empty() {
@@ -653,6 +666,6 @@ fn classify_widget_callback_candidates(
             route,
         }
         .into(),
-        hidden_sibling,
+        requires_scope_check,
     })
 }

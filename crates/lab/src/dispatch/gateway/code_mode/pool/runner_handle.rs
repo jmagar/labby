@@ -27,6 +27,13 @@ use crate::dispatch::error::ToolError;
 
 /// Per-line safety cap mirrored from the original driver: 64 MiB heap + framing
 /// headroom. A longer line is a protocol violation.
+///
+/// Note this is a per-runner transient ceiling: the parent may buffer up to this
+/// much for a single oversized stdout line, multiplied by the number of live
+/// runners (`LAB_CODE_MODE_POOL_SIZE` + `LAB_CODE_MODE_POOL_MAX_OVERFLOW`, ~24 at
+/// defaults). It is a hard bound that errors rather than growing unbounded, not a
+/// steady-state allocation; raising the pool/overflow knobs raises this worst
+/// case proportionally.
 pub(in crate::dispatch::gateway::code_mode) const MAX_LINE_BYTES: usize =
     64 * 1024 * 1024 + 4 * 1024;
 

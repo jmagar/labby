@@ -190,6 +190,10 @@ pub fn create_user_snippet(
     let dir = user_snippet_dir(lab_home);
     fs::create_dir_all(&dir).map_err(|e| io_error("create snippets directory", &dir, e))?;
     let path = dir.join(format!("{name}.md"));
+    // Fast-path rejection for a friendly early error; the authoritative
+    // no-overwrite guard is re-checked under the write lock inside
+    // `atomic_write_snippet` so two concurrent non-`force` creates of the same
+    // name cannot both pass this check and race to overwrite.
     if path.exists() && !force {
         return Err(ToolError::Conflict {
             message: format!("user snippet `{name}` already exists"),
@@ -197,7 +201,7 @@ pub fn create_user_snippet(
         });
     }
     let body = render_user_snippet_body(name, body, description)?;
-    atomic_write_snippet(&path, &body)?;
+    atomic_write_snippet(&path, &body, force)?;
     let (description, tags, inputs) = snippet_metadata_fields(frontmatter(&body).ok().flatten());
     Ok(SnippetInfo {
         name: name.to_string(),
@@ -601,12 +605,25 @@ fn sanitize_frontmatter_scalar(value: &str) -> String {
     }
 }
 
-fn atomic_write_snippet(path: &Path, body: &str) -> Result<(), ToolError> {
+fn atomic_write_snippet(path: &Path, body: &str, force: bool) -> Result<(), ToolError> {
     static WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     let _guard = WRITE_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
         .map_err(|_| ToolError::internal_message("snippet write lock poisoned"))?;
+    // Authoritative no-overwrite guard, held under the process-wide write lock so
+    // the exists-check and the rename below are atomic with respect to other
+    // in-process writers (the caller's pre-lock check is only a fast path).
+    if !force && path.exists() {
+        let name = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("snippet");
+        return Err(ToolError::Conflict {
+            message: format!("user snippet `{name}` already exists"),
+            existing_id: name.to_string(),
+        });
+    }
     let dir = path.parent().ok_or_else(|| {
         ToolError::internal_message(format!("snippet path `{}` has no parent", path.display()))
     })?;

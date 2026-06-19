@@ -76,40 +76,48 @@ runner process serves **multiple** `Start`→`Done`/`Error` cycles over its
 lifetime (warm pool); it parks on the next `Start` read after each and exits only
 on stdin EOF.
 
-**Parent → runner (requests):**
+Messages are tagged by a `"type"` field (serde `tag = "type"`, snake_case), NOT
+a `"kind"` field. `protocol.rs` is the source of truth; the shapes below mirror
+`CodeModeRunnerInput` / `CodeModeRunnerOutput`.
+
+**Parent → runner (`CodeModeRunnerInput`):**
 
 ```jsonc
-// Execute a snippet
-{ "kind": "execute", "id": "<uuid>", "code": "<js source>" }
+// Start an execution (the runtime is rebuilt fresh per Start)
+{ "type": "start", "code": "<js source>", "proxy": "<generated codemode proxy js>" }
 
-// Call an upstream tool (broker request from runner)
-{ "kind": "tool_result", "id": "<uuid>", "result": <json> }
+// Reply to a tool_call broker request
+{ "type": "tool_result", "seq": <u64>, "result": <json> }
 
-// Signal graceful shutdown
-{ "kind": "shutdown" }
+// Reply to a snippet_resolve request with resolved snippet source
+{ "type": "snippet_resolved", "seq": <u64>, "code": "<js>", "input": <json> }
+
+// Reply to a tool_call/snippet_resolve with a structured error
+{ "type": "tool_error", "seq": <u64>, "kind": "<error kind>", "message": "<string>" }
 ```
 
-**Runner → parent (responses/events):**
+**Runner → parent (`CodeModeRunnerOutput`):**
 
 ```jsonc
-// Snippet completed
-{ "kind": "done", "id": "<uuid>", "result": { "state": "json"|"undefined"|"error", ... } }
-
 // Runner wants to call an upstream tool
-{ "kind": "call_tool", "id": "<uuid>", "tool": "<upstream::name>", "params": <json> }
+{ "type": "tool_call", "seq": <u64>, "id": "<upstream::name>", "params": <json> }
 
 // Runner wants to write an artifact
-{ "kind": "write_artifact", "id": "<uuid>", "path": "<rel path>", "content": "<string>", ... }
+{ "type": "artifact_write", "seq": <u64>, "path": "<rel path>", "content": "<string>", "content_type": "<media type>" }
+
+// Runner wants to resolve a snippet by name
+{ "type": "snippet_resolve", "seq": <u64>, "name": "<snippet>", "input": <json> }
+
+// Execution completed
+{ "type": "done", "result": { "state": "json"|"undefined", "value": <json> }, "logs": ["..."] }
 
 // Execution error (JS exception or internal runner error)
-{ "kind": "error", "id": "<uuid>", "message": "<string>" }
-
-// Runner ready (sent once on startup before any requests)
-{ "kind": "ready" }
+{ "type": "error", "kind": "<error kind>", "message": "<string>" }
 ```
 
-Wire types are defined in `protocol.rs`. Do not add fields to the wire protocol
-without updating both sides and `protocol.rs`.
+The runner parks for the next `start` after each `done`/`error` and exits only on
+stdin EOF (no explicit `shutdown`/`ready` messages on the wire). Do not add fields
+to the wire protocol without updating both sides and `protocol.rs`.
 
 ---
 
@@ -127,7 +135,7 @@ items.
 | Env isolation | **Implemented.** Runner spawned with `env_clear()` (`runner_drive.rs:163`) — the child inherits NO labby env at all (not even an allowlist), so `LAB_*` secrets and every other ambient var are excluded. |
 | `PR_SET_DUMPABLE` | **Implemented.** `runner.rs:22` calls `prctl(PR_SET_DUMPABLE, 0)` as the runner's first act on Linux, blocking `/proc/<pid>/environ` readback. Failure is non-fatal and warns via stderr (drained into the parent's response logs). |
 | Per-run cwd isolation | Each runner has a long-lived spawn `TempDir`; the runner creates a FRESH per-execution jail subdir under it on every `Start` and removes the previous one (`runner.rs::reset_execution_jail`), so a pooled process never accumulates cwd state across runs. The `TempDir` is removed when the runner handle drops. |
-| Artifact path containment | Enforced: `artifacts.rs` checks `canonicalize` + `starts_with(jail_root)`, rejects symlinks |
+| Artifact path containment | Enforced: `artifacts.rs` rejects any traversal/absolute component up front (`reject_path_traversal`), normalizes `\`→`/`, joins lexically under the per-run jail root, then walks the destination's ancestors with `symlink_metadata` (`reject_existing_symlink_ancestors`) to reject any existing symlink in the path. (Lexical + lstat-walk containment — it deliberately does **not** call `std::fs::canonicalize`.) |
 | Artifact size cap | Enforced: 8 MiB default (`LAB_CODE_MODE_ARTIFACT_MAX_MIB`) |
 | Tool call budget | Not enforced. Code Mode is bounded by wall-clock timeout, sandbox memory/stack, output/log/artifact caps, and host-side tool policy. |
 
