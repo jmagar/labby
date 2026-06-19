@@ -893,6 +893,31 @@ mod tests {
     }
 
     #[test]
+    fn atomic_write_snippet_rejects_overwrite_without_force_under_lock() {
+        // The authoritative no-overwrite guard lives INSIDE atomic_write_snippet,
+        // under WRITE_LOCK — independent of create_user_snippet's pre-lock
+        // fast-path check. Exercise it directly so the guard is pinned even if
+        // the fast path is bypassed (the TOCTOU window two concurrent non-force
+        // creates could otherwise both slip through).
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("demo.md");
+        let body = render_user_snippet_body("demo", "async () => ({ ok: true })", None)
+            .expect("rendered body");
+
+        atomic_write_snippet(&path, &body, false).expect("first write succeeds");
+
+        let err = atomic_write_snippet(&path, &body, false)
+            .expect_err("second non-force write must be rejected");
+        assert!(
+            matches!(err, ToolError::Conflict { .. }),
+            "under-lock guard must reject overwrite without force, got {err:?}"
+        );
+
+        // force=true still overwrites in place.
+        atomic_write_snippet(&path, &body, true).expect("force write overwrites");
+    }
+
+    #[test]
     fn frontmatter_tolerates_crlf_line_endings() {
         // Regression guard for the Windows-checkout failure: a `---\r\n` opening
         // delimiter must be recognized just like `---\n`, otherwise built-in

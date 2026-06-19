@@ -599,15 +599,17 @@ async fn handle_snippet_resolve_event(
 ) -> Result<(), CodeModeExecutionError> {
     let op = resolve_snippet_for_runner(broker, &name, input, cfg, state);
     match tokio::time::timeout_at(deadline, op).await {
-        Ok(Ok((code, input))) => write_runner_input_by_deadline(
-            stdin,
-            &CodeModeRunnerInput::SnippetResolved { seq, code, input },
-            deadline,
-            child,
-            child_pid,
-        )
-        .await
-        .map_err(Into::into),
+        Ok(Ok((code, input))) => {
+            write_runner_input_by_deadline(
+                stdin,
+                &CodeModeRunnerInput::SnippetResolved { seq, code, input },
+                deadline,
+                child,
+                child_pid,
+                &state.calls,
+            )
+            .await
+        }
         Ok(Err(err)) => {
             write_runner_input_by_deadline(
                 stdin,
@@ -619,6 +621,7 @@ async fn handle_snippet_resolve_event(
                 deadline,
                 child,
                 child_pid,
+                &state.calls,
             )
             .await?;
             Ok(())
@@ -731,26 +734,28 @@ fn finalize_done(
 /// two-pipe deadlock (child flooding stdout, which the parent isn't reading while
 /// it's blocked writing a large `ToolResult` to stdin). The read side of the loop
 /// is already guarded by `timeout_at(deadline, lines.next())`; without this, the
-/// parent→child writeback path was the one reachable `await` the 30 s wall-clock
-/// backstop did not cover, so a deadlocked child could hang the drive loop and
-/// leak the pool slot forever. On expiry we kill the child (killpg) so the pooled
-/// slot respawns, mirroring the read-timeout path, and surface the stable
-/// `timeout` kind.
+/// parent→child writeback path was the one reachable *in-loop* `await` the 30 s
+/// wall-clock backstop did not cover (the pre-deadline `Start` write is excluded:
+/// it runs before the deadline exists and against a freshly-parked child that
+/// cannot yet be flooding stdout), so a deadlocked child could hang the drive
+/// loop and leak the pool slot forever. On expiry we kill the child (killpg) so
+/// the pooled slot respawns, mirroring the read-timeout path, and surface the
+/// stable `timeout` kind — carrying the partial call trace like the other
+/// timeout paths. A plain write I/O error (not a timeout) propagates without a
+/// trace, matching the pre-existing bare-write behavior.
 async fn write_runner_input_by_deadline(
     stdin: &mut ChildStdin,
     input: &CodeModeRunnerInput,
     deadline: tokio::time::Instant,
     child: &mut tokio::process::Child,
     child_pid: Option<u32>,
-) -> Result<(), ToolError> {
+    calls: &[(u64, CodeModeExecutedCall)],
+) -> Result<(), CodeModeExecutionError> {
     match tokio::time::timeout_at(deadline, write_runner_input(stdin, input)).await {
-        Ok(result) => result,
+        Ok(result) => result.map_err(Into::into),
         Err(_) => {
             terminate_code_mode_runner(child, child_pid).await;
-            Err(ToolError::Sdk {
-                sdk_kind: "timeout".to_string(),
-                message: "Code Mode execution timed out writing to the runner".to_string(),
-            })
+            Err(code_mode_timeout_error(calls))
         }
     }
 }
@@ -785,6 +790,7 @@ async fn handle_completed_tool_call(
                 deadline,
                 child,
                 child_pid,
+                &state.calls,
             )
             .await?;
         }
@@ -817,6 +823,7 @@ async fn handle_completed_tool_call(
                 deadline,
                 child,
                 child_pid,
+                &state.calls,
             )
             .await?;
             state.calls.push((

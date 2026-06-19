@@ -112,9 +112,11 @@ thread_local! {
 }
 
 /// Create a fresh empty per-execution working directory and `chdir` into it,
-/// removing the previous execution's directory first. Best-effort: any failure
-/// leaves the process in its existing (already-isolated) cwd. See the call site
-/// for why this is defense-in-depth rather than a hard containment boundary.
+/// removing the previous execution's directory first. Best-effort: on any
+/// failure the process is left in a still-valid isolated cwd — the prior jail if
+/// it was never touched, otherwise the stable spawn base (the per-runner
+/// `TempDir`), since the prior jail is removed up front. See the call site for
+/// why this is defense-in-depth rather than a hard containment boundary.
 fn reset_execution_jail() {
     // Resolve (and remember) the stable base = the spawn cwd. The first call
     // captures it before we ever chdir into a subdir, so subsequent jails are
