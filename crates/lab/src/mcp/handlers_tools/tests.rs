@@ -412,6 +412,58 @@ async fn list_tools_promotes_upstream_mcp_app_tools_when_raw_tools_are_hidden() 
 }
 
 #[tokio::test]
+async fn list_tools_does_not_cold_connect_code_mode_catalog() {
+    let pool = Arc::new(UpstreamPool::new());
+    let manager =
+        code_mode_manager_with_pool(true, fixture_upstream_config("cold-apps"), Arc::clone(&pool))
+            .await;
+    let server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = rmcp::service::RequestContext::new(
+        rmcp::model::NumberOrString::Number(1),
+        running.peer().clone(),
+    );
+
+    let result = running
+        .service()
+        .list_tools_impl(None, context)
+        .await
+        .expect("list tools");
+    let names = result
+        .tools
+        .iter()
+        .map(|tool| tool.name.as_ref())
+        .collect::<Vec<_>>();
+
+    assert!(
+        names.contains(&CODE_MODE_TOOL_NAME),
+        "root list_tools must keep advertising Code Mode"
+    );
+    assert!(
+        !names.contains(&"cold_widget"),
+        "cold upstream tools must not be discovered by root list_tools"
+    );
+
+    let summary = pool.cached_upstream_summary("cold-apps").await;
+    assert!(
+        summary.is_none(),
+        "root list_tools must not cold-connect or populate a lazy upstream catalog"
+    );
+    assert!(
+        pool.upstream_tool_last_error("cold-apps").await.is_none(),
+        "skipping cold discovery should not mark the upstream failed"
+    );
+}
+
+#[tokio::test]
 async fn list_tools_skips_upstream_ui_tools_that_collide_with_synthetic_names() {
     let upstream_name: Arc<str> = Arc::from("apps");
     let colliding_tool = fixture_upstream_tool(
