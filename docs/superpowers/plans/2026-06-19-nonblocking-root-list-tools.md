@@ -4,7 +4,7 @@
 
 **Goal:** Keep Labby's root MCP `list_tools` response fast and stable even when one upstream MCP server is slow, unreachable, or timing out during initialization.
 
-**Architecture:** Root MCP `list_tools` should advertise only Labby's synthetic Code Mode tool plus already-cached healthy MCP App UI siblings. It must not synchronously warm or refresh the Code Mode upstream catalog. Cold upstream discovery remains owned by Code Mode execution/search and direct tool resolution paths, where the user actually asked to inspect or call upstream tools.
+**Architecture:** Root MCP `list_tools` must not synchronously warm or refresh the Code Mode upstream catalog. In hidden-raw-tools / MCP App mode, it should advertise Labby's synthetic Code Mode tool and merge only already-cached healthy MCP App UI siblings. Cold upstream discovery remains owned by Code Mode execution/search and direct tool resolution paths, where the user actually asked to inspect or call upstream tools.
 
 **Tech Stack:** Rust 2024, Tokio, rmcp, Labby gateway dispatch layer, existing `cargo test -p labby --all-features` test style.
 
@@ -79,22 +79,13 @@ async fn list_tools_does_not_cold_connect_code_mode_catalog() {
         names.contains(&CODE_MODE_TOOL_NAME),
         "root list_tools must keep advertising Code Mode"
     );
+    let summary = pool.cached_upstream_summary("cold-apps").await;
     assert!(
-        !names.contains(&"cold_widget"),
-        "cold upstream tools must not be discovered by root list_tools"
-    );
-
-    let runtime = pool.runtime_metadata_for_upstream("cold-apps").await;
-    assert_eq!(
-        runtime.tool_count, 0,
+        summary.is_none(),
         "root list_tools must not cold-connect or populate a lazy upstream catalog"
     );
-    assert_eq!(
-        runtime.exposed_tool_count, 0,
-        "root list_tools must not expose tools that were not already healthy"
-    );
     assert!(
-        runtime.last_error.is_none(),
+        pool.upstream_tool_last_error("cold-apps").await.is_none(),
         "skipping cold discovery should not mark the upstream failed"
     );
 }
@@ -108,7 +99,7 @@ Run:
 cargo test -p labby --all-features list_tools_does_not_cold_connect_code_mode_catalog -- --nocapture
 ```
 
-Expected: FAIL. The failure should show `runtime.tool_count` or `runtime.exposed_tool_count` is non-zero because `list_tools_impl()` warmed the Code Mode catalog.
+Expected: FAIL. The failure should show the cached upstream summary exists because `list_tools_impl()` warmed the Code Mode catalog.
 
 - [ ] **Step 3: Commit the failing test**
 
@@ -246,7 +237,7 @@ Expected: JSON contains these tool IDs:
 
 Warnings for unrelated OAuth upstreams such as `google-drive`, `google-gmail`, `google-calendar`, `google-people`, or `globalping` are acceptable only if the command exits `0` and returns the ytdl results.
 
-- [ ] **Step 3: Run the root list-tools live latency smoke test**
+- [ ] **Step 3: Run the gateway status sanity check**
 
 Run:
 
@@ -254,10 +245,10 @@ Run:
 time labby gateway code status --json
 ```
 
-Expected: exits `0` and prints:
+Expected: exits `0` and includes:
 
 ```json
-{"enabled":true}
+"enabled": true
 ```
 
 The full JSON will include additional Code Mode limits. This is a low-friction local sanity check that the gateway is up before MCP-level validation.
@@ -298,4 +289,4 @@ git commit -m "chore: format nonblocking list tools changes"
 
 **Placeholder scan:** No `TBD`, `TODO`, "similar to", or unspecified implementation steps remain.
 
-**Type consistency:** The plan uses existing names verified in the codebase: `list_tools_impl`, `code_mode_catalog_tools_allowed`, `healthy_ui_tools_allowed`, `runtime_metadata_for_upstream`, `CODE_MODE_TOOL_NAME`, and the existing test helpers in `handlers_tools/tests.rs`.
+**Type consistency:** The plan uses existing names verified in the codebase: `list_tools_impl`, `code_mode_catalog_tools_allowed`, `healthy_ui_tools_allowed`, `cached_upstream_summary`, `upstream_tool_last_error`, `CODE_MODE_TOOL_NAME`, and the existing test helpers in `handlers_tools/tests.rs`.
