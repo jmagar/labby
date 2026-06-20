@@ -105,3 +105,6 @@ config.local.toml
 # Personal local cheatsheet (never commit)
 CLAUDE.md.local
 .worktrees
+
+# Local binary artifacts
+plugins/bitwarden/bin/
