@@ -4,7 +4,7 @@
 
 **Goal:** Keep Labby's root MCP `list_tools` response fast and stable even when one upstream MCP server is slow, unreachable, or timing out during initialization.
 
-**Architecture:** Root MCP `list_tools` should advertise only Labby's synthetic Code Mode tool plus already-cached healthy MCP App UI siblings. It must not synchronously warm or refresh the Code Mode upstream catalog. Cold upstream discovery remains owned by Code Mode execution/search and direct tool resolution paths, where the user actually asked to inspect or call upstream tools.
+**Architecture:** Root MCP `list_tools` must not synchronously warm or refresh the Code Mode upstream catalog. In hidden-raw-tools / MCP App mode, it should advertise Labby's synthetic Code Mode tool and merge only already-cached healthy MCP App UI siblings. Cold upstream discovery remains owned by Code Mode execution/search and direct tool resolution paths, where the user actually asked to inspect or call upstream tools.
 
 **Tech Stack:** Rust 2024, Tokio, rmcp, Labby gateway dispatch layer, existing `cargo test -p labby --all-features` test style.
 
@@ -237,7 +237,7 @@ Expected: JSON contains these tool IDs:
 
 Warnings for unrelated OAuth upstreams such as `google-drive`, `google-gmail`, `google-calendar`, `google-people`, or `globalping` are acceptable only if the command exits `0` and returns the ytdl results.
 
-- [ ] **Step 3: Run the root list-tools live latency smoke test**
+- [ ] **Step 3: Run the gateway status sanity check**
 
 Run:
 

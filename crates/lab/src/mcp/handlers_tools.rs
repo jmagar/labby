@@ -53,6 +53,10 @@ impl LabMcpServer {
         let mut gateway_tool_count = 0usize;
         let mut upstream_ui_tool_count = 0usize;
         let mut suppressed_builtin_tool_count = 0usize;
+        let mut pool_present = false;
+        let mut catalog_upstream_count = 0usize;
+        let mut upstream_tool_error_count = 0usize;
+        let mut open_upstream_count = 0usize;
         let visibility = self.code_mode_visibility().await;
         let manager_code_mode_enabled = visibility.exposes_synthetic_tools();
         let process_code_mode_enabled = crate::config::process_code_mode_enabled();
@@ -136,14 +140,21 @@ impl LabMcpServer {
             gateway_tool_count += 1;
         }
 
-        // Merge upstream tools from the already-healthy catalog only. Root
-        // `list_tools` must never cold-connect upstreams: a single slow or
-        // unhealthy server can otherwise stall the host's tool refresh and make
-        // Labby's synthetic Code Mode tool appear to disappear. Code Mode
-        // execution/search still performs cold discovery through the gateway
-        // manager when the caller actually asks for upstream catalog data.
+        // Merge upstream tools from the already-healthy catalog only. The
+        // hidden-raw-tools path must never cold-connect upstreams: a single
+        // slow or unhealthy server can otherwise stall the host's tool refresh
+        // and make Labby's synthetic Code Mode tool appear to disappear. Code
+        // Mode execution/search still performs cold discovery through the
+        // gateway manager when the caller asks for upstream catalog data.
         #[cfg(feature = "gateway")]
         if let Some(pool) = self.current_upstream_pool().await {
+            pool_present = true;
+            let upstream_status = pool.upstream_status().await;
+            catalog_upstream_count = upstream_status.len();
+            open_upstream_count = upstream_status
+                .iter()
+                .filter(|(_, health)| health.is_open())
+                .count();
             let upstream_tools = if hide_raw_tools {
                 pool.healthy_ui_tools_allowed(self.route_scope.allowed_upstreams())
                     .await
@@ -194,6 +205,11 @@ impl LabMcpServer {
                     }
                 }
             }
+            for (upstream, _) in &upstream_status {
+                if pool.upstream_tool_last_error(upstream).await.is_some() {
+                    upstream_tool_error_count += 1;
+                }
+            }
         }
 
         let elapsed_ms = start.elapsed().as_millis();
@@ -209,6 +225,16 @@ impl LabMcpServer {
             upstream_ui_tool_count,
             subject_scoped_tool_count,
             suppressed_builtin_tool_count,
+            pool_present,
+            cold_discovery_skipped = hide_raw_tools,
+            upstream_catalog_source = if pool_present {
+                "cached"
+            } else {
+                "not_initialized"
+            },
+            catalog_upstream_count,
+            open_upstream_count,
+            upstream_tool_error_count,
             manager_code_mode_enabled,
             process_code_mode_enabled,
             hide_raw_tools,
