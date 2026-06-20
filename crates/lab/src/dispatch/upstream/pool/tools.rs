@@ -83,6 +83,7 @@ impl UpstreamPool {
             .iter()
             .filter(|(name, _)| upstream_allowed(allowed, name))
             .filter(|(_, entry)| entry.tool_health.is_routable())
+            .filter(|(_, entry)| entry.proxy_resources)
             .flat_map(|(_, entry)| {
                 entry.tools.values().filter_map(|tool| {
                     (entry.exposure_policy.matches(tool.tool.name.as_ref())

@@ -268,6 +268,7 @@ impl UpstreamPool {
                             Ok((
                                 name,
                                 config.expose_tools.clone(),
+                                config.proxy_resources,
                                 conn,
                                 tools,
                                 resource_count,
@@ -321,6 +322,7 @@ impl UpstreamPool {
                 Ok((
                     name,
                     expose_tools,
+                    proxy_resources,
                     conn,
                     tools,
                     resource_count,
@@ -355,6 +357,7 @@ impl UpstreamPool {
                         name: Arc::clone(&upstream_name),
                         tools: tool_map,
                         exposure_policy,
+                        proxy_resources,
                         prompt_count,
                         resource_count,
                         prompt_names: Vec::new(),
@@ -379,6 +382,7 @@ impl UpstreamPool {
                         name: Arc::from(name.as_str()),
                         tools: HashMap::new(),
                         exposure_policy: ToolExposurePolicy::All,
+                        proxy_resources: true,
                         prompt_count: 0,
                         resource_count: 0,
                         prompt_names: Vec::new(),

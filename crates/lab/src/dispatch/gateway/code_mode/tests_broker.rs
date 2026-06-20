@@ -15,6 +15,7 @@ fn fixture_upstream_entry(
         name: Arc::from(upstream),
         tools,
         exposure_policy: crate::dispatch::upstream::types::ToolExposurePolicy::All,
+        proxy_resources: true,
         prompt_count: 0,
         resource_count: 0,
         prompt_names: Vec::new(),

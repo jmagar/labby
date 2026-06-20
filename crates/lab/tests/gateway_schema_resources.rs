@@ -46,6 +46,7 @@ fn make_entry(name: &str, tools: Vec<UpstreamTool>, policy: ToolExposurePolicy) 
         name: Arc::from(name),
         tools: map,
         exposure_policy: policy,
+        proxy_resources: true,
         prompt_count: 0,
         resource_count: 0,
         prompt_names: Vec::new(),

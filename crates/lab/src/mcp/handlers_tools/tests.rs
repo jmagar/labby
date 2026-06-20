@@ -208,6 +208,7 @@ fn fixture_upstream_entry(upstream: &str, tools: HashMap<String, UpstreamTool>) 
         name: Arc::from(upstream),
         tools,
         exposure_policy: ToolExposurePolicy::All,
+        proxy_resources: true,
         prompt_count: 0,
         resource_count: 1,
         prompt_names: Vec::new(),
@@ -409,6 +410,54 @@ async fn list_tools_promotes_upstream_mcp_app_tools_when_raw_tools_are_hidden() 
     assert!(!names.contains(&"youtube_probe"));
     assert!(names.contains(&CODE_MODE_TOOL_NAME));
     assert!(!names.contains(&"radarr"));
+}
+
+#[tokio::test]
+async fn list_tools_does_not_promote_upstream_mcp_app_tools_when_resources_are_not_proxied() {
+    let upstream_name: Arc<str> = Arc::from("apps");
+    let ui_tool = fixture_upstream_tool(
+        &upstream_name,
+        "github_pr_ui",
+        Some("ui://apps/github-pr.html"),
+    );
+    let pool = Arc::new(UpstreamPool::new());
+    let mut entry = fixture_upstream_entry(
+        "apps",
+        HashMap::from([("github_pr_ui".to_string(), ui_tool)]),
+    );
+    entry.proxy_resources = false;
+    pool.insert_entry_for_test("apps", entry).await;
+    let mut upstream = fixture_upstream_config("apps");
+    upstream.proxy_resources = false;
+    let manager = code_mode_manager_with_pool(true, upstream, pool).await;
+    let server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = rmcp::service::RequestContext::new(
+        rmcp::model::NumberOrString::Number(1),
+        running.peer().clone(),
+    );
+
+    let result = running
+        .service()
+        .list_tools_impl(None, context)
+        .await
+        .expect("list tools");
+    let names = result
+        .tools
+        .iter()
+        .map(|tool| tool.name.as_ref())
+        .collect::<Vec<_>>();
+
+    assert!(!names.contains(&"github_pr_ui"));
+    assert!(names.contains(&CODE_MODE_TOOL_NAME));
 }
 
 #[tokio::test]

@@ -504,6 +504,7 @@ async fn gateway_list_surfaces_cached_custom_gateway_summary_counts() {
                 vec!["scrape".to_string()],
             )
             .expect("policy"),
+            proxy_resources: true,
             prompt_count: 3,
             resource_count: 4,
             prompt_names: Vec::new(),

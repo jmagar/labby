@@ -266,6 +266,11 @@ pub struct UpstreamEntry {
     pub tools: HashMap<String, UpstreamTool>,
     /// Exposure policy for discovered tools from this upstream.
     pub exposure_policy: ToolExposurePolicy,
+    /// Whether this upstream's resources are allowed to be proxied downstream.
+    ///
+    /// MCP App tools depend on their `ui://` resources being readable through the
+    /// gateway, so top-level UI tool promotion also uses this flag.
+    pub proxy_resources: bool,
     /// Last successfully discovered upstream prompt count.
     pub prompt_count: usize,
     /// Last successfully discovered upstream resource count.
