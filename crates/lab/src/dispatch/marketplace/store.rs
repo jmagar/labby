@@ -1185,17 +1185,17 @@ fn set_restrictive_permissions(path: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_db_path(prefix: &str) -> PathBuf {
+        let unique = TEST_DB_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("{prefix}-{}-{unique}.db", std::process::id()))
+    }
 
     async fn temp_store() -> RegistryStore {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let path = std::env::temp_dir().join(format!(
-            "lab-registry-test-{}-{unique}.db",
-            std::process::id()
-        ));
+        let path = temp_db_path("lab-registry-test");
         RegistryStore::open(&path).await.unwrap()
     }
 
@@ -1213,15 +1213,7 @@ mod tests {
 
     #[tokio::test]
     async fn migration_is_idempotent() {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let path = std::env::temp_dir().join(format!(
-            "lab-registry-idem-{}-{unique}.db",
-            std::process::id()
-        ));
+        let path = temp_db_path("lab-registry-idem");
         // Open twice — second open re-runs migrate() which must be a no-op.
         drop(RegistryStore::open(&path).await.unwrap());
         let store2 = RegistryStore::open(&path).await.unwrap();
@@ -1236,15 +1228,7 @@ mod tests {
     #[tokio::test]
     async fn store_sets_restrictive_permissions() {
         use std::os::unix::fs::PermissionsExt;
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let path = std::env::temp_dir().join(format!(
-            "lab-registry-perm-{}-{unique}.db",
-            std::process::id()
-        ));
+        let path = temp_db_path("lab-registry-perm");
         drop(RegistryStore::open(&path).await.unwrap());
         let meta = std::fs::metadata(&path).unwrap();
         let mode = meta.permissions().mode() & 0o777;
