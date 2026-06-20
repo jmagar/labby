@@ -139,27 +139,12 @@ impl LabMcpServer {
             gateway_tool_count += 1;
         }
 
-        // Merge upstream tools (healthy only, filtered for collisions with built-in services).
-        #[cfg(feature = "gateway")]
-        if hide_raw_tools
-            && let Some(manager) = self.gateway_manager.as_ref()
-            && let Err(error) = manager
-                .code_mode_catalog_tools_allowed(
-                    true,
-                    None,
-                    oauth_subject.as_deref(),
-                    self.route_scope.allowed_upstreams(),
-                )
-                .await
-        {
-            tracing::warn!(
-                surface = "mcp",
-                service = "labby",
-                action = "list_tools",
-                error = %error,
-                "failed to warm upstream catalog before listing MCP App tools"
-            );
-        }
+        // Merge upstream tools from the already-healthy catalog only. Root
+        // `list_tools` must never cold-connect upstreams: a single slow or
+        // unhealthy server can otherwise stall the host's tool refresh and make
+        // Labby's synthetic Code Mode tool appear to disappear. Code Mode
+        // execution/search still performs cold discovery through the gateway
+        // manager when the caller actually asks for upstream catalog data.
         #[cfg(feature = "gateway")]
         if let Some(pool) = self.current_upstream_pool().await {
             let upstream_tools = if hide_raw_tools {
