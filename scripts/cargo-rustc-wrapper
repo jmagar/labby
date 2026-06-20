@@ -21,6 +21,19 @@ extra_filename=""
 is_test=0
 args=("$@")
 
+atomic_install() {
+  local src="$1"
+  local dest="$2"
+  local dir base tmp
+  dir="$(dirname -- "$dest")"
+  base="$(basename -- "$dest")"
+  mkdir -p "$dir"
+  tmp="$(mktemp "$dir/.${base}.tmp.XXXXXX")"
+  cp "$src" "$tmp"
+  chmod 755 "$tmp"
+  mv -f "$tmp" "$dest"
+}
+
 i=0
 while [ "$i" -lt "${#args[@]}" ]; do
   arg="${args[$i]}"
@@ -128,12 +141,11 @@ fi
 
 bin_dir="${CARGO_BIN_ARTIFACT_DIR:-$repo/bin}"
 mkdir -p "$bin_dir"
-install -m 755 "$out" "$bin_dir/$artifact_name"
-install -m 755 "$out" "$bin_dir/${artifact_base}${ext}"
+atomic_install "$out" "$bin_dir/$artifact_name"
+atomic_install "$out" "$bin_dir/${artifact_base}${ext}"
 
 
 if [ "$crate_name" = "labby" ]; then
   local_bin="${LABBY_RUSTC_WRAPPER_LOCAL_BIN:-$HOME/.local/bin/labby}"
-  mkdir -p "$(dirname "$local_bin")"
-  install -m 755 "$out" "$local_bin"
+  atomic_install "$out" "$local_bin"
 fi
