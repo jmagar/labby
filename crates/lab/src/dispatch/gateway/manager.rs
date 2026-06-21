@@ -108,11 +108,19 @@ pub struct GatewayManager {
     pub(super) code_mode_refresh_inflight: Arc<Mutex<()>>,
     /// Cached rendered Code Mode discovery catalog, keyed by a fingerprint of
     /// the live healthy tool list. Avoids regenerating `CodeModeCatalogEntry`
-    /// structs (including TS `.signature`/`.dts` via `generate_tool_types`),
-    /// the serialized JSON blob, and the JS proxy string on every lookup when
-    /// the upstream catalog has not changed between calls.
+    /// structs (including TS `.signature`/`.dts` via `generate_tool_types`) and
+    /// the serialized JSON blob on every lookup when the upstream catalog has
+    /// not changed between calls. The emitted JS proxy string is cached
+    /// separately in `code_mode_proxy_render_cache` (it is filtered per-call).
     pub(super) code_mode_catalog_render_cache:
         Arc<Mutex<Option<crate::dispatch::gateway::code_mode::CatalogRenderCache>>>,
+    /// Cached emitted `codemode.*` proxy JS for the execute path, keyed by the
+    /// catalog fingerprint plus the per-call capability filter, snippet
+    /// visibility, and sorted upstream list. Avoids re-running
+    /// `generate_discovery_js` / `generate_js_proxy_from_catalog` on every
+    /// execute when the proxy shape has not changed (lab-um27z).
+    pub(super) code_mode_proxy_render_cache:
+        Arc<Mutex<Option<crate::dispatch::gateway::code_mode::ProxyRenderCache>>>,
     /// Cached snippet metadata for Code Mode discovery. Snippet executable
     /// source is never stored here; `codemode.run()` resolves source lazily.
     pub(super) code_mode_snippet_metadata_cache:

@@ -99,6 +99,30 @@ pub(crate) struct SnippetMetadataCache {
     pub fingerprint: String,
     pub entries: Vec<crate::dispatch::snippets::store::SnippetInfo>,
 }
+
+/// Cached emitted `codemode.*` proxy JS for the execute path.
+///
+/// The catalog render cache (`CatalogRenderCache`) memoizes the catalog
+/// *entries* and serialized JSON, but the proxy is filtered and emitted
+/// per-call: `build_code_mode_proxy` re-runs `generate_discovery_js` +
+/// `generate_js_proxy_from_catalog` (the BTreeMap grouping + per-tool
+/// `function(p){…}` emission over ~140 tools) on every execute. This caches the
+/// emitted `(discovery_js, namespace_js)` pair.
+///
+/// The `key` MUST capture everything the emitted proxy depends on — the proxy
+/// is filtered by the per-call capability filter, so a key that ignored it
+/// would serve a wrong-scoped proxy. It folds in the post-filter tool/upstream
+/// identity (the same `fingerprint` the catalog render cache uses), the
+/// capability-filter fingerprint, the snippet-visibility flag, and the sorted
+/// upstream list.
+pub struct ProxyRenderCache {
+    /// Composite cache key (catalog fingerprint + capability filter + snippets + upstreams).
+    pub key: String,
+    /// `generate_discovery_js(...)` output.
+    pub discovery_js: String,
+    /// `generate_js_proxy_from_catalog(...)` output.
+    pub namespace_js: String,
+}
 #[cfg(test)]
 pub(crate) use types::{CodeModeExecutionError, CodeModeExecutionResponse};
 pub(crate) use types::{CodeModeExecutionSource, CodeModeSourceLookup, CodeModeSourceStore};

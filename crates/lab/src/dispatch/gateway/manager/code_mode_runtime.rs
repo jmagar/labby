@@ -134,11 +134,7 @@ impl GatewayManager {
                     });
                 }
             }
-            if !failures.is_empty()
-                && pool
-                    .healthy_tools_allowed(allowed_upstreams)
-                    .await
-                    .is_empty()
+            if !failures.is_empty() && !pool.has_any_healthy_tools_allowed(allowed_upstreams).await
             {
                 let details = failures
                     .iter()
@@ -255,6 +251,34 @@ impl GatewayManager {
             )
             .await?;
         }
+        let Some(pool) = self.current_pool().await else {
+            return Ok(Vec::new());
+        };
+        Ok(pool.healthy_tools_allowed(allowed_upstreams).await)
+    }
+
+    /// Code Mode **execute** catalog: connect-if-needed without re-probing
+    /// already-healthy upstreams.
+    ///
+    /// The execute path only needs a usable `codemode.*` proxy, not tool-list
+    /// growth detection: `callTool` resolves its target upstream live
+    /// (`resolve_code_mode_upstream_tool`), so a slightly-stale proxy can only
+    /// mis-shape helper names — never break a call. Reprobing every enabled
+    /// upstream (a live `tools/list` per upstream) on every execute is therefore
+    /// pure latency on the hot path. This path instead ensures each enabled
+    /// upstream is *connected* (`ensure_search_runtime_ready_allowed` with
+    /// `wait_for_refresh = true`, which short-circuits upstreams that already
+    /// have healthy tools) and then reads the healthy catalog. The full
+    /// growth-detecting reprobe stays on the `search` / catalog path
+    /// (`code_mode_catalog_tools_allowed` with `allow_cold_connect = true`).
+    pub async fn code_mode_catalog_tools_ensure_ready(
+        &self,
+        owner: Option<&UpstreamRuntimeOwner>,
+        oauth_subject: Option<&str>,
+        allowed_upstreams: Option<&BTreeSet<String>>,
+    ) -> Result<Vec<UpstreamTool>, ToolError> {
+        self.ensure_search_runtime_ready_allowed(true, owner, oauth_subject, allowed_upstreams)
+            .await?;
         let Some(pool) = self.current_pool().await else {
             return Ok(Vec::new());
         };
@@ -469,12 +493,7 @@ impl GatewayManager {
         }
         crate::dispatch::gateway::code_mode::catalog_cache::merge_and_store(cache_updates);
 
-        if !failures.is_empty()
-            && pool
-                .healthy_tools_allowed(allowed_upstreams)
-                .await
-                .is_empty()
-        {
+        if !failures.is_empty() && !pool.has_any_healthy_tools_allowed(allowed_upstreams).await {
             let details = failures
                 .iter()
                 .map(|failure| format!("{}: {}", failure.upstream, failure.message))
@@ -533,6 +552,44 @@ impl GatewayManager {
                 None
             }
         })
+    }
+
+    /// Store the freshly emitted `codemode.*` proxy JS in the manager-level
+    /// proxy render cache.
+    ///
+    /// Called by `build_code_mode_proxy` after a cache miss so subsequent
+    /// executes with the same proxy shape (catalog fingerprint + capability
+    /// filter + snippet visibility + upstreams) skip `generate_discovery_js`
+    /// and `generate_js_proxy_from_catalog`.
+    pub async fn store_code_mode_proxy(
+        &self,
+        cache: crate::dispatch::gateway::code_mode::ProxyRenderCache,
+    ) {
+        let mut guard = self.code_mode_proxy_render_cache.lock().await;
+        *guard = Some(cache);
+    }
+
+    /// Return the cached `(discovery_js, namespace_js)` pair if the proxy key
+    /// still matches.
+    ///
+    /// Returns `None` on a miss (caller must regenerate and call
+    /// `store_code_mode_proxy`).
+    pub async fn cached_code_mode_proxy(&self, key: &str) -> Option<(String, String)> {
+        let guard = self.code_mode_proxy_render_cache.lock().await;
+        guard.as_ref().and_then(|cache| {
+            (cache.key == key).then(|| (cache.discovery_js.clone(), cache.namespace_js.clone()))
+        })
+    }
+
+    /// Test-only: return the currently cached proxy JS (joined `discovery\nnamespace`)
+    /// regardless of key, or `None` if the proxy render cache is empty. Lets the
+    /// proxy-cache test assert the store path ran without re-deriving the key.
+    #[cfg(test)]
+    pub(crate) async fn cached_code_mode_proxy_any_for_tests(&self) -> Option<String> {
+        let guard = self.code_mode_proxy_render_cache.lock().await;
+        guard
+            .as_ref()
+            .map(|cache| format!("{}\n{}", cache.discovery_js, cache.namespace_js))
     }
 
     pub(crate) async fn cached_snippet_metadata(

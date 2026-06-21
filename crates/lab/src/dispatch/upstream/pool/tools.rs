@@ -131,6 +131,27 @@ impl UpstreamPool {
         })
     }
 
+    /// Cheap, non-cloning emptiness check for the (optionally scoped) healthy
+    /// catalog.
+    ///
+    /// Equivalent to `!healthy_tools_allowed(allowed).await.is_empty()` but
+    /// without deep-cloning every `UpstreamTool` (including its full JSON
+    /// schemas) just to look at the length. Used by the Code Mode runtime to
+    /// decide whether a connect/reprobe failure left the catalog usable.
+    pub async fn has_any_healthy_tools_allowed(&self, allowed: Option<&BTreeSet<String>>) -> bool {
+        let catalog = self.catalog.read().await;
+        catalog
+            .iter()
+            .filter(|(name, _)| upstream_allowed(allowed, name))
+            .filter(|(_, entry)| entry.tool_health.is_routable())
+            .any(|(_, entry)| {
+                entry
+                    .tools
+                    .values()
+                    .any(|tool| entry.exposure_policy.matches(tool.tool.name.as_ref()))
+            })
+    }
+
     pub async fn find_tool_candidates(&self, tool_name: &str) -> Vec<(String, UpstreamTool)> {
         let catalog = self.catalog.read().await;
         let mut matches = Vec::new();

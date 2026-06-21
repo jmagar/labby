@@ -430,6 +430,121 @@ async fn broker_search_refreshes_read_only_catalog_after_upstream_tool_expansion
     assert_eq!(tool.tool.name.as_ref(), "PowerShell");
 }
 
+/// lab-5h5xl: the **execute** proxy path must NOT re-probe upstreams that
+/// already have healthy tools.
+///
+/// Setup seeds `alpha` with a healthy `ping` tool, then installs a *live* peer
+/// whose advertised tool list is `["pong"]`. If the execute proxy build
+/// reprobed (a `tools/list` round-trip), it would observe `pong`; because the
+/// upstream is already healthy it must short-circuit and keep `ping`. The
+/// growth-detecting catalog path (`code_mode_catalog` with
+/// `allow_cold_connect = true`) is asserted as a positive control: it *does*
+/// reprobe and observe `pong`.
+#[tokio::test]
+async fn execute_proxy_does_not_reprobe_healthy_upstreams() {
+    let (manager, pool) =
+        code_mode_manager_with_upstreams(vec![fixture_http_upstream("alpha")]).await;
+    // Seed a healthy entry FIRST so the live-server helper's `or_insert_with`
+    // leaves the catalog entry intact (only installing the live peer).
+    pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
+        .await;
+    let live_tools = Arc::new(tokio::sync::RwLock::new(vec!["pong".to_string()]));
+    pool.insert_live_tool_server_for_tests("alpha", Arc::clone(&live_tools))
+        .await;
+
+    let registry = super::ToolRegistry::new();
+    let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+
+    // Execute path: healthy upstream → no reprobe → proxy reflects the seeded
+    // `ping`, never the live `pong`.
+    let proxy = broker
+        .build_code_mode_proxy_for_tests(
+            &super::CodeModeCaller::TrustedLocal,
+            super::CodeModeSurface::Mcp,
+            &super::CodeModeCapabilityFilter::default(),
+        )
+        .await
+        .expect("execute proxy builds");
+    assert!(
+        proxy.contains("alpha::ping"),
+        "execute proxy must keep the already-healthy tool: {proxy}"
+    );
+    assert!(
+        !proxy.contains("alpha::pong"),
+        "execute proxy must NOT reprobe and pick up the live tool list: {proxy}"
+    );
+
+    // Positive control: the growth-detecting catalog path DOES reprobe and sees
+    // the live `pong`. This proves the test would catch a reprobe if one
+    // happened on the execute path above.
+    let owner = super::CodeModeCaller::TrustedLocal.runtime_owner(super::CodeModeSurface::Mcp);
+    let (entries, _json, _size) = broker
+        .code_mode_catalog(&manager, true, &owner, None)
+        .await
+        .expect("growth-detecting catalog builds");
+    let names: Vec<&str> = entries
+        .iter()
+        .filter(|entry| entry.upstream == "alpha")
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["pong"],
+        "the search/catalog path must still reprobe (growth detection preserved)"
+    );
+}
+
+/// lab-um27z: the emitted `codemode.*` proxy JS is memoized in the manager-level
+/// proxy render cache and served from it on a repeat execute with an unchanged
+/// catalog fingerprint.
+#[tokio::test]
+async fn execute_proxy_js_is_served_from_render_cache() {
+    let (manager, pool) =
+        code_mode_manager_with_upstreams(vec![fixture_http_upstream("alpha")]).await;
+    pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
+        .await;
+
+    let registry = super::ToolRegistry::new();
+    let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+    let caller = super::CodeModeCaller::TrustedLocal;
+    let surface = super::CodeModeSurface::Mcp;
+    let filter = super::CodeModeCapabilityFilter::default();
+
+    // Before any build the proxy render cache is empty.
+    assert!(
+        manager
+            .cached_code_mode_proxy_any_for_tests()
+            .await
+            .is_none(),
+        "proxy render cache must start empty"
+    );
+
+    // First build: cache miss → generates and stores the proxy JS.
+    let first = broker
+        .build_code_mode_proxy_for_tests(&caller, surface, &filter)
+        .await
+        .expect("first proxy build");
+
+    // The proxy render cache is now populated; the stored value (joined
+    // `discovery\nnamespace`) must reconstruct the returned proxy exactly.
+    let cached = manager
+        .cached_code_mode_proxy_any_for_tests()
+        .await
+        .expect("proxy JS stored in render cache after first build");
+    assert_eq!(
+        cached, first,
+        "cached proxy JS must reconstruct the emitted proxy"
+    );
+
+    // Second build: cache hit → identical output, no regeneration.
+    let second = broker
+        .build_code_mode_proxy_for_tests(&caller, surface, &filter)
+        .await
+        .expect("second proxy build");
+    assert_eq!(first, second, "repeat proxy build must be byte-identical");
+    assert!(second.contains("alpha::ping"));
+}
+
 #[tokio::test]
 async fn broker_call_tool_validates_schema_before_upstream_dispatch() {
     let dir = tempfile::tempdir().expect("tempdir");

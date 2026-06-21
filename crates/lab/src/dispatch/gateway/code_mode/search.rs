@@ -39,24 +39,28 @@ impl CodeModeBroker<'_> {
         .await
     }
 
-    pub(in crate::dispatch::gateway::code_mode) async fn code_mode_catalog_for_proxy(
+    /// Build the execute-path proxy catalog without re-probing healthy
+    /// upstreams.
+    ///
+    /// Unlike `code_mode_catalog` / `code_mode_catalog_allowed` (which force a
+    /// full growth-detecting reprobe via `allow_cold_connect = true`), this
+    /// connects only upstreams that are not already healthy, then renders the
+    /// catalog through the same `code_mode_catalog_from_tools` render cache.
+    /// Tool calls resolve live, so a slightly-stale proxy is harmless on the
+    /// execute hot path (lab-5h5xl).
+    pub(in crate::dispatch::gateway::code_mode) async fn ensure_ready_code_mode_catalog_for_proxy(
         &self,
         manager: &GatewayManager,
-        allow_cold_connect: bool,
         owner: &UpstreamRuntimeOwner,
         oauth_subject: Option<&str>,
         allowed_upstreams: Option<&std::collections::BTreeSet<String>>,
         include_snippets: bool,
     ) -> Result<(Vec<CodeModeCatalogEntry>, String, usize), ToolError> {
-        self.code_mode_catalog_allowed(
-            manager,
-            allow_cold_connect,
-            owner,
-            oauth_subject,
-            allowed_upstreams,
-            include_snippets,
-        )
-        .await
+        let raw_tools = manager
+            .code_mode_catalog_tools_ensure_ready(Some(owner), oauth_subject, allowed_upstreams)
+            .await?;
+        self.code_mode_catalog_from_tools(manager, raw_tools, include_snippets)
+            .await
     }
 
     pub(in crate::dispatch::gateway::code_mode) async fn cached_code_mode_catalog_for_proxy(

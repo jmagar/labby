@@ -101,12 +101,18 @@ impl CodeModeBroker<'_> {
         let Some(manager) = self.gateway_manager else {
             return Ok(String::new());
         };
-        let allow_cold_connect = caller.can_execute();
         let owner = caller.runtime_owner(surface);
         let oauth_subject = caller.oauth_subject();
         let include_snippets =
             caller.can_use_snippets() && !capability_filter.is_scoped_to_upstreams();
         let allowed_upstreams = capability_filter.allowed_upstreams();
+        // The execute proxy only needs a usable `codemode.*` namespace; it does
+        // NOT need tool-list growth detection (callTool resolves its target
+        // upstream live, so a stale proxy can only mis-shape helper names). So
+        // we connect-if-needed and skip already-healthy upstreams rather than
+        // re-probing every enabled upstream on every execute. The CLI one-shot
+        // path stays on the on-disk catalog cache; the full growth-detecting
+        // reprobe stays on the `search`/catalog path. See lab-5h5xl.
         let (catalog, _catalog_json, _serialized_size) =
             if surface == CodeModeSurface::Cli && allowed_upstreams.is_none() {
                 self.cached_code_mode_catalog_for_proxy(
@@ -117,9 +123,8 @@ impl CodeModeBroker<'_> {
                 )
                 .await?
             } else {
-                self.code_mode_catalog_for_proxy(
+                self.ensure_ready_code_mode_catalog_for_proxy(
                     manager,
-                    allow_cold_connect,
                     &owner,
                     oauth_subject,
                     allowed_upstreams,
@@ -141,6 +146,28 @@ impl CodeModeBroker<'_> {
             .collect();
         upstreams.sort();
         upstreams.dedup();
+
+        // --- lab-um27z: proxy JS render cache ---
+        // The emitted proxy depends only on the (already filtered) catalog
+        // shape, the upstream list, snippet visibility, and the capability
+        // filter. Key on exactly those so a hit can skip the BTreeMap grouping
+        // and per-tool `function(p){…}` emission entirely. The capability filter
+        // is folded in because `catalog` above is filtered per-call — a key that
+        // ignored it could serve a wrong-scoped proxy.
+        let proxy_cache_key =
+            proxy_render_cache_key(&catalog, &upstreams, include_snippets, capability_filter);
+        if let Some((discovery_js, namespace_js)) =
+            manager.cached_code_mode_proxy(&proxy_cache_key).await
+        {
+            tracing::debug!(
+                surface = "dispatch",
+                service = "code_mode",
+                action = "proxy.build",
+                upstream_count = upstreams.len(),
+                "Code Mode proxy JS served from render cache"
+            );
+            return Ok(format!("{discovery_js}\n{namespace_js}"));
+        }
 
         let discovery_entries = catalog
             .iter()
@@ -164,6 +191,13 @@ impl CodeModeBroker<'_> {
                     message,
                 },
             )?;
+        manager
+            .store_code_mode_proxy(super::ProxyRenderCache {
+                key: proxy_cache_key,
+                discovery_js: discovery_js.clone(),
+                namespace_js: namespace_js.clone(),
+            })
+            .await;
         Ok(format!("{discovery_js}\n{namespace_js}"))
     }
 
@@ -507,6 +541,32 @@ fn extract_ui_link(result: &CallToolResult) -> Option<UiLink> {
 
 fn ui_resource_uri(ui_meta: &Value) -> Option<&str> {
     ui_meta.get("resourceUri").and_then(Value::as_str)
+}
+
+/// Build the proxy JS render-cache key (lab-um27z).
+///
+/// Captures everything the emitted `codemode.*` proxy depends on:
+/// - the sorted set of catalog entry ids (tools as `upstream::name`, snippets
+///   by their id) — the same identity the catalog render cache keys on, so the
+///   proxy cache shares the catalog cache's staleness boundary;
+/// - the sorted upstream list (the proxy emits per-upstream namespaces);
+/// - the snippet-visibility flag;
+/// - the per-call capability filter fingerprint (the `catalog` is filtered
+///   per-call, so an unfiltered key could serve a wrong-scoped proxy).
+fn proxy_render_cache_key(
+    catalog: &[super::types::CodeModeCatalogEntry],
+    upstreams: &[String],
+    include_snippets: bool,
+    capability_filter: &CodeModeCapabilityFilter,
+) -> String {
+    let mut ids: Vec<&str> = catalog.iter().map(|entry| entry.id.as_str()).collect();
+    ids.sort_unstable();
+    format!(
+        "snippets:{include_snippets}\nfilter:{}\nupstreams:{}\nids:\n{}",
+        capability_filter.fingerprint(),
+        upstreams.join(","),
+        ids.join("\n"),
+    )
 }
 
 #[cfg(test)]
