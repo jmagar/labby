@@ -295,7 +295,6 @@ impl GatewayManager {
     /// upstream), so a stale cache can only mis-shape the proxy — `callTool`
     /// remains the always-fresh escape hatch. Upstreams that fail to probe are
     /// omitted from the proxy and NOT cached, so the next run retries them.
-    #[allow(dead_code)]
     pub async fn code_mode_catalog_tools_cached(
         &self,
         owner: Option<&UpstreamRuntimeOwner>,

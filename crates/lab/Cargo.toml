@@ -46,12 +46,6 @@ boa_ast = "0.21.1"
 boa_interner = "0.21.1"
 boa_parser = "0.21.1"
 javy = { version = "7.0.0", optional = true }
-wasmtime = { version = "44.0.1", optional = true, default-features = false, features = [
-  "cranelift",
-  "pooling-allocator",
-  "runtime",
-  "wat",
-] }
 
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -137,6 +131,17 @@ lab-winjob = { path = "../lab-winjob" }
 [dev-dependencies]
 wiremock.workspace = true
 proptest = "1"
+# wasmtime backs ONLY the `#[cfg(test)] wasm_runner` smoke reference (the live
+# Code Mode engine is Javy/QuickJS). As a dev-dependency it is compiled for
+# `cargo test` but never for non-test `--all-features`/release builds. It was
+# previously a `gateway`-feature optional dep, which compiled cranelift into
+# every all-features build despite only test code using it. (lab-fnf1l)
+wasmtime = { version = "44.0.1", default-features = false, features = [
+  "cranelift",
+  "pooling-allocator",
+  "runtime",
+  "wat",
+] }
 
 [lib]
 path = "src/lib.rs"
@@ -154,7 +159,7 @@ path = "src/lib.rs"
 acp_registry = ["lab-apis/acp_registry"]
 node-runtime = []
 all = ["lab-apis/all", "lab-admin", "acp_registry", "deploy", "gateway", "marketplace"]
-gateway = ["dep:javy", "dep:wasmtime"]
+gateway = ["dep:javy"]
 marketplace = ["lab-apis/mcpregistry"]
 services-all = [
 ]

@@ -11,7 +11,7 @@ pub enum CodeModeRunnerInput {
     Start {
         code: String,
         /// Auto-generated `var codemode = {...}` proxy JS (see
-        /// `code_mode_preamble::generate_js_proxy`). Injected into the sandbox
+        /// `code_mode_preamble::generate_js_proxy_from_catalog`). Injected into the sandbox
         /// after `callTool` is defined so the user code can call
         /// `codemode.<upstream>.<tool>(params)`.
         ///
