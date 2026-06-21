@@ -1161,6 +1161,179 @@ async fn write_code_mode_artifact_maps_io_failure_to_internal_error() {
     assert_eq!(err.kind(), "internal_error");
 }
 
+/// lab-4dcil item 1: the receipt `absolute_path` must be redacted against
+/// `lab_home()` (which resolves `LAB_HOME` first), not just `$HOME`. When
+/// `LAB_HOME` is outside `$HOME` (daemon/container deploy), the real store path
+/// must NOT leak into the agent-facing receipt; only a logical `~lab/...` key.
+#[tokio::test]
+async fn artifact_receipt_path_is_relativized_against_lab_home_outside_home() {
+    // A lab home deliberately outside $HOME, modelling /var/lib/labby etc.
+    let lab_home_dir = TempDir::new().expect("lab home outside $HOME");
+    let lab_home_path = lab_home_dir.path().to_path_buf();
+    crate::dispatch::helpers::set_test_lab_home(Some(lab_home_path.clone()));
+
+    // The production store layout: $LAB_HOME/code-mode-artifacts/<run_id>.
+    let run_id = ulid::Ulid::new().to_string();
+    let root = code_mode_artifact_root(&run_id);
+
+    let receipt = write_code_mode_artifact(
+        &root,
+        &CodeModeArtifactWrite {
+            path: "out/report.txt".to_string(),
+            content: "body".to_string(),
+            content_type: None,
+        },
+        TEST_MAX_BYTES,
+    )
+    .await
+    .expect("write succeeds under lab home");
+
+    // Reset the global before asserting so a failure can't leave it set.
+    crate::dispatch::helpers::set_test_lab_home(None);
+
+    let real_prefix = lab_home_path.to_string_lossy().to_string();
+    assert!(
+        !receipt.absolute_path.contains(&real_prefix),
+        "receipt absolute_path `{}` must not leak the real lab-home prefix `{real_prefix}`",
+        receipt.absolute_path
+    );
+    assert!(
+        receipt.absolute_path.starts_with("~lab/"),
+        "receipt absolute_path `{}` must be a logical ~lab/ key",
+        receipt.absolute_path
+    );
+    assert!(
+        receipt
+            .absolute_path
+            .ends_with(&format!("{run_id}/out/report.txt")),
+        "receipt absolute_path `{}` must keep the run-relative tail",
+        receipt.absolute_path
+    );
+    // The run-relative `path` is unchanged (the contract field the agent uses).
+    assert_eq!(receipt.path, "out/report.txt");
+}
+
+/// lab-y966d item 3: the retention prune is detached (fire-and-forget) on the
+/// first write, so `write_code_mode_artifact` itself settles on the write alone
+/// — its latency is independent of a large pre-existing store. We assert the
+/// write completes well under a generous bound even with many pre-populated run
+/// dirs, and that the artifact is actually written.
+#[tokio::test]
+async fn write_code_mode_artifact_latency_is_independent_of_store_size() {
+    let store = TempDir::new().expect("store root");
+    // Pre-populate the store with many run dirs, each holding a file, so a
+    // synchronous prune sizing walk would be a visible stat-storm.
+    for _ in 0..64 {
+        let id = ulid::Ulid::new().to_string();
+        let dir = store.path().join(&id);
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        tokio::fs::write(dir.join("blob.bin"), vec![0u8; 4096])
+            .await
+            .unwrap();
+    }
+
+    // The write itself (the critical path after detaching the prune) must be
+    // fast regardless of the 64 pre-existing dirs. write_code_mode_artifact does
+    // NOT run the prune — that is detached in handle_artifact_write_event — so
+    // this directly asserts the write half is store-size-independent.
+    let run_dir = store.path().join(ulid::Ulid::new().to_string());
+    let start = std::time::Instant::now();
+    let receipt = write_code_mode_artifact(
+        &run_dir,
+        &CodeModeArtifactWrite {
+            path: "note.txt".to_string(),
+            content: "hello".to_string(),
+            content_type: None,
+        },
+        TEST_MAX_BYTES,
+    )
+    .await
+    .expect("write succeeds");
+    let elapsed = start.elapsed();
+
+    assert_eq!(receipt.bytes, 5);
+    assert!(
+        run_dir.join("note.txt").exists(),
+        "artifact must be written"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "write_code_mode_artifact took {elapsed:?}; the write half must not walk the store"
+    );
+}
+
+/// lab-y966d item 2: the chunked base64 encoder (`parts.push(...).join("")`,
+/// replacing O(n²) `out += ...`) must still produce correct standard base64,
+/// including all three padding cases (len % 3 == 0, 1, 2). The JS is not
+/// executable in a unit test, so this reimplements the exact chunked algorithm
+/// and asserts byte-for-byte equality with a reference encoder.
+#[test]
+fn chunked_base64_matches_reference_encoder() {
+    use base64::Engine as _;
+
+    // Faithful Rust port of `__labBase64FromBytes` (wrapper.rs): same standard
+    // alphabet, same 3-byte grouping, same `=` padding, chunked push + join.
+    fn lab_base64_from_bytes(bytes: &[u8]) -> String {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut parts: Vec<char> = Vec::with_capacity(bytes.len().div_ceil(3) * 4);
+        let mut i = 0;
+        while i < bytes.len() {
+            let a = bytes[i] as u32;
+            let b = if i + 1 < bytes.len() {
+                bytes[i + 1] as u32
+            } else {
+                0
+            };
+            let c = if i + 2 < bytes.len() {
+                bytes[i + 2] as u32
+            } else {
+                0
+            };
+            let triple = (a << 16) | (b << 8) | c;
+            parts.push(ALPHABET[((triple >> 18) & 63) as usize] as char);
+            parts.push(ALPHABET[((triple >> 12) & 63) as usize] as char);
+            parts.push(if i + 1 < bytes.len() {
+                ALPHABET[((triple >> 6) & 63) as usize] as char
+            } else {
+                '='
+            });
+            parts.push(if i + 2 < bytes.len() {
+                ALPHABET[(triple & 63) as usize] as char
+            } else {
+                '='
+            });
+            i += 3;
+        }
+        parts.into_iter().collect()
+    }
+
+    // Exercise all three len%3 residues and a range of byte values, including
+    // bytes that set the high bit (so the `+`/`/` alphabet tail is reached).
+    let cases: Vec<Vec<u8>> = vec![
+        vec![],
+        vec![0],
+        vec![0, 1],
+        vec![0, 1, 2],
+        b"M".to_vec(),
+        b"Ma".to_vec(),
+        b"Man".to_vec(),
+        b"hello world".to_vec(),
+        (0u8..=255).collect(),
+        (0u8..=255).chain(0u8..=200).collect(),
+    ];
+    for bytes in cases {
+        let got = lab_base64_from_bytes(&bytes);
+        let want = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        assert_eq!(
+            got,
+            want,
+            "chunked base64 mismatch for {}-byte input",
+            bytes.len()
+        );
+    }
+}
+
 #[tokio::test]
 async fn prune_artifact_runs_keeps_newest_and_ignores_non_ulid_entries() {
     let store = TempDir::new().expect("store root");

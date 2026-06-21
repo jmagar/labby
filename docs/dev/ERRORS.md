@@ -71,6 +71,8 @@ Dispatch layers may add the following kinds on top of SDK errors:
 - `code_mode_fuel_exhausted` — **reserved, not currently emitted.** Belongs to the dead Wasmtime reference engine (`wasm_runner.rs`), which is never run on the live path. Would map to HTTP 408 if the Wasmtime path were ever revived.
 - `code_mode_timeout` — **reserved, not currently emitted.** Same dead-Wasmtime origin as above. On the live Javy/QuickJS runner, a wall-clock backstop interruption surfaces as the canonical `timeout` kind, not `code_mode_timeout`. Would map to HTTP 408 if the Wasmtime path were ever revived. See [CODE_MODE.md](./CODE_MODE.md) "Runner Architecture".
 - `queue_saturated` — bounded runtime queue is full; caller should retry after the current work drains. HTTP 429.
+- `call_budget_exceeded` — a single Code Mode run exceeded its per-run `callTool` fan-out budget (default 512, override `LAB_CODE_MODE_MAX_CALLS_PER_RUN`, hard-clamped to 2048). Emitted by the Code Mode drive loop (`runner_drive.rs`) when a run enqueues more `callTool` invocations than the budget allows; the over-budget call's in-sandbox promise rejects cleanly with this kind (recoverable — the run continues so the user JS `try/catch` can handle partial fan-out) rather than the run being killed. The caller should reduce fan-out or split the work across multiple `codemode` calls. HTTP 429.
+- `result_too_large` — a single Code Mode `callTool` RESULT exceeded the host-side byte ceiling (serialized JSON; default 8 MiB, override `LAB_CODE_MODE_CALLTOOL_RESULT_MAX_MIB`) before entering the runner stdin pipe. Emitted by the Code Mode drive loop (`runner_drive.rs`) so an oversized binary result (e.g. a multi-MiB `Uint8Array` from an upstream tool) fails as a clean, recoverable size error instead of an opaque QuickJS out-of-memory `server_error` near the 64-MiB heap. The over-budget call's in-sandbox promise rejects with this kind; use `writeArtifact` for large payloads. HTTP 413.
 - `session_limit_exceeded` — ACP registry has reached `MAX_CONCURRENT_SESSIONS` (20); no new provider processes will be launched until existing sessions are closed. HTTP 429.
 - `too_many_subscribers` — a single ACP session has reached `MAX_SUBSCRIBERS_PER_SESSION` (32) concurrent SSE subscribers; the caller must reconnect later. HTTP 429.
 
@@ -403,6 +405,8 @@ Default mapping expectations:
 - `auth_failed` -> `401 Unauthorized`
 - `not_found` -> `404 Not Found`
 - `rate_limited` -> `429 Too Many Requests`
+- `call_budget_exceeded` -> `429 Too Many Requests`
+- `result_too_large` -> `413 Payload Too Large`
 - `validation_failed` -> `422 Unprocessable Entity`
 - `missing_param` -> `422 Unprocessable Entity`
 - `invalid_param` -> `422 Unprocessable Entity`

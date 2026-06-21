@@ -11,7 +11,9 @@ use tokio::io::AsyncWriteExt;
 use ulid::Ulid;
 
 use crate::dispatch::error::ToolError;
-use crate::dispatch::helpers::{env_non_empty, lab_home, redact_home, reject_path_traversal};
+use crate::dispatch::helpers::{
+    env_non_empty, lab_home, reject_path_traversal, relativize_to_lab_home,
+};
 use crate::dispatch::path_safety::reject_existing_symlink_ancestors;
 
 const DEFAULT_CONTENT_TYPE: &str = "text/plain";
@@ -436,7 +438,11 @@ pub(in crate::dispatch::gateway::code_mode) async fn write_code_mode_artifact(
 
     Ok(CodeModeArtifactReceipt {
         path: rel_path,
-        absolute_path: redact_home(&destination.display().to_string()),
+        // Anchor on lab_home() (resolves $LAB_HOME first), not just $HOME, so a
+        // daemon/container store path outside $HOME does not leak the host FS
+        // layout into the receipt/trace/truncation marker. The agent already has
+        // the run-relative `path`; this is only a logical `~lab/...` key.
+        absolute_path: relativize_to_lab_home(&destination.display().to_string()),
         content_type,
         bytes: bytes.len(),
         sha256: hex::encode(sha256),

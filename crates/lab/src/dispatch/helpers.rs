@@ -89,6 +89,39 @@ pub fn redact_home(path: &str) -> String {
     path.to_string()
 }
 
+/// Strip the `lab_home()` prefix from an absolute path, returning a logical
+/// `~lab`-anchored key instead of a host filesystem path.
+///
+/// Unlike [`redact_home`] (which only strips `$HOME`), this anchors on
+/// `lab_home()` — which resolves `$LAB_HOME` first. For daemon/container deploys
+/// where `LAB_HOME` lives outside `$HOME` (e.g. `/var/lib/labby`, `/data/lab`),
+/// `redact_home` would leak the full host store path into agent-facing output;
+/// this helper does not. Used for the Code Mode artifact receipt
+/// `absolute_path`, which reaches the model in the execution response and the
+/// truncation marker (OWASP Full Path Disclosure mitigation: emit a logical key,
+/// not a host-FS path).
+///
+/// Falls back to [`redact_home`] when the path does not sit under `lab_home()`,
+/// so the result is never a raw absolute path that leaks the OS username either.
+#[must_use]
+pub fn relativize_to_lab_home(path: &str) -> String {
+    let home = lab_home();
+    let home = home.to_string_lossy();
+    let home = home.trim_end_matches('/');
+    if !home.is_empty()
+        && let Some(rest) = path.strip_prefix(home)
+    {
+        let rest = rest.trim_start_matches('/');
+        return if rest.is_empty() {
+            "~lab".to_string()
+        } else {
+            format!("~lab/{rest}")
+        };
+    }
+    // Not under lab_home(): still redact $HOME so the OS username never leaks.
+    redact_home(path)
+}
+
 /// Reject any path input that contains a `Component::ParentDir` (`..`) segment.
 ///
 /// This is a **lexical** check only. Callers that join the input against a

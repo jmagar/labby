@@ -8,18 +8,23 @@ const CODE_MODE_MAIN_SHAPE_ERROR: &str =
 pub(in crate::dispatch::gateway::code_mode) const CODE_MODE_VALUE_CODEC_JS: &str = r#"
 function __labBase64FromBytes(bytes) {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  let out = "";
+  // QuickJS lacks rope-string optimization, so `out += ...` in a loop is
+  // O(n^2) (each append copies the whole accumulated string). Push fixed-size
+  // chunks into an array and `join("")` once for O(n) on multi-MiB binary.
+  const parts = [];
   for (let i = 0; i < bytes.length; i += 3) {
     const a = bytes[i];
     const b = i + 1 < bytes.length ? bytes[i + 1] : 0;
     const c = i + 2 < bytes.length ? bytes[i + 2] : 0;
     const triple = (a << 16) | (b << 8) | c;
-    out += alphabet[(triple >> 18) & 63];
-    out += alphabet[(triple >> 12) & 63];
-    out += i + 1 < bytes.length ? alphabet[(triple >> 6) & 63] : "=";
-    out += i + 2 < bytes.length ? alphabet[triple & 63] : "=";
+    parts.push(
+      alphabet[(triple >> 18) & 63],
+      alphabet[(triple >> 12) & 63],
+      i + 1 < bytes.length ? alphabet[(triple >> 6) & 63] : "=",
+      i + 2 < bytes.length ? alphabet[triple & 63] : "="
+    );
   }
-  return out;
+  return parts.join("");
 }
 function __labBytesFromBase64(data) {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -54,8 +59,31 @@ var __labBinaryTypes = {
   DataView: typeof DataView !== "undefined" ? DataView : null,
   ArrayBuffer: typeof ArrayBuffer !== "undefined" ? ArrayBuffer : null
 };
+// Cheap one-pass predicate: does this value contain any TypedArray /
+// ArrayBuffer / DataView anywhere in its tree? Lets the common case (pure JSON
+// callTool result) skip the deep-walk object/array rebuild entirely.
+function __labHasBinary(value) {
+  if (value == null || typeof value !== "object") return false;
+  if (typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer) return true;
+  if (typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView && ArrayBuffer.isView(value)) return true;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      if (__labHasBinary(value[i])) return true;
+    }
+    return false;
+  }
+  // A Date (or any toJSON object) is handled by the encode walk; treat it as
+  // needing the walk so its toJSON() is honored exactly as before.
+  if (typeof value.toJSON === "function") return true;
+  for (const key of Object.keys(value)) {
+    if (__labHasBinary(value[key])) return true;
+  }
+  return false;
+}
 function __labEncodeResult(value) {
   if (value == null) return value;
+  // Fast path: a pure-JSON result (no binary, no toJSON) needs no rebuild.
+  if (typeof value === "object" && !__labHasBinary(value)) return value;
   if (typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer) {
     return { __labBinary: "base64", type: "ArrayBuffer", data: __labBase64FromBytes(new Uint8Array(value)) };
   }
@@ -75,8 +103,27 @@ function __labEncodeResult(value) {
   }
   return value;
 }
+// Inverse of __labHasBinary for the decode side: does this value contain any
+// `{__labBinary: "base64", ...}` token anywhere? Lets a pure-JSON ToolResult
+// skip the deep-walk rebuild.
+function __labHasBinaryToken(value) {
+  if (value == null || typeof value !== "object") return false;
+  if (value.__labBinary === "base64") return true;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      if (__labHasBinaryToken(value[i])) return true;
+    }
+    return false;
+  }
+  for (const key of Object.keys(value)) {
+    if (__labHasBinaryToken(value[key])) return true;
+  }
+  return false;
+}
 function __labDecodeResult(value) {
   if (value == null) return value;
+  // Fast path: a pure-JSON value with no binary token needs no rebuild.
+  if (typeof value === "object" && !__labHasBinaryToken(value)) return value;
   if (
     typeof value === "object" &&
     value.__labBinary === "base64" &&

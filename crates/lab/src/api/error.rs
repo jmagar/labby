@@ -18,7 +18,14 @@ impl IntoResponse for ToolError {
         let status = match self.kind() {
             "auth_failed" => StatusCode::UNAUTHORIZED,
             "not_found" => StatusCode::NOT_FOUND,
-            "rate_limited" | "queue_saturated" | "session_limit_exceeded" | "too_many_subscribers" => StatusCode::TOO_MANY_REQUESTS,
+            // `call_budget_exceeded` is a recoverable per-run Code Mode fan-out
+            // policy limit (lab-4dcil) — grouped with the other 429s so callers
+            // back off and retry with a smaller fan-out.
+            "rate_limited"
+            | "queue_saturated"
+            | "session_limit_exceeded"
+            | "too_many_subscribers"
+            | "call_budget_exceeded" => StatusCode::TOO_MANY_REQUESTS,
             "sync_in_progress" | "service_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
             "missing_param" | "invalid_param" | "validation_failed" => {
                 StatusCode::UNPROCESSABLE_ENTITY
@@ -36,7 +43,9 @@ impl IntoResponse for ToolError {
             | "missing_env_values"
             | "unsupported_runtime_hint"
             | "unsupported_registry_type" => StatusCode::UNPROCESSABLE_ENTITY,
-            "content_too_large" | "preview_truncated" | "too_many_files" => {
+            // `result_too_large` is the Code Mode host-side guard on an oversized
+            // binary callTool result (lab-y966d) — grouped with the other 413s.
+            "content_too_large" | "preview_truncated" | "too_many_files" | "result_too_large" => {
                 StatusCode::PAYLOAD_TOO_LARGE
             }
             // Advertised-but-unimplemented actions (artifact.diff/artifact.patch)
@@ -200,6 +209,26 @@ mod tests {
         }
         .into_response();
         assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[test]
+    fn call_budget_exceeded_maps_to_429() {
+        // Code Mode per-run fan-out budget (lab-4dcil) is a recoverable policy
+        // limit — callers should back off and retry with a smaller fan-out.
+        assert_eq!(
+            status_for("call_budget_exceeded"),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+    }
+
+    #[test]
+    fn result_too_large_maps_to_413() {
+        // Code Mode host-side guard on an oversized binary callTool result
+        // (lab-y966d) maps to Payload Too Large.
+        assert_eq!(
+            status_for("result_too_large"),
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
     }
 
     #[test]

@@ -37,6 +37,84 @@ const ARTIFACT_WRITE_CALL_ID: &str = "code_mode::write_artifact";
 const MAX_SNIPPET_RESOLVES_PER_RUN: usize = 32;
 const MAX_SNIPPET_RESOLVED_BYTES_PER_RUN: usize = 256 * 1024;
 
+/// Default per-run `callTool` fan-out budget (lab-4dcil item 3).
+///
+/// A single `Promise.all([...thousands of callTool...])` enqueues every future
+/// before any settle, amplifying load against upstreams within the wall-clock
+/// window. Past this many `callTool` invocations in one run, further calls are
+/// rejected with the recoverable `call_budget_exceeded` kind (the in-sandbox
+/// promise rejects cleanly) rather than killing the run. Override with
+/// `LAB_CODE_MODE_MAX_CALLS_PER_RUN`; hard-clamped to [`MAX_CALLTOOL_PER_RUN_CEILING`]
+/// so a misconfigured value cannot re-open the amplification window.
+const DEFAULT_MAX_CALLTOOL_PER_RUN: u64 = 512;
+/// Hard ceiling on the configurable per-run `callTool` budget.
+const MAX_CALLTOOL_PER_RUN_CEILING: u64 = 2048;
+
+/// Default host-side byte ceiling on a single `callTool` RESULT before it enters
+/// the runner stdin pipe (lab-y966d item 1).
+///
+/// A large binary `Uint8Array` returned by an upstream tool would otherwise
+/// reach the runner and OOM the 64-MiB QuickJS heap during decode, surfacing as
+/// an opaque `server_error`. This pre-flight check on the serialized JSON bytes
+/// turns that into a clean, recoverable `result_too_large` kind. Mirrors the
+/// artifact content cap (`DEFAULT_ARTIFACT_MAX_MIB`). Override with
+/// `LAB_CODE_MODE_CALLTOOL_RESULT_MAX_MIB`; keep it below ~64 to preserve the
+/// clean-error boundary.
+const DEFAULT_CALLTOOL_RESULT_MAX_MIB: usize = 8;
+
+/// Resolve the per-run `callTool` fan-out budget from the environment, falling
+/// back to [`DEFAULT_MAX_CALLTOOL_PER_RUN`] and clamping to
+/// [`MAX_CALLTOOL_PER_RUN_CEILING`]. Absent/blank → default silently;
+/// present-but-unparseable or `0` → warn and fall back (a 0 budget would reject
+/// every call).
+fn max_calltool_per_run() -> u64 {
+    let Some(raw) = crate::dispatch::helpers::env_non_empty("LAB_CODE_MODE_MAX_CALLS_PER_RUN")
+    else {
+        return DEFAULT_MAX_CALLTOOL_PER_RUN;
+    };
+    match raw.trim().parse::<u64>() {
+        Ok(value) if value > 0 => value.min(MAX_CALLTOOL_PER_RUN_CEILING),
+        _ => {
+            tracing::warn!(
+                surface = "dispatch",
+                service = "code_mode",
+                action = "codemode",
+                value = %raw,
+                default = DEFAULT_MAX_CALLTOOL_PER_RUN,
+                "ignoring invalid LAB_CODE_MODE_MAX_CALLS_PER_RUN; using default"
+            );
+            DEFAULT_MAX_CALLTOOL_PER_RUN
+        }
+    }
+}
+
+/// Resolve the per-result byte ceiling (in bytes) from the environment, falling
+/// back to [`DEFAULT_CALLTOOL_RESULT_MAX_MIB`]. The env value is in MiB
+/// (`LAB_CODE_MODE_CALLTOOL_RESULT_MAX_MIB=16`); present-but-unparseable or `0`
+/// → warn and fall back (a 0 cap would reject every result).
+fn calltool_result_max_bytes() -> usize {
+    let default_bytes = DEFAULT_CALLTOOL_RESULT_MAX_MIB * 1024 * 1024;
+    let Some(raw) =
+        crate::dispatch::helpers::env_non_empty("LAB_CODE_MODE_CALLTOOL_RESULT_MAX_MIB")
+    else {
+        return default_bytes;
+    };
+    match raw.trim().parse::<usize>() {
+        Ok(mib) if mib > 0 => mib.saturating_mul(1024 * 1024),
+        _ => {
+            tracing::warn!(
+                surface = "dispatch",
+                service = "code_mode",
+                action = "codemode",
+                value = %raw,
+                default_mib = DEFAULT_CALLTOOL_RESULT_MAX_MIB,
+                "ignoring invalid LAB_CODE_MODE_CALLTOOL_RESULT_MAX_MIB; using default"
+            );
+            default_bytes
+        }
+    }
+}
+
 // Concrete future type for pending tool calls.
 // Using Pin<Box<dyn Future>> keeps the FuturesUnordered type concrete so the
 // compiler can infer the element type at the declaration site without requiring
@@ -83,6 +161,16 @@ struct DriveState {
     artifact_root: PathBuf,
     snippet_resolves: usize,
     snippet_resolved_bytes: usize,
+    /// Number of `callTool` invocations enqueued this run. Counts every call the
+    /// runner asked for — including ones rejected for budget — so a tight loop
+    /// can't reset the counter by being rejected. Drives the per-run fan-out
+    /// budget (lab-4dcil item 3).
+    calls_enqueued: u64,
+    /// Per-run `callTool` fan-out budget, resolved once from the environment.
+    max_calls_per_run: u64,
+    /// Host-side byte ceiling on a single `callTool` result, resolved once from
+    /// the environment (lab-y966d item 1).
+    calltool_result_max_bytes: usize,
 }
 
 impl DriveState {
@@ -97,6 +185,9 @@ impl DriveState {
             artifact_root,
             snippet_resolves: 0,
             snippet_resolved_bytes: 0,
+            calls_enqueued: 0,
+            max_calls_per_run: max_calltool_per_run(),
+            calltool_result_max_bytes: calltool_result_max_bytes(),
         }
     }
 }
@@ -318,15 +409,39 @@ impl CodeModeBroker<'_> {
 
                     match msg {
                         CodeModeRunnerOutput::ToolCall { seq, id, params } => {
-                            enqueue_tool_call(
-                                self,
-                                seq,
-                                id,
-                                params,
-                                deadline,
-                                cfg,
-                                &mut pending_tool_calls,
-                            );
+                            // Per-run fan-out budget (lab-4dcil item 3). Count
+                            // every requested call so a rejected call still
+                            // advances the counter; past the budget, reject this
+                            // call with a recoverable `call_budget_exceeded`
+                            // (the in-sandbox promise rejects cleanly) instead of
+                            // enqueuing another upstream-amplifying future.
+                            state.calls_enqueued = state.calls_enqueued.saturating_add(1);
+                            if state.calls_enqueued > state.max_calls_per_run {
+                                if let Err(err) = reject_tool_call_over_budget(
+                                    seq,
+                                    id,
+                                    state.max_calls_per_run,
+                                    stdin,
+                                    child,
+                                    child_pid,
+                                    deadline,
+                                    &mut state,
+                                )
+                                .await
+                                {
+                                    return DriveOutcome::RunnerUnhealthy(err);
+                                }
+                            } else {
+                                enqueue_tool_call(
+                                    self,
+                                    seq,
+                                    id,
+                                    params,
+                                    deadline,
+                                    cfg,
+                                    &mut pending_tool_calls,
+                                );
+                            }
                         }
                         CodeModeRunnerOutput::ArtifactWrite {
                             seq,
@@ -531,6 +646,67 @@ fn enqueue_tool_call<'a>(
     }));
 }
 
+/// Reject a `callTool` that exceeded the per-run fan-out budget (lab-4dcil item
+/// 3) by settling its in-sandbox promise with the recoverable
+/// `call_budget_exceeded` kind, without enqueuing the upstream call.
+///
+/// The rejection is recorded in the call trace (`ok: false`,
+/// `error_kind: call_budget_exceeded`) so the budget breach is observable, and a
+/// single WARN is emitted on the first over-budget call so operators can see
+/// the run hit the cap. Writing the error via the deadline-bounded writer means
+/// a deadlocked child still gets killed on the wall-clock, mirroring every other
+/// in-loop writeback.
+#[allow(clippy::too_many_arguments)]
+async fn reject_tool_call_over_budget(
+    seq: u64,
+    id: String,
+    budget: u64,
+    stdin: &mut ChildStdin,
+    child: &mut tokio::process::Child,
+    child_pid: Option<u32>,
+    deadline: tokio::time::Instant,
+    state: &mut DriveState,
+) -> Result<(), CodeModeExecutionError> {
+    // Log once, on the first call past the budget, to avoid flooding logs when a
+    // huge fan-out keeps tripping the cap.
+    if state.calls_enqueued == budget.saturating_add(1) {
+        tracing::warn!(
+            surface = "dispatch",
+            service = "code_mode",
+            action = "codemode",
+            kind = "call_budget_exceeded",
+            budget,
+            "Code Mode run exceeded the per-run callTool fan-out budget; rejecting further calls"
+        );
+    }
+    write_runner_input_by_deadline(
+        stdin,
+        &CodeModeRunnerInput::ToolError {
+            seq,
+            kind: "call_budget_exceeded".to_string(),
+            message: format!(
+                "per-run callTool budget of {budget} exceeded; reduce fan-out or split the work across multiple codemode calls"
+            ),
+        },
+        deadline,
+        child,
+        child_pid,
+        &state.calls,
+    )
+    .await?;
+    state.calls.push((
+        seq,
+        CodeModeExecutedCall {
+            id,
+            ok: false,
+            elapsed_ms: 0,
+            params: None,
+            error_kind: Some("call_budget_exceeded".to_string()),
+        },
+    ));
+    Ok(())
+}
+
 /// Handle an `ArtifactWrite` event from the runner.
 async fn handle_artifact_write_event(
     seq: u64,
@@ -544,34 +720,47 @@ async fn handle_artifact_write_event(
     cfg: &RunnerConfig,
     state: &mut DriveState,
 ) -> Result<(), CodeModeExecutionError> {
-    // Prune (lazy, once per run) and the write are host-side filesystem work;
-    // bound them by the run deadline just like tool calls so a hung or slow
-    // disk can't outlive `timeout_ms`.
+    // Retention prune is a best-effort heuristic ("pruning must never fail a
+    // run"), and on a large store it walks up to 200 run dirs (concurrency 8)
+    // before the write — a stat-storm on the writeArtifact critical path
+    // (lab-y966d item 3). Detach it as a fire-and-forget `tokio::spawn` (drop the
+    // JoinHandle) on the first write of the run so the writeArtifact promise
+    // settles on the write alone, independent of total store size. Concurrency
+    // is safe: this run's dir is registered in `active_runs` via the
+    // `ActiveArtifactRun` RAII guard *before* any write, so a detached prune
+    // (this run's or another concurrent run's) skips it. The `artifact_store_pruned`
+    // flag keeps it to one prune per run even under a rapid burst of writes.
+    if !state.artifact_store_pruned {
+        state.artifact_store_pruned = true;
+        let retain = super::artifacts::artifact_retention_runs();
+        // Fire-and-forget: dropping the JoinHandle detaches the task. If the
+        // runtime shuts down mid-prune the store is simply pruned on the next
+        // run — acceptable for a best-effort retention pass.
+        drop(tokio::spawn(async move {
+            super::artifacts::prune_artifact_runs(retain).await;
+        }));
+    }
+
+    // Only the write itself is host-side filesystem work on the critical path;
+    // bound it by the run deadline (like tool calls) so a hung or slow disk
+    // can't outlive `timeout_ms`.
     let artifact_root = state.artifact_root.clone();
     let artifact_max_bytes = state.artifact_max_bytes;
     let trace_params = cfg.trace_params;
-    let artifact_op = async {
-        if !state.artifact_store_pruned {
-            super::artifacts::prune_artifact_runs(super::artifacts::artifact_retention_runs())
-                .await;
-            state.artifact_store_pruned = true;
-        }
-        handle_artifact_write(
-            stdin,
-            &artifact_root,
-            &mut state.artifacts,
-            &mut state.calls,
-            seq,
-            CodeModeArtifactWrite {
-                path,
-                content,
-                content_type,
-            },
-            trace_params,
-            artifact_max_bytes,
-        )
-        .await
-    };
+    let artifact_op = handle_artifact_write(
+        stdin,
+        &artifact_root,
+        &mut state.artifacts,
+        &mut state.calls,
+        seq,
+        CodeModeArtifactWrite {
+            path,
+            content,
+            content_type,
+        },
+        trace_params,
+        artifact_max_bytes,
+    );
     match tokio::time::timeout_at(deadline, artifact_op).await {
         Ok(Ok(())) => Ok(()),
         Ok(Err(err)) => {
@@ -774,6 +963,44 @@ async fn handle_completed_tool_call(
     };
     match result {
         Ok(result) => {
+            // Host-side size guard (lab-y966d item 1): a large binary result
+            // (e.g. a multi-MiB Uint8Array from an upstream tool) would OOM the
+            // runner's 64-MiB QuickJS heap during decode and surface as an
+            // opaque `server_error`. Measure the serialized JSON bytes BEFORE the
+            // payload enters the stdin pipe and, when oversized, reject the
+            // in-sandbox promise with the recoverable `result_too_large` kind
+            // instead. Mirrors the artifact content cap. The base64 wrapper
+            // inflates binary ~4/3, so this serialized-byte cap is conservative.
+            let serialized_len = serde_json::to_vec(&result).map(|v| v.len()).unwrap_or(0);
+            if serialized_len > state.calltool_result_max_bytes {
+                let max = state.calltool_result_max_bytes;
+                write_runner_input_by_deadline(
+                    stdin,
+                    &CodeModeRunnerInput::ToolError {
+                        seq,
+                        kind: "result_too_large".to_string(),
+                        message: format!(
+                            "callTool result is {serialized_len} bytes; maximum is {max} bytes (use writeArtifact for large payloads)"
+                        ),
+                    },
+                    deadline,
+                    child,
+                    child_pid,
+                    &state.calls,
+                )
+                .await?;
+                state.calls.push((
+                    seq,
+                    CodeModeExecutedCall {
+                        id,
+                        ok: false,
+                        elapsed_ms,
+                        params,
+                        error_kind: Some("result_too_large".to_string()),
+                    },
+                ));
+                return Ok(());
+            }
             state.calls.push((
                 seq,
                 CodeModeExecutedCall {
@@ -983,6 +1210,192 @@ mod tests {
             DriveOutcome::Completed(_) | DriveOutcome::ExecutionError(_) => {
                 panic!("a never-replying runner must time out as RunnerUnhealthy")
             }
+        }
+    }
+
+    /// Read back the single framed line a writeback helper just sent to the
+    /// runner. The `cat` stub echoes stdin → stdout, so the next stdout line is
+    /// exactly the JSON the helper wrote — deserialize it as a runner input.
+    async fn read_echoed_input(runner: &mut PooledRunner) -> CodeModeRunnerInput {
+        let line = tokio::time::timeout(Duration::from_secs(5), runner.lines.next())
+            .await
+            .expect("stub echo within 5s")
+            .expect("stub produced a line")
+            .expect("stub line decodes");
+        serde_json::from_str::<CodeModeRunnerInput>(&line).expect("echoed line is a runner input")
+    }
+
+    fn drive_state_with_caps(per_run: u64, result_max_bytes: usize) -> DriveState {
+        let mut state = DriveState::new(&Ulid::new().to_string());
+        state.max_calls_per_run = per_run;
+        state.calltool_result_max_bytes = result_max_bytes;
+        state
+    }
+
+    /// lab-4dcil item 3: past the per-run fan-out budget, a `callTool` is
+    /// rejected with the recoverable `call_budget_exceeded` kind written back to
+    /// the runner (the in-sandbox promise rejects cleanly) and recorded as a
+    /// failed call — the run is NOT killed.
+    #[tokio::test]
+    async fn fan_out_budget_rejects_calls_past_cap_with_call_budget_exceeded() {
+        let mut runner = PooledRunner::spawn_stub().expect("spawn cat stub");
+        // Budget of 2: the 1st and 2nd calls enqueue; the 3rd is over budget.
+        let mut state = drive_state_with_caps(2, 8 * 1024 * 1024);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let child_pid = runner.child_pid;
+        let PooledRunner {
+            child,
+            stdin,
+            lines,
+            ..
+        } = &mut runner;
+
+        // Simulate three requested calls. Only the rejection path writes to the
+        // runner, so drive the counter exactly as the ToolCall arm does.
+        let mut rejected = Vec::new();
+        for seq in 1..=3u64 {
+            state.calls_enqueued = state.calls_enqueued.saturating_add(1);
+            if state.calls_enqueued > state.max_calls_per_run {
+                reject_tool_call_over_budget(
+                    seq,
+                    format!("up::tool{seq}"),
+                    state.max_calls_per_run,
+                    stdin,
+                    child,
+                    child_pid,
+                    deadline,
+                    &mut state,
+                )
+                .await
+                .expect("budget rejection writes cleanly");
+                rejected.push(seq);
+            }
+        }
+        // Borrow `lines` separately after the &mut on stdin/child ends.
+        let echoed = {
+            let line = tokio::time::timeout(Duration::from_secs(5), lines.next())
+                .await
+                .expect("stub echo within 5s")
+                .expect("stub produced a line")
+                .expect("stub line decodes");
+            serde_json::from_str::<CodeModeRunnerInput>(&line).expect("echoed input")
+        };
+
+        assert_eq!(
+            rejected,
+            vec![3],
+            "only the 3rd call (past budget=2) rejects"
+        );
+        match echoed {
+            CodeModeRunnerInput::ToolError { seq, kind, .. } => {
+                assert_eq!(seq, 3);
+                assert_eq!(kind, "call_budget_exceeded");
+            }
+            other => panic!("expected ToolError call_budget_exceeded, got {other:?}"),
+        }
+        // The rejected call is recorded as a failed call in the trace.
+        assert_eq!(state.calls.len(), 1);
+        let (trace_seq, call) = &state.calls[0];
+        assert_eq!(*trace_seq, 3);
+        assert!(!call.ok);
+        assert_eq!(call.error_kind.as_deref(), Some("call_budget_exceeded"));
+    }
+
+    /// lab-y966d item 1: an oversized binary `callTool` RESULT is rejected with
+    /// the recoverable `result_too_large` kind BEFORE the payload enters the
+    /// runner stdin pipe, rather than reaching the runner and OOMing the heap.
+    #[tokio::test]
+    async fn oversized_tool_result_is_rejected_as_result_too_large() {
+        let mut runner = PooledRunner::spawn_stub().expect("spawn cat stub");
+        // Tiny result cap so a small JSON payload trips the guard.
+        let mut state = drive_state_with_caps(512, 16);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let child_pid = runner.child_pid;
+        let PooledRunner { child, stdin, .. } = &mut runner;
+
+        // A result whose serialized JSON exceeds the 16-byte cap.
+        let big = json!({ "data": "xxxxxxxxxxxxxxxxxxxxxxxxxxxx" });
+        let completed = Some((7u64, "up::tool".to_string(), None, Ok(big), 3u128));
+        handle_completed_tool_call(completed, stdin, child, child_pid, deadline, &mut state)
+            .await
+            .expect("oversized result rejected cleanly, run not killed");
+
+        let echoed = read_echoed_input(&mut runner).await;
+        match echoed {
+            CodeModeRunnerInput::ToolError { seq, kind, .. } => {
+                assert_eq!(seq, 7);
+                assert_eq!(kind, "result_too_large");
+            }
+            other => panic!("expected ToolError result_too_large, got {other:?}"),
+        }
+        let (_, call) = &state.calls[0];
+        assert!(!call.ok);
+        assert_eq!(call.error_kind.as_deref(), Some("result_too_large"));
+    }
+
+    /// A within-cap result is relayed as a normal `ToolResult` (the guard does
+    /// not reject ordinary payloads).
+    #[tokio::test]
+    async fn within_cap_tool_result_is_relayed_as_tool_result() {
+        let mut runner = PooledRunner::spawn_stub().expect("spawn cat stub");
+        let mut state = drive_state_with_caps(512, 8 * 1024 * 1024);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let child_pid = runner.child_pid;
+        let PooledRunner { child, stdin, .. } = &mut runner;
+
+        let small = json!({ "ok": true });
+        let completed = Some((9u64, "up::tool".to_string(), None, Ok(small.clone()), 1u128));
+        handle_completed_tool_call(completed, stdin, child, child_pid, deadline, &mut state)
+            .await
+            .expect("within-cap result relays cleanly");
+
+        let echoed = read_echoed_input(&mut runner).await;
+        match echoed {
+            CodeModeRunnerInput::ToolResult { seq, result } => {
+                assert_eq!(seq, 9);
+                assert_eq!(result, small);
+            }
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
+        let (_, call) = &state.calls[0];
+        assert!(call.ok);
+        assert_eq!(call.error_kind, None);
+    }
+
+    /// The per-run fan-out budget env override parses and hard-clamps to the
+    /// ceiling; invalid/zero values fall back to the default.
+    #[test]
+    fn max_calltool_per_run_parses_and_clamps() {
+        use crate::dispatch::helpers::with_env_override;
+        use std::collections::HashMap;
+
+        let parsed = with_env_override(
+            HashMap::from([(
+                "LAB_CODE_MODE_MAX_CALLS_PER_RUN".to_string(),
+                "16".to_string(),
+            )]),
+            max_calltool_per_run,
+        );
+        assert_eq!(parsed, 16);
+
+        let clamped = with_env_override(
+            HashMap::from([(
+                "LAB_CODE_MODE_MAX_CALLS_PER_RUN".to_string(),
+                "999999".to_string(),
+            )]),
+            max_calltool_per_run,
+        );
+        assert_eq!(clamped, MAX_CALLTOOL_PER_RUN_CEILING);
+
+        for bad in ["0", "nope", "-5"] {
+            let fallback = with_env_override(
+                HashMap::from([(
+                    "LAB_CODE_MODE_MAX_CALLS_PER_RUN".to_string(),
+                    bad.to_string(),
+                )]),
+                max_calltool_per_run,
+            );
+            assert_eq!(fallback, DEFAULT_MAX_CALLTOOL_PER_RUN, "bad value `{bad}`");
         }
     }
 }

@@ -26,6 +26,12 @@ const DEFAULT_RECYCLE_AFTER: u64 = 100;
 /// Default cap on simultaneous overflow (ephemeral) runners. Bounds total
 /// concurrent runner processes to `pool_size + max_overflow`.
 const DEFAULT_MAX_OVERFLOW: usize = 8;
+/// Hard ceiling on configured overflow so a fat-fingered
+/// `LAB_CODE_MODE_POOL_MAX_OVERFLOW` cannot burst-fork an unbounded number of
+/// 64-MiB-capable ephemeral runner processes. Mirrors the [`MAX_POOL_SIZE`]
+/// clamp on `size`; chosen to match the disabled-pool overflow floor in
+/// `pool.rs` so the ceiling and that floor agree.
+const MAX_OVERFLOW_SIZE: usize = 64;
 
 /// Resolved, validated pool configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +49,10 @@ impl PoolConfig {
     pub(in crate::dispatch::gateway::code_mode) fn from_env() -> Self {
         let size = parse_env(POOL_SIZE_ENV, DEFAULT_POOL_SIZE).min(MAX_POOL_SIZE);
         let recycle_after = parse_env_u64(RECYCLE_AFTER_ENV, DEFAULT_RECYCLE_AFTER).max(1);
-        let max_overflow = parse_env(MAX_OVERFLOW_ENV, DEFAULT_MAX_OVERFLOW);
+        // Clamp overflow to a hard ceiling here, before pool.rs applies its
+        // disabled-pool `.max(64)` floor, so the floor can never circumvent the
+        // ceiling. Symmetric with the `size` clamp above.
+        let max_overflow = parse_env(MAX_OVERFLOW_ENV, DEFAULT_MAX_OVERFLOW).min(MAX_OVERFLOW_SIZE);
         Self {
             size,
             recycle_after,
@@ -103,5 +112,23 @@ mod tests {
     fn size_is_clamped_to_max() {
         assert_eq!(DEFAULT_POOL_SIZE.min(MAX_POOL_SIZE), DEFAULT_POOL_SIZE);
         assert_eq!(1000usize.min(MAX_POOL_SIZE), MAX_POOL_SIZE);
+    }
+
+    /// A fat-fingered `LAB_CODE_MODE_POOL_MAX_OVERFLOW` must not be able to burst
+    /// past the hard ceiling — symmetric with the `size` clamp. Asserted via the
+    /// same clamp expression `from_env` applies, so this stays green regardless
+    /// of ambient env in the test process.
+    #[test]
+    fn overflow_is_clamped_to_max() {
+        assert_eq!(
+            DEFAULT_MAX_OVERFLOW.min(MAX_OVERFLOW_SIZE),
+            DEFAULT_MAX_OVERFLOW,
+            "the default must already sit under the ceiling"
+        );
+        assert_eq!(
+            99_999usize.min(MAX_OVERFLOW_SIZE),
+            MAX_OVERFLOW_SIZE,
+            "an absurd overflow value must clamp to the hard ceiling"
+        );
     }
 }
