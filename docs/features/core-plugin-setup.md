@@ -1,3 +1,9 @@
+> **Superseded in part (2026-06-21):** The `labby marketplace generate` portions
+> of this plan were removed — Lab no longer publishes its own marketplace; it
+> moved to the dedicated [dendrite](https://github.com/jmagar/dendrite) repo. The
+> `setup` plugin-lifecycle and core-plugin work shipped and remains accurate;
+> treat the marketplace-generator sections below as historical.
+
 ## Title
 
 **feat: core plugin + Claude Code plugin lifecycle on top of the locked Setup/Settings UI**

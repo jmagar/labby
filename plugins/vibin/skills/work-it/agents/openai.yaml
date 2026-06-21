@@ -1,4 +1,0 @@
-interface:
-  display_name: "Work It"
-  short_description: "Full worktree PR execution flow"
-  default_prompt: "Use $work-it to execute this plan in an isolated worktree through green verification, review cleanup, PR creation, and PR comment resolution."

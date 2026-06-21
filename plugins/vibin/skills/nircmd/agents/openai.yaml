@@ -1,4 +1,0 @@
-interface:
-  display_name: "Nircmd"
-  short_description: "Drive a Windows machine over SSH via the NirCmd CLI and its..."
-  default_prompt: "Use $nircmd for drive a Windows machine over SSH via the NirCmd CLI and its."

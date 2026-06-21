@@ -1,4 +1,0 @@
-interface:
-  display_name: "Repo Status"
-  short_description: "Audit branches, worktrees, cleanup candidates, CI, conflicts, blockers, and merge order."
-  default_prompt: "Use $repo-status read-only to audit the current repository checkout, open branches, and worktrees; classify each branch and recommend the safest merge order."

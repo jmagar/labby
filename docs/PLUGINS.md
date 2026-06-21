@@ -1,8 +1,7 @@
 # Lab Plugins
 
-Lab plugins (the checked-in `plugins/labby` tree and the generated marketplace
-tree alike) ship **no binary**. Hosts install `labby` explicitly and the
-binary owns the setup flow from there:
+The checked-in `plugins/labby` tree ships **no binary**. Hosts install `labby`
+explicitly and the binary owns the setup flow from there:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jmagar/lab/main/scripts/install.sh | sh
@@ -25,28 +24,17 @@ is on PATH and prints an install pointer when it is not; ConfigChange syncs
 plugin settings via `labby setup plugin-hook` (again only when installed).
 Nothing is auto-installed or auto-repaired at session start.
 
-## Generated marketplace tree
+## Marketplace distribution
 
-`labby marketplace generate --out <dir>` builds a Claude Code plugin
-marketplace tree from the compiled service registry and each service
-`PluginMeta`:
+Lab no longer generates or publishes its own plugin marketplace. The marketplace
+moved to a dedicated repo, [dendrite](https://github.com/jmagar/dendrite), so it
+is decoupled from this Rust workspace. Dendrite catalogs `plugins/labby` (via a
+`git-subdir` source pointing at this repo) alongside the other Lab/Labby plugins
+and third-party entries.
 
-- `lab-core/`: setup commands and an `install-labby` skill (no binary).
-- `lab-<service>/`: one config-only service plugin per service with required env vars.
-- `.claude-plugin/marketplace.json` and/or `.agents/plugins/marketplace.json`: indexes for generated plugin marketplaces.
-
-Service plugins invoke `labby` from `PATH`. Their `.mcp.json` points at:
-
-```json
-{ "command": "labby", "args": ["mcp", "--services", "<service>"] }
-```
-
-The core plugin provides:
-
-- `/setup-core`: opens `labby setup --mode plugin`.
-- `/setup-core-advanced`: opens `labby setup --mode full`.
-
-Plugin manifests intentionally omit `version`; marketplace release identity is Git-SHA based unless an individual plugin explicitly documents a different manifest-level version contract.
+Install `labby` with `scripts/install.sh` (above); browse and install
+marketplace plugins through the `marketplace` dispatch service or the Labby web
+UI.
 
 Setup plugin lifecycle actions live in the `setup` dispatch service. The
 canonical names follow the dotted `<resource>.<verb>` convention; the legacy

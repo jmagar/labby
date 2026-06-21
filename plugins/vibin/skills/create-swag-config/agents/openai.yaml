@@ -1,4 +1,0 @@
-interface:
-  display_name: "Create Swag Config"
-  short_description: "Add or scaffold a new reverse proxy config for SWAG — the..."
-  default_prompt: "Use $create-swag-config to add or scaffold a new reverse proxy config for SWAG — the."

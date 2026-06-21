@@ -1,4 +1,0 @@
-interface:
-  display_name: "MCPJam UI Testing"
-  short_description: "Validate MCP-UI apps with MCPJam"
-  default_prompt: "Use $mcpjam-ui-testing to validate an MCP-UI app with MCPJam CLI and Inspector."

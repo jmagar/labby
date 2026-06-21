@@ -1,4 +1,0 @@
-interface:
-  display_name: "Chrome"
-  short_description: "Inspect or control a real Chrome session over SSH via Chrome..."
-  default_prompt: "Use $chrome to inspect or control a real Chrome session over SSH via Chrome."

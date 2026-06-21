@@ -1,4 +1,0 @@
-interface:
-  display_name: "Jellyfin"
-  short_description: "Working with Jellyfin media server management, libraries..."
-  default_prompt: "Use $jellyfin for working with Jellyfin media server management, libraries."

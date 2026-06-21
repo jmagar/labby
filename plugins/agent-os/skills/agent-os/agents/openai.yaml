@@ -1,4 +1,0 @@
-interface:
-  display_name: "Agent OS"
-  short_description: "Drive Claude's dedicated Windows 11 sandbox VM (agent-os) via Windows-MCP for desktop automation, PowerShell, screenshots, and app testing."
-  default_prompt: "Use agent-os to drive Claude's dedicated Windows 11 sandbox VM."

@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- **Bundled plugin marketplace** — Lab no longer ships its own plugin marketplace or the `labby marketplace generate` command that produced it. The marketplace moved to the dedicated [dendrite](https://github.com/jmagar/dendrite) repo, decoupling it from this Rust workspace. Removed the 23 migrated plugin directories (keeping `plugins/labby` and `plugins/scripts`), both the Claude (`.claude-plugin/marketplace.json`) and Codex (`.agents/plugins/marketplace.json`) catalogs, and the `marketplace` Justfile recipe. The marketplace browse/install dispatch service (`sources.*`, `plugins.*`, `plugin.install`, MCP Registry, ACP agents) is unchanged.
+
 ---
 
 ## [0.26.1] - 2026-06-17

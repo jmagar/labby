@@ -1,24 +1,19 @@
 //! `labby marketplace` — CLI shim for marketplace plugin management.
 //!
-//! Most actions follow the shared dispatch layer. `generate` is intentionally
-//! CLI-local because it writes a release marketplace tree to disk.
+//! All actions follow the shared dispatch layer.
 //! Always-on (synthetic service). See `apprise.rs` for the reference pattern.
 
 use std::process::ExitCode;
 
 use anyhow::Result;
-use clap::{Args, Subcommand};
+use clap::Args;
 
 use crate::cli::helpers::{print_dry_run, run_confirmable_action_command};
 use crate::output::OutputFormat;
 
-mod generator;
-
 /// `labby marketplace` arguments.
 #[derive(Debug, Args)]
 pub struct MarketplaceArgs {
-    #[command(subcommand)]
-    pub command: Option<MarketplaceCommand>,
     /// Action to run (e.g. sources.list, plugins.list, plugin.install).
     #[arg(default_value = "help")]
     pub action: String,
@@ -33,24 +28,11 @@ pub struct MarketplaceArgs {
     pub dry_run: bool,
 }
 
-#[derive(Debug, Subcommand)]
-pub enum MarketplaceCommand {
-    /// Generate a Claude Code marketplace tree from compiled-in PluginMeta.
-    Generate(generator::GenerateArgs),
-}
-
 /// Run the `labby marketplace` subcommand.
 ///
 /// # Errors
 /// Returns an error if dispatch fails.
 pub async fn run(args: MarketplaceArgs, format: OutputFormat) -> Result<ExitCode> {
-    if let Some(command) = args.command {
-        return match command {
-            MarketplaceCommand::Generate(generate_args) => {
-                generator::run_generate(generate_args, format)
-            }
-        };
-    }
     let params = args
         .params
         .as_deref()
@@ -68,9 +50,7 @@ pub async fn run(args: MarketplaceArgs, format: OutputFormat) -> Result<ExitCode
         params,
         args.yes,
         format,
-        |action, params| async move {
-            crate::dispatch::marketplace::dispatch(&action, params).await
-        },
+        |action, params| async move { crate::dispatch::marketplace::dispatch(&action, params).await },
     )
     .await
 }
