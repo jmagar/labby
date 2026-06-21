@@ -77,35 +77,85 @@ declare function callTool<T = unknown>(
 Successful return: the upstream tool's structuredContent if present, else the parsed \
 text of the first content[0] block. Never the raw MCP envelope.
 
+Sandbox globals:
+- Available: `codemode`, `codemode.run`, `codemode.search`, `codemode.describe`, \
+`codemode.step`, `callTool`, `writeArtifact`.
+- NOT available (the sandbox is not Node/Deno/Bun): `require`, `process`, `fs`, \
+`fetch`, `Bun`. A bare `ReferenceError: fetch is not defined` (or any `... is not \
+defined`) means you reached for a runtime global that does not exist — use the \
+listed globals instead; there is no network or filesystem except through upstream \
+tools and `writeArtifact`.
+
 Error handling:
-```ts
-// To recover: const env: CodeModeError = JSON.parse(String(e.message));
-// Retry-safe:    rate_limited (honor retry_after_ms), timeout, network_error
-// Fix-and-retry: missing_param, invalid_param, validation_failed, confirmation_required
-// Terminal:      unknown_tool, unknown_action, auth_failed, server_error, internal_error
-```
 A failed callTool rejects only its own promise — the run continues, so catch it and \
-proceed. For catch-and-continue fan-out, prefer `Promise.allSettled` so every call \
+proceed. `JSON.parse(String(e.message))` yields `{ kind, message, ... }` for a \
+structured failure (a bare `ReferenceError`/`TypeError` has no JSON message, so guard \
+the parse). For catch-and-continue fan-out, prefer `Promise.allSettled` so every call \
 settles before you return.
 
-Scope: `codemode` requires `lab` or `lab:admin`.
+Kinds Code Mode itself mints, grouped by recovery class:
+```ts
+// Retry-safe (transient — retry, optionally after warmup/backoff):
+//   not_found (upstream not yet connected), upstream_error, gateway_unavailable,
+//   timeout, call_budget_exceeded (split work across multiple codemode calls).
+// Fix-and-retry (your code/params are wrong — adjust and re-run):
+//   invalid_param, missing_param, invalid_code_mode_id, ambiguous_target,
+//   bad_snippet_name, invalid_snippet_resolution, result_too_large
+//   (reduce the return value in-sandbox or write it with writeArtifact).
+// Terminal (structural — do not blind-retry; change approach or escalate):
+//   unknown_tool, forbidden, route_scope_denied, server_error, internal_error,
+//   unknown_execution, snippet_recursion_limit, snippet_depth_exceeded,
+//   snippet_resolve_limit, snippet_budget_exceeded.
+```
+Upstream-passthrough kinds: `rate_limited` (honor `retry_after_ms`), `network_error`, \
+`validation_failed`, `auth_failed`, `confirmation_required`, `unknown_action`, \
+`conflict` appear ONLY when a called upstream returns them; Code Mode never mints \
+them. Act on the upstream (its params/state), not on your sandbox code. \
+`confirmation_required` is never produced by Code Mode itself — destructive calls \
+blocked by scope return `forbidden`.
 
-Results are capped to the configured envelope budget (default 24 KB / 6000 tokens). \
-Oversized results are replaced with a truncation marker containing `truncated`, \
-`original_size`, `original_tokens`, `preview`, and `next_action`. Reduce data inside \
-the sandbox before returning — that is the point of Code Mode.
+Scope gates (MCP only; the `lab` CLI runs as a trusted local caller with none of \
+these):
+- `codemode` itself requires the `lab` or `lab:admin` scope; without it the call \
+returns `forbidden`.
+- `codemode.run(<snippet>)` requires `lab:admin`; a non-admin scope returns \
+`forbidden`.
+- Destructive upstream tools require the execute scope; calling one without it \
+returns `forbidden` (no second confirmation prompt is issued).
+- On a protected/route-scoped surface, requesting an upstream outside the route \
+allowlist returns `route_scope_denied` (distinct from `forbidden`: the scope is \
+right, the upstream is simply not exposed on this route), and `codemode.run` may be \
+disabled entirely.
+
+writeArtifact — the escape hatch for oversized results:
+- `await writeArtifact(path, content, options?)` persists `content` (a string) to a \
+host-managed artifact path and returns a receipt `{ path, absolute_path, \
+content_type, bytes, sha256 }`. `options` may set `{ contentType: string }`.
+- When a result would exceed the response budget, write it as an artifact and return \
+the small receipt instead of the bulk data. The receipt is what the agent reads back.
+
+Results are capped to the configured envelope budget (default 24 KB / 6000 tokens; \
+the live limits are reported in the truncation marker). Oversized results are \
+replaced with a truncation marker containing `truncated`, `original_size`, \
+`original_tokens`, `max_size_bytes`, `max_tokens`, `preview`, `artifacts`, and \
+`next_action`. Reduce data inside the sandbox before returning, or persist it with \
+`writeArtifact` and return the receipt — that is the point of Code Mode.
 
 Budget:
 - Time: a 30 s wall-clock timeout bounds the whole run. Split work across \
 calls or reduce local computation if the `timeout` kind is returned.
-- Tool calls: Code Mode does not impose a per-run call-count cap. The whole \
-run remains bounded by wall-clock time, sandbox memory/stack, output caps, and \
+- Tool calls: a per-run tool-call budget bounds fan-out; exceeding it returns \
+`call_budget_exceeded` — split the work across multiple `codemode` calls. The run \
+also remains bounded by wall-clock time, sandbox memory/stack, output caps, and \
 host-side tool policy.
+- Output: an oversized return value is replaced with the truncation marker (and may \
+surface `result_too_large`); reduce it in-sandbox or write it with `writeArtifact`.
 - Memory: 64 MiB heap limit enforced by the QuickJS runtime. Reduce the data \
 processed inside the sandbox if the runner exits with `server_error`.
 - Stack: QuickJS enforces a native stack depth limit; avoid deep recursion.
-- The only recoverable budget kind is `timeout` — retry with a smaller payload \
-or split into multiple `codemode` calls.
+- Recoverable budget kinds are `timeout`, `call_budget_exceeded`, and \
+`result_too_large` — retry with a smaller payload, split into multiple `codemode` \
+calls, or persist the result with `writeArtifact`.
 
 Lab actions (`lab::*` tool IDs) are not available in Code Mode. For Lab built-in \
 actions, use the native Lab service tools instead of Code Mode.";

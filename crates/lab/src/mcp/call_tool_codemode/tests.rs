@@ -87,7 +87,7 @@ fn code_mode_description_contains_protocol_contract() {
         CODE_MODE_DESCRIPTION.contains("Successful return: the upstream tool's structuredContent")
     );
     assert!(CODE_MODE_DESCRIPTION.contains("JSON.parse(String(e.message))"));
-    assert!(CODE_MODE_DESCRIPTION.contains("Retry-safe:"));
+    assert!(CODE_MODE_DESCRIPTION.contains("Retry-safe"));
     assert!(CODE_MODE_DESCRIPTION.contains("Promise.all"));
     assert!(
         CODE_MODE_DESCRIPTION.contains("codemode"),
@@ -106,6 +106,115 @@ fn code_mode_description_contains_protocol_contract() {
         "description must not point codemode callers at a removed execute tool"
     );
     assert!(CODE_MODE_DESCRIPTION.len() < 8192);
+}
+
+#[test]
+fn code_mode_description_documents_scope_gates_and_write_artifact() {
+    // lab-g1tvp: MCP-only scope gates must be stated so a `lab`-scoped agent
+    // understands a `forbidden`/`route_scope_denied` result instead of looping.
+    assert!(
+        CODE_MODE_DESCRIPTION.contains("requires `lab:admin`"),
+        "snippet scope gate (codemode.run needs lab:admin) must be documented"
+    );
+    assert!(
+        CODE_MODE_DESCRIPTION.contains("route_scope_denied"),
+        "route-scope denial must be documented and distinguished from forbidden"
+    );
+    // lab-g1tvp: writeArtifact is the purpose-built escape hatch and must be
+    // discoverable from the static description.
+    assert!(
+        CODE_MODE_DESCRIPTION.contains("writeArtifact(path, content, options?)"),
+        "writeArtifact must be documented with its signature"
+    );
+    // lab-g1tvp: the live truncation-marker fields the agent will see.
+    assert!(
+        CODE_MODE_DESCRIPTION.contains("max_size_bytes")
+            && CODE_MODE_DESCRIPTION.contains("max_tokens"),
+        "description must mention the live budget fields carried by the marker"
+    );
+    // lab-g1tvp: confirmation_required is never minted by Code Mode itself.
+    assert!(
+        CODE_MODE_DESCRIPTION
+            .contains("`confirmation_required` is never produced by Code Mode itself"),
+        "confirmation_required must be labelled upstream-only / never host-minted"
+    );
+}
+
+#[test]
+fn code_mode_description_lists_sandbox_globals() {
+    // lab-8bndv: the available/forbidden globals list must be statically present
+    // so an agent that catches per-call errors (the documented JSON.parse idiom)
+    // still has the globals list in context.
+    assert!(
+        CODE_MODE_DESCRIPTION.contains("Sandbox globals:"),
+        "a static Sandbox globals stanza must exist"
+    );
+    for available in [
+        "codemode.run",
+        "codemode.search",
+        "codemode.describe",
+        "codemode.step",
+        "callTool",
+        "writeArtifact",
+    ] {
+        assert!(
+            CODE_MODE_DESCRIPTION.contains(available),
+            "available global `{available}` must be listed"
+        );
+    }
+    for forbidden in ["require", "process", "fs", "fetch", "Bun"] {
+        assert!(
+            CODE_MODE_DESCRIPTION.contains(forbidden),
+            "forbidden Node/Deno global `{forbidden}` must be named as unavailable"
+        );
+    }
+}
+
+/// lab-g1tvp validation criterion: the documented error-kind set must be a
+/// superset of the kinds Code Mode actually mints. This guards against the
+/// description drifting from emitted reality (the original bug).
+///
+/// The host-minted kinds below are cross-checked against the `sdk_kind: "..."`
+/// / `kind: "..."` literals emitted across the `code_mode` module
+/// (call_tool_codemode.rs, execute.rs, runner.rs, runner_io.rs,
+/// runner_drive.rs, schema.rs, preamble.rs, util.rs, artifacts.rs). The two
+/// cross-coordinated kinds (`call_budget_exceeded`, `result_too_large`) are
+/// documented ahead of their emitters by design.
+#[test]
+fn code_mode_description_documents_every_host_minted_kind() {
+    const HOST_MINTED_KINDS: &[&str] = &[
+        // top-level / per-run
+        "forbidden",
+        "route_scope_denied",
+        "unknown_tool",
+        "invalid_param",
+        "invalid_code_mode_id",
+        "missing_param",
+        "timeout",
+        "server_error",
+        "internal_error",
+        "gateway_unavailable",
+        "unknown_execution",
+        // per-call / snippets / discovery
+        "not_found",
+        "upstream_error",
+        "ambiguous_target",
+        "bad_snippet_name",
+        "snippet_recursion_limit",
+        "snippet_depth_exceeded",
+        "snippet_resolve_limit",
+        "snippet_budget_exceeded",
+        "invalid_snippet_resolution",
+        // cross-coordinated (documented ahead of emitters)
+        "call_budget_exceeded",
+        "result_too_large",
+    ];
+    for kind in HOST_MINTED_KINDS {
+        assert!(
+            CODE_MODE_DESCRIPTION.contains(kind),
+            "host-minted kind `{kind}` is emitted by the code but absent from CODE_MODE_DESCRIPTION"
+        );
+    }
 }
 
 #[test]

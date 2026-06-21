@@ -250,7 +250,15 @@ fn truncates_codemode_final_result_when_oversized() {
     let result = truncated.result.as_ref().expect("result present");
     assert_eq!(result["truncated"], json!(true));
     assert!(result["original_size"].as_u64().unwrap() > 5000);
-    assert!(result["next_action"].as_str().unwrap().contains("narrower"));
+    // The marker carries the LIVE budget it exceeded (lab-g1tvp), not a static
+    // default, so the agent sees the real ceiling.
+    assert_eq!(result["max_size_bytes"], json!(1400));
+    assert_eq!(result["max_tokens"], json!(6000));
+    // next_action points at writeArtifact as the escape hatch for oversized
+    // results, alongside the reduce/split guidance.
+    let next_action = result["next_action"].as_str().unwrap();
+    assert!(next_action.contains("narrower"));
+    assert!(next_action.contains("writeArtifact"));
     // Calls metadata preserved unchanged (no result payloads to truncate).
     assert_eq!(truncated.calls.len(), 2);
     assert!(truncated.calls[0].ok);
