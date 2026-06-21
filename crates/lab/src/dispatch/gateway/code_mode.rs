@@ -6,10 +6,9 @@
 //! MCP/CLI adapters and integration tests.
 
 // Used in-crate by the `CodeModeBroker` struct/`new`; also re-exported so the
-// in-crate test modules can reach them via `super::` exactly as the old nested
+// in-crate test modules can reach it via `super::` exactly as the old nested
 // `mod tests` did.
 pub(crate) use crate::dispatch::gateway::manager::GatewayManager;
-pub(crate) use crate::registry::ToolRegistry;
 
 mod artifacts;
 pub(crate) mod catalog_cache;
@@ -54,12 +53,6 @@ mod tests_runtime;
 /// Tests for the live TypeScript signature generator (previously `tests_types_legacy`).
 #[cfg(test)]
 mod tests_ts_signatures;
-// Keep the old module name so `cargo test tests_types_legacy` still works —
-// the test module was renamed to `tests_ts_signatures` in Q-L2.
-// The old file `tests_types_legacy.rs` is now identical to `tests_ts_signatures.rs`
-// with updated module paths; both modules reference the same functions.
-#[cfg(test)]
-mod tests_types_legacy;
 
 // Shared Code Mode dispatch constants (tracing service label + source-size
 // limit). Re-exported so the CLI and MCP surface adapters import one canonical
@@ -177,7 +170,7 @@ pub struct CodeModeBroker<'a> {
 
 impl<'a> CodeModeBroker<'a> {
     #[must_use]
-    pub fn new(_registry: &'a ToolRegistry, gateway_manager: Option<&'a GatewayManager>) -> Self {
+    pub fn new(gateway_manager: Option<&'a GatewayManager>) -> Self {
         Self {
             gateway_manager,
             ui_capture: std::sync::Arc::new(std::sync::Mutex::new(None)),

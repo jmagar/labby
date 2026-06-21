@@ -22,7 +22,7 @@ async fn search_tools_seeds_cold_lazy_runtime_before_searching() {
         .await;
 
     manager
-        .ensure_search_runtime_ready(true, None, None)
+        .ensure_search_runtime_ready_allowed(true, None, None, None)
         .await
         .expect_err("failed live discovery returns an actionable error");
 

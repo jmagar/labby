@@ -63,6 +63,9 @@ pub fn run_code_mode_runner_stdio() -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             Err(err) => {
+                // Best-effort emit: if the error line can't be written (e.g. the
+                // parent already closed the pipe), there is nothing more we can do
+                // for this run, so drop the write result and continue the loop.
                 drop(runner_emit(CodeModeRunnerOutput::Error {
                     kind: err.kind,
                     message: err.message,
@@ -411,10 +414,11 @@ fn run_code_mode_runner() -> Result<RunnerLoopOutcome, CodeModeRunnerError> {
 }
 
 fn wrap_code_mode(code: &str, proxy: &str) -> String {
-    // The execute wrapper body (assign → typeof check → invoke) is shared with
-    // the Boa path via `code_mode_main_invoker` so the contract cannot diverge.
-    // It is interpolated as a named arg (`{invoker}`) so its literal JS braces
-    // are substituted verbatim and need no `{{`/`}}` escaping.
+    // The execute wrapper body (assign → typeof check → invoke) comes from the
+    // single source of truth in `wrapper::code_mode_main_invoker`, so the invoke
+    // contract has one canonical shape. It is interpolated as a named arg
+    // (`{invoker}`) so its literal JS braces are substituted verbatim and need no
+    // `{{`/`}}` escaping.
     let invoker = code_mode_main_invoker(code);
     format!(
         r#"

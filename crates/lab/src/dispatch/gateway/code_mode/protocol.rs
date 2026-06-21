@@ -66,7 +66,7 @@ pub enum CodeModeRunnerOutput {
     },
     /// Runner completed successfully. `result` is the serialized return value of
     /// the async function (`Undefined` when the function returns undefined).
-    /// `logs` carries captured console output (Boa path) or redirected stderr (Javy path).
+    /// `logs` carries console output captured from the Javy/QuickJS runner.
     Done {
         // #[serde(default)] makes this variant forward-compatible: old runner binaries
         // that emit {"type":"done"} without these fields deserialize to Undefined/[] instead

@@ -1,11 +1,11 @@
 //! `CodeModeBroker::run_in_runner`: spawn the runner subprocess and drive the
 //! tool-call/log/completion protocol loop.
 //!
-//! The public entry point is `run_in_runner`, which packs runtime parameters
-//! into a `RunnerConfig` struct and delegates to `run_in_runner_with_config`.
-//! Each major event arm (`Done`, `ToolCall`, `ArtifactWrite`,
-//! `SnippetResolve`, `Error`) is handled by a named async helper to keep the
-//! select loop readable.
+//! The public entry point is `run_in_runner`, which takes a `RunnerConfig`
+//! struct (built by the caller so every runtime parameter is named) and routes
+//! to the pooled or one-shot runner path. Each major event arm (`Done`,
+//! `ToolCall`, `ArtifactWrite`, `SnippetResolve`, `Error`) is handled by a
+//! named async helper to keep the select loop readable.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -149,8 +149,8 @@ pub(in crate::dispatch::gateway::code_mode) struct RunnerConfig {
 
 // ---------------------------------------------------------------------------
 // Drive state — per-run mutable bookkeeping (excludes pending_tool_calls,
-// which stays local in run_in_runner_with_config so its lifetime is tied to
-// the enclosing async fn and not forced to 'static)
+// which stays local in the drive loop so its lifetime is tied to the enclosing
+// async fn and not forced to 'static)
 // ---------------------------------------------------------------------------
 
 struct DriveState {
@@ -201,37 +201,10 @@ impl CodeModeBroker<'_> {
     /// tool-call/artifact/completion protocol loop until the runner exits
     /// or the wall-clock deadline fires.
     ///
-    /// The runtime params are packed into [`RunnerConfig`] and the loop arms
-    /// are delegated to named helpers. Timeout and killpg invariants are
-    /// preserved exactly.
-    #[allow(clippy::too_many_arguments)]
+    /// Runtime params arrive packed in a [`RunnerConfig`] (built at the single
+    /// call site so every field is named) and the loop arms are delegated to
+    /// named helpers. Timeout and killpg invariants are preserved exactly.
     pub(in crate::dispatch::gateway::code_mode) async fn run_in_runner(
-        &self,
-        code_to_run: String,
-        proxy: String,
-        timeout: Duration,
-        caller: CodeModeCaller,
-        surface: CodeModeSurface,
-        max_log_entries: usize,
-        max_log_bytes: usize,
-        trace_params: bool,
-        capability_filter: CodeModeCapabilityFilter,
-    ) -> Result<CodeModeExecutionResponse, CodeModeExecutionError> {
-        let cfg = RunnerConfig {
-            code_to_run,
-            proxy,
-            timeout,
-            caller,
-            surface,
-            max_log_entries,
-            max_log_bytes,
-            trace_params,
-            capability_filter,
-        };
-        self.run_in_runner_with_config(cfg).await
-    }
-
-    async fn run_in_runner_with_config(
         &self,
         cfg: RunnerConfig,
     ) -> Result<CodeModeExecutionResponse, CodeModeExecutionError> {
@@ -613,7 +586,7 @@ fn classify_line_result(
 /// Enqueue a `ToolCall` request from the runner into `pending_tool_calls`.
 ///
 /// Free function (not `&self` method) so the returned future can capture
-/// `broker` with the same lifetime as the enclosing `run_in_runner_with_config`
+/// `broker` with the same lifetime as the enclosing `run_in_runner`
 /// rather than being forced to `'static`.
 fn enqueue_tool_call<'a>(
     broker: &'a CodeModeBroker<'a>,
@@ -1171,7 +1144,6 @@ fn artifact_call(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::ToolRegistry;
 
     fn test_config(timeout: Duration) -> RunnerConfig {
         RunnerConfig {
@@ -1193,8 +1165,7 @@ mod tests {
     /// runtime interrupted mid-execution.
     #[tokio::test]
     async fn drive_runner_times_out_and_marks_runner_unhealthy() {
-        let registry = ToolRegistry::new();
-        let broker = CodeModeBroker::new(&registry, None);
+        let broker = CodeModeBroker::new(None);
         let mut runner = PooledRunner::spawn_stub_silent().expect("spawn silent stub");
         let outcome = broker
             .drive_runner(&mut runner, &test_config(Duration::from_millis(80)))

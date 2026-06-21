@@ -13,37 +13,11 @@ use super::types::{CodeModeCatalogEntry, sanitize_code_mode_schema};
 use super::util::serialized_catalog_size;
 
 impl CodeModeBroker<'_> {
-    /// Build or return the cached Code Mode discovery catalog.
-    ///
-    /// Returns `(entries, catalog_json, serialized_size)`. The `catalog_json`
-    /// is the pre-serialized `serde_json::to_string(&entries)` string, ready
-    /// to inject as `const tools = ...;` into the runner. Both are served from
-    /// the manager-level render cache when the healthy tool fingerprint matches,
-    /// avoiding repeated `generate_tool_types` calls and JSON serialization.
-    #[allow(dead_code)]
-    pub(in crate::dispatch::gateway::code_mode) async fn code_mode_catalog(
-        &self,
-        manager: &GatewayManager,
-        allow_cold_connect: bool,
-        owner: &UpstreamRuntimeOwner,
-        oauth_subject: Option<&str>,
-    ) -> Result<(Vec<CodeModeCatalogEntry>, String, usize), ToolError> {
-        self.code_mode_catalog_allowed(
-            manager,
-            allow_cold_connect,
-            owner,
-            oauth_subject,
-            None,
-            false,
-        )
-        .await
-    }
-
     /// Build the execute-path proxy catalog without re-probing healthy
     /// upstreams.
     ///
-    /// Unlike `code_mode_catalog` / `code_mode_catalog_allowed` (which force a
-    /// full growth-detecting reprobe via `allow_cold_connect = true`), this
+    /// Unlike `code_mode_catalog_allowed` (which forces a full growth-detecting
+    /// reprobe via `allow_cold_connect = true`), this
     /// connects only upstreams that are not already healthy, then renders the
     /// catalog through the same `code_mode_catalog_from_tools` render cache.
     /// Tool calls resolve live, so a slightly-stale proxy is harmless on the
@@ -77,6 +51,14 @@ impl CodeModeBroker<'_> {
             .await
     }
 
+    /// Build the discovery catalog through the growth-detecting reprobe path
+    /// (`code_mode_catalog_tools_allowed`).
+    ///
+    /// The production execute path renders its proxy catalog via the cheaper
+    /// `_for_proxy` variants above, so this full-reprobe builder is exercised
+    /// only by the catalog-expansion tests today — hence the `not(test)`
+    /// allow-dead.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(in crate::dispatch::gateway::code_mode) async fn code_mode_catalog_allowed(
         &self,
         manager: &GatewayManager,

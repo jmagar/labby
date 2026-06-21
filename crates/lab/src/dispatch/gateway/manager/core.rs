@@ -209,9 +209,9 @@ impl GatewayManager {
             ProtectedRouteIndex::from_routes(&config.protected_mcp_routes);
         *self.config.write().await = config;
         // Cold-connect for the codemode surface is handled lazily by the
-        // code_mode path (`ensure_search_runtime_ready`) on first call, so
-        // seed_config does not eagerly connect upstreams here. This keeps startup
-        // cheap and non-blocking.
+        // code_mode path (`ensure_search_runtime_ready_allowed`) on first call,
+        // so seed_config does not eagerly connect upstreams here. This keeps
+        // startup cheap and non-blocking.
     }
 
     pub async fn current_pool(&self) -> Option<Arc<UpstreamPool>> {

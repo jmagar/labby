@@ -268,17 +268,17 @@ impl CodeModeBroker<'_> {
             .into());
         }
 
-        self.run_in_runner(
+        self.run_in_runner(super::runner_drive::RunnerConfig {
             code_to_run,
             proxy,
-            remaining,
+            timeout: remaining,
             caller,
             surface,
             max_log_entries,
             max_log_bytes,
             trace_params,
             capability_filter,
-        )
+        })
         .await
     }
 
@@ -572,7 +572,6 @@ fn proxy_render_cache_key(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::ToolRegistry;
     use rmcp::model::{Content, Meta};
     use serde_json::json;
 
@@ -621,8 +620,7 @@ mod tests {
 
     #[test]
     fn apply_ui_opt_in_unwraps_and_attaches_captured_link() {
-        let registry = ToolRegistry::new();
-        let broker = CodeModeBroker::new(&registry, None);
+        let broker = CodeModeBroker::new(None);
         *broker.ui_capture.lock().unwrap() = Some(UiLink {
             ui_meta: json!({ "resourceUri": "ui://axon/status-dashboard" }),
         });
@@ -638,8 +636,7 @@ mod tests {
 
     #[test]
     fn apply_ui_opt_in_without_optin_is_noop() {
-        let registry = ToolRegistry::new();
-        let broker = CodeModeBroker::new(&registry, None);
+        let broker = CodeModeBroker::new(None);
         let mut response = response_with_result(json!({ "degraded": false }));
         broker.apply_ui_opt_in(&mut response);
         assert_eq!(response.result, Some(json!({ "degraded": false })));
@@ -651,8 +648,7 @@ mod tests {
 
     #[test]
     fn apply_ui_opt_in_surfaces_direct_ui_tool_result() {
-        let registry = ToolRegistry::new();
-        let broker = CodeModeBroker::new(&registry, None);
+        let broker = CodeModeBroker::new(None);
         *broker.ui_capture.lock().unwrap() = Some(UiLink {
             ui_meta: json!({ "resourceUri": "ui://ytdl-mcp/youtube-search.html" }),
         });

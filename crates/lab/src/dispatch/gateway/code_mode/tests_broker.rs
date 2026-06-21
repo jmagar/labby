@@ -110,8 +110,7 @@ async fn execute_proxy_embeds_local_discovery_helpers_without_host_callbacks() {
         code_mode_manager_with_upstreams(vec![fixture_http_upstream("alpha")]).await;
     pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
         .await;
-    let registry = super::ToolRegistry::new();
-    let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+    let broker = super::CodeModeBroker::new(Some(&manager));
 
     let proxy = broker
         .build_code_mode_proxy_for_tests(
@@ -138,8 +137,7 @@ async fn execute_proxy_embeds_only_reduced_discovery_catalog() {
         code_mode_manager_with_upstreams(vec![fixture_http_upstream("alpha")]).await;
     pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
         .await;
-    let registry = super::ToolRegistry::new();
-    let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+    let broker = super::CodeModeBroker::new(Some(&manager));
 
     let proxy = broker
         .build_code_mode_proxy_for_tests(
@@ -179,8 +177,7 @@ async fn execute_proxy_rejects_generated_helper_collisions() {
         ),
     )
     .await;
-    let registry = super::ToolRegistry::new();
-    let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+    let broker = super::CodeModeBroker::new(Some(&manager));
 
     let err = broker
         .build_code_mode_proxy_for_tests(
@@ -207,8 +204,7 @@ async fn execute_proxy_discovery_paths_use_reserved_safe_namespaces() {
         pool.insert_entry_for_tests(upstream, healthy_entry_with_tool(upstream, "lookup"))
             .await;
     }
-    let registry = super::ToolRegistry::new();
-    let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+    let broker = super::CodeModeBroker::new(Some(&manager));
 
     let proxy = broker
         .build_code_mode_proxy_for_tests(
@@ -280,12 +276,11 @@ async fn broker_search_exposes_typed_schema_metadata_from_live_catalog() {
     )
     .await;
 
-    let registry = super::ToolRegistry::new();
-    let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+    let broker = super::CodeModeBroker::new(Some(&manager));
     // The JS evaluation step now runs in a subprocess (Javy runner) that lib
     // unit tests cannot spawn (`current_exe()` is the test harness, not
     // labby). The catalog projection (`schema`/`signature`/`dts`) is what this
-    // test actually covers, so assert directly on `code_mode_catalog` — the
+    // test actually covers, so assert directly on `code_mode_catalog_allowed` — the
     // same source in-sandbox discovery serializes into the runner as `const tools`.
     let caller = super::CodeModeCaller::Scoped {
         scopes: vec!["lab:read".to_string()],
@@ -295,7 +290,7 @@ async fn broker_search_exposes_typed_schema_metadata_from_live_catalog() {
     let owner = caller.runtime_owner(surface);
     let oauth_subject = caller.oauth_subject();
     let (entries, _catalog_json, _size) = broker
-        .code_mode_catalog(&manager, true, &owner, oauth_subject)
+        .code_mode_catalog_allowed(&manager, true, &owner, oauth_subject, None, false)
         .await
         .expect("catalog builds over live catalog");
     let result = serde_json::to_value(&entries).expect("serialize catalog");
@@ -372,15 +367,14 @@ async fn broker_search_refreshes_read_only_catalog_after_upstream_tool_expansion
     pool.insert_live_tool_server_for_tests("agent-os_windows-mcp", Arc::clone(&live_tools))
         .await;
 
-    let registry = super::ToolRegistry::new();
-    let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+    let broker = super::CodeModeBroker::new(Some(&manager));
     let read_only = super::CodeModeCaller::Scoped {
         scopes: vec!["lab:read".to_string()],
         sub: None,
     };
     let surface = super::CodeModeSurface::Mcp;
-    // The catalog-refresh behavior under test is in-process (`code_mode_catalog`
-    // re-resolves the live catalog on each call). The JS name-filter discovery
+    // The catalog-refresh behavior under test is in-process
+    // (`code_mode_catalog_allowed` re-resolves the live catalog on each call). The JS name-filter discovery
     // previously applied is now an in-test projection: collect agent-os tool
     // names from the freshly built catalog. (The runner that runs the JS filter
     // cannot be spawned from lib unit tests; see the sibling test.)
@@ -397,7 +391,7 @@ async fn broker_search_refreshes_read_only_catalog_after_upstream_tool_expansion
     };
 
     let (initial, _catalog_json, _size) = broker
-        .code_mode_catalog(&manager, true, &owner, oauth_subject)
+        .code_mode_catalog_allowed(&manager, true, &owner, oauth_subject, None, false)
         .await
         .expect("initial read-only catalog builds over partial catalog");
     assert_eq!(agent_os_names(&initial), vec!["Wait".to_string()]);
@@ -410,7 +404,7 @@ async fn broker_search_refreshes_read_only_catalog_after_upstream_tool_expansion
     ];
 
     let (refreshed, _catalog_json, _size) = broker
-        .code_mode_catalog(&manager, true, &owner, oauth_subject)
+        .code_mode_catalog_allowed(&manager, true, &owner, oauth_subject, None, false)
         .await
         .expect("read-only catalog refreshes expanded live catalog");
     assert_eq!(
@@ -437,7 +431,7 @@ async fn broker_search_refreshes_read_only_catalog_after_upstream_tool_expansion
 /// whose advertised tool list is `["pong"]`. If the execute proxy build
 /// reprobed (a `tools/list` round-trip), it would observe `pong`; because the
 /// upstream is already healthy it must short-circuit and keep `ping`. The
-/// growth-detecting catalog path (`code_mode_catalog` with
+/// growth-detecting catalog path (`code_mode_catalog_allowed` with
 /// `allow_cold_connect = true`) is asserted as a positive control: it *does*
 /// reprobe and observe `pong`.
 #[tokio::test]
@@ -452,8 +446,7 @@ async fn execute_proxy_does_not_reprobe_healthy_upstreams() {
     pool.insert_live_tool_server_for_tests("alpha", Arc::clone(&live_tools))
         .await;
 
-    let registry = super::ToolRegistry::new();
-    let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+    let broker = super::CodeModeBroker::new(Some(&manager));
 
     // Execute path: healthy upstream → no reprobe → proxy reflects the seeded
     // `ping`, never the live `pong`.
@@ -479,7 +472,7 @@ async fn execute_proxy_does_not_reprobe_healthy_upstreams() {
     // happened on the execute path above.
     let owner = super::CodeModeCaller::TrustedLocal.runtime_owner(super::CodeModeSurface::Mcp);
     let (entries, _json, _size) = broker
-        .code_mode_catalog(&manager, true, &owner, None)
+        .code_mode_catalog_allowed(&manager, true, &owner, None, None, false)
         .await
         .expect("growth-detecting catalog builds");
     let names: Vec<&str> = entries
@@ -504,8 +497,7 @@ async fn execute_proxy_js_is_served_from_render_cache() {
     pool.insert_entry_for_tests("alpha", healthy_entry_with_tool("alpha", "ping"))
         .await;
 
-    let registry = super::ToolRegistry::new();
-    let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+    let broker = super::CodeModeBroker::new(Some(&manager));
     let caller = super::CodeModeCaller::TrustedLocal;
     let surface = super::CodeModeSurface::Mcp;
     let filter = super::CodeModeCapabilityFilter::default();
@@ -604,8 +596,7 @@ async fn broker_call_tool_validates_schema_before_upstream_dispatch() {
         ),
     )
     .await;
-    let registry = super::ToolRegistry::new();
-    let broker = super::CodeModeBroker::new(&registry, Some(&manager));
+    let broker = super::CodeModeBroker::new(Some(&manager));
     let tool_id = "fixture::needs_action";
 
     let err = broker
@@ -623,8 +614,7 @@ async fn broker_call_tool_validates_schema_before_upstream_dispatch() {
 
 #[tokio::test]
 async fn codemode_call_tool_lab_id_returns_unknown_tool() {
-    let registry = super::ToolRegistry::new();
-    let broker = super::CodeModeBroker::new(&registry, None);
+    let broker = super::CodeModeBroker::new(None);
 
     let err = broker
         .call_tool_id(

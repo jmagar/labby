@@ -152,8 +152,20 @@ impl PooledRunner {
         })?;
 
         let mut cmd = Command::new(exe);
-        cmd.args(["internal", "code-mode-runner"])
-            .current_dir(temp_dir.path())
+        cmd.args(["internal", "code-mode-runner"]);
+        Self::from_command(cmd, temp_dir)
+    }
+
+    /// Apply the shared spawn invariants to `cmd`, launch it inside `temp_dir`,
+    /// and harvest the piped stdio into a `PooledRunner`.
+    ///
+    /// This is the single place that sets the security/isolation flags
+    /// (`env_clear`, piped stdio, `kill_on_drop`, Unix process group, Windows Job
+    /// Object) and wires up the stderr drain + line codec, so the production
+    /// `spawn` path and the `#[cfg(test)]` stub spawners can't drift apart. The
+    /// caller owns only the program/args on `cmd` and the `temp_dir` lifetime.
+    fn from_command(mut cmd: Command, temp_dir: tempfile::TempDir) -> Result<Self, ToolError> {
+        cmd.current_dir(temp_dir.path())
             .env_clear()
             .kill_on_drop(true)
             .stdin(Stdio::piped())
@@ -211,7 +223,7 @@ impl PooledRunner {
     /// unit test is the test harness, not the runner).
     ///
     /// The stand-in program must exist on the test host AND resolve under the
-    /// `env_clear()` in `spawn_stub_command` (no inherited `PATH`). On Unix `cat`
+    /// `env_clear()` in `from_command` (no inherited `PATH`). On Unix `cat`
     /// satisfies both; on Windows `cat`/`sleep` don't exist, so we use System32
     /// built-ins, which `CreateProcess` finds via its default search order even
     /// with an empty environment. `findstr` reads stdin and parks until EOF,
@@ -267,40 +279,9 @@ impl PooledRunner {
         })?;
         let mut cmd = Command::new(program);
         cmd.args(args);
-        cmd.current_dir(temp_dir.path())
-            .env_clear()
-            .kill_on_drop(true)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        #[cfg(unix)]
-        cmd.process_group(0);
-        let mut child = cmd.spawn().map_err(|err| ToolError::Sdk {
-            sdk_kind: "internal_error".to_string(),
-            message: format!("failed to spawn stub runner: {err}"),
-        })?;
-        let child_pid = child.id();
-        #[cfg(windows)]
-        let job_guard =
-            child_pid.map(crate::dispatch::upstream::process_guard::JobObjectGuard::arm);
-        let stdin = child.stdin.take().expect("stub stdin");
-        let stdout = child.stdout.take().expect("stub stdout");
-        let stderr_pipe = child.stderr.take().expect("stub stderr");
-        let stderr = StderrBuffer::new();
-        let drain_task = spawn_stderr_drain(stderr_pipe, stderr.clone());
-        let lines = FramedRead::new(stdout, LinesCodec::new_with_max_length(MAX_LINE_BYTES));
-        Ok(Self {
-            child,
-            child_pid,
-            stdin,
-            lines,
-            stderr,
-            executions: 0,
-            #[cfg(windows)]
-            _job_guard: job_guard,
-            drain_task,
-            _temp_dir: temp_dir,
-        })
+        // Share the spawn invariants + stdio harvesting with the production
+        // `spawn` path so the stub exercises the same isolation flags.
+        Self::from_command(cmd, temp_dir)
     }
 }
 

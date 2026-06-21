@@ -7,8 +7,10 @@
 //!
 //! Do not add new code here — use `ts_signatures` directly.
 
-// These re-exports are used by `tests_types_legacy` (which calls into
-// `super::types_legacy::*` to verify backward-compat paths). They are
-// intentionally `pub` for that test surface and unused in the non-test build.
+// Backward-compat re-exports for any out-of-crate caller still naming the
+// `types_legacy` path. Nothing in-crate consumes them — the redundant
+// `tests_types_legacy` test file (identical to `tests_ts_signatures` modulo the
+// module path) was removed, so this re-export is unused in this crate's own
+// builds; keep the `allow` so the public shim does not trip `-D warnings`.
 #[allow(unused_imports)]
 pub use super::ts_signatures::{ToolTypes, generate_tool_types, json_schema_to_type};

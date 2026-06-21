@@ -317,7 +317,7 @@ impl LabMcpServer {
             input_tokens,
             "gateway codemode start"
         );
-        let broker = CodeModeBroker::new(&self.registry, Some(manager));
+        let broker = CodeModeBroker::new(Some(manager));
         let caller = auth.map_or(CodeModeCaller::TrustedLocal, |auth| {
             CodeModeCaller::Scoped {
                 scopes: auth.scopes.clone(),

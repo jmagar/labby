@@ -15,8 +15,7 @@ pub(super) async fn run_gateway_code(
     args: GatewayCodeArgs,
     format: OutputFormat,
 ) -> Result<ExitCode> {
-    let registry = manager.builtin_service_registry();
-    let broker = CodeModeBroker::new(&registry, Some(manager.as_ref()));
+    let broker = CodeModeBroker::new(Some(manager.as_ref()));
     let caller = CodeModeCaller::TrustedLocal;
     let surface = CodeModeSurface::Cli;
 

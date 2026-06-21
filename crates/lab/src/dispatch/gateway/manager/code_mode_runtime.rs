@@ -1,6 +1,18 @@
 //! Code Mode runtime readiness and catalog freshness: upstream warm-up,
 //! single-flight catalog reprobe with TTL coalescing, and the rendered-catalog
 //! cache used by the `search` surface.
+//!
+//! LEARNED (lab-850hd): deleting the `None`-defaulting convenience wrappers
+//! (`ensure_search_runtime_ready`, `code_mode_catalog_tools`,
+//! `refresh_code_mode_catalog`) exposed that the growth-detecting reprobe chain
+//! — `code_mode_catalog_tools_allowed` → `refresh_code_mode_catalog_allowed`
+//! (+ `CATALOG_REFRESH_TTL` and the two `code_mode_refresh_*` fields) — has no
+//! production caller anymore: the live execute path reads the proxy catalog via
+//! the cheaper `_for_proxy` variants. The reprobe is kept (only the
+//! catalog-expansion tests exercise it) and carries `#[cfg_attr(not(test),
+//! allow(dead_code))]` so the non-test lib build stays warning-clean without
+//! losing that coverage. Production reachability — not an `#[allow(dead_code)]`
+//! tag — is what gates deletion here.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -20,8 +32,14 @@ use crate::dispatch::upstream::types::{UpstreamRuntimeOwner, UpstreamTool};
 use super::GatewayManager;
 
 /// How long a successful full-reprobe result is considered fresh.
-/// Back-to-back `refresh_code_mode_catalog` calls within this window
+/// Back-to-back `refresh_code_mode_catalog_allowed` calls within this window
 /// return immediately without hitting upstreams again.
+///
+/// Only the growth-detecting catalog path (`code_mode_catalog_tools_allowed`
+/// with `allow_cold_connect = true`) reprobes; the production execute path uses
+/// the cheaper `_for_proxy` catalog variants, so this chain is exercised only by
+/// the catalog-expansion tests today (hence `not(test)` allow-dead below).
+#[cfg_attr(not(test), allow(dead_code))]
 const CATALOG_REFRESH_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
@@ -32,6 +50,35 @@ struct CodeModeReprobeFailure {
 
 fn upstream_allowed(upstream: &str, allowed_upstreams: Option<&BTreeSet<String>>) -> bool {
     allowed_upstreams.is_none_or(|allowed| allowed.contains(upstream))
+}
+
+/// Convert accumulated per-upstream connect/reprobe failures into a single
+/// `upstream_connect_error` — but only when no *allowed* upstream is healthy.
+///
+/// Both the synchronous warm-up (`ensure_search_runtime_ready_allowed`) and the
+/// async reprobe (`refresh_code_mode_catalog_allowed`) share this "fail only if
+/// the scoped catalog is entirely empty" rule: a partial failure that still
+/// leaves a healthy allowed upstream is tolerated (the run can proceed against
+/// what connected), so this is a no-op in that case. `prefix` names the failing
+/// operation for the error message.
+async fn fail_if_no_healthy_tools(
+    pool: &Arc<UpstreamPool>,
+    allowed_upstreams: Option<&BTreeSet<String>>,
+    failures: Vec<CodeModeReprobeFailure>,
+    prefix: &str,
+) -> Result<(), ToolError> {
+    if failures.is_empty() || pool.has_any_healthy_tools_allowed(allowed_upstreams).await {
+        return Ok(());
+    }
+    let details = failures
+        .iter()
+        .map(|failure| format!("{}: {}", failure.upstream, failure.message))
+        .collect::<Vec<_>>()
+        .join("; ");
+    Err(ToolError::Sdk {
+        sdk_kind: "upstream_connect_error".to_string(),
+        message: format!("{prefix}: {details}"),
+    })
 }
 
 impl GatewayManager {
@@ -92,18 +139,10 @@ impl GatewayManager {
     /// index to build — the `search` tool runs the caller's JS over the live
     /// catalog. When `wait_for_refresh` is set, connect upstreams synchronously
     /// so the first cold call sees a populated catalog; otherwise fire-and-forget.
-    #[allow(dead_code)]
-    pub async fn ensure_search_runtime_ready(
-        &self,
-        wait_for_refresh: bool,
-        owner: Option<&UpstreamRuntimeOwner>,
-        oauth_subject: Option<&str>,
-    ) -> Result<(), ToolError> {
-        self.ensure_search_runtime_ready_allowed(wait_for_refresh, owner, oauth_subject, None)
-            .await
-    }
-
-    async fn ensure_search_runtime_ready_allowed(
+    ///
+    /// `allowed_upstreams = None` warms every enabled upstream; `Some(set)`
+    /// restricts the warm-up to a scoped subset (capability-filtered callers).
+    pub(in crate::dispatch::gateway::manager) async fn ensure_search_runtime_ready_allowed(
         &self,
         wait_for_refresh: bool,
         owner: Option<&UpstreamRuntimeOwner>,
@@ -134,18 +173,13 @@ impl GatewayManager {
                     });
                 }
             }
-            if !failures.is_empty() && !pool.has_any_healthy_tools_allowed(allowed_upstreams).await
-            {
-                let details = failures
-                    .iter()
-                    .map(|failure| format!("{}: {}", failure.upstream, failure.message))
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                return Err(ToolError::Sdk {
-                    sdk_kind: "upstream_connect_error".to_string(),
-                    message: format!("failed to connect upstreams for code mode: {details}"),
-                });
-            }
+            fail_if_no_healthy_tools(
+                &pool,
+                allowed_upstreams,
+                failures,
+                "failed to connect upstreams for code mode",
+            )
+            .await?;
         } else {
             self.spawn_code_mode_upstream_connections(
                 pool,
@@ -221,17 +255,14 @@ impl GatewayManager {
         pool
     }
 
-    #[allow(dead_code)]
-    pub async fn code_mode_catalog_tools(
-        &self,
-        allow_cold_connect: bool,
-        owner: Option<&UpstreamRuntimeOwner>,
-        oauth_subject: Option<&str>,
-    ) -> Result<Vec<UpstreamTool>, ToolError> {
-        self.code_mode_catalog_tools_allowed(allow_cold_connect, owner, oauth_subject, None)
-            .await
-    }
-
+    /// Growth-detecting catalog read: connect (and optionally cold-reprobe) the
+    /// allowed upstreams, then return their healthy tools.
+    ///
+    /// The production execute path reads the catalog through the cheaper
+    /// `_for_proxy` variants (`code_mode_catalog_tools_ensure_ready` /
+    /// `_cached`), so this reprobing path is now exercised only by the
+    /// catalog-expansion tests — hence the `not(test)` allow-dead.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn code_mode_catalog_tools_allowed(
         &self,
         allow_cold_connect: bool,
@@ -374,16 +405,14 @@ impl GatewayManager {
     ///   single-caller freshness contract.
     /// - Parallel reprobe: all enabled upstreams are probed concurrently, bounded by
     ///   `upstream_discovery_concurrency()` (default 3, env `LAB_UPSTREAM_DISCOVERY_CONCURRENCY`).
-    #[allow(dead_code)]
-    pub async fn refresh_code_mode_catalog(
-        &self,
-        owner: Option<&UpstreamRuntimeOwner>,
-        oauth_subject: Option<&str>,
-    ) -> Result<(), ToolError> {
-        self.refresh_code_mode_catalog_allowed(owner, oauth_subject, None)
-            .await
-    }
-
+    ///
+    /// `allowed_upstreams = None` reprobes every enabled upstream; `Some(set)`
+    /// restricts the reprobe to a scoped subset.
+    ///
+    /// Reached only via `code_mode_catalog_tools_allowed` (the growth-detecting
+    /// catalog path), which the production execute path no longer uses, so this
+    /// is currently test-only — hence the `not(test)` allow-dead.
+    #[cfg_attr(not(test), allow(dead_code))]
     async fn refresh_code_mode_catalog_allowed(
         &self,
         owner: Option<&UpstreamRuntimeOwner>,
@@ -492,17 +521,13 @@ impl GatewayManager {
         }
         crate::dispatch::gateway::code_mode::catalog_cache::merge_and_store(cache_updates);
 
-        if !failures.is_empty() && !pool.has_any_healthy_tools_allowed(allowed_upstreams).await {
-            let details = failures
-                .iter()
-                .map(|failure| format!("{}: {}", failure.upstream, failure.message))
-                .collect::<Vec<_>>()
-                .join("; ");
-            return Err(ToolError::Sdk {
-                sdk_kind: "upstream_connect_error".to_string(),
-                message: format!("failed to refresh Code Mode catalog: {details}"),
-            });
-        }
+        fail_if_no_healthy_tools(
+            &pool,
+            allowed_upstreams,
+            failures,
+            "failed to refresh Code Mode catalog",
+        )
+        .await?;
 
         // Stamp the TTL deadline so a *concurrent* caller that arrives while a
         // later refresh is in flight can coalesce within the freshness window.
