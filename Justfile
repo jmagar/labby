@@ -140,10 +140,6 @@ sync-container:
 
 container-sync: sync-container
 
-# Generate Claude Code marketplace tree from compiled service metadata
-marketplace: build-release
-    target/release/labby marketplace generate --out target/marketplace
-
 # Install release binary to ~/.local/bin/labby (updates the host CLI)
 install: build-release
     just link-bin

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Quick Push"
-  short_description: "Git add all, commit with Claude co-authorship trailer, and..."
-  default_prompt: "Use $quick-push for git add all, commit with Claude co-authorship trailer, and."

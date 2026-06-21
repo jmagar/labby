@@ -1,4 +1,0 @@
-interface:
-  display_name: "Save To Md"
-  short_description: "Save session documentation to a markdown file with full..."
-  default_prompt: "Use $save-to-md for save session documentation to a markdown file with full."

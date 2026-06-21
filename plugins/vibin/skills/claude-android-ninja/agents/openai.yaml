@@ -1,4 +1,0 @@
-interface:
-  display_name: "Claude Android Ninja"
-  short_description: "Building Android apps with Kotlin, Jetpack Compose, MVVM..."
-  default_prompt: "Use $claude-android-ninja for building Android apps with Kotlin, Jetpack Compose, MVVM."

@@ -1,6 +1,6 @@
 # Monitors
 
-This document covers Claude Code monitor definitions shipped by Lab plugins and the supporting `labby deploy monitor` CLI command.
+This document covers the `labby deploy monitor` CLI command (a lab-owned host-probe monitor). Plugin-declared Claude Code monitors — the `monitors.json` manifest mechanism described below — now ship from plugins in the [dendrite marketplace repo](https://github.com/jmagar/dendrite), not from this repo.
 
 ## What Monitors Are
 
@@ -26,12 +26,13 @@ User-configurable placeholders are declared under `userConfig` in `plugin.json` 
 
 ## Registered Monitor Files
 
-Current monitor files:
+The plugins that ship monitor manifests live in the [dendrite marketplace repo](https://github.com/jmagar/dendrite), not in this repo. From a dendrite checkout, run:
 
-- `plugins/broadcastr/monitors/monitors.json`
-- `plugins/vibin/monitors/monitors.json`
+```bash
+jq '.[] | {name, command, description}' plugins/*/monitors/monitors.json
+```
 
-Run `jq '.[] | {name, command, description}' plugins/*/monitors/monitors.json` for the current registered monitor names and command payloads.
+for the current registered monitor names and command payloads.
 
 ## `labby deploy monitor` Command
 
@@ -119,6 +120,8 @@ kill -INT $(cat ~/.lab/run/deploy-monitor.lock)
 SIGINT triggers the clean exit path and removes the lock file. SIGTERM works too, but the lock will linger until the next launch overwrites it.
 
 ## Adding a New Monitor
+
+Plugin monitor manifests are authored in the [dendrite marketplace repo](https://github.com/jmagar/dendrite); steps 1–2 below refer to paths in that repo.
 
 1. Append an entry to the owning plugin's `plugins/<name>/monitors/monitors.json`.
 2. If the command reads runtime config, declare any new `${user_config.*}` keys under `userConfig` in `plugins/<name>/.claude-plugin/plugin.json`.

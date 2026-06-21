@@ -1,4 +1,0 @@
-interface:
-  display_name: "yt-dlp"
-  short_description: "Download, archive, inspect, or organize media with yt-dlp and MeTube."
-  default_prompt: "Use $yt-dlp for media downloads, playlists, audio extraction, MeTube/NAS routing, and local yt-dlp fallback."

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Sysinternals"
-  short_description: "Drive Microsoft Sysinternals CLI tools on a remote Windows..."
-  default_prompt: "Use $sysinternals for drive Microsoft Sysinternals CLI tools on a remote Windows."

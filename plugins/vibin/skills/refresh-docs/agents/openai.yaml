@@ -1,4 +1,0 @@
-interface:
-  display_name: "Refresh Docs"
-  short_description: "Refresh local reference docs, rerun `"
-  default_prompt: "Use $refresh-docs to refresh local reference docs, rerun `."

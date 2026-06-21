@@ -2972,11 +2972,7 @@ Arguments:
 ```text
 Claude plugin marketplace manager
 
-Usage: marketplace [OPTIONS] [ACTION] [COMMAND]
-
-Commands:
-  generate  Generate a Claude Code marketplace tree from compiled-in PluginMeta
-  help      Print this message or the help of the given subcommand(s)
+Usage: marketplace [OPTIONS] [ACTION]
 
 Arguments:
   [ACTION]
@@ -2988,14 +2984,14 @@ Options:
       --json
           Emit JSON instead of human-readable tables
 
+      --params <PARAMS>
+          Action-specific parameters as JSON
+
       --color <COLOR>
           Control human-readable CLI styling
 
           [default: auto]
           [possible values: auto, plain, color]
-
-      --params <PARAMS>
-          Action-specific parameters as JSON
 
   -y, --yes
           Skip confirmation for destructive actions
@@ -3005,47 +3001,6 @@ Options:
 
   -h, --help
           Print help
-```
-
-## `labby marketplace generate`
-
-```text
-Generate a Claude Code marketplace tree from compiled-in PluginMeta
-
-Usage: generate [OPTIONS] --out <OUT>
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --out <OUT>
-          Output directory for the generated marketplace tree
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --org <ORG>
-          Marketplace/org suffix used in plugin ids, for example `lab`
-
-          [default: lab]
-
-  -h, --help
-          Print help
-```
-
-## `labby marketplace help`
-
-```text
-Print this message or the help of the given subcommand(s)
-
-Usage: help [COMMAND]...
-
-Arguments:
-  [COMMAND]...
-          Print help for the subcommand(s)
 ```
 
 ## `labby stash`

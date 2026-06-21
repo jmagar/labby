@@ -1,4 +1,0 @@
-interface:
-  display_name: "Mcporter"
-  short_description: "Mcporter, says \"test an MCP server\", \"smoke-test these..."
-  default_prompt: "Use $mcporter for mcporter, says \"test an MCP server\", \"smoke-test these."

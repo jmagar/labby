@@ -1,4 +1,0 @@
-interface:
-  display_name: "Jetpack Compose Expert"
-  short_description: "Compose and Compose Multiplatform expert for UI development..."
-  default_prompt: "Use $jetpack-compose-expert for compose and Compose Multiplatform expert for UI development."

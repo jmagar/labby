@@ -1,4 +1,0 @@
-interface:
-  display_name: "Check Skill CLIs"
-  short_description: "Audit CLI dependencies referenced by active, installed, and..."
-  default_prompt: "Use $check-skill-clis to audit CLI dependencies referenced by active, installed, and."

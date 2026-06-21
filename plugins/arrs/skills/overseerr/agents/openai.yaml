@@ -1,4 +1,0 @@
-interface:
-  display_name: "Overseerr"
-  short_description: "Request movies and TV shows via Overseerr, monitor request..."
-  default_prompt: "Use $overseerr for request movies and TV shows via Overseerr, monitor request."

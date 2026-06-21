@@ -1,4 +1,0 @@
-interface:
-  display_name: "Creating Snippets"
-  short_description: "Build Labby Code Mode snippets from gateway tools and schemas."
-  default_prompt: "Help me create a Labby snippet from available gateway tools."
