@@ -1122,4 +1122,60 @@ mod tests {
         // Hold the downstream server alive until the relayed call completed.
         drop(gw_server);
     }
+
+    /// `acquire_or_connect_relay` builds the cache key FROM the `subject` param,
+    /// so a fast-path lookup hits only the matching subject. Seeding "alice" and
+    /// asking for "alice" returns the cached peer (no connect); asking for "bob"
+    /// (same upstream + session) misses and falls through to a connect that fails
+    /// (the test config has no url/command). Guards the key *construction* at the
+    /// live connect seam, complementing `relay_cache_key_isolates_oauth_subjects`
+    /// which only proves the key *type* discriminates via direct map insertion.
+    #[tokio::test]
+    async fn acquire_or_connect_relay_keys_by_subject() {
+        let pool = UpstreamPool::new();
+        let config = super::super::testsupport::test_upstream_config(); // name "test", no url/command
+
+        // A downstream agent peer is required by the signature; it is unused on
+        // the fast path (cache hit) and on the bob miss (connect fails first).
+        let (gw_server_transport, agent_transport) =
+            tokio::io::duplex(IN_PROCESS_PEER_BUFFER_BYTES);
+        tokio::spawn(async move {
+            if let Ok(running) = ().serve(agent_transport).await {
+                running.waiting().await.ok();
+            }
+        });
+        let gw_server = TrivialServer
+            .serve(gw_server_transport)
+            .await
+            .expect("downstream server connects");
+        let downstream = gw_server.peer().clone();
+
+        // Seed a live relay connection under (name, session=1, Some("alice")).
+        let (entry, _keepalive) = live_relay_cached_connection(Instant::now()).await;
+        pool.relay_connections
+            .write()
+            .await
+            .insert((config.name.clone(), 1, Some("alice".to_string())), entry);
+
+        // alice → fast-path cache hit (Some, no connect attempt).
+        let alice = pool
+            .acquire_or_connect_relay(&config, Some("alice"), downstream.clone(), 1)
+            .await;
+        assert!(
+            alice.is_some(),
+            "alice's subject-keyed entry must be a cache hit"
+        );
+
+        // bob → distinct key → miss → connect attempt → fails (no url/command) →
+        // None. If the key ignored the subject, bob would wrongly reuse alice's.
+        let bob = pool
+            .acquire_or_connect_relay(&config, Some("bob"), downstream, 1)
+            .await;
+        assert!(
+            bob.is_none(),
+            "bob must NOT reuse alice's connection — the key includes the subject"
+        );
+
+        drop(gw_server);
+    }
 }
