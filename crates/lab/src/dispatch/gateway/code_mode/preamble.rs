@@ -168,13 +168,34 @@ pub(crate) fn upstream_name_to_namespace(name: &str) -> String {
 // ────────────────────────────────────────────────────────────────────────────
 
 pub(crate) fn generate_discovery_js(entries: &[CodeModeDiscoveryEntry]) -> Result<String, String> {
+    // Compact search index: the `#[serde(skip)]` on `schema`/`dts` keeps the
+    // per-execute preamble small. `codemode.search` iterates only this array.
     let json = serde_json::to_string(entries)
         .map_err(|err| format!("failed to serialize Code Mode discovery catalog: {err}"))?;
+    // Separate, describe-only lookup keyed by tool id. We emit just the already
+    // generated `.d.ts` type body (a TypeScript declaration string) — NOT the
+    // raw JSON schema — so `codemode.describe` can show field names/types
+    // without bloating the search index above. Snippets (empty type body) are
+    // skipped. Built as a plain JS object literal via serde for correct
+    // escaping of the embedded type text.
+    let types_map: serde_json::Map<String, serde_json::Value> = entries
+        .iter()
+        .filter(|entry| !entry.dts.is_empty())
+        .map(|entry| {
+            (
+                entry.id.clone(),
+                serde_json::Value::String(entry.dts.clone()),
+            )
+        })
+        .collect();
+    let types_json = serde_json::to_string(&serde_json::Value::Object(types_map))
+        .map_err(|err| format!("failed to serialize Code Mode type lookup: {err}"))?;
     Ok(format!(
         r##"
 globalThis.codemode = globalThis.codemode || {{}};
 var codemode = globalThis.codemode;
 var __codemodeDiscovery = {json};
+var __codemodeTypes = {types_json};
 function __codemodeNormalize(value) {{
   return String(value == null ? "" : value)
     .toLowerCase()
@@ -191,7 +212,8 @@ codemode.search = function(input) {{
     ? Math.max(1, Math.min(50, Number(input.limit)))
     : 50;
   var tokens = __codemodeTokens(query);
-  if (!tokens.length) return Promise.resolve({{ results: [], total: 0, truncated: false }});
+  var __codemodeNoMatchHint = "No matches. Broaden or try synonyms, or call codemode.__meta__.upstreams() to list namespaces and search by upstream name.";
+  if (!tokens.length) return Promise.resolve({{ results: [], total: 0, truncated: false, hint: __codemodeNoMatchHint }});
   var scored = [];
   for (var i = 0; i < __codemodeDiscovery.length; i++) {{
     var entry = __codemodeDiscovery[i];
@@ -235,6 +257,9 @@ codemode.search = function(input) {{
     return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
   }});
   var total = scored.length;
+  if (total === 0) {{
+    return Promise.resolve({{ results: [], total: 0, truncated: false, hint: __codemodeNoMatchHint }});
+  }}
   return Promise.resolve({{ results: scored.slice(0, limit), total: total, truncated: total > limit }});
 }};
 codemode.describe = function(target) {{
@@ -292,6 +317,10 @@ codemode.describe = function(target) {{
     markdown = "# " + entry.name + "\n\nKind: snippet\n\nName: `" + entry.name + "`\n\nDescription: " + entry.description + "\n\nRun: `codemode.run(" + JSON.stringify(entry.name) + ", input)`\n" + (inputLines ? "\nInputs:\n" + inputLines + "\n" : "\nInputs: none\n");
   }} else {{
     markdown = "# " + entry.path + "\n\n" + entry.description + "\n\n- kind: `tool`\n- id: `" + entry.id + "`\n- helper: `" + entry.helper + "`\n- signature: `" + entry.signature + "`\n";
+    var typeBody = __codemodeTypes[entry.id];
+    if (typeBody) {{
+      markdown += "\nParameters (TypeScript):\n\n```typescript\n" + typeBody + "```\n";
+    }}
   }}
   return Promise.resolve({{
     path: entry.path,
@@ -410,6 +439,8 @@ mod tests {
             signature: format!("codemode.{path}(params: unknown): Promise<unknown>"),
             tags: Vec::new(),
             inputs: Vec::new(),
+            schema: None,
+            dts: String::new(),
         }
     }
 
@@ -498,6 +529,107 @@ mod tests {
         let js = generate_discovery_js(&entries).expect("js");
         assert!(js.contains("ambiguous_target"));
         assert!(js.contains("github.search_issues"));
+    }
+
+    #[test]
+    fn discovery_describe_surfaces_tool_type_body() {
+        // A multi-field tool's `.d.ts` type body must reach `codemode.describe`
+        // so the agent can construct valid params without an execute round-trip.
+        let mut entry = discovery_entry("github", "list_tags", "List repository tags");
+        entry.dts =
+            "type GithubListTagsInput = { owner: string; repo: string; perPage?: number };\n"
+                .to_string();
+        let js = generate_discovery_js(&[entry]).expect("js");
+
+        // PRESENCE: the type body is embedded in the describe-only lookup map,
+        // keyed by tool id, and the describe branch renders it as a fenced block.
+        assert!(
+            js.contains("__codemodeTypes"),
+            "describe-only type lookup map must be emitted"
+        );
+        assert!(
+            js.contains("GithubListTagsInput"),
+            "type body must be present for describe lookup"
+        );
+        assert!(
+            js.contains("github::list_tags"),
+            "type lookup must be keyed by the tool id"
+        );
+        // PRESENCE: the describe markdown renders the looked-up body in a fence.
+        assert!(
+            js.contains("```typescript"),
+            "describe must render the type body in a typescript fence"
+        );
+        // PRESENCE: every input field name reaches the model.
+        assert!(js.contains("owner"));
+        assert!(js.contains("repo"));
+        assert!(js.contains("perPage"));
+    }
+
+    #[test]
+    fn discovery_search_index_stays_lean_when_tools_carry_types() {
+        // The compact `__codemodeDiscovery` search array must NOT carry the raw
+        // input schema even when the catalog entry holds one — embedding it
+        // would balloon the per-execute preamble. The type body lives only in
+        // the separate describe lookup.
+        let mut entry = discovery_entry("github", "list_tags", "List repository tags");
+        entry.schema = Some(serde_json::json!({
+            "type": "object",
+            "properties": { "owner": { "type": "string" } },
+            "required": ["owner"],
+        }));
+        entry.dts = "type GithubListTagsInput = { owner: string };\n".to_string();
+        let js = generate_discovery_js(&[entry]).expect("js");
+
+        // The discovery array slice (before the type lookup) must not contain a
+        // serialized `properties`/`required` JSON schema object — those only
+        // appear via the omitted raw schema, which we never emit anywhere.
+        let discovery_slice = js
+            .split("var __codemodeTypes")
+            .next()
+            .expect("discovery array precedes type lookup");
+        assert!(
+            !discovery_slice.contains("\"properties\""),
+            "search index must not embed the raw input schema"
+        );
+        assert!(
+            !discovery_slice.contains("\"required\""),
+            "search index must not embed schema required-ness"
+        );
+        // ABSENCE (whole proxy): the raw schema keys never leak into the JS.
+        assert!(
+            !js.contains("\"properties\""),
+            "raw input schema must not be emitted anywhere in the proxy"
+        );
+    }
+
+    #[test]
+    fn discovery_search_zero_result_returns_actionable_hint() {
+        // A vocabulary mismatch must not be a silent empty array: the search
+        // return carries a `hint` pointing the agent at namespace browsing.
+        let entries = vec![discovery_entry(
+            "github",
+            "list_tags",
+            "List repository tags",
+        )];
+        let js = generate_discovery_js(&entries).expect("js");
+
+        // PRESENCE: a hint string is wired into the zero-result paths.
+        assert!(
+            js.contains("hint: __codemodeNoMatchHint"),
+            "zero-result search must attach a hint field"
+        );
+        assert!(
+            js.contains("codemode.__meta__.upstreams()"),
+            "hint must point at namespace browsing"
+        );
+        // PRESENCE: both the empty-token guard and the post-scoring empty case
+        // return the hint (two `total: 0` returns carry it).
+        assert_eq!(
+            js.matches("hint: __codemodeNoMatchHint").count(),
+            2,
+            "both empty-token and zero-score paths must return the hint"
+        );
     }
 
     #[test]

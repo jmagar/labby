@@ -244,6 +244,19 @@ pub(crate) struct CodeModeDiscoveryEntry {
     pub(crate) signature: String,
     pub(crate) tags: Vec<String>,
     pub(crate) inputs: Vec<CodeModeSnippetInputEntry>,
+    /// Input JSON Schema for the underlying tool. Carried from the catalog so
+    /// `codemode.describe` can surface field names/types/required-ness, but
+    /// deliberately `skip`-ped from the serialized `__codemodeDiscovery` search
+    /// index: embedding full schemas there would balloon the per-execute
+    /// preamble and slow startup. `generate_discovery_js` emits the type body
+    /// (not this raw schema) only through the `describe` lookup map.
+    #[serde(skip)]
+    pub(crate) schema: Option<Value>,
+    /// Generated `.d.ts` declaration block for the tool (empty for snippets).
+    /// Like `schema`, this is `skip`-ped from the search index and surfaced
+    /// only via `codemode.describe`.
+    #[serde(skip)]
+    pub(crate) dts: String,
 }
 
 impl CodeModeDiscoveryEntry {
@@ -274,6 +287,8 @@ impl CodeModeDiscoveryEntry {
             signature: entry.signature.clone(),
             tags: entry.tags.clone(),
             inputs: entry.inputs.clone(),
+            schema: entry.schema.clone(),
+            dts: entry.dts.clone(),
         }
     }
 }
