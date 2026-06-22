@@ -1,21 +1,41 @@
 //! HTTP error handling.
 //!
 //! `ToolError` from `crate::dispatch::error` is the canonical error type for
-//! all surfaces (MCP, API, CLI). Its `IntoResponse` impl lives here (not in
-//! `dispatch/`) because HTTP status code mapping is an API surface concern.
+//! all surfaces (MCP, API, CLI). It now lives in the `lab-runtime` crate, so
+//! the HTTP status-code mapping cannot hang off an `impl IntoResponse for
+//! ToolError` here (orphan rule). Instead, `ApiError` is a thin local newtype
+//! around `ToolError` that carries the `IntoResponse` mapping; axum route
+//! handlers return `Result<_, ApiError>` and rely on `From<ToolError>` so `?`
+//! still propagates dispatch-layer `ToolError`s transparently.
 //!
-//! `ApiError` was a duplicate type that serialized a bare `{kind, message}`
-//! envelope, dropping structured fields. It has been removed — use
-//! `ToolError` directly in all HTTP handlers.
+//! The serialized error envelope is byte-identical to the MCP envelope —
+//! `IntoResponse` serializes the inner `ToolError` directly and derives the
+//! HTTP status from `kind()`.
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
 pub use crate::dispatch::error::ToolError;
 
-impl IntoResponse for ToolError {
+/// HTTP-surface newtype wrapper around the surface-neutral [`ToolError`].
+///
+/// `ToolError` now lives in the `lab-runtime` crate, so an
+/// `impl IntoResponse for ToolError` here would violate Rust's orphan rule
+/// (both the trait and the type would be foreign to `lab`). `ApiError` is a
+/// thin, local newtype that carries the `IntoResponse` mapping instead. axum
+/// route handlers return `Result<_, ApiError>`; `From<ToolError>` lets `?`
+/// propagate `ToolError` from the shared dispatch layer transparently.
+pub struct ApiError(pub ToolError);
+
+impl From<ToolError> for ApiError {
+    fn from(e: ToolError) -> Self {
+        Self(e)
+    }
+}
+
+impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let status = match self.kind() {
+        let status = match self.0.kind() {
             "auth_failed" => StatusCode::UNAUTHORIZED,
             "not_found" => StatusCode::NOT_FOUND,
             "rate_limited" | "queue_saturated" | "session_limit_exceeded" | "too_many_subscribers" => StatusCode::TOO_MANY_REQUESTS,
@@ -76,8 +96,9 @@ impl IntoResponse for ToolError {
             "conflict" | "ambiguous_tool" | "restart_required" => StatusCode::CONFLICT,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
-        // Serialize self directly — byte-identical to the MCP error envelope.
-        let body = serde_json::to_value(&self).unwrap_or_else(|_| {
+        // Serialize the inner ToolError directly — byte-identical to the MCP
+        // error envelope.
+        let body = serde_json::to_value(&self.0).unwrap_or_else(|_| {
             serde_json::json!({"kind": "internal_error", "message": "error serialization failed"})
         });
 
@@ -94,13 +115,13 @@ mod tests {
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
 
-    use super::ToolError;
+    use super::{ApiError, ToolError};
 
     fn status_for(kind: &str) -> StatusCode {
-        ToolError::Sdk {
+        ApiError(ToolError::Sdk {
             sdk_kind: kind.to_string(),
             message: "x".to_string(),
-        }
+        })
         .into_response()
         .status()
     }
@@ -129,20 +150,20 @@ mod tests {
 
     #[test]
     fn confirmation_required_maps_to_422() {
-        let response = ToolError::Sdk {
+        let response = ApiError(ToolError::Sdk {
             sdk_kind: "confirmation_required".to_string(),
             message: "confirm".to_string(),
-        }
+        })
         .into_response();
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     #[test]
     fn restart_required_maps_to_conflict() {
-        let response = ToolError::Sdk {
+        let response = ApiError(ToolError::Sdk {
             sdk_kind: "restart_required".to_string(),
             message: "restart labby serve".to_string(),
-        }
+        })
         .into_response();
 
         assert_eq!(response.status(), StatusCode::CONFLICT);
@@ -150,30 +171,30 @@ mod tests {
 
     #[test]
     fn queue_saturated_maps_to_429() {
-        let response = ToolError::Sdk {
+        let response = ApiError(ToolError::Sdk {
             sdk_kind: "queue_saturated".to_string(),
             message: "queue full".to_string(),
-        }
+        })
         .into_response();
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 
     #[test]
     fn acp_session_limit_exceeded_maps_to_429() {
-        let response = ToolError::Sdk {
+        let response = ApiError(ToolError::Sdk {
             sdk_kind: "session_limit_exceeded".to_string(),
             message: "session limit reached".to_string(),
-        }
+        })
         .into_response();
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 
     #[test]
     fn acp_too_many_subscribers_maps_to_429() {
-        let response = ToolError::Sdk {
+        let response = ApiError(ToolError::Sdk {
             sdk_kind: "too_many_subscribers".to_string(),
             message: "subscriber limit reached".to_string(),
-        }
+        })
         .into_response();
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     }
@@ -183,10 +204,10 @@ mod tests {
         // The ACP installer converges on the canonical `path_traversal` kind
         // (Docs-M1). It must map to the same 422 as the legacy
         // `path_traversal_rejected` spelling.
-        let response = ToolError::Sdk {
+        let response = ApiError(ToolError::Sdk {
             sdk_kind: "path_traversal".to_string(),
             message: "archive entry escapes extract root".to_string(),
-        }
+        })
         .into_response();
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
@@ -194,20 +215,20 @@ mod tests {
     #[test]
     fn content_too_large_maps_to_413() {
         // Decompression-bomb / oversized-archive guard (Sec/Test-M3).
-        let response = ToolError::Sdk {
+        let response = ApiError(ToolError::Sdk {
             sdk_kind: "content_too_large".to_string(),
             message: "uncompressed archive exceeds cap".to_string(),
-        }
+        })
         .into_response();
         assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 
     #[test]
     fn integrity_missing_maps_to_502() {
-        let response = ToolError::Sdk {
+        let response = ApiError(ToolError::Sdk {
             sdk_kind: "integrity_missing".to_string(),
             message: "missing sha256".to_string(),
-        }
+        })
         .into_response();
         assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     }

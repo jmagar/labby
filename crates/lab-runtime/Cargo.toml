@@ -1,0 +1,30 @@
+[package]
+name = "lab-runtime"
+description = "Surface-neutral runtime primitives (error taxonomy) shared by lab and product slices."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "../../README.md"
+keywords = ["homelab", "mcp", "errors", "dispatch"]
+categories = ["development-tools"]
+publish = false
+
+[features]
+# Explicit empty default to keep Cargo feature unification a no-op for downstream consumers.
+default = []
+marketplace = ["dep:lab-apis", "lab-apis/mcpregistry"]
+acp_registry = ["dep:lab-apis", "lab-apis/acp_registry"]
+deploy = ["dep:lab-apis", "lab-apis/deploy"]
+
+[dependencies]
+lab-apis = { path = "../lab-apis", default-features = false, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

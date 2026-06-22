@@ -19,6 +19,7 @@ test = false
 [dependencies]
 lab-apis = { path = "../lab-apis", default-features = false }
 lab-auth = { path = "../lab-auth" }
+lab-runtime = { path = "../lab-runtime" }
 
 tokio = { workspace = true, features = ["process"] }
 process-wrap = { version = "9.1.0", default-features = false, features = [
@@ -141,15 +142,15 @@ path = "src/lib.rs"
 #   or UI-coupled capabilities, not standalone slices in this feature table.
 # - Helper/internal features are not standalone product slices unless this comment is updated.
 [features]
-acp_registry = ["lab-apis/acp_registry"]
+acp_registry = ["lab-apis/acp_registry", "lab-runtime/acp_registry"]
 node-runtime = []
 all = ["lab-apis/all", "lab-admin", "acp_registry", "deploy", "gateway", "marketplace"]
 gateway = ["dep:javy", "dep:wasmtime"]
-marketplace = ["lab-apis/mcpregistry"]
+marketplace = ["lab-apis/mcpregistry", "lab-runtime/marketplace"]
 services-all = [
 ]
 default = ["all"]
-deploy = ["lab-apis/deploy"]
+deploy = ["lab-apis/deploy", "lab-runtime/deploy"]
 fs = ["dep:walkdir", "dep:globset", "dep:unicode-normalization", "dep:rustix"]
 lab-admin = []
 mcpregistry = ["marketplace"]
