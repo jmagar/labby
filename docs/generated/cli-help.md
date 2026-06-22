@@ -820,7 +820,7 @@ Options:
           Emit JSON instead of human-readable tables
 
   -y, --yes
-
+          Confirm installation and service start
 
       --color <COLOR>
           Control human-readable CLI styling
@@ -865,7 +865,7 @@ Options:
           Emit JSON instead of human-readable tables
 
   -y, --yes
-
+          Confirm service restart
 
       --color <COLOR>
           Control human-readable CLI styling
@@ -889,7 +889,7 @@ Options:
           Emit JSON instead of human-readable tables
 
   -y, --yes
-
+          Confirm service removal
 
       --color <COLOR>
           Control human-readable CLI styling

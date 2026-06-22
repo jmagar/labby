@@ -197,4 +197,24 @@ mod tests {
 
         assert_eq!(resolved, std::fs::canonicalize(override_path).unwrap());
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn override_rejects_group_or_world_writable_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let override_path = temp.path().join("labby");
+        std::fs::write(&override_path, b"binary").unwrap();
+        let mut perms = std::fs::metadata(&override_path).unwrap().permissions();
+        perms.set_mode(0o777);
+        std::fs::set_permissions(&override_path, perms).unwrap();
+
+        let err =
+            resolve_runner_exe_from(PathBuf::from("/usr/local/bin/labby"), Some(override_path))
+                .unwrap_err();
+
+        assert_eq!(err.kind(), "internal_error");
+        assert!(err.to_string().contains("group/world writable"));
+    }
 }

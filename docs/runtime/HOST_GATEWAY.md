@@ -20,12 +20,12 @@ systemctl --user --no-pager --full status labby.service
 ## Migrate From The Docker Dev Container
 
 Stop the container before starting the host service because both runtimes bind
-port `8765`:
+the configured local MCP HTTP port:
 
 ```bash
 docker compose -f docker-compose.yml stop labby-master
 just host-service-install
-curl -fsS http://127.0.0.1:8765/ready
+labby setup host-service status --json
 labby gateway list
 ```
 
@@ -99,5 +99,29 @@ readlink "/proc/$pid/exe"
 If the path ends in `(deleted)`, restart the service:
 
 ```bash
+systemctl --user restart labby.service
+```
+
+Advanced operators can point Code Mode at an alternate validated Labby binary
+before restarting the service. The path must be absolute, executable, owned by
+the current user or root, and not group/world-writable:
+
+```bash
+install -D -m 755 target/release-fast/labby ~/.local/bin/labby.next
+env_file="$HOME/.lab/.env"
+tmp="$(mktemp)"
+grep -v '^LAB_CODE_MODE_RUNNER_EXE=' "$env_file" > "$tmp"
+printf 'LAB_CODE_MODE_RUNNER_EXE=%s\n' "$HOME/.local/bin/labby.next" >> "$tmp"
+install -m 600 "$tmp" "$env_file"
+rm -f "$tmp"
+systemctl --user restart labby.service
+labby gateway code exec --json --code 'async () => 1'
+```
+
+Remove `LAB_CODE_MODE_RUNNER_EXE` from `~/.lab/.env` after the normal
+`~/.local/bin/labby` path is healthy again:
+
+```bash
+sed -i '/^LAB_CODE_MODE_RUNNER_EXE=/d' ~/.lab/.env
 systemctl --user restart labby.service
 ```

@@ -900,14 +900,26 @@ mod tests {
         assert!(
             ACTIONS
                 .iter()
-                .all(|action| !action.name.starts_with("host_service.")),
+                .all(|action| !action.name.starts_with("host_service.")
+                    && !action.name.starts_with("host-service.")),
             "host-service lifecycle commands must remain CLI-only"
         );
     }
 
     #[tokio::test]
     async fn setup_dispatch_does_not_route_host_service_actions() {
-        for action in ["host_service.restart", "host_service.uninstall"] {
+        for action in [
+            "host_service.unit",
+            "host_service.install",
+            "host_service.status",
+            "host_service.restart",
+            "host_service.uninstall",
+            "host-service.unit",
+            "host-service.install",
+            "host-service.status",
+            "host-service.restart",
+            "host-service.uninstall",
+        ] {
             let err = dispatch(action, Value::Null).await.unwrap_err();
             assert!(
                 matches!(err, ToolError::UnknownAction { .. }),

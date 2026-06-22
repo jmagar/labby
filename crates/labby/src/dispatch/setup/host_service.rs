@@ -304,13 +304,25 @@ async fn preflight_port_available(operation: &str) -> Result<(), ToolError> {
 
 fn configured_local_port() -> u16 {
     let env_file_port = env_file_value("LAB_MCP_HTTP_PORT");
+    let config_port = crate::config::load_toml(&crate::config::toml_candidates())
+        .ok()
+        .and_then(|config| config.mcp.port);
     let process_port = std::env::var("LAB_MCP_HTTP_PORT").ok();
-    configured_local_port_from(env_file_port.as_deref(), process_port.as_deref())
+    configured_local_port_from(
+        env_file_port.as_deref(),
+        config_port,
+        process_port.as_deref(),
+    )
 }
 
-fn configured_local_port_from(service_env: Option<&str>, process_env: Option<&str>) -> u16 {
+fn configured_local_port_from(
+    service_env: Option<&str>,
+    config_port: Option<u16>,
+    process_env: Option<&str>,
+) -> u16 {
     service_env
         .and_then(|value| value.parse().ok())
+        .or(config_port)
         .or_else(|| process_env.and_then(|value| value.parse().ok()))
         .unwrap_or(8765)
 }
@@ -523,9 +535,7 @@ fn path_to_str(path: &Path) -> Result<&str, ToolError> {
 }
 
 fn command_not_found(err: &ToolError) -> bool {
-    err.to_string().contains("No such file or directory")
-        || err.to_string().contains("os error 2")
-        || err.to_string().contains("not found")
+    err.to_string().contains("No such file or directory") || err.to_string().contains("os error 2")
 }
 
 fn io_error(err: std::io::Error) -> ToolError {
@@ -594,11 +604,25 @@ mod tests {
 
     #[test]
     fn service_env_port_wins_over_process_env_port() {
-        assert_eq!(configured_local_port_from(Some("9876"), Some("1234")), 9876);
-        assert_eq!(configured_local_port_from(None, Some("1234")), 1234);
-        assert_eq!(configured_local_port_from(Some("bad"), Some("1234")), 1234);
         assert_eq!(
-            configured_local_port_from(Some("bad"), Some("also-bad")),
+            configured_local_port_from(Some("9876"), Some(7777), Some("1234")),
+            9876
+        );
+        assert_eq!(
+            configured_local_port_from(None, Some(7777), Some("1234")),
+            7777
+        );
+        assert_eq!(configured_local_port_from(None, None, Some("1234")), 1234);
+        assert_eq!(
+            configured_local_port_from(Some("bad"), Some(7777), Some("1234")),
+            7777
+        );
+        assert_eq!(
+            configured_local_port_from(Some("bad"), None, Some("1234")),
+            1234
+        );
+        assert_eq!(
+            configured_local_port_from(Some("bad"), None, Some("also-bad")),
             8765
         );
     }
