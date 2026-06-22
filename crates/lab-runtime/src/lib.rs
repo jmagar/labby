@@ -7,4 +7,5 @@
 //! on transport/runtime layers (`axum`, `clap`, `rmcp`, `javy`, `wasmtime`,
 //! `utoipa`) or on Labby product registry builders.
 
+pub mod gateway_config;
 pub mod redact;
