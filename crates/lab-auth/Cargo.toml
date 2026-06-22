@@ -21,7 +21,6 @@ axum.workspace = true
 base64.workspace = true
 dashmap = "6"
 getrandom = "0.4"
-httpdate = "1"
 jsonwebtoken.workspace = true
 reqwest.workspace = true
 rsa.workspace = true
@@ -38,7 +37,6 @@ tracing.workspace = true
 url.workspace = true
 
 [dev-dependencies]
-rand.workspace = true
 tempfile = "3.27"
 tracing-subscriber.workspace = true
 wiremock.workspace = true

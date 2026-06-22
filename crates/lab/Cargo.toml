@@ -59,11 +59,7 @@ tracing-appender = "0.2"
 
 clap.workspace = true
 clap_complete.workspace = true
-owo-colors.workspace = true
-is-terminal.workspace = true
-indicatif.workspace = true
 dialoguer.workspace = true
-console.workspace = true
 
 dotenvy.workspace = true
 toml.workspace = true
@@ -74,14 +70,11 @@ base64.workspace = true
 fd-lock = "4"
 tempfile = "3.27"
 subtle = "2"
-indexmap = { version = "2", features = ["serde"] }
-secrecy = "0.10"
 sha2 = "0.11"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 hmac.workspace = true
 chacha20poly1305 = "0.10"
 dashmap = "6"
-lru = "0.16"
 diffy-imara = "0.3"
 arc-swap = "1"
 tokio-util = { version = "0.7", features = ["rt", "compat", "codec"] }
@@ -91,7 +84,6 @@ agent-client-protocol = { version = "=0.13.1", features = ["unstable"] }
 hex = "0.4"
 getrandom = "0.4"
 ulid = "1"
-num_cpus = "1"
 
 # optional — deploy feature
 regex = { version = "1" }
@@ -102,7 +94,6 @@ rmcp.workspace = true
 # reqwest::header (already a direct dep).
 bytes = "1"
 sse-stream = "0.2"
-jsonwebtoken.workspace = true
 rusqlite.workspace = true
 r2d2 = "0.8"
 r2d2_sqlite = "0.33"
@@ -112,7 +103,6 @@ axum.workspace = true
 tower.workspace = true
 tower-http.workspace = true
 utoipa.workspace = true
-utoipa-scalar.workspace = true
 
 oauth2 = { version = "5.0", default-features = false }
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
