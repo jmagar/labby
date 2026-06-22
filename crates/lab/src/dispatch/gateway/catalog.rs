@@ -65,6 +65,12 @@ pub const ACTIONS: &[ActionSpec] = &[
                 description: "Whether call traces include redacted and capped upstream tool params",
             },
             ParamSpec {
+                name: "result_shape_policy",
+                ty: "string",
+                required: false,
+                description: "Final-result shaping policy for completed Code Mode runs: off or truncate",
+            },
+            ParamSpec {
                 name: "timeout_ms",
                 ty: "integer",
                 required: false,
@@ -893,6 +899,7 @@ mod tests {
         for param in [
             "enabled",
             "trace_params",
+            "result_shape_policy",
             "timeout_ms",
             "max_response_bytes",
             "max_response_tokens",
