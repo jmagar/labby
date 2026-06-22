@@ -74,45 +74,67 @@ peer to `lab-runtime`/`lab-auth`, with hosts injected via a trait.
   This also breaks today's bidirectional `code_mode ↔ snippets` dependency.
 - **Do not duplicate `ToolError`.** Use the one moved to `lab-runtime` by the
   gateway plan's Task 1. `lab-codemode` depends on `lab-runtime` for it.
-- **No `UpstreamTool` in the crate's public API.** The catalog projection input is
-  a crate-owned neutral type (build on the existing `CodeModeCatalogEntry`). The
-  gateway host converts `UpstreamTool` → catalog entry in its `CodeModeHost` impl,
-  so the kernel never knows what an "upstream" is.
+- **No client/transport vocabulary in the crate.** The crate must not export or
+  reference `UpstreamTool`, `Upstream*`, `Gateway*`, `pool`, `manager`, or any
+  API-client name. Tools are an opaque `id: &str` + JSON params; descriptors are
+  the neutral `ToolDescriptor` (renamed from `CodeModeCatalogEntry`); the filter
+  is the neutral `ToolScope` (renamed from `CodeModeCapabilityFilter`). Each host
+  converts its own tool representation into `ToolDescriptor` inside its
+  `CodeModeHost` impl, so the kernel never learns what its tool source is. A
+  grep of `lab-codemode/src` for `upstream`/`gateway` must come back empty.
 - Prefer manifest + `cargo tree -e features` checks over source-string scans for
   dependency gates. Replace any long-running smoke commands with bounded
   spawn/probe/teardown tests.
 
 ---
 
-## `CodeModeHost` trait (derived from real `GatewayManager` call sites)
+## `CodeModeHost` trait (tool-source-neutral)
 
-The broker holds `Option<&GatewayManager>` today and calls into it for exactly
-these capabilities. The trait captures only these; everything else in the broker
-is host-agnostic.
+The trait is the **only** thing the kernel knows about its tool source. Its
+vocabulary is deliberately neutral — **no `upstream`, `gateway`, `pool`,
+`manager`, or any client name appears in the crate or the trait.** A tool is
+just an opaque string `id` + JSON params; a tool descriptor is a neutral
+`ToolDescriptor` (the renamed, gateway-free successor of today's
+`CodeModeCatalogEntry`). Hosts inject behavior; the kernel never reaches back
+into a concrete type.
 
 ```text
 trait CodeModeHost {
-    // Discovery catalog the sandbox's `tools` proxy + search/describe read.
-    async fn code_mode_catalog(...) -> Result<Vec<CodeModeCatalogEntry>, ToolError>;
-    async fn cached_catalog_render(...) -> ...;   // render cache hook (optional/default)
+    // Discovery: the tool descriptors the sandbox's `tools` proxy +
+    // in-sandbox search/describe read. Pure projection; no transport implied.
+    async fn list_tools(&self, scope: &ToolScope) -> Result<Vec<ToolDescriptor>, ToolError>;
 
-    // Tool execution: route a callTool(id, params) to the host's tool source.
-    async fn resolve_and_call_tool(id, params, scope) -> Result<Value, ToolError>;
+    // Optional render-cache hook; default impl just calls list_tools.
+    async fn cached_tools_render(&self, scope: &ToolScope) -> Result<ToolsRender, ToolError> { .. }
 
-    // Snippet resolution (engine lives in-crate; source lookup is host-provided).
-    async fn resolve_snippet_source(name, input, ...) -> Result<..., ToolError>;
+    // Execution: route a callTool(id, params) to whatever the host's tool
+    // source is (REST client, MCP proxy, in-memory stub — the kernel can't tell).
+    async fn call_tool(&self, id: &str, params: Value, scope: &ToolScope) -> Result<Value, ToolError>;
 
-    // Config + history.
-    fn code_mode_config(&self) -> impl Future<Output = CodeModeConfig>;
+    // Snippet resolution (engine lives in-crate; only source lookup is host-provided).
+    async fn resolve_snippet(&self, name: &str, input: Value) -> Result<ResolvedSnippet, ToolError>;
+
+    // Config + history sinks.
+    async fn config(&self) -> CodeModeConfig;
     async fn record_history(&self, entry: CodeModeHistoryEntry);
     async fn record_source(&self, source: CodeModeExecutionSource);
 }
 ```
 
-(Exact signatures finalized against the call sites in `execute.rs`,
-`runner_drive.rs`, `search.rs`, and `manager/code_mode_runtime.rs` /
-`code_mode_resolve.rs` during Task 3. `CodeModeBroker` becomes
-`CodeModeBroker<H: CodeModeHost>`.)
+Naming rules for this trait and its types:
+- Methods are `list_tools` / `call_tool` / `resolve_snippet` — **not**
+  `code_mode_catalog`, `resolve_upstream_tool`, or `resolve_and_call_tool`.
+- The descriptor type is `ToolDescriptor`; do not export `UpstreamTool` or any
+  `Upstream*` / `Gateway*` type from the crate.
+- `ToolScope` is a neutral capability/visibility filter (the renamed
+  `CodeModeCapabilityFilter`), carrying no gateway/route concepts.
+
+`CodeModeBroker` becomes `CodeModeBroker<H: CodeModeHost>`. Exact signatures are
+finalized in Task 3 by reading what the broker actually needs from the current
+`GatewayManager` call sites (`execute.rs`, `runner_drive.rs`, `search.rs`,
+`manager/code_mode_runtime.rs`, `manager/code_mode_resolve.rs`) — but the trait
+that lands is named in neutral terms, and `GatewayManager` is merely Labby's
+*implementor* of it, living outside the crate.
 
 ---
 
