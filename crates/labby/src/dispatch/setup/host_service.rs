@@ -26,8 +26,10 @@ pub(crate) struct HostServiceStatus {
     pub unit_path: PathBuf,
     pub process_exe: Option<PathBuf>,
     pub local_ready: Option<bool>,
+    pub local_ready_error: Option<String>,
     pub ready_owned_by_service: Option<bool>,
     pub docker_labby_master_running: Option<bool>,
+    pub docker_labby_master_error: Option<String>,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -67,9 +69,12 @@ pub(crate) async fn install() -> Result<HostServiceOutcome, ToolError> {
     let daemon = run_systemctl(&["daemon-reload"]).await?;
     stdout.push_str(&daemon.stdout);
     stderr.push_str(&daemon.stderr);
-    let enable = run_systemctl(&["enable", "--now", SERVICE_NAME]).await?;
+    let enable = run_systemctl(&["enable", SERVICE_NAME]).await?;
     stdout.push_str(&enable.stdout);
     stderr.push_str(&enable.stderr);
+    let restart = run_systemctl(&["restart", SERVICE_NAME]).await?;
+    stdout.push_str(&restart.stdout);
+    stderr.push_str(&restart.stderr);
     if let Err(err) = poll_ready().await {
         stderr.push_str(&format!("\nreadiness failed: {err}"));
         return Err(ToolError::Sdk {
@@ -93,8 +98,15 @@ pub(crate) async fn status() -> Result<HostServiceStatus, ToolError> {
     let home = current_home()?;
     let path = unit_path(&home);
     let installed = path.is_file();
-    let docker_labby_master_running = docker_labby_master_running().await;
-    let ready_response = check_ready().await.unwrap_or(false);
+    let (docker_labby_master_running, docker_labby_master_error) =
+        match docker_labby_master_running().await {
+            Ok(value) => (value, None),
+            Err(err) => (None, Some(err.user_message().to_string())),
+        };
+    let (ready_response, mut local_ready_error) = match check_ready().await {
+        Ok(value) => (Some(value), None),
+        Err(err) => (None, Some(err)),
+    };
     let mut load_state = None;
     let mut active_state = None;
     let mut sub_state = None;
@@ -113,21 +125,24 @@ pub(crate) async fn status() -> Result<HostServiceStatus, ToolError> {
         load_state = non_empty_prop(&props, "LoadState");
         active_state = non_empty_prop(&props, "ActiveState");
         sub_state = non_empty_prop(&props, "SubState");
-        main_pid = non_empty_prop(&props, "MainPID").and_then(|value| {
-            let pid = value.parse::<u32>().ok()?;
-            (pid != 0).then_some(pid)
-        });
+        main_pid = parse_main_pid(&props);
         exec_main_status =
             non_empty_prop(&props, "ExecMainStatus").and_then(|value| value.parse().ok());
     }
 
     let process_exe = main_pid.and_then(process_exe);
-    let ready_owned_by_service = if ready_response {
-        Some(readiness_owner_matches(main_pid).await?)
-    } else {
-        Some(false)
+    let ready_owned_by_service = match ready_response {
+        Some(true) => match readiness_owner_matches(main_pid).await {
+            Ok(value) => Some(value),
+            Err(err) => {
+                local_ready_error = Some(err.user_message().to_string());
+                None
+            }
+        },
+        Some(false) => Some(false),
+        None => None,
     };
-    let local_ready = Some(ready_response && ready_owned_by_service == Some(true));
+    let local_ready = ready_response.map(|ready| ready && ready_owned_by_service == Some(true));
 
     Ok(HostServiceStatus {
         installed,
@@ -139,8 +154,10 @@ pub(crate) async fn status() -> Result<HostServiceStatus, ToolError> {
         unit_path: path,
         process_exe,
         local_ready,
+        local_ready_error,
         ready_owned_by_service,
         docker_labby_master_running,
+        docker_labby_master_error,
     })
 }
 
@@ -279,24 +296,49 @@ async fn append_optional_verify(
 }
 
 async fn preflight_port_available(operation: &str) -> Result<(), ToolError> {
-    if docker_labby_master_running().await == Some(true) {
-        return Err(ToolError::Sdk {
-            sdk_kind: "internal_error".into(),
+    let docker_running = docker_labby_master_running().await?;
+    let port = configured_local_port();
+    let holder = port_holder(port).await?;
+    let (active_state, main_pid) = if holder.is_some() {
+        systemctl_service_identity().await?
+    } else {
+        (None, None)
+    };
+    preflight_decision(
+        operation,
+        port,
+        docker_running,
+        holder.as_deref(),
+        active_state.as_deref(),
+        main_pid,
+    )
+}
+
+fn preflight_decision(
+    operation: &str,
+    port: u16,
+    docker_running: Option<bool>,
+    holder: Option<&str>,
+    active_state: Option<&str>,
+    main_pid: Option<u32>,
+) -> Result<(), ToolError> {
+    if docker_running == Some(true) {
+        return Err(ToolError::Conflict {
             message: format!(
                 "cannot {operation} {SERVICE_NAME}: Docker container `labby-master` is running; stop it before starting the host gateway"
             ),
+            existing_id: "labby-master".to_string(),
         });
     }
 
-    let port = configured_local_port();
-    if let Some(holder) = port_holder(port).await?
-        && !holder_can_be_host_service(&holder).await?
+    if let Some(holder) = holder
+        && !holder_can_be_host_service_from(holder, active_state, main_pid)
     {
-        return Err(ToolError::Sdk {
-            sdk_kind: "internal_error".into(),
+        return Err(ToolError::Conflict {
             message: format!(
                 "cannot {operation} {SERVICE_NAME}: local port {port} is already in use:\n{holder}"
             ),
+            existing_id: format!("127.0.0.1:{port}"),
         });
     }
     Ok(())
@@ -369,17 +411,6 @@ async fn port_holder(port: u16) -> Result<Option<String>, ToolError> {
     }
 }
 
-async fn holder_can_be_host_service(holder: &str) -> Result<bool, ToolError> {
-    let status = status().await?;
-    if status.active_state.as_deref() != Some("active") {
-        return Ok(false);
-    }
-    let Some(pid) = status.main_pid else {
-        return Ok(false);
-    };
-    Ok(holder_contains_pid(holder, pid))
-}
-
 async fn readiness_owner_matches(main_pid: Option<u32>) -> Result<bool, ToolError> {
     let Some(pid) = main_pid else {
         return Ok(false);
@@ -388,6 +419,22 @@ async fn readiness_owner_matches(main_pid: Option<u32>) -> Result<bool, ToolErro
         return Ok(false);
     };
     Ok(holder_contains_pid(&holder, pid))
+}
+
+fn holder_can_be_host_service_from(
+    holder: &str,
+    active_state: Option<&str>,
+    main_pid: Option<u32>,
+) -> bool {
+    active_state == Some("active") && main_pid.is_some_and(|pid| holder_contains_pid(holder, pid))
+}
+
+#[cfg(test)]
+fn readiness_owner_matches_from(main_pid: Option<u32>, holder: Option<&str>) -> bool {
+    let Some(pid) = main_pid else {
+        return false;
+    };
+    holder.is_some_and(|holder| holder_contains_pid(holder, pid))
 }
 
 fn holder_contains_pid(holder: &str, pid: u32) -> bool {
@@ -400,16 +447,17 @@ fn holder_contains_pid(holder: &str, pid: u32) -> bool {
     })
 }
 
-async fn docker_labby_master_running() -> Option<bool> {
+async fn docker_labby_master_running() -> Result<Option<bool>, ToolError> {
     match run_command(
         "docker",
         &["inspect", "-f", "{{.State.Running}}", "labby-master"],
     )
     .await
     {
-        Ok(output) => Some(output.stdout.trim() == "true"),
-        Err(err) if command_not_found(&err) => None,
-        Err(_) => Some(false),
+        Ok(output) => Ok(Some(output.stdout.trim() == "true")),
+        Err(err) if command_not_found(&err) => Ok(None),
+        Err(err) if docker_container_missing(&err) => Ok(Some(false)),
+        Err(err) => Err(err),
     }
 }
 
@@ -439,12 +487,22 @@ async fn poll_ready() -> Result<(), String> {
 }
 
 async fn systemctl_main_pid() -> Result<Option<u32>, ToolError> {
-    let output = run_systemctl(&["show", SERVICE_NAME, "--property=MainPID", "--no-pager"]).await?;
+    Ok(systemctl_service_identity().await?.1)
+}
+
+async fn systemctl_service_identity() -> Result<(Option<String>, Option<u32>), ToolError> {
+    let output = run_systemctl(&[
+        "show",
+        SERVICE_NAME,
+        "--property=ActiveState,MainPID",
+        "--no-pager",
+    ])
+    .await?;
     let props = parse_systemctl_show(&output.stdout);
-    Ok(non_empty_prop(&props, "MainPID").and_then(|value| {
-        let pid = value.parse::<u32>().ok()?;
-        (pid != 0).then_some(pid)
-    }))
+    Ok((
+        non_empty_prop(&props, "ActiveState"),
+        parse_main_pid(&props),
+    ))
 }
 
 async fn check_ready() -> Result<bool, String> {
@@ -480,6 +538,13 @@ fn non_empty_prop(props: &BTreeMap<String, String>, key: &str) -> Option<String>
         .get(key)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn parse_main_pid(props: &BTreeMap<String, String>) -> Option<u32> {
+    non_empty_prop(props, "MainPID").and_then(|value| {
+        let pid = value.parse::<u32>().ok()?;
+        (pid != 0).then_some(pid)
+    })
 }
 
 async fn run_systemctl(args: &[&str]) -> Result<CommandCapture, ToolError> {
@@ -535,7 +600,14 @@ fn path_to_str(path: &Path) -> Result<&str, ToolError> {
 }
 
 fn command_not_found(err: &ToolError) -> bool {
-    err.to_string().contains("No such file or directory") || err.to_string().contains("os error 2")
+    let message = err.to_string();
+    message.contains("failed to run `")
+        && (message.contains("No such file or directory") || message.contains("os error 2"))
+}
+
+fn docker_container_missing(err: &ToolError) -> bool {
+    let message = err.to_string();
+    message.contains("No such object: labby-master") || message.contains("No such container")
 }
 
 fn io_error(err: std::io::Error) -> ToolError {
@@ -600,6 +672,7 @@ mod tests {
             Some("active")
         );
         assert_eq!(non_empty_prop(&props, "MainPID").as_deref(), Some("123"));
+        assert_eq!(parse_main_pid(&props), Some(123));
     }
 
     #[test]
@@ -633,5 +706,57 @@ mod tests {
 
         assert!(holder_contains_pid(holder, 12345));
         assert!(!holder_contains_pid(holder, 1234));
+    }
+
+    #[test]
+    fn preflight_blocks_docker_labby_master() {
+        let err = preflight_decision("install", 8765, Some(true), None, None, None).unwrap_err();
+
+        assert_eq!(err.kind(), "conflict");
+        assert!(err.to_string().contains("labby-master"));
+    }
+
+    #[test]
+    fn preflight_blocks_foreign_port_holder() {
+        let holder = r#"LISTEN 0 4096 127.0.0.1:8765 0.0.0.0:* users:(("other",pid=54321,fd=17))"#;
+        let err = preflight_decision(
+            "restart",
+            8765,
+            Some(false),
+            Some(holder),
+            Some("active"),
+            Some(12345),
+        )
+        .unwrap_err();
+
+        assert_eq!(err.kind(), "conflict");
+        assert!(
+            err.to_string()
+                .contains("local port 8765 is already in use")
+        );
+    }
+
+    #[test]
+    fn preflight_allows_active_service_pid_holder() {
+        let holder = r#"LISTEN 0 4096 127.0.0.1:8765 0.0.0.0:* users:(("labby",pid=12345,fd=17))"#;
+
+        preflight_decision(
+            "restart",
+            8765,
+            Some(false),
+            Some(holder),
+            Some("active"),
+            Some(12345),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn readiness_from_non_service_pid_is_not_owned() {
+        let holder = r#"LISTEN 0 4096 127.0.0.1:8765 0.0.0.0:* users:(("other",pid=54321,fd=17))"#;
+
+        assert!(!readiness_owner_matches_from(Some(12345), Some(holder)));
+        assert!(readiness_owner_matches_from(Some(54321), Some(holder)));
+        assert!(!readiness_owner_matches_from(None, Some(holder)));
     }
 }

@@ -371,11 +371,7 @@ async fn run_host_service_command(args: HostServiceArgs, format: OutputFormat) -
             .await?;
         }
         HostServiceCommand::Install { yes } => {
-            if !yes {
-                anyhow::bail!(
-                    "setup host-service install is destructive; pass -y/--yes to confirm"
-                );
-            }
+            require_host_service_confirmation("install", yes)?;
             run_host_service_logged(
                 "host_service.install",
                 format,
@@ -392,11 +388,7 @@ async fn run_host_service_command(args: HostServiceArgs, format: OutputFormat) -
             .await?;
         }
         HostServiceCommand::Restart { yes } => {
-            if !yes {
-                anyhow::bail!(
-                    "setup host-service restart is destructive; pass -y/--yes to confirm"
-                );
-            }
+            require_host_service_confirmation("restart", yes)?;
             run_host_service_logged(
                 "host_service.restart",
                 format,
@@ -405,11 +397,7 @@ async fn run_host_service_command(args: HostServiceArgs, format: OutputFormat) -
             .await?;
         }
         HostServiceCommand::Uninstall { yes } => {
-            if !yes {
-                anyhow::bail!(
-                    "setup host-service uninstall is destructive; pass -y/--yes to confirm"
-                );
-            }
+            require_host_service_confirmation("uninstall", yes)?;
             run_host_service_logged(
                 "host_service.uninstall",
                 format,
@@ -419,6 +407,19 @@ async fn run_host_service_command(args: HostServiceArgs, format: OutputFormat) -
         }
     }
     Ok(())
+}
+
+fn require_host_service_confirmation(action: &str, yes: bool) -> Result<()> {
+    if yes {
+        return Ok(());
+    }
+    let error = crate::dispatch::error::ToolError::ConfirmationRequired {
+        message: format!("setup host-service {action} is destructive; pass -y/--yes to confirm"),
+    };
+    Err(anyhow::anyhow!(
+        "{}",
+        serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
+    ))
 }
 
 async fn run_host_service_logged<F, Fut, T>(
@@ -638,6 +639,29 @@ mod tests {
                 panic!("expected setup host-service subcommand");
             };
             assert_eq!(actual, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn host_service_destructive_commands_require_confirmation_envelope() {
+        for command in [
+            HostServiceCommand::Install { yes: false },
+            HostServiceCommand::Restart { yes: false },
+            HostServiceCommand::Uninstall { yes: false },
+        ] {
+            let err = run_host_service_command(
+                HostServiceArgs { command },
+                OutputFormat::from_json_flag(
+                    true,
+                    crate::output::ColorPolicy::Plain,
+                    crate::output::RenderEnv::stdout(),
+                ),
+            )
+            .await
+            .unwrap_err();
+            let envelope: Value = serde_json::from_str(&err.to_string()).unwrap();
+
+            assert_eq!(envelope["kind"], "confirmation_required");
         }
     }
 }

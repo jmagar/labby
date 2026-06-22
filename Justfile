@@ -54,9 +54,19 @@ build-release:
     install -D -m 755 target/release/labby bin/labby
     just link-bin
 
-# Symlink the compiled binary into PATH.
+# Copy the compiled binary into PATH.
 # Called automatically by `just build-release` and `just install`.
 link-bin profile="release":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if systemctl --user is-active --quiet labby.service 2>/dev/null; then
+      echo "error: labby.service is active; use 'just host-sync' so the service restarts onto the new binary" >&2
+      exit 1
+    fi
+    profile="{{profile}}"
+    just _install-labby-bin "$profile"
+
+_install-labby-bin profile:
     #!/usr/bin/env bash
     set -euo pipefail
     profile="{{profile}}"
@@ -70,7 +80,11 @@ link-bin profile="release":
       exit 1
     fi
     mkdir -p ~/.local/bin
-    ln -sf "$LABBY_BIN" ~/.local/bin/labby
+    if [ -x ~/.local/bin/labby ]; then
+      cp -f ~/.local/bin/labby ~/.local/bin/labby.prev
+    fi
+    install -D -m 755 "$LABBY_BIN" ~/.local/bin/labby.new
+    mv ~/.local/bin/labby.new ~/.local/bin/labby
     echo "labby → $LABBY_BIN"
 
 # Build release-fast binary, copy it to the durable host path, and restart the
@@ -79,34 +93,29 @@ link-bin profile="release":
 host-sync:
     #!/usr/bin/env bash
     set -euo pipefail
-    repo="$(pwd)"
     profile="{{local_release_profile}}"
     if command -v mold >/dev/null 2>&1; then
       export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=mold"
     fi
-    LAB_TARGET_DIR="${CARGO_TARGET_DIR:-target}"
-    case "$LAB_TARGET_DIR" in
-      /*) LABBY_BIN="$LAB_TARGET_DIR/$profile/labby" ;;
-      *)  LABBY_BIN="$repo/$LAB_TARGET_DIR/$profile/labby" ;;
-    esac
     CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-16}" cargo build --workspace --all-features --profile "$profile" --bin labby
-    mkdir -p ~/.local/bin
-    if [ -x ~/.local/bin/labby ]; then
-      cp -f ~/.local/bin/labby ~/.local/bin/labby.prev
-    fi
-    install -D -m 755 "$LABBY_BIN" ~/.local/bin/labby.new
-    mv ~/.local/bin/labby.new ~/.local/bin/labby
-    if systemctl --user is-enabled --quiet labby.service; then
+    just _install-labby-bin "$profile"
+    if systemctl --user is-active --quiet labby.service; then
       ~/.local/bin/labby setup host-service restart -y
       ~/.local/bin/labby setup host-service status --json
     else
-      echo "labby.service is not installed; run: just host-service-install"
+      echo "error: labby.service is not active; run: just host-service-install" >&2
+      exit 1
     fi
 
 host-service-install:
     #!/usr/bin/env bash
     set -euo pipefail
-    just host-sync
+    profile="{{local_release_profile}}"
+    if command -v mold >/dev/null 2>&1; then
+      export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=mold"
+    fi
+    CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-16}" cargo build --workspace --all-features --profile "$profile" --bin labby
+    just _install-labby-bin "$profile"
     ~/.local/bin/labby setup host-service install -y
 
 host-service-restart:

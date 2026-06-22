@@ -70,13 +70,16 @@ Expected result includes:
 Also prove the public route is backed by the host service:
 
 ```bash
-pid=$(systemctl --user show labby.service --property=MainPID --value)
-readlink "/proc/$pid/exe"
-docker inspect -f '{{.State.Running}}' labby-master 2>/dev/null || true
+host_pid=$(systemctl --user show labby.service --property=MainPID --value)
+public_pid=$(curl -fsS https://lab.tootie.tv/health | jq -r .pid)
+test "$public_pid" = "$host_pid"
+readlink "/proc/$host_pid/exe"
+docker inspect -f '{{.State.Running}}' labby-master
 ```
 
-Expected: `/proc/$pid/exe` points at `/home/jmagar/.local/bin/labby`, and the
-Docker container is not the process answering the public route.
+Expected: the public health PID matches `labby.service` `MainPID`,
+`/proc/$host_pid/exe` points at `/home/jmagar/.local/bin/labby`, and the Docker
+container reports `false`.
 
 ## Roll Back To Docker
 
@@ -92,8 +95,7 @@ If Code Mode reports `failed to spawn Code Mode runner` after replacing a
 running binary, check:
 
 ```bash
-pid=$(pgrep -u "$USER" -f 'labby serve' | head -n1)
-readlink "/proc/$pid/exe"
+labby setup host-service status --json | jq -r .process_exe
 ```
 
 If the path ends in `(deleted)`, restart the service:
