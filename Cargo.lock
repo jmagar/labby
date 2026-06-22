@@ -2252,38 +2252,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "indicatif"
-version = "0.18.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25470f23803092da7d239834776d653104d551bc4d7eacaf31e6837854b8e9eb"
-dependencies = [
- "console",
- "portable-atomic",
- "unicode-width",
- "unit-prefix",
- "web-time",
-]
-
-[[package]]
 name = "inout"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
 dependencies = [
  "generic-array",
-]
-
-[[package]]
-name = "insta"
-version = "1.47.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b4a6248eb93a4401ed2f37dfe8ea592d3cf05b7cf4f8efa867b6895af7e094e"
-dependencies = [
- "console",
- "once_cell",
- "serde",
- "similar",
- "tempfile",
 ]
 
 [[package]]
@@ -2300,17 +2274,6 @@ checksum = "25e659a4bb38e810ebc252e53b5814ff908a8c58c2a9ce2fae1bbec24cbf4e20"
 dependencies = [
  "memchr",
  "serde",
-]
-
-[[package]]
-name = "is-terminal"
-version = "0.4.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
-dependencies = [
- "hermit-abi",
- "libc",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2506,10 +2469,7 @@ dependencies = [
 name = "lab-apis"
 version = "0.26.1"
 dependencies = [
- "base64",
  "futures",
- "insta",
- "jiff",
  "percent-encoding",
  "reqwest",
  "serde",
@@ -2532,9 +2492,7 @@ dependencies = [
  "chacha20poly1305",
  "dashmap",
  "getrandom 0.4.2",
- "httpdate",
  "jsonwebtoken",
- "rand 0.10.1",
  "reqwest",
  "rsa 0.10.0-rc.16",
  "rusqlite",
@@ -2576,7 +2534,6 @@ dependencies = [
  "chacha20poly1305",
  "clap",
  "clap_complete",
- "console",
  "dashmap",
  "dialoguer",
  "diffy-imara",
@@ -2588,20 +2545,13 @@ dependencies = [
  "globset",
  "hex",
  "hmac 0.13.0",
- "indexmap 2.14.0",
- "indicatif",
- "is-terminal",
  "javy",
  "jiff",
- "jsonwebtoken",
  "lab-apis",
  "lab-auth",
  "lab-winjob",
- "lru",
  "nix",
- "num_cpus",
  "oauth2",
- "owo-colors",
  "process-wrap",
  "proptest",
  "r2d2",
@@ -2612,7 +2562,6 @@ dependencies = [
  "rusqlite",
  "rustix",
  "sd-notify",
- "secrecy",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -2636,7 +2585,6 @@ dependencies = [
  "unicode-normalization",
  "url",
  "utoipa",
- "utoipa-scalar",
  "uuid",
  "walkdir",
  "wasmtime",
@@ -2727,15 +2675,6 @@ name = "log"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
-
-[[package]]
-name = "lru"
-version = "0.16.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
-dependencies = [
- "hashbrown 0.16.1",
-]
 
 [[package]]
 name = "lru-slab"
@@ -3016,12 +2955,6 @@ name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
-
-[[package]]
-name = "owo-colors"
-version = "4.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 
 [[package]]
 name = "p256"
@@ -4179,15 +4112,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "secrecy"
-version = "0.10.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e891af845473308773346dc847b2c23ee78fe442e0472ac50e22a18a93d3ae5a"
-dependencies = [
- "zeroize",
-]
-
-[[package]]
 name = "security-framework"
 version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4450,12 +4374,6 @@ name = "simdutf8"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
-
-[[package]]
-name = "similar"
-version = "2.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
 name = "simple_asn1"
@@ -5169,12 +5087,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
-name = "unit-prefix"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81e544489bf3d8ef66c953931f56617f423cd4b5494be343d9b9d3dda037b9a3"
-
-[[package]]
 name = "universal-hash"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5237,18 +5149,6 @@ dependencies = [
  "quote",
  "regex",
  "syn",
-]
-
-[[package]]
-name = "utoipa-scalar"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59559e1509172f6b26c1cdbc7247c4ddd1ac6560fe94b584f81ee489b141f719"
-dependencies = [
- "axum",
- "serde",
- "serde_json",
- "utoipa",
 ]
 
 [[package]]
