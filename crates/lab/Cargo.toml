@@ -19,6 +19,7 @@ test = false
 [dependencies]
 lab-apis = { path = "../lab-apis", default-features = false }
 lab-auth = { path = "../lab-auth" }
+lab-runtime = { path = "../lab-runtime" }
 
 tokio = { workspace = true, features = ["process"] }
 process-wrap = { version = "9.1.0", default-features = false, features = [

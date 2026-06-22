@@ -1,0 +1,19 @@
+[package]
+name = "lab-runtime"
+description = "Internal Lab runtime contracts and surface-neutral helpers shared by the gateway-extraction crates."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "../../README.md"
+keywords = ["homelab", "mcp", "gateway", "runtime"]
+categories = ["development-tools"]
+publish = false
+
+[dependencies]
+url.workspace = true
+
+[lints]
+workspace = true

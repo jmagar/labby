@@ -2511,6 +2511,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-runtime"
+version = "0.26.1"
+dependencies = [
+ "url",
+]
+
+[[package]]
 name = "lab-winjob"
 version = "0.26.1"
 dependencies = [
@@ -2549,6 +2556,7 @@ dependencies = [
  "jiff",
  "lab-apis",
  "lab-auth",
+ "lab-runtime",
  "lab-winjob",
  "nix",
  "oauth2",
