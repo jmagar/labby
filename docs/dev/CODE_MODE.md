@@ -240,6 +240,26 @@ Defaults:
 - `max_response_bytes = 24576`
 - `max_response_tokens = 6000`
 
+### Final Result Shaping
+
+Code Mode can optionally shape the final model-facing `result` of a successful
+execution. This is disabled by default.
+
+Ordering:
+
+1. The sandbox finishes and returns the raw final value.
+2. Labby applies the existing `__ui` compatibility unwrap.
+3. Labby applies the configured final-result shaping policy.
+4. Labby applies the envelope budget truncation.
+5. MCP text JSON and `structuredContent` are built from the same shaped response.
+
+This does not change values seen by sandbox code through `callTool()` or
+`codemode.<upstream>.<tool>()`. It also does not add raw-result audit retention.
+Use `writeArtifact()` when a snippet needs to preserve a large detailed payload.
+
+The `truncate` policy bounds model-facing output; it is not a redaction policy
+and must not be used to sanitize secrets.
+
 When the envelope is too large, the final `result` is replaced with a truncation
 marker containing `truncated`, `original_size`, `original_tokens`, `preview`, and
 `next_action`. Logs are trimmed after result truncation if needed.

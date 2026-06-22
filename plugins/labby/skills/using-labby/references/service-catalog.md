@@ -70,63 +70,48 @@ The action-dispatch mirrors are:
 { "action": "gateway.schema", "params": { "name": "<upstream>" } }
 ```
 
-Use Code Mode `search`/`execute` for intent-based discovery across the gateway. Use the
+Use Code Mode `codemode` for intent-based discovery and execution across the gateway. Use the
 `lab://gateway/*` resources or `gateway.servers`/`gateway.schema` actions when
 the caller needs a complete schema for a known connected server.
 
 ## Code Mode Contract
 
-The public Code Mode MCP tools are `search` and `execute`.
+The public Code Mode MCP tool is `codemode`.
 
-`search` accepts only:
-
-```json
-{ "code": "async () => tools.filter(t => t.upstream === \"github\")" }
-```
-
-The search sandbox injects a fresh live `tools` array. Each entry includes:
-
-- `id`: canonical `<upstream>::<tool>` ID for `callTool`
-- `upstream`, `name`, `description`
-- `schema`, `output_schema`
-- `signature`, `dts`
-
-`execute` accepts:
+`codemode` accepts:
 
 ```json
 {
   "code": "async () => { ... }",
   "upstreams": ["optional-upstream-allowlist"],
-  "tools": ["optional-tool-or-id-allowlist"],
-  "max_tool_calls": 10,
-  "confirm": true
+  "tools": ["optional-tool-or-id-allowlist"]
 }
 ```
 
-Only `code` is required. `upstreams`, `tools`, `max_tool_calls`, and `confirm`
-are Labby `execute` arguments, not upstream tool params. Some client-rendered
-schemas may lag the implementation, so use this contract when handling Code
-Mode recovery.
+Only `code` is required. `upstreams` and `tools` are Labby `codemode`
+arguments, not upstream tool params. Some client-rendered schemas may lag the
+implementation, so use this contract when handling Code Mode recovery.
 
 Inside `code`, call upstream MCP tools either way:
 
 ```js
 async () => {
+  const hits = await codemode.search({ query: "github issues", limit: 1 });
+  const docs = await codemode.describe(hits.results[0].path);
   const a = await callTool("github::search_issues", { q: "bug" });
   const b = await codemode.github.search_issues({ q: "fix" });
-  return { a, b };
+  return { tool: docs.path, a, b };
 }
 ```
 
 `callTool` is the escape hatch and always takes the canonical upstream ID.
 `codemode.<upstream>.<tool>` helpers are generated from the live catalog; use
-them only after `search` confirms the sanitized helper name.
+them only after `codemode.search` confirms the sanitized helper name.
 
 Destructive upstream tools:
 
-- Require top-level `"confirm": true` on the Labby `execute` call.
-- Do not accept `confirm` inside the upstream params object unless that
-  upstream tool's own live schema separately requires it.
+- The MCP `codemode` tool does not expose a public top-level `confirm` field.
+- Put confirmation exactly where the upstream tool's own live schema requires it.
 - Do not accept `allow_destructive_actions`; that is an internal
   `CodeModeSurface` flag and older error text may leak it.
 - Execute-capable OAuth scopes authorize Code Mode but do not confirm
@@ -134,16 +119,18 @@ Destructive upstream tools:
 
 Error recovery:
 
-- `missing_param`, `invalid_param`, `validation_failed`: inspect the `search`
+- `missing_param`, `invalid_param`, `validation_failed`: inspect the `codemode.search`
   schema and fix params.
-- `confirmation_required`: retry top-level `execute` with `"confirm": true`.
-- `unknown_tool`: rerun `search`; Code Mode only accepts `<upstream>::<tool>` IDs,
+- `confirmation_required`: inspect the upstream schema and provide the
+  confirmation field exactly where that tool expects it.
+- `unknown_tool`: rerun `codemode.search`; Code Mode only accepts `<upstream>::<tool>` IDs,
   not `lab::...` action IDs.
-- `tool_call_limit_exceeded`: reduce fan-out or raise top-level
-  `max_tool_calls` within gateway limits.
+- `tool_call_limit_exceeded`: stale legacy error text; current Code Mode is
+  bounded by wall-clock time, sandbox resources, output caps, and host-side
+  tool policy.
 - `timeout`: split work across executions or reduce upstream calls.
 
-For Code Mode `execute`, follow the live schema exactly for tool params. For
+For Code Mode `codemode`, follow the live schema exactly for tool params. For
 example, Windows MCP `Wait` currently uses `{ "duration": 2 }`, not
 `{ "seconds": 2 }`.
 

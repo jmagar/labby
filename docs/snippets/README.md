@@ -213,6 +213,11 @@ Use `labby snippets test <name>` to execute one snippet as a smoke test, or
 defaults. MCP/API callers use `snippets.test` with `{ "all": true }` for the
 same all-snippet check.
 
+When Code Mode final-result shaping is enabled, `snippets.exec` returns the
+same shaped display response as Code Mode. `snippets.test` evaluates pass/fail
+from the pre-shape result, so `{ "ok": true }` and `{ "ok": false }` remain
+reliable even when the displayed response is shaped into a bounded string.
+
 `snippets.list`, `help`, and `schema` are read-only discovery actions. Actions
 that expose snippet bodies or execute/manage snippets require `lab:admin`.
 

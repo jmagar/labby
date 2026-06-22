@@ -1305,6 +1305,12 @@
         "description": "Whether call traces include redacted and capped upstream tool params"
       },
       {
+        "name": "result_shape_policy",
+        "ty": "string",
+        "required": false,
+        "description": "Final-result shaping policy for completed Code Mode runs: off or truncate"
+      },
+      {
         "name": "timeout_ms",
         "ty": "integer",
         "required": false,

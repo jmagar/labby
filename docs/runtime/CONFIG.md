@@ -257,6 +257,7 @@ synthetic `codemode` tool instead.
 |-----|-------------|---------|-------------|
 | `enabled` | — | `false` | Replace raw proxied upstream tools with the synthetic Code Mode `codemode` tool for the gateway. Discovery happens inside the sandbox with `codemode.search()` and `codemode.describe()`. |
 | `trace_params` | — | `true` | Include only redacted and capped upstream tool params in Code Mode call traces and history. Set false to omit params from traces entirely. |
+| `result_shape_policy` | — | `"off"` | Optional final-result shaping policy for successful completed Code Mode runs. Values: `"off"` or `"truncate"`. The policy shapes only the model-facing final `result`, never sandbox-visible tool-call results. |
 | `timeout_ms` | — | `30000` | Maximum wall-clock time for one Code Mode execution. Valid range: 1-60000. |
 | `max_response_bytes` | — | `24576` | Maximum serialized response envelope size returned by `codemode`. Valid range: 1024-1048576. |
 | `max_response_tokens` | — | `6000` | Approximate maximum response tokens returned by `codemode`. Valid range: 256-256000. |
@@ -270,6 +271,7 @@ Example:
 [code_mode]
 enabled = true
 trace_params = true
+result_shape_policy = "off"
 timeout_ms = 30000
 max_response_bytes = 24576
 max_response_tokens = 6000
@@ -282,6 +284,13 @@ Operators can change the main execution limits without hand-editing TOML using
 `gateway.code_mode.get` and `gateway.code_mode.set`. The action accepts all
 fields listed above and validates them with the same ranges used for file
 configuration.
+
+`result_shape_policy = "truncate"` bounds oversized model-facing final results
+after the sandbox completes and after the `__ui` compatibility unwrap, but
+before envelope truncation and MCP text/structured serialization. It does not
+change values observed inside the sandbox through `callTool()` or
+`codemode.<upstream>.<tool>()`, does not persist raw results, and is not a
+redaction policy.
 
 #### Code Mode Artifacts
 

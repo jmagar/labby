@@ -110,7 +110,7 @@ Snippets are also available through the shared dispatch layer and MCP/API servic
 { "action": "snippets.get", "params": { "name": "my-workflow" } }
 { "action": "snippets.validate", "params": { "name": "my-workflow", "body": "..." } }
 { "action": "snippets.create", "params": { "name": "my-workflow", "body": "...", "description": "...", "force": false } }
-{ "action": "snippets.exec", "params": { "name": "my-workflow", "params": { "topic": "mcp-ui rust" }, "max_tool_calls": 10 } }
+{ "action": "snippets.exec", "params": { "name": "my-workflow", "params": { "topic": "mcp-ui rust" } } }
 { "action": "snippets.test", "params": { "name": "my-workflow", "params": { "topic": "mcp-ui rust" } } }
 { "action": "snippets.test", "params": { "all": true } }
 { "action": "snippets.remove", "params": { "name": "my-workflow" } }
@@ -126,6 +126,9 @@ Snippets are also available through the shared dispatch layer and MCP/API servic
 - Return stable JSON fields: `snippet`, `input`, `summary`, `results`, `evidence`, `gaps`, `followup_calls`, `timings`.
 - Keep responses compact; large Markdown, tables, screenshots, or manifests should be written with `writeArtifact("relative/path.md", content, { contentType })`.
 - Include enough ids, URLs, labels, and raw evidence handles for follow-up verification.
+- Code Mode final-result shaping may be enabled by the operator. It can shape the displayed final `result`, but it does not change values the snippet sees from `callTool()`/`codemode.*` during execution.
+- `snippets.test` evaluates pass/fail from the pre-shape result, so return `{ ok: true }` or `{ ok: false }` deliberately. `snippets.exec` and the `response` inside `snippets.test` show the shaped display response when shaping is enabled.
+- Truncation is not redaction. Do not return secrets and rely on output shaping to hide them.
 
 ## Validation Checklist
 
@@ -138,6 +141,6 @@ Before calling the work done:
 - Tool params match upstream schemas.
 - Optional inputs have defaults or code fallbacks.
 - Required inputs fail fast with clear validation.
-- Fan-out is bounded by limits and `max_tool_calls`.
+- Fan-out is bounded by explicit snippet limits and the Code Mode wall-clock/output budgets.
 - `labby snippets validate` passes.
 - `labby snippets test` passes for one snippet, or `labby snippets test --all` passes when changing shared built-ins.

@@ -51,7 +51,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `gateway` | `gateway.add` | false | false | `spec*: json`<br>`bearer_token_value: string` | `GatewayView` | cli, mcp, api, web |
 | `gateway` | `gateway.client_config.get` | false | false | `name*: string` | `McpClientConfigView` | cli, mcp, api, web |
 | `gateway` | `gateway.code_mode.get` | false | false |  | `CodeModeConfig` | cli, mcp, api, web |
-| `gateway` | `gateway.code_mode.set` | false | false | `enabled: boolean`<br>`trace_params: boolean`<br>`timeout_ms: integer`<br>`max_response_bytes: integer`<br>`max_response_tokens: integer`<br>`token_estimate_divisor: integer`<br>`max_log_entries: integer`<br>`max_log_bytes: integer` | `CodeModeConfig` | cli, mcp, api, web |
+| `gateway` | `gateway.code_mode.set` | false | false | `enabled: boolean`<br>`trace_params: boolean`<br>`result_shape_policy: string`<br>`timeout_ms: integer`<br>`max_response_bytes: integer`<br>`max_response_tokens: integer`<br>`token_estimate_divisor: integer`<br>`max_log_entries: integer`<br>`max_log_bytes: integer` | `CodeModeConfig` | cli, mcp, api, web |
 | `gateway` | `gateway.discover` | false | false | `clients: string[]`<br>`include_existing: boolean` | `DiscoveredServerView[]` | cli, mcp, api, web |
 | `gateway` | `gateway.discovered_prompts` | false | false | `name*: string` | `string[]` | cli, mcp, api, web |
 | `gateway` | `gateway.discovered_resources` | false | false | `name*: string` | `string[]` | cli, mcp, api, web |

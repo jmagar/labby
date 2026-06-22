@@ -110,6 +110,7 @@ Configuration lives at root `[code_mode]` in `config.toml`:
 [code_mode]
 enabled = true
 trace_params = true
+result_shape_policy = "off"
 timeout_ms = 30000
 max_response_bytes = 24576
 max_response_tokens = 6000
@@ -134,7 +135,7 @@ HTTP/MCP gateway management actions:
 ```
 
 ```json
-{ "action": "gateway.code_mode.set", "params": { "enabled": true, "trace_params": true, "timeout_ms": 5000, "max_log_entries": 100 } }
+{ "action": "gateway.code_mode.set", "params": { "enabled": true, "trace_params": true, "result_shape_policy": "truncate", "timeout_ms": 5000, "max_log_entries": 100 } }
 ```
 
 MCP `codemode` call shape:
@@ -181,6 +182,15 @@ History is process-local, memory-only, maintained under entry/byte caps on a
 best-effort basis, and cleared on restart; do not treat it as a durable audit log
 or a hard storage quota until the backend history-cap follow-up lands.
 
+`code_mode.result_shape_policy` defaults to `"off"`. When set to `"truncate"`,
+Labby shapes only successful completed final `result` values after the `__ui`
+unwrap and before envelope truncation. Sandbox-visible `callTool()` and
+`codemode.<upstream>.<tool>()` results are unchanged, `calls[]` remains
+metadata-only, and MCP text JSON plus `structuredContent` are built from the
+same shaped response. This does not retain the raw result for audit; use
+`writeArtifact()` for large detailed payloads. The truncate policy is an output
+bound, not redaction, and must not be used to sanitize secrets.
+
 Code Mode execution handles upstream MCP tools only. Lab actions are not callable
 from inside the Code Mode sandbox. Upstream ids use
 `<upstream-name>::<tool-name>`.
@@ -198,6 +208,7 @@ Use `codemode` for gateway Code Mode. Discovery happens inside the sandbox with
 Rules:
 
 - `code_mode.timeout_ms` is validated in the range `1..=60000`
+- `code_mode.result_shape_policy` accepts `"off"` or `"truncate"`
 - `code_mode.max_response_bytes` is validated in the range `1024..=1048576`
 - `code_mode.max_response_tokens` is validated in the range `256..=256000`
 - `code_mode.token_estimate_divisor` is validated in the range `1..=64`
