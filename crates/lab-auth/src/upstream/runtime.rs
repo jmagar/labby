@@ -1,23 +1,31 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use lab_runtime::gateway_config::UpstreamConfig;
 
-use crate::config::LabConfig;
-use crate::oauth::upstream::cache::OauthClientCache;
-use crate::oauth::upstream::encryption::{EncryptionKey, load_key};
-use crate::oauth::upstream::manager::UpstreamOauthManager;
+use crate::config::AuthConfig;
+use crate::sqlite::SqliteStore;
+use crate::upstream::cache::OauthClientCache;
+use crate::upstream::encryption::{EncryptionKey, load_key};
+use crate::upstream::manager::UpstreamOauthManager;
 
-pub(crate) struct UpstreamOauthRuntime {
-    pub(crate) managers: Arc<dashmap::DashMap<String, UpstreamOauthManager>>,
-    pub(crate) cache: OauthClientCache,
-    pub(crate) sqlite: lab_auth::sqlite::SqliteStore,
-    pub(crate) key: EncryptionKey,
-    pub(crate) redirect_uri: String,
+pub struct UpstreamOauthRuntime {
+    pub managers: Arc<dashmap::DashMap<String, UpstreamOauthManager>>,
+    pub cache: OauthClientCache,
+    pub sqlite: SqliteStore,
+    pub key: EncryptionKey,
+    pub redirect_uri: String,
 }
 
-pub(crate) async fn build_upstream_oauth_runtime(
-    config: &LabConfig,
-    auth_config: &lab_auth::config::AuthConfig,
+/// Build the upstream OAuth runtime for the upstreams that declare an `oauth`
+/// block.
+///
+/// Takes the upstream slice directly rather than a whole `LabConfig` so this
+/// runtime stays decoupled from the product binary's config type: `lab-auth`
+/// reads only the upstream list, never the rest of `LabConfig`.
+pub async fn build_upstream_oauth_runtime(
+    upstreams: &[UpstreamConfig],
+    auth_config: &AuthConfig,
 ) -> Result<Option<UpstreamOauthRuntime>> {
     let Some(public_url) = auth_config.public_url.as_ref() else {
         tracing::info!(
@@ -41,31 +49,31 @@ pub(crate) async fn build_upstream_oauth_runtime(
     );
     let key = load_key(&encryption_key_raw)
         .map_err(|error| anyhow::anyhow!("invalid LAB_OAUTH_ENCRYPTION_KEY: {error}"))?;
-    let sqlite = lab_auth::sqlite::SqliteStore::open(auth_config.sqlite_path.clone())
+    let sqlite = SqliteStore::open(auth_config.sqlite_path.clone())
         .await
         .context("open sqlite store for upstream oauth")?;
     let redirect_uri = build_upstream_oauth_callback_uri(public_url)?;
 
     Ok(Some(build_upstream_oauth_runtime_from_parts(
-        config,
+        upstreams,
         sqlite,
         key,
         redirect_uri,
     )))
 }
 
-pub(crate) fn build_upstream_oauth_runtime_from_parts(
-    config: &LabConfig,
-    sqlite: lab_auth::sqlite::SqliteStore,
+/// Assemble the runtime from pre-loaded parts.
+///
+/// `upstreams` is the upstream slice (decoupled from `LabConfig`); only the
+/// entries with an `oauth` block get a manager.
+pub fn build_upstream_oauth_runtime_from_parts(
+    upstreams: &[UpstreamConfig],
+    sqlite: SqliteStore,
     key: EncryptionKey,
     redirect_uri: String,
 ) -> UpstreamOauthRuntime {
     let managers = Arc::new(dashmap::DashMap::new());
-    for upstream in config
-        .upstream
-        .iter()
-        .filter(|upstream| upstream.oauth.is_some())
-    {
+    for upstream in upstreams.iter().filter(|upstream| upstream.oauth.is_some()) {
         managers.insert(
             upstream.name.clone(),
             UpstreamOauthManager::new(
@@ -92,7 +100,7 @@ pub(crate) fn build_upstream_oauth_runtime_from_parts(
     }
 }
 
-pub(crate) fn build_upstream_oauth_callback_uri(public_url: &url::Url) -> Result<String> {
+pub fn build_upstream_oauth_callback_uri(public_url: &url::Url) -> Result<String> {
     let mut redirect_uri = public_url.clone();
     let base_path = redirect_uri.path().trim_end_matches('/');
     let next_path = if base_path.is_empty() {

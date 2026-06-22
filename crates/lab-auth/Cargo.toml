@@ -15,6 +15,13 @@ publish = false
 [features]
 # Explicit empty default to keep Cargo feature unification a no-op for downstream consumers.
 default = []
+# Outbound upstream OAuth runtime (client cache, manager, refresh, store, runtime).
+# Gated because it pulls in the rmcp client/auth transport stack and oauth2, which
+# pure-auth consumers (browser/API OAuth) do not need.
+upstream-oauth-rmcp = ["dep:rmcp-client", "dep:oauth2", "dep:anyhow"]
+# Exposes test-only seams (e.g. `OauthClientCache::insert_for_tests`) to
+# downstream crates' test builds. Never enable in production builds.
+test = []
 
 [dependencies]
 axum.workspace = true
@@ -22,6 +29,7 @@ base64.workspace = true
 dashmap = "6"
 getrandom = "0.4"
 jsonwebtoken.workspace = true
+lab-runtime = { path = "../lab-runtime" }
 reqwest.workspace = true
 rsa.workspace = true
 rusqlite.workspace = true
@@ -35,6 +43,15 @@ tokio.workspace = true
 tower.workspace = true
 tracing.workspace = true
 url.workspace = true
+anyhow = { workspace = true, optional = true }
+oauth2 = { version = "5.0", default-features = false, optional = true }
+
+[dependencies.rmcp-client]
+package = "rmcp"
+version = "1.7"
+default-features = false
+features = ["client", "auth", "transport-streamable-http-client-reqwest"]
+optional = true
 
 [dev-dependencies]
 tempfile = "3.27"

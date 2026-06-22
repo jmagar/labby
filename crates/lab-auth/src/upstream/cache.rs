@@ -18,13 +18,14 @@ use std::future::Future;
 use std::sync::Arc;
 
 use dashmap::DashMap;
+use lab_runtime::gateway_config::{UpstreamConfig, UpstreamOauthRegistration};
 use rmcp::transport::AuthClient;
 use rmcp::transport::streamable_http_client::StreamableHttpClient;
+use rmcp_client as rmcp;
 use tokio::sync::Mutex;
 
-use crate::config::{UpstreamConfig, UpstreamOauthRegistration};
-use crate::oauth::upstream::manager::UpstreamOauthManager;
-use crate::oauth::upstream::types::OauthError;
+use crate::upstream::manager::UpstreamOauthManager;
+use crate::upstream::types::OauthError;
 
 /// A cached `AuthClient` plus the OAuth-registration fingerprint it was
 /// built from. When the current config's fingerprint differs, the entry
@@ -228,7 +229,11 @@ impl OauthClientCache {
         // build_locks intentionally preserved — see comment in evict_subject.
     }
 
-    pub(crate) fn evict_upstreams_not_in(&self, known: &std::collections::HashSet<&str>) {
+    /// Evict every entry whose upstream is not in `known`.
+    ///
+    /// Used at config reload to drop cached clients for upstreams that no
+    /// longer exist in config.
+    pub fn evict_upstreams_not_in(&self, known: &std::collections::HashSet<&str>) {
         self.clients
             .retain(|(name, _), _| known.contains(name.as_str()));
     }
@@ -247,8 +252,13 @@ impl OauthClientCache {
         self.clients.is_empty()
     }
 
-    #[cfg(test)]
-    pub(crate) fn insert_for_tests(
+    /// Insert a pre-built `AuthClient` directly into the cache.
+    ///
+    /// Test-only seam: available in `lab-auth`'s own tests and to downstream
+    /// crates that enable the `test` feature (e.g. `lab`'s gateway manager
+    /// tests). Not part of the production API.
+    #[cfg(any(test, feature = "test"))]
+    pub fn insert_for_tests(
         &self,
         upstream: &str,
         subject: &str,
@@ -301,8 +311,8 @@ fn registration_fingerprint(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{UpstreamOauthConfig, UpstreamOauthMode};
-    use rmcp::transport::AuthorizationManager;
+    use lab_runtime::gateway_config::{UpstreamOauthConfig, UpstreamOauthMode};
+    use rmcp_client::transport::AuthorizationManager;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn cfg(name: &str, client_id: &str) -> UpstreamConfig {

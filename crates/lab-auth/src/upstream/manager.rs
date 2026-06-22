@@ -30,20 +30,21 @@
 
 use std::sync::Arc;
 
-use lab_auth::sqlite::SqliteStore;
-use lab_auth::types::UpstreamOauthCredentialRow;
+use lab_runtime::gateway_config::{UpstreamConfig, UpstreamOauthRegistration};
 use rmcp::transport::auth::{AuthorizationMetadata, OAuthClientConfig};
 use rmcp::transport::streamable_http_client::StreamableHttpClient;
 use rmcp::transport::{AuthClient, AuthorizationManager};
+use rmcp_client as rmcp;
 use serde::Deserialize;
 use tokio::sync::RwLock;
 use tracing::info;
 
-use crate::config::{UpstreamConfig, UpstreamOauthRegistration};
-use crate::oauth::upstream::encryption::EncryptionKey;
-use crate::oauth::upstream::refresh::RefreshLocks;
-use crate::oauth::upstream::store::{SqliteCredentialStore, SqliteStateStore};
-use crate::oauth::upstream::types::{BeginAuthorization, OauthError};
+use crate::sqlite::SqliteStore;
+use crate::types::UpstreamOauthCredentialRow;
+use crate::upstream::encryption::EncryptionKey;
+use crate::upstream::refresh::RefreshLocks;
+use crate::upstream::store::{SqliteCredentialStore, SqliteStateStore};
+use crate::upstream::types::{BeginAuthorization, OauthError};
 
 const TOKEN_EXPIRY_WARNING_SECS: i64 = 300;
 const PROACTIVE_REFRESH_WINDOW_SECS: i64 = 30;
@@ -703,7 +704,9 @@ impl UpstreamOauthManager {
         Ok(manager)
     }
 
-    fn oauth_config(&self) -> Result<&crate::config::UpstreamOauthConfig, OauthError> {
+    fn oauth_config(
+        &self,
+    ) -> Result<&lab_runtime::gateway_config::UpstreamOauthConfig, OauthError> {
         self.upstream
             .oauth
             .as_ref()
@@ -1203,6 +1206,47 @@ fn google_offline_access_url(url: &str) -> Result<String, OauthError> {
     Ok(parsed.into())
 }
 
+struct TokenRefreshState {
+    seconds_until_expiry: i64,
+    refresh_token_present: bool,
+}
+
+impl TokenRefreshState {
+    fn from_row(row: &UpstreamOauthCredentialRow, now: i64) -> Option<Self> {
+        if row.access_token_expires_at <= 0 {
+            return None;
+        }
+        Some(Self {
+            seconds_until_expiry: row.access_token_expires_at.saturating_sub(now),
+            refresh_token_present: row.refresh_token_present,
+        })
+    }
+
+    fn refresh_due(&self) -> bool {
+        self.seconds_until_expiry <= PROACTIVE_REFRESH_WINDOW_SECS
+    }
+}
+
+fn now_unix() -> Result<i64, OauthError> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| OauthError::Internal(format!("system clock error: {error}")))
+        .map(|duration| duration.as_secs() as i64)
+}
+
+fn map_auth_error(e: rmcp::transport::AuthError) -> OauthError {
+    match e {
+        rmcp::transport::AuthError::AuthorizationRequired => {
+            OauthError::NeedsReauth("authorization required".to_string())
+        }
+        rmcp::transport::AuthError::TokenExchangeFailed(msg) => OauthError::Internal(msg),
+        rmcp::transport::AuthError::TokenRefreshFailed(msg) => {
+            OauthError::NeedsReauth(format!("token refresh failed: {msg}"))
+        }
+        other => OauthError::Internal(other.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod url_tests {
     use super::google_offline_access_url;
@@ -1252,46 +1296,5 @@ mod url_tests {
             params.get("include_granted_scopes").map(|v| v.as_ref()),
             Some("false")
         );
-    }
-}
-
-struct TokenRefreshState {
-    seconds_until_expiry: i64,
-    refresh_token_present: bool,
-}
-
-impl TokenRefreshState {
-    fn from_row(row: &UpstreamOauthCredentialRow, now: i64) -> Option<Self> {
-        if row.access_token_expires_at <= 0 {
-            return None;
-        }
-        Some(Self {
-            seconds_until_expiry: row.access_token_expires_at.saturating_sub(now),
-            refresh_token_present: row.refresh_token_present,
-        })
-    }
-
-    fn refresh_due(&self) -> bool {
-        self.seconds_until_expiry <= PROACTIVE_REFRESH_WINDOW_SECS
-    }
-}
-
-fn now_unix() -> Result<i64, OauthError> {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|error| OauthError::Internal(format!("system clock error: {error}")))
-        .map(|duration| duration.as_secs() as i64)
-}
-
-fn map_auth_error(e: rmcp::transport::AuthError) -> OauthError {
-    match e {
-        rmcp::transport::AuthError::AuthorizationRequired => {
-            OauthError::NeedsReauth("authorization required".to_string())
-        }
-        rmcp::transport::AuthError::TokenExchangeFailed(msg) => OauthError::Internal(msg),
-        rmcp::transport::AuthError::TokenRefreshFailed(msg) => {
-            OauthError::NeedsReauth(format!("token refresh failed: {msg}"))
-        }
-        other => OauthError::Internal(other.to_string()),
     }
 }

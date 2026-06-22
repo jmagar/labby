@@ -20,14 +20,15 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use lab_auth::sqlite::SqliteStore;
-use lab_auth::types::{UpstreamOauthCredentialRow, UpstreamOauthStateRow};
 use oauth2::{CsrfToken, PkceCodeVerifier, TokenResponse as _};
 use rmcp::transport::auth::{
     AuthError, CredentialStore, StateStore, StoredAuthorizationState, StoredCredentials,
 };
+use rmcp_client as rmcp;
 
-use crate::oauth::upstream::encryption::{self, EncryptionKey};
+use crate::sqlite::SqliteStore;
+use crate::types::{UpstreamOauthCredentialRow, UpstreamOauthStateRow};
+use crate::upstream::encryption::{self, EncryptionKey};
 
 fn credential_aad(upstream_name: &str, subject: &str, client_id: &str) -> Vec<u8> {
     format!("upstream={upstream_name}\0subject={subject}\0client_id={client_id}").into_bytes()
@@ -287,23 +288,23 @@ impl StateStore for SqliteStateStore {
 #[cfg(test)]
 mod tests {
     use oauth2::{CsrfToken, PkceCodeVerifier};
-    use rmcp::transport::auth::{StateStore, StoredAuthorizationState};
+    use rmcp_client::transport::auth::{StateStore, StoredAuthorizationState};
 
     use super::SqliteStateStore;
 
     /// Open a disposable in-memory SQLite store for testing.
-    async fn temp_store() -> lab_auth::sqlite::SqliteStore {
+    async fn temp_store() -> crate::sqlite::SqliteStore {
         let path = tempfile::tempdir()
             .expect("tempdir")
             .keep()
             .join("upstream_oauth_test.db");
-        lab_auth::sqlite::SqliteStore::open(path)
+        crate::sqlite::SqliteStore::open(path)
             .await
             .expect("open test store")
     }
 
     fn make_state_store(
-        store: lab_auth::sqlite::SqliteStore,
+        store: crate::sqlite::SqliteStore,
         upstream: &str,
         subject: &str,
     ) -> SqliteStateStore {
@@ -367,7 +368,7 @@ mod tests {
     /// by writing a row with `expires_at = now - 1` directly via the raw store.
     #[tokio::test]
     async fn expired_state_is_rejected() {
-        use lab_auth::types::UpstreamOauthStateRow;
+        use crate::types::UpstreamOauthStateRow;
 
         let sqlite = temp_store().await;
 
