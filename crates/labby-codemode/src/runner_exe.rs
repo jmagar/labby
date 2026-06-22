@@ -119,6 +119,10 @@ fn reject_untrusted_permissions(path: &Path) -> Result<(), ToolError> {
             });
         }
     }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
     Ok(())
 }
 

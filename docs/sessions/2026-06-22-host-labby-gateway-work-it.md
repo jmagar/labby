@@ -27,7 +27,7 @@ Implemented a host `labby.service` path for running the gateway outside the dev 
 4. Opened PR #152 and pushed the initial implementation commit.
 5. Ran lavra review, three simplifier passes, PR-review-toolkit style sweeps, and CodeRabbit comment resolution, then pushed focused fix commits for each batch.
 6. Ran targeted and full verification locally, then saved this session artifact for the final docs-only commit.
-7. Fixed a Rust 1.94.1 CI-only Clippy failure in `host_service.rs`, re-ran local Clippy and focused host-service tests, and prepared the final push.
+7. Fixed Rust 1.94.1 CI-only Clippy failures in `host_service.rs`, then fixed a Windows-only unused-variable failure in `runner_exe.rs`, re-running local Clippy and focused tests after each patch.
 
 ## Key Findings
 
@@ -118,6 +118,7 @@ Updated `README.md`, `CLAUDE.md`, `docs/runtime/HOST_GATEWAY.md`, and `docs/gene
 - Review found `command_not_found` matched generic `not found` text. Narrowed it to actual spawn failures.
 - Review found operator docs could hide public-route proof gaps. Replaced the generic public proof with `mcporter` and PID correlation guidance.
 - Remote CI Clippy on Rust 1.94.1 failed for `needless_raw_string_hashes` and `useless_let_if_seq` in `crates/lab/src/dispatch/setup/host_service.rs`. Removed the needless raw-string hashes and rewrote the `ExecMainStatus` assignment as an expression.
+- Remote Windows self-hosted CI failed because `reject_untrusted_permissions(path: &Path)` used `path` only under `#[cfg(unix)]`. Added a non-Unix use so Windows no longer trips `unused_variables` under `-D warnings`.
 
 ## Behavior Changes (Before/After)
 
@@ -165,5 +166,5 @@ Updated `README.md`, `CLAUDE.md`, `docs/runtime/HOST_GATEWAY.md`, and `docs/gene
 
 ## Next Steps
 
-1. Push the final CI Clippy fix.
+1. Push the final CI fix.
 2. Wait for PR #152 checks after the final commit and fix any new CI or review findings before merge.
