@@ -18,7 +18,7 @@ test = false
 
 [dependencies]
 lab-apis = { path = "../lab-apis", default-features = false }
-lab-auth = { path = "../lab-auth" }
+lab-auth = { path = "../lab-auth", features = ["upstream-oauth-rmcp"] }
 lab-runtime = { path = "../lab-runtime" }
 lab-gateway-web = { path = "../lab-gateway-web" }
 
@@ -127,6 +127,9 @@ sd-notify = { version = "0.5", optional = true }
 lab-winjob = { path = "../lab-winjob" }
 
 [dev-dependencies]
+# Enable lab-auth's test-only seams (e.g. `OauthClientCache::insert_for_tests`)
+# for `lab`'s test build only — never compiled into the production binary.
+lab-auth = { path = "../lab-auth", features = ["upstream-oauth-rmcp", "test"] }
 wiremock.workspace = true
 proptest = "1"
 

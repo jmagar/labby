@@ -13,6 +13,8 @@ pub mod sqlite;
 pub mod state;
 pub mod token;
 pub mod types;
+#[cfg(feature = "upstream-oauth-rmcp")]
+pub mod upstream;
 pub mod util;
 
 pub use auth_context::{AuthContext, auth_context, www_authenticate_value};

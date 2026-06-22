@@ -28,8 +28,11 @@ pub(crate) async fn build_manager(
     discover_upstreams: bool,
 ) -> Result<Arc<GatewayManager>> {
     let auth_config = resolve_auth_for_config(config)?;
-    let upstream_oauth_runtime =
-        crate::oauth::upstream::runtime::build_upstream_oauth_runtime(config, &auth_config).await?;
+    let upstream_oauth_runtime = crate::oauth::upstream::runtime::build_upstream_oauth_runtime(
+        &config.upstream,
+        &auth_config,
+    )
+    .await?;
     Ok(build_manager_with_upstream_oauth_runtime(
         config,
         discover_upstreams,
@@ -379,7 +382,7 @@ mod tests {
             base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [9_u8; 32]);
         let key = load_key(&key_b64).expect("encryption key");
         let oauth_runtime = build_upstream_oauth_runtime_from_parts(
-            &config,
+            &config.upstream,
             sqlite,
             key,
             "https://lab.example.com/auth/upstream/callback".to_string(),

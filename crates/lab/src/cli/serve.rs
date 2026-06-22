@@ -1077,7 +1077,8 @@ async fn build_gateway_runtime(
         );
         None
     } else {
-        crate::oauth::upstream::runtime::build_upstream_oauth_runtime(config, auth_config).await?
+        crate::oauth::upstream::runtime::build_upstream_oauth_runtime(&config.upstream, auth_config)
+            .await?
     };
     tracing::info!(
         subsystem = "gateway_client",

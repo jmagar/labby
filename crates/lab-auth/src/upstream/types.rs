@@ -1,6 +1,5 @@
 //! Shared types for outbound upstream OAuth.
 
-use axum::http::StatusCode;
 use serde::Serialize;
 use thiserror::Error;
 
@@ -52,15 +51,19 @@ impl OauthError {
         }
     }
 
+    /// Transport-neutral HTTP status code for this error.
+    ///
+    /// Returns a bare `u16` rather than `axum::http::StatusCode` so the upstream
+    /// OAuth runtime carries no transport dependency; the product binary maps it
+    /// onto its own response type at the route boundary.
     #[allow(dead_code)]
-    pub fn http_status(&self) -> StatusCode {
+    #[must_use]
+    pub const fn http_status_code(&self) -> u16 {
         match self {
-            Self::NeedsReauth(_) => StatusCode::UNAUTHORIZED,
-            Self::StateInvalid(_) => StatusCode::BAD_REQUEST,
-            Self::ResourceMismatch(_) | Self::IssuerMismatch(_) | Self::UnsupportedMethod(_) => {
-                StatusCode::BAD_GATEWAY
-            }
-            Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::NeedsReauth(_) => 401,
+            Self::StateInvalid(_) => 400,
+            Self::ResourceMismatch(_) | Self::IssuerMismatch(_) | Self::UnsupportedMethod(_) => 502,
+            Self::Internal(_) => 500,
         }
     }
 }

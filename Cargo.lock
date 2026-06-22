@@ -2487,13 +2487,17 @@ dependencies = [
 name = "lab-auth"
 version = "0.26.1"
 dependencies = [
+ "anyhow",
  "axum",
  "base64",
  "chacha20poly1305",
  "dashmap",
  "getrandom 0.4.2",
  "jsonwebtoken",
+ "lab-runtime",
+ "oauth2",
  "reqwest",
+ "rmcp",
  "rsa 0.10.0-rc.16",
  "rusqlite",
  "serde",
