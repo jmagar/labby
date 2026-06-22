@@ -11,6 +11,7 @@ use futures::stream;
 use serde_json::Value;
 use tracing::{error, info, warn};
 
+use crate::api::error::ApiError;
 use crate::api::oauth::AuthContext;
 use crate::api::services::helpers::{dispatch_meta_from_headers, handle_action_with_meta};
 use crate::api::{ActionRequest, state::AppState};
@@ -31,7 +32,7 @@ async fn handle(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     Json(req): Json<ActionRequest>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     let logs_system = state.logs_system.clone().ok_or_else(|| {
         ToolError::internal_message("local log system is not wired into API state")
     })?;
@@ -56,7 +57,7 @@ async fn handle(
 async fn stream_logs(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Sse<impl futures::Stream<Item = Result<Event, Infallible>>>, ToolError> {
+) -> Result<Sse<impl futures::Stream<Item = Result<Event, Infallible>>>, ApiError> {
     const ACTION: &str = "logs.stream";
     let request_id = headers
         .get("x-request-id")
@@ -83,7 +84,7 @@ async fn stream_logs(
             kind = error.kind(),
             "dispatch error"
         );
-        return Err(error);
+        return Err(error.into());
     };
     let receiver = match logs_system
         .subscribe(crate::dispatch::logs::types::StreamSubscription::default())
@@ -112,7 +113,7 @@ async fn stream_logs(
                     "dispatch error"
                 );
             }
-            return Err(error);
+            return Err(error.into());
         }
     };
 
@@ -173,7 +174,7 @@ async fn ingest_peer_events(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(req): Json<PeerIngestRequest>,
-) -> Result<Json<PeerIngestResponse>, ToolError> {
+) -> Result<Json<PeerIngestResponse>, ApiError> {
     const ACTION: &str = "logs.ingest";
     let request_id = headers
         .get("x-request-id")
@@ -186,7 +187,8 @@ async fn ingest_peer_events(
             message:
                 "peer log ingest is not enabled on this node; set LAB_LOGS_INGEST_ENABLED=true"
                     .to_string(),
-        });
+        }
+        .into());
     }
 
     const MAX_EVENTS_PER_BATCH: usize = 500;
@@ -199,7 +201,8 @@ async fn ingest_peer_events(
                 req.events.len()
             ),
             param: "events".to_string(),
-        });
+        }
+        .into());
     }
 
     for event in &req.events {
@@ -207,7 +210,8 @@ async fn ingest_peer_events(
             return Err(ToolError::InvalidParam {
                 message: format!("event message exceeds maximum size of {MAX_MESSAGE_BYTES} bytes"),
                 param: "events[].message".to_string(),
-            });
+            }
+            .into());
         }
     }
 
@@ -245,7 +249,8 @@ async fn ingest_peer_events(
                         "source_kind `{kind}` is not allowed; valid: {ALLOWED_SOURCE_KINDS:?}"
                     ),
                     param: "events[].source_kind".to_string(),
-                });
+                }
+                .into());
             }
         } else {
             event.source_kind = Some("syslog".to_string());
@@ -265,7 +270,7 @@ async fn ingest_peer_events(
                     elapsed_ms = start.elapsed().as_millis(),
                     "dispatch error"
                 );
-                return Err(e);
+                return Err(e.into());
             }
         }
     }
@@ -288,7 +293,8 @@ async fn ingest_peer_events(
             message: format!(
                 "log ingest queue is full; all {dropped} event(s) dropped — retry after backoff"
             ),
-        });
+        }
+        .into());
     }
 
     if dropped > 0 {

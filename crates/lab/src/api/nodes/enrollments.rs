@@ -4,7 +4,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::api::{ToolError, state::AppState};
+use crate::api::{ToolError, error::ApiError, state::AppState};
 
 use super::normalize_node_id_value;
 
@@ -18,7 +18,7 @@ pub struct DenyEnrollmentRequest {
     pub reason: Option<String>,
 }
 
-pub async fn list(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ToolError> {
+pub async fn list(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
     let store = super::fleet::require_enrollment_store(&state)?;
     let snapshot = store
         .list()
@@ -33,7 +33,7 @@ pub async fn approve(
     State(state): State<AppState>,
     Path(node_id): Path<String>,
     Json(payload): Json<ApproveEnrollmentRequest>,
-) -> Result<Json<serde_json::Value>, ToolError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     let node_id = normalize_node_id_value(&node_id, "node_id")?;
     let store = super::fleet::require_enrollment_store(&state)?;
     let approved = store
@@ -49,7 +49,7 @@ pub async fn deny(
     State(state): State<AppState>,
     Path(node_id): Path<String>,
     Json(payload): Json<DenyEnrollmentRequest>,
-) -> Result<Json<serde_json::Value>, ToolError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     let node_id = normalize_node_id_value(&node_id, "node_id")?;
     let store = super::fleet::require_enrollment_store(&state)?;
     let denied = store

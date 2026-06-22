@@ -13,6 +13,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::api::error::ApiError;
 use crate::api::state::AppState;
 use crate::dispatch::error::ToolError;
 use crate::dispatch::marketplace::store::StoreListParams;
@@ -54,12 +55,12 @@ const SERVER_NAME_MAX_LEN: usize = 512;
 async fn list_servers(
     State(state): State<AppState>,
     Query(query): Query<ListServersQuery>,
-) -> Result<Json<serde_json::Value>, ToolError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     let Some(store) = state.registry_store.as_ref() else {
-        return Err(ToolError::Sdk {
+        return Err(ApiError(ToolError::Sdk {
             sdk_kind: "service_unavailable".into(),
             message: "registry store initializing — try again in a few seconds".into(),
-        });
+        }));
     };
 
     let mut params = StoreListParams {
@@ -103,19 +104,19 @@ async fn list_servers(
 async fn list_versions(
     State(state): State<AppState>,
     Path(server_name): Path<String>,
-) -> Result<Json<serde_json::Value>, ToolError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     if server_name.len() > SERVER_NAME_MAX_LEN {
-        return Err(ToolError::Sdk {
+        return Err(ApiError(ToolError::Sdk {
             sdk_kind: "invalid_param".into(),
             message: format!("serverName must be at most {SERVER_NAME_MAX_LEN} bytes"),
-        });
+        }));
     }
 
     let Some(store) = state.registry_store.as_ref() else {
-        return Err(ToolError::Sdk {
+        return Err(ApiError(ToolError::Sdk {
             sdk_kind: "service_unavailable".into(),
             message: "registry store initializing — try again in a few seconds".into(),
-        });
+        }));
     };
 
     let versions = store
@@ -133,31 +134,31 @@ async fn list_versions(
 async fn get_server(
     State(state): State<AppState>,
     Path((server_name, version)): Path<(String, String)>,
-) -> Result<Json<serde_json::Value>, ToolError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     if server_name.len() > SERVER_NAME_MAX_LEN {
-        return Err(ToolError::Sdk {
+        return Err(ApiError(ToolError::Sdk {
             sdk_kind: "invalid_param".into(),
             message: format!("serverName must be at most {SERVER_NAME_MAX_LEN} bytes"),
-        });
+        }));
     }
 
     let Some(store) = state.registry_store.as_ref() else {
-        return Err(ToolError::Sdk {
+        return Err(ApiError(ToolError::Sdk {
             sdk_kind: "service_unavailable".into(),
             message: "registry store initializing — try again in a few seconds".into(),
-        });
+        }));
     };
 
     match store.get_server(&server_name, &version).await {
         Ok(Some(server)) => Ok(Json(json!(server))),
-        Ok(None) => Err(ToolError::Sdk {
+        Ok(None) => Err(ApiError(ToolError::Sdk {
             sdk_kind: "not_found".into(),
             message: format!("server '{server_name}' version '{version}' not found"),
-        }),
-        Err(e) => Err(ToolError::Sdk {
+        })),
+        Err(e) => Err(ApiError(ToolError::Sdk {
             sdk_kind: "internal_error".into(),
             message: format!("registry store get_server: {e}"),
-        }),
+        })),
     }
 }
 

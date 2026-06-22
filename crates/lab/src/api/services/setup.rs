@@ -14,6 +14,7 @@ use axum::{
 };
 use serde_json::Value;
 
+use crate::api::error::ApiError;
 use crate::api::oauth::AuthContext;
 use crate::api::services::helpers::{dispatch_meta_from_headers, handle_action_with_meta};
 use crate::api::{ActionRequest, state::AppState};
@@ -30,7 +31,7 @@ async fn handle(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     Json(req): Json<ActionRequest>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     let request_id = headers.get("x-request-id").and_then(|v| v.to_str().ok());
     require_setup_admin(&req.action, request_id, auth.as_ref())?;
     if plugin_lifecycle_action(&req.action) && !http_bind_is_loopback(&state) {
@@ -41,10 +42,10 @@ async fn handle(
             bind_host = state.http_bind_host.as_deref().map(String::as_str).unwrap_or("<unknown>"),
             "setup plugin lifecycle action skipped because HTTP bind is non-loopback"
         );
-        return Err(ToolError::Sdk {
+        return Err(ApiError(ToolError::Sdk {
             sdk_kind: "not_found".into(),
             message: "setup plugin lifecycle actions are only available over loopback HTTP".into(),
-        });
+        }));
     }
     handle_action_with_meta(
         "setup",

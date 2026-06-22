@@ -1,12 +1,12 @@
 use axum::{Json, extract::State};
 
-use crate::api::{ToolError, nodes::NodeAck, state::AppState};
+use crate::api::{ToolError, error::ApiError, nodes::NodeAck, state::AppState};
 use crate::node::checkin::NodeStatus;
 
 pub async fn handle(
     State(state): State<AppState>,
     Json(mut payload): Json<NodeStatus>,
-) -> Result<Json<NodeAck>, ToolError> {
+) -> Result<Json<NodeAck>, ApiError> {
     payload.node_id = super::normalize_node_id_value(&payload.node_id, "node_id")?;
     let store = state
         .node_store

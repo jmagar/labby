@@ -106,6 +106,7 @@ pub(crate) fn parse_bearer_token(header_value: &str) -> Option<String> {
 }
 
 use super::{health, services, state::AppState};
+use crate::api::error::ApiError;
 use crate::dispatch::error::ToolError;
 
 fn app_auth_state(state: &AppState) -> Result<lab_auth::state::AuthState, LabAuthError> {
@@ -306,7 +307,7 @@ fn auth_error_response(message: &str, resource_url: Option<&str>) -> axum::respo
         sdk_kind: "auth_failed".into(),
         message: message.into(),
     };
-    let mut response = err.into_response();
+    let mut response = ApiError(err).into_response();
     if let Some(url) = resource_url {
         let www_auth = crate::api::oauth::www_authenticate_value(url);
         if let Ok(value) = HeaderValue::from_str(&www_auth) {
@@ -327,7 +328,7 @@ fn auth_error_response_with_challenge(
         sdk_kind: "auth_failed".into(),
         message: message.into(),
     };
-    let mut response = err.into_response();
+    let mut response = ApiError(err).into_response();
     let scope = scopes
         .iter()
         .map(String::as_str)
@@ -451,10 +452,10 @@ async fn authenticate_protected_route_request(
             granted_scopes = ?granted,
             "protected MCP route auth failed: insufficient scope"
         );
-        return Err(ToolError::Sdk {
+        return Err(ApiError(ToolError::Sdk {
             sdk_kind: "forbidden".into(),
             message: "insufficient OAuth scope for protected MCP route".into(),
-        }
+        })
         .into_response());
     }
     let subject_id = lab_auth::util::fingerprint(&claims.sub);
@@ -528,10 +529,10 @@ async fn proxy_protected_mcp_route(
                 error = %error,
                 "protected MCP route proxy failed: request body read error"
             );
-            return ToolError::Sdk {
+            return ApiError(ToolError::Sdk {
                 sdk_kind: "bad_request".into(),
                 message: format!("failed to read MCP request body: {error}"),
-            }
+            })
             .into_response();
         }
     };
@@ -574,10 +575,10 @@ async fn proxy_protected_mcp_route(
                 error = %error,
                 "protected MCP route proxy failed: backend request failed"
             );
-            return ToolError::Sdk {
+            return ApiError(ToolError::Sdk {
                 sdk_kind: "bad_gateway".into(),
                 message: format!("protected MCP backend request failed: {error}"),
-            }
+            })
             .into_response();
         }
     };
@@ -614,10 +615,10 @@ async fn proxy_protected_mcp_route(
                 error = %error,
                 "protected MCP route proxy failed: response build failed"
             );
-            ToolError::Sdk {
+            ApiError(ToolError::Sdk {
                 sdk_kind: "bad_gateway".into(),
                 message: format!("failed to build protected MCP response: {error}"),
-            }
+            })
             .into_response()
         })
 }
@@ -636,10 +637,10 @@ async fn protected_route_upstream_target(
                     error = %error,
                     "protected MCP route proxy failed: invalid backend_url"
                 );
-                ToolError::Sdk {
+                ApiError(ToolError::Sdk {
                     sdk_kind: "bad_gateway".into(),
                     message: format!("protected MCP route backend_url is invalid: {error}"),
-                }
+                })
                 .into_response()
             })?;
             return Ok((url, None, "backend_url".to_string()));
@@ -651,10 +652,10 @@ async fn protected_route_upstream_target(
                 resource = %route.public_resource(),
                 "protected MCP gateway subset reached legacy proxy path"
             );
-            return Err(ToolError::Sdk {
+            return Err(ApiError(ToolError::Sdk {
                 sdk_kind: "bad_gateway".into(),
                 message: "gateway_subset routes must be served by the scoped MCP service".into(),
-            }
+            })
             .into_response());
         }
     };
@@ -666,10 +667,10 @@ async fn protected_route_upstream_target(
             upstream = %upstream_name,
             "protected MCP route proxy failed: gateway manager missing"
         );
-        return Err(ToolError::Sdk {
+        return Err(ApiError(ToolError::Sdk {
             sdk_kind: "bad_gateway".into(),
             message: "gateway manager is not available for upstream protected route".into(),
-        }
+        })
         .into_response());
     };
     let Some(upstream_config) = manager.upstream_config(&upstream_name).await else {
@@ -679,10 +680,10 @@ async fn protected_route_upstream_target(
             upstream = %upstream_name,
             "protected MCP route proxy failed: configured upstream not found"
         );
-        return Err(ToolError::Sdk {
+        return Err(ApiError(ToolError::Sdk {
             sdk_kind: "not_found".into(),
             message: format!("upstream `{upstream_name}` not found for protected MCP route"),
-        }
+        })
         .into_response());
     };
     let Some(raw_url) = upstream_config.url.as_deref() else {
@@ -692,10 +693,10 @@ async fn protected_route_upstream_target(
             upstream = %upstream_name,
             "protected MCP route proxy failed: upstream has no HTTP URL"
         );
-        return Err(ToolError::Sdk {
+        return Err(ApiError(ToolError::Sdk {
             sdk_kind: "bad_gateway".into(),
             message: format!("upstream `{upstream_name}` does not have an HTTP MCP URL"),
-        }
+        })
         .into_response());
     };
     let url = reqwest::Url::parse(raw_url).map_err(|error| {
@@ -718,10 +719,10 @@ async fn protected_route_upstream_target(
                 subject = %SHARED_GATEWAY_OAUTH_SUBJECT,
                 "protected MCP route proxy failed: upstream oauth manager missing"
             );
-            return Err(ToolError::Sdk {
+            return Err(ApiError(ToolError::Sdk {
                 sdk_kind: "oauth_needs_reauth".into(),
                 message: format!("upstream `{upstream_name}` is not connected with OAuth"),
-            }
+            })
             .into_response());
         };
         let auth_client = oauth_manager
@@ -737,12 +738,12 @@ async fn protected_route_upstream_target(
                     error = %error,
                     "protected MCP route proxy failed: upstream oauth auth client unavailable"
                 );
-                ToolError::Sdk {
+                ApiError(ToolError::Sdk {
                     sdk_kind: error.kind().to_string(),
                     message: format!(
                         "upstream `{upstream_name}` OAuth authorization required: {error}"
                     ),
-                }
+                })
                 .into_response()
             })?;
         Some(auth_client.get_access_token().await.map_err(|error| {
@@ -754,10 +755,10 @@ async fn protected_route_upstream_target(
                 error = %error,
                 "protected MCP route proxy failed: upstream oauth token unavailable"
             );
-            ToolError::Sdk {
+            ApiError(ToolError::Sdk {
                 sdk_kind: "oauth_needs_reauth".into(),
                 message: format!("upstream `{upstream_name}` OAuth token unavailable: {error}"),
-            }
+            })
             .into_response()
         })?)
     } else {
@@ -822,10 +823,10 @@ async fn protected_mcp_route_entry(
                 resource = %route.public_resource(),
                 "protected MCP gateway subset failed: scoped router missing"
             );
-            return ToolError::Sdk {
+            return ApiError(ToolError::Sdk {
                 sdk_kind: "bad_gateway".into(),
                 message: "protected MCP gateway subset service is not mounted".into(),
-            }
+            })
             .into_response();
         };
         return router
@@ -840,10 +841,10 @@ async fn protected_mcp_route_entry(
                     error = %error,
                     "protected MCP gateway subset failed: scoped service error"
                 );
-                ToolError::Sdk {
+                ApiError(ToolError::Sdk {
                     sdk_kind: "bad_gateway".into(),
                     message: format!("protected MCP gateway subset service failed: {error}"),
-                }
+                })
                 .into_response()
             });
     }
@@ -879,10 +880,10 @@ async fn protected_mcp_intercept(
 }
 
 fn csrf_error_response(message: &str) -> axum::response::Response {
-    ToolError::Sdk {
+    ApiError(ToolError::Sdk {
         sdk_kind: "validation_failed".into(),
         message: message.into(),
-    }
+    })
     .into_response()
 }
 
@@ -1394,13 +1395,13 @@ async fn dev_nodeinfo(State(state): State<AppState>) -> axum::response::Response
 async fn dev_marketplace_readonly(
     headers: axum::http::HeaderMap,
     Json(req): Json<crate::api::ActionRequest>,
-) -> Result<Json<serde_json::Value>, ToolError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     let action = req.action.trim().to_string();
     if !DEV_MARKETPLACE_READ_ACTIONS.contains(&action.as_str()) {
-        return Err(ToolError::Sdk {
+        return Err(ApiError(ToolError::Sdk {
             sdk_kind: "dev_preview_read_only".to_string(),
             message: format!("dev preview route blocked mutating marketplace action `{action}`"),
-        });
+        }));
     }
 
     let request_id = headers.get("x-request-id").and_then(|v| v.to_str().ok());
@@ -1775,7 +1776,7 @@ fn build_cors_layer(config_origins: &[String]) -> CorsLayer {
 async fn service_actions(
     State(state): State<AppState>,
     axum::extract::Path(service): axum::extract::Path<String>,
-) -> Result<Json<serde_json::Value>, ToolError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     let entry = state
         .catalog
         .services

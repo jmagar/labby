@@ -10,6 +10,7 @@ use axum::{
 };
 use serde_json::Value;
 
+use crate::api::error::ApiError;
 use crate::api::oauth::AuthContext;
 use crate::api::services::helpers::{dispatch_meta_from_headers, handle_action_with_meta};
 use crate::api::{ActionRequest, state::AppState};
@@ -26,7 +27,7 @@ async fn handle(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     Json(req): Json<ActionRequest>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     let request_id = headers.get("x-request-id").and_then(|v| v.to_str().ok());
 
     if stash_action_requires_admin(&req.action) {
@@ -42,10 +43,10 @@ async fn handle(
                 kind = "forbidden",
                 "stash write action rejected: lab:admin scope required"
             );
-            return Err(ToolError::Sdk {
+            return Err(ApiError(ToolError::Sdk {
                 sdk_kind: "forbidden".to_string(),
                 message: format!("action `{}` requires `lab:admin` scope", req.action),
-            });
+            }));
         }
     }
 

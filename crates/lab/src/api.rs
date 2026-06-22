@@ -62,6 +62,6 @@ pub struct ActionRequest {
 }
 
 #[allow(unused_imports)]
-pub use error::ToolError;
+pub use error::{ApiError, ToolError};
 #[allow(unused_imports)]
 pub use state::AppState;

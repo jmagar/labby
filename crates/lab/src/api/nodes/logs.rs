@@ -1,7 +1,7 @@
 use axum::{Json, extract::State};
 use serde::Deserialize;
 
-use crate::api::{ToolError, state::AppState};
+use crate::api::{error::ApiError, state::AppState};
 
 use super::{fleet::require_master_store, normalize_node_id_value};
 
@@ -20,7 +20,7 @@ pub struct SearchLogsRequest {
 pub async fn search(
     State(state): State<AppState>,
     Json(payload): Json<SearchLogsRequest>,
-) -> Result<Json<Vec<crate::node::log_event::NodeLogEvent>>, ToolError> {
+) -> Result<Json<Vec<crate::node::log_event::NodeLogEvent>>, ApiError> {
     let node_id = normalize_node_id_value(&payload.node_id, "node_id")?;
     let store = require_master_store(&state)?;
     let needle = payload.query.to_ascii_lowercase();

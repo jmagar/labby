@@ -20,7 +20,7 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::api::{ToolError, state::AppState};
+use crate::api::{ToolError, error::ApiError, state::AppState};
 use crate::config::NodeRole;
 use crate::dispatch::node::send::{SessionToken, sender_registry};
 use crate::node::checkin::{NodeHello, NodeMetadataUpload, NodeStatus};
@@ -86,7 +86,7 @@ const DEMUX_ALLOWLIST: &[&str] = &["lab.help", "lab.catalog", "lab.status"];
 
 pub async fn list_nodes(
     State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, ToolError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     let store = require_master_store(&state)?;
     let nodes = store.list_nodes().await;
     Ok(Json(serde_json::Value::Array(
@@ -112,7 +112,7 @@ pub async fn list_nodes(
 pub async fn get_node(
     State(state): State<AppState>,
     Path(node_id): Path<String>,
-) -> Result<Json<serde_json::Value>, ToolError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     let store = require_master_store(&state)?;
     let node_id = super::normalize_node_id_value(&node_id, "node_id")?;
     let snapshot = store.node(&node_id).await.ok_or_else(|| ToolError::Sdk {
@@ -156,7 +156,7 @@ pub(crate) fn require_enrollment_store(
 pub async fn websocket_upgrade(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
-) -> Result<Response, ToolError> {
+) -> Result<Response, ApiError> {
     let store = require_master_store(&state)?;
     let enrollment_store = require_enrollment_store(&state)?;
     let registry = Arc::clone(&state.registry);

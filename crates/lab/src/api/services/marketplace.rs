@@ -15,6 +15,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use tracing::{info, warn};
 
+use crate::api::error::ApiError;
 use crate::api::oauth::AuthContext;
 use crate::api::services::helpers::{dispatch_meta_from_headers, handle_action_with_meta};
 use crate::api::{ActionRequest, state::AppState};
@@ -64,7 +65,7 @@ async fn handle(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     Json(req): Json<ActionRequest>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     handle_marketplace_action(
         peer.map(|Extension(ConnectInfo(addr))| addr),
         headers,
@@ -79,7 +80,7 @@ async fn handle_marketplace_action(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     req: ActionRequest,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     let request_id = headers.get("x-request-id").and_then(|v| v.to_str().ok());
     require_marketplace_admin(&req.action, request_id, auth.as_ref())?;
     handle_action_with_meta(
@@ -139,7 +140,7 @@ async fn handle_artifact_fork(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     handle_artifact_path_action(headers, auth, "artifact.fork", body).await
 }
 
@@ -147,7 +148,7 @@ async fn handle_artifact_list(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     handle_artifact_path_action(headers, auth, "artifact.list", body).await
 }
 
@@ -155,7 +156,7 @@ async fn handle_artifact_unfork(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     handle_artifact_path_action(headers, auth, "artifact.unfork", body).await
 }
 
@@ -163,7 +164,7 @@ async fn handle_artifact_reset(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     handle_artifact_path_action(headers, auth, "artifact.reset", body).await
 }
 
@@ -171,7 +172,7 @@ async fn handle_artifact_diff(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     handle_artifact_path_action(headers, auth, "artifact.diff", body).await
 }
 
@@ -179,7 +180,7 @@ async fn handle_artifact_patch(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     handle_artifact_path_action(headers, auth, "artifact.patch", body).await
 }
 
@@ -187,7 +188,7 @@ async fn handle_artifact_update_check(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     handle_artifact_path_action(headers, auth, "artifact.update.check", body).await
 }
 
@@ -195,7 +196,7 @@ async fn handle_artifact_update_preview(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     handle_artifact_path_action(headers, auth, "artifact.update.preview", body).await
 }
 
@@ -203,7 +204,7 @@ async fn handle_artifact_update_apply(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     handle_artifact_path_action(headers, auth, "artifact.update.apply", body).await
 }
 
@@ -211,7 +212,7 @@ async fn handle_artifact_merge_suggest(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     handle_artifact_path_action(headers, auth, "artifact.merge.suggest", body).await
 }
 
@@ -219,7 +220,7 @@ async fn handle_artifact_config_set(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     body: Option<Json<Value>>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     handle_artifact_path_action(headers, auth, "artifact.config.set", body).await
 }
 
@@ -228,7 +229,7 @@ async fn handle_artifact_path_action(
     auth: Option<Extension<AuthContext>>,
     action: &'static str,
     body: Option<Json<Value>>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     let params = body
         .map(|Json(value)| value)
         .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
@@ -263,21 +264,21 @@ pub(crate) struct CherryPickProgressQuery {
 async fn cherry_pick_progress(
     State(_state): State<AppState>,
     Query(query): Query<CherryPickProgressQuery>,
-) -> Result<Sse<impl stream::Stream<Item = Result<Event, Infallible>>>, ToolError> {
+) -> Result<Sse<impl stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
     let rpc_id = query.rpc_id.trim();
     if rpc_id.is_empty() {
-        return Err(ToolError::MissingParam {
+        return Err(ApiError(ToolError::MissingParam {
             param: "rpc_id".into(),
             message: "`rpc_id` query parameter is required".into(),
-        });
+        }));
     }
     // Validate rpc_id shape — cherry_pick generates UUIDv4 strings, and we
     // reject anything else to keep a tight surface for this endpoint.
     if uuid::Uuid::parse_str(rpc_id).is_err() {
-        return Err(ToolError::InvalidParam {
+        return Err(ApiError(ToolError::InvalidParam {
             param: "rpc_id".into(),
             message: "`rpc_id` must be a UUID".into(),
-        });
+        }));
     }
 
     let receiver = subscribe_progress(rpc_id);

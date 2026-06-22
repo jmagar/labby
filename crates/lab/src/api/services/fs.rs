@@ -23,6 +23,7 @@ use tokio::io::AsyncReadExt;
 use tokio_util::io::ReaderStream;
 use tower_http::set_header::SetResponseHeaderLayer;
 
+use crate::api::error::ApiError;
 use crate::api::state::AppState;
 use crate::dispatch::error::ToolError;
 
@@ -71,7 +72,7 @@ pub struct PreviewQuery {
 async fn handle_list(
     State(state): State<AppState>,
     Query(query): Query<ListQuery>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     let root = state
         .workspace_root
         .as_ref()
@@ -89,7 +90,7 @@ async fn handle_list(
         Ok(_) => log_ok("fs.list", elapsed_ms, None, None, None),
         Err(err) => log_err("fs.list", elapsed_ms, err, None),
     }
-    result.map(Json)
+    result.map(Json).map_err(ApiError)
 }
 
 /// `GET /v1/fs/preview` handler.
@@ -107,7 +108,7 @@ async fn handle_list(
 async fn handle_preview(
     State(state): State<AppState>,
     Query(query): Query<PreviewQuery>,
-) -> Result<Response, ToolError> {
+) -> Result<Response, ApiError> {
     let root = state
         .workspace_root
         .as_ref()

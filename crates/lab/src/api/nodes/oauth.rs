@@ -6,7 +6,7 @@ use serde::Deserialize;
 use std::time::Instant;
 
 use crate::api::auth_helpers::request_id;
-use crate::api::{ToolError, state::AppState};
+use crate::api::{ToolError, error::ApiError, state::AppState};
 
 #[derive(Debug, Deserialize)]
 pub struct StartOauthRelayRequest {
@@ -39,7 +39,7 @@ pub async fn handle_start(
     State(_state): State<AppState>,
     headers: HeaderMap,
     Json(payload): Json<StartOauthRelayRequest>,
-) -> Result<Json<StartOauthRelayResponse>, ToolError> {
+) -> Result<Json<StartOauthRelayResponse>, ApiError> {
     let start = Instant::now();
     let request_id = request_id(&headers).map(ToOwned::to_owned);
     validate_bind_addr(payload.bind_addr)?;

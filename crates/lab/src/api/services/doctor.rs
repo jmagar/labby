@@ -11,11 +11,11 @@ use futures::stream;
 use serde_json::Value;
 use tracing::info;
 
+use crate::api::error::ApiError;
 use crate::api::oauth::AuthContext;
 use crate::api::services::helpers::{dispatch_meta_from_headers, handle_action_with_meta};
 use crate::api::{ActionRequest, state::AppState};
 use crate::dispatch::doctor::ACTIONS;
-use crate::dispatch::error::ToolError;
 
 pub fn routes(_state: AppState) -> Router<AppState> {
     Router::new()
@@ -29,7 +29,7 @@ async fn handle(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     Json(req): Json<ActionRequest>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     let clients = state.clients.clone();
     handle_action_with_meta(
         "doctor",
@@ -52,7 +52,7 @@ async fn handle(
 async fn stream_audit_full(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Sse<impl futures::Stream<Item = Result<Event, Infallible>>>, ToolError> {
+) -> Result<Sse<impl futures::Stream<Item = Result<Event, Infallible>>>, ApiError> {
     const ACTION: &str = "audit.full";
     let request_id = headers
         .get("x-request-id")

@@ -23,6 +23,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::api::auth_helpers::{log_auth_dispatch, log_auth_dispatch_start, request_id};
+use crate::api::error::ApiError;
 use crate::api::oauth::AuthContext;
 use crate::api::state::AppState;
 use crate::dispatch::error::ToolError;
@@ -176,7 +177,7 @@ async fn list_allowed_emails(
                 Some(err.kind()),
                 actor_key,
             );
-            return no_store(err.into_response());
+            return no_store(ApiError(err).into_response());
         }
     };
     if let Err(err) = require_admin(&auth, admin_email) {
@@ -187,7 +188,7 @@ async fn list_allowed_emails(
             Some(err.kind()),
             actor_key,
         );
-        return no_store(err.into_response());
+        return no_store(ApiError(err).into_response());
     }
 
     // Require oauth_state.
@@ -201,7 +202,7 @@ async fn list_allowed_emails(
                 Some(err.kind()),
                 actor_key,
             );
-            return no_store(err.into_response());
+            return no_store(ApiError(err).into_response());
         }
     };
 
@@ -218,7 +219,7 @@ async fn list_allowed_emails(
                 "auth.allowed_user.list failed"
             );
             log_auth_dispatch(action, req_id.as_deref(), start, Some(kind), actor_key);
-            return no_store(auth_err(err).into_response());
+            return no_store(ApiError(auth_err(err)).into_response());
         }
     };
 
@@ -258,7 +259,7 @@ async fn add_allowed_email(
                 Some(err.kind()),
                 actor_key,
             );
-            return no_store(err.into_response());
+            return no_store(ApiError(err).into_response());
         }
     };
     if let Err(err) = require_admin(&auth, admin_email) {
@@ -269,7 +270,7 @@ async fn add_allowed_email(
             Some(err.kind()),
             actor_key,
         );
-        return no_store(err.into_response());
+        return no_store(ApiError(err).into_response());
     }
 
     // Require oauth_state.
@@ -283,7 +284,7 @@ async fn add_allowed_email(
                 Some(err.kind()),
                 actor_key,
             );
-            return no_store(err.into_response());
+            return no_store(ApiError(err).into_response());
         }
     };
 
@@ -298,7 +299,7 @@ async fn add_allowed_email(
                 Some(err.kind()),
                 actor_key,
             );
-            return no_store(err.into_response());
+            return no_store(ApiError(err).into_response());
         }
     };
 
@@ -333,7 +334,7 @@ async fn add_allowed_email(
                 "auth.allowed_user.add failed"
             );
             log_auth_dispatch(action, req_id.as_deref(), start, Some(kind), actor_key);
-            return no_store(auth_err(err).into_response());
+            return no_store(ApiError(auth_err(err)).into_response());
         }
     }
 
@@ -381,7 +382,7 @@ async fn delete_allowed_email(
                 Some(err.kind()),
                 actor_key,
             );
-            return no_store(err.into_response());
+            return no_store(ApiError(err).into_response());
         }
     };
     if let Err(err) = require_admin(&auth, admin_email) {
@@ -392,7 +393,7 @@ async fn delete_allowed_email(
             Some(err.kind()),
             actor_key,
         );
-        return no_store(err.into_response());
+        return no_store(ApiError(err).into_response());
     }
 
     // Require oauth_state.
@@ -406,7 +407,7 @@ async fn delete_allowed_email(
                 Some(err.kind()),
                 actor_key,
             );
-            return no_store(err.into_response());
+            return no_store(ApiError(err).into_response());
         }
     };
 
@@ -437,7 +438,7 @@ async fn delete_allowed_email(
                 "auth.allowed_user.remove failed"
             );
             log_auth_dispatch(action, req_id.as_deref(), start, Some(kind), actor_key);
-            return no_store(auth_err(err).into_response());
+            return no_store(ApiError(auth_err(err)).into_response());
         }
     }
 

@@ -18,6 +18,12 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 jiff.workspace = true
+lab-apis = { path = "../lab-apis", default-features = false, optional = true }
+
+[features]
+marketplace = ["dep:lab-apis", "lab-apis/mcpregistry"]
+acp_registry = ["dep:lab-apis", "lab-apis/acp_registry"]
+deploy = ["dep:lab-apis", "lab-apis/deploy"]
 
 [dev-dependencies]
 toml.workspace = true

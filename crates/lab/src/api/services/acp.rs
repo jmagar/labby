@@ -15,6 +15,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::api::ActionRequest;
+use crate::api::error::ApiError;
 use crate::api::oauth::AuthContext;
 use crate::api::services::helpers::{dispatch_meta_from_headers, handle_action_with_meta};
 use crate::api::state::AppState;
@@ -68,7 +69,7 @@ async fn handle(
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
     Json(mut req): Json<ActionRequest>,
-) -> Result<Json<Value>, ToolError> {
+) -> Result<Json<Value>, ApiError> {
     if req.action.starts_with("session.") {
         let principal = required_principal(auth.clone())?;
         match req.params {
@@ -79,10 +80,10 @@ async fn handle(
                 req.params = json!({ "principal": principal });
             }
             _ => {
-                return Err(ToolError::InvalidParam {
+                return Err(ApiError(ToolError::InvalidParam {
                     message: "params must be an object".to_string(),
                     param: "params".to_string(),
-                });
+                }));
             }
         }
     }
@@ -117,7 +118,7 @@ async fn handle(
 async fn provider_health(State(state): State<AppState>) -> impl IntoResponse {
     match dispatch_with_registry(&state.acp_registry, "provider.list", json!({})).await {
         Ok(v) => Json(v).into_response(),
-        Err(e) => e.into_response(),
+        Err(e) => ApiError(e).into_response(),
     }
 }
 
@@ -127,7 +128,7 @@ async fn list_sessions(
 ) -> impl IntoResponse {
     let principal = match required_principal(auth) {
         Ok(principal) => principal,
-        Err(error) => return error.into_response(),
+        Err(error) => return ApiError(error).into_response(),
     };
     match dispatch_with_registry(
         &state.acp_registry,
@@ -137,7 +138,7 @@ async fn list_sessions(
     .await
     {
         Ok(v) => Json(v).into_response(),
-        Err(e) => e.into_response(),
+        Err(e) => ApiError(e).into_response(),
     }
 }
 
@@ -173,7 +174,7 @@ async fn create_session(
 ) -> impl IntoResponse {
     let principal = match required_principal(auth) {
         Ok(principal) => principal,
-        Err(error) => return error.into_response(),
+        Err(error) => return ApiError(error).into_response(),
     };
     let params = json!({
         "provider": body.provider,
@@ -184,7 +185,7 @@ async fn create_session(
     });
     match dispatch_with_registry(&state.acp_registry, "session.start", params).await {
         Ok(v) => Json(v).into_response(),
-        Err(e) => e.into_response(),
+        Err(e) => ApiError(e).into_response(),
     }
 }
 
@@ -220,33 +221,33 @@ async fn prompt_session(
 ) -> impl IntoResponse {
     let principal = match required_principal(auth) {
         Ok(principal) => principal,
-        Err(error) => return error.into_response(),
+        Err(error) => return ApiError(error).into_response(),
     };
     let attachments = body.attachments.unwrap_or_default();
     let prompt_is_empty = body.prompt.trim().is_empty();
     let no_attachments = attachments.is_empty();
     if prompt_is_empty && no_attachments {
-        return ToolError::MissingParam {
+        return ApiError(ToolError::MissingParam {
             message: "prompt or attachments is required".to_string(),
             param: "prompt".to_string(),
-        }
+        })
         .into_response();
     }
 
     if body.prompt.len() > PROMPT_MAX_CHARS {
-        return ToolError::InvalidParam {
+        return ApiError(ToolError::InvalidParam {
             message: format!(
                 "prompt exceeds maximum allowed length ({} > {} chars)",
                 body.prompt.len(),
                 PROMPT_MAX_CHARS
             ),
             param: "prompt".to_string(),
-        }
+        })
         .into_response();
     }
 
     if let Err(error) = validate_prompt_attachments(&attachments) {
-        return error.into_response();
+        return ApiError(error).into_response();
     }
     let local_attachments = into_local_prompt_attachments(attachments);
 
@@ -272,7 +273,7 @@ async fn prompt_session(
     });
     match dispatch_with_registry(&state.acp_registry, "session.prompt", params).await {
         Ok(v) => Json(v).into_response(),
-        Err(e) => e.into_response(),
+        Err(e) => ApiError(e).into_response(),
     }
 }
 
@@ -304,7 +305,7 @@ async fn cancel_session(
 ) -> impl IntoResponse {
     let principal = match required_principal(auth) {
         Ok(principal) => principal,
-        Err(error) => return error.into_response(),
+        Err(error) => return ApiError(error).into_response(),
     };
     let params = json!({
         "session_id": session_id,
@@ -313,7 +314,7 @@ async fn cancel_session(
     });
     match dispatch_with_registry(&state.acp_registry, "session.cancel", params).await {
         Ok(v) => Json(v).into_response(),
-        Err(e) => e.into_response(),
+        Err(e) => ApiError(e).into_response(),
     }
 }
 
@@ -330,13 +331,13 @@ async fn approve_permission(
 ) -> impl IntoResponse {
     let principal = match required_principal(auth) {
         Ok(principal) => principal,
-        Err(error) => return error.into_response(),
+        Err(error) => return ApiError(error).into_response(),
     };
     if body.option_id.trim().is_empty() {
-        return ToolError::MissingParam {
+        return ApiError(ToolError::MissingParam {
             message: "option_id is required".to_string(),
             param: "option_id".to_string(),
-        }
+        })
         .into_response();
     }
     let params = json!({
@@ -348,7 +349,7 @@ async fn approve_permission(
     });
     match dispatch_with_registry(&state.acp_registry, "session.permission.approve", params).await {
         Ok(v) => Json(v).into_response(),
-        Err(e) => e.into_response(),
+        Err(e) => ApiError(e).into_response(),
     }
 }
 
@@ -359,7 +360,7 @@ async fn reject_permission(
 ) -> impl IntoResponse {
     let principal = match required_principal(auth) {
         Ok(principal) => principal,
-        Err(error) => return error.into_response(),
+        Err(error) => return ApiError(error).into_response(),
     };
     let params = json!({
         "session_id": session_id,
@@ -368,7 +369,7 @@ async fn reject_permission(
     });
     match dispatch_with_registry(&state.acp_registry, "session.permission.reject", params).await {
         Ok(v) => Json(v).into_response(),
-        Err(e) => e.into_response(),
+        Err(e) => ApiError(e).into_response(),
     }
 }
 
@@ -379,12 +380,12 @@ async fn subscribe_ticket(
 ) -> impl IntoResponse {
     let principal = match required_principal(auth) {
         Ok(principal) => principal,
-        Err(error) => return error.into_response(),
+        Err(error) => return ApiError(error).into_response(),
     };
     let params = json!({ "session_id": session_id, "principal": principal });
     match dispatch_with_registry(&state.acp_registry, "session.subscribe_ticket", params).await {
         Ok(v) => Json(v).into_response(),
-        Err(e) => e.into_response(),
+        Err(e) => ApiError(e).into_response(),
     }
 }
 
@@ -437,7 +438,7 @@ async fn stream_events(
         .await;
 
     match stream_result {
-        Err(e) => e.into_response(),
+        Err(e) => ApiError(e).into_response(),
         Ok(event_stream) => {
             let sse_stream = event_stream.map(|event| {
                 let data = serde_json::to_string(&*event).unwrap_or_else(|_| "{}".to_string());

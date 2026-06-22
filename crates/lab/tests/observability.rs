@@ -180,7 +180,7 @@ fn api_dispatch_failure_emits_stable_kind() {
     });
 
     // The returned error exposes the stable kind to callers...
-    assert_eq!(err.kind(), "missing_param");
+    assert_eq!(err.0.kind(), "missing_param");
 
     // ...and the dispatch failure event records it for log-based correlation.
     let logs = buf.contents();

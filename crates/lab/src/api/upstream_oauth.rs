@@ -8,6 +8,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
+use crate::api::error::ApiError;
 use crate::api::state::AppState;
 use crate::dispatch::error::ToolError;
 use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
@@ -128,7 +129,7 @@ struct UpstreamEntry {
 async fn upstreams(
     State(state): State<AppState>,
     Extension(auth): Extension<crate::api::oauth::AuthContext>,
-) -> Result<Json<Vec<UpstreamEntry>>, ToolError> {
+) -> Result<Json<Vec<UpstreamEntry>>, ApiError> {
     require_master(&state)?;
     require_admin_scope(&auth, "upstreams")?;
     let manager = state
@@ -244,15 +245,15 @@ async fn probe(
     State(state): State<AppState>,
     Extension(auth): Extension<crate::api::oauth::AuthContext>,
     Json(body): Json<ProbeRequest>,
-) -> Result<Json<crate::dispatch::gateway::oauth::ProbeResult>, ToolError> {
+) -> Result<Json<crate::dispatch::gateway::oauth::ProbeResult>, ApiError> {
     let started = std::time::Instant::now();
     require_master(&state)?;
     require_admin_scope(&auth, "probe")?;
     if body.confirm != Some(true) {
-        return Err(ToolError::Sdk {
+        return Err(ApiError(ToolError::Sdk {
             sdk_kind: "confirmation_required".to_string(),
             message: "set confirm=true to probe and prepare upstream oauth".to_string(),
-        });
+        }));
     }
     let manager = state
         .gateway_manager
@@ -292,7 +293,7 @@ async fn start(
     State(state): State<AppState>,
     Extension(auth): Extension<crate::api::oauth::AuthContext>,
     Json(body): Json<StartRequest>,
-) -> Result<Json<StartResponse>, ToolError> {
+) -> Result<Json<StartResponse>, ApiError> {
     let started = std::time::Instant::now();
     require_master(&state)?;
     require_admin_scope(&auth, "start")?;
@@ -305,9 +306,9 @@ async fn start(
     // sends the user off-site only to fail at the callback with "oauth sqlite
     // not configured" — after the user has already left the page.
     if manager.oauth_sqlite().is_none() {
-        return Err(ToolError::internal_message(
+        return Err(ApiError(ToolError::internal_message(
             "upstream OAuth not configured (missing SQLite store)",
-        ));
+        )));
     }
     let begin = crate::dispatch::gateway::oauth::begin_authorization(
         &manager,
@@ -346,7 +347,7 @@ async fn status(
     State(state): State<AppState>,
     Query(query): Query<StatusQuery>,
     Extension(auth): Extension<crate::api::oauth::AuthContext>,
-) -> Result<Json<crate::dispatch::gateway::oauth::UpstreamOauthStatusView>, ToolError> {
+) -> Result<Json<crate::dispatch::gateway::oauth::UpstreamOauthStatusView>, ApiError> {
     let started = std::time::Instant::now();
     require_master(&state)?;
     require_admin_scope(&auth, "status")?;
@@ -392,14 +393,17 @@ async fn clear(
 ) -> impl IntoResponse {
     let started = std::time::Instant::now();
     if let Err(error) = require_master(&state) {
-        return error.into_response();
+        return ApiError(error).into_response();
     }
     if let Err(error) = require_admin_scope(&auth, "clear") {
-        return error.into_response();
+        return ApiError(error).into_response();
     }
     let manager = match state.gateway_manager.clone() {
         Some(manager) => manager,
-        None => return ToolError::internal_message("gateway manager not wired").into_response(),
+        None => {
+            return ApiError(ToolError::internal_message("gateway manager not wired"))
+                .into_response();
+        }
     };
     if let Err(error) = crate::dispatch::gateway::oauth::clear(
         &manager,
@@ -418,7 +422,7 @@ async fn clear(
             kind = error.kind(),
             "upstream oauth clear failed"
         );
-        return error.into_response();
+        return ApiError(error).into_response();
     }
     info!(
         surface = "api",
@@ -441,27 +445,33 @@ async fn callback(
 ) -> impl IntoResponse {
     let started = std::time::Instant::now();
     if let Err(error) = require_master(&state) {
-        return error.into_response();
+        return ApiError(error).into_response();
     }
 
     let manager = match state.gateway_manager.clone() {
         Some(manager) => manager,
-        None => return ToolError::internal_message("gateway manager not wired").into_response(),
+        None => {
+            return ApiError(ToolError::internal_message("gateway manager not wired"))
+                .into_response();
+        }
     };
     let base = match public_url(&state) {
         Ok(url) => url.clone(),
-        Err(error) => return error.into_response(),
+        Err(error) => return ApiError(error).into_response(),
     };
     let mut redirect_url = match append_public_path(&base, "/gateway/oauth/result") {
         Ok(url) => url,
-        Err(error) => return error.into_response(),
+        Err(error) => return ApiError(error).into_response(),
     };
 
     // Recover (upstream, subject) from the state token — the AS only sends back
     // `code` and `state`, so we can't require `upstream` as a query param.
     let sqlite = match manager.oauth_sqlite() {
         Some(s) => s,
-        None => return ToolError::internal_message("oauth sqlite not configured").into_response(),
+        None => {
+            return ApiError(ToolError::internal_message("oauth sqlite not configured"))
+                .into_response();
+        }
     };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -479,15 +489,17 @@ async fn callback(
                 action = "callback",
                 "upstream oauth callback: state token not found or expired"
             );
-            return ToolError::Sdk {
+            return ApiError(ToolError::Sdk {
                 sdk_kind: "auth_failed".to_string(),
                 message: "OAuth state token not found or expired".to_string(),
-            }
+            })
             .into_response();
         }
         Err(e) => {
-            return ToolError::internal_message(format!("state lookup failed: {e}"))
-                .into_response();
+            return ApiError(ToolError::internal_message(format!(
+                "state lookup failed: {e}"
+            )))
+            .into_response();
         }
     };
 
@@ -501,10 +513,10 @@ async fn callback(
             expected_subject = SHARED_GATEWAY_OAUTH_SUBJECT,
             "upstream oauth callback rejected: state subject mismatch"
         );
-        return ToolError::Sdk {
+        return ApiError(ToolError::Sdk {
             sdk_kind: "auth_failed".to_string(),
             message: "OAuth state subject mismatch".to_string(),
-        }
+        })
         .into_response();
     }
 
@@ -566,10 +578,10 @@ async fn callback(
                     "failed to revoke oauth state token after malformed callback: {revoke_err}"
                 );
             }
-            return ToolError::InvalidParam {
+            return ApiError(ToolError::InvalidParam {
                 message: "Callback missing code parameter".to_string(),
                 param: "code".to_string(),
-            }
+            })
             .into_response();
         }
     };

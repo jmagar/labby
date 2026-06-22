@@ -17,6 +17,7 @@ use tracing::Instrument;
 
 use lab_apis::core::action::ActionSpec;
 
+use crate::api::error::ApiError;
 use crate::api::{ActionRequest, oauth::AuthContext};
 use crate::dispatch::error::ToolError;
 use crate::dispatch::helpers::estimate_tokens_value;
@@ -74,7 +75,7 @@ pub async fn handle_action<F, Fut>(
     req: ActionRequest,
     actions: &[ActionSpec],
     dispatch: F,
-) -> Result<Json<Value>, ToolError>
+) -> Result<Json<Value>, ApiError>
 where
     F: FnOnce(String, Value) -> Fut,
     Fut: Future<Output = Result<Value, ToolError>>,
@@ -101,7 +102,7 @@ pub async fn handle_action_with_meta<F, Fut>(
     req: ActionRequest,
     actions: &[ActionSpec],
     dispatch: F,
-) -> Result<Json<Value>, ToolError>
+) -> Result<Json<Value>, ApiError>
 where
     F: FnOnce(String, Value) -> Fut,
     Fut: Future<Output = Result<Value, ToolError>>,
@@ -122,10 +123,10 @@ where
                     kind = "not_found",
                     "service rejected by gateway surface policy"
                 );
-                return Err(ToolError::Sdk {
+                return Err(ApiError(ToolError::Sdk {
                     sdk_kind: "not_found".to_string(),
                     message: format!("service `{service}` is not enabled on the {surface} surface"),
-                });
+                }));
             }
         }
     }
@@ -150,11 +151,11 @@ where
         let mut valid: Vec<String> = actions.iter().map(|s| s.name.to_string()).collect();
         valid.push("help".to_string());
         valid.push("schema".to_string());
-        return Err(ToolError::UnknownAction {
+        return Err(ApiError(ToolError::UnknownAction {
             message: format!("unknown action: `{action}`"),
             valid,
             hint: None,
-        });
+        }));
     };
     let is_destructive = spec.is_some_and(|s| s.destructive);
     let instance = params
@@ -179,11 +180,11 @@ where
                 request_id,
                 "confirmation_required for destructive action"
             );
-            return Err(ToolError::ConfirmationRequired {
+            return Err(ApiError(ToolError::ConfirmationRequired {
                 message: format!(
                     "action `{action}` is destructive — set `confirm: true` in params to proceed"
                 ),
-            });
+            }));
         }
     }
 
@@ -279,7 +280,7 @@ where
         ),
     }
 
-    result.map(Json)
+    result.map(Json).map_err(ApiError)
 }
 
 #[cfg(test)]
@@ -425,7 +426,7 @@ mod tests {
         })
         .await;
         assert!(result.is_err());
-        let err = result.unwrap_err();
+        let err = result.unwrap_err().0;
         assert_eq!(err.kind(), "missing_param");
     }
 
@@ -439,7 +440,7 @@ mod tests {
         })
         .await;
         assert!(result.is_err());
-        let err = result.unwrap_err();
+        let err = result.unwrap_err().0;
         assert_eq!(
             err.kind(),
             "confirmation_required",
@@ -456,7 +457,7 @@ mod tests {
         })
         .await;
         assert!(result.is_err());
-        let err = result.unwrap_err();
+        let err = result.unwrap_err().0;
         assert_eq!(err.kind(), "confirmation_required");
     }
 
@@ -516,7 +517,7 @@ mod tests {
         .await;
 
         assert!(result.is_err(), "unknown action must be rejected");
-        let err = result.unwrap_err();
+        let err = result.unwrap_err().0;
         assert_eq!(
             err.kind(),
             "unknown_action",
@@ -587,7 +588,7 @@ mod tests {
         })
         .await;
         assert!(result.is_err());
-        let err = result.unwrap_err();
+        let err = result.unwrap_err().0;
         assert_eq!(err.kind(), "missing_param");
     }
 
@@ -602,7 +603,7 @@ mod tests {
         })
         .await;
         assert!(result.is_err());
-        let err = result.unwrap_err();
+        let err = result.unwrap_err().0;
         assert_eq!(
             err.kind(),
             "confirmation_required",
@@ -620,7 +621,7 @@ mod tests {
         })
         .await;
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().kind(), "unknown_action");
+        assert_eq!(result.unwrap_err().0.kind(), "unknown_action");
     }
 
     // ── Destructive action requires confirm:true in params (headers are never checked) ──
@@ -634,7 +635,7 @@ mod tests {
         })
         .await;
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().kind(), "confirmation_required");
+        assert_eq!(result.unwrap_err().0.kind(), "confirmation_required");
     }
 
     #[test]
