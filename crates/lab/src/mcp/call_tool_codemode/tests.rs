@@ -170,7 +170,18 @@ fn code_mode_execute_trace_includes_shape_metadata_and_shaped_result() {
         structured_json["result_shaping"]["policy"],
         json!("truncate")
     );
+    assert_eq!(structured_json["result_shaping"]["changed"], json!(true));
     assert_eq!(structured_json["result_shaping"]["truncated"], json!(true));
+    assert_eq!(
+        structured_json["result_shaping"]["original_size_bytes"],
+        json!(5000)
+    );
+    assert_eq!(
+        structured_json["result_shaping"]["shaped_size_bytes"],
+        json!(256)
+    );
+    assert!(structured_json["result_shape"].get("policy").is_none());
+    assert!(structured_json["result_shape"].get("truncated").is_none());
 }
 
 #[test]

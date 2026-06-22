@@ -3,6 +3,8 @@ use serde_json::Value;
 
 use crate::config::CodeModeResultShapePolicy;
 
+const MIN_SHAPED_RESULT_BYTES: usize = 256;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CodeModeResultShapeMetadata {
     pub policy: CodeModeResultShapePolicy,
@@ -73,7 +75,9 @@ fn shape_truncate(
     let token_budget_bytes = max_response_tokens
         .max(1)
         .saturating_mul(token_estimate_divisor.max(1) as usize);
-    let budget = max_response_bytes.min(token_budget_bytes).max(256);
+    let budget = max_response_bytes
+        .min(token_budget_bytes)
+        .max(MIN_SHAPED_RESULT_BYTES);
     if original_size_bytes <= budget {
         return unchanged(Some(value), policy, original_size_bytes);
     }

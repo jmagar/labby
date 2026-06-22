@@ -405,11 +405,9 @@ mod tests {
         )
         .expect("passing snippet result");
         assert_eq!(pass["passed"], json!(true));
-        assert!(
-            pass["response"]["result"]
-                .as_str()
-                .expect("display result is shaped string")
-                .contains("[code mode result truncated]")
+        assert_eq!(
+            pass["response"],
+            serde_json::to_value(shaped_display_response()).expect("display response serializes")
         );
 
         let fail = snippet_test_result(
@@ -421,11 +419,9 @@ mod tests {
         )
         .expect("failing snippet result");
         assert_eq!(fail["passed"], json!(false));
-        assert!(
-            fail["response"]["result"]
-                .as_str()
-                .expect("display result is shaped string")
-                .contains("[code mode result truncated]")
+        assert_eq!(
+            fail["response"],
+            serde_json::to_value(shaped_display_response()).expect("display response serializes")
         );
     }
 }

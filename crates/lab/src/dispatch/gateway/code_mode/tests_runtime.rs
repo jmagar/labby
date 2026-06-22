@@ -62,8 +62,9 @@ fn shape_policy_truncate_stringifies_large_object() {
 
 #[test]
 fn shape_policy_truncates_utf8_by_bytes() {
-    let input = Some(json!({"payload": "é".repeat(5000)}));
-    let shaped = shape_final_result(input, CodeModeResultShapePolicy::Truncate, 512, 6000, 4);
+    let budget = 511;
+    let input = Some(json!({"payload": "€".repeat(5000)}));
+    let shaped = shape_final_result(input, CodeModeResultShapePolicy::Truncate, budget, 6000, 4);
     let text = shaped
         .result
         .unwrap()
@@ -72,7 +73,7 @@ fn shape_policy_truncates_utf8_by_bytes() {
         .to_string();
 
     assert!(text.contains("[code mode result truncated]"), "{text}");
-    assert!(text.len() <= 512);
+    assert!(text.len() <= budget);
     assert_eq!(shaped.metadata.shaped_size_bytes, text.len());
 }
 

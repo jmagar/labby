@@ -97,7 +97,7 @@ Rules:
 5. Validate without saving: `labby snippets validate my-workflow --file draft.md`.
 6. Save as a user snippet: `labby snippets create my-workflow --file draft.md --description "..."`.
 7. Smoke-test execution: `labby snippets test my-workflow --param topic="mcp-ui rust"`.
-8. Run normally: `labby snippets exec my-workflow --param topic="mcp-ui rust" --max-tool-calls 10`.
+8. Run normally: `labby snippets exec my-workflow --param topic="mcp-ui rust"`.
 
 Use `--force` only when intentionally replacing a user snippet.
 

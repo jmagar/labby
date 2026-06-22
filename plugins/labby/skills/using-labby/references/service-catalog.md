@@ -138,7 +138,7 @@ Discovery chooser:
 
 | Need | Use |
 | --- | --- |
-| Unknown intent across all servers | Code Mode `search` then `execute` |
+| Unknown intent across all servers | `codemode.search()` then `codemode` execution |
 | Connected upstream inventory | MCP `list_resources` + `read_resource lab://gateway/servers`, or `gateway.servers` |
 | Full schema for one known upstream | MCP `read_resource lab://gateway/<name>/schema`, or `gateway.schema` |
 | Runtime gateway health/status | `labby gateway mcp list --json` or `gateway.mcp.list` |
