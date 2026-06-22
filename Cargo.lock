@@ -2511,6 +2511,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-runtime"
+version = "0.26.1"
+dependencies = [
+ "lab-apis",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "lab-winjob"
 version = "0.26.1"
 dependencies = [
@@ -2549,6 +2560,7 @@ dependencies = [
  "jiff",
  "lab-apis",
  "lab-auth",
+ "lab-runtime",
  "lab-winjob",
  "nix",
  "oauth2",
