@@ -26,6 +26,7 @@ acp_registry = ["dep:lab-apis", "lab-apis/acp_registry"]
 deploy = ["dep:lab-apis", "lab-apis/deploy"]
 
 [dev-dependencies]
+tempfile.workspace = true
 toml.workspace = true
 
 [lints]

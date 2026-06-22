@@ -2,7 +2,6 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::{Component, Path};
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
 
@@ -10,6 +9,14 @@ use lab_apis::core::action::ActionSpec;
 use serde_json::Value;
 
 use crate::dispatch::error::ToolError;
+
+/// Lexical `..`/absolute-component path-traversal guard.
+///
+/// The implementation now lives in `lab_runtime::path_safety` (alongside the
+/// canonicalizing guards it shares the `path_traversal` kind with) so the
+/// standalone gateway crates can use it. It is re-exported here so existing
+/// `crate::dispatch::helpers::reject_path_traversal` callers keep working.
+pub use lab_runtime::path_safety::reject_path_traversal;
 
 #[cfg(test)]
 static TEST_LAB_HOME: OnceLock<Mutex<Option<std::path::PathBuf>>> = OnceLock::new();
@@ -87,35 +94,6 @@ pub fn redact_home(path: &str) -> String {
         return format!("~/{rest}");
     }
     path.to_string()
-}
-
-/// Reject any path input that contains a `Component::ParentDir` (`..`) segment.
-///
-/// This is a **lexical** check only. Callers that join the input against a
-/// trusted root MUST additionally `canonicalize` + `starts_with(root)` after
-/// writing to protect against symlinks escaping the jail (TOCTOU-weak, but
-/// strictly better than skipping). Windows UNC / absolute paths are rejected
-/// upstream by callers via `Path::is_absolute`.
-///
-/// Emits the canonical `path_traversal` kind (see `docs/dev/ERRORS.md`) so this
-/// lexical guard and the canonicalizing guards in `dispatch/path_safety.rs`
-/// report the same path-escape threat under one stable kind rather than
-/// splitting it across `path_traversal` and `invalid_param`.
-pub fn reject_path_traversal(rel_path: &str) -> Result<(), ToolError> {
-    for component in Path::new(rel_path).components() {
-        if matches!(
-            component,
-            Component::ParentDir | Component::RootDir | Component::Prefix(_)
-        ) {
-            return Err(ToolError::Sdk {
-                sdk_kind: "path_traversal".to_string(),
-                message: format!(
-                    "path traversal rejected: `{rel_path}` must be a relative path with only normal components"
-                ),
-            });
-        }
-    }
-    Ok(())
 }
 
 /// Read an environment variable, returning `None` if absent or empty.

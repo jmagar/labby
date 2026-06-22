@@ -9,4 +9,5 @@
 
 pub mod error;
 pub mod gateway_config;
+pub mod path_safety;
 pub mod redact;
