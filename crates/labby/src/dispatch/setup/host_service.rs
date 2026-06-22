@@ -111,9 +111,8 @@ pub(crate) async fn status() -> Result<HostServiceStatus, ToolError> {
     let mut active_state = None;
     let mut sub_state = None;
     let mut main_pid = None;
-    let mut exec_main_status = None;
 
-    if installed {
+    let exec_main_status = if installed {
         let output = run_systemctl(&[
             "show",
             SERVICE_NAME,
@@ -126,9 +125,10 @@ pub(crate) async fn status() -> Result<HostServiceStatus, ToolError> {
         active_state = non_empty_prop(&props, "ActiveState");
         sub_state = non_empty_prop(&props, "SubState");
         main_pid = parse_main_pid(&props);
-        exec_main_status =
-            non_empty_prop(&props, "ExecMainStatus").and_then(|value| value.parse().ok());
-    }
+        non_empty_prop(&props, "ExecMainStatus").and_then(|value| value.parse().ok())
+    } else {
+        None
+    };
 
     let process_exe = main_pid.and_then(process_exe);
     let ready_owned_by_service = match ready_response {
@@ -221,7 +221,7 @@ pub(crate) async fn uninstall() -> Result<HostServiceOutcome, ToolError> {
 }
 
 fn unit_text() -> String {
-    r#"[Unit]
+    r"[Unit]
 Description=Labby host gateway
 After=network-online.target
 Wants=network-online.target
@@ -240,7 +240,7 @@ KillSignal=SIGINT
 
 [Install]
 WantedBy=default.target
-"#
+"
     .to_string()
 }
 

@@ -27,6 +27,7 @@ Implemented a host `labby.service` path for running the gateway outside the dev 
 4. Opened PR #152 and pushed the initial implementation commit.
 5. Ran lavra review, three simplifier passes, PR-review-toolkit style sweeps, and CodeRabbit comment resolution, then pushed focused fix commits for each batch.
 6. Ran targeted and full verification locally, then saved this session artifact for the final docs-only commit.
+7. Fixed a Rust 1.94.1 CI-only Clippy failure in `host_service.rs`, re-ran local Clippy and focused host-service tests, and prepared the final push.
 
 ## Key Findings
 
@@ -106,6 +107,7 @@ Updated `README.md`, `CLAUDE.md`, `docs/runtime/HOST_GATEWAY.md`, and `docs/gene
 | `cargo fmt --all --check` | Passed. |
 | `git diff --check` | Passed. |
 | `cargo check --workspace --all-features` | Passed. |
+| `cargo clippy --workspace --all-features --locked -- -D warnings` | Passed after fixing Rust 1.94.1 CI-only lints. |
 | `cargo nextest run --workspace --all-features` | Passed, 2200 passed and 14 skipped. |
 | `gh api graphql ... reviewThreads` | Confirmed all CodeRabbit inline review threads resolved. |
 
@@ -115,6 +117,7 @@ Updated `README.md`, `CLAUDE.md`, `docs/runtime/HOST_GATEWAY.md`, and `docs/gene
 - Review found host-service preflight and status paths were too lossy around Docker/port/readiness errors. Fixed with explicit conflict errors, probe error fields, and ownership checks.
 - Review found `command_not_found` matched generic `not found` text. Narrowed it to actual spawn failures.
 - Review found operator docs could hide public-route proof gaps. Replaced the generic public proof with `mcporter` and PID correlation guidance.
+- Remote CI Clippy on Rust 1.94.1 failed for `needless_raw_string_hashes` and `useless_let_if_seq` in `crates/lab/src/dispatch/setup/host_service.rs`. Removed the needless raw-string hashes and rewrote the `ExecMainStatus` assignment as an expression.
 
 ## Behavior Changes (Before/After)
 
@@ -135,6 +138,7 @@ Updated `README.md`, `CLAUDE.md`, `docs/runtime/HOST_GATEWAY.md`, and `docs/gene
 | `cargo test -p labby runner_exe --all-features` | Runner executable validation tests pass. | 6 passed. | pass |
 | `just docs-check` | Generated docs are fresh. | Passed, 15 artifacts fresh. | pass |
 | `cargo check --workspace --all-features` | Workspace compiles with all features. | Passed. | pass |
+| `cargo clippy --workspace --all-features --locked -- -D warnings` | Matches CI Clippy gate. | Passed after CI lint fix. | pass |
 | `cargo nextest run --workspace --all-features` | Full test suite is green. | 2200 passed, 14 skipped. | pass |
 | `gh api graphql ... reviewThreads` | No unresolved actionable CodeRabbit threads. | All 4 threads returned `isResolved: true`. | pass |
 
@@ -161,6 +165,5 @@ Updated `README.md`, `CLAUDE.md`, `docs/runtime/HOST_GATEWAY.md`, and `docs/gene
 
 ## Next Steps
 
-1. Commit only this session artifact with `docs: save session log`.
-2. Push `codex/host-gateway-work`.
-3. Wait for PR #152 checks after the final commit and fix any new CI or review findings before merge.
+1. Push the final CI Clippy fix.
+2. Wait for PR #152 checks after the final commit and fix any new CI or review findings before merge.
