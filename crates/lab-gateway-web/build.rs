@@ -1,9 +1,9 @@
-//! Build script: embed the gateway-admin web bundle into the binary.
+//! Build script: embed the gateway-admin web bundle into this crate.
 //!
 //! The frontend (`apps/gateway-admin`) is exported by Next.js into
 //! `apps/gateway-admin/out/`. We generate `$OUT_DIR/embedded_web_assets.rs`
-//! containing one `include_bytes!` per file so the assets ship inside the
-//! `labby` binary.
+//! containing one `include_bytes!` per file so the assets ship inside any
+//! binary that links this crate.
 //!
 //! Why a build script instead of the `include_dir!` proc macro:
 //!
@@ -19,7 +19,7 @@
 //! missing — a valid state for backend-only work. A genuine filesystem error
 //! (permissions, mid-walk read failure) fails the build via `Err` rather than
 //! being masked as "missing" — but we never `panic!` (clippy bans it). The
-//! generated `EMBEDDED_WEB_FILES` slice is consumed by `crate::api::web`.
+//! generated `EMBEDDED_WEB_FILES` slice is consumed by `crate::assets`.
 
 use std::env;
 use std::error::Error;
@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Re-run when the bundle appears/disappears or its top level changes.
     // Cargo treats missing watched paths as stale on every build, so when the
     // bundle is absent we watch the nearest existing parent instead.
-    let watch_path = rerun_watch_path_for_assets_dir(&assets_dir);
+    let watch_path = watch_asset_tree_or_existing_parent(&assets_dir);
     println!("cargo:rerun-if-changed={}", watch_path.display());
 
     let mut files: Vec<(String, PathBuf)> = Vec::new();
@@ -86,7 +86,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn rerun_watch_path_for_assets_dir(assets_dir: &Path) -> PathBuf {
+/// Resolve the path Cargo should watch for asset-tree changes.
+///
+/// When the bundle is absent, watching the missing directory makes Cargo treat
+/// every build as stale (a missing watched path is always "changed"). Watching
+/// the nearest existing parent instead keeps no-op rebuilds quiet while still
+/// retriggering when the bundle appears.
+fn watch_asset_tree_or_existing_parent(assets_dir: &Path) -> PathBuf {
     if assets_dir.exists() {
         return assets_dir.to_path_buf();
     }
@@ -140,12 +146,13 @@ mod tests {
 
     #[test]
     fn missing_assets_dir_watches_existing_parent_not_missing_dir() {
-        let root = std::env::temp_dir().join(format!("lab-build-rs-test-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("lab-gw-web-build-rs-test-{}", std::process::id()));
         let app_dir = root.join("apps/gateway-admin");
         std::fs::create_dir_all(&app_dir).expect("create app dir");
         let assets_dir = app_dir.join("out");
 
-        let watched = rerun_watch_path_for_assets_dir(&assets_dir);
+        let watched = watch_asset_tree_or_existing_parent(&assets_dir);
 
         assert_eq!(watched, app_dir);
         std::fs::remove_dir_all(root).expect("cleanup");

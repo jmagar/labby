@@ -2511,6 +2511,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-gateway-web"
+version = "0.26.1"
+dependencies = [
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "lab-winjob"
 version = "0.26.1"
 dependencies = [
@@ -2549,6 +2559,7 @@ dependencies = [
  "jiff",
  "lab-apis",
  "lab-auth",
+ "lab-gateway-web",
  "lab-winjob",
  "nix",
  "oauth2",
