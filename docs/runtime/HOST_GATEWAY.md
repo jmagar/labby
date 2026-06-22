@@ -33,25 +33,35 @@ labby gateway list
 
 ```bash
 just host-sync
-curl -fsS http://127.0.0.1:8765/ready
+labby setup host-service status --json
 labby gateway code exec --json --code 'async () => 1'
 ```
 
 ## Verify The Public MCP Route
 
 ```bash
-TOKEN=$(awk -F= '/^LAB_MCP_HTTP_TOKEN=/{print $2}' ~/.lab/.env)
-curl -fsS -H "Authorization: Bearer $TOKEN" https://lab.tootie.tv/mcp
+set -a
+. ~/.lab/.env
+set +a
+TOKEN="$LAB_MCP_HTTP_TOKEN"
+mcporter list https://lab.tootie.tv/mcp \
+  --header Authorization="Bearer $TOKEN" \
+  --status \
+  --exit-code
 ```
 
-Then verify from Codex by calling the Labby Code Mode MCP tool through the
-public MCP route with:
+Then call Code Mode through the same public MCP route:
 
-```javascript
-async () => 1
+```bash
+mcporter call \
+  --http-url https://lab.tootie.tv/mcp \
+  --header Authorization="Bearer $TOKEN" \
+  --tool codemode \
+  --args '{"code":"async () => 1"}' \
+  --output json
 ```
 
-Expected result:
+Expected result includes:
 
 ```json
 {"result":1}

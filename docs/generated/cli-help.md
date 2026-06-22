@@ -651,6 +651,7 @@ Usage: setup [OPTIONS] [COMMAND]
 
 Commands:
   draft                Manage the local setup draft
+  host-service         Manage the host user systemd Labby gateway service
   installed-plugins    List installed Claude Code lab plugins
   services-status      Join service configuration, draft, and Claude plugin state
   plugin-hook          Run binary-owned local setup checks for Claude plugin hooks
@@ -746,6 +747,161 @@ Options:
 ```
 
 ## `labby setup draft help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
+## `labby setup host-service`
+
+```text
+Manage the host user systemd Labby gateway service
+
+Usage: host-service [OPTIONS] <COMMAND>
+
+Commands:
+  unit       Print the user systemd unit that Labby would install
+  install    Install and start labby.service under systemd --user
+  status     Read labby.service status
+  restart    Restart labby.service
+  uninstall  Stop, disable, and remove labby.service
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup host-service unit`
+
+```text
+Print the user systemd unit that Labby would install
+
+Usage: unit [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup host-service install`
+
+```text
+Install and start labby.service under systemd --user
+
+Usage: install [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+  -y, --yes
+
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup host-service status`
+
+```text
+Read labby.service status
+
+Usage: status [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup host-service restart`
+
+```text
+Restart labby.service
+
+Usage: restart [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+  -y, --yes
+
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup host-service uninstall`
+
+```text
+Stop, disable, and remove labby.service
+
+Usage: uninstall [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+  -y, --yes
+
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup host-service help`
 
 ```text
 Print this message or the help of the given subcommand(s)

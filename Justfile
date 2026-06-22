@@ -97,9 +97,8 @@ host-sync:
     install -D -m 755 "$LABBY_BIN" ~/.local/bin/labby.new
     mv ~/.local/bin/labby.new ~/.local/bin/labby
     if systemctl --user is-enabled --quiet labby.service; then
-      systemctl --user restart labby.service
+      ~/.local/bin/labby setup host-service restart -y
       ~/.local/bin/labby setup host-service status --json
-      curl -fsS http://127.0.0.1:8765/ready >/dev/null
     else
       echo "labby.service is not installed; run: just host-service-install"
     fi
@@ -112,7 +111,7 @@ host-service-install:
 
 host-service-restart:
     ~/.local/bin/labby setup host-service restart -y
-    curl -fsS http://127.0.0.1:8765/ready >/dev/null
+    ~/.local/bin/labby setup host-service status --json
 
 host-service-status:
     ~/.local/bin/labby setup host-service status --json

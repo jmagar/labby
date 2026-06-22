@@ -26,6 +26,7 @@ pub(crate) struct HostServiceStatus {
     pub unit_path: PathBuf,
     pub process_exe: Option<PathBuf>,
     pub local_ready: Option<bool>,
+    pub ready_owned_by_service: Option<bool>,
     pub docker_labby_master_running: Option<bool>,
 }
 
@@ -93,7 +94,7 @@ pub(crate) async fn status() -> Result<HostServiceStatus, ToolError> {
     let path = unit_path(&home);
     let installed = path.is_file();
     let docker_labby_master_running = docker_labby_master_running().await;
-    let local_ready = Some(check_ready().await.unwrap_or(false));
+    let ready_response = check_ready().await.unwrap_or(false);
     let mut load_state = None;
     let mut active_state = None;
     let mut sub_state = None;
@@ -121,6 +122,12 @@ pub(crate) async fn status() -> Result<HostServiceStatus, ToolError> {
     }
 
     let process_exe = main_pid.and_then(process_exe);
+    let ready_owned_by_service = if ready_response {
+        Some(readiness_owner_matches(main_pid).await?)
+    } else {
+        Some(false)
+    };
+    let local_ready = Some(ready_response && ready_owned_by_service == Some(true));
 
     Ok(HostServiceStatus {
         installed,
@@ -132,6 +139,7 @@ pub(crate) async fn status() -> Result<HostServiceStatus, ToolError> {
         unit_path: path,
         process_exe,
         local_ready,
+        ready_owned_by_service,
         docker_labby_master_running,
     })
 }
@@ -205,6 +213,7 @@ Wants=network-online.target
 Type=simple
 ExecStart=%h/.local/bin/labby serve
 WorkingDirectory=%h
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:%h/.local/share/mise/shims:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=-%h/.lab/.env
 Restart=on-failure
 RestartSec=3
@@ -294,10 +303,15 @@ async fn preflight_port_available(operation: &str) -> Result<(), ToolError> {
 }
 
 fn configured_local_port() -> u16 {
-    std::env::var("LAB_MCP_HTTP_PORT")
-        .ok()
+    let env_file_port = env_file_value("LAB_MCP_HTTP_PORT");
+    let process_port = std::env::var("LAB_MCP_HTTP_PORT").ok();
+    configured_local_port_from(env_file_port.as_deref(), process_port.as_deref())
+}
+
+fn configured_local_port_from(service_env: Option<&str>, process_env: Option<&str>) -> u16 {
+    service_env
         .and_then(|value| value.parse().ok())
-        .or_else(|| env_file_value("LAB_MCP_HTTP_PORT").and_then(|value| value.parse().ok()))
+        .or_else(|| process_env.and_then(|value| value.parse().ok()))
         .unwrap_or(8765)
 }
 
@@ -351,7 +365,27 @@ async fn holder_can_be_host_service(holder: &str) -> Result<bool, ToolError> {
     let Some(pid) = status.main_pid else {
         return Ok(false);
     };
-    Ok(holder.contains(&format!("pid={pid},")) || holder.contains(&format!("pid={pid}")))
+    Ok(holder_contains_pid(holder, pid))
+}
+
+async fn readiness_owner_matches(main_pid: Option<u32>) -> Result<bool, ToolError> {
+    let Some(pid) = main_pid else {
+        return Ok(false);
+    };
+    let Some(holder) = port_holder(configured_local_port()).await? else {
+        return Ok(false);
+    };
+    Ok(holder_contains_pid(&holder, pid))
+}
+
+fn holder_contains_pid(holder: &str, pid: u32) -> bool {
+    let needle = format!("pid={pid}");
+    holder.match_indices(&needle).any(|(start, _)| {
+        holder[start + needle.len()..]
+            .chars()
+            .next()
+            .is_none_or(|next| !next.is_ascii_digit())
+    })
 }
 
 async fn docker_labby_master_running() -> Option<bool> {
@@ -372,13 +406,33 @@ async fn poll_ready() -> Result<(), String> {
     let mut last_err = String::new();
     while tokio::time::Instant::now() < deadline {
         match check_ready().await {
-            Ok(true) => return Ok(()),
+            Ok(true) => match systemctl_main_pid().await {
+                Ok(main_pid) => match readiness_owner_matches(main_pid).await {
+                    Ok(true) => return Ok(()),
+                    Ok(false) => {
+                        last_err =
+                            "ready endpoint responded, but the listener is not labby.service"
+                                .to_string();
+                    }
+                    Err(err) => last_err = err.to_string(),
+                },
+                Err(err) => last_err = err.to_string(),
+            },
             Ok(false) => last_err = "ready endpoint returned non-success".to_string(),
             Err(err) => last_err = err,
         }
         tokio::time::sleep(READY_POLL_INTERVAL).await;
     }
     Err(last_err)
+}
+
+async fn systemctl_main_pid() -> Result<Option<u32>, ToolError> {
+    let output = run_systemctl(&["show", SERVICE_NAME, "--property=MainPID", "--no-pager"]).await?;
+    let props = parse_systemctl_show(&output.stdout);
+    Ok(non_empty_prop(&props, "MainPID").and_then(|value| {
+        let pid = value.parse::<u32>().ok()?;
+        (pid != 0).then_some(pid)
+    }))
 }
 
 async fn check_ready() -> Result<bool, String> {
@@ -424,7 +478,9 @@ async fn run_systemctl(args: &[&str]) -> Result<CommandCapture, ToolError> {
 
 async fn run_command(program: &str, args: &[&str]) -> Result<CommandCapture, ToolError> {
     let command_display = command_display(program, args);
-    let output = tokio::time::timeout(COMMAND_TIMEOUT, Command::new(program).args(args).output())
+    let mut command = Command::new(program);
+    command.args(args).kill_on_drop(true);
+    let output = tokio::time::timeout(COMMAND_TIMEOUT, command.output())
         .await
         .map_err(|_| ToolError::Sdk {
             sdk_kind: "internal_error".into(),
@@ -490,6 +546,7 @@ mod tests {
         assert!(unit.contains("Description=Labby host gateway"));
         assert!(unit.contains("ExecStart=%h/.local/bin/labby serve"));
         assert!(unit.contains("WorkingDirectory=%h"));
+        assert!(unit.contains("Environment=PATH=%h/.local/bin:%h/.cargo/bin:%h/.local/share/mise/shims:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin"));
         assert!(unit.contains("EnvironmentFile=-%h/.lab/.env"));
     }
 
@@ -533,5 +590,24 @@ mod tests {
             Some("active")
         );
         assert_eq!(non_empty_prop(&props, "MainPID").as_deref(), Some("123"));
+    }
+
+    #[test]
+    fn service_env_port_wins_over_process_env_port() {
+        assert_eq!(configured_local_port_from(Some("9876"), Some("1234")), 9876);
+        assert_eq!(configured_local_port_from(None, Some("1234")), 1234);
+        assert_eq!(configured_local_port_from(Some("bad"), Some("1234")), 1234);
+        assert_eq!(
+            configured_local_port_from(Some("bad"), Some("also-bad")),
+            8765
+        );
+    }
+
+    #[test]
+    fn detects_port_holder_pid() {
+        let holder = r#"LISTEN 0 4096 127.0.0.1:8765 0.0.0.0:* users:(("labby",pid=12345,fd=17))"#;
+
+        assert!(holder_contains_pid(holder, 12345));
+        assert!(!holder_contains_pid(holder, 1234));
     }
 }
