@@ -19,8 +19,8 @@ use super::shape::shape_final_result;
 use super::truncate::{response_within_budget, truncate_execution_response};
 use super::types::{
     CodeModeCaller, CodeModeCapabilityFilter, CodeModeDiscoveryEntry, CodeModeExecutionError,
-    CodeModeExecutionResponse, CodeModeSurface, CodeModeToolId, CodeModeToolRef, UiLink,
-    destructive_permitted,
+    CodeModeExecutionOutcome, CodeModeExecutionResponse, CodeModeSurface, CodeModeToolId,
+    CodeModeToolRef, UiLink, destructive_permitted,
 };
 
 /// Compatibility key a Code Mode snippet can return
@@ -37,6 +37,20 @@ impl CodeModeBroker<'_> {
         config: crate::config::CodeModeConfig,
         capability_filter: CodeModeCapabilityFilter,
     ) -> Result<CodeModeExecutionResponse, CodeModeExecutionError> {
+        Ok(self
+            .execute_with_raw_response(code, caller, surface, config, capability_filter)
+            .await?
+            .display_response)
+    }
+
+    pub(crate) async fn execute_with_raw_response(
+        &self,
+        code: &str,
+        caller: CodeModeCaller,
+        surface: CodeModeSurface,
+        config: crate::config::CodeModeConfig,
+        capability_filter: CodeModeCapabilityFilter,
+    ) -> Result<CodeModeExecutionOutcome, CodeModeExecutionError> {
         // `codemode` is exposed only when the gateway Code Mode surface is
         // enabled (code_mode.enabled -> RootSynthetic), and the MCP handler
         // gates on `exposes_synthetic_tools()` before reaching here.
@@ -65,6 +79,7 @@ impl CodeModeBroker<'_> {
         // Done before truncation so the (tiny) `ui` field is preserved while
         // `result` may be capped.
         self.apply_ui_opt_in(&mut response);
+        let raw_response = response.clone();
         let shaped = shape_final_result(
             response.result.take(),
             config.result_shape_policy,
@@ -112,7 +127,10 @@ impl CodeModeBroker<'_> {
             truncated = was_truncated,
             "code execution complete"
         );
-        Ok(response)
+        Ok(CodeModeExecutionOutcome {
+            raw_response,
+            display_response: response,
+        })
     }
 
     async fn build_code_mode_proxy(

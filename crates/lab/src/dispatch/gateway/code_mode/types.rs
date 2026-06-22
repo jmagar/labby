@@ -318,6 +318,12 @@ pub struct CodeModeExecutionResponse {
     pub artifacts: Vec<CodeModeArtifactReceipt>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CodeModeExecutionOutcome {
+    pub raw_response: CodeModeExecutionResponse,
+    pub display_response: CodeModeExecutionResponse,
+}
+
 /// Lightweight metadata for one host-brokered tool call. Cloudflare parity:
 /// the per-call result payload is NOT carried here — only the model needs the
 /// final `result`. Recording full per-call results bloated context and risked

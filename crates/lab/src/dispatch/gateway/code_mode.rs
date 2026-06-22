@@ -102,8 +102,9 @@ pub(crate) struct SnippetMetadataCache {
     pub fingerprint: String,
     pub entries: Vec<crate::dispatch::snippets::store::SnippetInfo>,
 }
+pub(crate) use types::CodeModeExecutionResponse;
 #[cfg(test)]
-pub(crate) use types::{CodeModeExecutionError, CodeModeExecutionResponse};
+pub(crate) use types::CodeModeExecutionError;
 #[cfg(test)]
 pub(in crate::dispatch::gateway::code_mode) use shape::shape_final_result;
 pub(crate) use types::{CodeModeExecutionSource, CodeModeSourceLookup, CodeModeSourceStore};
