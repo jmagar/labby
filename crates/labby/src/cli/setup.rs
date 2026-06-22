@@ -65,6 +65,8 @@ impl SetupModeArg {
 pub enum SetupCommand {
     /// Manage the local setup draft.
     Draft(DraftArgs),
+    /// Manage the host user systemd Labby gateway service.
+    HostService(HostServiceArgs),
     /// List installed Claude Code lab plugins.
     InstalledPlugins {
         /// Bypass the short in-process cache.
@@ -105,6 +107,35 @@ pub enum SetupCommand {
 pub struct DraftArgs {
     #[command(subcommand)]
     pub command: DraftCommand,
+}
+
+#[derive(Debug, Args)]
+pub struct HostServiceArgs {
+    #[command(subcommand)]
+    pub command: HostServiceCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum HostServiceCommand {
+    /// Print the user systemd unit that Labby would install.
+    Unit,
+    /// Install and start labby.service under systemd --user.
+    Install {
+        #[arg(short = 'y', long, alias = "no-confirm")]
+        yes: bool,
+    },
+    /// Read labby.service status.
+    Status,
+    /// Restart labby.service.
+    Restart {
+        #[arg(short = 'y', long, alias = "no-confirm")]
+        yes: bool,
+    },
+    /// Stop, disable, and remove labby.service.
+    Uninstall {
+        #[arg(short = 'y', long, alias = "no-confirm")]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -244,6 +275,9 @@ async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<Exit
         SetupCommand::Draft(args) => {
             run_draft_command(args, format).await?;
         }
+        SetupCommand::HostService(args) => {
+            run_host_service_command(args, format).await?;
+        }
         SetupCommand::InstalledPlugins { force } => {
             let value =
                 crate::dispatch::setup::dispatch("plugins.installed", json!({ "force": force }))
@@ -319,6 +353,47 @@ async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<Exit
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+async fn run_host_service_command(args: HostServiceArgs, format: OutputFormat) -> Result<()> {
+    match args.command {
+        HostServiceCommand::Unit => {
+            let value = crate::dispatch::setup::host_service::unit().await?;
+            print(&value, format)?;
+        }
+        HostServiceCommand::Install { yes } => {
+            if !yes {
+                anyhow::bail!(
+                    "setup host-service install is destructive; pass -y/--yes to confirm"
+                );
+            }
+            let value = crate::dispatch::setup::host_service::install().await?;
+            print(&value, format)?;
+        }
+        HostServiceCommand::Status => {
+            let value = crate::dispatch::setup::host_service::status().await?;
+            print(&value, format)?;
+        }
+        HostServiceCommand::Restart { yes } => {
+            if !yes {
+                anyhow::bail!(
+                    "setup host-service restart is destructive; pass -y/--yes to confirm"
+                );
+            }
+            let value = crate::dispatch::setup::host_service::restart().await?;
+            print(&value, format)?;
+        }
+        HostServiceCommand::Uninstall { yes } => {
+            if !yes {
+                anyhow::bail!(
+                    "setup host-service uninstall is destructive; pass -y/--yes to confirm"
+                );
+            }
+            let value = crate::dispatch::setup::host_service::uninstall().await?;
+            print(&value, format)?;
+        }
+    }
+    Ok(())
 }
 
 async fn run_draft_command(args: DraftArgs, format: OutputFormat) -> Result<()> {
@@ -470,5 +545,20 @@ mod tests {
             panic!("expected setup draft discard subcommand");
         };
         assert!(discard.yes);
+    }
+
+    #[test]
+    fn parses_host_service_subcommands() {
+        for command in ["unit", "install", "status", "restart", "uninstall"] {
+            let mut args = vec!["labby", "setup", "host-service", command];
+            if matches!(command, "install" | "restart" | "uninstall") {
+                args.push("-y");
+            }
+            let cli = crate::cli::Cli::try_parse_from(args).unwrap();
+            let crate::cli::Command::Setup(args) = cli.command else {
+                panic!("expected setup command");
+            };
+            assert!(matches!(args.command, Some(SetupCommand::HostService(_))));
+        }
     }
 }

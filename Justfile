@@ -73,8 +73,67 @@ link-bin profile="release":
     ln -sf "$LABBY_BIN" ~/.local/bin/labby
     echo "labby → $LABBY_BIN"
 
-# Build local release-fast binary when stale, sync PATH/container bind binary,
-# rebuild the dev image only when runtime inputs changed, and restart container.
+# Build release-fast binary, copy it to the durable host path, and restart the
+# host user service. This is the preferred Labby gateway workflow because stdio
+# MCP tools, SSH config, agent caches, and credentials live on the host.
+host-sync:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    repo="$(pwd)"
+    profile="{{local_release_profile}}"
+    if command -v mold >/dev/null 2>&1; then
+      export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=mold"
+    fi
+    LAB_TARGET_DIR="${CARGO_TARGET_DIR:-target}"
+    case "$LAB_TARGET_DIR" in
+      /*) LABBY_BIN="$LAB_TARGET_DIR/$profile/labby" ;;
+      *)  LABBY_BIN="$repo/$LAB_TARGET_DIR/$profile/labby" ;;
+    esac
+    CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-16}" cargo build --workspace --all-features --profile "$profile" --bin labby
+    mkdir -p ~/.local/bin
+    if [ -x ~/.local/bin/labby ]; then
+      cp -f ~/.local/bin/labby ~/.local/bin/labby.prev
+    fi
+    install -D -m 755 "$LABBY_BIN" ~/.local/bin/labby.new
+    mv ~/.local/bin/labby.new ~/.local/bin/labby
+    if systemctl --user is-enabled --quiet labby.service; then
+      systemctl --user restart labby.service
+      ~/.local/bin/labby setup host-service status --json
+      curl -fsS http://127.0.0.1:8765/ready >/dev/null
+    else
+      echo "labby.service is not installed; run: just host-service-install"
+    fi
+
+host-service-install:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just host-sync
+    ~/.local/bin/labby setup host-service install -y
+
+host-service-restart:
+    ~/.local/bin/labby setup host-service restart -y
+    curl -fsS http://127.0.0.1:8765/ready >/dev/null
+
+host-service-status:
+    ~/.local/bin/labby setup host-service status --json
+
+# Explicit container compatibility path. Prefer host-sync for normal gateway
+# development; this remains useful for prod-like image smoke and Docker-specific
+# ACP adapter changes.
+dev-container: web-build build-release
+    docker compose -f docker-compose.yml restart
+
+dev-container-debug:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    nightly_rustc=$(rustup which --toolchain nightly rustc)
+    RUSTC="$nightly_rustc" RUSTC_WRAPPER="" RUSTFLAGS="-C link-arg=-fuse-ld=mold -Z codegen-backend=cranelift" \
+        cargo build -p labby --all-features
+    install -D -m 755 target/debug/labby bin/labby
+    docker compose -f docker-compose.yml restart
+
+# Explicit container sync path. The normal gateway workflow is host-sync.
+# Rebuilds the dev image only when runtime inputs changed, then restarts Docker.
 sync-container:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -149,24 +208,16 @@ install: build-release
 ensure-host-dirs:
     scripts/ensure-host-dirs
 
-# Start the dev container for the first time (or after docker-compose changes)
+# Start the explicit Docker compatibility container path for the first time (or
+# after docker-compose changes).
 dev-up: ensure-host-dirs
     docker compose -f docker-compose.yml up -d
 
-# Release build + web assets → hot-swap into running dev container (no image rebuild)
-dev: web-build build-release
-    docker compose -f docker-compose.yml restart
+# Backward-compatible alias for explicit Docker compatibility smoke.
+dev: dev-container
 
-# Debug build with Cranelift codegen (fastest compile) → hot-swap into running dev container.
-# Uses nightly toolchain — RUSTFLAGS explicitly includes mold since env var overrides config.toml.
-dev-debug:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    nightly_rustc=$(rustup which --toolchain nightly rustc)
-    RUSTC="$nightly_rustc" RUSTC_WRAPPER="" RUSTFLAGS="-C link-arg=-fuse-ld=mold -Z codegen-backend=cranelift" \
-        cargo build -p labby --all-features
-    install -D -m 755 target/debug/labby bin/labby
-    docker compose -f docker-compose.yml restart
+# Backward-compatible alias for explicit Docker debug smoke.
+dev-debug: dev-container-debug
 
 # Verify Docker ACP provider config, provider health, and a minimal Codex ACP prompt.
 acp-smoke *ARGS:

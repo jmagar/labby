@@ -896,6 +896,27 @@ mod tests {
     }
 
     #[test]
+    fn setup_catalog_does_not_expose_host_service_actions() {
+        assert!(
+            ACTIONS
+                .iter()
+                .all(|action| !action.name.starts_with("host_service.")),
+            "host-service lifecycle commands must remain CLI-only"
+        );
+    }
+
+    #[tokio::test]
+    async fn setup_dispatch_does_not_route_host_service_actions() {
+        for action in ["host_service.restart", "host_service.uninstall"] {
+            let err = dispatch(action, Value::Null).await.unwrap_err();
+            assert!(
+                matches!(err, ToolError::UnknownAction { .. }),
+                "{action} must not be reachable through setup dispatch"
+            );
+        }
+    }
+
+    #[test]
     fn plugin_lifecycle_actions_are_cataloged() {
         // Every loopback-gated name must have a catalog ActionSpec — otherwise
         // the unknown-action gate in the API surface would reject it before

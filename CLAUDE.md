@@ -329,13 +329,18 @@ Default verification targets the all-features build. If you run a reduced featur
 - **`labby doctor`** — comprehensive health audit: checks env vars, reachability, auth, version for every enabled service. Emits human-readable table by default, `--json` for CI. Exit code reflects worst severity.
 - **`bin/health-check`** — repo-level shell helper for CI/CD smoke tests.
 
-### Docker dev container
+### Host Labby gateway
 
-`docker-compose.yml` runs `labby:dev` with the host's `~/.lab/`, `~/.gemini/`, the repo workspace, the locally built `bin/labby`, and frontend assets bind-mounted in. The image at `config/Dockerfile.fast` pre-installs the three ACP adapters (`claude-agent-acp`, `codex-acp`, `gemini`) into `/opt/acp-adapters/node_modules` and symlinks them into `/usr/local/bin/`, so each chat session spawn calls a deterministic local binary instead of paying the `npx -y` round-trip. The provider config at `config/acp-providers.docker.json` therefore uses `command: "claude-agent-acp"` (etc.) directly.
+The normal local/dookie Labby gateway should run on the host as
+`systemd --user` service `labby.service`, executing `~/.local/bin/labby serve`.
+This is preferred over the Docker dev container because the gateway launches
+stdio MCP tools and depends on host SSH config, agent credentials, local
+binaries, and user caches. Use `just host-service-install` once, then
+`just host-sync` after Rust changes.
 
-The Claude SDK is held forward of `claude-agent-acp`'s pinned version via an `overrides` entry in `/opt/acp-adapters/package.json` (currently `^0.2.131`). The bundled Claude Code binary version must match credential format expectations from the host's `claude` CLI, otherwise the underlying binary `SIGILL`s on session start. Bump both when upgrading.
-
-`just dev-debug` rebuilds the labby binary with nightly + cranelift codegen and hot-swaps it into the running container without rebuilding the Docker image. Image rebuilds are only needed when changing `Dockerfile.fast` or the pre-installed package set.
+The Docker Compose stack is still supported for prod-like image smoke and
+Docker-specific ACP adapter work. Use `just dev-container` or
+`just dev-container-debug` explicitly when testing that path.
 
 ### Bearer auth in dev (driving the UI with agent-browser)
 

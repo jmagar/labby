@@ -45,10 +45,7 @@ pub struct RunnerSpawn {
 
 impl RunnerSpawn {
     pub fn try_default() -> Result<Self, ToolError> {
-        let program = std::env::current_exe().map_err(|err| ToolError::Sdk {
-            sdk_kind: "internal_error".to_string(),
-            message: format!("failed to resolve current executable for Code Mode runner: {err}"),
-        })?;
+        let program = super::runner_exe::resolve_runner_exe()?;
         Ok(Self {
             program,
             args: vec!["internal".to_string(), "code-mode-runner".to_string()],
