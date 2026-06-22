@@ -209,12 +209,13 @@ Upstream result unwrapping:
 
 > **Reading the value back.** `codemode` returns the envelope in the tool's text
 > content block and a copy in `structuredContent` carrying both `result` and a
-> compact `result_shape`. Most MCP clients (Claude Code included) surface
-> `structuredContent` over text. If `result` comes back as a truncation marker —
-> an object with `"truncated": true`, plus `preview` and `next_action` — the
-> value exceeded the response budget (24 KB / 6000 tokens). Reduce the data
-> inside the sandbox before returning, or write large payloads to an artifact and
-> read them back — do not rely on a large `result` reaching the model verbatim.
+> compact `result_shape`; shaped runs also include `result_shaping` metadata.
+> Most MCP clients (Claude Code included) surface `structuredContent` over text.
+> If `result` comes back as a truncation marker — an object with `"truncated":
+> true`, plus `preview` and `next_action` — the value exceeded the response
+> budget (24 KB / 6000 tokens). Reduce the data inside the sandbox before
+> returning, or write large payloads to an artifact and read them back — do not
+> rely on a large `result` reaching the model verbatim.
 
 Oversized final responses are replaced with a truncation marker. Reduce data in
 the sandbox before returning large values.
