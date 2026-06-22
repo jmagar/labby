@@ -23,6 +23,7 @@ mod runner_drive;
 mod runner_io;
 mod schema;
 mod search;
+mod shape;
 mod trace;
 mod truncate;
 /// Live TypeScript signature / `.d.ts` generator for Code Mode catalog entries.
@@ -101,6 +102,8 @@ pub(crate) struct SnippetMetadataCache {
 }
 #[cfg(test)]
 pub(crate) use types::{CodeModeExecutionError, CodeModeExecutionResponse};
+#[cfg(test)]
+pub(in crate::dispatch::gateway::code_mode) use shape::shape_final_result;
 pub(crate) use types::{CodeModeExecutionSource, CodeModeSourceLookup, CodeModeSourceStore};
 pub(crate) use types::{CodeModeHistory, CodeModeHistoryEntry, CodeModeHistoryKind};
 

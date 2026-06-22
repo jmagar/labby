@@ -717,6 +717,7 @@ fn finalize_done(
     CodeModeExecutionResponse {
         execution_id: None,
         result: result.into_response_result(),
+        result_shape: None,
         // Widget capture and optional `__ui` unwrapping are applied later in
         // `execute()`; the runner-level response always starts with `ui: None`.
         ui: None,

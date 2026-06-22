@@ -145,6 +145,7 @@ fn execute_trace_embeds_result_and_redacts_call_params() {
             "answer": "the full research answer the model asked for",
             "items": ["a", "b", "c"]
         })),
+        result_shape: None,
         calls: vec![CodeModeExecutedCall {
             id: "github::search_issues".to_string(),
             ok: true,
@@ -184,6 +185,7 @@ fn execute_trace_omits_result_when_function_returns_undefined() {
         execution_id: None,
         ui: None,
         result: None,
+        result_shape: None,
         calls: vec![],
         logs: vec![],
         artifacts: vec![],
@@ -206,6 +208,7 @@ fn execute_trace_preserves_explicit_null_result() {
         execution_id: None,
         ui: None,
         result: Some(Value::Null),
+        result_shape: None,
         calls: vec![],
         logs: vec![],
         artifacts: vec![],

@@ -552,6 +552,7 @@ mod tests {
         CodeModeExecutionResponse {
             execution_id: None,
             result: Some(result),
+            result_shape: None,
             ui: None,
             calls: Vec::new(),
             logs: Vec::new(),
