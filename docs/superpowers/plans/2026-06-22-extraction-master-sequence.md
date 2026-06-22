@@ -128,3 +128,36 @@ These hold at every phase; both owning plans carry the detail:
 - `lab-runtime` stays transport-free; `lab-codemode` stays client/transport-free
   (no `upstream`/`gateway` vocabulary); `lab-gateway` stays adapter-free (no
   `axum`/`clap`/`utoipa`, no `build_default_registry`).
+
+## Operational gotchas (learned during execution)
+
+- **Every new workspace crate needs a `config/Dockerfile` dep-cache entry**, or
+  the "Container build + smoke" CI job fails with `failed to read
+  crates/<crate>/Cargo.toml`. That layer COPYs each member's `Cargo.toml` and
+  stubs its `src/` individually for a hardcoded list. For each new crate add: the
+  `COPY crates/<crate>/Cargo.toml ...` line, `crates/<crate>/src` to the `mkdir`,
+  `crates/<crate>/src/lib.rs` to the `touch`, and `cargo clean -p <crate>`. If the
+  crate declares `build = "build.rs"`, also `echo 'fn main(){}' >
+  crates/<crate>/build.rs` (lab-gateway-web needed this). **`cargo check
+  --all-features` passing locally does NOT catch this** — only the in-image build
+  does. (lab-codemode, lab-gateway, lab-gatewayd will each need this.)
+- **`ToolError` move is not mechanical (orphan rule).** Moving `ToolError` to
+  `lab-runtime` makes `impl IntoResponse for ToolError` (`api/error.rs`) and the
+  `From<lab_apis::*>` impls illegal in `lab`. Resolution: the `lab-apis`-sourced
+  `From` impls move into `lab-runtime` behind feature gates (optional `lab-apis`
+  dep); the `marketplace::store::RegistryStoreError` `From` stays in `lab` (local
+  source type); a local `ApiError(ToolError)` newtype in `api/error.rs` carries
+  `IntoResponse`, threaded through ~82 handler return sites. `path_safety.rs`
+  returns `ToolError`, so it can only move to `lab-runtime` AFTER `ToolError`.
+- **`lab-auth` OAuth move has one `LabConfig` coupling:**
+  `oauth/upstream/runtime.rs` takes `config: &LabConfig` (lines ~19, ~58). Since
+  `lab-auth` cannot depend on `lab`, the Phase 3 move must pass the specific
+  upstream-config data those functions need instead of the whole `LabConfig`.
+- **`lab-runtime::process` is a consolidation, not a move** — there is no single
+  `dispatch/process.rs`; process-group/`killpg` logic lives in
+  `upstream/process_guard.rs` and `code_mode/pool/runner_handle.rs`. Treat as
+  optional/deferred; the upstream guard travels with `lab-gateway` regardless.
+- **Integrate worktree branches one at a time, verified.** Each agent branch
+  conflicts on `Cargo.toml` (`members`), `crates/lab/Cargo.toml` (deps/features),
+  and `crates/lab-runtime/src/lib.rs` (module decls) — all trivial "keep both"
+  resolutions. `cargo check --all-features` green after each merge before the next.
