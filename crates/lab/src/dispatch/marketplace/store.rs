@@ -1191,7 +1191,14 @@ mod tests {
 
     fn temp_db_path(prefix: &str) -> PathBuf {
         let unique = TEST_DB_COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!("{prefix}-{}-{unique}.db", std::process::id()))
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "{prefix}-{}-{nanos}-{unique}.db",
+            std::process::id()
+        ))
     }
 
     async fn temp_store() -> RegistryStore {
