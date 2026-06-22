@@ -1529,6 +1529,9 @@
           "max_response_tokens": {
             "type": "integer"
           },
+          "result_shape_policy": {
+            "type": "string"
+          },
           "timeout_ms": {
             "type": "integer"
           },
