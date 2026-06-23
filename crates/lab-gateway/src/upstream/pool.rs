@@ -277,8 +277,8 @@ impl UpstreamPool {
         self
     }
 
-    #[cfg(test)]
-    pub(crate) fn request_timeout(&self) -> Duration {
+    #[cfg(any(test, feature = "testkit"))]
+    pub fn request_timeout(&self) -> Duration {
         self.request_timeout
     }
 }

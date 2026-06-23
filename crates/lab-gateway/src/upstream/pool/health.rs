@@ -102,7 +102,7 @@ impl UpstreamPool {
             .map(ToOwned::to_owned)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testkit"))]
     pub async fn insert_entry_for_tests(&self, name: &str, entry: UpstreamEntry) {
         self.catalog.write().await.insert(name.to_string(), entry);
     }
@@ -165,7 +165,7 @@ impl UpstreamPool {
         self.catalog.read().await.len()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testkit"))]
     pub async fn connection_count_for_tests(&self) -> usize {
         self.connections.read().await.len()
     }

@@ -12,6 +12,12 @@ keywords = ["homelab", "mcp", "gateway", "proxy", "upstream"]
 categories = ["development-tools"]
 publish = false
 
+[features]
+# Exposes the pool's `*_for_tests` inspection helpers as part of the public API
+# so downstream crates (notably `lab`'s gateway integration tests) can drive the
+# pool. Off by default; enabled only from dev/test builds.
+testkit = []
+
 [dependencies]
 lab-apis = { path = "../lab-apis", default-features = false }
 lab-runtime = { path = "../lab-runtime" }

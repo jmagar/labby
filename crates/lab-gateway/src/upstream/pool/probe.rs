@@ -24,7 +24,7 @@ use super::helpers::{
     classify_upstream_error, upstream_transport,
 };
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testkit"))]
 static PROBE_TASK_SCHEDULE_COUNTS: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<String, usize>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
@@ -42,7 +42,7 @@ impl UpstreamPool {
         let cancel = CancellationToken::new();
         tasks.insert(config.name.clone(), cancel.clone());
         drop(tasks);
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testkit"))]
         {
             let mut counts = PROBE_TASK_SCHEDULE_COUNTS
                 .lock()
@@ -159,16 +159,16 @@ impl UpstreamPool {
         });
     }
 
-    #[cfg(test)]
-    pub(crate) fn reset_probe_task_schedule_count_for_tests(upstream: &str) {
+    #[cfg(any(test, feature = "testkit"))]
+    pub fn reset_probe_task_schedule_count_for_tests(upstream: &str) {
         PROBE_TASK_SCHEDULE_COUNTS
             .lock()
             .expect("probe task schedule counts lock")
             .remove(upstream);
     }
 
-    #[cfg(test)]
-    pub(crate) fn probe_task_schedule_count_for_tests(upstream: &str) -> usize {
+    #[cfg(any(test, feature = "testkit"))]
+    pub fn probe_task_schedule_count_for_tests(upstream: &str) -> usize {
         PROBE_TASK_SCHEDULE_COUNTS
             .lock()
             .expect("probe task schedule counts lock")
