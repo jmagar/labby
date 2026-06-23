@@ -2,7 +2,9 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use lab_runtime::error::ToolError;
-use crate::dispatch::helpers::{action_schema, handle_builtin, help_payload, require_str, to_json};
+use lab_runtime::dispatch_helpers::{
+    action_schema, handle_builtin, help_payload, require_str, to_json,
+};
 
 use super::SHARED_GATEWAY_OAUTH_SUBJECT;
 use super::catalog::ACTIONS;

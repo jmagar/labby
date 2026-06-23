@@ -175,12 +175,6 @@ impl GatewayManager {
     }
 
     #[must_use]
-    pub fn with_service_clients(mut self, service_clients: SharedServiceClients) -> Self {
-        self.service_clients = Some(service_clients);
-        self
-    }
-
-    #[must_use]
     pub fn with_oauth_client_cache(mut self, cache: OauthClientCache) -> Self {
         self.oauth_client_cache = Some(cache);
         self
@@ -208,7 +202,8 @@ impl GatewayManager {
         // do not re-normalize here with false — that would incorrectly promote
         // legacy upstream config when the root [code_mode] is explicitly disabled.
 
-        lab_runtime::gateway_config::set_process_code_mode_enabled(config.code_mode.enabled);
+        self.store
+            .set_process_code_mode_enabled(config.code_mode.enabled);
         *self.protected_route_index.write().await =
             ProtectedRouteIndex::from_routes(&config.protected_mcp_routes);
         *self.config.write().await = config;

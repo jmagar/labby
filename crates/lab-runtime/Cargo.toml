@@ -18,12 +18,12 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 jiff.workspace = true
-lab-apis = { path = "../lab-apis", default-features = false, optional = true }
+lab-apis = { path = "../lab-apis", default-features = false }
 
 [features]
-marketplace = ["dep:lab-apis", "lab-apis/mcpregistry"]
-acp_registry = ["dep:lab-apis", "lab-apis/acp_registry"]
-deploy = ["dep:lab-apis", "lab-apis/deploy"]
+marketplace = ["lab-apis/mcpregistry"]
+acp_registry = ["lab-apis/acp_registry"]
+deploy = ["lab-apis/deploy"]
 
 [dev-dependencies]
 tempfile.workspace = true
