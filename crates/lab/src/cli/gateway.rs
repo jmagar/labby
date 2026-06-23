@@ -48,7 +48,6 @@ async fn build_manager_with_upstream_oauth_runtime(
     upstream_oauth_runtime: Option<crate::oauth::upstream::runtime::UpstreamOauthRuntime>,
 ) -> Arc<GatewayManager> {
     let runtime = GatewayRuntimeHandle::default();
-    let registry = filtered_builtin_service_registry(config);
     if discover_upstreams {
         // Seed lazily (mirroring `serve`): catalog entries come from config
         // without spawning any upstream processes. Connections are made on

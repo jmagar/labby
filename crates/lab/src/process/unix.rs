@@ -33,7 +33,12 @@ pub fn send_signal_process_group(pgid: u32, signal: Signal) -> nix::Result<()> {
     killpg(Pid::from_raw(raw_pgid), signal)
 }
 
+// The SIGKILL/process-introspection helpers below lost their only in-tree
+// callers when the upstream pool's process guard moved to the `lab-gateway`
+// crate (which vendors its own copies). They are kept for API symmetry and
+// future callers; allow dead_code so the strict workspace lint stays green.
 #[cfg(unix)]
+#[allow(dead_code)]
 pub fn terminate_sigkill(pid: u32) -> nix::Result<()> {
     send_signal(pid, Some(Signal::SIGKILL))
 }
@@ -44,6 +49,7 @@ pub fn terminate_sigterm(pid: u32) -> nix::Result<()> {
 }
 
 #[cfg(unix)]
+#[allow(dead_code)]
 pub fn terminate_process_group_sigkill(pgid: u32) -> nix::Result<()> {
     send_signal_process_group(pgid, Signal::SIGKILL)
 }
@@ -59,11 +65,13 @@ pub fn terminate_process_group_sigterm(pgid: u32) -> nix::Result<()> {
 }
 
 #[cfg(unix)]
+#[allow(dead_code)]
 pub fn pid_is_alive(pid: u32) -> bool {
     matches!(send_signal(pid, None), Ok(()) | Err(Errno::EPERM))
 }
 
 #[cfg(target_os = "linux")]
+#[allow(dead_code)]
 pub fn read_cmdline(pid: u32) -> Option<String> {
     let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
     if raw.is_empty() {
@@ -82,6 +90,7 @@ pub fn read_cmdline(pid: u32) -> Option<String> {
 }
 
 #[cfg(target_os = "linux")]
+#[allow(dead_code)]
 pub fn process_group_id(pid: u32) -> Option<u32> {
     let raw = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after_comm = raw.rsplit_once(") ")?.1;
@@ -89,6 +98,7 @@ pub fn process_group_id(pid: u32) -> Option<u32> {
 }
 
 #[cfg(target_os = "linux")]
+#[allow(dead_code)]
 pub fn process_has_ancestor(mut pid: u32, ancestor: u32) -> bool {
     while pid > 1 {
         if pid == ancestor {

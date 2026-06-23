@@ -736,6 +736,10 @@ fn invalid_protected_route(
 // `lab_runtime::gateway_config`. They are re-exported below so the rest of
 // this module and all external callers keep their existing import paths.
 // Serde shape (defaults, renames, skip rules) is preserved exactly there.
+// Some entries are only referenced from tests after the gateway runtime moved to
+// `lab-gateway`; keep them as the public `labby::config` surface and silence the
+// bin-target unused-import lint.
+#[allow(unused_imports)]
 pub use lab_runtime::gateway_config::{
     CodeModeConfig, ConfigError, GatewayConfig, GatewayImportMode, GatewayPreferences, ImportSource,
     ProtectedGatewaySubsetTarget, ProtectedMcpRouteConfig, ProtectedMcpRouteEffectiveTarget,

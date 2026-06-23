@@ -26,6 +26,10 @@ use crate::config::{
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::error::ToolError;
 
+// `load_gateway_config` is consumed by the gateway API integration tests;
+// `write_gateway_config` is used by `LabConfigStore::persist`. Allow the
+// bin-target unused-import lint for the test-only re-export.
+#[allow(unused_imports)]
 pub use host_config::{load_gateway_config, write_gateway_config};
 
 /// Host-owned [`GatewayConfigStore`] backed by the live [`LabConfig`].
@@ -36,8 +40,6 @@ pub struct LabConfigStore {
     config_path: PathBuf,
     /// Cached service clients to refresh after a credential write.
     service_clients: Option<SharedServiceClients>,
-    /// Optional `.env` path override (tests). `None` => `~/.lab/.env`.
-    env_path_override: Option<PathBuf>,
 }
 
 impl LabConfigStore {
@@ -48,7 +50,6 @@ impl LabConfigStore {
             config,
             config_path,
             service_clients: None,
-            env_path_override: None,
         }
     }
 
@@ -59,17 +60,7 @@ impl LabConfigStore {
         self
     }
 
-    /// Override the `.env` path (tests writing beside a temp config).
-    #[must_use]
-    pub fn with_env_path(mut self, path: PathBuf) -> Self {
-        self.env_path_override = Some(path);
-        self
-    }
-
     fn resolved_env_path(&self) -> PathBuf {
-        if let Some(override_path) = &self.env_path_override {
-            return override_path.clone();
-        }
         home_dir()
             .map(|h| h.join(".lab").join(".env"))
             .unwrap_or_else(|| PathBuf::from(".env"))
@@ -261,6 +252,11 @@ mod host_config {
     }
 
     /// Load the gateway-relevant config from `path` as a full [`LabConfig`].
+    ///
+    /// Consumed by the gateway API integration tests (in the lib test target);
+    /// allow dead_code so the bin-target build, which does not compile those
+    /// tests, stays lint-clean.
+    #[allow(dead_code)]
     pub fn load_gateway_config(path: &Path) -> Result<LabConfig, ToolError> {
         match std::fs::read_to_string(path) {
             Ok(raw) => {
