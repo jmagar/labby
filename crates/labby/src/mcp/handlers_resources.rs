@@ -660,7 +660,7 @@ mod tests {
             runtime,
         ));
         manager
-            .seed_config(
+            .seed_config_unchecked_for_tests(
                 crate::config::LabConfig {
                     code_mode: crate::config::CodeModeConfig {
                         enabled: true,

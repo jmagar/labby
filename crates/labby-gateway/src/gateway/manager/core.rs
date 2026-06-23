@@ -232,6 +232,11 @@ impl GatewayManager {
         self.seed_config_unchecked(config).await;
     }
 
+    #[cfg(any(test, feature = "testkit"))]
+    pub async fn seed_config_unchecked_for_tests(&self, config: GatewayConfig) {
+        self.seed_config_unchecked(config).await;
+    }
+
     async fn seed_config_unchecked(&self, config: GatewayConfig) {
         self.store
             .set_process_code_mode_enabled(config.code_mode.enabled);
@@ -272,7 +277,7 @@ impl GatewayManager {
         &self,
         upstream: Vec<labby_runtime::gateway_config::UpstreamConfig>,
     ) {
-        self.seed_config(GatewayConfig {
+        self.seed_config_unchecked_for_tests(GatewayConfig {
             upstream,
             ..GatewayConfig::default()
         })

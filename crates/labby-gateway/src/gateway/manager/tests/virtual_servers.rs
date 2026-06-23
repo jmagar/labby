@@ -14,7 +14,7 @@ async fn configured_service_appears_in_list_before_virtual_server_enablement() {
     let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
 
     manager
-        .seed_config(GatewayConfig {
+        .seed_config_unchecked_for_tests(GatewayConfig {
             virtual_servers: vec![VirtualServerConfig {
                 id: "deploy".to_string(),
                 service: "deploy".to_string(),
@@ -43,7 +43,7 @@ async fn stale_virtual_server_with_unknown_service_does_not_break_list() {
     let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
 
     manager
-        .seed_config(GatewayConfig {
+        .seed_config_unchecked_for_tests(GatewayConfig {
             virtual_servers: vec![VirtualServerConfig {
                 id: "mcpregistry".to_string(),
                 service: "mcpregistry".to_string(),
@@ -110,7 +110,7 @@ async fn disabling_virtual_server_preserves_configured_service_listing() {
     let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
 
     manager
-        .seed_config(GatewayConfig {
+        .seed_config_unchecked_for_tests(GatewayConfig {
             virtual_servers: vec![VirtualServerConfig {
                 id: "deploy".to_string(),
                 service: "deploy".to_string(),
@@ -124,7 +124,7 @@ async fn disabling_virtual_server_preserves_configured_service_listing() {
 
     let mut cfg = manager.config.read().await.clone();
     cfg.virtual_servers[0].enabled = false;
-    manager.seed_config(cfg).await;
+    manager.seed_config_unchecked_for_tests(cfg).await;
 
     let servers = manager.list().await.expect("list");
     let plex = servers
@@ -223,7 +223,7 @@ async fn enabled_virtual_server_only_exposes_enabled_surfaces() {
         .with_builtin_service_registry(deploy_known_registry());
 
     manager
-        .seed_config(GatewayConfig {
+        .seed_config_unchecked_for_tests(GatewayConfig {
             virtual_servers: vec![VirtualServerConfig {
                 id: "deploy".to_string(),
                 service: "deploy".to_string(),
@@ -332,7 +332,7 @@ async fn mcp_action_policy_restricts_actions_to_allowlist() {
         .with_builtin_service_registry(deploy_known_registry());
 
     manager
-        .seed_config(GatewayConfig {
+        .seed_config_unchecked_for_tests(GatewayConfig {
             virtual_servers: vec![VirtualServerConfig {
                 id: "deploy".to_string(),
                 service: "deploy".to_string(),
@@ -377,7 +377,7 @@ async fn unrestricted_mcp_actions_return_none_when_no_policy_is_set() {
     let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
 
     manager
-        .seed_config(GatewayConfig {
+        .seed_config_unchecked_for_tests(GatewayConfig {
             virtual_servers: vec![VirtualServerConfig {
                 id: "deploy".to_string(),
                 service: "deploy".to_string(),
@@ -406,7 +406,9 @@ async fn synthetic_services_without_gateway_metadata_allow_mcp_actions() {
     let path = dir.path().join("config.toml");
     let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
 
-    manager.seed_config(GatewayConfig::default()).await;
+    manager
+        .seed_config_unchecked_for_tests(GatewayConfig::default())
+        .await;
 
     assert!(
         manager

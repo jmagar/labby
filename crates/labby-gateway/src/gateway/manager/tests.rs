@@ -280,7 +280,7 @@ async fn code_mode_manager_with_upstreams(
     runtime.swap(Some(Arc::clone(&pool))).await;
     let manager = GatewayManager::new(path, runtime);
     manager
-        .seed_config(GatewayConfig {
+        .seed_config_unchecked_for_tests(GatewayConfig {
             code_mode: CodeModeConfig {
                 enabled: true,
                 ..CodeModeConfig::default()

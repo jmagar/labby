@@ -518,7 +518,7 @@ mod tests {
     async fn gateway_list_returns_stale_virtual_server_warning() {
         let manager = test_manager();
         manager
-            .seed_config(
+            .seed_config_unchecked_for_tests(
                 LabConfig {
                     virtual_servers: vec![VirtualServerConfig {
                         id: "stale-registry".to_string(),

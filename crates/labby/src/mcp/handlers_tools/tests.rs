@@ -118,7 +118,7 @@ async fn code_mode_manager(
         runtime,
     ));
     manager
-        .seed_config(
+        .seed_config_unchecked_for_tests(
             crate::config::LabConfig {
                 code_mode: crate::config::CodeModeConfig {
                     enabled,
@@ -160,7 +160,7 @@ async fn code_mode_manager_with_pool_and_upstreams(
         runtime,
     ));
     manager
-        .seed_config(
+        .seed_config_unchecked_for_tests(
             crate::config::LabConfig {
                 code_mode: crate::config::CodeModeConfig {
                     enabled,
@@ -2214,7 +2214,7 @@ async fn snapshot_catalog_hides_mcp_disabled_virtual_services() {
         .with_builtin_service_registry(Arc::new(crate::registry::build_default_registry())),
     );
     manager
-        .seed_config(
+        .seed_config_unchecked_for_tests(
             crate::config::LabConfig {
                 virtual_servers: vec![crate::config::VirtualServerConfig {
                     id: "deploy".to_string(),
@@ -2254,7 +2254,7 @@ async fn service_actions_json_filters_to_allowed_mcp_actions() {
         runtime,
     ));
     manager
-        .seed_config(
+        .seed_config_unchecked_for_tests(
             crate::config::LabConfig {
                 virtual_servers: vec![crate::config::VirtualServerConfig {
                     id: "deploy".to_string(),

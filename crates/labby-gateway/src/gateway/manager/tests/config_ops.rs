@@ -206,7 +206,7 @@ async fn concurrent_root_and_virtual_server_mutations_both_persist() {
     let manager = GatewayManager::new(path.clone(), GatewayRuntimeHandle::default())
         .with_builtin_service_registry(deploy_known_registry());
     manager
-        .seed_config(GatewayConfig {
+        .seed_config_unchecked_for_tests(GatewayConfig {
             virtual_servers: vec![VirtualServerConfig {
                 id: "deploy".to_string(),
                 service: "deploy".to_string(),

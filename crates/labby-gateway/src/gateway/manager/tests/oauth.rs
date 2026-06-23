@@ -43,7 +43,7 @@ async fn reload_evicts_removed_upstream_oauth_clients() {
         prefer_client_metadata_document: None,
     });
     manager
-        .seed_config(GatewayConfig {
+        .seed_config_unchecked_for_tests(GatewayConfig {
             upstream: vec![removed_upstream],
             ..GatewayConfig::default()
         })

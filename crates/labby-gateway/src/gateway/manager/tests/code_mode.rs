@@ -13,7 +13,7 @@ async fn search_tools_seeds_cold_lazy_runtime_before_searching() {
     let path = dir.path().join("config.toml");
     let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
     manager
-        .seed_config(GatewayConfig {
+        .seed_config_unchecked_for_tests(GatewayConfig {
             code_mode: CodeModeConfig {
                 enabled: true,
                 ..CodeModeConfig::default()
@@ -94,7 +94,7 @@ async fn resolve_code_mode_upstream_tool_resolves_requested_upstream() {
     runtime.swap(Some(Arc::clone(&pool))).await;
     let manager = GatewayManager::new(path, runtime);
     manager
-        .seed_config(GatewayConfig {
+        .seed_config_unchecked_for_tests(GatewayConfig {
             code_mode: CodeModeConfig {
                 enabled: true,
                 ..CodeModeConfig::default()
@@ -130,7 +130,7 @@ async fn resolve_upstream_tool_works_with_code_mode_enabled() {
     runtime.swap(Some(Arc::clone(&pool))).await;
     let manager = GatewayManager::new(path, runtime);
     manager
-        .seed_config(GatewayConfig {
+        .seed_config_unchecked_for_tests(GatewayConfig {
             code_mode: CodeModeConfig {
                 enabled: true,
                 ..CodeModeConfig::default()
@@ -160,7 +160,7 @@ async fn resolve_raw_upstream_tool_resolves_cached_tool_without_code_mode() {
     runtime.swap(Some(Arc::clone(&pool))).await;
     let manager = GatewayManager::new(path, runtime);
     manager
-        .seed_config(GatewayConfig {
+        .seed_config_unchecked_for_tests(GatewayConfig {
             code_mode: CodeModeConfig {
                 enabled: false,
                 ..CodeModeConfig::default()
@@ -229,7 +229,7 @@ async fn code_mode_enabled_reads_code_mode_config() {
     let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
 
     manager
-        .seed_config(GatewayConfig {
+        .seed_config_unchecked_for_tests(GatewayConfig {
             code_mode: CodeModeConfig {
                 enabled: true,
                 ..CodeModeConfig::default()

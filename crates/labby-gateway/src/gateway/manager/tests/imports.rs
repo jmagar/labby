@@ -122,7 +122,7 @@ async fn approve_pending_import_persists_through_injected_store() {
         store,
     );
     manager
-        .seed_config(GatewayConfig {
+        .seed_config_unchecked_for_tests(GatewayConfig {
             upstream_pending: vec![fixture_http_upstream("pending")],
             ..GatewayConfig::default()
         })
@@ -156,7 +156,7 @@ async fn reject_pending_import_persists_through_injected_store() {
         store,
     );
     manager
-        .seed_config(GatewayConfig {
+        .seed_config_unchecked_for_tests(GatewayConfig {
             upstream_pending: vec![fixture_discovered_http("pending").spec],
             ..GatewayConfig::default()
         })

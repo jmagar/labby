@@ -485,7 +485,7 @@ async fn protected_gateway_subset_hot_crud_requires_restart() {
     assert_eq!(err.kind(), "restart_required");
 
     manager
-        .seed_config(labby_runtime::gateway_config::GatewayConfig {
+        .seed_config_unchecked_for_tests(labby_runtime::gateway_config::GatewayConfig {
             protected_mcp_routes: vec![protected_gateway_subset_route_fixture("media")],
             ..labby_runtime::gateway_config::GatewayConfig::default()
         })
@@ -642,7 +642,7 @@ async fn gateway_list_surfaces_cached_custom_gateway_summary_counts() {
 async fn virtual_server_policy_validation_uses_service_name() {
     let manager = test_manager();
     manager
-        .seed_config(labby_runtime::gateway_config::GatewayConfig {
+        .seed_config_unchecked_for_tests(labby_runtime::gateway_config::GatewayConfig {
             virtual_servers: vec![labby_runtime::gateway_config::VirtualServerConfig {
                 id: "deploy-primary".to_string(),
                 service: "deploy".to_string(),
@@ -739,7 +739,7 @@ async fn virtual_server_enable_rejects_disabled_upstream_service() {
     let registry = std::sync::Arc::new(crate::gateway::service_registry::EmptyServiceRegistry);
     let manager = test_manager().with_builtin_service_registry(registry);
     manager
-        .seed_config(labby_runtime::gateway_config::GatewayConfig {
+        .seed_config_unchecked_for_tests(labby_runtime::gateway_config::GatewayConfig {
             virtual_servers: vec![labby_runtime::gateway_config::VirtualServerConfig {
                 id: "deploy".to_string(),
                 service: "deploy".to_string(),
@@ -767,7 +767,7 @@ async fn virtual_server_enable_rejects_disabled_upstream_service() {
 async fn enabling_virtual_server_marks_existing_server_row_enabled() {
     let manager = test_manager();
     manager
-        .seed_config(labby_runtime::gateway_config::GatewayConfig {
+        .seed_config_unchecked_for_tests(labby_runtime::gateway_config::GatewayConfig {
             virtual_servers: vec![labby_runtime::gateway_config::VirtualServerConfig {
                 id: "deploy".to_string(),
                 service: "deploy".to_string(),
@@ -834,7 +834,7 @@ async fn enabling_virtual_server_creates_missing_service_row() {
 async fn disabling_virtual_server_keeps_server_row_visible_but_disabled() {
     let manager = test_manager();
     manager
-        .seed_config(labby_runtime::gateway_config::GatewayConfig {
+        .seed_config_unchecked_for_tests(labby_runtime::gateway_config::GatewayConfig {
             virtual_servers: vec![labby_runtime::gateway_config::VirtualServerConfig {
                 id: "deploy".to_string(),
                 service: "deploy".to_string(),
@@ -920,7 +920,7 @@ async fn setting_service_config_writes_canonical_env_backed_fields() {
 async fn configured_but_disabled_service_can_be_read_back_for_editing() {
     let manager = test_manager();
     manager
-        .seed_config(labby_runtime::gateway_config::GatewayConfig {
+        .seed_config_unchecked_for_tests(labby_runtime::gateway_config::GatewayConfig {
             virtual_servers: vec![labby_runtime::gateway_config::VirtualServerConfig {
                 id: "deploy".to_string(),
                 service: "deploy".to_string(),
@@ -977,7 +977,7 @@ async fn configured_but_disabled_service_can_be_read_back_for_editing() {
 async fn setting_virtual_server_surface_updates_visible_server_row() {
     let manager = test_manager();
     manager
-        .seed_config(labby_runtime::gateway_config::GatewayConfig {
+        .seed_config_unchecked_for_tests(labby_runtime::gateway_config::GatewayConfig {
             virtual_servers: vec![labby_runtime::gateway_config::VirtualServerConfig {
                 id: "deploy".to_string(),
                 service: "deploy".to_string(),
@@ -1011,7 +1011,7 @@ async fn setting_virtual_server_surface_updates_visible_server_row() {
 async fn setting_virtual_server_mcp_policy_persists_allowed_actions() {
     let manager = test_manager();
     manager
-        .seed_config(labby_runtime::gateway_config::GatewayConfig {
+        .seed_config_unchecked_for_tests(labby_runtime::gateway_config::GatewayConfig {
             virtual_servers: vec![labby_runtime::gateway_config::VirtualServerConfig {
                 id: "deploy".to_string(),
                 service: "deploy".to_string(),
@@ -1256,7 +1256,7 @@ async fn gateway_update_stdio_needs_no_ack() {
 async fn virtual_server_remove_deletes_configured_service_row() {
     let manager = test_manager();
     manager
-        .seed_config(labby_runtime::gateway_config::GatewayConfig {
+        .seed_config_unchecked_for_tests(labby_runtime::gateway_config::GatewayConfig {
             virtual_servers: vec![labby_runtime::gateway_config::VirtualServerConfig {
                 id: "stale-registry".to_string(),
                 service: "mcpregistry".to_string(),
@@ -1294,7 +1294,7 @@ async fn virtual_server_remove_deletes_configured_service_row() {
 async fn virtual_server_quarantine_list_and_restore_round_trip() {
     let manager = test_manager();
     manager
-        .seed_config(labby_runtime::gateway_config::GatewayConfig {
+        .seed_config_unchecked_for_tests(labby_runtime::gateway_config::GatewayConfig {
             quarantined_virtual_servers: vec![labby_runtime::gateway_config::VirtualServerConfig {
                 id: "deploy".to_string(),
                 service: "deploy".to_string(),
