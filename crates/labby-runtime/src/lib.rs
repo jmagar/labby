@@ -1,10 +1,11 @@
 #![forbid(unsafe_code)]
 
-//! Surface-neutral runtime contracts and helpers shared across the Lab
-//! gateway-extraction crates (`lab-codemode`, `lab-gateway`, `lab-gatewayd`).
+//! Surface-neutral contracts, DTOs, and helpers shared across the Lab gateway
+//! extraction crates (`labby-codemode`, `labby-gateway`, `labby`).
 //!
-//! This crate holds contracts, DTOs, and pure helpers only. It must not depend
-//! on transport/runtime layers (`axum`, `clap`, `rmcp`, `javy`, `wasmtime`,
+//! It owns serialization-stable gateway configuration DTOs plus generic helper
+//! contracts used by more than one extracted crate. It must not depend on
+//! product/transport layers (`axum`, `clap`, `rmcp`, `javy`, `wasmtime`,
 //! `utoipa`) or on Labby product registry builders.
 
 pub mod dispatch_helpers;
@@ -13,6 +14,7 @@ pub mod gateway_config;
 pub mod helpers;
 pub mod path_safety;
 pub mod redact;
+pub mod security;
 
 pub use helpers::{env_non_empty, home_dir, lab_home};
 

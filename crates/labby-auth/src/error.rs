@@ -1,9 +1,12 @@
 use std::path::PathBuf;
 
+#[cfg(feature = "http-axum")]
 use axum::http::{HeaderValue, StatusCode, header};
+#[cfg(feature = "http-axum")]
 use axum::response::{IntoResponse, Response};
 use thiserror::Error;
 
+#[cfg(feature = "http-axum")]
 #[derive(Clone, Copy, Debug)]
 pub struct AuthErrorKind(pub &'static str);
 
@@ -62,6 +65,7 @@ impl AuthError {
         }
     }
 
+    #[cfg(feature = "http-axum")]
     const fn status(&self) -> StatusCode {
         match self {
             Self::InvalidGrant(_) => StatusCode::BAD_REQUEST,
@@ -77,6 +81,7 @@ impl AuthError {
     }
 }
 
+#[cfg(feature = "http-axum")]
 impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
         let status = self.status();

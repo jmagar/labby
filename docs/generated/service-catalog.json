@@ -47,8 +47,8 @@
     "description": "Build-and-push the lab release binary to SSH targets with integrity verification",
     "category": "bootstrap",
     "status": "available",
-    "feature": null,
-    "exposure": "always_on",
+    "feature": "deploy",
+    "exposure": "feature_gated",
     "surfaces": {
       "cli": true,
       "mcp": true,

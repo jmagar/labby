@@ -1,70 +1,6 @@
 {
   "features": [
     {
-      "crate_name": "lab-apis",
-      "feature": "acp_registry",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/acp_registry",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "all",
-      "dependencies": [
-        "deploy",
-        "mcpregistry",
-        "acp_registry"
-      ],
-      "included_in_default": false,
-      "included_in_all": false,
-      "classification": "aggregate_default",
-      "mapped_crate_feature": "labby/all",
-      "exception_reason": "aggregate/default feature"
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "default",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": false,
-      "classification": "aggregate_default",
-      "mapped_crate_feature": "labby/default",
-      "exception_reason": "aggregate/default feature"
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "deploy",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/deploy",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "mcpregistry",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": true,
-      "classification": "service_passthrough",
-      "mapped_crate_feature": "labby/mcpregistry",
-      "exception_reason": null
-    },
-    {
-      "crate_name": "lab-apis",
-      "feature": "test-utils",
-      "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": false,
-      "classification": "helper_internal",
-      "mapped_crate_feature": "labby/test-utils",
-      "exception_reason": "helper/internal feature"
-    },
-    {
       "crate_name": "labby",
       "feature": "acp_registry",
       "dependencies": [
@@ -73,9 +9,9 @@
       ],
       "included_in_default": true,
       "included_in_all": true,
-      "classification": "intentional_exception",
-      "mapped_crate_feature": "lab-apis/acp_registry",
-      "exception_reason": "intentional crate-local exception"
+      "classification": "service_passthrough",
+      "mapped_crate_feature": "labby-apis/acp_registry",
+      "exception_reason": null
     },
     {
       "crate_name": "labby",
@@ -89,9 +25,9 @@
         "marketplace"
       ],
       "included_in_default": true,
-      "included_in_all": false,
+      "included_in_all": true,
       "classification": "aggregate_default",
-      "mapped_crate_feature": "lab-apis/all",
+      "mapped_crate_feature": "labby-apis/all",
       "exception_reason": "aggregate/default feature"
     },
     {
@@ -103,7 +39,7 @@
       "included_in_default": false,
       "included_in_all": false,
       "classification": "aggregate_default",
-      "mapped_crate_feature": "lab-apis/default",
+      "mapped_crate_feature": "labby-apis/default",
       "exception_reason": "aggregate/default feature"
     },
     {
@@ -115,9 +51,9 @@
       ],
       "included_in_default": true,
       "included_in_all": true,
-      "classification": "intentional_exception",
-      "mapped_crate_feature": "lab-apis/deploy",
-      "exception_reason": "intentional crate-local exception"
+      "classification": "service_passthrough",
+      "mapped_crate_feature": "labby-apis/deploy",
+      "exception_reason": null
     },
     {
       "crate_name": "labby",
@@ -164,7 +100,7 @@
       "included_in_default": true,
       "included_in_all": true,
       "classification": "product_slice",
-      "mapped_crate_feature": null,
+      "mapped_crate_feature": "labby-apis/mcpregistry",
       "exception_reason": "standalone product slice"
     },
     {
@@ -173,10 +109,10 @@
       "dependencies": [
         "marketplace"
       ],
-      "included_in_default": false,
-      "included_in_all": false,
+      "included_in_default": true,
+      "included_in_all": true,
       "classification": "intentional_exception",
-      "mapped_crate_feature": "lab-apis/mcpregistry",
+      "mapped_crate_feature": "labby-apis/mcpregistry",
       "exception_reason": "intentional crate-local exception"
     },
     {
@@ -218,8 +154,72 @@
       "included_in_default": false,
       "included_in_all": false,
       "classification": "intentional_exception",
-      "mapped_crate_feature": "lab-apis/test-utils",
+      "mapped_crate_feature": "labby-apis/test-utils",
       "exception_reason": "intentional crate-local exception"
+    },
+    {
+      "crate_name": "labby-apis",
+      "feature": "acp_registry",
+      "dependencies": [],
+      "included_in_default": false,
+      "included_in_all": true,
+      "classification": "service_passthrough",
+      "mapped_crate_feature": "labby/acp_registry",
+      "exception_reason": null
+    },
+    {
+      "crate_name": "labby-apis",
+      "feature": "all",
+      "dependencies": [
+        "deploy",
+        "mcpregistry",
+        "acp_registry"
+      ],
+      "included_in_default": false,
+      "included_in_all": false,
+      "classification": "aggregate_default",
+      "mapped_crate_feature": "labby/all",
+      "exception_reason": "aggregate/default feature"
+    },
+    {
+      "crate_name": "labby-apis",
+      "feature": "default",
+      "dependencies": [],
+      "included_in_default": false,
+      "included_in_all": false,
+      "classification": "aggregate_default",
+      "mapped_crate_feature": "labby/default",
+      "exception_reason": "aggregate/default feature"
+    },
+    {
+      "crate_name": "labby-apis",
+      "feature": "deploy",
+      "dependencies": [],
+      "included_in_default": false,
+      "included_in_all": true,
+      "classification": "service_passthrough",
+      "mapped_crate_feature": "labby/deploy",
+      "exception_reason": null
+    },
+    {
+      "crate_name": "labby-apis",
+      "feature": "mcpregistry",
+      "dependencies": [],
+      "included_in_default": false,
+      "included_in_all": true,
+      "classification": "service_passthrough",
+      "mapped_crate_feature": "labby/mcpregistry",
+      "exception_reason": null
+    },
+    {
+      "crate_name": "labby-apis",
+      "feature": "test-utils",
+      "dependencies": [],
+      "included_in_default": false,
+      "included_in_all": false,
+      "classification": "helper_internal",
+      "mapped_crate_feature": "labby/test-utils",
+      "exception_reason": "helper/internal feature"
     }
   ],
   "mismatches": []

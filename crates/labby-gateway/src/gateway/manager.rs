@@ -138,7 +138,13 @@ impl GatewayManager {
         // existing `write_gateway_config`/`render_gateway_config` toml_edit logic
         // verbatim. The manager keeps the in-memory `GatewayConfig` authoritative
         // for the gateway-owned sections and swaps it in after a successful write.
-        self.store.persist(&cfg)?;
+        let store = Arc::clone(&self.store);
+        let cfg_for_persist = cfg.clone();
+        tokio::task::spawn_blocking(move || store.persist(&cfg_for_persist))
+            .await
+            .map_err(|err| {
+                ToolError::internal_message(format!("gateway config write task failed: {err}"))
+            })??;
         *self.protected_route_index.write().await =
             ProtectedRouteIndex::from_routes(&cfg.protected_mcp_routes);
         *self.config.write().await = cfg;

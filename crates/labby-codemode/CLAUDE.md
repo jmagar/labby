@@ -165,9 +165,8 @@ env_clear lands" comment — that state is in the past.
 | `normalize.rs` | Result normalization after runner returns. |
 | `truncate.rs` | Output size limiting before returning to caller. |
 | `trace.rs` | Execution span helpers (`tracing`). |
-| `types.rs` | Shared Code Mode types: `CodeModeRequest`, `CodeModeResult`. |
+| `types.rs` | Shared Code Mode types: tool descriptors, callers, scopes, execution responses, traces, and UI links. |
 | `ts_signatures.rs` | **Live** TypeScript signature / `.d.ts` generator called by `types.rs::CodeModeCatalogEntry::upstream_tool`. NOT legacy shims. |
-| `types_legacy.rs` | Thin re-export alias for `ts_signatures`. Kept for backward compatibility — do not add new code here. |
 | `util.rs` | Small utilities: JS source wrapping, ID generation. |
 | `artifacts.rs` | Artifact write handler: path containment check, size cap, atomic write. |
 | `catalog_cache.rs` | Per-run catalog snapshot cache to avoid repeated pool reads. |
@@ -193,4 +192,4 @@ env_clear lands" comment — that state is in the past.
 
 - `docs/dev/CODE_MODE.md` — surface documentation and examples (authoritative)
 - `docs/dev/ERRORS.md` — `"timeout"` and artifact kinds
-- Parent: `crates/lab/src/dispatch/gateway/CLAUDE.md` — trust model, runner env isolation (`env_clear`)
+- Parent: `crates/labby-gateway/src/gateway/CLAUDE.md` — trust model, runner env isolation (`env_clear`)

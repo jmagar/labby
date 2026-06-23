@@ -19,6 +19,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 jiff.workspace = true
 labby-apis = { path = "../labby-apis", default-features = false }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+tracing.workspace = true
 
 [features]
 marketplace = ["labby-apis/mcpregistry"]
@@ -28,6 +30,7 @@ deploy = ["labby-apis/deploy"]
 [dev-dependencies]
 tempfile.workspace = true
 toml.workspace = true
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true

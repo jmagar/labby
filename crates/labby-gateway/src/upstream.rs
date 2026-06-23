@@ -19,7 +19,7 @@ pub mod http_client;
 pub mod pool;
 #[allow(dead_code)]
 pub mod process_guard;
-pub mod spawn_guard;
+pub use labby_runtime::security::spawn_guard;
 #[allow(dead_code)]
 pub mod transport;
 #[allow(dead_code)]

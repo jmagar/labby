@@ -60,10 +60,7 @@ async fn reload_applies_configured_upstream_request_timeout() {
         .expect("reload");
 
     let pool = manager.current_pool().await.expect("pool installed");
-    assert_eq!(
-        pool.request_timeout(),
-        std::time::Duration::from_millis(60_000)
-    );
+    assert_eq!(pool.request_timeout(), Duration::from_millis(60_000));
 }
 
 #[tokio::test]

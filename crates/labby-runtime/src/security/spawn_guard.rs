@@ -2,9 +2,8 @@
 //!
 //! These guards are applied at `validate_upstream` write-time so that every
 //! persisted stdio config is already clean before it reaches `connect_stdio`.
-//! Both the gateway add/update/import path (`dispatch/gateway/config.rs`) and
-//! the marketplace install path (`dispatch/marketplace/mcp_params.rs`) call
-//! these same functions — there is exactly one copy of each rule.
+//! Both the gateway add/update/import path and the marketplace install path
+//! call these same functions — there is exactly one copy of each rule.
 //!
 //! # Allowlists
 //! - [`ALLOWED_RUNTIME_HINTS`] — executables that may appear as the `command`
@@ -13,7 +12,7 @@
 //! - [`DANGEROUS_DOCKER_FLAGS`] / [`DANGEROUS_NODE_FLAGS`] — argv flags that
 //!   are rejected for the corresponding runtime families.
 
-use labby_runtime::error::ToolError;
+use crate::error::ToolError;
 
 /// Runtime hints / commands the gateway is allowed to execute as stdio upstreams.
 pub const ALLOWED_RUNTIME_HINTS: &[&str] = &[
@@ -251,8 +250,41 @@ pub fn validate_stdio_spec(
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::io;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
+    use tracing_subscriber::fmt::MakeWriter;
+
+    #[derive(Clone, Default)]
+    struct SharedBuf(Arc<Mutex<Vec<u8>>>);
+
+    impl<'a> MakeWriter<'a> for SharedBuf {
+        type Writer = SharedWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            SharedWriter(Arc::clone(&self.0))
+        }
+    }
+
+    struct SharedWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl io::Write for SharedWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn captured_logs(buf: &SharedBuf) -> String {
+        String::from_utf8(buf.0.lock().unwrap().clone()).unwrap()
+    }
+
+    static TRACING_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     // ── validate_stdio_command ───────────────────────────────────────────────
 
@@ -311,15 +343,11 @@ mod tests {
         use tracing_subscriber::layer::SubscriberExt;
         use tracing_subscriber::{EnvFilter, fmt};
 
-        use crate::test_support::{SharedBuf, captured_logs};
-
-        let _tracing_lock = crate::test_support::TRACING_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _tracing_lock = TRACING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let buf = SharedBuf::default();
         let subscriber = tracing_subscriber::registry()
-            .with(EnvFilter::new("labby_gateway=warn"))
+            .with(EnvFilter::new("labby_runtime=warn"))
             .with(
                 fmt::layer()
                     .json()
@@ -355,15 +383,11 @@ mod tests {
         use tracing_subscriber::layer::SubscriberExt;
         use tracing_subscriber::{EnvFilter, fmt};
 
-        use crate::test_support::{SharedBuf, captured_logs};
-
-        let _tracing_lock = crate::test_support::TRACING_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _tracing_lock = TRACING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let buf = SharedBuf::default();
         let subscriber = tracing_subscriber::registry()
-            .with(EnvFilter::new("labby_gateway=warn"))
+            .with(EnvFilter::new("labby_runtime=warn"))
             .with(
                 fmt::layer()
                     .json()

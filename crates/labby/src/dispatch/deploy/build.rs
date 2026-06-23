@@ -333,12 +333,22 @@ fn newest_build_input_mtime() -> Result<SystemTime, DeployError> {
     let inputs = [
         root.join("Cargo.toml"),
         root.join("Cargo.lock"),
-        root.join("crates/lab/Cargo.toml"),
-        root.join("crates/lab/src"),
-        root.join("crates/lab-apis/Cargo.toml"),
-        root.join("crates/lab-apis/src"),
-        root.join("crates/lab-auth/Cargo.toml"),
-        root.join("crates/lab-auth/src"),
+        root.join("crates/labby/Cargo.toml"),
+        root.join("crates/labby/src"),
+        root.join("crates/labby-apis/Cargo.toml"),
+        root.join("crates/labby-apis/src"),
+        root.join("crates/labby-auth/Cargo.toml"),
+        root.join("crates/labby-auth/src"),
+        root.join("crates/labby-codemode/Cargo.toml"),
+        root.join("crates/labby-codemode/src"),
+        root.join("crates/labby-gateway/Cargo.toml"),
+        root.join("crates/labby-gateway/src"),
+        root.join("crates/labby-runtime/Cargo.toml"),
+        root.join("crates/labby-runtime/src"),
+        root.join("crates/labby-web/Cargo.toml"),
+        root.join("crates/labby-web/src"),
+        root.join("crates/labby-winjob/Cargo.toml"),
+        root.join("crates/labby-winjob/src"),
     ];
 
     let mut newest = SystemTime::UNIX_EPOCH;

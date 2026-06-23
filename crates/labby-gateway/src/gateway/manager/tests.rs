@@ -3,19 +3,23 @@
 //! `use super::*;` to inherit these fixtures and imports.
 
 use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use base64::Engine as _;
 use labby_auth::sqlite::SqliteStore;
 use rmcp::transport::{AuthClient, AuthorizationManager};
 
+use crate::gateway::config_store::{GatewayConfigStore, StoreFuture};
 use crate::gateway::discovery::DiscoveredServer;
 use crate::upstream::pool::UpstreamPool;
 use crate::upstream::types::{ToolExposurePolicy, UpstreamEntry, UpstreamHealth, UpstreamTool};
 use labby_auth::upstream::encryption::{EncryptionKey, load_key};
 use labby_runtime::gateway_config::{
-    CodeModeConfig, GatewayConfig, ImportSource, ProtectedMcpRouteConfig, UpstreamConfig,
-    UpstreamOauthConfig, UpstreamOauthMode, UpstreamOauthRegistration,
+    CodeModeConfig, GatewayConfig, ImportSource, ProtectedMcpRouteConfig, ResolvedPublicUrls,
+    UpstreamConfig, UpstreamOauthConfig, UpstreamOauthMode, UpstreamOauthRegistration,
 };
 
 use super::{GatewayManager, GatewayRuntimeHandle};
@@ -36,6 +40,49 @@ mod virtual_servers;
 /// gating, MCP action-policy enforcement) inject this so the registry seam
 /// resolves `deploy` instead of the default `EmptyServiceRegistry`.
 struct DeployKnownRegistry;
+
+struct SlowPersistStore {
+    calls: Arc<AtomicUsize>,
+    delay: Duration,
+}
+
+impl GatewayConfigStore for SlowPersistStore {
+    fn public_urls(&self) -> ResolvedPublicUrls {
+        ResolvedPublicUrls::default()
+    }
+
+    fn set_process_code_mode_enabled(&self, _enabled: bool) {}
+
+    fn env_path(&self) -> PathBuf {
+        PathBuf::from(".env")
+    }
+
+    fn persist(&self, _cfg: &GatewayConfig) -> Result<(), labby_runtime::error::ToolError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        std::thread::sleep(self.delay);
+        Ok(())
+    }
+
+    fn persist_gateway_bearer_token<'a>(
+        &'a self,
+        _env_name: &'a str,
+        _token_value: &'a str,
+    ) -> StoreFuture<'a, Result<(), labby_runtime::error::ToolError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn persist_service_env<'a>(
+        &'a self,
+        _service: &'a str,
+        _values: &'a BTreeMap<String, String>,
+    ) -> StoreFuture<'a, Result<(), labby_runtime::error::ToolError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn read_env_values(&self, _path: &Path) -> BTreeMap<String, String> {
+        BTreeMap::new()
+    }
+}
 
 static DEPLOY_KNOWN_META: labby_apis::core::PluginMeta = labby_apis::core::PluginMeta {
     name: "deploy",
@@ -92,6 +139,35 @@ impl crate::gateway::service_registry::GatewayServiceRegistry for DeployKnownReg
 /// Build an `Arc<dyn GatewayServiceRegistry>` that knows `deploy`.
 fn deploy_known_registry() -> Arc<dyn crate::gateway::service_registry::GatewayServiceRegistry> {
     Arc::new(DeployKnownRegistry)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn persist_config_offloads_blocking_store_write() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let store = Arc::new(SlowPersistStore {
+        calls: Arc::clone(&calls),
+        delay: Duration::from_millis(150),
+    });
+    let manager = GatewayManager::with_store(
+        PathBuf::from("config.toml"),
+        GatewayRuntimeHandle::default(),
+        store,
+    );
+
+    let persist_task =
+        tokio::spawn(async move { manager.persist_config(GatewayConfig::default()).await });
+
+    let timer_result = tokio::time::timeout(Duration::from_millis(50), async {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    })
+    .await;
+
+    assert!(
+        timer_result.is_ok(),
+        "blocking store persistence must not stall the async runtime"
+    );
+    persist_task.await.expect("persist task joins").unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
 async fn dummy_auth_client() -> Arc<AuthClient<reqwest::Client>> {

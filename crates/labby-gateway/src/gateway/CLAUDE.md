@@ -54,16 +54,16 @@ keeping each file under ~500 LOC.
 | `manager/oauth_resources.rs` | Upstream OAuth resource/token management. |
 | `manager/views.rs` | `list()`, `get()`, `status()`, `test()`, `discovered_tools/resources/prompts()`, `client_config()`. |
 
-### `code_mode/` — extracted to the `lab-codemode` crate
+### `code_mode/` — extracted to the `labby-codemode` crate
 
 **The Code Mode JS execution kernel, broker, result-shaping helpers, and snippet
-engine were extracted into the client-neutral `lab-codemode` crate** (runner,
+engine were extracted into the client-neutral `labby-codemode` crate** (runner,
 runner_drive, runner_io, protocol, pool, artifacts, wrapper, preamble, util,
 execute broker, schema, normalize, truncate, trace, types, ts_signatures, plus
 the snippet store). The crate is injected with a tool source via the
-`lab_codemode::CodeModeHost` trait and carries **no** gateway/upstream
+`labby_codemode::CodeModeHost` trait and carries **no** gateway/upstream
 vocabulary. Wasmtime / `wasm_runner.rs` were dropped (dead code). See
-`crates/lab-codemode/CLAUDE.md` for the sandbox containment invariants.
+`crates/labby-codemode/CLAUDE.md` for the sandbox containment invariants.
 
 What stays in `dispatch/gateway/code_mode/` is the gateway's **thin adapter**:
 
@@ -73,7 +73,6 @@ What stays in `dispatch/gateway/code_mode/` is the gateway's **thin adapter**:
 | `code_mode/code_mode_host.rs` | `impl CodeModeHost for GatewayManager` — the upstream→`ToolDescriptor` binding, `callTool` over the `UpstreamPool`, mcp-ui capture + result unwrap, upstream-error classification, snippet source resolution, OAuth-subject / runtime-owner derivation. This is the one place gateway/upstream vocabulary is legitimately reintroduced. |
 | `code_mode/search.rs` | Host-side discovery catalog projection + render cache (`build_tools_render`). |
 | `code_mode/catalog_cache.rs` | One-shot CLI on-disk catalog cache (gateway-config fingerprinted). |
-| `code_mode/tests_broker.rs.disabled` / `tests_runtime.rs.disabled` | Broker/runtime integration tests parked pending a rewrite against the new public `CodeModeBroker` API (they tested the old crate-private broker internals). |
 
 ---
 
@@ -105,7 +104,7 @@ process environment.** The following invariants are NON-NEGOTIABLE:
    `LAB_*` secrets and every other ambient labby env var are excluded by default.
    To extend the allowlist, add entries to `STDIO_ENV_ALLOWLIST` in
    `pool/connect_stdio.rs` with a comment justifying why the var is safe to
-   forward. Integration tests in `crates/lab/tests/gateway_stdio_spawn.rs` that
+   forward. Integration tests in `crates/labby/tests/gateway_stdio_spawn.rs` that
    assert on env behaviour are non-`#[ignore]` where hermetic (Linux `/proc`
    inspect) and `#[ignore]` where they require a built binary or external tool.
 
@@ -149,7 +148,7 @@ Outbound OAuth (upstream MCP servers protected by OAuth) is coordinated by:
 1. `dispatch/gateway/oauth.rs` — action-level entry points (`oauth.start`, `oauth.status`, `oauth.callback`).
 2. `dispatch/gateway/oauth_lifecycle.rs` — core orchestration: PKCE flow, token storage, refresh.
 3. `manager/oauth_resources.rs` — per-upstream token/credential management within the manager.
-4. `crates/lab/src/oauth/upstream/` — the reusable `UpstreamOauthManager` (wire-level OAuth client).
+4. `crates/labby-auth/src/upstream/` — the reusable `UpstreamOauthManager` (wire-level OAuth client).
 
 Full flow documented in `docs/services/UPSTREAM.md`. Stable error kinds for OAuth
 failures are in `docs/dev/ERRORS.md` under "Upstream OAuth Kinds".
@@ -159,26 +158,26 @@ failures are in `docs/dev/ERRORS.md` under "Upstream OAuth Kinds".
 ## `GatewayManager` — sanctioned in-dispatch stateful runtime component
 
 `GatewayManager` (`manager.rs` + the `manager/` impl split) is a **de-facto SDK
-client that intentionally lives in dispatch, not in `lab-apis`.** This is a
+client that intentionally lives in dispatch, not in `labby-apis`.** This is a
 sanctioned pattern, not a Golden-Rule violation — call it out explicitly so it
 is not mistaken for a layout mistake during review or onboarding:
 
 - It is the gateway analogue of the **`upstream` connection pool**: a stateful
   runtime object (`RwLock<LabConfig>` + a live `Arc<UpstreamPool>` of spawned
-  stdio children) that cannot be a stateless `lab-apis` HTTP client. The pool is
+  stdio children) that cannot be a stateless `labby-apis` HTTP client. The pool is
   in-process, file-backed, and inherently single-instance (see the
   horizontal-scaling note in `02-security-performance.md` / Perf-C1).
 - Dispatch arms over it are correctly **thin**: `to_json(manager.foo().await?)`.
   The complexity is encapsulated inside `GatewayManager`, which is the right
   place for it given the runtime state it owns.
-- **No `lab-apis` counterpart is expected.** Unlike pure upstream API services
+- **No `labby-apis` counterpart is expected.** Unlike pure upstream API services
   (radarr, unraid, …), the gateway's "client" manages local process and config
-  state, which the `lab-apis` layer (no `tokio`-spawned children, no config
+  state, which the `labby-apis` layer (no `tokio`-spawned children, no config
   files) deliberately does not own.
 
 `config.rs` persistence (`toml_edit` round-trips, atomic write, `fd_lock`) is a
 property of this single-instance runtime component and stays with it; it is not
-a separable SDK concern that belongs in `lab-apis`.
+a separable SDK concern that belongs in `labby-apis`.
 
 ## Module Size Rule
 
@@ -219,4 +218,4 @@ behavioral code. Two clarifications keep this rule and the actual code honest:
 - `docs/dev/ERRORS.md` — stable error kind contract (authoritative)
 - `docs/surfaces/TRANSPORT.md` — auth layer, MCP/HTTP transport security (authoritative)
 - `docs/services/UPSTREAM.md` — upstream OAuth flow
-- `crates/lab/src/dispatch/upstream/CLAUDE.md` — upstream pool internals
+- `crates/labby-gateway/src/upstream/CLAUDE.md` — upstream pool internals

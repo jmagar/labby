@@ -1,7 +1,7 @@
 //! Surface-neutral path-safety helpers for dispatch modules that operate on the
 //! local filesystem.
 //!
-//! These helpers now live in `lab-runtime` so the standalone gateway crates can
+//! These helpers now live in `labby-runtime` so the standalone gateway crates can
 //! share them. They are re-exported from `crate::dispatch::path_safety` (and the
 //! lexical `reject_path_traversal` guard from `crate::dispatch::helpers`) so the
 //! existing import paths keep working.
@@ -10,7 +10,7 @@
 //!
 //! - `reject_path_traversal` — lexical `..`/absolute-component guard. Previously
 //!   lived in `dispatch/helpers.rs`; moved here because it is pure and is needed
-//!   by this module's tests, which `lab-runtime` cannot reach across crates.
+//!   by this module's tests, which `labby-runtime` cannot reach across crates.
 //! - `reject_symlink` — consolidated from `dispatch/marketplace/stash_meta.rs`
 //!   where it was a private function.  Stash dispatch (and future modules that
 //!   walk user-supplied paths) import from here instead of duplicating the

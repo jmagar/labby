@@ -19,13 +19,21 @@
 //! those sections; non-gateway sections and foreign top-level keys are never
 //! touched by the manager.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::fs;
 use std::future::Future;
-use std::path::PathBuf;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use labby_runtime::error::ToolError;
 use labby_runtime::gateway_config::{GatewayConfig, ResolvedPublicUrls};
+use tempfile::NamedTempFile;
+
+const ENV_BACKUP_RETAIN: usize = 10;
+static ENV_BACKUP_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 /// Boxed future returned by the store's async env-write methods.
 ///
@@ -37,11 +45,12 @@ pub type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Host-owned persistence + environment seam for the gateway manager.
 ///
-/// All methods are synchronous: persistence is blocking file IO (the underlying
-/// `write_gateway_config` uses `std::fs` + `fd_lock`), so there is nothing to
-/// `await`. Keeping the trait sync also makes it dyn-compatible, so the manager
-/// can hold an injected `Arc<dyn GatewayConfigStore>` without `#[async_trait]`
-/// or boxed futures. Implemented by `lab` and injected at construction.
+/// Config persistence is synchronous blocking file IO (the underlying
+/// `write_gateway_config` uses `std::fs` + `fd_lock`), while credential writes
+/// return boxed futures because host implementations may refresh async service
+/// clients after touching `.env`. This keeps the manager's injected
+/// `Arc<dyn GatewayConfigStore>` dyn-compatible without `#[async_trait]`.
+/// Implemented by `lab` and injected at construction.
 pub trait GatewayConfigStore: Send + Sync {
     /// Resolve the canonical public URL pair (env over config over legacy
     /// `[auth].public_url`). Host-owned because it reads `LabConfig` sections
@@ -80,7 +89,7 @@ pub trait GatewayConfigStore: Send + Sync {
     ) -> StoreFuture<'a, Result<(), ToolError>>;
 
     /// Read raw `KEY=value` pairs from the `.env` file (best-effort).
-    fn read_env_values(&self, path: &std::path::Path) -> BTreeMap<String, String>;
+    fn read_env_values(&self, path: &Path) -> BTreeMap<String, String>;
 }
 
 /// Default filesystem-backed [`GatewayConfigStore`].
@@ -121,29 +130,208 @@ impl FsGatewayConfigStore {
     }
 
     fn write_env_pairs(&self, pairs: &[(String, String)]) -> Result<(), ToolError> {
-        let mut existing: BTreeMap<String, String> = self.read_env_values(&self.env_path);
-        for (k, v) in pairs {
-            existing.insert(k.clone(), v.clone());
-        }
-        if let Some(parent) = self.env_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                ToolError::internal_message(format!("failed to create env dir: {e}"))
-            })?;
-        }
-        // Values may contain spaces (e.g. `Bearer <token>`); double-quote them so
-        // `dotenvy` round-trips the value back on read. The host store (`lab`)
-        // owns the richer backup-first writer; this default is for tests/standalone.
-        let body: String = existing
-            .iter()
-            .map(|(k, v)| format!("{k}={}\n", quote_env_value(v)))
-            .collect();
-        std::fs::write(&self.env_path, body)
-            .map_err(|e| ToolError::internal_message(format!("failed to write env file: {e}")))
+        merge_env_pairs(&self.env_path, pairs)
     }
 }
 
+fn merge_env_pairs(path: &Path, pairs: &[(String, String)]) -> Result<(), ToolError> {
+    if pairs.is_empty() {
+        return Ok(());
+    }
+
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)
+        .map_err(|e| ToolError::internal_message(format!("failed to create env dir: {e}")))?;
+    reject_env_symlink(path)?;
+
+    let existing_raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => {
+            return Err(ToolError::internal_message(format!(
+                "failed to read env file {}: {err}",
+                path.display()
+            )));
+        }
+    };
+
+    let existing_lines = existing_raw.lines().collect::<Vec<_>>();
+    let existing_values = parse_env_values(&existing_lines);
+    let requested = dedupe_pairs(pairs);
+    let mut overrides = HashMap::new();
+    let mut new_keys = Vec::new();
+
+    for (key, value) in &requested {
+        match existing_values.get(key) {
+            Some(existing) if existing == value => {}
+            Some(_) => {
+                overrides.insert(key.clone(), value.clone());
+            }
+            None => {
+                new_keys.push((key.clone(), value.clone()));
+            }
+        }
+    }
+
+    if overrides.is_empty() && new_keys.is_empty() {
+        return Ok(());
+    }
+
+    if path.exists() {
+        create_env_backup(path)?;
+    }
+
+    let mut out_lines = Vec::with_capacity(existing_lines.len() + new_keys.len() + 1);
+    for line in &existing_lines {
+        let trimmed = line.trim();
+        if !trimmed.is_empty()
+            && !trimmed.starts_with('#')
+            && let Some((key, _)) = trimmed.split_once('=')
+        {
+            let key = key.trim();
+            if let Some(value) = overrides.get(key) {
+                out_lines.push(format!("{key}={}", quote_env_value(value)));
+                continue;
+            }
+        }
+        out_lines.push((*line).to_string());
+    }
+
+    if !new_keys.is_empty() {
+        if !out_lines.last().is_none_or(|line| line.trim().is_empty()) {
+            out_lines.push(String::new());
+        }
+        for (key, value) in new_keys {
+            out_lines.push(format!("{key}={}", quote_env_value(&value)));
+        }
+    }
+
+    write_env_lines_atomically(path, parent, &out_lines)
+}
+
+fn dedupe_pairs(pairs: &[(String, String)]) -> Vec<(String, String)> {
+    let mut deduped: Vec<(String, String)> = Vec::new();
+    for (key, value) in pairs {
+        if let Some((_, existing_value)) = deduped.iter_mut().find(|(existing, _)| existing == key)
+        {
+            *existing_value = value.clone();
+        } else {
+            deduped.push((key.clone(), value.clone()));
+        }
+    }
+    deduped
+}
+
+fn parse_env_values(lines: &[&str]) -> HashMap<String, String> {
+    lines
+        .iter()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                return None;
+            }
+            trimmed
+                .split_once('=')
+                .map(|(key, value)| (key.trim().to_string(), unquote_env_value(value.trim())))
+        })
+        .collect()
+}
+
+fn write_env_lines_atomically(
+    path: &Path,
+    parent: &Path,
+    lines: &[String],
+) -> Result<(), ToolError> {
+    let mut tmp = NamedTempFile::new_in(parent).map_err(|e| {
+        ToolError::internal_message(format!(
+            "failed to create temp env file in {}: {e}",
+            parent.display()
+        ))
+    })?;
+    for line in lines {
+        writeln!(tmp, "{line}")
+            .map_err(|e| ToolError::internal_message(format!("failed to write env file: {e}")))?;
+    }
+    tmp.as_file()
+        .sync_all()
+        .map_err(|e| ToolError::internal_message(format!("failed to sync env file: {e}")))?;
+    tmp.persist(path).map_err(|e| {
+        ToolError::internal_message(format!("failed to persist {}: {}", path.display(), e.error))
+    })?;
+    restrict_secret_file_permissions(path)
+}
+
+fn create_env_backup(path: &Path) -> Result<PathBuf, ToolError> {
+    reject_env_symlink(path)?;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(".env");
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+    let counter = ENV_BACKUP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let backup = parent.join(format!("{file_name}.bak.{millis}.{counter}"));
+    fs::copy(path, &backup).map_err(|e| {
+        ToolError::internal_message(format!(
+            "failed to back up {} to {}: {e}",
+            path.display(),
+            backup.display()
+        ))
+    })?;
+    restrict_secret_file_permissions(&backup)?;
+    prune_env_backups(parent, file_name)?;
+    Ok(backup)
+}
+
+fn reject_env_symlink(path: &Path) -> Result<(), ToolError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(ToolError::Sdk {
+            sdk_kind: "invalid_param".to_string(),
+            message: format!(
+                "refusing to write env file through symlink: {}",
+                path.display()
+            ),
+        }),
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(ToolError::internal_message(format!(
+            "failed to inspect env file {}: {err}",
+            path.display()
+        ))),
+    }
+}
+
+fn prune_env_backups(parent: &Path, file_name: &str) -> Result<(), ToolError> {
+    let prefix = format!("{file_name}.bak.");
+    let mut backups = Vec::new();
+    let entries = fs::read_dir(parent)
+        .map_err(|e| ToolError::internal_message(format!("failed to read env backup dir: {e}")))?;
+    for entry in entries {
+        let entry = entry
+            .map_err(|e| ToolError::internal_message(format!("failed to read env backup: {e}")))?;
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with(&prefix) {
+            backups.push(entry.path());
+        }
+    }
+    backups.sort();
+    let remove_count = backups.len().saturating_sub(ENV_BACKUP_RETAIN);
+    for backup in backups.into_iter().take(remove_count) {
+        fs::remove_file(&backup).map_err(|e| {
+            ToolError::internal_message(format!(
+                "failed to prune env backup {}: {e}",
+                backup.display()
+            ))
+        })?;
+    }
+    Ok(())
+}
+
 /// Double-quote an env value when it contains whitespace or shell metacharacters
-/// so `dotenvy` can read it back. Mirrors `lab`'s host-side `quote_env_value`.
+/// so `dotenvy` can read it back.
 fn quote_env_value(v: &str) -> String {
     let needs_quotes = v
         .chars()
@@ -154,6 +342,29 @@ fn quote_env_value(v: &str) -> String {
     } else {
         v.to_owned()
     }
+}
+
+fn unquote_env_value(value: &str) -> String {
+    value
+        .strip_prefix('"')
+        .and_then(|inner| inner.strip_suffix('"'))
+        .map_or_else(
+            || value.to_string(),
+            |inner| inner.replace(r#"\""#, "\"").replace(r"\\", r"\"),
+        )
+}
+
+fn restrict_secret_file_permissions(path: &Path) -> Result<(), ToolError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|e| {
+            ToolError::internal_message(format!("failed to chmod {}: {e}", path.display()))
+        })?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 impl GatewayConfigStore for FsGatewayConfigStore {
@@ -194,10 +405,111 @@ impl GatewayConfigStore for FsGatewayConfigStore {
         })
     }
 
-    fn read_env_values(&self, path: &std::path::Path) -> BTreeMap<String, String> {
+    fn read_env_values(&self, path: &Path) -> BTreeMap<String, String> {
         dotenvy::from_path_iter(path)
             .ok()
             .map(|iter| iter.filter_map(Result::ok).collect())
             .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn backup_count(dir: &Path) -> usize {
+        fs::read_dir(dir)
+            .expect("read temp dir")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(".env.bak."))
+            .count()
+    }
+
+    #[cfg(unix)]
+    fn file_mode(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(path).expect("metadata").permissions().mode() & 0o777
+    }
+
+    #[test]
+    fn fs_store_env_merge_preserves_comments_and_creates_backup() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(".env");
+        fs::write(&path, "# operator note\nOTHER=keep\nTOKEN=old\n").expect("write env");
+
+        merge_env_pairs(
+            &path,
+            &[
+                ("TOKEN".to_string(), "new value".to_string()),
+                ("ADDED".to_string(), "abc123".to_string()),
+            ],
+        )
+        .expect("merge env");
+
+        let rendered = fs::read_to_string(&path).expect("read env");
+        assert!(rendered.contains("# operator note"));
+        assert!(rendered.contains("OTHER=keep"));
+        assert!(rendered.contains("TOKEN=\"new value\""));
+        assert!(rendered.contains("ADDED=abc123"));
+        assert_eq!(backup_count(dir.path()), 1);
+    }
+
+    #[test]
+    fn fs_store_env_merge_idempotent_write_skips_backup() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(".env");
+        fs::write(&path, "TOKEN=\"new value\"\n").expect("write env");
+
+        merge_env_pairs(&path, &[("TOKEN".to_string(), "new value".to_string())])
+            .expect("merge env");
+
+        assert_eq!(backup_count(dir.path()), 0);
+        assert_eq!(
+            fs::read_to_string(&path).expect("read env"),
+            "TOKEN=\"new value\"\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fs_store_env_merge_restricts_env_and_backup_permissions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(".env");
+        fs::write(&path, "TOKEN=old\n").expect("write env");
+
+        merge_env_pairs(&path, &[("TOKEN".to_string(), "new".to_string())]).expect("merge env");
+
+        assert_eq!(file_mode(&path), 0o600);
+        let backup = fs::read_dir(dir.path())
+            .expect("read temp dir")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with(".env.bak."))
+            })
+            .expect("backup exists");
+        assert_eq!(file_mode(&backup), 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fs_store_env_merge_refuses_symlink_target() {
+        use std::os::unix::fs as unix_fs;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("target.env");
+        let link = dir.path().join(".env");
+        fs::write(&target, "TOKEN=old\n").expect("write target");
+        unix_fs::symlink(&target, &link).expect("symlink env");
+
+        let err = merge_env_pairs(&link, &[("TOKEN".to_string(), "new".to_string())])
+            .expect_err("env symlink must be refused");
+
+        assert_eq!(err.kind(), "invalid_param");
+        assert_eq!(
+            fs::read_to_string(&target).expect("read target"),
+            "TOKEN=old\n"
+        );
     }
 }

@@ -118,15 +118,22 @@ impl GatewayConfigStore for LabConfigStore {
     fn persist(&self, cfg: &GatewayConfig) -> Result<(), ToolError> {
         // Apply the gateway-owned sections into the live LabConfig, then render
         // the FULL LabConfig through the foreign-key-preserving toml_edit path.
-        let snapshot = {
-            let mut guard = self
+        let mut snapshot = {
+            let guard = self
                 .config
-                .write()
+                .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            guard.apply_gateway_config(cfg);
             guard.clone()
         };
-        write_gateway_config(&self.config_path, &snapshot)
+        snapshot.apply_gateway_config(cfg);
+        write_gateway_config(&self.config_path, &snapshot)?;
+
+        let mut guard = self
+            .config
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *guard = snapshot;
+        Ok(())
     }
 
     fn persist_gateway_bearer_token<'a>(

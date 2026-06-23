@@ -15,6 +15,10 @@ use crate::api::openapi::build_openapi_spec;
 use crate::catalog::build_catalog;
 use crate::registry::{RegisteredService, build_docs_registry};
 
+const LABBY_CRATE: &str = "labby";
+const LABBY_APIS_CRATE: &str = "labby-apis";
+const LABBY_APIS_PREFIX: &str = "labby-apis/";
+
 pub fn build_docs_projection(repo_root: &Path) -> Result<DocsProjection> {
     let registry = build_docs_registry();
     let mcp_help = build_catalog(&registry);
@@ -191,7 +195,7 @@ fn build_feature_matrix(repo_root: &Path) -> Result<FeatureMatrix> {
             if !api_features.contains_key(feature.as_str()) {
                 mismatches.push(FeatureMismatch {
                     feature: feature.clone(),
-                    message: "service passthrough missing matching lab-apis feature".to_string(),
+                    message: "service passthrough missing matching labby-apis feature".to_string(),
                 });
             }
             if !lab_all.contains(feature.as_str()) {
@@ -203,12 +207,12 @@ fn build_feature_matrix(repo_root: &Path) -> Result<FeatureMatrix> {
             if !api_all.contains(feature.as_str()) {
                 mismatches.push(FeatureMismatch {
                     feature: feature.clone(),
-                    message: "service feature missing from lab-apis all".to_string(),
+                    message: "service feature missing from labby-apis all".to_string(),
                 });
             }
         }
         features.push(FeatureDoc {
-            crate_name: "labby".to_string(),
+            crate_name: LABBY_CRATE.to_string(),
             feature: feature.clone(),
             dependencies: deps.clone(),
             included_in_default: lab_default.contains(feature.as_str()),
@@ -224,11 +228,11 @@ fn build_feature_matrix(repo_root: &Path) -> Result<FeatureMatrix> {
         if classification == FeatureClass::SdkOnly && !api_all.contains(feature.as_str()) {
             mismatches.push(FeatureMismatch {
                 feature: feature.clone(),
-                message: "SDK-only service feature missing from lab-apis all".to_string(),
+                message: "SDK-only service feature missing from labby-apis all".to_string(),
             });
         }
         features.push(FeatureDoc {
-            crate_name: "lab-apis".to_string(),
+            crate_name: LABBY_APIS_CRATE.to_string(),
             feature: feature.clone(),
             dependencies: deps.clone(),
             included_in_default: api_default.contains(feature.as_str()),
@@ -236,7 +240,7 @@ fn build_feature_matrix(repo_root: &Path) -> Result<FeatureMatrix> {
             classification,
             mapped_crate_feature: lab_features
                 .contains_key(feature.as_str())
-                .then(|| format!("labby/{feature}")),
+                .then(|| format!("{LABBY_CRATE}/{feature}")),
             exception_reason: exception_reason(classification).map(str::to_string),
         });
     }
@@ -281,7 +285,7 @@ fn collect_feature_set(
     }
 
     for dep in features.get(name).into_iter().flatten() {
-        let normalized = dep.strip_prefix("lab-apis/").unwrap_or(dep);
+        let normalized = dep.strip_prefix(LABBY_APIS_PREFIX).unwrap_or(dep);
         out.insert(normalized.to_string());
         if features.contains_key(normalized) {
             collect_feature_set(features, normalized, out, seen);
@@ -300,7 +304,9 @@ fn classify_lab_feature(
         FeatureClass::ProductSlice
     } else if matches!(feature, "node-runtime") {
         FeatureClass::BinaryOnly
-    } else if deps.iter().any(|dep| dep == &format!("lab-apis/{feature}"))
+    } else if deps
+        .iter()
+        .any(|dep| dep == &format!("{LABBY_APIS_PREFIX}{feature}"))
         && api_features.contains_key(feature)
     {
         FeatureClass::ServicePassthrough
@@ -332,13 +338,13 @@ fn mapped_lab_feature(
     api_features: &BTreeMap<String, Vec<String>>,
 ) -> Option<String> {
     deps.iter()
-        .filter_map(|dep| dep.strip_prefix("lab-apis/"))
+        .filter_map(|dep| dep.strip_prefix(LABBY_APIS_PREFIX))
         .find(|dep| api_features.contains_key(*dep))
-        .map(|dep| format!("lab-apis/{dep}"))
+        .map(|dep| format!("{LABBY_APIS_PREFIX}{dep}"))
         .or_else(|| {
             api_features
                 .contains_key(feature)
-                .then(|| format!("lab-apis/{feature}"))
+                .then(|| format!("{LABBY_APIS_PREFIX}{feature}"))
         })
 }
 

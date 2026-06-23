@@ -1,7 +1,7 @@
 //! Surface-neutral error type for dispatch operations.
 //!
 //! `ToolError` is the single canonical error type across all three surfaces
-//! (MCP, API, CLI). It lives here in `lab-runtime` because it is
+//! (MCP, API, CLI). It lives here in `labby-runtime` because it is
 //! surface-neutral — no surface module should own it, and downstream crates
 //! (`lab`, gateway-extraction crates) share it.
 
@@ -221,7 +221,7 @@ impl ToolError {
 
 // ── From<ServiceError> for ToolError ─────────────────────────────────────
 //
-// SDK error → ToolError conversions whose source type lives in `lab-apis`
+// SDK error → ToolError conversions whose source type lives in `labby-apis`
 // live here so all surfaces share one conversion path. Conversions whose
 // source type is local to the `lab` binary (e.g. `RegistryStoreError`) stay
 // in `lab` to satisfy the orphan rule.
@@ -272,7 +272,7 @@ impl From<labby_apis::acp_registry::AcpRegistryError> for ToolError {
 }
 
 // The ACP archive installer (download/verify/extract/install primitive in
-// lab-apis) carries its own stable `kind()` taxonomy that already matches the
+// labby-apis) carries its own stable `kind()` taxonomy that already matches the
 // dispatcher vocabulary (`ssrf_blocked`, `integrity_missing`, `path_traversal`,
 // `content_too_large`, …), so the conversion is a straight kind+message
 // pass-through. Messages are built only from non-secret URL/host forms.

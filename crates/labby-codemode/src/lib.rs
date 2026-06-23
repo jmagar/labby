@@ -39,8 +39,8 @@ mod truncate;
 /// Live TypeScript signature / `.d.ts` generator for Code Mode tool descriptors.
 pub mod ts_signatures;
 mod types;
-/// Backward-compat alias for `ts_signatures`.
-pub mod types_legacy;
+#[cfg(test)]
+mod types_legacy;
 mod util;
 mod wrapper;
 

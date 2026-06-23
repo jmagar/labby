@@ -18,7 +18,7 @@ test = false
 
 [dependencies]
 labby-apis = { path = "../labby-apis", default-features = false }
-labby-auth = { path = "../labby-auth", features = ["upstream-oauth-rmcp"] }
+labby-auth = { path = "../labby-auth", features = ["http-axum", "upstream-oauth-rmcp"] }
 labby-runtime = { path = "../labby-runtime" }
 labby-codemode = { path = "../labby-codemode" }
 labby-gateway = { path = "../labby-gateway" }
@@ -121,7 +121,7 @@ labby-winjob = { path = "../labby-winjob" }
 [dev-dependencies]
 # Enable labby-auth's test-only seams (e.g. `OauthClientCache::insert_for_tests`)
 # for `lab`'s test build only — never compiled into the production binary.
-labby-auth = { path = "../labby-auth", features = ["upstream-oauth-rmcp", "test"] }
+labby-auth = { path = "../labby-auth", features = ["http-axum", "upstream-oauth-rmcp", "test"] }
 # Enable labby-gateway's testkit pool inspection helpers for `lab`'s gateway
 # tests only — never compiled into the production binary.
 labby-gateway = { path = "../labby-gateway", features = ["testkit"] }
@@ -135,6 +135,8 @@ path = "src/lib.rs"
 # - `default` keeps the production all-features binary.
 # - `all` is the authoritative development and release build.
 # - Product slices must compile with `--no-default-features --features <slice> --all-targets`.
+# - Slices are compile-surface checks, not minimal dependency graph profiles; base runtime crates
+#   may remain normal dependencies until a dedicated dependency-slimming pass makes them optional.
 # - Supported standalone product slices are: gateway, marketplace, fs, deploy, acp_registry.
 # - `mcpregistry` is owned by marketplace in this crate; do not treat it as standalone here.
 # - `doctor`, `setup`, `serve` base, `nodes`, `logs`, `stash`, and `acp` are base control-plane

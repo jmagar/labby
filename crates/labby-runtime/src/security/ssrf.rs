@@ -6,7 +6,7 @@
 //!
 //! The host/IP allow-deny policy itself is **not** defined here — it lives in
 //! `labby_apis::core::ssrf` (the canonical single source of truth, since
-//! `lab-apis` cannot depend back on the gateway). This module owns only the
+//! `labby-apis` cannot depend back on the gateway). This module owns only the
 //! runtime concerns: DNS resolution, the async `spawn_blocking` wrapper, the
 //! concurrency semaphore, and conversion of `SsrfError` into `ToolError`. The
 //! private-TLD suffix denylist, CGNAT/ULA ranges, and IPv4-mapped handling are
@@ -16,8 +16,8 @@ use std::net::{IpAddr, ToSocketAddrs};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use crate::error::ToolError;
 use labby_apis::core::ssrf as shared;
-use labby_runtime::error::ToolError;
 use tokio::sync::Semaphore;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
