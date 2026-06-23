@@ -1,0 +1,154 @@
+//! Action catalog for the local-master `logs` service.
+//!
+//! Single authoritative source for MCP, CLI, and API adapters. All actions
+//! are read-only — `destructive: false` everywhere.
+
+use labby_apis::core::action::{ActionSpec, ParamSpec};
+
+pub const ACTIONS: &[ActionSpec] = &[
+    ActionSpec {
+        name: "help",
+        description: "Show this action catalog",
+        destructive: false,
+        requires_admin: false,
+        returns: "Catalog",
+        params: &[],
+    },
+    ActionSpec {
+        name: "schema",
+        description: "Return the parameter schema for a named action",
+        destructive: false,
+        requires_admin: false,
+        returns: "Schema",
+        params: &[ParamSpec {
+            name: "action",
+            ty: "string",
+            required: true,
+            description: "Action name to describe",
+        }],
+    },
+    ActionSpec {
+        name: "logs.search",
+        description: "Search persisted log events with filters",
+        destructive: false,
+        requires_admin: false,
+        returns: "Value",
+        params: &[ParamSpec {
+            name: "query",
+            ty: "json",
+            required: false,
+            description: "LogQuery filter object (text, levels, subsystems, surfaces, ts range, …)",
+        }],
+    },
+    ActionSpec {
+        name: "logs.tail",
+        description: "Bounded follow-up read from the persisted store",
+        destructive: false,
+        requires_admin: false,
+        returns: "Value",
+        params: &[
+            ParamSpec {
+                name: "after_ts",
+                ty: "integer",
+                required: false,
+                description: "Return events strictly after this ms-since-epoch timestamp",
+            },
+            ParamSpec {
+                name: "since_event_id",
+                ty: "string",
+                required: false,
+                description: "Return events strictly after this event_id cursor",
+            },
+            ParamSpec {
+                name: "limit",
+                ty: "integer",
+                required: false,
+                description: "Max events to return (default 500, max 10000)",
+            },
+        ],
+    },
+    ActionSpec {
+        name: "logs.stats",
+        description: "Return retention metadata and drop counters",
+        destructive: false,
+        requires_admin: false,
+        returns: "Value",
+        params: &[],
+    },
+    ActionSpec {
+        name: "logs.metrics",
+        description: "Aggregate usage metrics (tool calls, tokens, latency, surfaces, fan-out, …) over a rolling window",
+        destructive: false,
+        requires_admin: false,
+        returns: "Value",
+        params: &[ParamSpec {
+            name: "window",
+            ty: "string",
+            required: false,
+            description: "Rolling window: 1h, 24h (default), or 7d",
+        }],
+    },
+    ActionSpec {
+        name: "logs.tool_detail",
+        description: "Drill-down metrics for a single tool over a rolling window",
+        destructive: false,
+        requires_admin: false,
+        returns: "Value",
+        params: &[
+            ParamSpec {
+                name: "tool",
+                ty: "string",
+                required: true,
+                description: "Tool / service name",
+            },
+            ParamSpec {
+                name: "window",
+                ty: "string",
+                required: false,
+                description: "Rolling window: 1h, 24h (default), or 7d",
+            },
+        ],
+    },
+    ActionSpec {
+        name: "logs.agent_detail",
+        description: "Drill-down metrics for a single agent / device over a rolling window",
+        destructive: false,
+        requires_admin: false,
+        returns: "Value",
+        params: &[
+            ParamSpec {
+                name: "agent",
+                ty: "string",
+                required: true,
+                description: "Agent / actor id",
+            },
+            ParamSpec {
+                name: "window",
+                ty: "string",
+                required: false,
+                description: "Rolling window: 1h, 24h (default), or 7d",
+            },
+        ],
+    },
+    ActionSpec {
+        name: "logs.calls",
+        description: "Filterable, paginated tool-call log for the usage explorer",
+        destructive: false,
+        requires_admin: false,
+        returns: "Value",
+        params: &[ParamSpec {
+            name: "query",
+            ty: "json",
+            required: true,
+            description: "ToolCallQuery: window + optional tool/agent/ip/outcome/surface/search/limit/offset",
+        }],
+    },
+    ActionSpec {
+        name: "logs.stream",
+        description: "Live push is HTTP SSE only; dispatch returns guidance",
+        destructive: false,
+        requires_admin: false,
+        returns: "Value",
+        params: &[],
+    },
+];

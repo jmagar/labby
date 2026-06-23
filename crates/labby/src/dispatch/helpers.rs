@@ -1,0 +1,280 @@
+//! Shared dispatch helpers used across all service modules.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
+
+use labby_apis::core::action::ActionSpec;
+use serde_json::Value;
+
+use crate::dispatch::error::ToolError;
+
+/// Lexical `..`/absolute-component path-traversal guard.
+///
+/// The implementation now lives in `labby_runtime::path_safety` (alongside the
+/// canonicalizing guards it shares the `path_traversal` kind with) so the
+/// standalone gateway crates can use it. It is re-exported here so existing
+/// `crate::dispatch::helpers::reject_path_traversal` callers keep working.
+pub use labby_runtime::path_safety::reject_path_traversal;
+
+#[cfg(test)]
+static TEST_LAB_HOME: OnceLock<Mutex<Option<std::path::PathBuf>>> = OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn set_test_lab_home(path: Option<std::path::PathBuf>) {
+    let slot = TEST_LAB_HOME.get_or_init(|| Mutex::new(None));
+    *slot.lock().expect("test lab home lock") = path;
+}
+
+/// Resolve the lab home directory: `$LAB_HOME` if set, else `$HOME/.lab/`.
+///
+/// Lives in `helpers` (a leaf module) rather than `setup` so peer services
+/// can resolve the path without importing the `setup` orchestrator — see
+/// `dispatch/CLAUDE.md` § Orchestrator Exception.
+#[must_use]
+pub fn lab_home() -> std::path::PathBuf {
+    #[cfg(test)]
+    if let Some(path) = TEST_LAB_HOME
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("test lab home lock")
+        .clone()
+    {
+        return path;
+    }
+    if let Ok(home) = std::env::var("LAB_HOME")
+        && !home.is_empty()
+    {
+        return std::path::PathBuf::from(home);
+    }
+    match std::env::var("HOME") {
+        Ok(home) if !home.is_empty() => std::path::PathBuf::from(home).join(".lab"),
+        // Fail closed: never anchor token/secret/artifact/DB storage to the
+        // process CWD (CWE-426/377). For a daemon the CWD is attacker-influenced
+        // and non-durable, so derive a fixed absolute location under the system
+        // temp dir instead and WARN so the misconfiguration is visible.
+        _ => {
+            let fallback = std::env::temp_dir().join("lab");
+            tracing::warn!(
+                fallback = %fallback.display(),
+                "neither LAB_HOME nor HOME is set; using a temp-dir fallback for lab home instead of the process CWD"
+            );
+            fallback
+        }
+    }
+}
+
+/// Replace the user's home-directory prefix with literal `~` so paths
+/// embedded in log events, response bodies, and error messages don't leak
+/// the OS username.
+///
+/// Preserves per-runtime subdirs (`~/.claude/plugins/` vs `~/.codex/plugins/`
+/// vs `~/.lab/bin/<agent_id>/` remain distinguishable). Safe on any input:
+/// if `HOME` is unset or the path doesn't sit under it, the input is
+/// returned unchanged.
+///
+/// lab-zxx5.27: promoted to shared helpers so `node/` install paths can
+/// call it without reaching into a sibling service's private module.
+#[must_use]
+pub fn redact_home(path: &str) -> String {
+    let Some(home) = std::env::var_os("HOME") else {
+        return path.to_string();
+    };
+    let home = home.to_string_lossy();
+    let home = home.trim_end_matches('/');
+    if home.is_empty() {
+        return path.to_string();
+    }
+    if let Some(rest) = path.strip_prefix(home) {
+        let rest = rest.trim_start_matches('/');
+        if rest.is_empty() {
+            return "~".to_string();
+        }
+        return format!("~/{rest}");
+    }
+    path.to_string()
+}
+
+/// Read an environment variable, returning `None` if absent or empty.
+pub fn env_non_empty(name: &str) -> Option<String> {
+    ENV_OVERRIDE
+        .with(|override_map| {
+            override_map
+                .borrow()
+                .as_ref()
+                .and_then(|values| values.get(name).cloned())
+        })
+        .or_else(|| std::env::var(name).ok())
+        .filter(|v| !v.is_empty())
+}
+
+thread_local! {
+    static ENV_OVERRIDE: RefCell<Option<HashMap<String, String>>> = const { RefCell::new(None) };
+}
+
+pub fn with_env_override<T>(values: HashMap<String, String>, f: impl FnOnce() -> T) -> T {
+    ENV_OVERRIDE.with(|slot| {
+        let previous = slot.replace(Some(values));
+        let result = f();
+        slot.replace(previous);
+        result
+    })
+}
+
+/// Serialize any `Serialize` value to `serde_json::Value`.
+pub fn to_json<T: serde::Serialize>(v: T) -> Result<Value, ToolError> {
+    serde_json::to_value(v).map_err(|e| ToolError::Sdk {
+        sdk_kind: "decode_error".to_string(),
+        message: e.to_string(),
+    })
+}
+
+/// Rough char-based token estimator for dispatch telemetry logs.
+///
+/// Uses the conventional ~4-chars-per-token heuristic — cheap, dependency-free,
+/// and accurate enough for capacity/cost tracking; do NOT use for LLM budget
+/// enforcement. Lives in this shared dispatch leaf so the MCP, HTTP, and CLI
+/// surfaces can all attribute tokens without crossing the `api -> mcp` boundary.
+#[must_use]
+pub fn estimate_tokens(s: &str) -> usize {
+    s.len().div_ceil(4)
+}
+
+/// Token estimate for a JSON value, computed against its serialized form.
+#[must_use]
+pub fn estimate_tokens_value(value: &Value) -> usize {
+    estimate_tokens(&serde_json::to_string(value).unwrap_or_default())
+}
+
+/// Token estimate for an MCP arguments map (`request.arguments`).
+#[must_use]
+pub fn estimate_tokens_args(arguments: &serde_json::Map<String, Value>) -> usize {
+    estimate_tokens(&serde_json::to_string(arguments).unwrap_or_default())
+}
+
+/// Extract a required string parameter from a JSON object.
+pub fn require_str<'a>(params: &'a Value, key: &str) -> Result<&'a str, ToolError> {
+    params
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| ToolError::MissingParam {
+            message: format!("missing required parameter `{key}`"),
+            param: key.to_string(),
+        })
+}
+
+/// Extract an optional string parameter from a JSON object.
+///
+/// Empty strings are rejected as `invalid_param` so callers do not silently
+/// treat `instance=` as if the field were absent.
+pub fn optional_str<'a>(params: &'a Value, key: &str) -> Result<Option<&'a str>, ToolError> {
+    match params.get(key) {
+        None => Ok(None),
+        Some(v) => {
+            let value = v.as_str().ok_or_else(|| ToolError::InvalidParam {
+                message: format!("parameter `{key}` must be a string"),
+                param: key.to_string(),
+            })?;
+            if value.is_empty() {
+                Err(ToolError::InvalidParam {
+                    message: format!("parameter `{key}` must not be empty"),
+                    param: key.to_string(),
+                })
+            } else {
+                Ok(Some(value))
+            }
+        }
+    }
+}
+
+/// Build the standard `help` response payload for a service.
+///
+/// Produces the canonical `{ service, actions: [...] }` shape returned by every
+/// service dispatcher when `action == "help"`.
+pub fn help_payload(service: &str, actions: &[ActionSpec]) -> Value {
+    serde_json::json!({
+        "service": service,
+        "actions": actions.iter().map(|a| serde_json::json!({
+            "name": a.name,
+            "description": a.description,
+            "destructive": a.destructive,
+            "returns": a.returns,
+            "params": a.params.iter().map(|p| serde_json::json!({
+                "name": p.name,
+                "type": p.ty,
+                "required": p.required,
+                "description": p.description,
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// Return the schema for one named action.
+///
+/// Used to implement the `"schema"` built-in action in every service dispatcher.
+/// Returns `ToolError::UnknownAction` if `action_name` is not in `actions`.
+pub fn action_schema(actions: &[ActionSpec], action_name: &str) -> Result<Value, ToolError> {
+    let spec = actions
+        .iter()
+        .find(|a| a.name == action_name)
+        .ok_or_else(|| ToolError::UnknownAction {
+            message: format!("no schema for unknown action `{action_name}`"),
+            valid: actions.iter().map(|a| a.name.to_string()).collect(),
+            hint: None,
+        })?;
+    Ok(serde_json::json!({
+        "action": spec.name,
+        "description": spec.description,
+        "destructive": spec.destructive,
+        "returns": spec.returns,
+        "params": spec.params.iter().map(|p| serde_json::json!({
+            "name": p.name,
+            "type": p.ty,
+            "required": p.required,
+            "description": p.description,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+/// Handle the `help` and `schema` built-in actions that every service dispatcher
+/// must respond to **before** resolving any service-specific client or manager.
+///
+/// # Contract (shared dispatch rule)
+/// Create a database file with Unix 0600 permissions if it does not already exist.
+///
+/// This is a no-op when the file already exists (uses `create_new`, so an
+/// `AlreadyExists` error is silently swallowed). On platforms that do not
+/// support `OpenOptionsExt`, this function is not compiled and callers must
+/// ensure appropriate permissions by other means.
+///
+/// # Security
+///
+/// Must be called **before** opening the file via the connection pool so that
+/// the creation and permission assignment happen atomically. Subsequent opens
+/// by the pool do not change permissions.
+#[cfg(unix)]
+#[allow(dead_code)]
+pub fn create_db_file_0600(path: &std::path::PathBuf) {
+    use std::os::unix::fs::OpenOptionsExt;
+    // Only set mode on creation; if the file already exists, leave perms
+    // alone. Any other failure (permission denied, parent missing, EROFS,
+    // etc.) is logged at WARN — silently swallowing every error here can
+    // hide real misconfigurations of the secure-DB-file path.
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+    {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "failed to pre-create secure DB file with 0600 permissions"
+            );
+        }
+    }
+}

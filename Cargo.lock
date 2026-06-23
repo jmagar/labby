@@ -2250,158 +2250,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lab-apis"
-version = "0.26.1"
-dependencies = [
- "futures",
- "percent-encoding",
- "reqwest",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "url",
- "wiremock",
-]
-
-[[package]]
-name = "lab-auth"
-version = "0.26.1"
-dependencies = [
- "anyhow",
- "axum",
- "base64",
- "chacha20poly1305",
- "dashmap",
- "getrandom 0.4.2",
- "jsonwebtoken",
- "lab-runtime",
- "oauth2",
- "reqwest",
- "rmcp",
- "rsa 0.10.0-rc.16",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "subtle",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "url",
- "wiremock",
-]
-
-[[package]]
-name = "lab-codemode"
-version = "0.26.1"
-dependencies = [
- "anyhow",
- "boa_ast",
- "boa_interner",
- "boa_parser",
- "futures",
- "hex",
- "javy",
- "lab-runtime",
- "lab-winjob",
- "nix",
- "regex",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
- "ulid",
-]
-
-[[package]]
-name = "lab-gateway"
-version = "0.26.1"
-dependencies = [
- "anyhow",
- "arc-swap",
- "base64",
- "bytes",
- "dashmap",
- "dirs",
- "dotenvy",
- "fd-lock",
- "futures",
- "hex",
- "jiff",
- "lab-apis",
- "lab-auth",
- "lab-codemode",
- "lab-runtime",
- "lab-winjob",
- "nix",
- "process-wrap",
- "proptest",
- "regex",
- "reqwest",
- "rmcp",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "sse-stream",
- "strip-ansi-escapes",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite",
- "tokio-util",
- "toml",
- "toml_edit 0.23.10+spec-1.0.0",
- "tracing",
- "tracing-subscriber",
- "url",
- "wiremock",
- "xxhash-rust",
-]
-
-[[package]]
-name = "lab-gateway-web"
-version = "0.26.1"
-dependencies = [
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "lab-runtime"
-version = "0.26.1"
-dependencies = [
- "jiff",
- "lab-apis",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "toml",
- "url",
-]
-
-[[package]]
-name = "lab-winjob"
-version = "0.26.1"
-dependencies = [
- "tracing",
- "windows-sys 0.59.0",
-]
-
-[[package]]
 name = "labby"
 version = "0.26.1"
 dependencies = [
@@ -2426,13 +2274,13 @@ dependencies = [
  "hex",
  "hmac 0.13.0",
  "jiff",
- "lab-apis",
- "lab-auth",
- "lab-codemode",
- "lab-gateway",
- "lab-gateway-web",
- "lab-runtime",
- "lab-winjob",
+ "labby-apis",
+ "labby-auth",
+ "labby-codemode",
+ "labby-gateway",
+ "labby-runtime",
+ "labby-web",
+ "labby-winjob",
  "nix",
  "oauth2",
  "process-wrap",
@@ -2472,6 +2320,158 @@ dependencies = [
  "walkdir",
  "wiremock",
  "xxhash-rust",
+]
+
+[[package]]
+name = "labby-apis"
+version = "0.26.1"
+dependencies = [
+ "futures",
+ "percent-encoding",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+ "wiremock",
+]
+
+[[package]]
+name = "labby-auth"
+version = "0.26.1"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64",
+ "chacha20poly1305",
+ "dashmap",
+ "getrandom 0.4.2",
+ "jsonwebtoken",
+ "labby-runtime",
+ "oauth2",
+ "reqwest",
+ "rmcp",
+ "rsa 0.10.0-rc.16",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "subtle",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "wiremock",
+]
+
+[[package]]
+name = "labby-codemode"
+version = "0.26.1"
+dependencies = [
+ "anyhow",
+ "boa_ast",
+ "boa_interner",
+ "boa_parser",
+ "futures",
+ "hex",
+ "javy",
+ "labby-runtime",
+ "labby-winjob",
+ "nix",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "ulid",
+]
+
+[[package]]
+name = "labby-gateway"
+version = "0.26.1"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "base64",
+ "bytes",
+ "dashmap",
+ "dirs",
+ "dotenvy",
+ "fd-lock",
+ "futures",
+ "hex",
+ "jiff",
+ "labby-apis",
+ "labby-auth",
+ "labby-codemode",
+ "labby-runtime",
+ "labby-winjob",
+ "nix",
+ "process-wrap",
+ "proptest",
+ "regex",
+ "reqwest",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "sse-stream",
+ "strip-ansi-escapes",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "toml",
+ "toml_edit 0.23.10+spec-1.0.0",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "wiremock",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "labby-runtime"
+version = "0.26.1"
+dependencies = [
+ "jiff",
+ "labby-apis",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml",
+ "url",
+]
+
+[[package]]
+name = "labby-web"
+version = "0.26.1"
+dependencies = [
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "labby-winjob"
+version = "0.26.1"
+dependencies = [
+ "tracing",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

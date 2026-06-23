@@ -1,0 +1,62 @@
+[package]
+name = "labby-auth"
+description = "Parameterizable OAuth 2.0 + JWT auth crate (axum) for lab and other consumers."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "../../README.md"
+keywords = ["oauth", "auth", "axum", "jwt", "mcp"]
+categories = ["authentication", "web-programming::http-server"]
+publish = false
+
+[features]
+# Explicit empty default to keep Cargo feature unification a no-op for downstream consumers.
+default = []
+# Outbound upstream OAuth runtime (client cache, manager, refresh, store, runtime).
+# Gated because it pulls in the rmcp client/auth transport stack and oauth2, which
+# pure-auth consumers (browser/API OAuth) do not need.
+upstream-oauth-rmcp = ["dep:rmcp-client", "dep:oauth2", "dep:anyhow"]
+# Exposes test-only seams (e.g. `OauthClientCache::insert_for_tests`) to
+# downstream crates' test builds. Never enable in production builds.
+test = []
+
+[dependencies]
+axum.workspace = true
+base64.workspace = true
+dashmap = "6"
+getrandom = "0.4"
+jsonwebtoken.workspace = true
+labby-runtime = { path = "../labby-runtime" }
+reqwest.workspace = true
+rsa.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chacha20poly1305 = "0.10"
+sha2.workspace = true
+subtle = "2"
+thiserror.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tracing.workspace = true
+url.workspace = true
+anyhow = { workspace = true, optional = true }
+oauth2 = { version = "5.0", default-features = false, optional = true }
+
+[dependencies.rmcp-client]
+package = "rmcp"
+version = "1.7"
+default-features = false
+features = ["client", "auth", "transport-streamable-http-client-reqwest"]
+optional = true
+
+[dev-dependencies]
+tempfile = "3.27"
+tracing-subscriber.workspace = true
+wiremock.workspace = true
+
+[lints]
+workspace = true

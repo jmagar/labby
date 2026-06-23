@@ -1,0 +1,77 @@
+[package]
+name = "labby-gateway"
+description = "Standalone gateway runtime: upstream MCP proxy pool, connection management, and circuit breaking."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "../../README.md"
+keywords = ["homelab", "mcp", "gateway", "proxy", "upstream"]
+categories = ["development-tools"]
+publish = false
+
+[features]
+# Exposes the pool's `*_for_tests` inspection helpers as part of the public API
+# so downstream crates (notably `lab`'s gateway integration tests) can drive the
+# pool. Off by default; enabled only from dev/test builds.
+testkit = []
+
+[dependencies]
+labby-apis = { path = "../labby-apis", default-features = false }
+labby-runtime = { path = "../labby-runtime" }
+labby-auth = { path = "../labby-auth", features = ["upstream-oauth-rmcp"] }
+labby-codemode = { path = "../labby-codemode" }
+dirs = "5"
+toml = { workspace = true }
+toml_edit = "0.23"
+base64 = { workspace = true }
+sha2 = "0.11"
+jiff = { workspace = true }
+hex = "0.4"
+regex = "1"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+tokio = { workspace = true, features = ["process"] }
+tokio-util = { version = "0.7", features = ["rt", "compat", "codec"] }
+futures.workspace = true
+reqwest.workspace = true
+rmcp = { workspace = true }
+serde.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tempfile.workspace = true
+url.workspace = true
+dotenvy = "0.15"
+fd-lock = "4"
+process-wrap = { version = "9.1.0", default-features = false, features = [
+  "tokio1",
+  "process-group",
+] }
+nix = { version = "0.31", default-features = false, features = [
+  "signal",
+  "process",
+] }
+bytes = "1"
+sse-stream = "0.2"
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
+dashmap = "6"
+arc-swap = "1"
+strip-ansi-escapes = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+labby-winjob = { path = "../labby-winjob" }
+
+[dev-dependencies]
+wiremock.workspace = true
+tracing-subscriber.workspace = true
+tokio = { workspace = true, features = ["process", "test-util"] }
+proptest = "1"
+# Enable labby-auth's `test` feature in test builds so gateway OAuth-manager tests
+# can seed the upstream OAuth client cache via `OauthClientCache::insert_for_tests`.
+labby-auth = { path = "../labby-auth", features = ["upstream-oauth-rmcp", "test"] }
+
+[lints]
+workspace = true

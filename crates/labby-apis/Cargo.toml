@@ -1,0 +1,47 @@
+[package]
+name = "labby-apis"
+description = "Pure Rust SDK for homelab service APIs (Servarr, Plex, qBittorrent, Unraid, UniFi, etc.)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "README.md"
+keywords = ["homelab", "mcp", "cli", "sdk"]
+categories = ["api-bindings", "command-line-utilities"]
+
+[dependencies]
+tokio.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+url.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+percent-encoding.workspace = true
+tempfile.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = [
+  "test-util",
+  "macros",
+  "rt-multi-thread",
+] }
+wiremock.workspace = true
+
+[features]
+acp_registry = []
+all = [
+  "deploy",
+  "mcpregistry",
+  "acp_registry",
+]
+default = []
+deploy = []
+mcpregistry = []
+test-utils = []
+[lints]
+workspace = true

@@ -8,8 +8,8 @@ run() {
   "$@"
 }
 
-run cargo check -p lab-apis --no-default-features
-run cargo check -p lab-apis --no-default-features --features all
+run cargo check -p labby-apis --no-default-features
+run cargo check -p labby-apis --no-default-features --features all
 
 labby_product_features=(
   ""
