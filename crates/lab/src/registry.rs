@@ -271,6 +271,41 @@ impl ToolRegistry {
     }
 }
 
+// === lab-gateway in-process peer seam ===
+//
+// The standalone `lab-gateway` upstream pool registers built-in lab services as
+// in-process upstream peers without depending on this crate's registry types.
+// It does that through the `InProcessService` / `InProcessServiceRegistry`
+// traits; we implement them here for `RegisteredService` / `ToolRegistry` so the
+// gateway pool can enumerate services and hand each one back to the
+// `mcp::in_process_peer` connector (which downcasts via `as_any`).
+
+impl lab_gateway::registry::InProcessService for RegisteredService {
+    fn service_name(&self) -> &'static str {
+        self.name
+    }
+
+    fn has_actions(&self) -> bool {
+        !self.actions.is_empty()
+    }
+
+    fn as_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        self
+    }
+}
+
+impl lab_gateway::registry::InProcessServiceRegistry for ToolRegistry {
+    fn in_process_services(&self) -> Vec<Box<dyn lab_gateway::registry::InProcessService>> {
+        self.services
+            .iter()
+            .cloned()
+            .map(
+                |service| -> Box<dyn lab_gateway::registry::InProcessService> { Box::new(service) },
+            )
+            .collect()
+    }
+}
+
 const ALWAYS_VISIBLE_SERVICES: &[&str] = &[
     "init",
     "setup",

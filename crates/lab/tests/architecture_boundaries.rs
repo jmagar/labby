@@ -28,18 +28,15 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Dispatch files allowed to reference `crate::mcp`, by `src`-relative path:
-/// - `prompts_list.rs` / `resources_read.rs` reference the MCP surface only from
-///   `#[cfg(test)]` fixtures, not the shipped dispatch path.
+/// Dispatch files allowed to reference `crate::mcp`, by `src`-relative path.
 ///
-/// NOTE: `connect_stdio.rs` was previously in this list because it constructed an
-/// in-process `LabMcpServer` peer directly. That code has been removed (A-M6):
-/// in-process peer construction now lives exclusively in `crate::mcp::in_process_peer`
-/// and is injected via the `InProcessConnector` IoC seam. The boundary is now clean.
-const ALLOWED_MCP_IMPORTS: &[&str] = &[
-    "dispatch/upstream/pool/prompts_list.rs",
-    "dispatch/upstream/pool/resources_read.rs",
-];
+/// The upstream proxy pool (formerly `dispatch/upstream/**`) moved to the
+/// standalone `lab-gateway` crate, so the previously-allowlisted
+/// `prompts_list.rs` / `resources_read.rs` fixtures no longer live under
+/// `crate::dispatch` here — the list is empty. In-process peer construction
+/// lives exclusively in `crate::mcp::in_process_peer` and is injected into the
+/// pool via the `InProcessConnector` IoC seam, so the boundary stays clean.
+const ALLOWED_MCP_IMPORTS: &[&str] = &[];
 
 #[test]
 fn dispatch_layer_does_not_import_mcp_surface_modules() {
@@ -72,5 +69,55 @@ fn dispatch_layer_does_not_import_mcp_surface_modules() {
     assert!(
         offenders.is_empty(),
         "dispatch must not import the MCP surface; offenders: {offenders:?}"
+    );
+}
+
+fn lab_gateway_src() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("lab-gateway")
+        .join("src")
+}
+
+/// The standalone gateway runtime crate must stay free of product-surface
+/// adapter dependencies (axum/clap/utoipa) and must not depend on Labby itself.
+/// A manifest gate is cheaper and more robust than scanning sources for use
+/// statements.
+#[test]
+fn lab_gateway_manifest_does_not_depend_on_product_surfaces() {
+    let manifest = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("lab-gateway")
+            .join("Cargo.toml"),
+    )
+    .expect("read lab-gateway manifest");
+    for banned in ["axum", "clap", "utoipa", "javy", "wasmtime", "labby"] {
+        assert!(
+            !manifest.contains(banned),
+            "lab-gateway runtime crate must not depend on {banned}"
+        );
+    }
+}
+
+/// `lab-gateway` receives its registry/service composition by injection through
+/// the `InProcessServiceRegistry` trait; it must never reach for Labby's default
+/// registry builder.
+#[test]
+fn lab_gateway_does_not_call_labby_default_registry() {
+    let mut files = Vec::new();
+    rust_files(&lab_gateway_src(), &mut files);
+    let offenders: Vec<_> = files
+        .into_iter()
+        .filter(|path| {
+            fs::read_to_string(path)
+                .expect("read lab-gateway source")
+                .contains("build_default_registry")
+        })
+        .map(|path| path.display().to_string())
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "lab-gateway must not call build_default_registry: {offenders:?}"
     );
 }

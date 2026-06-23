@@ -7,6 +7,8 @@ use rmcp::model::LoggingLevel;
 use rmcp::{RoleClient, ServiceExt};
 use tokio::sync::RwLock;
 
+use lab_gateway::registry::InProcessService;
+
 use crate::dispatch::upstream::pool::{
     InProcessConnector, InProcessRegistration, UpstreamConnection, in_process_upstream_name,
 };
@@ -18,7 +20,21 @@ use crate::registry::{RegisteredService, ToolRegistry};
 const IN_PROCESS_PEER_BUFFER_BYTES: usize = 256 * 1024;
 
 pub(crate) fn connector() -> InProcessConnector {
-    Arc::new(|service| Box::pin(connect_in_process_service_peer(service)))
+    Arc::new(|service: Box<dyn InProcessService>| {
+        Box::pin(async move {
+            // The gateway pool hands back the type-erased service it was given;
+            // recover the concrete `RegisteredService` this crate registered.
+            let service = service
+                .as_any()
+                .downcast::<RegisteredService>()
+                .map_err(|_| {
+                    anyhow::anyhow!(
+                        "in-process connector received a non-RegisteredService peer descriptor"
+                    )
+                })?;
+            connect_in_process_service_peer(*service).await
+        })
+    })
 }
 
 async fn connect_in_process_service_peer(

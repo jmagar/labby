@@ -234,7 +234,7 @@ impl GatewayManager {
         pool.discover_all_for_subject_ephemeral_with_in_process_peers(
             &[upstream.clone()],
             SHARED_GATEWAY_OAUTH_SUBJECT,
-            &registry,
+            registry.as_ref(),
         )
         .await;
 

@@ -2325,6 +2325,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-gateway"
+version = "0.26.1"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "bytes",
+ "dashmap",
+ "dotenvy",
+ "fd-lock",
+ "futures",
+ "lab-apis",
+ "lab-auth",
+ "lab-runtime",
+ "lab-winjob",
+ "nix",
+ "process-wrap",
+ "proptest",
+ "reqwest",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "sse-stream",
+ "strip-ansi-escapes",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "wiremock",
+]
+
+[[package]]
 name = "lab-gateway-web"
 version = "0.26.1"
 dependencies = [
@@ -2384,6 +2419,7 @@ dependencies = [
  "lab-apis",
  "lab-auth",
  "lab-codemode",
+ "lab-gateway",
  "lab-gateway-web",
  "lab-runtime",
  "lab-winjob",

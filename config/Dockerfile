@@ -34,6 +34,7 @@ COPY crates/lab-apis/Cargo.toml crates/lab-apis/Cargo.toml
 COPY crates/lab-auth/Cargo.toml crates/lab-auth/Cargo.toml
 COPY crates/lab-runtime/Cargo.toml crates/lab-runtime/Cargo.toml
 COPY crates/lab-codemode/Cargo.toml crates/lab-codemode/Cargo.toml
+COPY crates/lab-gateway/Cargo.toml crates/lab-gateway/Cargo.toml
 COPY crates/lab-gateway-web/Cargo.toml crates/lab-gateway-web/Cargo.toml
 COPY crates/lab-winjob/Cargo.toml crates/lab-winjob/Cargo.toml
 
@@ -56,6 +57,7 @@ RUN mkdir -p \
       crates/lab-auth/src \
       crates/lab-runtime/src \
       crates/lab-codemode/src \
+      crates/lab-gateway/src \
       crates/lab-gateway-web/src \
       crates/lab-winjob/src \
       apps/gateway-admin/out \
@@ -71,6 +73,7 @@ RUN mkdir -p \
       crates/lab-auth/src/lib.rs \
       crates/lab-runtime/src/lib.rs \
       crates/lab-codemode/src/lib.rs \
+      crates/lab-gateway/src/lib.rs \
       crates/lab-gateway-web/src/lib.rs \
       crates/lab-winjob/src/lib.rs \
  && cargo build --workspace --all-features --release \
@@ -79,6 +82,7 @@ RUN mkdir -p \
  && cargo clean -p lab-auth \
  && cargo clean -p lab-runtime \
  && cargo clean -p lab-codemode \
+ && cargo clean -p lab-gateway \
  && cargo clean -p lab-gateway-web \
  && cargo clean -p lab-winjob \
  && rm -rf \

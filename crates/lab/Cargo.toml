@@ -21,6 +21,7 @@ lab-apis = { path = "../lab-apis", default-features = false }
 lab-auth = { path = "../lab-auth", features = ["upstream-oauth-rmcp"] }
 lab-runtime = { path = "../lab-runtime" }
 lab-codemode = { path = "../lab-codemode" }
+lab-gateway = { path = "../lab-gateway" }
 lab-gateway-web = { path = "../lab-gateway-web" }
 
 tokio = { workspace = true, features = ["process"] }
@@ -121,6 +122,9 @@ lab-winjob = { path = "../lab-winjob" }
 # Enable lab-auth's test-only seams (e.g. `OauthClientCache::insert_for_tests`)
 # for `lab`'s test build only — never compiled into the production binary.
 lab-auth = { path = "../lab-auth", features = ["upstream-oauth-rmcp", "test"] }
+# Enable lab-gateway's testkit pool inspection helpers for `lab`'s gateway
+# tests only — never compiled into the production binary.
+lab-gateway = { path = "../lab-gateway", features = ["testkit"] }
 wiremock.workspace = true
 proptest = "1"
 

@@ -48,12 +48,7 @@ pub fn terminate_process_group_sigkill(pgid: u32) -> nix::Result<()> {
     send_signal_process_group(pgid, Signal::SIGKILL)
 }
 
-// The SIGTERM-group helper is the symmetric sibling of the SIGKILL one above.
-// Its only in-tree caller (the upstream pool's process guard) moved to the
-// `lab-gateway` crate's vendored copy, leaving this one unused in `labby`; it is
-// kept for API symmetry and future callers.
 #[cfg(unix)]
-#[allow(dead_code)]
 pub fn terminate_process_group_sigterm(pgid: u32) -> nix::Result<()> {
     send_signal_process_group(pgid, Signal::SIGTERM)
 }
