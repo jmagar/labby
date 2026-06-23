@@ -7,13 +7,13 @@ use std::sync::{Mutex, OnceLock};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::dispatch::error::ToolError;
+use crate::error::ToolError;
 
 const SNIPPET_EXTENSIONS: &[&str] = &["md", "js"];
 
 /// Maximum size of a snippet's *executable* code — the extracted ```js block,
 /// or the whole file for bare `.js` snippets. This is what actually runs in
-/// code-mode, so it mirrors `CODE_MODE_CLI_MAX_SOURCE_BYTES` in `cli/gateway.rs`.
+/// code-mode, so it mirrors the host CLI source-size cap.
 const MAX_SNIPPET_CODE_BYTES: usize = 20 * 1024;
 
 /// Generous upper bound on the whole snippet markdown file (frontmatter + prose
@@ -852,6 +852,7 @@ fn validate_input_type(name: &str, ty: SnippetInputType, value: &Value) -> Resul
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::panic)]
     use super::*;
     use serde_json::json;
 

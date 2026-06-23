@@ -1,11 +1,10 @@
-//! JSON Schema validation for Code Mode callTool params and upstream-result unwrapping.
+//! JSON Schema validation for Code Mode callTool params.
 
 use std::collections::{BTreeSet, HashSet};
 
-use rmcp::model::CallToolResult;
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
-use crate::dispatch::error::ToolError;
+use crate::error::ToolError;
 
 /// Serialize `value` with object keys sorted recursively, so two `Value`-equal
 /// inputs always produce the same string. Used to key `uniqueItems` dedup in a
@@ -50,7 +49,7 @@ fn canonical_json(value: &Value) -> String {
     out
 }
 
-pub(in crate::dispatch::gateway::code_mode) fn validate_code_mode_params_against_schema(
+pub fn validate_code_mode_params_against_schema(
     params: &Value,
     schema: Option<&Value>,
 ) -> Result<(), ToolError> {
@@ -373,35 +372,5 @@ fn invalid_schema_param(path: &str, detail: &str) -> ToolError {
     ToolError::Sdk {
         sdk_kind: "invalid_param".to_string(),
         message: format!("callTool params `{path}` {detail}"),
-    }
-}
-
-pub(in crate::dispatch::gateway::code_mode) fn unwrap_code_mode_upstream_result(
-    result: CallToolResult,
-) -> Value {
-    if let Some(value) = result.structured_content {
-        return value;
-    }
-
-    let all_text = !result.content.is_empty()
-        && result
-            .content
-            .iter()
-            .all(|content| content.as_text().is_some());
-    if all_text {
-        let text = result
-            .content
-            .iter()
-            .filter_map(|content| content.as_text())
-            .map(|content| content.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        return serde_json::from_str(&text).unwrap_or_else(|_| Value::String(text));
-    }
-
-    if result.content.is_empty() {
-        Value::Null
-    } else {
-        json!(result)
     }
 }

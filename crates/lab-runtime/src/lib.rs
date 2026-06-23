@@ -11,3 +11,8 @@ pub mod error;
 pub mod gateway_config;
 pub mod path_safety;
 pub mod redact;
+
+/// Code Mode runtime configuration, re-exported at the crate root so consumers
+/// that must stay free of host/transport vocabulary can name it without the
+/// module path.
+pub use gateway_config::CodeModeConfig;

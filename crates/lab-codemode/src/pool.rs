@@ -21,21 +21,47 @@ use std::sync::Mutex as StdMutex;
 
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 
-use crate::dispatch::error::ToolError;
+use crate::error::ToolError;
 
 use super::pool::config::PoolConfig;
 use super::pool::runner_handle::PooledRunner;
 
-pub(in crate::dispatch::gateway::code_mode) mod config;
-pub(in crate::dispatch::gateway::code_mode) mod runner_handle;
+pub(crate) mod config;
+#[cfg(windows)]
+pub(crate) mod job_guard;
+pub(crate) mod runner_handle;
+
+/// Host-configurable runner re-invocation: the program to exec and the args to
+/// pass it. The pool re-execs this per spawned runner.
+///
+/// The default is the current executable plus the canonical
+/// `["internal", "code-mode-runner"]` args, so a labby binary hosts its own
+/// runner; a different host binary can supply its own program/args seam.
+#[derive(Debug, Clone)]
+pub struct RunnerSpawn {
+    pub program: std::path::PathBuf,
+    pub args: Vec<String>,
+}
+
+impl Default for RunnerSpawn {
+    fn default() -> Self {
+        let program = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("labby"));
+        Self {
+            program,
+            args: vec!["internal".to_string(), "code-mode-runner".to_string()],
+        }
+    }
+}
 
 /// A bounded pool of long-lived Code Mode runner processes.
 ///
 /// Slot ownership is tracked by an explicit free-list of indices rather than by
 /// scanning mutex states, so two concurrent checkouts can never select the same
 /// slot. A slot index is popped on checkout and pushed back on lease finalize.
-pub(crate) struct RunnerPool {
+pub struct RunnerPool {
     config: PoolConfig,
+    /// Host-supplied runner re-invocation (program + args).
+    spawn: RunnerSpawn,
     /// One slot per pooled runner. `None` = empty slot to (re)spawn into. The
     /// outer `Mutex` is only ever held briefly to move the runner in/out; the
     /// free-list guarantees single-owner access for the lease lifetime.
@@ -49,14 +75,26 @@ pub(crate) struct RunnerPool {
 }
 
 impl RunnerPool {
-    /// Build a pool from the environment-derived config. When pooling is disabled
-    /// (`size == 0`) the pool holds no slots and every checkout returns an
-    /// ephemeral runner — i.e. the spawn-per-execution fallback.
-    pub(crate) fn from_env() -> Self {
-        Self::with_config(PoolConfig::from_env())
+    /// Build a pool from the environment-derived config and the default runner
+    /// spawn seam (`current_exe()` + `["internal", "code-mode-runner"]`). When
+    /// pooling is disabled (`size == 0`) the pool holds no slots and every
+    /// checkout returns an ephemeral runner — i.e. the spawn-per-execution
+    /// fallback.
+    pub fn from_env() -> Self {
+        Self::with_config_and_spawn(PoolConfig::from_env(), RunnerSpawn::default())
     }
 
-    pub(in crate::dispatch::gateway::code_mode) fn with_config(config: PoolConfig) -> Self {
+    /// Build a pool with an explicit, host-supplied runner spawn seam.
+    pub fn with_spawn(spawn: RunnerSpawn) -> Self {
+        Self::with_config_and_spawn(PoolConfig::from_env(), spawn)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_config(config: PoolConfig) -> Self {
+        Self::with_config_and_spawn(config, RunnerSpawn::default())
+    }
+
+    fn with_config_and_spawn(config: PoolConfig, spawn: RunnerSpawn) -> Self {
         let slots = (0..config.size)
             .map(|_| Arc::new(Mutex::new(None)))
             .collect::<Vec<_>>();
@@ -72,6 +110,7 @@ impl RunnerPool {
         };
         Self {
             config,
+            spawn,
             slots,
             free_slots: Arc::new(StdMutex::new(free_slots)),
             overflow_permits: Arc::new(Semaphore::new(overflow)),
@@ -79,7 +118,7 @@ impl RunnerPool {
     }
 
     #[cfg(test)]
-    pub(in crate::dispatch::gateway::code_mode) fn config(&self) -> PoolConfig {
+    pub(crate) fn config(&self) -> PoolConfig {
         self.config
     }
 
@@ -90,15 +129,12 @@ impl RunnerPool {
     /// saturation spawns a bounded ephemeral runner. The lease MUST be finalized
     /// via [`RunnerLease::release`] / [`RunnerLease::evict`] (or dropped, which
     /// evicts) so the slot index returns to the free-list.
-    pub(in crate::dispatch::gateway::code_mode) async fn checkout(
-        &self,
-        exe: &std::path::Path,
-    ) -> Result<RunnerLease, ToolError> {
+    pub(crate) async fn checkout(&self) -> Result<RunnerLease, ToolError> {
         // Pooled fast path: atomically claim a free slot index.
         if !self.config.is_disabled() {
             let claimed = self.free_slots.lock().expect("free-list lock").pop_front();
             if let Some(index) = claimed {
-                let runner = self.take_or_spawn_slot(index, exe).await;
+                let runner = self.take_or_spawn_slot(index).await;
                 match runner {
                     Ok(runner) => {
                         return Ok(RunnerLease::pooled(
@@ -137,21 +173,17 @@ impl RunnerPool {
             pool_size = self.config.size,
             "pool saturated; spawning ephemeral Code Mode runner"
         );
-        let runner = PooledRunner::spawn(exe)?;
+        let runner = PooledRunner::spawn(&self.spawn)?;
         Ok(RunnerLease::ephemeral(runner, permit))
     }
 
     /// Take the runner out of a claimed slot, spawning a fresh one if the slot is
     /// empty (first use or post-eviction).
-    async fn take_or_spawn_slot(
-        &self,
-        index: usize,
-        exe: &std::path::Path,
-    ) -> Result<PooledRunner, ToolError> {
+    async fn take_or_spawn_slot(&self, index: usize) -> Result<PooledRunner, ToolError> {
         let mut guard = self.slots[index].lock().await;
         match guard.take() {
             Some(runner) => Ok(runner),
-            None => PooledRunner::spawn(exe),
+            None => PooledRunner::spawn(&self.spawn),
         }
     }
 
@@ -159,9 +191,7 @@ impl RunnerPool {
     /// lease / free-list / recycle / eviction bookkeeping and PID reuse can be
     /// exercised without the real labby binary.
     #[cfg(test)]
-    pub(in crate::dispatch::gateway::code_mode) async fn checkout_stub(
-        &self,
-    ) -> Result<RunnerLease, ToolError> {
+    pub(crate) async fn checkout_stub(&self) -> Result<RunnerLease, ToolError> {
         if !self.config.is_disabled() {
             let claimed = self.free_slots.lock().expect("free-list lock").pop_front();
             if let Some(index) = claimed {
@@ -195,7 +225,7 @@ impl RunnerPool {
 /// `evict` the runner is always dropped and a pooled slot is left empty to be
 /// respawned on next checkout. Dropping the lease without finalizing also
 /// evicts (the runner is dropped and the slot left empty) — fail-safe.
-pub(in crate::dispatch::gateway::code_mode) struct RunnerLease {
+pub(crate) struct RunnerLease {
     kind: LeaseKind,
     runner: Option<PooledRunner>,
 }
@@ -243,7 +273,7 @@ impl RunnerLease {
     }
 
     /// Mutable access to the leased runner for driving one execution.
-    pub(in crate::dispatch::gateway::code_mode) fn runner_mut(&mut self) -> &mut PooledRunner {
+    pub(crate) fn runner_mut(&mut self) -> &mut PooledRunner {
         self.runner
             .as_mut()
             .expect("runner present for the lease lifetime")
@@ -251,7 +281,7 @@ impl RunnerLease {
 
     /// Whether this lease is backed by a pooled (long-lived, reused) runner.
     #[cfg(test)]
-    pub(in crate::dispatch::gateway::code_mode) fn is_pooled(&self) -> bool {
+    pub(crate) fn is_pooled(&self) -> bool {
         matches!(self.kind, LeaseKind::Pooled { .. })
     }
 
@@ -261,7 +291,7 @@ impl RunnerLease {
     /// recycle-after-K threshold, in which case it is dropped (killed) and the
     /// slot left empty so the next checkout spawns a fresh process. Either way
     /// the slot index returns to the free-list. An ephemeral runner is dropped.
-    pub(in crate::dispatch::gateway::code_mode) async fn release(mut self) {
+    pub(crate) async fn release(mut self) {
         let runner = self.runner.take();
         match (&mut self.kind, runner) {
             (
@@ -300,7 +330,7 @@ impl RunnerLease {
     /// The runner is always dropped (killed); a pooled slot is left empty (the
     /// runner is never returned) so the next checkout spawns a fresh replacement.
     /// The slot index still returns to the free-list so the slot is reusable.
-    pub(in crate::dispatch::gateway::code_mode) fn evict(mut self) {
+    pub(crate) fn evict(mut self) {
         drop(self.runner.take());
         if let LeaseKind::Pooled {
             free_slots,

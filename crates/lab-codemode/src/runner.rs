@@ -196,7 +196,7 @@ impl From<String> for CodeModeRunnerError {
 /// and return its `kind`, scanning the ENTIRE message rather than the first line.
 ///
 /// The `__labSettleToolCall` bridge rejects a failed `callTool` with an `Error`
-/// whose `.message` is the *pure JSON* `{kind,message}` of the upstream error.
+/// whose `.message` is the *pure JSON* `{kind,message}` of the tool-call error.
 /// That pure-JSON shape is a load-bearing contract: caller JS recovers the
 /// structured error via `JSON.parse(e.message)` (see the runner integration
 /// tests), so the bridge must NOT wrap the message in markers or prose. QuickJS
@@ -274,33 +274,6 @@ fn add_code_mode_hint(kind: &str, message: &str) -> String {
     } else {
         format!("{message}\n\nHint: {}", hints.join(" "))
     }
-}
-
-#[cfg(test)]
-pub(in crate::dispatch::gateway::code_mode) fn add_code_mode_hint_for_test(
-    kind: &str,
-    message: &str,
-) -> String {
-    add_code_mode_hint(kind, message)
-}
-
-#[cfg(test)]
-pub(in crate::dispatch::gateway::code_mode) fn classify_rejection_kind_for_test(
-    message: &str,
-) -> String {
-    classify_rejection(message.to_string()).kind
-}
-
-/// The exact `Error.message` the `__labSettleToolCall` bridge throws on a
-/// `tool_error`: the pure JSON `{kind,message}`. Exposed for the round-trip
-/// regression test so it asserts against the real wire shape rather than a
-/// hand-rolled approximation.
-#[cfg(test)]
-pub(in crate::dispatch::gateway::code_mode) fn structured_error_message_for_test(
-    kind: &str,
-    message: &str,
-) -> String {
-    serde_json::json!({ "kind": kind, "message": message }).to_string()
 }
 
 fn run_code_mode_runner() -> Result<RunnerLoopOutcome, CodeModeRunnerError> {
@@ -515,7 +488,7 @@ globalThis.__labSettlePendingOperation = (message) => {{
   }}
   if (input.type === "tool_error") {{
     // Reject with an Error whose message is the *pure JSON* {{kind,message}} of
-    // the upstream error. This is a load-bearing contract: caller JS recovers the
+    // the tool-call error. This is a load-bearing contract: caller JS recovers the
     // structured error via `JSON.parse(e.message)` (see the runner integration
     // tests), so the message must stay valid JSON — do NOT wrap it in markers or
     // prose. The host preserves `kind` by extracting the embedded JSON object from
@@ -536,14 +509,6 @@ globalThis.__labMainPromise = (async () => {{
         invoker = invoker,
         proxy = proxy,
     )
-}
-
-#[cfg(test)]
-pub(in crate::dispatch::gateway::code_mode) fn wrap_code_mode_for_test(
-    code: &str,
-    proxy: &str,
-) -> String {
-    wrap_code_mode(code, proxy)
 }
 
 enum JavyMainPromiseState {

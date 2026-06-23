@@ -1,4 +1,4 @@
-//! Tests for `ts_signatures` (TypeScript type generation from JSON Schema).
+//! Tests for `types_legacy` (TypeScript type generation from JSON Schema).
 #![cfg(test)]
 
 use serde_json::json;
@@ -32,7 +32,7 @@ fn json_schema_to_type_handles_refs_unions_arrays_and_required_properties() {
         "required": ["items"]
     });
 
-    let ts = super::ts_signatures::json_schema_to_type(Some(&schema));
+    let ts = super::types_legacy::json_schema_to_type(Some(&schema));
 
     assert!(ts.contains("items: Array<{"));
     assert!(ts.contains("title: string;"));
@@ -64,7 +64,7 @@ fn json_schema_to_type_matches_cloudflare_edge_cases() {
         }
     });
 
-    let ts = super::ts_signatures::json_schema_to_type(Some(&schema));
+    let ts = super::types_legacy::json_schema_to_type(Some(&schema));
 
     assert!(ts.contains("tuple?: [string, number];"), "{ts}");
     assert!(ts.contains("exact?: Record<string, never>;"), "{ts}");
@@ -87,7 +87,7 @@ fn json_schema_to_type_maps_binary_strings_to_runtime_buffer_types() {
         "required": ["payload"]
     });
 
-    let ts = super::ts_signatures::json_schema_to_type(Some(&schema));
+    let ts = super::types_legacy::json_schema_to_type(Some(&schema));
 
     assert!(ts.contains("payload: Uint8Array | ArrayBuffer;"), "{ts}");
 }
@@ -104,7 +104,7 @@ fn json_schema_to_type_does_not_emit_conflicting_index_signatures() {
         "additionalProperties": { "type": "number" }
     });
 
-    let ts = super::ts_signatures::json_schema_to_type(Some(&schema));
+    let ts = super::types_legacy::json_schema_to_type(Some(&schema));
 
     assert!(ts.contains("id: string;"), "{ts}");
     assert!(ts.contains("count?: number;"), "{ts}");
@@ -121,14 +121,14 @@ fn json_schema_to_type_does_not_emit_conflicting_index_signatures() {
 
 #[test]
 fn generate_tool_types_emits_composable_codemode_declarations() {
-    let first = super::ts_signatures::generate_tool_types(
+    let first = super::types_legacy::generate_tool_types(
         "github",
         "list_tags",
         "List tags",
         Some(&json!({"type": "object"})),
         None,
     );
-    let second = super::ts_signatures::generate_tool_types(
+    let second = super::types_legacy::generate_tool_types(
         "github",
         "create_issue",
         "Create issue",
@@ -146,7 +146,7 @@ fn generate_tool_types_emits_composable_codemode_declarations() {
 
 #[test]
 fn generate_tool_types_quotes_sanitized_namespace_and_method_names() {
-    let types = super::ts_signatures::generate_tool_types(
+    let types = super::types_legacy::generate_tool_types(
         "github chat",
         "list tags",
         "List tags",
@@ -183,9 +183,9 @@ fn generate_tool_types_sanitizes_reserved_digits_empty_dollar_and_collision_adja
         ),
     ];
 
-    for (upstream, tool, expected) in cases {
-        let types = super::ts_signatures::generate_tool_types(
-            upstream,
+    for (namespace, tool, expected) in cases {
+        let types = super::types_legacy::generate_tool_types(
+            namespace,
             tool,
             "Description",
             Some(&json!({"type": "object"})),

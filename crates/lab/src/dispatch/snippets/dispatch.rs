@@ -295,8 +295,7 @@ async fn execute_snippet(
         owned_manager = crate::dispatch::gateway::require_gateway_manager()?;
         owned_manager.as_ref()
     };
-    let registry = manager.builtin_service_registry();
-    let broker = CodeModeBroker::new(&registry, Some(manager));
+    let broker = CodeModeBroker::new(Some(manager));
     let config = manager.code_mode_config().await;
     let snippet = resolve_snippet(&lab_home(), &builtin_snippet_dir(), name)?;
     let code = code_for_snippet(&snippet)?;

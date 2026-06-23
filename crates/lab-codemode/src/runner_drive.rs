@@ -15,10 +15,10 @@ use serde_json::{Value, json};
 use tokio::process::ChildStdin;
 use ulid::Ulid;
 
-use crate::dispatch::error::ToolError;
+use crate::error::ToolError;
+use crate::host::CodeModeHost;
 
 use super::CodeModeBroker;
-use super::GatewayManager;
 use super::artifacts::{
     ActiveArtifactRun, CodeModeArtifactReceipt, CodeModeArtifactWrite, code_mode_artifact_root,
     write_code_mode_artifact,
@@ -29,8 +29,8 @@ use super::protocol::{CodeModeRunnerInput, CodeModeRunnerOutput};
 use super::runner_io::{terminate_code_mode_runner, write_runner_input};
 use super::truncate::apply_log_caps;
 use super::types::{
-    CodeModeCaller, CodeModeCapabilityFilter, CodeModeExecutedCall, CodeModeExecutionError,
-    CodeModeExecutionResponse, CodeModeSurface,
+    CodeModeCaller, CodeModeExecutedCall, CodeModeExecutionError, CodeModeExecutionResponse,
+    CodeModeSurface, ToolScope,
 };
 
 const ARTIFACT_WRITE_CALL_ID: &str = "code_mode::write_artifact";
@@ -57,7 +57,7 @@ type ToolCallFut<'a> = std::pin::Pin<
 ///
 /// Collecting these into a struct eliminates the 10-positional-argument call
 /// site (clippy `too_many_arguments`) and makes each field self-documenting.
-pub(in crate::dispatch::gateway::code_mode) struct RunnerConfig {
+pub(crate) struct RunnerConfig {
     pub code_to_run: String,
     pub proxy: String,
     pub timeout: Duration,
@@ -66,7 +66,7 @@ pub(in crate::dispatch::gateway::code_mode) struct RunnerConfig {
     pub max_log_entries: usize,
     pub max_log_bytes: usize,
     pub trace_params: bool,
-    pub capability_filter: CodeModeCapabilityFilter,
+    pub capability_filter: ToolScope,
 }
 
 // ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ impl DriveState {
 // Main entry point
 // ---------------------------------------------------------------------------
 
-impl CodeModeBroker<'_> {
+impl<H: CodeModeHost> CodeModeBroker<'_, H> {
     /// Spawn the runner subprocess, send the code, and drive the
     /// tool-call/artifact/completion protocol loop until the runner exits
     /// or the wall-clock deadline fires.
@@ -114,7 +114,7 @@ impl CodeModeBroker<'_> {
     /// are delegated to named helpers. Timeout and killpg invariants are
     /// preserved exactly.
     #[allow(clippy::too_many_arguments)]
-    pub(in crate::dispatch::gateway::code_mode) async fn run_in_runner(
+    pub(crate) async fn run_in_runner(
         &self,
         code_to_run: String,
         proxy: String,
@@ -124,7 +124,7 @@ impl CodeModeBroker<'_> {
         max_log_entries: usize,
         max_log_bytes: usize,
         trace_params: bool,
-        capability_filter: CodeModeCapabilityFilter,
+        capability_filter: ToolScope,
     ) -> Result<CodeModeExecutionResponse, CodeModeExecutionError> {
         let cfg = RunnerConfig {
             code_to_run,
@@ -144,22 +144,14 @@ impl CodeModeBroker<'_> {
         &self,
         cfg: RunnerConfig,
     ) -> Result<CodeModeExecutionResponse, CodeModeExecutionError> {
-        let exe = std::env::current_exe().map_err(|err| ToolError::Sdk {
-            sdk_kind: "internal_error".to_string(),
-            message: format!("failed to locate current executable for Code Mode runner: {err}"),
-        })?;
-
-        // Acquire a runner. With a gateway manager, use the shared warm pool
-        // (Perf H1): a pooled runner amortizes the fork/startup cost across
-        // executions while still building a fresh `javy::Runtime` per `Start`
-        // (runner-side), so JS state isolation holds. Without a manager (some
-        // tests / standalone paths), spawn a one-shot runner directly.
-        match self
-            .gateway_manager
-            .map(GatewayManager::code_mode_runner_pool)
-        {
-            Some(pool) => self.run_via_pool(pool, &exe, cfg).await,
-            None => self.run_standalone(&exe, cfg).await,
+        // Acquire a runner. With a host, use the shared warm pool (Perf H1): a
+        // pooled runner amortizes the fork/startup cost across executions while
+        // still building a fresh `javy::Runtime` per `Start` (runner-side), so JS
+        // state isolation holds. Without a host (some tests / standalone paths),
+        // spawn a one-shot runner directly.
+        match self.host {
+            Some(host) => self.run_via_pool(host.runner_pool(), cfg).await,
+            None => self.run_standalone(cfg).await,
         }
     }
 
@@ -173,10 +165,9 @@ impl CodeModeBroker<'_> {
     async fn run_via_pool(
         &self,
         pool: &RunnerPool,
-        exe: &Path,
         cfg: RunnerConfig,
     ) -> Result<CodeModeExecutionResponse, CodeModeExecutionError> {
-        let mut lease = pool.checkout(exe).await?;
+        let mut lease = pool.checkout().await?;
         let outcome = self.drive_runner(lease.runner_mut(), &cfg).await;
         match outcome {
             DriveOutcome::Completed(response) => {
@@ -201,10 +192,9 @@ impl CodeModeBroker<'_> {
     /// Run one execution against a freshly-spawned one-shot runner (no pool).
     async fn run_standalone(
         &self,
-        exe: &Path,
         cfg: RunnerConfig,
     ) -> Result<CodeModeExecutionResponse, CodeModeExecutionError> {
-        let mut runner = PooledRunner::spawn(exe)?;
+        let mut runner = PooledRunner::spawn(&super::pool::RunnerSpawn::default())?;
         let outcome = self.drive_runner(&mut runner, &cfg).await;
         // The runner handle's Drop kills the process on every path here, so a
         // standalone runner is never leaked or reused.
@@ -401,11 +391,7 @@ impl CodeModeBroker<'_> {
                             );
                             let sanitized_logs = all_logs
                                 .into_iter()
-                                .map(|line| {
-                                    crate::dispatch::gateway::projection::sanitize_tool_text(
-                                        &line, 4096,
-                                    )
-                                })
+                                .map(|line| super::truncate::sanitize_log_text(&line, 4096))
                                 .collect();
                             return DriveOutcome::Completed(CodeModeExecutionResponse {
                                 logs: sanitized_logs,
@@ -500,8 +486,8 @@ fn classify_line_result(
 /// Free function (not `&self` method) so the returned future can capture
 /// `broker` with the same lifetime as the enclosing `run_in_runner_with_config`
 /// rather than being forced to `'static`.
-fn enqueue_tool_call<'a>(
-    broker: &'a CodeModeBroker<'a>,
+fn enqueue_tool_call<'a, H: CodeModeHost>(
+    broker: &'a CodeModeBroker<'a, H>,
     seq: u64,
     id: String,
     params: Value,
@@ -585,8 +571,8 @@ async fn handle_artifact_write_event(
     }
 }
 
-async fn handle_snippet_resolve_event(
-    broker: &CodeModeBroker<'_>,
+async fn handle_snippet_resolve_event<H: CodeModeHost>(
+    broker: &CodeModeBroker<'_, H>,
     seq: u64,
     name: String,
     input: Value,
@@ -633,8 +619,8 @@ async fn handle_snippet_resolve_event(
     }
 }
 
-async fn resolve_snippet_for_runner(
-    broker: &CodeModeBroker<'_>,
+async fn resolve_snippet_for_runner<H: CodeModeHost>(
+    broker: &CodeModeBroker<'_, H>,
     name: &str,
     input: Value,
     cfg: &RunnerConfig,
@@ -646,18 +632,18 @@ async fn resolve_snippet_for_runner(
             required_scopes: vec!["lab:admin".to_string()],
         });
     }
-    if cfg.capability_filter.is_scoped_to_upstreams() {
+    if cfg.capability_filter.is_scoped() {
         return Err(ToolError::Forbidden {
             message: "codemode.run is not available on route-scoped Code Mode surfaces".to_string(),
             required_scopes: vec!["lab:admin".to_string()],
         });
     }
-    if broker.gateway_manager.is_none() {
+    let Some(host) = broker.host else {
         return Err(ToolError::Sdk {
-            sdk_kind: "gateway_unavailable".to_string(),
-            message: "codemode.run requires a live gateway manager".to_string(),
+            sdk_kind: "tool_source_unavailable".to_string(),
+            message: "codemode.run requires a live tool source".to_string(),
         });
-    }
+    };
     if state.snippet_resolves >= MAX_SNIPPET_RESOLVES_PER_RUN {
         return Err(ToolError::Sdk {
             sdk_kind: "snippet_resolve_limit".to_string(),
@@ -667,20 +653,8 @@ async fn resolve_snippet_for_runner(
 
     state.snippet_resolves = state.snippet_resolves.saturating_add(1);
     let started = std::time::Instant::now();
-    let lab_home = crate::dispatch::helpers::lab_home();
-    let builtin_dir = crate::dispatch::snippets::store::builtin_snippet_dir();
-    let name = name.to_string();
-    let resolved = tokio::task::spawn_blocking(move || {
-        let resolved =
-            crate::dispatch::snippets::store::resolve_snippet(&lab_home, &builtin_dir, &name)?;
-        let input = crate::dispatch::snippets::store::merge_snippet_input(&resolved, input)?;
-        let code = crate::dispatch::snippets::store::code_for_snippet(&resolved)?;
-        Ok::<_, ToolError>((resolved.name, code, input))
-    })
-    .await
-    .map_err(|err| ToolError::internal_message(format!("snippet resolve task failed: {err}")))??;
-
-    let (name, code, input) = resolved;
+    let resolved = host.resolve_snippet(name, input).await?;
+    let (name, code, input) = (resolved.name, resolved.code, resolved.input);
 
     state.snippet_resolved_bytes = state.snippet_resolved_bytes.saturating_add(code.len());
     if state.snippet_resolved_bytes > MAX_SNIPPET_RESOLVED_BYTES_PER_RUN {
@@ -943,8 +917,9 @@ fn artifact_call(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::panic)]
     use super::*;
-    use crate::registry::ToolRegistry;
+    use crate::host::NoopHost;
 
     fn test_config(timeout: Duration) -> RunnerConfig {
         RunnerConfig {
@@ -956,7 +931,7 @@ mod tests {
             max_log_entries: 100,
             max_log_bytes: 4096,
             trace_params: false,
-            capability_filter: CodeModeCapabilityFilter::default(),
+            capability_filter: ToolScope::default(),
         }
     }
 
@@ -966,8 +941,7 @@ mod tests {
     /// runtime interrupted mid-execution.
     #[tokio::test]
     async fn drive_runner_times_out_and_marks_runner_unhealthy() {
-        let registry = ToolRegistry::new();
-        let broker = CodeModeBroker::new(&registry, None);
+        let broker: CodeModeBroker<'_, NoopHost> = CodeModeBroker::new(None);
         let mut runner = PooledRunner::spawn_stub_silent().expect("spawn silent stub");
         let outcome = broker
             .drive_runner(&mut runner, &test_config(Duration::from_millis(80)))

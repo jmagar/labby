@@ -117,7 +117,7 @@ async fn execute_proxy_embeds_local_discovery_helpers_without_host_callbacks() {
         .build_code_mode_proxy_for_tests(
             &super::CodeModeCaller::TrustedLocal,
             super::CodeModeSurface::Mcp,
-            &super::CodeModeCapabilityFilter::default(),
+            &super::ToolScope::default(),
         )
         .await
         .expect("proxy");
@@ -145,7 +145,7 @@ async fn execute_proxy_embeds_only_reduced_discovery_catalog() {
         .build_code_mode_proxy_for_tests(
             &super::CodeModeCaller::TrustedLocal,
             super::CodeModeSurface::Mcp,
-            &super::CodeModeCapabilityFilter::default(),
+            &super::ToolScope::default(),
         )
         .await
         .expect("proxy");
@@ -186,7 +186,7 @@ async fn execute_proxy_rejects_generated_helper_collisions() {
         .build_code_mode_proxy_for_tests(
             &super::CodeModeCaller::TrustedLocal,
             super::CodeModeSurface::Mcp,
-            &super::CodeModeCapabilityFilter::default(),
+            &super::ToolScope::default(),
         )
         .await
         .expect_err("generated helper collisions fail the run");
@@ -214,7 +214,7 @@ async fn execute_proxy_discovery_paths_use_reserved_safe_namespaces() {
         .build_code_mode_proxy_for_tests(
             &super::CodeModeCaller::TrustedLocal,
             super::CodeModeSurface::Mcp,
-            &super::CodeModeCapabilityFilter::default(),
+            &super::ToolScope::default(),
         )
         .await
         .expect("proxy");
@@ -386,7 +386,7 @@ async fn broker_search_refreshes_read_only_catalog_after_upstream_tool_expansion
     // cannot be spawned from lib unit tests; see the sibling test.)
     let owner = read_only.runtime_owner(surface);
     let oauth_subject = read_only.oauth_subject();
-    let agent_os_names = |entries: &[super::CodeModeCatalogEntry]| -> Vec<String> {
+    let agent_os_names = |entries: &[super::ToolDescriptor]| -> Vec<String> {
         let mut names: Vec<String> = entries
             .iter()
             .filter(|entry| entry.upstream == "agent-os_windows-mcp")
@@ -499,7 +499,7 @@ async fn broker_call_tool_validates_schema_before_upstream_dispatch() {
             json!({}),
             super::CodeModeCaller::TrustedLocal,
             super::CodeModeSurface::Cli,
-            &super::CodeModeCapabilityFilter::default(),
+            &super::ToolScope::default(),
         )
         .await
         .expect_err("missing action must fail before dispatch");
@@ -517,7 +517,7 @@ async fn codemode_call_tool_lab_id_returns_unknown_tool() {
             json!({"query": "Matrix"}),
             super::CodeModeCaller::TrustedLocal,
             super::CodeModeSurface::Cli,
-            &super::CodeModeCapabilityFilter::default(),
+            &super::ToolScope::default(),
         )
         .await
         .expect_err("lab:: callTool id should return unknown_tool");

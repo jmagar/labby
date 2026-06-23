@@ -54,29 +54,26 @@ keeping each file under ~500 LOC.
 | `manager/oauth_resources.rs` | Upstream OAuth resource/token management. |
 | `manager/views.rs` | `list()`, `get()`, `status()`, `test()`, `discovered_tools/resources/prompts()`, `client_config()`. |
 
-### `code_mode/` sub-modules
+### `code_mode/` — extracted to the `lab-codemode` crate
+
+**The Code Mode JS execution kernel, broker, result-shaping helpers, and snippet
+engine were extracted into the client-neutral `lab-codemode` crate** (runner,
+runner_drive, runner_io, protocol, pool, artifacts, wrapper, preamble, util,
+execute broker, schema, normalize, truncate, trace, types, ts_signatures, plus
+the snippet store). The crate is injected with a tool source via the
+`lab_codemode::CodeModeHost` trait and carries **no** gateway/upstream
+vocabulary. Wasmtime / `wasm_runner.rs` were dropped (dead code). See
+`crates/lab-codemode/CLAUDE.md` for the sandbox containment invariants.
+
+What stays in `dispatch/gateway/code_mode/` is the gateway's **thin adapter**:
 
 | Module | Responsibilities |
 |--------|-----------------|
-| `code_mode.rs` (parent) | Module entrypoint, `CodeModeHistory`, shared types. |
-| `code_mode/runner.rs` | Subprocess lifecycle: spawn, stdio framing, request/response loop, kill. |
-| `code_mode/runner_drive.rs` | Higher-level runner driver: retry, timeout enforcement, history tracking. |
-| `code_mode/runner_io.rs` | Framed stdin/stdout line protocol with the runner child. |
-| `code_mode/execute.rs` | `execute()` entry point; builds the Code Mode context and calls the driver. |
-| `code_mode/search.rs` | `search()` entry point; projects the catalog and calls the driver. |
-| `code_mode/preamble.rs` | Preamble injection into the JS sandbox (catalog stubs, `callTool` bridge). |
-| `code_mode/protocol.rs` | Wire types for the parent↔runner stdio protocol messages. |
-| `code_mode/schema.rs` | JSON Schema helpers for Code Mode tool descriptions. |
-| `code_mode/normalize.rs` | Result normalization / truncation. |
-| `code_mode/truncate.rs` | Output size limiting. |
-| `code_mode/trace.rs` | Execution tracing/span helpers. |
-| `code_mode/types.rs` | Shared Code Mode types (`CodeModeRequest`, `CodeModeResult`, etc.). |
-| `code_mode/types_legacy.rs` | Backward-compat shims for older Code Mode type shapes. |
-| `code_mode/util.rs` | Small utilities (e.g. JS function wrapping). |
-| `code_mode/artifacts.rs` | Artifact write handler — path containment, size cap, atomic write. |
-| `code_mode/catalog_cache.rs` | Per-run catalog snapshot cache. |
-| `code_mode/wrapper.rs` | JS source wrappers injected around caller snippets. |
-| `code_mode/wasm_runner.rs` | **DEAD CODE — do not use.** Wasmtime/WASM runner path kept for reference only. The live runner is Javy/QuickJS via subprocess stdio. See trust-model note below. |
+| `code_mode.rs` (parent) | Re-exports the crate's public surface under the historical `code_mode::*` paths (with `CodeModeCapabilityFilter`/`CodeModeCatalogEntry`/`split_upstream_tool` aliases), and owns the host-side `CatalogRenderCache` / `SnippetMetadataCache`. |
+| `code_mode/code_mode_host.rs` | `impl CodeModeHost for GatewayManager` — the upstream→`ToolDescriptor` binding, `callTool` over the `UpstreamPool`, mcp-ui capture + result unwrap, upstream-error classification, snippet source resolution, OAuth-subject / runtime-owner derivation. This is the one place gateway/upstream vocabulary is legitimately reintroduced. |
+| `code_mode/search.rs` | Host-side discovery catalog projection + render cache (`build_tools_render`). |
+| `code_mode/catalog_cache.rs` | One-shot CLI on-disk catalog cache (gateway-config fingerprinted). |
+| `code_mode/tests_broker.rs.disabled` / `tests_runtime.rs.disabled` | Broker/runtime integration tests parked pending a rewrite against the new public `CodeModeBroker` API (they tested the old crate-private broker internals). |
 
 ---
 

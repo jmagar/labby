@@ -1,6 +1,10 @@
 pub mod catalog;
 pub mod dispatch;
-pub mod store;
+
+/// The snippet ENGINE moved to `lab-codemode`; the snippet SURFACE (catalog,
+/// dispatch, MCP/CLI/API registration) stays here as a thin adapter. Re-export
+/// the engine under the historical `dispatch::snippets::store` path.
+pub use lab_codemode::snippet::store;
 
 pub use catalog::ACTIONS;
 pub use dispatch::dispatch;

@@ -7,13 +7,13 @@ use std::io::{self, BufReader, BufWriter};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum CodeModeRunnerInput {
+pub(crate) enum CodeModeRunnerInput {
     Start {
         code: String,
         /// Auto-generated `var codemode = {...}` proxy JS (see
         /// `code_mode_preamble::generate_js_proxy`). Injected into the sandbox
         /// after `callTool` is defined so the user code can call
-        /// `codemode.<upstream>.<tool>(params)`.
+        /// `codemode.<namespace>.<tool>(params)`.
         ///
         /// `#[serde(default)]` keeps the search path and older Start messages
         /// (which carry only `code`) forward-compatible — they deserialize to
@@ -39,7 +39,7 @@ pub enum CodeModeRunnerInput {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum CodeModeRunnerOutput {
+pub(crate) enum CodeModeRunnerOutput {
     ToolCall {
         seq: u64,
         id: String,
@@ -82,23 +82,9 @@ pub enum CodeModeRunnerOutput {
     },
 }
 
-impl CodeModeRunnerOutput {
-    #[must_use]
-    #[cfg(test)]
-    pub(in crate::dispatch::gateway::code_mode) fn result_for_response(&self) -> Option<Value> {
-        match self {
-            Self::Done { result, .. } => result.clone().into_response_result(),
-            Self::ToolCall { .. }
-            | Self::ArtifactWrite { .. }
-            | Self::SnippetResolve { .. }
-            | Self::Error { .. } => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(tag = "state", content = "value", rename_all = "snake_case")]
-pub enum CodeModeRunnerResult {
+pub(crate) enum CodeModeRunnerResult {
     #[default]
     Undefined,
     Json(Value),
@@ -106,9 +92,7 @@ pub enum CodeModeRunnerResult {
 
 impl CodeModeRunnerResult {
     #[must_use]
-    pub(in crate::dispatch::gateway::code_mode) fn from_response_result(
-        result: Option<Value>,
-    ) -> Self {
+    pub(crate) fn from_response_result(result: Option<Value>) -> Self {
         match result {
             Some(value) => Self::Json(value),
             None => Self::Undefined,
@@ -116,7 +100,7 @@ impl CodeModeRunnerResult {
     }
 
     #[must_use]
-    pub(in crate::dispatch::gateway::code_mode) fn into_response_result(self) -> Option<Value> {
+    pub(crate) fn into_response_result(self) -> Option<Value> {
         match self {
             Self::Undefined => None,
             Self::Json(value) => Some(value),
@@ -124,18 +108,18 @@ impl CodeModeRunnerResult {
     }
 }
 
-pub(in crate::dispatch::gateway::code_mode) struct CodeModeRunnerState {
-    pub(in crate::dispatch::gateway::code_mode) reader: BufReader<io::Stdin>,
-    pub(in crate::dispatch::gateway::code_mode) writer: BufWriter<io::Stdout>,
-    pub(in crate::dispatch::gateway::code_mode) next_seq: u64,
+pub(crate) struct CodeModeRunnerState {
+    pub(crate) reader: BufReader<io::Stdin>,
+    pub(crate) writer: BufWriter<io::Stdout>,
+    pub(crate) next_seq: u64,
 }
 
 thread_local! {
-    pub(in crate::dispatch::gateway::code_mode) static RUNNER_STATE: RefCell<Option<CodeModeRunnerState>> = const { RefCell::new(None) };
+    pub(crate) static RUNNER_STATE: RefCell<Option<CodeModeRunnerState>> = const { RefCell::new(None) };
 }
 
 // Javy interprets this as the native stack size in bytes. The runtime
-// `codemode.*` proxy preamble (one method per upstream tool, ~140+ across the
-// gateway) plus await/Promise machinery needs ample headroom; 256 KiB avoids
+// `codemode.*` proxy preamble (one method per tool, ~140+ across the
+// catalog) plus await/Promise machinery needs ample headroom; 256 KiB avoids
 // operand-stack overflow on a single callTool.
-pub(in crate::dispatch::gateway::code_mode) const CODE_MODE_STACK_SIZE_LIMIT: usize = 256 * 1024;
+pub(crate) const CODE_MODE_STACK_SIZE_LIMIT: usize = 256 * 1024;

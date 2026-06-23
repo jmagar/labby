@@ -3,16 +3,15 @@
 //! Generates the executable `var codemode = {...}` proxy object that is sent
 //! through the Code Mode Start protocol and injected into the sandbox after
 //! `callTool` is defined. The proxy lets the agent call
-//! `codemode.<upstream>.<tool>(params)`, which routes to
-//! `callTool("<upstream>::<dotted.name>", params)`.
+//! `codemode.<namespace>.<tool>(params)`, which routes to
+//! `callTool("<namespace>::<dotted.name>", params)`.
 //!
 //! This is RUNTIME JS, not a TypeScript declaration: it never enters the
 //! model's context (unlike the deleted typed-preamble-in-tool-description
 //! machinery from commit 780c67d3). Surfacing types/schemas via `search` is a
 //! separate follow-up; this module only restores the executable proxy.
 
-use super::types::{CodeModeCatalogEntry, CodeModeCatalogKind, CodeModeDiscoveryEntry};
-use crate::dispatch::upstream::types::UpstreamTool;
+use super::types::{CodeModeCatalogKind, CodeModeDiscoveryEntry, ToolDescriptor};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Tool name conversion (snake_case — Cloudflare Code Mode parity)
@@ -93,8 +92,8 @@ const JS_RESERVED: &[&str] = &[
 
 /// Top-level `codemode` helper names owned by Lab's local runtime.
 ///
-/// Upstream namespaces that sanitize to one of these names are suffixed so a
-/// real upstream named `search`, `describe`, or `step` cannot overwrite the
+/// Namespaces that sanitize to one of these names are suffixed so a
+/// real namespace named `search`, `describe`, or `step` cannot overwrite the
 /// local discovery/control helpers.
 const CODEMODE_TOP_LEVEL_RESERVED: &[&str] = &["search", "describe", "run", "step"];
 
@@ -154,8 +153,8 @@ pub fn tool_name_to_snake(name: &str) -> String {
     }
 }
 
-/// Convert an upstream name to the runtime `codemode.<namespace>` key.
-pub(crate) fn upstream_name_to_namespace(name: &str) -> String {
+/// Convert a namespace name to the runtime `codemode.<namespace>` key.
+pub(crate) fn namespace_segment(name: &str) -> String {
     let namespace = tool_name_to_snake(name);
     if CODEMODE_TOP_LEVEL_RESERVED.contains(&namespace.as_str()) {
         format!("{namespace}_")
@@ -199,7 +198,7 @@ codemode.search = function(input) {{
     var fields = [
       [__codemodeNormalize(entry.path), 12],
       [__codemodeNormalize(entry.name), 10],
-      [__codemodeNormalize(entry.upstream), 8],
+      [__codemodeNormalize(entry.namespace), 8],
       [__codemodeNormalize(entry.description), 5],
       [__codemodeNormalize((entry.tags || []).join(" ")), 7],
       [__codemodeNormalize(entry.kind === "snippet" ? "codemode run snippet" : ""), 9]
@@ -222,7 +221,7 @@ codemode.search = function(input) {{
         path: entry.path,
         id: entry.id,
         kind: entry.kind,
-        upstream: entry.upstream,
+        namespace: entry.namespace,
         name: entry.name,
         description: entry.description,
         signature: entry.signature,
@@ -248,7 +247,7 @@ codemode.describe = function(target) {{
     if (raw === entry.id || raw === entry.path || raw === entry.helper) exact.push(entry);
     if (entry.kind === "snippet" && raw === "snippet::" + entry.name) exact.push(entry);
     if (raw === entry.name) bare.push(entry);
-    if (raw === entry.upstream) ambiguous.push(entry);
+    if (raw === entry.namespace) ambiguous.push(entry);
   }}
   if (exact.length > 1) {{
     var uniqueExact = [];
@@ -313,7 +312,7 @@ codemode.step = function(name, fn) {{
 }
 
 /// Generate a JavaScript preamble string that defines the `codemode` proxy
-/// namespace, plus `codemode.__meta__.upstreams()` and a `__upstreams__`
+/// namespace, plus `codemode.__meta__.namespaces()` and a `__namespaces__`
 /// script-global, for use inside the sandbox.
 ///
 /// The output is a JS snippet (not TypeScript) that is prepended to (Boa) or
@@ -324,127 +323,28 @@ codemode.step = function(name, fn) {{
 /// concatenated in front of a trailing IIFE the IIFE's promise remains the
 /// `eval` completion value.
 ///
-/// `tools` — the upstream tools to expose
-/// `upstreams` — sorted, deduplicated list of upstream names
-#[allow(dead_code)]
-pub fn generate_js_proxy(tools: &[UpstreamTool], upstreams: &[String]) -> Result<String, String> {
-    use std::collections::BTreeMap;
-    use std::fmt::Write as _;
-
-    // Group tools by upstream name, sorted for deterministic output.
-    let mut by_upstream: BTreeMap<&str, Vec<&UpstreamTool>> = BTreeMap::new();
-    for tool in tools {
-        by_upstream
-            .entry(tool.upstream_name.as_ref())
-            .or_default()
-            .push(tool);
-    }
-
-    let mut parts = String::new();
-
-    // Accumulate method definitions keyed by the snake_cased UPSTREAM name so the
-    // namespace is reachable via dot notation (`codemode.arcane_mcp.tool(...)`),
-    // not just bracket access. Hyphenated upstreams (arcane-mcp, github-chat, …)
-    // would otherwise be unreachable as `codemode.arcane-mcp` (parses as
-    // subtraction). The `callTool` id keeps the RAW upstream name. Two raw
-    // upstreams that snake-collide merge into one namespace object (tools are not
-    // dropped); a per-tool snake collision is last-wins inside the object literal.
-    let mut by_snake_upstream: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let mut final_proxy_keys: BTreeMap<(String, String), (String, String)> = BTreeMap::new();
-    for (upstream_name, upstream_tools) in &by_upstream {
-        let upstream_snake = upstream_name_to_namespace(upstream_name);
-
-        // Build snake_case → dotted name mapping, last registration wins on collision.
-        let mut snake_to_dotted: BTreeMap<String, String> = BTreeMap::new();
-        let mut sorted_tools = upstream_tools.to_vec();
-        sorted_tools.sort_by(|a, b| a.tool.name.cmp(&b.tool.name));
-        for tool in &sorted_tools {
-            let snake = tool_name_to_snake(tool.tool.name.as_ref());
-            if snake_to_dotted.contains_key(&snake) {
-                let existing = snake_to_dotted
-                    .get(&snake)
-                    .map(String::as_str)
-                    .unwrap_or("<unknown>");
-                return Err(format!(
-                    "Tool names \"{existing}\" and \"{}\" both sanitize to \"{snake}\" in upstream \"{upstream_name}\"",
-                    tool.tool.name.as_ref()
-                ));
-            }
-            snake_to_dotted.insert(snake, tool.tool.name.to_string());
-        }
-
-        let method_defs = by_snake_upstream.entry(upstream_snake.clone()).or_default();
-        for (snake, dotted) in &snake_to_dotted {
-            if let Some((existing_upstream, existing_tool)) = final_proxy_keys.insert(
-                (upstream_snake.clone(), snake.clone()),
-                (upstream_name.to_string(), dotted.clone()),
-            ) {
-                return Err(format!(
-                    "Tools \"{existing_upstream}::{existing_tool}\" and \"{upstream_name}::{dotted}\" both sanitize to \"{upstream_snake}.{snake}\""
-                ));
-            }
-            // callTool id uses the RAW upstream + RAW tool name.
-            let tool_id = super::types::upstream_tool_id(upstream_name, &dotted);
-            let tool_id_json =
-                serde_json::to_string(&tool_id).unwrap_or_else(|_| "\"unknown\"".to_string());
-            // Always use a JSON-quoted property key so that any residual special
-            // characters in the snake_case name (e.g. from exotic tool schemas) never
-            // cause a JS syntax error inside QuickJS/Boa.
-            let snake_json =
-                serde_json::to_string(snake.as_str()).unwrap_or_else(|_| format!("\"{snake}\""));
-            // Use `p == null ? {} : p` (not `?? {}`) so the proxy does not depend
-            // on the engine supporting the nullish-coalescing operator.
-            method_defs.push(format!(
-                "    {snake_json}: function(p) {{ return callTool({tool_id_json}, p == null ? {{}} : p); }}"
-            ));
-        }
-    }
-
-    for (upstream_snake, method_defs) in &by_snake_upstream {
-        let upstream_snake_json =
-            serde_json::to_string(upstream_snake).unwrap_or_else(|_| "\"unknown\"".to_string());
-        let methods = method_defs.join(",\n");
-        let _ = write!(
-            parts,
-            "codemode[{upstream_snake_json}] = {{\n{methods}\n}};\n"
-        );
-    }
-
-    // Emit __meta__.upstreams value.
-    let upstreams_json = serde_json::to_string(upstreams).unwrap_or_else(|_| "[]".to_string());
-
-    Ok(format!(
-        "// Code Mode proxy — auto-generated\n\
-         globalThis.codemode = globalThis.codemode || {{}};\n\
-         var codemode = globalThis.codemode;\n\
-         {parts}\
-         codemode.__meta__ = {{ upstreams: function() {{ return Promise.resolve({upstreams_json}); }} }};\n\
-         var __upstreams__ = {upstreams_json};\n"
-    ))
-}
-
 pub(crate) fn generate_js_proxy_from_catalog(
-    tools: &[&CodeModeCatalogEntry],
-    upstreams: &[String],
+    tools: &[&ToolDescriptor],
+    namespaces: &[String],
 ) -> Result<String, String> {
     use std::collections::BTreeMap;
     use std::fmt::Write as _;
 
-    let mut by_upstream: BTreeMap<&str, Vec<&CodeModeCatalogEntry>> = BTreeMap::new();
+    let mut by_namespace: BTreeMap<&str, Vec<&ToolDescriptor>> = BTreeMap::new();
     for tool in tools {
         if tool.kind != CodeModeCatalogKind::Tool {
             continue;
         }
-        by_upstream.entry(&tool.upstream).or_default().push(*tool);
+        by_namespace.entry(&tool.namespace).or_default().push(*tool);
     }
 
     let mut parts = String::new();
-    let mut by_snake_upstream: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut by_snake_namespace: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut final_proxy_keys: BTreeMap<(String, String), (String, String)> = BTreeMap::new();
-    for (upstream_name, upstream_tools) in &by_upstream {
-        let upstream_snake = upstream_name_to_namespace(upstream_name);
+    for (namespace_name, namespace_tools) in &by_namespace {
+        let namespace_snake = namespace_segment(namespace_name);
         let mut snake_to_dotted: BTreeMap<String, String> = BTreeMap::new();
-        let mut sorted_tools = upstream_tools.to_vec();
+        let mut sorted_tools = namespace_tools.to_vec();
         sorted_tools.sort_by(|a, b| a.name.cmp(&b.name));
         for tool in &sorted_tools {
             let snake = tool_name_to_snake(&tool.name);
@@ -454,24 +354,26 @@ pub(crate) fn generate_js_proxy_from_catalog(
                     .map(String::as_str)
                     .unwrap_or("<unknown>");
                 return Err(format!(
-                    "Tool names \"{existing}\" and \"{}\" both sanitize to \"{snake}\" in upstream \"{upstream_name}\"",
+                    "Tool names \"{existing}\" and \"{}\" both sanitize to \"{snake}\" in namespace \"{namespace_name}\"",
                     tool.name
                 ));
             }
             snake_to_dotted.insert(snake, tool.name.clone());
         }
 
-        let method_defs = by_snake_upstream.entry(upstream_snake.clone()).or_default();
+        let method_defs = by_snake_namespace
+            .entry(namespace_snake.clone())
+            .or_default();
         for (snake, dotted) in &snake_to_dotted {
-            if let Some((existing_upstream, existing_tool)) = final_proxy_keys.insert(
-                (upstream_snake.clone(), snake.clone()),
-                (upstream_name.to_string(), dotted.clone()),
+            if let Some((existing_namespace, existing_tool)) = final_proxy_keys.insert(
+                (namespace_snake.clone(), snake.clone()),
+                (namespace_name.to_string(), dotted.clone()),
             ) {
                 return Err(format!(
-                    "Tools \"{existing_upstream}::{existing_tool}\" and \"{upstream_name}::{dotted}\" both sanitize to \"{upstream_snake}.{snake}\""
+                    "Tools \"{existing_namespace}::{existing_tool}\" and \"{namespace_name}::{dotted}\" both sanitize to \"{namespace_snake}.{snake}\""
                 ));
             }
-            let tool_id = super::types::upstream_tool_id(upstream_name, dotted);
+            let tool_id = super::types::namespaced_tool_id(namespace_name, dotted);
             let tool_id_json =
                 serde_json::to_string(&tool_id).unwrap_or_else(|_| "\"unknown\"".to_string());
             let snake_json =
@@ -482,17 +384,17 @@ pub(crate) fn generate_js_proxy_from_catalog(
         }
     }
 
-    for (upstream_snake, method_defs) in &by_snake_upstream {
-        let upstream_snake_json =
-            serde_json::to_string(upstream_snake).unwrap_or_else(|_| "\"unknown\"".to_string());
+    for (namespace_snake, method_defs) in &by_snake_namespace {
+        let namespace_snake_json =
+            serde_json::to_string(namespace_snake).unwrap_or_else(|_| "\"unknown\"".to_string());
         let methods = method_defs.join(",\n");
         let _ = write!(
             parts,
-            "codemode[{upstream_snake_json}] = {{\n{methods}\n}};\n"
+            "codemode[{namespace_snake_json}] = {{\n{methods}\n}};\n"
         );
     }
 
-    let upstreams_json = serde_json::to_string(upstreams).unwrap_or_else(|_| "[]".to_string());
+    let namespaces_json = serde_json::to_string(namespaces).unwrap_or_else(|_| "[]".to_string());
 
     Ok(format!(
         "// Code Mode proxy — auto-generated\n\
@@ -500,28 +402,23 @@ pub(crate) fn generate_js_proxy_from_catalog(
          var codemode = globalThis.codemode;\n\
          codemode.run = function(name, input) {{ return globalThis.__labRunSnippet(name, input == null ? {{}} : input); }};\n\
          {parts}\
-         codemode.__meta__ = {{ upstreams: function() {{ return Promise.resolve({upstreams_json}); }} }};\n\
-         var __upstreams__ = {upstreams_json};\n"
+         codemode.__meta__ = {{ namespaces: function() {{ return Promise.resolve({namespaces_json}); }} }};\n\
+         var __namespaces__ = {namespaces_json};\n"
     ))
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use rmcp::model::Tool;
-    use serde_json::Value;
-
     use super::*;
-    use crate::dispatch::upstream::types::UpstreamTool;
+    use crate::types::ToolDescriptor;
 
-    fn discovery_entry(upstream: &str, name: &str, description: &str) -> CodeModeDiscoveryEntry {
-        let path = format!("{upstream}.{name}");
+    fn discovery_entry(namespace: &str, name: &str, description: &str) -> CodeModeDiscoveryEntry {
+        let path = format!("{namespace}.{name}");
         CodeModeDiscoveryEntry {
             kind: CodeModeCatalogKind::Tool,
-            id: format!("{upstream}::{name}"),
+            id: format!("{namespace}::{name}"),
             path: path.clone(),
-            upstream: upstream.to_string(),
+            namespace: namespace.to_string(),
             name: name.to_string(),
             helper: format!("codemode.{path}"),
             description: description.to_string(),
@@ -529,6 +426,17 @@ mod tests {
             tags: Vec::new(),
             inputs: Vec::new(),
         }
+    }
+
+    /// Build a `ToolDescriptor` for the proxy-generation tests.
+    fn descriptor(namespace: &str, tool: &str) -> ToolDescriptor {
+        ToolDescriptor::tool(namespace, tool, "", None, None)
+    }
+
+    /// Generate the runtime proxy from owned descriptors.
+    fn proxy(tools: &[ToolDescriptor], namespaces: &[String]) -> Result<String, String> {
+        let refs: Vec<&ToolDescriptor> = tools.iter().collect();
+        generate_js_proxy_from_catalog(&refs, namespaces)
     }
 
     // ── tool_name_to_snake ────────────────────────────────────────────────────
@@ -572,11 +480,11 @@ mod tests {
     }
 
     #[test]
-    fn upstream_name_to_namespace_preserves_top_level_helpers() {
-        assert_eq!(upstream_name_to_namespace("github"), "github");
-        assert_eq!(upstream_name_to_namespace("search"), "search_");
-        assert_eq!(upstream_name_to_namespace("describe"), "describe_");
-        assert_eq!(upstream_name_to_namespace("step"), "step_");
+    fn namespace_segment_preserves_top_level_helpers() {
+        assert_eq!(namespace_segment("github"), "github");
+        assert_eq!(namespace_segment("search"), "search_");
+        assert_eq!(namespace_segment("describe"), "describe_");
+        assert_eq!(namespace_segment("step"), "step_");
     }
 
     // ── generate_js_proxy ─────────────────────────────────────────────────────
@@ -611,7 +519,7 @@ mod tests {
     }
 
     #[test]
-    fn discovery_describe_rejects_upstream_only_targets() {
+    fn discovery_describe_rejects_namespace_only_targets() {
         let entries = vec![discovery_entry("github", "search_issues", "Search issues")];
         let js = generate_discovery_js(&entries).expect("js");
         assert!(js.contains("ambiguous_target"));
@@ -620,27 +528,15 @@ mod tests {
 
     #[test]
     fn generate_js_proxy_quoted_keys_tolerate_special_chars() {
-        // Tool with a slash in the name — previously caused "Exception generated
-        // by QuickJS" because the unquoted key was a JS syntax error.
-        let schema = Arc::new(
-            serde_json::from_value::<serde_json::Map<String, Value>>(
-                serde_json::json!({"type": "object", "properties": {}}),
-            )
-            .unwrap(),
-        );
-        let tool = UpstreamTool {
-            upstream_name: Arc::from("github"),
-            tool: Tool::new("create/issue", "Create an issue", Arc::clone(&schema)),
-            destructive: false,
-            input_schema: None,
-            output_schema: None,
-        };
-        let js = generate_js_proxy(&[tool], &["github".to_string()]).expect("proxy");
+        // Tool with a slash in the name — previously caused a QuickJS syntax
+        // error because the unquoted key was invalid.
+        let tool = descriptor("github", "create/issue");
+        let js = proxy(&[tool], &["github".to_string()]).expect("proxy");
 
-        // PRESENCE: the upstream object must be present
+        // PRESENCE: the namespace object must be present
         assert!(
             js.contains("codemode[\"github\"]"),
-            "upstream block missing"
+            "namespace block missing"
         );
         // PRESENCE: the tool key must appear as a quoted string (not unquoted)
         assert!(
@@ -661,15 +557,8 @@ mod tests {
 
     #[test]
     fn generate_js_proxy_emits_codemode_global_and_method() {
-        let schema = Arc::new(serde_json::Map::new());
-        let tool = UpstreamTool {
-            upstream_name: Arc::from("radarr"),
-            tool: Tool::new("movie.search", "Search for movies", Arc::clone(&schema)),
-            destructive: false,
-            input_schema: None,
-            output_schema: None,
-        };
-        let js = generate_js_proxy(&[tool], &["radarr".to_string()]).expect("proxy");
+        let tool = descriptor("radarr", "movie.search");
+        let js = proxy(&[tool], &["radarr".to_string()]).expect("proxy");
 
         // PRESENCE: preserves the platform-created codemode object
         assert!(
@@ -684,15 +573,15 @@ mod tests {
             !js.contains("var codemode = {}"),
             "must not replace codemode"
         );
-        // PRESENCE: snake_case method routes to the dotted upstream id
+        // PRESENCE: snake_case method routes to the dotted tool id
         assert!(
             js.contains("radarr::movie.search"),
             "method must route to dotted tool id"
         );
-        // PRESENCE: __meta__.upstreams reflects the upstream list
+        // PRESENCE: __meta__.namespaces reflects the namespace list
         assert!(
             js.contains("[\"radarr\"]"),
-            "upstreams list must be embedded"
+            "namespaces list must be embedded"
         );
         // PRESENCE: null-safe params guard (no nullish-coalescing dependency)
         assert!(
@@ -705,113 +594,65 @@ mod tests {
 
     #[test]
     fn generate_js_proxy_does_not_overwrite_local_discovery_helpers() {
-        let schema = Arc::new(serde_json::Map::new());
-        for upstream in ["search", "describe", "step"] {
-            let namespace = upstream_name_to_namespace(upstream);
-            let tool = UpstreamTool {
-                upstream_name: Arc::from(upstream),
-                tool: Tool::new(
-                    "lookup",
-                    format!("Lookup through {upstream} upstream"),
-                    Arc::clone(&schema),
-                ),
-                destructive: false,
-                input_schema: None,
-                output_schema: None,
-            };
-            let js = generate_js_proxy(&[tool], &[upstream.to_string()]).expect("proxy");
+        for raw in ["search", "describe", "step"] {
+            let namespace = namespace_segment(raw);
+            let tool = descriptor(raw, "lookup");
+            let js = proxy(&[tool], &[raw.to_string()]).expect("proxy");
 
             assert!(
                 js.contains(&format!("codemode[\"{namespace}\"]")),
-                "reserved upstream must be suffixed: {js}"
+                "reserved namespace must be suffixed: {js}"
             );
             assert!(
-                !js.contains(&format!("codemode[\"{upstream}\"] = {{")),
-                "reserved upstream must not replace codemode.{upstream}"
+                !js.contains(&format!("codemode[\"{raw}\"] = {{")),
+                "reserved namespace must not replace codemode.{raw}"
             );
             assert!(
-                js.contains(&format!("{upstream}::lookup")),
-                "raw upstream id must still route to the original upstream"
+                js.contains(&format!("{raw}::lookup")),
+                "raw id must still route to the original namespace"
             );
         }
     }
 
     #[test]
-    fn generate_js_proxy_snake_cases_hyphenated_upstream_keys() {
-        // Hyphenated upstreams (arcane-mcp, github-chat, …) must be reachable via
-        // dot notation `codemode.arcane_mcp.tool(...)`, not just bracket access —
-        // `codemode.arcane-mcp` parses as subtraction. The callTool id must keep
-        // the RAW upstream name so the gateway routes to the real server.
-        let schema = Arc::new(serde_json::Map::new());
-        let tool = UpstreamTool {
-            upstream_name: Arc::from("arcane-mcp"),
-            tool: Tool::new("arcane", "Docker management", Arc::clone(&schema)),
-            destructive: false,
-            input_schema: None,
-            output_schema: None,
-        };
-        let js = generate_js_proxy(&[tool], &["arcane-mcp".to_string()]).expect("proxy");
+    fn generate_js_proxy_snake_cases_hyphenated_namespace_keys() {
+        // Hyphenated namespaces (arcane-mcp, github-chat, …) must be reachable
+        // via dot notation `codemode.arcane_mcp.tool(...)`; the callTool id keeps
+        // the RAW namespace name so the host routes to the real source.
+        let tool = descriptor("arcane-mcp", "arcane");
+        let js = proxy(&[tool], &["arcane-mcp".to_string()]).expect("proxy");
 
-        // PRESENCE: namespace key is snake_cased (dot-accessible)
         assert!(
             js.contains("codemode[\"arcane_mcp\"]"),
-            "hyphenated upstream key must be snake_cased: {js}"
+            "hyphenated namespace key must be snake_cased: {js}"
         );
-        // ABSENCE: the raw hyphenated key must NOT be the namespace key
         assert!(
             !js.contains("codemode[\"arcane-mcp\"]"),
             "raw hyphenated key would only be bracket-accessible"
         );
-        // PRESENCE: callTool id keeps the RAW upstream name (routing correctness)
         assert!(
             js.contains("arcane-mcp::arcane"),
-            "callTool id must keep the raw upstream name: {js}"
+            "callTool id must keep the raw namespace name: {js}"
         );
     }
 
     #[test]
     fn generate_js_proxy_rejects_sanitized_tool_collisions() {
-        let schema = Arc::new(serde_json::Map::new());
-        let dotted = UpstreamTool {
-            upstream_name: Arc::from("demo"),
-            tool: Tool::new("movie.search", "Search", Arc::clone(&schema)),
-            destructive: false,
-            input_schema: None,
-            output_schema: None,
-        };
-        let underscored = UpstreamTool {
-            upstream_name: Arc::from("demo"),
-            tool: Tool::new("movie_search", "Search", Arc::clone(&schema)),
-            destructive: false,
-            input_schema: None,
-            output_schema: None,
-        };
+        let dotted = descriptor("demo", "movie.search");
+        let underscored = descriptor("demo", "movie_search");
 
-        let err = generate_js_proxy(&[dotted, underscored], &["demo".to_string()])
+        let err = proxy(&[dotted, underscored], &["demo".to_string()])
             .expect_err("sanitized collisions must not be last-wins");
 
         assert!(err.contains("both sanitize to"));
     }
 
     #[test]
-    fn generate_js_proxy_rejects_final_proxy_collisions_across_raw_upstreams() {
-        let schema = Arc::new(serde_json::Map::new());
-        let hyphenated = UpstreamTool {
-            upstream_name: Arc::from("foo-bar"),
-            tool: Tool::new("ping", "Ping", Arc::clone(&schema)),
-            destructive: false,
-            input_schema: None,
-            output_schema: None,
-        };
-        let dotted = UpstreamTool {
-            upstream_name: Arc::from("foo.bar"),
-            tool: Tool::new("ping", "Ping", Arc::clone(&schema)),
-            destructive: false,
-            input_schema: None,
-            output_schema: None,
-        };
+    fn generate_js_proxy_rejects_final_proxy_collisions_across_raw_namespaces() {
+        let hyphenated = descriptor("foo-bar", "ping");
+        let dotted = descriptor("foo.bar", "ping");
 
-        let err = generate_js_proxy(
+        let err = proxy(
             &[hyphenated, dotted],
             &["foo-bar".to_string(), "foo.bar".to_string()],
         )

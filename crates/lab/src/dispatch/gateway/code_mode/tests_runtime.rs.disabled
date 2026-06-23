@@ -75,7 +75,7 @@ fn code_mode_source_store_resolves_same_route_admin_source() {
         is_admin: true,
         route_scope: "root".to_string(),
         surface: CodeModeSurface::Mcp,
-        capability_filter_fingerprint: CodeModeCapabilityFilter::default().fingerprint(),
+        capability_filter_fingerprint: ToolScope::default().fingerprint(),
         code: "async () => ({ ok: true })".to_string(),
     });
 
@@ -86,7 +86,7 @@ fn code_mode_source_store_resolves_same_route_admin_source() {
                 actor_key: Some("actor-a".to_string()),
                 is_admin: true,
                 route_scope: "root".to_string(),
-                capability_filter_fingerprint: CodeModeCapabilityFilter::default().fingerprint(),
+                capability_filter_fingerprint: ToolScope::default().fingerprint(),
             },
         )
         .unwrap();
@@ -103,7 +103,7 @@ fn code_mode_source_store_rejects_unknown_and_cross_route() {
         is_admin: true,
         route_scope: "root".to_string(),
         surface: CodeModeSurface::Mcp,
-        capability_filter_fingerprint: CodeModeCapabilityFilter::default().fingerprint(),
+        capability_filter_fingerprint: ToolScope::default().fingerprint(),
         code: "async () => ({ ok: true })".to_string(),
     });
 
@@ -111,7 +111,7 @@ fn code_mode_source_store_rejects_unknown_and_cross_route() {
         actor_key: None,
         is_admin: true,
         route_scope: "protected".to_string(),
-        capability_filter_fingerprint: CodeModeCapabilityFilter::default().fingerprint(),
+        capability_filter_fingerprint: ToolScope::default().fingerprint(),
     };
     assert_eq!(
         store.resolve("missing", &lookup).unwrap_err().kind(),
@@ -161,7 +161,7 @@ fn code_mode_source_store_rejects_wider_source_capability_filter() {
         is_admin: true,
         route_scope: "protected".to_string(),
         surface: CodeModeSurface::Mcp,
-        capability_filter_fingerprint: CodeModeCapabilityFilter::default().fingerprint(),
+        capability_filter_fingerprint: ToolScope::default().fingerprint(),
         code: "async () => ({ ok: true })".to_string(),
     });
 

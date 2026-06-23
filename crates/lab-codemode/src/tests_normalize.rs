@@ -442,7 +442,7 @@ fn destructive_permitted_for_execute_capable_callers() {
             super::CodeModeSurface::Mcp,
             &super::CodeModeCaller::TrustedLocal
         ),
-        "TrustedLocal MCP callers are already trusted by the gateway"
+        "TrustedLocal MCP callers are already trusted by the host"
     );
 }
 
@@ -452,69 +452,6 @@ fn destructive_denied_for_read_scope() {
     assert!(
         !super::destructive_permitted(surface, &scoped(&["lab:read"])),
         "lab:read caller cannot execute Code Mode tools"
-    );
-}
-
-// ── CodeModeCaller oauth_subject ──────────────────────────────────────────
-
-#[test]
-fn oauth_subject_uses_sub_for_non_admin_caller() {
-    // A non-admin caller with its own sub authenticates as itself so a
-    // personal upstream grant is used.
-    let caller = super::CodeModeCaller::Scoped {
-        scopes: vec!["lab".to_string()],
-        sub: Some("user@example.com".to_string()),
-    };
-
-    assert_eq!(
-        caller.oauth_subject(),
-        Some("user@example.com"),
-        "non-admin oauth_subject must return the caller's JWT sub"
-    );
-}
-
-#[test]
-fn oauth_subject_collapses_admin_to_shared_gateway_subject() {
-    // Regression (lab-om1ou): admin callers must collapse to the shared
-    // gateway subject — parity with `oauth_upstream_subject_for_request` —
-    // so they reuse the gateway-owned upstream credential and the proactive
-    // refresh path is reached. Otherwise OAuth upstreams (axon) get stranded.
-    let caller = super::CodeModeCaller::Scoped {
-        scopes: vec!["lab".to_string(), "lab:admin".to_string()],
-        sub: Some("115693937070075916387".to_string()),
-    };
-
-    assert_eq!(
-        caller.oauth_subject(),
-        Some(super::SHARED_GATEWAY_OAUTH_SUBJECT),
-        "lab:admin callers must collapse to the shared gateway subject, not their raw sub"
-    );
-}
-
-#[test]
-fn oauth_subject_falls_back_to_shared_when_sub_absent() {
-    let caller = super::CodeModeCaller::Scoped {
-        scopes: vec!["lab:admin".to_string()],
-        sub: None,
-    };
-
-    // Enforce the exact shared gateway subject fallback, not merely "some
-    // non-user subject" — the fallback must be the gateway-owned credential
-    // identity so OAuth upstreams resolve the shared grant.
-    assert_eq!(
-        caller.oauth_subject(),
-        Some(super::SHARED_GATEWAY_OAUTH_SUBJECT),
-        "oauth_subject must fall back to the shared gateway subject when sub is None"
-    );
-}
-
-#[test]
-fn oauth_subject_trusted_local_returns_shared_subject() {
-    let caller = super::CodeModeCaller::TrustedLocal;
-    assert_eq!(
-        caller.oauth_subject(),
-        Some(super::SHARED_GATEWAY_OAUTH_SUBJECT),
-        "TrustedLocal must resolve to the shared gateway subject"
     );
 }
 

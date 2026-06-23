@@ -1,5 +1,8 @@
-//! Core Code Mode value types: tool ids, catalog entries, execution responses,
-//! callers, surfaces, and the capability filter.
+//! Core Code Mode value types: tool ids, tool descriptors, execution responses,
+//! callers, surfaces, and the tool scope.
+//!
+//! Vocabulary is host-source-neutral. A tool is an opaque `id` of the form
+//! `<namespace>::<tool>`; the kernel never learns what backs the namespace.
 
 use std::collections::{BTreeSet, VecDeque};
 
@@ -7,32 +10,30 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::dispatch::error::ToolError;
-use crate::dispatch::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
-use crate::dispatch::snippets::store::{SnippetInfo, SnippetInputSpec, SnippetInputType};
-use crate::dispatch::upstream::types::UpstreamRuntimeOwner;
+use crate::error::ToolError;
+use crate::snippet::store::{SnippetInfo, SnippetInputSpec, SnippetInputType};
 
 use super::artifacts::CodeModeArtifactReceipt;
 use super::util::{invalid_code_mode_id, lab_action_unknown_tool};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeModeToolId {
+pub(crate) struct CodeModeToolId {
     pub(crate) raw: String,
     pub(crate) reference: CodeModeToolRef,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CodeModeToolRef {
-    UpstreamTool { upstream: String, tool: String },
+pub(crate) enum CodeModeToolRef {
+    Tool { namespace: String, tool: String },
 }
 
 impl CodeModeToolId {
-    /// Parse a raw `<upstream>::<tool>` string into a `CodeModeToolId`.
+    /// Parse a raw `<namespace>::<tool>` string into a `CodeModeToolId`.
     ///
     /// This is an inherent shim over the `FromStr` impl so call sites that
     /// already use `.parse(…)` or `CodeModeToolId::parse(…)` continue to
     /// compile without churn.
-    pub fn parse(raw: &str) -> Result<Self, ToolError> {
+    pub(crate) fn parse(raw: &str) -> Result<Self, ToolError> {
         raw.parse()
     }
 }
@@ -50,58 +51,53 @@ impl std::str::FromStr for CodeModeToolId {
             return Err(lab_action_unknown_tool());
         }
 
-        // Shared `<upstream>::<tool>` splitter — also used by `ToolExecuteSelector`.
-        if let Some((upstream, tool)) = split_upstream_tool(raw) {
+        // Shared `<namespace>::<tool>` splitter — also used by `ToolExecuteSelector`.
+        if let Some((namespace, tool)) = split_namespaced_id(raw) {
             return Ok(Self {
                 raw: raw.to_string(),
-                reference: CodeModeToolRef::UpstreamTool {
-                    upstream: upstream.to_string(),
+                reference: CodeModeToolRef::Tool {
+                    namespace: namespace.to_string(),
                     tool: tool.to_string(),
                 },
             });
         }
 
         Err(invalid_code_mode_id(
-            "Code Mode ids must use <upstream>::<tool>",
+            "Code Mode ids must use <namespace>::<tool>",
         ))
     }
 }
 
-/// Split a `<upstream>::<tool>` string into its two trimmed parts.
+/// Split a `<namespace>::<tool>` string into its two trimmed parts.
 ///
 /// Returns `None` when the string has a wrong number of `::` separators or
 /// when either part is empty after trimming. Used by both `CodeModeToolId` and
 /// `ToolExecuteSelector` to avoid duplicating the splitting logic.
-pub(crate) fn split_upstream_tool(raw: &str) -> Option<(&str, &str)> {
+pub fn split_namespaced_id(raw: &str) -> Option<(&str, &str)> {
     let mut parts = raw.split("::");
-    let upstream = parts.next()?.trim();
+    let namespace = parts.next()?.trim();
     let tool = parts.next()?.trim();
     // Ensure there is no third segment (e.g. `a::b::c` is invalid).
     if parts.next().is_some() {
         return None;
     }
-    if upstream.is_empty() || tool.is_empty() {
+    if namespace.is_empty() || tool.is_empty() {
         return None;
     }
-    Some((upstream, tool))
+    Some((namespace, tool))
 }
 
 #[must_use]
-pub fn upstream_tool_id(upstream: &str, tool: &str) -> String {
-    format!("{upstream}::{tool}")
-}
-
-#[must_use]
-pub fn sanitize_code_mode_schema(schema: Option<Value>) -> Option<Value> {
-    crate::dispatch::gateway::projection::sanitize_schema(schema)
+pub fn namespaced_tool_id(namespace: &str, tool: &str) -> String {
+    format!("{namespace}::{tool}")
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct CodeModeCatalogEntry {
+pub struct ToolDescriptor {
     pub kind: CodeModeCatalogKind,
     pub id: String,
     pub name: String,
-    pub upstream: String,
+    pub namespace: String,
     pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema: Option<Value>,
@@ -129,17 +125,21 @@ pub struct CodeModeSnippetInputEntry {
     pub spec: SnippetInputSpec,
 }
 
-impl CodeModeCatalogEntry {
+impl ToolDescriptor {
+    /// Build a tool descriptor for a host-provided tool (`<namespace>::<tool>`).
+    ///
+    /// The host passes already-sanitized JSON Schemas; this constructor only
+    /// generates the TypeScript signature / `.d.ts` for the in-sandbox catalog.
     #[must_use]
-    pub fn upstream_tool(
-        upstream: &str,
+    pub fn tool(
+        namespace: &str,
         tool: &str,
         description: &str,
         schema: Option<Value>,
         output_schema: Option<Value>,
     ) -> Self {
         let types = super::ts_signatures::generate_tool_types(
-            upstream,
+            namespace,
             tool,
             description,
             schema.as_ref(),
@@ -147,9 +147,9 @@ impl CodeModeCatalogEntry {
         );
         Self {
             kind: CodeModeCatalogKind::Tool,
-            id: upstream_tool_id(upstream, tool),
+            id: namespaced_tool_id(namespace, tool),
             name: tool.to_string(),
-            upstream: upstream.to_string(),
+            namespace: namespace.to_string(),
             description: description.to_string(),
             schema,
             output_schema,
@@ -178,7 +178,7 @@ impl CodeModeCatalogEntry {
             kind: CodeModeCatalogKind::Snippet,
             id: format!("snippet::{}", info.name),
             name: info.name.clone(),
-            upstream: "snippet".to_string(),
+            namespace: "snippet".to_string(),
             description,
             schema: Some(snippet_inputs_schema(&info.inputs)),
             output_schema: None,
@@ -237,7 +237,7 @@ pub(crate) struct CodeModeDiscoveryEntry {
     pub(crate) kind: CodeModeCatalogKind,
     pub(crate) id: String,
     pub(crate) path: String,
-    pub(crate) upstream: String,
+    pub(crate) namespace: String,
     pub(crate) name: String,
     pub(crate) helper: String,
     pub(crate) description: String,
@@ -248,14 +248,14 @@ pub(crate) struct CodeModeDiscoveryEntry {
 
 impl CodeModeDiscoveryEntry {
     #[must_use]
-    pub(crate) fn from_catalog(entry: &CodeModeCatalogEntry) -> Self {
+    pub(crate) fn from_catalog(entry: &ToolDescriptor) -> Self {
         let (path, helper) = match entry.kind {
             CodeModeCatalogKind::Tool => {
-                let upstream = super::preamble::upstream_name_to_namespace(&entry.upstream);
+                let namespace = super::preamble::namespace_segment(&entry.namespace);
                 let name = super::preamble::tool_name_to_snake(&entry.name);
                 (
-                    format!("{upstream}.{name}"),
-                    format!("codemode.{upstream}.{name}"),
+                    format!("{namespace}.{name}"),
+                    format!("codemode.{namespace}.{name}"),
                 )
             }
             CodeModeCatalogKind::Snippet => (
@@ -267,7 +267,7 @@ impl CodeModeDiscoveryEntry {
             kind: entry.kind,
             id: entry.id.clone(),
             path,
-            upstream: entry.upstream.clone(),
+            namespace: entry.namespace.clone(),
             name: entry.name.clone(),
             helper,
             description: entry.description.clone(),
@@ -278,13 +278,12 @@ impl CodeModeDiscoveryEntry {
     }
 }
 
-/// A captured upstream MCP Apps (mcp-ui) widget link.
+/// A captured MCP Apps (mcp-ui) widget link.
 ///
-/// Recorded at the broker boundary when an upstream tool result carries
-/// `_meta.ui.resourceUri`, before `unwrap_code_mode_upstream_result` discards
-/// the envelope. `ui_meta` holds the upstream's `_meta.ui` object verbatim
-/// (including `resourceUri`) so the final `execute` `CallToolResult` can mirror
-/// the upstream identically.
+/// Recorded by the host at the tool-call boundary when a tool result carries
+/// `_meta.ui.resourceUri`, before the result envelope is discarded. `ui_meta`
+/// holds the `_meta.ui` object verbatim (including `resourceUri`) so the final
+/// `execute` response can mirror the widget identically.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct UiLink {
     pub ui_meta: Value,
@@ -332,10 +331,10 @@ pub struct CodeModeExecutedCall {
 
 impl Serialize for CodeModeExecutedCall {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let (upstream, tool) = split_code_mode_call_id(&self.id);
+        let (namespace, tool) = split_code_mode_call_id(&self.id);
         let mut state = serializer.serialize_struct("CodeModeExecutedCall", 7)?;
         state.serialize_field("id", &self.id)?;
-        state.serialize_field("upstream", upstream)?;
+        state.serialize_field("namespace", namespace)?;
         state.serialize_field("tool", tool)?;
         state.serialize_field("ok", &self.ok)?;
         state.serialize_field("elapsed_ms", &self.elapsed_ms)?;
@@ -350,35 +349,35 @@ impl Serialize for CodeModeExecutedCall {
 }
 
 #[must_use]
-pub(in crate::dispatch::gateway::code_mode) fn split_code_mode_call_id(id: &str) -> (&str, &str) {
+pub(crate) fn split_code_mode_call_id(id: &str) -> (&str, &str) {
     id.split_once("::")
-        .map_or(("", id), |(upstream, tool)| (upstream, tool))
+        .map_or(("", id), |(namespace, tool)| (namespace, tool))
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CodeModeExecutionError {
+pub struct CodeModeExecutionError {
     error: ToolError,
     calls: Vec<CodeModeExecutedCall>,
 }
 
 impl CodeModeExecutionError {
     #[must_use]
-    pub(crate) fn with_trace(error: ToolError, calls: Vec<CodeModeExecutedCall>) -> Self {
+    pub fn with_trace(error: ToolError, calls: Vec<CodeModeExecutedCall>) -> Self {
         Self { error, calls }
     }
 
     #[must_use]
-    pub(crate) fn kind(&self) -> &str {
+    pub fn kind(&self) -> &str {
         self.error.kind()
     }
 
     #[must_use]
-    pub(crate) fn calls(&self) -> &[CodeModeExecutedCall] {
+    pub fn calls(&self) -> &[CodeModeExecutedCall] {
         &self.calls
     }
 
     #[must_use]
-    pub(crate) fn into_tool_error(self) -> ToolError {
+    pub fn into_tool_error(self) -> ToolError {
         self.error
     }
 }
@@ -606,7 +605,7 @@ impl CodeModeSourceStore {
         else {
             return Err(ToolError::Sdk {
                 sdk_kind: "unknown_execution".to_string(),
-                message: "Code Mode promotion source is ephemeral and may have expired, been evicted, lived in another gateway process, or disappeared after restart".to_string(),
+                message: "Code Mode promotion source is ephemeral and may have expired, been evicted, lived in another host process, or disappeared after restart".to_string(),
             });
         };
         if !lookup.is_admin {
@@ -642,27 +641,27 @@ fn source_capability_within_lookup(source: &str, lookup: &str) -> bool {
         return true;
     }
 
-    let Some(source_upstreams) = capability_fingerprint_upstreams(source) else {
+    let Some(source_namespaces) = capability_fingerprint_namespaces(source) else {
         return false;
     };
-    let Some(lookup_upstreams) = capability_fingerprint_upstreams(lookup) else {
+    let Some(lookup_namespaces) = capability_fingerprint_namespaces(lookup) else {
         return false;
     };
 
-    match (source_upstreams, lookup_upstreams) {
+    match (source_namespaces, lookup_namespaces) {
         (_, None) => true,
         (None, Some(_)) => false,
         (Some(source), Some(lookup)) => source.is_subset(&lookup),
     }
 }
 
-fn capability_fingerprint_upstreams(fingerprint: &str) -> Option<Option<BTreeSet<String>>> {
+fn capability_fingerprint_namespaces(fingerprint: &str) -> Option<Option<BTreeSet<String>>> {
     if let Ok(value) = serde_json::from_str::<Value>(fingerprint) {
-        let upstreams = value.get("upstreams")?;
-        if upstreams.is_null() {
+        let namespaces = value.get("namespaces")?;
+        if namespaces.is_null() {
             return Some(None);
         }
-        let set = upstreams
+        let set = namespaces
             .as_array()?
             .iter()
             .map(Value::as_str)
@@ -673,13 +672,13 @@ fn capability_fingerprint_upstreams(fingerprint: &str) -> Option<Option<BTreeSet
         return Some(Some(set));
     }
 
-    let upstreams = fingerprint
+    let namespaces = fingerprint
         .split(';')
-        .find_map(|part| part.strip_prefix("upstreams="))?;
-    if upstreams == "*" {
+        .find_map(|part| part.strip_prefix("namespaces="))?;
+    if namespaces == "*" {
         return Some(None);
     }
-    let set = upstreams
+    let set = namespaces
         .split(',')
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -705,11 +704,9 @@ pub enum CodeModeCaller {
     TrustedLocal,
     Scoped {
         scopes: Vec<String>,
-        /// JWT `sub` claim for the caller, when available. Used as the upstream
-        /// OAuth subject only for *non-admin* callers, so a user with their own
-        /// upstream grant authenticates as themselves. `lab:admin` callers (and
-        /// callers with no `sub`) collapse to `SHARED_GATEWAY_OAUTH_SUBJECT` —
-        /// see [`CodeModeCaller::oauth_subject`] for the rationale.
+        /// JWT `sub` claim for the caller, when available. The host decides how
+        /// to map this onto its own credential/identity model when resolving
+        /// and calling tools; the kernel itself never interprets it.
         sub: Option<String>,
     },
 }
@@ -720,14 +717,24 @@ pub enum CodeModeSurface {
     Cli,
 }
 
-/// Whether a destructive upstream tool call is permitted for this caller.
+impl CodeModeSurface {
+    /// Stable lowercase surface tag (`"mcp"` / `"cli"`) used by hosts when
+    /// building their own runtime-owner / logging context.
+    #[must_use]
+    pub fn tag(self) -> &'static str {
+        match self {
+            CodeModeSurface::Mcp => "mcp",
+            CodeModeSurface::Cli => "cli",
+        }
+    }
+}
+
+/// Whether a destructive tool call is permitted for this caller.
 /// Code Mode execution is already scope-gated; do not add a second host-side
-/// confirmation gate based on upstream catalog metadata.
+/// confirmation gate based on tool catalog metadata. Hosts call this when
+/// applying destructive-tool policy.
 #[must_use]
-pub(in crate::dispatch::gateway::code_mode) fn destructive_permitted(
-    surface: CodeModeSurface,
-    caller: &CodeModeCaller,
-) -> bool {
+pub fn destructive_permitted(surface: CodeModeSurface, caller: &CodeModeCaller) -> bool {
     match surface {
         CodeModeSurface::Cli => true,
         CodeModeSurface::Mcp => caller.can_execute(),
@@ -753,72 +760,47 @@ impl CodeModeCaller {
         }
     }
 
+    /// Whether this caller carries the `lab:admin` scope (trusted-local always
+    /// counts as admin). Hosts use this when mapping the caller onto their own
+    /// credential model.
     #[must_use]
-    pub fn runtime_owner(&self, surface: CodeModeSurface) -> UpstreamRuntimeOwner {
-        let surface = match surface {
-            CodeModeSurface::Mcp => "mcp",
-            CodeModeSurface::Cli => "cli",
-        };
-        let subject = match self {
-            Self::TrustedLocal => None,
-            Self::Scoped { sub, .. } => sub.clone(),
-        };
-        let raw = subject
-            .as_ref()
-            .map(|subject| format!("{surface}:{subject}"))
-            .unwrap_or_else(|| format!("{surface}:trusted-local"));
-        UpstreamRuntimeOwner {
-            surface: surface.to_string(),
-            subject,
-            request_id: None,
-            session_id: None,
-            client_name: None,
-            raw: Some(raw),
+    pub fn is_admin(&self) -> bool {
+        match self {
+            Self::TrustedLocal => true,
+            Self::Scoped { scopes, .. } => scopes.iter().any(|scope| scope == "lab:admin"),
         }
     }
 
+    /// The caller's `sub` identity, when available. `None` for trusted-local.
     #[must_use]
-    pub fn oauth_subject(&self) -> Option<&str> {
+    pub fn subject(&self) -> Option<&str> {
         match self {
-            Self::TrustedLocal => Some(SHARED_GATEWAY_OAUTH_SUBJECT),
-            // Parity with `oauth_upstream_subject_for_request` (the direct
-            // upstream-tool-call path): admin/operator callers share the single
-            // gateway-owned upstream credential rather than a per-user grant that
-            // was never provisioned. Without this collapse, an admin caller's raw
-            // `sub` misses the credential store (`initialize_from_store` → false),
-            // so the proactive token refresh in `build_auth_client` is never
-            // reached and OAuth upstreams (e.g. axon) get stranded with an expired
-            // token. Non-admin callers keep their own `sub` so a personal upstream
-            // grant is used; a `sub`-less caller falls back to the shared subject.
-            Self::Scoped { scopes, .. } if scopes.iter().any(|scope| scope == "lab:admin") => {
-                Some(SHARED_GATEWAY_OAUTH_SUBJECT)
-            }
-            Self::Scoped { sub: Some(s), .. } => Some(s.as_str()),
-            Self::Scoped { sub: None, .. } => Some(SHARED_GATEWAY_OAUTH_SUBJECT),
+            Self::TrustedLocal => None,
+            Self::Scoped { sub, .. } => sub.as_deref(),
         }
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CodeModeCapabilityFilter {
-    upstreams: Option<BTreeSet<String>>,
+pub struct ToolScope {
+    namespaces: Option<BTreeSet<String>>,
     tools: BTreeSet<String>,
 }
 
-impl CodeModeCapabilityFilter {
+impl ToolScope {
     #[must_use]
-    pub fn new(upstreams: Vec<String>, tools: Vec<String>) -> Self {
-        Self::new_inner(None, upstreams, tools)
+    pub fn new(namespaces: Vec<String>, tools: Vec<String>) -> Self {
+        Self::new_inner(None, namespaces, tools)
     }
 
     #[must_use]
-    pub fn scoped_upstreams(upstreams: Vec<String>, tools: Vec<String>) -> Self {
-        Self::new_inner(Some(BTreeSet::new()), upstreams, tools)
+    pub fn scoped_namespaces(namespaces: Vec<String>, tools: Vec<String>) -> Self {
+        Self::new_inner(Some(BTreeSet::new()), namespaces, tools)
     }
 
     fn new_inner(
         scoped_default: Option<BTreeSet<String>>,
-        upstreams: Vec<String>,
+        namespaces: Vec<String>,
         tools: Vec<String>,
     ) -> Self {
         fn clean_set(values: Vec<String>) -> BTreeSet<String> {
@@ -828,42 +810,42 @@ impl CodeModeCapabilityFilter {
                 .filter(|value| !value.is_empty())
                 .collect()
         }
-        let upstreams = clean_set(upstreams);
+        let namespaces = clean_set(namespaces);
         Self {
-            upstreams: if upstreams.is_empty() {
+            namespaces: if namespaces.is_empty() {
                 scoped_default
             } else {
-                Some(upstreams)
+                Some(namespaces)
             },
             tools: clean_set(tools),
         }
     }
 
     #[must_use]
-    pub fn allows(&self, upstream: &str, tool: &str) -> bool {
+    pub fn allows(&self, namespace: &str, tool: &str) -> bool {
         (self
-            .upstreams
+            .namespaces
             .as_ref()
-            .is_none_or(|upstreams| upstreams.contains(upstream)))
+            .is_none_or(|namespaces| namespaces.contains(namespace)))
             && (self.tools.is_empty()
                 || self.tools.contains(tool)
-                || self.tools.contains(&upstream_tool_id(upstream, tool)))
+                || self.tools.contains(&namespaced_tool_id(namespace, tool)))
     }
 
     #[must_use]
-    pub fn is_scoped_to_upstreams(&self) -> bool {
-        self.upstreams.is_some()
+    pub fn is_scoped(&self) -> bool {
+        self.namespaces.is_some()
     }
 
     #[must_use]
-    pub fn allowed_upstreams(&self) -> Option<&BTreeSet<String>> {
-        self.upstreams.as_ref()
+    pub fn allowed_namespaces(&self) -> Option<&BTreeSet<String>> {
+        self.namespaces.as_ref()
     }
 
     #[must_use]
     pub fn fingerprint(&self) -> String {
         serde_json::json!({
-            "upstreams": self.upstreams.as_ref().map(|set| set.iter().cloned().collect::<Vec<_>>()),
+            "namespaces": self.namespaces.as_ref().map(|set| set.iter().cloned().collect::<Vec<_>>()),
             "tools": self.tools.iter().cloned().collect::<Vec<_>>(),
         })
         .to_string()

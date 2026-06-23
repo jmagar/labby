@@ -6,13 +6,11 @@
 //! byte-identical behavior.
 
 /// Pool size env var. `0` disables pooling (kill switch → spawn-per-execution).
-pub(in crate::dispatch::gateway::code_mode) const POOL_SIZE_ENV: &str = "LAB_CODE_MODE_POOL_SIZE";
+pub(crate) const POOL_SIZE_ENV: &str = "LAB_CODE_MODE_POOL_SIZE";
 /// Recycle-after-K env var: kill+respawn a runner after K executions.
-pub(in crate::dispatch::gateway::code_mode) const RECYCLE_AFTER_ENV: &str =
-    "LAB_CODE_MODE_POOL_RECYCLE_AFTER";
+pub(crate) const RECYCLE_AFTER_ENV: &str = "LAB_CODE_MODE_POOL_RECYCLE_AFTER";
 /// Max concurrent ephemeral (overflow) runners spawned when the pool is saturated.
-pub(in crate::dispatch::gateway::code_mode) const MAX_OVERFLOW_ENV: &str =
-    "LAB_CODE_MODE_POOL_MAX_OVERFLOW";
+pub(crate) const MAX_OVERFLOW_ENV: &str = "LAB_CODE_MODE_POOL_MAX_OVERFLOW";
 
 /// Conservative default pool size. Small enough to keep idle RSS bounded while
 /// still absorbing typical search+execute bursts without serializing.
@@ -29,18 +27,18 @@ const DEFAULT_MAX_OVERFLOW: usize = 8;
 
 /// Resolved, validated pool configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::dispatch::gateway::code_mode) struct PoolConfig {
+pub(crate) struct PoolConfig {
     /// Number of long-lived pooled runners. `0` means pooling is disabled.
-    pub(in crate::dispatch::gateway::code_mode) size: usize,
+    pub(crate) size: usize,
     /// Executions a pooled runner serves before being recycled.
-    pub(in crate::dispatch::gateway::code_mode) recycle_after: u64,
+    pub(crate) recycle_after: u64,
     /// Max simultaneous ephemeral runners spawned when the pool is saturated.
-    pub(in crate::dispatch::gateway::code_mode) max_overflow: usize,
+    pub(crate) max_overflow: usize,
 }
 
 impl PoolConfig {
     /// Read the pool configuration from the environment, clamping to safe bounds.
-    pub(in crate::dispatch::gateway::code_mode) fn from_env() -> Self {
+    pub(crate) fn from_env() -> Self {
         let size = parse_env(POOL_SIZE_ENV, DEFAULT_POOL_SIZE).min(MAX_POOL_SIZE);
         let recycle_after = parse_env_u64(RECYCLE_AFTER_ENV, DEFAULT_RECYCLE_AFTER).max(1);
         let max_overflow = parse_env(MAX_OVERFLOW_ENV, DEFAULT_MAX_OVERFLOW);
@@ -53,7 +51,7 @@ impl PoolConfig {
 
     /// True when pooling is disabled (kill switch): every execution spawns a
     /// fresh one-shot runner exactly as before this feature landed.
-    pub(in crate::dispatch::gateway::code_mode) fn is_disabled(&self) -> bool {
+    pub(crate) fn is_disabled(&self) -> bool {
         self.size == 0
     }
 }

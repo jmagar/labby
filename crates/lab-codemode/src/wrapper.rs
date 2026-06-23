@@ -5,7 +5,7 @@
 const CODE_MODE_MAIN_SHAPE_ERROR: &str =
     "codemode code must evaluate to an async arrow function: async () => { ... }";
 
-pub(in crate::dispatch::gateway::code_mode) const CODE_MODE_VALUE_CODEC_JS: &str = r#"
+pub(crate) const CODE_MODE_VALUE_CODEC_JS: &str = r#"
 function __labBase64FromBytes(bytes) {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   let out = "";
@@ -118,7 +118,7 @@ function __labDecodeResult(value) {
 /// error otherwise), then `return await __codeModeMain();`. Built by
 /// concatenation (not a brace-laden `format!`) so the literal JS braces need no
 /// escaping.
-pub(in crate::dispatch::gateway::code_mode) fn code_mode_main_invoker(code: &str) -> String {
+pub(crate) fn code_mode_main_invoker(code: &str) -> String {
     let mut body = String::new();
     body.push_str("  const __codeModeMain = (");
     body.push_str(code);

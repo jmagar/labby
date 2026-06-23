@@ -158,7 +158,9 @@ fn execute_trace_embeds_result_and_redacts_call_params() {
 
     let trace = code_mode_execute_trace(&response);
     assert_eq!(trace["kind"], json!("code_mode_execute_trace"));
-    assert_eq!(trace["calls"][0]["upstream"], json!("github"));
+    // Neutral vocabulary after the lab-codemode extraction: the call trace
+    // namespace field is `namespace` (was `upstream`).
+    assert_eq!(trace["calls"][0]["namespace"], json!("github"));
     assert_eq!(trace["calls"][0]["tool"], json!("search_issues"));
     // Per-call params remain redacted — that is the secret-bearing channel.
     assert_eq!(trace["calls"][0]["params"]["token"], json!("[redacted]"));

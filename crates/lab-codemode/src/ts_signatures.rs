@@ -1,6 +1,6 @@
 //! TypeScript signature and `.d.ts` generation for Code Mode catalog entries.
 //!
-//! Given a tool's upstream name, tool name, description, and JSON Schema for
+//! Given a tool's namespace name, tool name, description, and JSON Schema for
 //! its input/output, this module produces two strings:
 //!
 //! - `signature` — a human-readable one-liner shown in `search` results,
@@ -9,14 +9,14 @@
 //!   in-browser Monaco editor can use for auto-complete and type checking.
 //!
 //! This module is the **live** TypeScript generator called from `types.rs` via
-//! `CodeModeCatalogEntry::upstream_tool`. It is NOT backward-compat shims.
+//! `ToolDescriptor::tool`. It is NOT backward-compat shims.
 
 use std::collections::{BTreeSet, HashSet};
 
 use serde_json::Value;
 
-use super::preamble::{tool_name_to_snake, upstream_name_to_namespace};
-use super::upstream_tool_id;
+use super::namespaced_tool_id;
+use super::preamble::{namespace_segment, tool_name_to_snake};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolTypes {
@@ -25,7 +25,7 @@ pub struct ToolTypes {
 }
 
 pub fn generate_tool_types(
-    upstream: &str,
+    namespace: &str,
     tool: &str,
     description: &str,
     input_schema: Option<&Value>,
@@ -33,26 +33,26 @@ pub fn generate_tool_types(
 ) -> ToolTypes {
     let base = format!(
         "{}{}",
-        to_pascal_identifier(upstream),
+        to_pascal_identifier(namespace),
         to_pascal_identifier(tool)
     );
     let input_name = format!("{base}Input");
     let output_name = format!("{base}Output");
-    let upstream_interface = format!("Codemode{}Tools", to_pascal_identifier(upstream));
-    let upstream_method = upstream_name_to_namespace(upstream);
+    let namespace_interface = format!("Codemode{}Tools", to_pascal_identifier(namespace));
+    let namespace_method = namespace_segment(namespace);
     let tool_method = tool_name_to_snake(tool);
-    let tool_id = upstream_tool_id(upstream, tool);
+    let tool_id = namespaced_tool_id(namespace, tool);
     let tool_id_literal = serde_json::to_string(&tool_id).unwrap_or_else(|_| "\"\"".to_string());
     let input_type = json_schema_to_type(input_schema);
     let output_type = json_schema_to_type(output_schema);
     let signature = format!(
-        "codemode.{upstream_method}.{tool_method}(params: {input_name}): Promise<{output_name}>"
+        "codemode.{namespace_method}.{tool_method}(params: {input_name}): Promise<{output_name}>"
     );
 
     let mut dts = String::new();
     dts.push_str(&format!("type {input_name} = {input_type};\n"));
     dts.push_str(&format!("type {output_name} = {output_type};\n"));
-    dts.push_str(&format!("interface {upstream_interface} {{\n"));
+    dts.push_str(&format!("interface {namespace_interface} {{\n"));
     if let Some(comment) = jsdoc_block(description, 4) {
         dts.push_str(&comment);
     }
@@ -61,7 +61,7 @@ pub fn generate_tool_types(
     ));
     dts.push_str("}\n");
     dts.push_str("interface CodemodeTools {\n");
-    dts.push_str(&format!("  {upstream_method}: {upstream_interface};\n"));
+    dts.push_str(&format!("  {namespace_method}: {namespace_interface};\n"));
     dts.push_str("}\n");
     dts.push_str("declare var codemode: CodemodeTools;\n");
     dts.push_str(&format!(

@@ -450,7 +450,7 @@ impl LabMcpServer {
                     .route_scope
                     .allowed_upstreams()
                     .map(|allowed| {
-                        crate::dispatch::gateway::code_mode::CodeModeCapabilityFilter::scoped_upstreams(
+                        crate::dispatch::gateway::code_mode::CodeModeCapabilityFilter::scoped_namespaces(
                             allowed.iter().cloned().collect(),
                             Vec::new(),
                         )

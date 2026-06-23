@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/lab-apis", "crates/lab", "crates/lab-auth", "crates/lab-gateway-web", "crates/lab-runtime", "crates/lab-winjob"]
+members = ["crates/lab-apis", "crates/lab", "crates/lab-auth", "crates/lab-codemode", "crates/lab-gateway-web", "crates/lab-runtime", "crates/lab-winjob"]
 
 [workspace.package]
 version = "0.26.1"

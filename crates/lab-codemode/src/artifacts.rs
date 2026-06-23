@@ -10,9 +10,10 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 use ulid::Ulid;
 
-use crate::dispatch::error::ToolError;
-use crate::dispatch::helpers::{env_non_empty, lab_home, redact_home, reject_path_traversal};
-use crate::dispatch::path_safety::reject_existing_symlink_ancestors;
+use crate::error::ToolError;
+use crate::util::{env_non_empty, lab_home, redact_home};
+use lab_runtime::path_safety::reject_existing_symlink_ancestors;
+use lab_runtime::path_safety::reject_path_traversal;
 
 const DEFAULT_CONTENT_TYPE: &str = "text/plain";
 
@@ -50,7 +51,7 @@ const DEFAULT_ARTIFACT_RETENTION_RUNS: usize = 200;
 const DEFAULT_ARTIFACT_MAX_STORE_MIB: u64 = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(in crate::dispatch::gateway::code_mode) struct CodeModeArtifactWrite {
+pub(crate) struct CodeModeArtifactWrite {
     pub path: String,
     pub content: String,
     #[serde(default)]
@@ -66,11 +67,11 @@ pub(in crate::dispatch::gateway::code_mode) struct CodeModeArtifactWrite {
 /// execution response regardless of their visibility.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeModeArtifactReceipt {
-    pub(in crate::dispatch::gateway::code_mode) path: String,
-    pub(in crate::dispatch::gateway::code_mode) absolute_path: String,
-    pub(in crate::dispatch::gateway::code_mode) content_type: String,
-    pub(in crate::dispatch::gateway::code_mode) bytes: usize,
-    pub(in crate::dispatch::gateway::code_mode) sha256: String,
+    pub(crate) path: String,
+    pub(crate) absolute_path: String,
+    pub(crate) content_type: String,
+    pub(crate) bytes: usize,
+    pub(crate) sha256: String,
 }
 
 fn artifact_store_root() -> PathBuf {
@@ -78,14 +79,14 @@ fn artifact_store_root() -> PathBuf {
 }
 
 #[must_use]
-pub(in crate::dispatch::gateway::code_mode) fn code_mode_artifact_root(run_id: &str) -> PathBuf {
+pub(crate) fn code_mode_artifact_root(run_id: &str) -> PathBuf {
     artifact_store_root().join(run_id)
 }
 
 /// Resolve the per-run artifact retention cap from the environment, falling back
 /// to [`DEFAULT_ARTIFACT_RETENTION_RUNS`]. `0` disables pruning.
 #[must_use]
-pub(in crate::dispatch::gateway::code_mode) fn artifact_retention_runs() -> usize {
+pub(crate) fn artifact_retention_runs() -> usize {
     // Absent/blank → default silently. Present-but-unparseable → warn and fall
     // back, so a fat-fingered value (e.g. `5O`) isn't silently ignored.
     let Some(raw) = env_non_empty("LAB_CODE_MODE_ARTIFACT_RETENTION_RUNS") else {
@@ -111,7 +112,7 @@ pub(in crate::dispatch::gateway::code_mode) fn artifact_retention_runs() -> usiz
 /// falling back to [`DEFAULT_ARTIFACT_MAX_MIB`]. The env value is expressed in
 /// MiB for ergonomics (`LAB_CODE_MODE_ARTIFACT_MAX_MIB=16`).
 #[must_use]
-pub(in crate::dispatch::gateway::code_mode) fn artifact_max_bytes() -> usize {
+pub(crate) fn artifact_max_bytes() -> usize {
     let default_bytes = DEFAULT_ARTIFACT_MAX_MIB * 1024 * 1024;
     // Absent/blank → default silently. Present-but-unparseable or `0` → warn and
     // fall back (a 0 MiB cap would reject every write).
@@ -138,7 +139,7 @@ pub(in crate::dispatch::gateway::code_mode) fn artifact_max_bytes() -> usize {
 /// [`DEFAULT_ARTIFACT_MAX_STORE_MIB`]. The env value is in MiB
 /// (`LAB_CODE_MODE_ARTIFACT_MAX_STORE_MIB=8192`); `0` disables byte pruning.
 #[must_use]
-pub(in crate::dispatch::gateway::code_mode) fn artifact_max_store_bytes() -> u64 {
+pub(crate) fn artifact_max_store_bytes() -> u64 {
     let default_bytes = DEFAULT_ARTIFACT_MAX_STORE_MIB * 1024 * 1024;
     let Some(raw) = env_non_empty("LAB_CODE_MODE_ARTIFACT_MAX_STORE_MIB") else {
         return default_bytes;
@@ -201,7 +202,7 @@ fn active_runs() -> &'static Mutex<HashSet<String>> {
 }
 
 /// Snapshot the currently-active run ids so a prune pass can exclude them.
-pub(in crate::dispatch::gateway::code_mode) fn active_artifact_runs_snapshot() -> HashSet<String> {
+pub(crate) fn active_artifact_runs_snapshot() -> HashSet<String> {
     active_runs()
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -211,12 +212,12 @@ pub(in crate::dispatch::gateway::code_mode) fn active_artifact_runs_snapshot() -
 /// RAII registration of an in-flight run id. Construct once per execution and
 /// hold it for the whole run; `Drop` removes the id so the directory becomes
 /// eligible for pruning only after the run has finished.
-pub(in crate::dispatch::gateway::code_mode) struct ActiveArtifactRun {
+pub(crate) struct ActiveArtifactRun {
     run_id: String,
 }
 
 impl ActiveArtifactRun {
-    pub(in crate::dispatch::gateway::code_mode) fn register(run_id: &str) -> Self {
+    pub(crate) fn register(run_id: &str) -> Self {
         active_runs()
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -240,7 +241,7 @@ impl Drop for ActiveArtifactRun {
 /// bounded by both a run-count cap and a total-byte budget. Keeps the newest
 /// runs (ULID names sort chronologically) and removes older ones, except any run
 /// still executing.
-pub(in crate::dispatch::gateway::code_mode) async fn prune_artifact_runs(retain: usize) {
+pub(crate) async fn prune_artifact_runs(retain: usize) {
     let active = active_artifact_runs_snapshot();
     prune_artifact_runs_in(
         &artifact_store_root(),
@@ -264,7 +265,7 @@ pub(in crate::dispatch::gateway::code_mode) async fn prune_artifact_runs(retain:
 /// `active` are skipped unconditionally (even past either limit) so a concurrent
 /// run's directory is never deleted while it is still writing. Errors are
 /// swallowed (best-effort, debug-logged); pruning must never fail a run.
-pub(in crate::dispatch::gateway::code_mode) async fn prune_artifact_runs_in(
+pub(crate) async fn prune_artifact_runs_in(
     store_root: &Path,
     retain: usize,
     max_store_bytes: u64,
@@ -382,7 +383,7 @@ pub(in crate::dispatch::gateway::code_mode) async fn prune_artifact_runs_in(
     }
 }
 
-pub(in crate::dispatch::gateway::code_mode) async fn write_code_mode_artifact(
+pub(crate) async fn write_code_mode_artifact(
     root: &Path,
     request: &CodeModeArtifactWrite,
     max_bytes: usize,

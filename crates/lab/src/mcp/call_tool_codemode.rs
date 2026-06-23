@@ -174,9 +174,9 @@ fn route_scoped_capability_filter(
         return Ok(CodeModeCapabilityFilter::new(requested_upstreams, tools));
     };
     let filter = if requested_upstreams.is_empty() {
-        CodeModeCapabilityFilter::scoped_upstreams(allowed.iter().cloned().collect(), tools)
+        CodeModeCapabilityFilter::scoped_namespaces(allowed.iter().cloned().collect(), tools)
     } else {
-        CodeModeCapabilityFilter::scoped_upstreams(requested_upstreams, tools)
+        CodeModeCapabilityFilter::scoped_namespaces(requested_upstreams, tools)
     };
     Ok(filter)
 }
@@ -264,7 +264,7 @@ impl LabMcpServer {
             input_tokens,
             "gateway codemode start"
         );
-        let broker = CodeModeBroker::new(&self.registry, Some(manager));
+        let broker = CodeModeBroker::new(Some(manager.as_ref()));
         let caller = auth.map_or(CodeModeCaller::TrustedLocal, |auth| {
             CodeModeCaller::Scoped {
                 scopes: auth.scopes.clone(),

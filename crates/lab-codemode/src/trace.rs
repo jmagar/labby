@@ -16,10 +16,7 @@ const MAX_STRING_CHARS: usize = 512;
 const DEFAULT_PARAM_BYTES: usize = 4096;
 
 #[must_use]
-pub(in crate::dispatch::gateway::code_mode) fn redact_trace_params(
-    params: &Value,
-    enabled: bool,
-) -> Option<Value> {
+pub(crate) fn redact_trace_params(params: &Value, enabled: bool) -> Option<Value> {
     if !enabled {
         return None;
     }
@@ -27,10 +24,7 @@ pub(in crate::dispatch::gateway::code_mode) fn redact_trace_params(
 }
 
 #[must_use]
-pub(in crate::dispatch::gateway::code_mode) fn redact_trace_value(
-    value: &Value,
-    max_bytes: usize,
-) -> Value {
+pub(crate) fn redact_trace_value(value: &Value, max_bytes: usize) -> Value {
     let redacted = redact_value(value, 0);
     let size = serde_json::to_vec(&redacted)
         .map(|bytes| bytes.len())
@@ -65,15 +59,15 @@ pub(in crate::dispatch::gateway::code_mode) fn redact_trace_value(
 /// redacted below. `result_shape` is retained as a cheap descriptor the inline
 /// UI app and tooling read.
 #[must_use]
-pub(crate) fn code_mode_execute_trace(response: &CodeModeExecutionResponse) -> Value {
+pub fn code_mode_execute_trace(response: &CodeModeExecutionResponse) -> Value {
     let calls = response
         .calls
         .iter()
         .map(|call| {
-            let (upstream, tool) = split_code_mode_call_id(&call.id);
+            let (namespace, tool) = split_code_mode_call_id(&call.id);
             json!({
                 "id": call.id,
-                "upstream": upstream,
+                "namespace": namespace,
                 "tool": tool,
                 "ok": call.ok,
                 "elapsed_ms": call.elapsed_ms,
@@ -231,7 +225,7 @@ fn redact_value(value: &Value, depth: usize) -> Value {
                     );
                     break;
                 }
-                if crate::dispatch::redact::is_sensitive_key(key) {
+                if lab_runtime::redact::is_sensitive_key(key) {
                     out.insert(key.clone(), Value::String(REDACTED.to_string()));
                 } else {
                     out.insert(key.clone(), redact_value(child, depth + 1));
@@ -253,7 +247,7 @@ fn redact_string(value: &str) -> String {
 
 fn redact_url_like(value: &str) -> String {
     if value.starts_with("http://") || value.starts_with("https://") {
-        return crate::dispatch::redact::redact_url(value);
+        return lab_runtime::redact::redact_url(value);
     }
     value.to_string()
 }
@@ -291,7 +285,7 @@ fn looks_like_sensitive_assignment(value: &str) -> bool {
         let Some((key, _)) = trimmed.split_once('=') else {
             return false;
         };
-        crate::dispatch::redact::is_sensitive_key(key.trim_start_matches("--"))
+        lab_runtime::redact::is_sensitive_key(key.trim_start_matches("--"))
     })
 }
 

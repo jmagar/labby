@@ -23,7 +23,7 @@ use tokio::process::{ChildStdin, Command};
 use tokio::sync::{Mutex, Notify};
 use tokio_util::codec::{FramedRead, LinesCodec};
 
-use crate::dispatch::error::ToolError;
+use crate::error::ToolError;
 
 /// Per-line safety cap mirrored from the original driver: 64 MiB heap + framing
 /// headroom. A longer line is a protocol violation.
@@ -34,12 +34,10 @@ use crate::dispatch::error::ToolError;
 /// defaults). It is a hard bound that errors rather than growing unbounded, not a
 /// steady-state allocation; raising the pool/overflow knobs raises this worst
 /// case proportionally.
-pub(in crate::dispatch::gateway::code_mode) const MAX_LINE_BYTES: usize =
-    64 * 1024 * 1024 + 4 * 1024;
+pub(crate) const MAX_LINE_BYTES: usize = 64 * 1024 * 1024 + 4 * 1024;
 
 /// Stdout line stream type for a pooled runner.
-pub(in crate::dispatch::gateway::code_mode) type RunnerLines =
-    FramedRead<tokio::process::ChildStdout, LinesCodec>;
+pub(crate) type RunnerLines = FramedRead<tokio::process::ChildStdout, LinesCodec>;
 
 /// Shared, continuously-drained stderr buffer for one runner.
 ///
@@ -47,7 +45,7 @@ pub(in crate::dispatch::gateway::code_mode) type RunnerLines =
 /// EOF so a >64 KiB burst can never block the child on a full pipe. Per-execution
 /// log capture slices `[start_index..]` of this buffer.
 #[derive(Clone)]
-pub(in crate::dispatch::gateway::code_mode) struct StderrBuffer {
+pub(crate) struct StderrBuffer {
     lines: Arc<Mutex<Vec<String>>>,
     /// Signalled on every push so a waiter can poll for post-`Done` flush.
     notify: Arc<Notify>,
@@ -62,7 +60,7 @@ impl StderrBuffer {
     }
 
     /// Current line count — the start index for the next execution's capture.
-    pub(in crate::dispatch::gateway::code_mode) async fn mark(&self) -> usize {
+    pub(crate) async fn mark(&self) -> usize {
         self.lines.lock().await.len()
     }
 
@@ -70,10 +68,7 @@ impl StderrBuffer {
     /// stderr lines for this runner. A runner executes one request at a time, so
     /// completed executions do not need historical stderr retained after the
     /// response has been materialized.
-    pub(in crate::dispatch::gateway::code_mode) async fn take_since_and_clear(
-        &self,
-        start_index: usize,
-    ) -> Vec<String> {
+    pub(crate) async fn take_since_and_clear(&self, start_index: usize) -> Vec<String> {
         let mut guard = self.lines.lock().await;
         let captured = guard
             .get(start_index..)
@@ -85,7 +80,7 @@ impl StderrBuffer {
 
     /// Release retained stderr without returning it, used when the runner
     /// reports a reusable per-execution error.
-    pub(in crate::dispatch::gateway::code_mode) async fn clear(&self) {
+    pub(crate) async fn clear(&self) {
         self.lines.lock().await.clear();
     }
 
@@ -96,7 +91,7 @@ impl StderrBuffer {
     /// async drain may not have read it yet. Poll for the buffer to stop growing,
     /// bounded by a short deadline — logs are best-effort, never a correctness
     /// boundary.
-    pub(in crate::dispatch::gateway::code_mode) async fn flush_settle(&self) {
+    pub(crate) async fn flush_settle(&self) {
         const SETTLE_BUDGET: std::time::Duration = std::time::Duration::from_millis(50);
         let deadline = tokio::time::Instant::now() + SETTLE_BUDGET;
         let mut last_len = self.lines.lock().await.len();
@@ -118,18 +113,18 @@ impl StderrBuffer {
 }
 
 /// A single long-lived runner process plus its parent-side I/O channels.
-pub(in crate::dispatch::gateway::code_mode) struct PooledRunner {
-    pub(in crate::dispatch::gateway::code_mode) child: tokio::process::Child,
-    pub(in crate::dispatch::gateway::code_mode) child_pid: Option<u32>,
-    pub(in crate::dispatch::gateway::code_mode) stdin: ChildStdin,
-    pub(in crate::dispatch::gateway::code_mode) lines: RunnerLines,
-    pub(in crate::dispatch::gateway::code_mode) stderr: StderrBuffer,
+pub(crate) struct PooledRunner {
+    pub(crate) child: tokio::process::Child,
+    pub(crate) child_pid: Option<u32>,
+    pub(crate) stdin: ChildStdin,
+    pub(crate) lines: RunnerLines,
+    pub(crate) stderr: StderrBuffer,
     /// Number of executions this runner has served (for recycle-after-K).
-    pub(in crate::dispatch::gateway::code_mode) executions: u64,
+    pub(crate) executions: u64,
     /// Windows Job Object guard; reaps the descendant tree when dropped. On Unix
     /// the process-group + `killpg` covers the same role.
     #[cfg(windows)]
-    _job_guard: Option<crate::dispatch::upstream::process_guard::JobObjectGuard>,
+    _job_guard: Option<crate::pool::job_guard::JobObjectGuard>,
     /// Background stderr drain task; aborted on drop.
     drain_task: tokio::task::JoinHandle<()>,
     /// The runner's spawn cwd. Held for the runner's whole life so the
@@ -139,11 +134,10 @@ pub(in crate::dispatch::gateway::code_mode) struct PooledRunner {
 }
 
 impl PooledRunner {
-    /// Spawn a fresh long-lived runner process. The `current_exe` is resolved by
-    /// the caller and passed in so spawn failures surface as a clean error.
-    pub(in crate::dispatch::gateway::code_mode) fn spawn(
-        exe: &std::path::Path,
-    ) -> Result<Self, ToolError> {
+    /// Spawn a fresh long-lived runner process using the host-supplied
+    /// re-invocation (program + args). Defaults to `current_exe()` +
+    /// `["internal", "code-mode-runner"]` via [`RunnerSpawn::default`].
+    pub(crate) fn spawn(spawn: &super::super::pool::RunnerSpawn) -> Result<Self, ToolError> {
         // Each runner gets its own isolated cwd. It is a long-lived TempDir; the
         // runner creates a fresh per-execution subdir under it on every `Start`.
         let temp_dir = tempfile::TempDir::new().map_err(|err| ToolError::Sdk {
@@ -151,8 +145,8 @@ impl PooledRunner {
             message: format!("failed to create Code Mode sandbox directory: {err}"),
         })?;
 
-        let mut cmd = Command::new(exe);
-        cmd.args(["internal", "code-mode-runner"])
+        let mut cmd = Command::new(&spawn.program);
+        cmd.args(&spawn.args)
             .current_dir(temp_dir.path())
             .env_clear()
             .kill_on_drop(true)
@@ -169,8 +163,7 @@ impl PooledRunner {
         let child_pid = child.id();
 
         #[cfg(windows)]
-        let job_guard =
-            child_pid.map(crate::dispatch::upstream::process_guard::JobObjectGuard::arm);
+        let job_guard = child_pid.map(crate::pool::job_guard::JobObjectGuard::arm);
 
         let stdin = child.stdin.take().ok_or_else(|| ToolError::Sdk {
             sdk_kind: "internal_error".to_string(),
@@ -217,7 +210,7 @@ impl PooledRunner {
     /// with an empty environment. `findstr` reads stdin and parks until EOF,
     /// mirroring `cat`.
     #[cfg(test)]
-    pub(in crate::dispatch::gateway::code_mode) fn spawn_stub() -> Result<Self, ToolError> {
+    pub(crate) fn spawn_stub() -> Result<Self, ToolError> {
         #[cfg(not(windows))]
         {
             Self::spawn_stub_command("cat", &[])
@@ -234,7 +227,7 @@ impl PooledRunner {
     /// long time, modelling a runner that never replies. Used to exercise the
     /// parent-side wall-clock timeout path in `drive_runner`.
     #[cfg(test)]
-    pub(in crate::dispatch::gateway::code_mode) fn spawn_stub_silent() -> Result<Self, ToolError> {
+    pub(crate) fn spawn_stub_silent() -> Result<Self, ToolError> {
         // The program ignores stdin and emits nothing on stdout, so the drive
         // loop's `lines.next()` pends until the wall-clock deadline fires.
         #[cfg(not(windows))]
@@ -281,8 +274,7 @@ impl PooledRunner {
         })?;
         let child_pid = child.id();
         #[cfg(windows)]
-        let job_guard =
-            child_pid.map(crate::dispatch::upstream::process_guard::JobObjectGuard::arm);
+        let job_guard = child_pid.map(crate::pool::job_guard::JobObjectGuard::arm);
         let stdin = child.stdin.take().expect("stub stdin");
         let stdout = child.stdout.take().expect("stub stdout");
         let stderr_pipe = child.stderr.take().expect("stub stderr");

@@ -989,7 +989,7 @@ fn assert_single_call_round_trip(code: &str, expected_result: Value) {
 #[test]
 fn normalized_function_main_form_executes_end_to_end() {
     let body = "async function main() { return await callTool(\"test::ping\", {}); }";
-    let normalized = labby::dispatch::gateway::code_mode::normalize_user_code(body);
+    let normalized = lab_codemode::normalize_user_code(body);
     // Guard: normalize must produce a wrapper that invokes the named function,
     // otherwise this test would be vacuous (the raw form happens to wrap too).
     assert!(
@@ -1075,7 +1075,7 @@ fn codemode_proxy_routes_through_call_tool() {
 #[test]
 fn normalized_export_default_form_executes_end_to_end() {
     let body = "export default async function() { return await callTool(\"test::ping\", {}); }";
-    let normalized = labby::dispatch::gateway::code_mode::normalize_user_code(body);
+    let normalized = lab_codemode::normalize_user_code(body);
     assert!(
         normalized.starts_with("async () =>")
             && normalized.contains("async function")
@@ -1096,7 +1096,7 @@ fn normalized_export_default_form_executes_end_to_end() {
 fn normalized_export_default_arrow_with_prologue_executes_end_to_end() {
     let body = "const tool = \"test::ping\";\n\
                 export default async () => await callTool(tool, {});";
-    let normalized = labby::dispatch::gateway::code_mode::normalize_user_code(body);
+    let normalized = lab_codemode::normalize_user_code(body);
     assert!(
         normalized.starts_with("async () =>") && !normalized.contains("export default"),
         "normalize must emit executable script code without export syntax, got: {normalized}"
@@ -1115,7 +1115,7 @@ fn normalized_export_default_arrow_with_prologue_executes_end_to_end() {
 fn normalized_export_default_plain_arrow_with_prologue_executes_end_to_end() {
     let body = "const tool = \"test::ping\";\n\
                 export default () => callTool(tool, {});";
-    let normalized = labby::dispatch::gateway::code_mode::normalize_user_code(body);
+    let normalized = lab_codemode::normalize_user_code(body);
     assert!(
         normalized.starts_with("async () =>") && !normalized.contains("export default"),
         "normalize must emit executable script code without export syntax, got: {normalized}"
@@ -1133,7 +1133,7 @@ fn normalized_export_default_plain_arrow_with_prologue_executes_end_to_end() {
 fn normalized_export_default_function_with_prologue_executes_end_to_end() {
     let body = "const tool = \"test::ping\";\n\
                 export default async function() { return await callTool(tool, {}); }";
-    let normalized = labby::dispatch::gateway::code_mode::normalize_user_code(body);
+    let normalized = lab_codemode::normalize_user_code(body);
     assert!(
         normalized.starts_with("async () =>") && !normalized.contains("export default"),
         "normalize must emit executable script code without export syntax, got: {normalized}"
@@ -1152,7 +1152,7 @@ fn normalized_export_default_function_with_prologue_executes_end_to_end() {
 fn normalized_async_arrow_default_with_named_export_executes_end_to_end() {
     let body = "export const tool = \"test::ping\";\n\
                 export default async () => await callTool(tool, {});";
-    let normalized = labby::dispatch::gateway::code_mode::normalize_user_code(body);
+    let normalized = lab_codemode::normalize_user_code(body);
     assert!(
         normalized.starts_with("async () =>") && !normalized.contains("export "),
         "normalize must strip every `export` keyword, got: {normalized}"
@@ -1171,7 +1171,7 @@ fn normalized_export_default_multi_statement_prologue_executes_end_to_end() {
     let body = "function mk() { return \"test::ping\"; }\n\
                 const tool = mk();\n\
                 export default () => callTool(tool, {});";
-    let normalized = labby::dispatch::gateway::code_mode::normalize_user_code(body);
+    let normalized = lab_codemode::normalize_user_code(body);
     assert!(
         normalized.starts_with("async () =>") && !normalized.contains("export default"),
         "normalize must emit executable script code without export syntax, got: {normalized}"
