@@ -1,6 +1,6 @@
 use crate::upstream::types::UpstreamRuntimeOwner;
 
-pub(crate) const SHARED_GATEWAY_OAUTH_SUBJECT: &str = "gateway";
+pub const SHARED_GATEWAY_OAUTH_SUBJECT: &str = "gateway";
 
 /// Build an [`UpstreamRuntimeOwner`] for an API surface request.
 ///

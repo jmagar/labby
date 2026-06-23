@@ -515,7 +515,7 @@ async fn handle_gateway_actions(
         "gateway.supported_services" => {
             let registry = manager.builtin_service_registry();
             to_json(super::service_catalog::supported_services_from_registry(
-                &registry,
+                registry.as_ref(),
             ))
         }
         "gateway.get" => {
@@ -604,7 +604,7 @@ async fn handle_gateway_actions(
             to_json(manager.client_config(&params.name).await?)
         }
         "gateway.public_urls.get" => {
-            let urls = manager.public_urls().await;
+            let urls = manager.public_urls();
             let effective_mcp_gateway = urls.effective_mcp_gateway().map(str::to_owned);
             to_json(serde_json::json!({
                 "app": urls.app,
@@ -775,15 +775,14 @@ fn compiled_service_actions(
     service: &str,
 ) -> Result<Vec<ServiceActionView>, ToolError> {
     let registry = manager.builtin_service_registry();
-    let entry = registry
-        .service(service)
+    let actions = registry
+        .service_actions(service)
         .ok_or_else(|| ToolError::InvalidParam {
             message: format!("unknown service `{service}`"),
             param: "service".to_string(),
         })?;
 
-    Ok(entry
-        .actions
+    Ok(actions
         .iter()
         .map(|action| ServiceActionView {
             name: action.name.to_string(),

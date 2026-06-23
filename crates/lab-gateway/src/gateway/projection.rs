@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use lab_runtime::gateway_config::{CodeModeConfig, UpstreamConfig};
-use crate::gateway::service_catalog::service_meta;
+use crate::gateway::service_registry::GatewayServiceRegistry;
 use crate::gateway::types::{
     GatewayConfigView, GatewayRuntimeView, ServiceConfigFieldView, ServiceConfigView,
 };
@@ -330,12 +330,13 @@ pub(super) fn server_view_from_virtual_server(
     summary: UpstreamCachedSummary,
     last_error: Option<String>,
     health: Option<&ServiceHealth>,
+    registry: &dyn GatewayServiceRegistry,
 ) -> ServerView {
     let record = VirtualServerRecord::from(config);
     let service = match &record.source {
         VirtualServerSource::LabService { service } => service.clone(),
     };
-    let service_known = service_meta(&service).is_some();
+    let service_known = registry.service_meta(&service).is_some();
     let peer_connected = last_error.is_none()
         && (summary.discovered_tool_count > 0
             || summary.discovered_resource_count > 0

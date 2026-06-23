@@ -25,18 +25,14 @@ pub struct SupportedServiceView {
 }
 
 pub fn supported_services_from_registry(
-    registry: &crate::registry::ToolRegistry,
+    registry: &dyn crate::gateway::service_registry::GatewayServiceRegistry,
 ) -> Vec<SupportedServiceView> {
     registry
-        .services()
+        .service_names()
         .iter()
-        .filter_map(|service| crate::registry::service_meta(service.name))
+        .filter_map(|name| registry.service_meta(name))
         .map(meta_to_view)
         .collect()
-}
-
-pub fn service_meta(service: &str) -> Option<&'static PluginMeta> {
-    crate::registry::service_meta(service)
 }
 
 fn meta_to_view(meta: &'static PluginMeta) -> SupportedServiceView {

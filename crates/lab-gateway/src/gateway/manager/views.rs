@@ -47,6 +47,7 @@ impl GatewayManager {
                 summary,
                 last_error,
                 None,
+                self.builtin_service_registry().as_ref(),
             ));
         }
         let unknown_service_count = degraded_server_warning_count(&views, WARNING_UNKNOWN_SERVICE);
@@ -81,6 +82,7 @@ impl GatewayManager {
             summary,
             last_error,
             None,
+            self.builtin_service_registry().as_ref(),
         ))
     }
 

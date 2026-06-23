@@ -50,8 +50,13 @@ impl GatewayManager {
                 message: format!("virtual server `{id}` not found"),
             })?;
         let removed = cfg.virtual_servers.remove(index);
-        let removed_view =
-            server_view_from_virtual_server(&removed, UpstreamCachedSummary::default(), None, None);
+        let removed_view = server_view_from_virtual_server(
+            &removed,
+            UpstreamCachedSummary::default(),
+            None,
+            None,
+            self.builtin_service_registry().as_ref(),
+        );
 
         self.persist_config(cfg).await?;
         Ok(removed_view)
@@ -59,6 +64,7 @@ impl GatewayManager {
 
     pub async fn list_quarantined_virtual_servers(&self) -> Result<Vec<ServerView>, ToolError> {
         let cfg = self.config.read().await;
+        let registry = self.builtin_service_registry();
         Ok(cfg
             .quarantined_virtual_servers
             .iter()
@@ -68,6 +74,7 @@ impl GatewayManager {
                     UpstreamCachedSummary::default(),
                     None,
                     None,
+                    registry.as_ref(),
                 )
             })
             .collect())
@@ -113,6 +120,7 @@ impl GatewayManager {
             UpstreamCachedSummary::default(),
             None,
             None,
+            self.builtin_service_registry().as_ref(),
         );
         cfg.virtual_servers.push(restored);
         self.persist_config(cfg).await?;
@@ -157,6 +165,7 @@ impl GatewayManager {
             UpstreamCachedSummary::default(),
             None,
             None,
+            self.builtin_service_registry().as_ref(),
         ))
     }
 
@@ -272,6 +281,7 @@ impl GatewayManager {
             UpstreamCachedSummary::default(),
             None,
             None,
+            self.builtin_service_registry().as_ref(),
         ))
     }
 }

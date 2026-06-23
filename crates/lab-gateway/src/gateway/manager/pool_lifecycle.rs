@@ -16,7 +16,7 @@ use crate::gateway::runtime::runtime_origin_tag;
 use crate::gateway::types::GatewayCatalogDiff;
 use crate::upstream::pool::UpstreamPool;
 use crate::upstream::types::UpstreamRuntimeOwner;
-use crate::registry::ToolRegistry;
+use crate::gateway::service_registry::GatewayServiceRegistry;
 
 use super::GatewayManager;
 
@@ -78,7 +78,8 @@ impl GatewayManager {
             .await
             .map_err(|e| ToolError::internal_message(format!("config read task failed: {e}")))??;
         let registry = self.builtin_service_registry();
-        let (cfg, migration) = quarantine_unregistered_virtual_servers(cfg, &registry);
+        let (cfg, migration) =
+            quarantine_unregistered_virtual_servers(cfg, registry.as_ref());
         if migration.changed() {
             tracing::warn!(
                 action = "gateway.config.migrate",
@@ -216,7 +217,8 @@ impl GatewayManager {
             upstream_count = cfg.upstream.len(),
             "gateway reconcile"
         );
-        lab_runtime::gateway_config::set_process_code_mode_enabled(cfg.code_mode.enabled);
+        self.store
+            .set_process_code_mode_enabled(cfg.code_mode.enabled);
         let fresh_pool = {
             let base_pool =
                 self.new_base_pool(cfg.upstream_request_timeout(), cfg.upstream_relay_timeout());
@@ -353,13 +355,13 @@ impl GatewayManager {
 
 pub(super) fn quarantine_unregistered_virtual_servers(
     mut cfg: GatewayConfig,
-    registry: &ToolRegistry,
+    registry: &dyn GatewayServiceRegistry,
 ) -> (GatewayConfig, VirtualServerMigration) {
     let mut migration = VirtualServerMigration::default();
     let mut active = Vec::with_capacity(cfg.virtual_servers.len());
 
     for virtual_server in std::mem::take(&mut cfg.virtual_servers) {
-        if registry.service(&virtual_server.service).is_some() {
+        if registry.contains_service(&virtual_server.service) {
             active.push(virtual_server);
             continue;
         }
