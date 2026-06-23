@@ -5,15 +5,13 @@ use std::collections::BTreeMap;
 
 use tokio::time::Instant;
 
-use lab_runtime::gateway_config::{
-    CodeModeConfig, GatewayConfig, UpstreamConfig, backup_env, env_is_up_to_date, write_env,
-};
+use lab_runtime::gateway_config::{CodeModeConfig, GatewayConfig, UpstreamConfig};
 use lab_runtime::error::ToolError;
 use crate::gateway::config::{
     default_gateway_bearer_env_name, insert_upstream, remove_upstream, tombstone_removed_import,
     update_upstream, validate_bearer_token_env_name, validate_code_mode,
 };
-use crate::gateway::config_mutation::{read_env_values, values_to_service_creds};
+use crate::gateway::config_mutation::read_env_values;
 use crate::gateway::params::GatewayUpdatePatch;
 use crate::gateway::projection::*;
 use crate::gateway::types::{GatewayRuntimeView, GatewayView, ServiceConfigView};
@@ -36,8 +34,8 @@ impl GatewayManager {
     /// Return the resolved canonical public URL pair for the app and MCP gateway.
     ///
     /// Merges env vars over config file over legacy `[auth].public_url` field.
-    pub async fn public_urls(&self) -> lab_runtime::gateway_config::ResolvedPublicUrls {
-        self.config.read().await.public_urls()
+    pub fn public_urls(&self) -> lab_runtime::gateway_config::ResolvedPublicUrls {
+        self.store.public_urls()
     }
 
     pub async fn get_service_config(&self, service: &str) -> Result<ServiceConfigView, ToolError> {
@@ -78,37 +76,13 @@ impl GatewayManager {
         }
 
         let _mutation_guard = self.config_mutation.lock().await;
-        let creds = values_to_service_creds(service, values);
-        let env_path = self.env_path();
-        if !creds.is_empty() && !env_is_up_to_date(&env_path, &creds) {
-            // Offload the synchronous backup + rewrite to a blocking thread —
-            // mirrors `persist_config`'s discipline so the async runtime is not
-            // stalled by `std::fs` I/O while the mutation guard is held.
-            let env_path_for_write = env_path.clone();
-            tokio::task::spawn_blocking(move || -> Result<(), ToolError> {
-                drop(backup_env(&env_path_for_write).map_err(|e| {
-                    ToolError::internal_message(format!("failed to back up env file: {e}"))
-                })?);
-                write_env(&env_path_for_write, &creds, true).map_err(|e| {
-                    ToolError::internal_message(format!("failed to write env file: {e}"))
-                })?;
-                Ok(())
-            })
-            .await
-            .map_err(|e| ToolError::internal_message(format!("env write task failed: {e}")))??;
-            if let Some(service_clients) = &self.service_clients {
-                service_clients
-                    .refresh_from_env_path(&env_path)
-                    .await
-                    .map_err(|e| {
-                        ToolError::internal_message(format!(
-                            "failed to refresh service clients: {e}"
-                        ))
-                    })?;
-            }
+        // The host store owns env-file backup/atomic-write semantics and any
+        // cached service-client refresh; the manager only validates + delegates.
+        if !values.is_empty() {
+            self.store.persist_service_env(service, values).await?;
         }
 
-        let values = read_env_values(&env_path)?;
+        let values = read_env_values(&self.env_path())?;
         Ok(service_config_view(meta, &values))
     }
 

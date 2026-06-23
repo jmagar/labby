@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::dispatch::helpers::env_non_empty;
+use lab_runtime::env_non_empty;
 
 use super::{DiscoveredServer, entry_to_upstream, env_key_count, read_json};
 

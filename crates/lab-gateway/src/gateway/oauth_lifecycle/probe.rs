@@ -12,7 +12,7 @@ use lab_runtime::gateway_config::{
 use lab_runtime::error::ToolError;
 use crate::gateway::manager::GatewayManager;
 use crate::gateway::oauth::ProbeResult;
-use crate::dispatch::redact::redact_url;
+use lab_runtime::redact::redact_url;
 use lab_auth::upstream::manager::UpstreamOauthManager;
 
 use super::{OauthRuntime, should_use_dynamic_registration};
@@ -324,7 +324,7 @@ pub async fn run(
     let (canonical_url, redacted_url, name, name_is_persisted) =
         resolve_probe_identity(manager, url, upstream_name).await?;
 
-    crate::dispatch::security::ssrf::validate_external_https_url(&canonical_url)
+    crate::security::ssrf::validate_external_https_url(&canonical_url)
         .await
         .inspect_err(|_| {
             tracing::warn!(

@@ -19,7 +19,7 @@ use serde_json::{Map, Value};
 use lab_runtime::error::ToolError;
 use crate::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
 use crate::gateway::manager::GatewayManager;
-use crate::dispatch::helpers::lab_home;
+use lab_runtime::lab_home;
 use crate::upstream::types::UpstreamRuntimeOwner;
 
 use super::search;

@@ -20,15 +20,28 @@
 //! touched by the manager.
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 use lab_runtime::error::ToolError;
 use lab_runtime::gateway_config::{GatewayConfig, ResolvedPublicUrls};
 
+/// Boxed future returned by the store's async env-write methods.
+///
+/// Persisting `config.toml` is pure blocking IO (see [`GatewayConfigStore::persist`]),
+/// but the env-write methods also refresh the host's cached service clients,
+/// which is async. Returning a boxed future keeps those methods dyn-compatible
+/// (so the manager can hold `Arc<dyn GatewayConfigStore>`) without `#[async_trait]`.
+pub type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
 /// Host-owned persistence + environment seam for the gateway manager.
 ///
-/// Native `async fn in trait` (no `#[async_trait]`). Implemented by `lab` and
-/// injected into the manager at construction.
+/// All methods are synchronous: persistence is blocking file IO (the underlying
+/// `write_gateway_config` uses `std::fs` + `fd_lock`), so there is nothing to
+/// `await`. Keeping the trait sync also makes it dyn-compatible, so the manager
+/// can hold an injected `Arc<dyn GatewayConfigStore>` without `#[async_trait]`
+/// or boxed futures. Implemented by `lab` and injected at construction.
 pub trait GatewayConfigStore: Send + Sync {
     /// Resolve the canonical public URL pair (env over config over legacy
     /// `[auth].public_url`). Host-owned because it reads `LabConfig` sections
@@ -47,23 +60,24 @@ pub trait GatewayConfigStore: Send + Sync {
     ///
     /// The host writes `cfg` into its live `LabConfig`, renders via the existing
     /// foreign-key-preserving toml_edit path, and atomically replaces the file.
-    async fn persist(&self, cfg: &GatewayConfig) -> Result<(), ToolError>;
+    fn persist(&self, cfg: &GatewayConfig) -> Result<(), ToolError>;
 
     /// Idempotently write the gateway HTTP bearer token to the `.env` file
-    /// (backup-first) and refresh any cached service clients.
-    async fn persist_gateway_bearer_token(
-        &self,
-        env_name: &str,
-        token_value: &str,
-    ) -> Result<(), ToolError>;
+    /// (backup-first) and refresh any cached service clients. `token_value` is
+    /// the already-normalized header value the store writes verbatim.
+    fn persist_gateway_bearer_token<'a>(
+        &'a self,
+        env_name: &'a str,
+        token_value: &'a str,
+    ) -> StoreFuture<'a, Result<(), ToolError>>;
 
     /// Idempotently write a registered service's credential env vars and refresh
     /// cached service clients. `values` maps env field name → value.
-    async fn persist_service_env(
-        &self,
-        service: &str,
-        values: &BTreeMap<String, String>,
-    ) -> Result<(), ToolError>;
+    fn persist_service_env<'a>(
+        &'a self,
+        service: &'a str,
+        values: &'a BTreeMap<String, String>,
+    ) -> StoreFuture<'a, Result<(), ToolError>>;
 
     /// Read raw `KEY=value` pairs from the `.env` file (best-effort).
     fn read_env_values(&self, path: &std::path::Path) -> BTreeMap<String, String>;
@@ -136,41 +150,33 @@ impl GatewayConfigStore for FsGatewayConfigStore {
         self.env_path.clone()
     }
 
-    async fn persist(&self, cfg: &GatewayConfig) -> Result<(), ToolError> {
-        let path = self.config_path.clone();
-        let cfg = cfg.clone();
-        tokio::task::spawn_blocking(move || super::config::write_gateway_config(&path, &cfg))
-            .await
-            .map_err(|e| ToolError::internal_message(format!("config write task failed: {e}")))?
+    fn persist(&self, cfg: &GatewayConfig) -> Result<(), ToolError> {
+        super::config::write_gateway_config(&self.config_path, cfg)
     }
 
-    async fn persist_gateway_bearer_token(
-        &self,
-        env_name: &str,
-        token_value: &str,
-    ) -> Result<(), ToolError> {
-        let trimmed = token_value.trim();
-        let header = if trimmed
-            .get(..7)
-            .is_some_and(|s| s.eq_ignore_ascii_case("bearer "))
-        {
-            format!("Bearer {}", &trimmed[7..])
-        } else {
-            format!("Bearer {trimmed}")
-        };
-        self.write_env_pairs(&[(env_name.to_string(), header)])
+    fn persist_gateway_bearer_token<'a>(
+        &'a self,
+        env_name: &'a str,
+        token_value: &'a str,
+    ) -> StoreFuture<'a, Result<(), ToolError>> {
+        // The manager normalizes the header before calling; write it verbatim.
+        Box::pin(async move {
+            self.write_env_pairs(&[(env_name.to_string(), token_value.to_string())])
+        })
     }
 
-    async fn persist_service_env(
-        &self,
-        _service: &str,
-        values: &BTreeMap<String, String>,
-    ) -> Result<(), ToolError> {
-        let pairs: Vec<(String, String)> = values
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        self.write_env_pairs(&pairs)
+    fn persist_service_env<'a>(
+        &'a self,
+        _service: &'a str,
+        values: &'a BTreeMap<String, String>,
+    ) -> StoreFuture<'a, Result<(), ToolError>> {
+        Box::pin(async move {
+            let pairs: Vec<(String, String)> = values
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            self.write_env_pairs(&pairs)
+        })
     }
 
     fn read_env_values(&self, path: &std::path::Path) -> BTreeMap<String, String> {

@@ -19,6 +19,7 @@ pub mod gateway;
 pub mod net;
 pub mod process;
 pub mod registry;
+pub mod security;
 pub mod upstream;
 
 #[cfg(test)]

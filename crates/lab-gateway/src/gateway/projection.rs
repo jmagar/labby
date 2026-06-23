@@ -12,7 +12,7 @@ use crate::gateway::view_models::{
     ServerConfigSummaryView, ServerView, SurfaceStateView, SurfaceStatesView,
 };
 use crate::gateway::virtual_servers::{VirtualServerRecord, VirtualServerSource};
-use crate::dispatch::redact::{redact_stdio_args, redact_stdio_value, redact_url};
+use lab_runtime::redact::{redact_stdio_args, redact_stdio_value, redact_url};
 use crate::upstream::pool::{UpstreamCachedSummary, UpstreamPool};
 /// Per-service health probe result. Carried through gateway projection so the
 /// `ServerView` can surface upstream-service reachability without forcing the

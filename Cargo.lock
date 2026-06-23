@@ -2337,6 +2337,8 @@ dependencies = [
  "dotenvy",
  "fd-lock",
  "futures",
+ "hex",
+ "jiff",
  "lab-apis",
  "lab-auth",
  "lab-codemode",
@@ -2345,6 +2347,7 @@ dependencies = [
  "nix",
  "process-wrap",
  "proptest",
+ "regex",
  "reqwest",
  "rmcp",
  "serde",
@@ -2363,6 +2366,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "wiremock",
+ "xxhash-rust",
 ]
 
 [[package]]

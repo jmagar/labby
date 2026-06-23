@@ -1,22 +1,21 @@
-//! Env-file persistence helpers: canonical `.env` path resolution and gateway
-//! bearer-token writes (backup-first, idempotent).
+//! Env-file persistence: canonical `.env` path resolution and gateway
+//! bearer-token writes, both delegated to the host-owned [`GatewayConfigStore`].
+//!
+//! The manager owns only the gateway-specific policy (token normalization and
+//! env-name validation); the actual `.env` backup/atomic-write and any cached
+//! service-client refresh live behind the store seam in the host (`lab`).
 
 use std::path::PathBuf;
 
-use lab_runtime::gateway_config::{EnvCredential, backup_env, env_is_up_to_date, write_env};
 use lab_runtime::error::ToolError;
+
 use crate::gateway::config::validate_bearer_token_env_name;
 
 use super::GatewayManager;
 
 impl GatewayManager {
     pub(super) fn env_path(&self) -> PathBuf {
-        if let Some(override_path) = &self.env_path_override {
-            return override_path.clone();
-        }
-        lab_runtime::gateway_config::home_dir()
-            .map(|h| h.join(".lab").join(".env"))
-            .unwrap_or_else(|| PathBuf::from(".env"))
+        self.store.env_path()
     }
 
     pub(super) async fn persist_gateway_bearer_token(
@@ -25,38 +24,10 @@ impl GatewayManager {
         token_value: &str,
     ) -> Result<(), ToolError> {
         validate_bearer_token_env_name(env_name)?;
-
         let auth_header = normalize_gateway_bearer_token(token_value);
-        let env_path = self.env_path();
-        let creds = [EnvCredential {
-            service: "gateway".to_string(),
-            url: None,
-            secret: Some(auth_header),
-            env_field: env_name.to_string(),
-        }];
-
-        if !env_is_up_to_date(&env_path, &creds) {
-            drop(backup_env(&env_path).map_err(|e| {
-                ToolError::internal_message(format!("failed to back up env file: {e}"))
-            })?);
-            write_env(&env_path, &creds, true).map_err(|e| {
-                ToolError::internal_message(format!("failed to write env file: {e}"))
-            })?;
-        }
-
-        if let Some(service_clients) = &self.service_clients {
-            service_clients
-                .refresh_from_env_path(&env_path)
-                .await
-                .map_err(|e| {
-                    ToolError::internal_message(format!(
-                        "failed to refresh service clients from {}: {e}",
-                        env_path.display()
-                    ))
-                })?;
-        }
-
-        Ok(())
+        self.store
+            .persist_gateway_bearer_token(env_name, &auth_header)
+            .await
     }
 }
 

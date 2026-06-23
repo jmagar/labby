@@ -539,7 +539,7 @@ impl GatewayManager {
     pub(crate) async fn cached_snippet_metadata(
         &self,
         fingerprint: &str,
-    ) -> Option<Vec<crate::dispatch::snippets::store::SnippetInfo>> {
+    ) -> Option<Vec<lab_codemode::snippet::store::SnippetInfo>> {
         let guard = self.code_mode_snippet_metadata_cache.lock().await;
         guard
             .as_ref()
