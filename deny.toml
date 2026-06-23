@@ -64,13 +64,16 @@ reason = "Binary-only: lab-apis must stay pure. CLI parsing lives in `labby`."
 
 [[bans.deny]]
 name = "rmcp"
-wrappers = ["labby", "agent-client-protocol"]
+wrappers = ["labby", "labby-auth", "labby-gateway", "agent-client-protocol"]
 reason = "Binary-only: lab-apis must stay pure. MCP server lives in `labby`."
 
 [[bans.deny]]
 name = "anyhow"
 wrappers = [
     "labby",
+    "labby-auth",
+    "labby-codemode",
+    "labby-gateway",
     "agent-client-protocol",
     "agent-client-protocol-schema",
     "javy",
