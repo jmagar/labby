@@ -1152,7 +1152,9 @@ async fn build_gateway_runtime(
     // settings match the persisted config. Normal stdio follows the same gateway
     // runtime path as HTTP; only recursive stdio children suppress upstream
     // spawning.
-    gateway_manager.seed_config(config.to_gateway_config()).await;
+    gateway_manager
+        .seed_config(config.to_gateway_config())
+        .await;
     install_gateway_manager(Arc::clone(&gateway_manager));
     if !suppress_upstream_runtime {
         match config.gateway_import_mode {

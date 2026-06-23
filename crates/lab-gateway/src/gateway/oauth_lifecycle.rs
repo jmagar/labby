@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use lab_runtime::gateway_config::UpstreamConfig;
-use lab_runtime::error::ToolError;
 use crate::gateway::manager::GatewayManager;
 use crate::gateway::oauth::{UpstreamOauthConnectionState, UpstreamOauthStatusView};
 use lab_auth::upstream::encryption::EncryptionKey;
 use lab_auth::upstream::manager::UpstreamOauthManager;
 use lab_auth::upstream::types::{BeginAuthorization, OauthError};
+use lab_runtime::error::ToolError;
+use lab_runtime::gateway_config::UpstreamConfig;
 
 pub(crate) mod probe;
 #[cfg(test)]

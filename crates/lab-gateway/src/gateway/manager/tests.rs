@@ -9,16 +9,14 @@ use base64::Engine as _;
 use lab_auth::sqlite::SqliteStore;
 use rmcp::transport::{AuthClient, AuthorizationManager};
 
-use lab_runtime::gateway_config::{
-    CodeModeConfig, ImportSource, GatewayConfig, ProtectedMcpRouteConfig, UpstreamConfig,
-    UpstreamOauthConfig, UpstreamOauthMode, UpstreamOauthRegistration,
-};
 use crate::gateway::discovery::DiscoveredServer;
 use crate::upstream::pool::UpstreamPool;
-use crate::upstream::types::{
-    ToolExposurePolicy, UpstreamEntry, UpstreamHealth, UpstreamTool,
-};
+use crate::upstream::types::{ToolExposurePolicy, UpstreamEntry, UpstreamHealth, UpstreamTool};
 use lab_auth::upstream::encryption::{EncryptionKey, load_key};
+use lab_runtime::gateway_config::{
+    CodeModeConfig, GatewayConfig, ImportSource, ProtectedMcpRouteConfig, UpstreamConfig,
+    UpstreamOauthConfig, UpstreamOauthMode, UpstreamOauthRegistration,
+};
 
 use super::{GatewayManager, GatewayRuntimeHandle};
 

@@ -1,9 +1,9 @@
 //! Virtual-server listing, surface gating, and MCP action-policy tests.
 
-use lab_runtime::gateway_config::{VirtualServerConfig, VirtualServerSurfacesConfig};
 use crate::gateway::projection::{ServiceHealth, server_view_from_virtual_server};
 use crate::gateway::service_registry::EmptyServiceRegistry;
 use crate::upstream::pool::UpstreamCachedSummary;
+use lab_runtime::gateway_config::{VirtualServerConfig, VirtualServerSurfacesConfig};
 
 use super::*;
 

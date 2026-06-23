@@ -11,11 +11,11 @@ use std::path::{Path, PathBuf};
 use lab_codemode::snippet::store::{SnippetInfo, builtin_snippet_dir, list_snippets};
 use lab_codemode::{ToolDescriptor, ToolsRender, serialized_catalog_size};
 
-use lab_runtime::error::ToolError;
 use crate::gateway::manager::GatewayManager;
 use crate::gateway::projection::{sanitize_schema, sanitize_tool_text};
-use lab_runtime::lab_home;
 use crate::upstream::types::{UpstreamRuntimeOwner, UpstreamTool};
+use lab_runtime::error::ToolError;
+use lab_runtime::lab_home;
 
 /// Build (or serve from cache) the Code Mode discovery catalog for the proxy.
 ///

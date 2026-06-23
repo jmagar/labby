@@ -816,7 +816,10 @@ impl GatewayConfig {
     }
 }
 
-fn normalize_string_list(values: &mut Vec<String>, field: &'static str) -> Result<(), &'static str> {
+fn normalize_string_list(
+    values: &mut Vec<String>,
+    field: &'static str,
+) -> Result<(), &'static str> {
     let mut normalized = Vec::new();
     for value in std::mem::take(values) {
         let name = value.trim().to_string();

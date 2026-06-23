@@ -37,8 +37,8 @@ use crate::upstream::pool::InProcessConnector;
 use super::code_mode::{CodeModeHistory, CodeModeSourceStore};
 use super::config_store::GatewayConfigStore;
 use super::protected_routes::ProtectedRouteIndex;
-use super::service_registry::GatewayServiceRegistry;
 pub use super::runtime::GatewayRuntimeHandle;
+use super::service_registry::GatewayServiceRegistry;
 use super::types::CatalogChangeNotifier;
 
 mod code_mode_resolve;

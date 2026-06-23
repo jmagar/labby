@@ -1,8 +1,6 @@
 //! Read-only inspection surface: `list`, `get`, `status`, `test`, discovered
 //! tool/resource/prompt views, surface gating checks, and client config export.
 
-use lab_runtime::gateway_config::{GatewayConfig, UpstreamConfig};
-use lab_runtime::error::ToolError;
 use crate::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
 use crate::gateway::projection::*;
 use crate::gateway::types::{
@@ -11,6 +9,8 @@ use crate::gateway::types::{
 };
 use crate::gateway::view_models::ServerView;
 use crate::upstream::pool::in_process_upstream_name;
+use lab_runtime::error::ToolError;
+use lab_runtime::gateway_config::{GatewayConfig, UpstreamConfig};
 
 use super::GatewayManager;
 use super::virtual_servers::find_virtual_server;

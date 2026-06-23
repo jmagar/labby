@@ -177,9 +177,9 @@ impl GatewayConfigStore for FsGatewayConfigStore {
         token_value: &'a str,
     ) -> StoreFuture<'a, Result<(), ToolError>> {
         // The manager normalizes the header before calling; write it verbatim.
-        Box::pin(async move {
-            self.write_env_pairs(&[(env_name.to_string(), token_value.to_string())])
-        })
+        Box::pin(
+            async move { self.write_env_pairs(&[(env_name.to_string(), token_value.to_string())]) },
+        )
     }
 
     fn persist_service_env<'a>(
@@ -188,10 +188,8 @@ impl GatewayConfigStore for FsGatewayConfigStore {
         values: &'a BTreeMap<String, String>,
     ) -> StoreFuture<'a, Result<(), ToolError>> {
         Box::pin(async move {
-            let pairs: Vec<(String, String)> = values
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
+            let pairs: Vec<(String, String)> =
+                values.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
             self.write_env_pairs(&pairs)
         })
     }

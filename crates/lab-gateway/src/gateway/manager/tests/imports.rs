@@ -1,8 +1,8 @@
 //! Auto-import partition + tombstone matching tests.
 
-use lab_runtime::gateway_config::UpstreamImportTombstone;
 use crate::gateway::manager::partition_discovered_for_import;
 use crate::gateway::types::ImportSkipReason;
+use lab_runtime::gateway_config::UpstreamImportTombstone;
 
 use super::*;
 

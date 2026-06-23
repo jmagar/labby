@@ -24,8 +24,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use lab_runtime::gateway_config::UpstreamConfig;
 use crate::upstream::types::UpstreamTool;
+use lab_runtime::gateway_config::UpstreamConfig;
 
 const CACHE_VERSION: u32 = 1;
 /// How long a cached upstream catalog stays valid. The fingerprint catches

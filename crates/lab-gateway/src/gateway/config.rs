@@ -5,12 +5,12 @@ use anyhow::Context;
 use fd_lock::RwLock;
 use tempfile::NamedTempFile;
 
+use crate::upstream::spawn_guard;
+use lab_runtime::error::ToolError;
 use lab_runtime::gateway_config::{
-    GatewayPreferences, GatewayConfig, ProtectedMcpRouteConfig, ProtectedMcpRouteTarget,
+    GatewayConfig, GatewayPreferences, ProtectedMcpRouteConfig, ProtectedMcpRouteTarget,
     UpstreamConfig, UpstreamImportTombstone,
 };
-use lab_runtime::error::ToolError;
-use crate::upstream::spawn_guard;
 
 use super::params::GatewayUpdatePatch;
 
@@ -561,12 +561,16 @@ fn normalize_config(cfg: &mut GatewayConfig) -> Result<(), ToolError> {
     Ok(())
 }
 
-pub fn validate_code_mode(code_mode: &lab_runtime::gateway_config::CodeModeConfig) -> Result<(), ToolError> {
+pub fn validate_code_mode(
+    code_mode: &lab_runtime::gateway_config::CodeModeConfig,
+) -> Result<(), ToolError> {
     code_mode.validate().map_err(|e| match e {
-        lab_runtime::gateway_config::ConfigError::InvalidCodeModeTimeout { .. } => ToolError::InvalidParam {
-            message: e.to_string(),
-            param: "code_mode.timeout_ms".to_string(),
-        },
+        lab_runtime::gateway_config::ConfigError::InvalidCodeModeTimeout { .. } => {
+            ToolError::InvalidParam {
+                message: e.to_string(),
+                param: "code_mode.timeout_ms".to_string(),
+            }
+        }
         lab_runtime::gateway_config::ConfigError::InvalidCodeModeMaxResponseBytes { .. } => {
             ToolError::InvalidParam {
                 message: e.to_string(),
@@ -879,10 +883,12 @@ fn validate_upstream(
             message: e.to_string(),
             param: "name".to_string(),
         },
-        lab_runtime::gateway_config::ConfigError::ConflictingAuth { .. } => ToolError::InvalidParam {
-            message: e.to_string(),
-            param: "bearer_token_env".to_string(),
-        },
+        lab_runtime::gateway_config::ConfigError::ConflictingAuth { .. } => {
+            ToolError::InvalidParam {
+                message: e.to_string(),
+                param: "bearer_token_env".to_string(),
+            }
+        }
         lab_runtime::gateway_config::ConfigError::MissingOauthUrl { .. }
         | lab_runtime::gateway_config::ConfigError::InvalidUrl { .. } => ToolError::InvalidParam {
             message: e.to_string(),

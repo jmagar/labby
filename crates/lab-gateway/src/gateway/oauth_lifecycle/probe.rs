@@ -6,14 +6,14 @@
 
 use url::Url;
 
+use crate::gateway::manager::GatewayManager;
+use crate::gateway::oauth::ProbeResult;
+use lab_auth::upstream::manager::UpstreamOauthManager;
+use lab_runtime::error::ToolError;
 use lab_runtime::gateway_config::{
     UpstreamConfig, UpstreamOauthConfig, UpstreamOauthMode, UpstreamOauthRegistration,
 };
-use lab_runtime::error::ToolError;
-use crate::gateway::manager::GatewayManager;
-use crate::gateway::oauth::ProbeResult;
 use lab_runtime::redact::redact_url;
-use lab_auth::upstream::manager::UpstreamOauthManager;
 
 use super::{OauthRuntime, should_use_dynamic_registration};
 

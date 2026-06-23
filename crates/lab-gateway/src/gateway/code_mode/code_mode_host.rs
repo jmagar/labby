@@ -16,11 +16,11 @@ use lab_codemode::{
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use serde_json::{Map, Value};
 
-use lab_runtime::error::ToolError;
 use crate::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
 use crate::gateway::manager::GatewayManager;
-use lab_runtime::lab_home;
 use crate::upstream::types::UpstreamRuntimeOwner;
+use lab_runtime::error::ToolError;
+use lab_runtime::lab_home;
 
 use super::search;
 use super::validate_code_mode_params_against_schema;

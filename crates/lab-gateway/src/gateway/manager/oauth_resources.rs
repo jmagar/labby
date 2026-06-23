@@ -3,10 +3,10 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use lab_runtime::gateway_config::{GatewayConfig, UpstreamConfig};
-use lab_runtime::error::ToolError;
 use lab_auth::upstream::cache::OauthClientCache;
 use lab_auth::upstream::manager::UpstreamOauthManager;
+use lab_runtime::error::ToolError;
+use lab_runtime::gateway_config::{GatewayConfig, UpstreamConfig};
 
 use super::GatewayManager;
 

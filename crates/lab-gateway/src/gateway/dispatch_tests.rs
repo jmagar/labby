@@ -391,13 +391,15 @@ fn protected_gateway_subset_route_fixture(name: &str) -> ProtectedMcpRouteConfig
         backend_mcp_path: "/mcp".to_string(),
         scopes: Vec::new(),
         health_path: None,
-        target: Some(lab_runtime::gateway_config::ProtectedMcpRouteTarget::GatewaySubset(
-            lab_runtime::gateway_config::ProtectedGatewaySubsetTarget {
-                upstreams: vec!["sonarr".to_string()],
-                services: Vec::new(),
-                expose_code_mode: false,
-            },
-        )),
+        target: Some(
+            lab_runtime::gateway_config::ProtectedMcpRouteTarget::GatewaySubset(
+                lab_runtime::gateway_config::ProtectedGatewaySubsetTarget {
+                    upstreams: vec!["sonarr".to_string()],
+                    services: Vec::new(),
+                    expose_code_mode: false,
+                },
+            ),
+        ),
     }
 }
 
@@ -560,9 +562,9 @@ async fn gateway_list_surfaces_cached_custom_gateway_summary_counts() {
         crate::upstream::types::UpstreamEntry {
             name: std::sync::Arc::clone(&upstream_name),
             tools,
-            exposure_policy: crate::upstream::types::ToolExposurePolicy::from_patterns(
-                vec!["scrape".to_string()],
-            )
+            exposure_policy: crate::upstream::types::ToolExposurePolicy::from_patterns(vec![
+                "scrape".to_string(),
+            ])
             .expect("policy"),
             proxy_resources: true,
             prompt_count: 3,

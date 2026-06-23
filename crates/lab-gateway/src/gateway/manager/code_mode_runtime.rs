@@ -8,14 +8,14 @@ use std::sync::Arc;
 use futures::StreamExt as _;
 use tokio::time::Instant;
 
-use lab_runtime::gateway_config::{CodeModeConfig, GatewayConfig};
-use lab_runtime::error::ToolError;
 use crate::gateway::SHARED_GATEWAY_OAUTH_SUBJECT;
 use crate::gateway::code_mode::{
     CodeModeExecutionSource, CodeModeHistoryEntry, CodeModeSourceLookup,
 };
 use crate::upstream::pool::UpstreamPool;
 use crate::upstream::types::{UpstreamRuntimeOwner, UpstreamTool};
+use lab_runtime::error::ToolError;
+use lab_runtime::gateway_config::{CodeModeConfig, GatewayConfig};
 
 use super::GatewayManager;
 
@@ -44,9 +44,7 @@ impl GatewayManager {
     /// The broker checks out a runner from this pool per execution. The pool is
     /// `Arc`-shared across every `Clone` of the manager so a single set of
     /// long-lived runner processes serves all surfaces.
-    pub(crate) fn code_mode_runner_pool(
-        &self,
-    ) -> &Arc<crate::gateway::code_mode::RunnerPool> {
+    pub(crate) fn code_mode_runner_pool(&self) -> &Arc<crate::gateway::code_mode::RunnerPool> {
         &self.code_mode_runner_pool
     }
 
@@ -452,10 +450,9 @@ impl GatewayManager {
                     cache_updates.push(
                         crate::gateway::code_mode::catalog_cache::CatalogCacheUpdate {
                             upstream_name: upstream.name.clone(),
-                            fingerprint:
-                                crate::gateway::code_mode::catalog_cache::fingerprint(
-                                    &upstream,
-                                ),
+                            fingerprint: crate::gateway::code_mode::catalog_cache::fingerprint(
+                                &upstream,
+                            ),
                             tools: pool.healthy_tools_for_upstream(&upstream.name).await,
                         },
                     );

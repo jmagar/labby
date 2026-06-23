@@ -2,9 +2,9 @@
 
 use std::collections::BTreeSet;
 
-use lab_runtime::gateway_config::{VirtualServerConfig, VirtualServerSurfacesConfig};
 use crate::gateway::config::load_gateway_config;
 use crate::gateway::config_mutation::read_env_values;
+use lab_runtime::gateway_config::{VirtualServerConfig, VirtualServerSurfacesConfig};
 
 use super::*;
 
@@ -32,8 +32,7 @@ fn service_config_get_redacts_secret_values() {
         "super-secret".to_string(),
     );
 
-    let config =
-        crate::gateway::projection::service_config_view(&lab_apis::acp::META, &values);
+    let config = crate::gateway::projection::service_config_view(&lab_apis::acp::META, &values);
 
     let secret = config
         .fields
@@ -69,8 +68,7 @@ fn service_config_get_treats_empty_values_as_not_present() {
     values.insert("LAB_ACP_HMAC_SECRET".to_string(), "token".to_string());
     values.insert("LAB_ACP_DB".to_string(), String::new());
 
-    let config =
-        crate::gateway::projection::service_config_view(&lab_apis::acp::META, &values);
+    let config = crate::gateway::projection::service_config_view(&lab_apis::acp::META, &values);
 
     let db = config
         .fields
@@ -122,8 +120,7 @@ fn service_config_get_marks_service_configured_when_required_fields_are_present(
     values.insert("LAB_ACP_DB".to_string(), "/tmp/acp.db".to_string());
     values.insert("LAB_ACP_HMAC_SECRET".to_string(), "token".to_string());
 
-    let config =
-        crate::gateway::projection::service_config_view(&lab_apis::acp::META, &values);
+    let config = crate::gateway::projection::service_config_view(&lab_apis::acp::META, &values);
 
     assert!(config.configured);
 }

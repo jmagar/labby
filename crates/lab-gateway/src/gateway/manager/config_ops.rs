@@ -5,8 +5,6 @@ use std::collections::BTreeMap;
 
 use tokio::time::Instant;
 
-use lab_runtime::gateway_config::{CodeModeConfig, GatewayConfig, UpstreamConfig};
-use lab_runtime::error::ToolError;
 use crate::gateway::config::{
     default_gateway_bearer_env_name, insert_upstream, remove_upstream, tombstone_removed_import,
     update_upstream, validate_bearer_token_env_name, validate_code_mode,
@@ -16,6 +14,8 @@ use crate::gateway::params::GatewayUpdatePatch;
 use crate::gateway::projection::*;
 use crate::gateway::types::{GatewayRuntimeView, GatewayView, ServiceConfigView};
 use crate::upstream::types::UpstreamRuntimeOwner;
+use lab_runtime::error::ToolError;
+use lab_runtime::gateway_config::{CodeModeConfig, GatewayConfig, UpstreamConfig};
 
 use super::GatewayManager;
 

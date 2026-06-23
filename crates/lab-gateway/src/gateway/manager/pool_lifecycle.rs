@@ -8,15 +8,15 @@ use futures::StreamExt as _;
 
 use tokio::time::Instant;
 
-use lab_runtime::gateway_config::GatewayConfig;
-use lab_runtime::error::ToolError;
 use crate::gateway::config::load_gateway_config;
 use crate::gateway::protected_routes::ProtectedRouteIndex;
 use crate::gateway::runtime::runtime_origin_tag;
+use crate::gateway::service_registry::GatewayServiceRegistry;
 use crate::gateway::types::GatewayCatalogDiff;
 use crate::upstream::pool::UpstreamPool;
 use crate::upstream::types::UpstreamRuntimeOwner;
-use crate::gateway::service_registry::GatewayServiceRegistry;
+use lab_runtime::error::ToolError;
+use lab_runtime::gateway_config::GatewayConfig;
 
 use super::GatewayManager;
 
@@ -78,8 +78,7 @@ impl GatewayManager {
             .await
             .map_err(|e| ToolError::internal_message(format!("config read task failed: {e}")))??;
         let registry = self.builtin_service_registry();
-        let (cfg, migration) =
-            quarantine_unregistered_virtual_servers(cfg, registry.as_ref());
+        let (cfg, migration) = quarantine_unregistered_virtual_servers(cfg, registry.as_ref());
         if migration.changed() {
             tracing::warn!(
                 action = "gateway.config.migrate",
@@ -449,9 +448,7 @@ async fn snapshot_from_pool(pool: Option<Arc<UpstreamPool>>) -> GatewayCatalogSn
             .map(|tool| tool.tool.name.to_string())
             .collect(),
         resources: pool
-            .routable_upstream_names(
-                crate::upstream::types::UpstreamCapability::Resources,
-            )
+            .routable_upstream_names(crate::upstream::types::UpstreamCapability::Resources)
             .await
             .into_iter()
             .collect(),

@@ -20,9 +20,7 @@ use std::sync::{Arc, RwLock};
 use lab_gateway::gateway::config_store::{GatewayConfigStore, StoreFuture};
 use lab_runtime::gateway_config::{GatewayConfig, ResolvedPublicUrls};
 
-use crate::config::{
-    EnvCredential, LabConfig, backup_env, env_is_up_to_date, home_dir, write_env,
-};
+use crate::config::{EnvCredential, LabConfig, backup_env, env_is_up_to_date, home_dir, write_env};
 use crate::dispatch::clients::SharedServiceClients;
 use crate::dispatch::error::ToolError;
 
@@ -170,10 +168,7 @@ impl GatewayConfigStore for LabConfigStore {
 /// Map a service's `{FIELD: value}` set to host [`EnvCredential`]s. A
 /// `{SERVICE}_URL` field is treated as the service URL; everything else is a
 /// secret credential.
-fn values_to_service_creds(
-    service: &str,
-    values: &BTreeMap<String, String>,
-) -> Vec<EnvCredential> {
+fn values_to_service_creds(service: &str, values: &BTreeMap<String, String>) -> Vec<EnvCredential> {
     let url_field = format!("{}_URL", service.to_uppercase());
     values
         .iter()
@@ -399,10 +394,7 @@ url = \"https://alpha.example.com/mcp\"
 
         // Load the full LabConfig and seed the store with it.
         let loaded = load_gateway_config(&path).expect("load config");
-        let store = LabConfigStore::new(
-            Arc::new(RwLock::new(loaded.clone())),
-            path.clone(),
-        );
+        let store = LabConfigStore::new(Arc::new(RwLock::new(loaded.clone())), path.clone());
 
         // Mutate a gateway-owned upstream and persist through the host store.
         let mut gw = loaded.to_gateway_config();

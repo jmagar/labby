@@ -141,7 +141,10 @@ impl GatewayManager {
     }
 
     #[must_use]
-    pub fn with_builtin_service_registry(mut self, registry: Arc<dyn GatewayServiceRegistry>) -> Self {
+    pub fn with_builtin_service_registry(
+        mut self,
+        registry: Arc<dyn GatewayServiceRegistry>,
+    ) -> Self {
         self.builtin_service_registry = Arc::new(ArcSwap::from_pointee(registry));
         self
     }
@@ -237,7 +240,10 @@ impl GatewayManager {
     }
 
     #[cfg(any(test, feature = "testkit"))]
-    pub async fn replace_config_for_tests(&self, upstream: Vec<lab_runtime::gateway_config::UpstreamConfig>) {
+    pub async fn replace_config_for_tests(
+        &self,
+        upstream: Vec<lab_runtime::gateway_config::UpstreamConfig>,
+    ) {
         self.seed_config(GatewayConfig {
             upstream,
             ..GatewayConfig::default()

@@ -3,7 +3,6 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use lab_runtime::gateway_config::{CodeModeConfig, UpstreamConfig};
 use crate::gateway::service_registry::GatewayServiceRegistry;
 use crate::gateway::types::{
     GatewayConfigView, GatewayRuntimeView, ServiceConfigFieldView, ServiceConfigView,
@@ -12,8 +11,9 @@ use crate::gateway::view_models::{
     ServerConfigSummaryView, ServerView, SurfaceStateView, SurfaceStatesView,
 };
 use crate::gateway::virtual_servers::{VirtualServerRecord, VirtualServerSource};
-use lab_runtime::redact::{redact_stdio_args, redact_stdio_value, redact_url};
 use crate::upstream::pool::{UpstreamCachedSummary, UpstreamPool};
+use lab_runtime::gateway_config::{CodeModeConfig, UpstreamConfig};
+use lab_runtime::redact::{redact_stdio_args, redact_stdio_value, redact_url};
 /// Per-service health probe result. Carried through gateway projection so the
 /// `ServerView` can surface upstream-service reachability without forcing the
 /// caller to thread separate fields.

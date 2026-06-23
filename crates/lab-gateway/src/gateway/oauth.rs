@@ -1,8 +1,8 @@
 use serde::Serialize;
 
-use lab_runtime::error::ToolError;
 use crate::gateway::manager::GatewayManager;
 use lab_auth::upstream::types::BeginAuthorization;
+use lab_runtime::error::ToolError;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct UpstreamOauthStatusView {

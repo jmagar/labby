@@ -3,10 +3,10 @@
 
 use std::collections::BTreeSet;
 
-use lab_runtime::gateway_config::{VirtualServerConfig, VirtualServerSurfacesConfig};
 use crate::gateway::config::{load_gateway_config, write_gateway_config};
 use crate::gateway::manager::pool_lifecycle::quarantine_unregistered_virtual_servers;
 use crate::gateway::manager::{GatewayCatalogSnapshot, diff_catalogs};
+use lab_runtime::gateway_config::{VirtualServerConfig, VirtualServerSurfacesConfig};
 
 use super::*;
 

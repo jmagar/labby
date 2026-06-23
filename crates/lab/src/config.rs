@@ -741,12 +741,12 @@ fn invalid_protected_route(
 // bin-target unused-import lint.
 #[allow(unused_imports)]
 pub use lab_runtime::gateway_config::{
-    CodeModeConfig, ConfigError, GatewayConfig, GatewayImportMode, GatewayPreferences, ImportSource,
-    ProtectedGatewaySubsetTarget, ProtectedMcpRouteConfig, ProtectedMcpRouteEffectiveTarget,
-    ProtectedMcpRouteTarget, ResolvedPublicUrls, UpstreamConfig, UpstreamImportTombstone,
-    UpstreamOauthConfig, UpstreamOauthMode, UpstreamOauthRegistration, VirtualServerConfig,
-    VirtualServerMcpPolicyConfig, VirtualServerSurfacesConfig, WebPreferences, default_mcp_path,
-    default_true, normalize_protected_backend_url,
+    CodeModeConfig, ConfigError, GatewayConfig, GatewayImportMode, GatewayPreferences,
+    ImportSource, ProtectedGatewaySubsetTarget, ProtectedMcpRouteConfig,
+    ProtectedMcpRouteEffectiveTarget, ProtectedMcpRouteTarget, ResolvedPublicUrls, UpstreamConfig,
+    UpstreamImportTombstone, UpstreamOauthConfig, UpstreamOauthMode, UpstreamOauthRegistration,
+    VirtualServerConfig, VirtualServerMcpPolicyConfig, VirtualServerSurfacesConfig, WebPreferences,
+    default_mcp_path, default_true, normalize_protected_backend_url,
 };
 // Re-exported for the public `labby::config` API surface (consumed by the
 // `upstream_oauth` integration test); not referenced within the binary build,

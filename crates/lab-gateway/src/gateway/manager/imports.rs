@@ -1,14 +1,14 @@
 //! Discovery import orchestration: auto-import, the pending-import queue, and
 //! import tombstone management.
 
-use lab_runtime::gateway_config::{GatewayConfig, UpstreamConfig, UpstreamImportTombstone};
-use lab_runtime::error::ToolError;
 use crate::gateway::config::{insert_upstream, write_gateway_config};
 use crate::gateway::types::{
     GatewayView, ImportErrorView, ImportResultView, ImportSkipReason, ImportSkipView,
     ImportTombstoneView, PendingDiscoveryOutcome, PendingImportView,
 };
 use crate::upstream::types::UpstreamRuntimeOwner;
+use lab_runtime::error::ToolError;
+use lab_runtime::gateway_config::{GatewayConfig, UpstreamConfig, UpstreamImportTombstone};
 
 use super::GatewayManager;
 use super::import_matchers::{
@@ -108,11 +108,12 @@ impl GatewayManager {
             return Ok(ImportResultView::default());
         };
 
-        let discovered = tokio::task::spawn_blocking(move || {
-            crate::gateway::discovery::discover_all(&home)
-        })
-        .await
-        .map_err(|e| ToolError::internal_message(format!("discovery task panicked: {e}")))?;
+        let discovered =
+            tokio::task::spawn_blocking(move || crate::gateway::discovery::discover_all(&home))
+                .await
+                .map_err(|e| {
+                    ToolError::internal_message(format!("discovery task panicked: {e}"))
+                })?;
 
         let cfg = self.current_config().await;
         let (mut result, specs_to_add) = partition_discovered_for_import(&cfg, discovered);
@@ -158,11 +159,12 @@ impl GatewayManager {
             return Ok(PendingDiscoveryOutcome::default());
         };
 
-        let discovered = tokio::task::spawn_blocking(move || {
-            crate::gateway::discovery::discover_all(&home)
-        })
-        .await
-        .map_err(|e| ToolError::internal_message(format!("discovery task panicked: {e}")))?;
+        let discovered =
+            tokio::task::spawn_blocking(move || crate::gateway::discovery::discover_all(&home))
+                .await
+                .map_err(|e| {
+                    ToolError::internal_message(format!("discovery task panicked: {e}"))
+                })?;
 
         let _mutation_guard = self.config_mutation.lock().await;
         let mut cfg = self.config.read().await.clone();
@@ -322,11 +324,12 @@ impl GatewayManager {
                 "cannot determine home directory for MCP config restore",
             ));
         };
-        let discovered = tokio::task::spawn_blocking(move || {
-            crate::gateway::discovery::discover_all(&home)
-        })
-        .await
-        .map_err(|e| ToolError::internal_message(format!("discovery task panicked: {e}")))?;
+        let discovered =
+            tokio::task::spawn_blocking(move || crate::gateway::discovery::discover_all(&home))
+                .await
+                .map_err(|e| {
+                    ToolError::internal_message(format!("discovery task panicked: {e}"))
+                })?;
 
         let _mutation_guard = self.config_mutation.lock().await;
         let mut cfg = self.config.read().await.clone();

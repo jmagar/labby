@@ -1,9 +1,11 @@
 //! Upstream OAuth manager/cache reconciliation tests across reloads.
 
-use lab_runtime::gateway_config::{UpstreamOauthConfig, UpstreamOauthMode, UpstreamOauthRegistration};
 use crate::gateway::config::write_gateway_config;
 use lab_auth::upstream::cache::OauthClientCache;
 use lab_auth::upstream::manager::UpstreamOauthManager;
+use lab_runtime::gateway_config::{
+    UpstreamOauthConfig, UpstreamOauthMode, UpstreamOauthRegistration,
+};
 
 use super::*;
 

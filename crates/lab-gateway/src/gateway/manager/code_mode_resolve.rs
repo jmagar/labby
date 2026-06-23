@@ -3,10 +3,10 @@
 
 use std::collections::HashMap;
 
-use lab_runtime::error::ToolError;
 use crate::gateway::code_mode::split_upstream_tool;
 use crate::upstream::pool::tool_has_mcp_app_ui_resource;
 use crate::upstream::types::{UpstreamRuntimeOwner, UpstreamTool};
+use lab_runtime::error::ToolError;
 
 use super::GatewayManager;
 

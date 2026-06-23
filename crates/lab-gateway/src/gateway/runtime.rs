@@ -11,18 +11,18 @@ use nix::errno::Errno;
 use tempfile::NamedTempFile;
 use tokio::sync::RwLock;
 
-use lab_runtime::gateway_config::{GatewayConfig, UpstreamConfig};
-use lab_runtime::error::ToolError;
 use crate::gateway::manager::GatewayManager;
 use crate::gateway::projection::{redacted_gateway_target, upstream_summary};
-use crate::upstream::pool::UpstreamPool;
-use crate::upstream::types::UpstreamRuntimeOwner;
 #[cfg(all(unix, target_os = "linux"))]
 use crate::process::unix::terminate_process_group_sigkill;
 #[cfg(unix)]
 use crate::process::unix::{pid_is_alive, terminate_sigkill};
 #[cfg(target_os = "linux")]
 use crate::process::unix::{process_group_id, process_has_ancestor, read_cmdline};
+use crate::upstream::pool::UpstreamPool;
+use crate::upstream::types::UpstreamRuntimeOwner;
+use lab_runtime::error::ToolError;
+use lab_runtime::gateway_config::{GatewayConfig, UpstreamConfig};
 
 #[derive(Clone, Default)]
 pub struct GatewayRuntimeHandle {

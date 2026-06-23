@@ -3,9 +3,9 @@
 
 use std::collections::HashSet;
 
-use lab_runtime::gateway_config::{GatewayConfig, UpstreamConfig, UpstreamImportTombstone};
 use crate::gateway::discovery::DiscoveredServer;
 use crate::gateway::types::{ImportResultView, ImportSkipReason, ImportSkipView};
+use lab_runtime::gateway_config::{GatewayConfig, UpstreamConfig, UpstreamImportTombstone};
 
 fn tombstone_matches_discovered(
     tombstone: &UpstreamImportTombstone,

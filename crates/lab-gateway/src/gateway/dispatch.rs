@@ -1,10 +1,10 @@
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use lab_runtime::error::ToolError;
 use lab_runtime::dispatch_helpers::{
     action_schema, handle_builtin, help_payload, require_str, to_json,
 };
+use lab_runtime::error::ToolError;
 
 use super::SHARED_GATEWAY_OAUTH_SUBJECT;
 use super::catalog::ACTIONS;
@@ -645,12 +645,8 @@ async fn handle_oauth_actions(
                 .as_deref()
                 .unwrap_or(SHARED_GATEWAY_OAUTH_SUBJECT);
             to_json(
-                crate::gateway::oauth::begin_authorization(
-                    manager,
-                    &params.upstream,
-                    subject,
-                )
-                .await?,
+                crate::gateway::oauth::begin_authorization(manager, &params.upstream, subject)
+                    .await?,
             )
         }
         "gateway.oauth.status" => {
@@ -659,9 +655,7 @@ async fn handle_oauth_actions(
                 .subject
                 .as_deref()
                 .unwrap_or(SHARED_GATEWAY_OAUTH_SUBJECT);
-            to_json(
-                crate::gateway::oauth::status(manager, &params.upstream, subject).await?,
-            )
+            to_json(crate::gateway::oauth::status(manager, &params.upstream, subject).await?)
         }
         "gateway.oauth.clear" => {
             let params: GatewayOauthNameParams = parse_params(params_value)?;

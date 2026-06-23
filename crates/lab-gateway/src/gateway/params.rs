@@ -2,8 +2,10 @@ use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use lab_runtime::gateway_config::{CodeModeConfig, ProtectedMcpRouteConfig, UpstreamConfig, UpstreamOauthConfig};
 use crate::upstream::types::UpstreamRuntimeOwner;
+use lab_runtime::gateway_config::{
+    CodeModeConfig, ProtectedMcpRouteConfig, UpstreamConfig, UpstreamOauthConfig,
+};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct GatewayRuntimeOwnerParams {

@@ -1,11 +1,11 @@
 //! Manager-level protected-route management: live resolver lookups plus CRUD
 //! that keeps the in-memory route index in sync with persisted config.
 
-use lab_runtime::gateway_config::{GatewayConfig, ProtectedMcpRouteConfig};
-use lab_runtime::error::ToolError;
 use crate::gateway::config::{
     insert_protected_mcp_route, remove_protected_mcp_route, update_protected_mcp_route,
 };
+use lab_runtime::error::ToolError;
+use lab_runtime::gateway_config::{GatewayConfig, ProtectedMcpRouteConfig};
 
 use super::GatewayManager;
 
