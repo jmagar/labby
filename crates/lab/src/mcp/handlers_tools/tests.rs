@@ -118,13 +118,16 @@ async fn code_mode_manager(
         runtime,
     ));
     manager
-        .seed_config(crate::config::LabConfig {
-            code_mode: crate::config::CodeModeConfig {
-                enabled,
-                ..crate::config::CodeModeConfig::default()
-            },
-            ..crate::config::LabConfig::default()
-        })
+        .seed_config(
+            crate::config::LabConfig {
+                code_mode: crate::config::CodeModeConfig {
+                    enabled,
+                    ..crate::config::CodeModeConfig::default()
+                },
+                ..crate::config::LabConfig::default()
+            }
+            .to_gateway_config(),
+        )
         .await;
     manager
 }
@@ -157,14 +160,17 @@ async fn code_mode_manager_with_pool_and_upstreams(
         runtime,
     ));
     manager
-        .seed_config(crate::config::LabConfig {
-            code_mode: crate::config::CodeModeConfig {
-                enabled,
-                ..crate::config::CodeModeConfig::default()
-            },
-            upstream: upstreams,
-            ..crate::config::LabConfig::default()
-        })
+        .seed_config(
+            crate::config::LabConfig {
+                code_mode: crate::config::CodeModeConfig {
+                    enabled,
+                    ..crate::config::CodeModeConfig::default()
+                },
+                upstream: upstreams,
+                ..crate::config::LabConfig::default()
+            }
+            .to_gateway_config(),
+        )
         .await;
     manager
 }
@@ -2205,21 +2211,24 @@ async fn snapshot_catalog_hides_mcp_disabled_virtual_services() {
         runtime,
     ));
     manager
-        .seed_config(crate::config::LabConfig {
-            virtual_servers: vec![crate::config::VirtualServerConfig {
-                id: "deploy".to_string(),
-                service: "deploy".to_string(),
-                enabled: true,
-                surfaces: crate::config::VirtualServerSurfacesConfig {
-                    cli: false,
-                    api: false,
-                    mcp: false,
-                    webui: false,
-                },
-                mcp_policy: None,
-            }],
-            ..crate::config::LabConfig::default()
-        })
+        .seed_config(
+            crate::config::LabConfig {
+                virtual_servers: vec![crate::config::VirtualServerConfig {
+                    id: "deploy".to_string(),
+                    service: "deploy".to_string(),
+                    enabled: true,
+                    surfaces: crate::config::VirtualServerSurfacesConfig {
+                        cli: false,
+                        api: false,
+                        mcp: false,
+                        webui: false,
+                    },
+                    mcp_policy: None,
+                }],
+                ..crate::config::LabConfig::default()
+            }
+            .to_gateway_config(),
+        )
         .await;
 
     let server = test_server(
@@ -2242,23 +2251,26 @@ async fn service_actions_json_filters_to_allowed_mcp_actions() {
         runtime,
     ));
     manager
-        .seed_config(crate::config::LabConfig {
-            virtual_servers: vec![crate::config::VirtualServerConfig {
-                id: "deploy".to_string(),
-                service: "deploy".to_string(),
-                enabled: true,
-                surfaces: crate::config::VirtualServerSurfacesConfig {
-                    cli: false,
-                    api: false,
-                    mcp: true,
-                    webui: false,
-                },
-                mcp_policy: Some(crate::config::VirtualServerMcpPolicyConfig {
-                    allowed_actions: vec!["server.info".to_string()],
-                }),
-            }],
-            ..crate::config::LabConfig::default()
-        })
+        .seed_config(
+            crate::config::LabConfig {
+                virtual_servers: vec![crate::config::VirtualServerConfig {
+                    id: "deploy".to_string(),
+                    service: "deploy".to_string(),
+                    enabled: true,
+                    surfaces: crate::config::VirtualServerSurfacesConfig {
+                        cli: false,
+                        api: false,
+                        mcp: true,
+                        webui: false,
+                    },
+                    mcp_policy: Some(crate::config::VirtualServerMcpPolicyConfig {
+                        allowed_actions: vec!["server.info".to_string()],
+                    }),
+                }],
+                ..crate::config::LabConfig::default()
+            }
+            .to_gateway_config(),
+        )
         .await;
 
     let server = test_server(

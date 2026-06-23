@@ -382,10 +382,13 @@ fn refresh_built_in_upstream_registry(enabled: bool) {
     // is nothing to refresh.
     #[cfg(feature = "gateway")]
     if let Some(manager) = current_gateway_manager() {
-        manager.set_builtin_service_registry(crate::registry::filter_built_in_upstream_apis(
+        let registry: std::sync::Arc<
+            dyn lab_gateway::gateway::service_registry::GatewayServiceRegistry,
+        > = std::sync::Arc::new(crate::registry::filter_built_in_upstream_apis(
             crate::registry::build_default_registry(),
             enabled,
         ));
+        manager.set_builtin_service_registry(registry);
     }
 }
 

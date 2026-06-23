@@ -660,13 +660,16 @@ mod tests {
             runtime,
         ));
         manager
-            .seed_config(crate::config::LabConfig {
-                code_mode: crate::config::CodeModeConfig {
-                    enabled: true,
-                    ..crate::config::CodeModeConfig::default()
-                },
-                ..crate::config::LabConfig::default()
-            })
+            .seed_config(
+                crate::config::LabConfig {
+                    code_mode: crate::config::CodeModeConfig {
+                        enabled: true,
+                        ..crate::config::CodeModeConfig::default()
+                    },
+                    ..crate::config::LabConfig::default()
+                }
+                .to_gateway_config(),
+            )
             .await;
         LabMcpServer {
             registry: std::sync::Arc::new(crate::registry::ToolRegistry::new()),

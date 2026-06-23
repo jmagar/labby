@@ -306,6 +306,46 @@ impl lab_gateway::registry::InProcessServiceRegistry for ToolRegistry {
     }
 }
 
+// === lab-gateway service-registry seam ===
+//
+// The gateway manager needs read-only access to the host registry: the set of
+// registered service names, each service's actions, and the `&'static PluginMeta`
+// for a service. It depends only on the `GatewayServiceRegistry` trait (a
+// supertrait of `InProcessServiceRegistry`); we implement it here for
+// `ToolRegistry` and inject it at manager construction.
+impl lab_gateway::gateway::service_registry::GatewayServiceRegistry for ToolRegistry {
+    fn service_names(&self) -> Vec<&'static str> {
+        self.services.iter().map(|service| service.name).collect()
+    }
+
+    fn contains_service(&self, name: &str) -> bool {
+        self.service(name).is_some()
+    }
+
+    fn service_actions(
+        &self,
+        name: &str,
+    ) -> Option<Vec<lab_gateway::gateway::service_registry::ServiceActionInfo>> {
+        self.service(name).map(|service| {
+            service
+                .actions
+                .iter()
+                .map(
+                    |action| lab_gateway::gateway::service_registry::ServiceActionInfo {
+                        name: action.name,
+                        description: action.description,
+                        destructive: action.destructive,
+                    },
+                )
+                .collect()
+        })
+    }
+
+    fn service_meta(&self, name: &str) -> Option<&'static PluginMeta> {
+        service_meta(name)
+    }
+}
+
 const ALWAYS_VISIBLE_SERVICES: &[&str] = &[
     "init",
     "setup",

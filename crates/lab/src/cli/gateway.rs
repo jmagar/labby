@@ -15,6 +15,7 @@ use dispatch::dispatch_command;
 
 use crate::config::{LabConfig, config_toml_path, resolve_auth_for_config};
 use crate::dispatch::clients::SharedServiceClients;
+use crate::dispatch::gateway::config_store::LabConfigStore;
 use crate::dispatch::gateway::install_gateway_manager;
 use crate::dispatch::gateway::manager::{
     GatewayManager, GatewayManagerConfig, GatewayOauthConfig, GatewayRuntimeHandle,
@@ -65,11 +66,20 @@ async fn build_manager_with_upstream_oauth_runtime(
         runtime.swap(Some(pool)).await;
     }
 
+    let config_path = config_toml_path().unwrap_or_else(|| "config.toml".into());
+    let live_config = Arc::new(std::sync::RwLock::new(config.clone()));
+    let store: Arc<dyn lab_gateway::gateway::config_store::GatewayConfigStore> = Arc::new(
+        LabConfigStore::new(Arc::clone(&live_config), config_path.clone())
+            .with_service_clients(SharedServiceClients::from_env()),
+    );
+    let registry: Arc<dyn lab_gateway::gateway::service_registry::GatewayServiceRegistry> =
+        Arc::new(filtered_builtin_service_registry(config));
+
     let manager = GatewayManager::from_config(
         GatewayManagerConfig {
-            config_path: config_toml_path().unwrap_or_else(|| "config.toml".into()),
+            config_path,
+            store,
             registry,
-            service_clients: SharedServiceClients::from_env(),
             in_process_connector: None,
             oauth: upstream_oauth_runtime.map(|rt| GatewayOauthConfig {
                 managers: rt.managers,
@@ -82,7 +92,7 @@ async fn build_manager_with_upstream_oauth_runtime(
         runtime,
     );
     let manager = Arc::new(manager);
-    manager.seed_config(config.clone()).await;
+    manager.seed_config(config.to_gateway_config()).await;
     install_gateway_manager(Arc::clone(&manager));
     manager
 }

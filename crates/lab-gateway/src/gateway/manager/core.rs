@@ -236,7 +236,7 @@ impl GatewayManager {
         .with_relay_timeout(relay_timeout)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testkit"))]
     pub async fn replace_config_for_tests(&self, upstream: Vec<lab_runtime::gateway_config::UpstreamConfig>) {
         self.seed_config(GatewayConfig {
             upstream,

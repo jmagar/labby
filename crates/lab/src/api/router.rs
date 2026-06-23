@@ -2584,7 +2584,7 @@ mod tests {
         ));
         let config =
             protected_route_config("syslog", "mcp.tootie.tv", "/syslog", "http://10.0.0.2:3100");
-        manager.seed_config(config.clone()).await;
+        manager.seed_config(config.to_gateway_config()).await;
         let state = AppState::new()
             .with_config(config)
             .with_gateway_manager(manager);
@@ -2621,7 +2621,7 @@ mod tests {
         ));
         let config =
             protected_route_config("syslog", "mcp.tootie.tv", "/syslog", "http://10.0.0.2:3100");
-        manager.seed_config(config.clone()).await;
+        manager.seed_config(config.to_gateway_config()).await;
         let state = AppState::new()
             .with_config(config)
             .with_gateway_manager(manager);
@@ -2658,7 +2658,7 @@ mod tests {
         ));
         let config =
             protected_route_config("syslog", "mcp.tootie.tv", "/syslog", "http://10.0.0.2:3100");
-        manager.seed_config(config.clone()).await;
+        manager.seed_config(config.to_gateway_config()).await;
         let state = AppState::new()
             .with_config(config)
             .with_gateway_manager(manager);
@@ -2704,7 +2704,7 @@ mod tests {
             crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
         ));
         let config = protected_route_config("syslog", "mcp.tootie.tv", "/syslog", &backend.uri());
-        manager.seed_config(config.clone()).await;
+        manager.seed_config(config.to_gateway_config()).await;
         let state = AppState::new()
             .with_config(config)
             .with_gateway_manager(manager);
@@ -2793,7 +2793,7 @@ mod tests {
             }],
             ..crate::config::LabConfig::default()
         };
-        manager.seed_config(config.clone()).await;
+        manager.seed_config(config.to_gateway_config()).await;
         let state = AppState::new()
             .with_config(config)
             .with_gateway_manager(manager);
@@ -2851,7 +2851,7 @@ mod tests {
             crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
         ));
         let config = protected_route_config("syslog", "syslog.tootie.tv", "/mcp", &backend.uri());
-        manager.seed_config(config.clone()).await;
+        manager.seed_config(config.to_gateway_config()).await;
         let state = AppState::new()
             .with_config(config)
             .with_gateway_manager(manager);
@@ -2902,7 +2902,7 @@ mod tests {
             crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
         ));
         let config = protected_gateway_subset_config();
-        manager.seed_config(config.clone()).await;
+        manager.seed_config(config.to_gateway_config()).await;
         let state = AppState::new()
             .with_config(config)
             .with_gateway_manager(manager);
@@ -2937,7 +2937,7 @@ mod tests {
             crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
         ));
         let config = protected_gateway_subset_config();
-        manager.seed_config(config.clone()).await;
+        manager.seed_config(config.to_gateway_config()).await;
         let scoped_router = Router::new().route(
             "/media",
             post(|| async { Json(serde_json::json!({"scoped": true})) }),
@@ -3008,7 +3008,7 @@ mod tests {
             }],
             ..crate::config::LabConfig::default()
         };
-        manager.seed_config(config.clone()).await;
+        manager.seed_config(config.to_gateway_config()).await;
         let state = AppState::new()
             .with_config(config)
             .with_gateway_manager(manager);

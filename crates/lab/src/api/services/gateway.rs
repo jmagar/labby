@@ -154,7 +154,7 @@ mod tests {
     use crate::config::{
         LabConfig, UpstreamConfig, VirtualServerConfig, VirtualServerSurfacesConfig,
     };
-    use crate::dispatch::gateway::config::{load_gateway_config, write_gateway_config};
+    use crate::dispatch::gateway::config_store::{load_gateway_config, write_gateway_config};
     use crate::dispatch::gateway::manager::{GatewayManager, GatewayRuntimeHandle};
     use crate::registry::build_default_registry;
 
@@ -518,19 +518,22 @@ mod tests {
     async fn gateway_list_returns_stale_virtual_server_warning() {
         let manager = test_manager();
         manager
-            .seed_config(LabConfig {
-                virtual_servers: vec![VirtualServerConfig {
-                    id: "stale-registry".to_string(),
-                    service: "mcpregistry".to_string(),
-                    enabled: true,
-                    surfaces: VirtualServerSurfacesConfig {
-                        mcp: true,
-                        ..VirtualServerSurfacesConfig::default()
-                    },
-                    mcp_policy: None,
-                }],
-                ..LabConfig::default()
-            })
+            .seed_config(
+                LabConfig {
+                    virtual_servers: vec![VirtualServerConfig {
+                        id: "stale-registry".to_string(),
+                        service: "mcpregistry".to_string(),
+                        enabled: true,
+                        surfaces: VirtualServerSurfacesConfig {
+                            mcp: true,
+                            ..VirtualServerSurfacesConfig::default()
+                        },
+                        mcp_policy: None,
+                    }],
+                    ..LabConfig::default()
+                }
+                .to_gateway_config(),
+            )
             .await;
 
         let response =

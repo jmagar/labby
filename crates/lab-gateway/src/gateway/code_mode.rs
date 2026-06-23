@@ -25,7 +25,7 @@ pub use lab_codemode::{
     CodeModeSourceLookup, CodeModeSourceStore, CodeModeSurface, RunnerPool,
     code_mode_execute_trace, validate_code_mode_params_against_schema,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "testkit"))]
 pub use lab_codemode::{CodeModeExecutedCall, CodeModeExecutionResponse};
 pub use lab_codemode::{CodeModeExecutionSource, ToolDescriptor, ToolScope};
 

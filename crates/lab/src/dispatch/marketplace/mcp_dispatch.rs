@@ -591,7 +591,7 @@ async fn mcp_client_config(
     prefs: &GatewayPreferences,
 ) -> Result<Value, ToolError> {
     if let Some(url) = server.remotes.iter().find_map(|r| r.url.as_deref()) {
-        crate::dispatch::security::ssrf::validate_external_https_url(url).await?;
+        lab_gateway::security::ssrf::validate_external_https_url(url).await?;
         return Ok(serde_json::json!({ "url": url }));
     }
 
@@ -692,7 +692,7 @@ async fn install_http(
 ) -> Result<Value, ToolError> {
     let url = url.to_string();
 
-    crate::dispatch::security::ssrf::validate_external_https_url(&url).await?;
+    lab_gateway::security::ssrf::validate_external_https_url(&url).await?;
 
     // Probe for OAuth support — non-fatal, install proceeds without OAuth on failure.
     #[cfg(feature = "gateway")]

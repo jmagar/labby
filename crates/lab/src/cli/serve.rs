@@ -26,6 +26,8 @@ use crate::config::{
 #[cfg(feature = "gateway")]
 use crate::dispatch::clients::SharedServiceClients;
 #[cfg(feature = "gateway")]
+use crate::dispatch::gateway::config_store::LabConfigStore;
+#[cfg(feature = "gateway")]
 use crate::dispatch::gateway::install_gateway_manager;
 #[cfg(feature = "gateway")]
 use crate::dispatch::gateway::manager::{
@@ -1120,12 +1122,19 @@ async fn build_gateway_runtime(
     }
     let (notify_tx, notify_rx) = mpsc::unbounded_channel();
     let _catalog_notifier_task = tokio::spawn(notifier.run(notify_rx));
-    let service_clients = SharedServiceClients::from_env();
+    let config_path = config_toml_path().unwrap_or_else(|| "config.toml".into());
+    let live_config = Arc::new(std::sync::RwLock::new(config.clone()));
+    let store: Arc<dyn lab_gateway::gateway::config_store::GatewayConfigStore> = Arc::new(
+        LabConfigStore::new(Arc::clone(&live_config), config_path.clone())
+            .with_service_clients(SharedServiceClients::from_env()),
+    );
+    let registry: Arc<dyn lab_gateway::gateway::service_registry::GatewayServiceRegistry> =
+        Arc::new(registry);
     let mut gateway_manager = GatewayManager::from_config(
         GatewayManagerConfig {
-            config_path: config_toml_path().unwrap_or_else(|| "config.toml".into()),
+            config_path,
+            store,
             registry,
-            service_clients,
             in_process_connector: Some(crate::mcp::in_process_peer::connector()),
             oauth: upstream_oauth_runtime.map(|rt| GatewayOauthConfig {
                 managers: rt.managers,
@@ -1143,7 +1152,7 @@ async fn build_gateway_runtime(
     // settings match the persisted config. Normal stdio follows the same gateway
     // runtime path as HTTP; only recursive stdio children suppress upstream
     // spawning.
-    gateway_manager.seed_config(config.clone()).await;
+    gateway_manager.seed_config(config.to_gateway_config()).await;
     install_gateway_manager(Arc::clone(&gateway_manager));
     if !suppress_upstream_runtime {
         match config.gateway_import_mode {
@@ -2065,7 +2074,7 @@ mod tests {
             }],
             ..LabConfig::default()
         };
-        manager.seed_config(config.clone()).await;
+        manager.seed_config(config.to_gateway_config()).await;
         let state = AppState::new()
             .with_config(config)
             .with_gateway_manager(manager);
