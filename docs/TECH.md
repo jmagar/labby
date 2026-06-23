@@ -60,8 +60,8 @@ This document captures the locked stack and tooling choices for `lab`.
 
 - dependency versions live at the workspace root
 - lints live at the workspace root
-- feature flags are mirrored from `lab-apis` into `lab` only for real SDK
-  passthroughs; product-local slices are declared in `lab`
+- feature flags are mirrored from `labby-apis` into `labby` only for real SDK
+  passthroughs; product-local slices are declared in `labby`
 - release profile is optimized and stripped
 - dev profile keeps faster local iteration
 - release-debug profile exists for profiling and diagnostics
@@ -69,7 +69,7 @@ This document captures the locked stack and tooling choices for `lab`.
 
 ## Feature Gating
 
-`lab-apis` owns SDK feature flags. `lab` re-exports true SDK passthroughs and
+`labby-apis` owns SDK feature flags. `labby` re-exports true SDK passthroughs and
 also owns product-local feature slices.
 
 The practical rules are:
@@ -101,8 +101,8 @@ just build
 Scoped commands:
 
 ```bash
-cargo test -p lab-apis
-cargo test --manifest-path crates/lab/Cargo.toml
+cargo test -p labby-apis
+cargo test --manifest-path crates/labby/Cargo.toml
 ```
 
 Documentation verification target:

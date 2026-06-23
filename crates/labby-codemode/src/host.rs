@@ -106,7 +106,7 @@ pub(crate) struct NoopHost {
 impl Default for NoopHost {
     fn default() -> Self {
         Self {
-            pool: RunnerPool::from_env(),
+            pool: RunnerPool::from_env().expect("test process must expose current executable"),
         }
     }
 }

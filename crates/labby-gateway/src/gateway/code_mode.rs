@@ -2,9 +2,9 @@
 //!
 //! The Code Mode JS execution kernel, broker, result-shaping helpers, and
 //! snippet engine now live in `labby-codemode`. This module is the gateway's
-//! thin adapter: it re-exports the crate's public surface under the historical
-//! `crate::gateway::code_mode::*` import paths, owns the host-side
-//! render caches, and hosts `impl CodeModeHost for GatewayManager`
+//! thin adapter: it re-exports the crate's public surface under
+//! `crate::gateway::code_mode::*` import paths, owns the host-side render
+//! caches, and hosts `impl CodeModeHost for GatewayManager`
 //! (`code_mode_host.rs`) plus the upstream→`ToolDescriptor` catalog projection
 //! (`search.rs`) and the one-shot CLI catalog cache (`catalog_cache.rs`).
 
@@ -14,11 +14,6 @@ mod search;
 
 // ── Re-exports of the crate's neutral public surface ────────────────────────
 //
-// Several gateway call sites still use the historical gateway-flavored names
-// (`CodeModeCapabilityFilter`, `CodeModeCatalogEntry`, `split_upstream_tool`).
-// Those are aliased here so the broad gateway tree compiles unchanged while the
-// crate itself stays vocabulary-neutral.
-
 pub use labby_codemode::run_code_mode_runner_stdio;
 pub use labby_codemode::{
     CodeModeBroker, CodeModeCaller, CodeModeCallerCapabilities, CodeModeHistory,
@@ -29,12 +24,7 @@ pub use labby_codemode::{
 pub use labby_codemode::{CodeModeExecutedCall, CodeModeExecutionResponse};
 pub use labby_codemode::{CodeModeExecutionSource, ToolDescriptor, ToolScope};
 
-/// Historical gateway alias for the crate-neutral [`ToolScope`].
-pub type CodeModeCapabilityFilter = ToolScope;
-/// Historical gateway alias for the crate-neutral [`ToolDescriptor`].
-pub type CodeModeCatalogEntry = ToolDescriptor;
-
-pub(crate) use labby_codemode::split_namespaced_id as split_upstream_tool;
+pub(crate) use labby_codemode::split_namespaced_id;
 
 // ── Host-side render caches (gateway-owned, keyed on the live tool set) ──────
 

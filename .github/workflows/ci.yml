@@ -126,6 +126,39 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo check -p labby --no-default-features --features ${{ matrix.slice }} --all-targets --locked
 
+  extracted-crate-slices:
+    name: Extracted crate slice (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: ""
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: labby-auth-minimal
+            command: cargo check -p labby-auth --no-default-features --all-targets --locked
+          - name: labby-auth-http-axum
+            command: cargo check -p labby-auth --no-default-features --features http-axum --all-targets --locked
+          - name: labby-auth-upstream-oauth-rmcp
+            command: cargo check -p labby-auth --no-default-features --features upstream-oauth-rmcp --all-targets --locked
+          - name: labby-auth-all-runtime-features
+            command: cargo check -p labby-auth --no-default-features --features http-axum,upstream-oauth-rmcp --all-targets --locked
+          - name: labby-runtime-minimal
+            command: cargo check -p labby-runtime --no-default-features --all-targets --locked
+          - name: labby-runtime-marketplace
+            command: cargo check -p labby-runtime --no-default-features --features marketplace --all-targets --locked
+          - name: labby-runtime-acp-registry
+            command: cargo check -p labby-runtime --no-default-features --features acp_registry --all-targets --locked
+          - name: labby-runtime-deploy
+            command: cargo check -p labby-runtime --no-default-features --features deploy --all-targets --locked
+          - name: labby-runtime-all-features
+            command: cargo check -p labby-runtime --no-default-features --features marketplace,acp_registry,deploy --all-targets --locked
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: Swatinem/rust-cache@v2
+      - run: ${{ matrix.command }}
+
   docs-check:
     name: Generated docs
     runs-on: ubuntu-latest
@@ -225,6 +258,9 @@ jobs:
           }
 
           exit $process.ExitCode
+      - name: Run Windows Job Object reaping integration test
+        shell: pwsh
+        run: cargo nextest run -p labby --test windows_job_object_reaping --all-features --locked --profile ci --run-ignored ignored-only
 
   release-smoke:
     name: Release smoke (${{ matrix.os }})

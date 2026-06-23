@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use crate::gateway::code_mode::split_upstream_tool;
+use crate::gateway::code_mode::split_namespaced_id;
 use crate::upstream::pool::tool_has_mcp_app_ui_resource;
 use crate::upstream::types::{UpstreamRuntimeOwner, UpstreamTool};
 use labby_runtime::error::ToolError;
@@ -340,7 +340,7 @@ impl ToolExecuteSelector {
     /// over an embedded `<upstream>::` prefix in `name`.
     ///
     /// The `<upstream>::<tool>` splitting is delegated to
-    /// [`split_upstream_tool`] (from `code_mode::types`) so the two callers
+    /// [`split_namespaced_id`] (from `labby-codemode`) so the two callers
     /// share one implementation.
     fn parse(name: &str, upstream: Option<&str>) -> Result<Self, ToolError> {
         let explicit_upstream = upstream.map(str::trim).filter(|value| !value.is_empty());
@@ -374,7 +374,7 @@ impl ToolExecuteSelector {
         // instead of an inline `split_once("..")` so the two implementations
         // stay in sync (e.g. both reject `a::b::c` and empty segments).
         if trimmed_name.contains("::") {
-            return match split_upstream_tool(trimmed_name) {
+            return match split_namespaced_id(trimmed_name) {
                 Some((upstream_name, tool_name)) => Ok(Self {
                     upstream: Some(upstream_name.to_string()),
                     tool_name: tool_name.to_string(),

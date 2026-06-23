@@ -18,6 +18,7 @@ use crate::registry::{RegisteredService, build_docs_registry};
 const LABBY_CRATE: &str = "labby";
 const LABBY_APIS_CRATE: &str = "labby-apis";
 const LABBY_APIS_PREFIX: &str = "labby-apis/";
+const EXTRACTED_FEATURE_CRATES: &[&str] = &["labby-auth", "labby-runtime"];
 
 pub fn build_docs_projection(repo_root: &Path) -> Result<DocsProjection> {
     let registry = build_docs_registry();
@@ -245,6 +246,11 @@ fn build_feature_matrix(repo_root: &Path) -> Result<FeatureMatrix> {
         });
     }
 
+    for crate_name in EXTRACTED_FEATURE_CRATES {
+        let manifest = read_manifest(&repo_root.join(format!("crates/{crate_name}/Cargo.toml")))?;
+        push_extracted_crate_features(crate_name, manifest.features, &mut features);
+    }
+
     features.sort_by(|a, b| {
         (a.crate_name.as_str(), a.feature.as_str())
             .cmp(&(b.crate_name.as_str(), b.feature.as_str()))
@@ -254,6 +260,32 @@ fn build_feature_matrix(repo_root: &Path) -> Result<FeatureMatrix> {
         features,
         mismatches,
     })
+}
+
+fn push_extracted_crate_features(
+    crate_name: &str,
+    crate_features: BTreeMap<String, Vec<String>>,
+    features: &mut Vec<FeatureDoc>,
+) {
+    let default = feature_set(&crate_features, "default");
+    let all = feature_set(&crate_features, "all");
+    for (feature, deps) in crate_features {
+        let classification = if matches!(feature.as_str(), "all" | "default") {
+            FeatureClass::AggregateDefault
+        } else {
+            FeatureClass::ExtractedCrate
+        };
+        features.push(FeatureDoc {
+            crate_name: crate_name.to_string(),
+            feature: feature.clone(),
+            dependencies: deps,
+            included_in_default: default.contains(feature.as_str()),
+            included_in_all: all.contains(feature.as_str()),
+            classification,
+            mapped_crate_feature: None,
+            exception_reason: exception_reason(classification).map(str::to_string),
+        });
+    }
 }
 
 fn read_manifest(path: &Path) -> Result<CargoManifest> {
@@ -300,7 +332,10 @@ fn classify_lab_feature(
 ) -> FeatureClass {
     if matches!(feature, "all" | "default") {
         FeatureClass::AggregateDefault
-    } else if matches!(feature, "gateway" | "marketplace" | "fs" | "lab-admin") {
+    } else if matches!(
+        feature,
+        "gateway" | "marketplace" | "fs" | "deploy" | "acp_registry" | "lab-admin"
+    ) {
         FeatureClass::ProductSlice
     } else if matches!(feature, "node-runtime") {
         FeatureClass::BinaryOnly
@@ -362,6 +397,7 @@ fn exception_reason(classification: FeatureClass) -> Option<&'static str> {
         FeatureClass::ProductSlice => Some("standalone product slice"),
         FeatureClass::BinaryOnly => Some("binary-only Lab feature"),
         FeatureClass::HelperInternal => Some("helper/internal feature"),
+        FeatureClass::ExtractedCrate => Some("extracted crate feature"),
         FeatureClass::AggregateDefault => Some("aggregate/default feature"),
         FeatureClass::IntentionalException => Some("intentional crate-local exception"),
         FeatureClass::ServicePassthrough | FeatureClass::SdkOnly => None,

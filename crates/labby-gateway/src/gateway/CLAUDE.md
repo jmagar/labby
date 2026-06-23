@@ -69,7 +69,7 @@ What stays in `dispatch/gateway/code_mode/` is the gateway's **thin adapter**:
 
 | Module | Responsibilities |
 |--------|-----------------|
-| `code_mode.rs` (parent) | Re-exports the crate's public surface under the historical `code_mode::*` paths (with `CodeModeCapabilityFilter`/`CodeModeCatalogEntry`/`split_upstream_tool` aliases), and owns the host-side `CatalogRenderCache` / `SnippetMetadataCache`. |
+| `code_mode.rs` (parent) | Re-exports the crate's neutral public surface under `code_mode::*` paths and owns the host-side `CatalogRenderCache` / `SnippetMetadataCache`. |
 | `code_mode/code_mode_host.rs` | `impl CodeModeHost for GatewayManager` — the upstream→`ToolDescriptor` binding, `callTool` over the `UpstreamPool`, mcp-ui capture + result unwrap, upstream-error classification, snippet source resolution, OAuth-subject / runtime-owner derivation. This is the one place gateway/upstream vocabulary is legitimately reintroduced. |
 | `code_mode/search.rs` | Host-side discovery catalog projection + render cache (`build_tools_render`). |
 | `code_mode/catalog_cache.rs` | One-shot CLI on-disk catalog cache (gateway-config fingerprinted). |

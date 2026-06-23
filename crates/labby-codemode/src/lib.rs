@@ -26,7 +26,7 @@ mod execute;
 pub mod host;
 mod normalize;
 mod pool;
-pub mod preamble;
+mod preamble;
 mod protocol;
 mod runner;
 mod runner_drive;
@@ -37,7 +37,7 @@ pub mod snippet;
 mod trace;
 mod truncate;
 /// Live TypeScript signature / `.d.ts` generator for Code Mode tool descriptors.
-pub mod ts_signatures;
+mod ts_signatures;
 mod types;
 mod util;
 mod wrapper;

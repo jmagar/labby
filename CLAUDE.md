@@ -24,24 +24,28 @@ Shared dispatch ownership and adapter direction are governed by `docs/dev/DISPAT
 **Service onboarding rule.** When bringing a service online, follow the dispatch/module layout in `docs/dev/SERVICE_ONBOARDING.md`, update generated docs, then validate with the all-features test/build path. The older `labby scaffold service` / `labby audit onboarding` workflow is not part of the current CLI surface unless those commands are restored in code.
 
 **Nested guides.** Subdirectories carry their own `CLAUDE.md` with rules that don't belong at the root. Read the nearest one when working in:
-- `crates/lab-apis/src/core/` — trait contracts, error taxonomy, HttpClient invariants
-- `crates/lab/src/dispatch/` — shared dispatch layer, required service layout, canonical templates
-- `crates/lab/src/dispatch/upstream/` — upstream MCP proxy pool, circuit breaker, layer contract
-- `crates/lab/src/mcp/` — dispatch, envelopes, elicitation, catalog
-- `crates/lab/src/cli/` — thin-shim pattern, destructive flags, batch commands
-- `crates/lab/src/api/` — axum HTTP surface, status code mapping, middleware stack
+- `crates/labby-apis/src/core/` — trait contracts, error taxonomy, HttpClient invariants
+- `crates/labby/src/dispatch/` — product dispatch layer, required service layout, canonical templates
+- `crates/labby-gateway/src/upstream/` — upstream MCP proxy pool, circuit breaker, layer contract
+- `crates/labby/src/mcp/` — dispatch, envelopes, elicitation, catalog
+- `crates/labby/src/cli/` — thin-shim pattern, destructive flags, batch commands
+- `crates/labby/src/api/` — axum HTTP surface, status code mapping, middleware stack
 
 ## Repository Structure
 
-Four crates. Pure API clients live in `lab-apis`. HTTP/OAuth auth middleware
-lives in `lab-auth`. Windows process-tree reaping lives in `lab-winjob`.
-Everything else (CLI, MCP, HTTP API, Labby serving, dispatch, binary) lives in
-`lab`.
+The workspace is split into reusable crates plus one product binary crate. Pure
+SDK/domain clients live in `labby-apis`. HTTP/OAuth auth middleware and
+upstream OAuth runtime live in `labby-auth`. Shared transport-neutral contracts
+and helpers live in `labby-runtime`. Code Mode execution lives in
+`labby-codemode`. Gateway runtime/proxy orchestration lives in `labby-gateway`.
+Embedded/static web serving lives in `labby-web`. Windows process-tree reaping
+lives in `labby-winjob`. CLI, MCP, HTTP API adapters, config loading, product
+dispatch, and the `labby` binary live in `labby`.
 
 ```
 lab/
 ├── crates/
-│   ├── lab-apis/                     # PURE Rust SDK — reusable in any binary
+│   ├── labby-apis/                   # PURE Rust SDK — reusable in any binary
 │   │   ├── Cargo.toml                # deps: reqwest, serde, thiserror, tokio
 │   │   └── src/
 │   │       ├── lib.rs                # re-exports, feature gates
@@ -56,10 +60,14 @@ lab/
 │   │       ├── setup/                 # setup pure data/client helpers
 │   │       └── stash/                 # stash pure data types
 │   │
-│   ├── lab-auth/                     # HTTP/OAuth auth middleware and storage
-│   ├── lab-winjob/                   # Windows Job Object helper crate
-│   └── lab/                          # BINARY: cli + mcp + api + main
-│       ├── Cargo.toml                # deps: lab-apis, lab-auth, clap, rmcp, axum, anyhow
+│   ├── labby-auth/                   # HTTP/OAuth auth middleware and storage
+│   ├── labby-runtime/                # ToolError, config DTOs, path/security helpers
+│   ├── labby-codemode/               # Code Mode runner kernel + snippet engine
+│   ├── labby-gateway/                # Gateway manager, upstream pool, OAuth lifecycle
+│   ├── labby-web/                    # Embedded/filesystem web asset serving
+│   ├── labby-winjob/                 # Windows Job Object helper crate
+│   └── labby/                        # BINARY: cli + mcp + api + product dispatch
+│       ├── Cargo.toml                # deps: labby-*, clap, rmcp, axum, anyhow
 │       └── src/
 │           ├── main.rs
 │           ├── api.rs                # axum surface module declaration
@@ -97,9 +105,9 @@ When upgrading: pin to an exact version (`=X.Y.Z`), verify the `unstable` featur
 
 ## Key Patterns
 
-### Per-Service Module Structure (in `lab-apis`)
+### Per-Service Module Structure (in `labby-apis`)
 
-Every service is a module under `crates/lab-apis/src/`:
+Every service is a module under `crates/labby-apis/src/`:
 
 ```
 foo.rs              # module declaration: pub mod client; pub mod types; pub mod error; pub const META: ...
@@ -111,13 +119,13 @@ foo/
 
 Modern Rust module style: **no `mod.rs` files anywhere**. A module `foo` is declared in `foo.rs` (sibling to the `foo/` directory), not in `foo/mod.rs`.
 
-Note: `commands.rs` and `tools.rs` do **not** live here. CLI subcommands and MCP dispatch live in the `lab` crate, never in `lab-apis`.
+Note: `commands.rs` and `tools.rs` do **not** live here. CLI subcommands and MCP dispatch live in the `labby` crate, never in `labby-apis`.
 
 ### The Golden Rule
 
-Business logic lives in `lab-apis/src/<service>/client.rs`. Shared product semantics live in `crates/lab/src/dispatch/<service>/`. CLI, MCP, and HTTP are thin adapters over dispatch unless a surface has a genuine protocol-specific exception. If you're writing business logic in a CLI command, MCP handler, or API route, you're doing it wrong — move it to the client or shared dispatch layer.
+Business logic lives in `labby-apis/src/<service>/client.rs`. Shared product semantics live in `crates/labby/src/dispatch/<service>/`. CLI, MCP, and HTTP are thin adapters over dispatch unless a surface has a genuine protocol-specific exception. If you're writing business logic in a CLI command, MCP handler, or API route, you're doing it wrong — move it to the client or shared dispatch layer.
 
-The two-crate split enforces this structurally: `lab-apis` doesn't depend on `clap` or `rmcp`, so you literally cannot reach for them while writing business logic.
+The crate split enforces this structurally: `labby-apis` doesn't depend on `clap` or `rmcp`, so you literally cannot reach for them while writing business logic.
 
 ### One Tool Per Service (MCP) — action + subaction dispatch
 
@@ -162,18 +170,18 @@ See `docs/surfaces/MCP.md` for the MCP surface and `docs/CONVENTIONS.md` for the
 
 ### Adding a New Service
 
-1. `mkdir crates/lab-apis/src/foo/`
+1. `mkdir crates/labby-apis/src/foo/`
 2. Define types in `types.rs` from API spec/docs
 3. Implement `FooClient` methods in `client.rs`
 4. Add observability at the shared boundary and confirm it matches `docs/dev/OBSERVABILITY.md`
 5. Implement `ServiceClient` trait for health checks
-6. Add `#[cfg(feature = "foo")] pub mod foo;` to `lab-apis/src/lib.rs`
-7. Add `foo = []` feature to `crates/lab-apis/Cargo.toml`
-8. Create the shared dispatch layer in `crates/lab/src/dispatch/foo/` following the required layout in `crates/lab/src/dispatch/CLAUDE.md` (catalog.rs, client.rs, params.rs, dispatch.rs + entry `foo.rs`)
-9. Create CLI subcommands in `crates/lab/src/cli/foo.rs` calling the dispatch layer
-10. Create API route group in `crates/lab/src/api/services/foo.rs` calling the dispatch layer
-11. Register in `crates/lab/src/registry.rs` (via `register_service!` inside `build_default_registry()`), `crates/lab/src/cli.rs`, and `crates/lab/src/api/router.rs`
-12. Add `foo = ["lab-apis/foo"]` passthrough to `crates/lab/Cargo.toml`
+6. Add `#[cfg(feature = "foo")] pub mod foo;` to `labby-apis/src/lib.rs`
+7. Add `foo = []` feature to `crates/labby-apis/Cargo.toml`
+8. Create the shared dispatch layer in `crates/labby/src/dispatch/foo/` following the required layout in `crates/labby/src/dispatch/CLAUDE.md` (catalog.rs, client.rs, params.rs, dispatch.rs + entry `foo.rs`)
+9. Create CLI subcommands in `crates/labby/src/cli/foo.rs` calling the dispatch layer
+10. Create API route group in `crates/labby/src/api/services/foo.rs` calling the dispatch layer
+11. Register in `crates/labby/src/registry.rs` (via `register_service!` inside `build_default_registry()`), `crates/labby/src/cli.rs`, and `crates/labby/src/api/router.rs`
+12. Add `foo = ["labby-apis/foo"]` passthrough to `crates/labby/Cargo.toml`
 
 A service is not fully online until one successful path and one failing path are traceable end to end without leaking secrets.
 
@@ -195,9 +203,9 @@ impl FooClient {
 
 ### Config Loading
 
-**`lab-apis` never reads files or env vars on its own.** Config loading lives entirely in `crates/lab/src/config.rs`. The library exposes optional `from_env()` helpers; the binary calls them.
+**`labby-apis` never reads files or env vars on its own.** Config loading lives entirely in `crates/labby/src/config.rs`. The library exposes optional `from_env()` helpers; the binary calls them.
 
-Naming convention for env vars (read by `lab`, not `lab-apis`):
+Naming convention for env vars (read by `labby`, not `labby-apis`):
 - `{SERVICE}_URL` — base URL
 - `{SERVICE}_API_KEY` — API key (for ApiKey auth)
 - `{SERVICE}_TOKEN` — token (for Token/Bearer auth)
@@ -217,7 +225,7 @@ Every service entry-point file that participates in generated metadata declares 
 
 ### Error Handling
 
-- `lab-apis`: use `thiserror` for typed errors per service; every service error wraps `ApiError` transparently.
+- `labby-apis`: use `thiserror` for typed errors per service; every service error wraps `ApiError` transparently.
 - `lab` binary: use `anyhow` to wrap everything.
 - Always return `Result<T>`, never panic.
 - `docs/dev/ERRORS.md` is canonical for stable `kind` values, dispatcher-level kinds, MCP and HTTP envelope behavior, and status mapping.
@@ -271,11 +279,11 @@ Use **native `async fn in trait`** (stable in Rust 1.75+). Do **not** add the `a
 
 ### Output Formatting
 
-All formatting lives in `crates/lab/src/output.rs`. `lab-apis` types are pure data.
+All formatting lives in `crates/labby/src/output.rs`. `labby-apis` types are pure data.
 
 `docs/design/SERIALIZATION.md` is the canonical source of truth for serde ownership, stable envelopes, and output boundaries.
 
-- Support `--json` by serializing the underlying `lab-apis` type with `serde_json`
+- Support `--json` by serializing the underlying `labby-apis` type with `serde_json`
 - Use `tracing` for debug/verbose output, never `println!` for debug info
 
 ## Tech Stack
@@ -283,10 +291,10 @@ All formatting lives in `crates/lab/src/output.rs`. `lab-apis` types are pure da
 | Crate | Purpose | Lives in |
 |-------|---------|----------|
 | tokio | async runtime | both |
-| reqwest | HTTP client (rustls-tls) | lab-apis |
-| serde + serde_json | serialization | lab-apis |
-| thiserror | library errors | lab-apis |
-| wiremock | HTTP mocking (tests) | lab-apis |
+| reqwest | HTTP client (rustls-tls) | labby-apis |
+| serde + serde_json | serialization | labby-apis |
+| thiserror | library errors | labby-apis |
+| wiremock | HTTP mocking (tests) | labby-apis |
 | clap | CLI parsing (derive) | lab |
 | rmcp | MCP server | lab |
 | dotenvy | .env loading | lab |
@@ -355,13 +363,13 @@ The bearer-via-`/auth/session` path returns `sub: "static-bearer"` so admin-gate
 Scoped to a single crate:
 
 ```bash
-cargo nextest run -p lab-apis        # client tests only (fast, wiremock-based)
-cargo nextest run --manifest-path crates/lab/Cargo.toml --all-features  # CLI/MCP/API tests
+cargo nextest run -p labby-apis        # client tests only (fast, wiremock-based)
+cargo nextest run --manifest-path crates/labby/Cargo.toml --all-features  # CLI/MCP/API tests
 ```
 
 ## Testing
 
-- Unit tests: mock HTTP with `wiremock` in `lab-apis`, run in CI
+- Unit tests: mock HTTP with `wiremock` in `labby-apis`, run in CI
 - Integration tests: hit real services, run locally only (marked `#[ignore]`)
 - Test runner: `cargo-nextest` (parallel execution)
 - The authoritative test/build signal is the all-features workspace run, not a partial-feature slice
@@ -390,7 +398,7 @@ just test-integration
 - Treat all-features warnings as real; treat narrow feature-slice warnings as diagnostic only until confirmed in the normal all-features build
 - Prefer `impl Trait` over `Box<dyn Trait>` where possible
 - Prefer concrete types over generics unless sharing demands it
-- Never add `clap`, `rmcp`, `axum`, or `anyhow` to `lab-apis` — they belong in product/runtime crates only
+- Never add `clap`, `rmcp`, `axum`, or `anyhow` to `labby-apis` — they belong in product/runtime crates only
 - **No `mod.rs` files.** Modern Rust module style only: a module `foo` is declared in `foo.rs` sibling to its `foo/` directory, never in `foo/mod.rs`
 
 ## Plugin setup hooks and install flow

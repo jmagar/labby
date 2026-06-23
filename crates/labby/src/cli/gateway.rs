@@ -34,19 +34,15 @@ pub(crate) async fn build_manager(
         &auth_config,
     )
     .await?;
-    Ok(build_manager_with_upstream_oauth_runtime(
-        config,
-        discover_upstreams,
-        upstream_oauth_runtime,
-    )
-    .await)
+    build_manager_with_upstream_oauth_runtime(config, discover_upstreams, upstream_oauth_runtime)
+        .await
 }
 
 async fn build_manager_with_upstream_oauth_runtime(
     config: &LabConfig,
     discover_upstreams: bool,
     upstream_oauth_runtime: Option<crate::oauth::upstream::runtime::UpstreamOauthRuntime>,
-) -> Arc<GatewayManager> {
+) -> Result<Arc<GatewayManager>> {
     let runtime = GatewayRuntimeHandle::default();
     if discover_upstreams {
         // Seed lazily (mirroring `serve`): catalog entries come from config
@@ -89,14 +85,14 @@ async fn build_manager_with_upstream_oauth_runtime(
             }),
         },
         runtime,
-    );
+    )?;
     let manager = Arc::new(manager);
     manager
         .try_seed_config(config.to_gateway_config())
         .await
         .expect("loaded gateway config must normalize and validate");
     install_gateway_manager(Arc::clone(&manager));
-    manager
+    Ok(manager)
 }
 
 fn filtered_builtin_service_registry(config: &LabConfig) -> ToolRegistry {
@@ -400,8 +396,9 @@ mod tests {
             "https://lab.example.com/auth/upstream/callback".to_string(),
         );
 
-        let manager =
-            build_manager_with_upstream_oauth_runtime(&config, true, Some(oauth_runtime)).await;
+        let manager = build_manager_with_upstream_oauth_runtime(&config, true, Some(oauth_runtime))
+            .await
+            .expect("build gateway manager");
 
         assert!(
             manager.upstream_oauth_manager("axon").is_some(),

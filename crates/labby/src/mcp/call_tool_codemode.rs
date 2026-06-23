@@ -20,8 +20,8 @@ use serde_json::Value;
 
 use crate::dispatch::error::ToolError as DispatchToolError;
 use crate::dispatch::gateway::code_mode::{
-    CodeModeBroker, CodeModeCaller, CodeModeCallerCapabilities, CodeModeCapabilityFilter,
-    CodeModeExecutionSource, CodeModeHistoryEntry, CodeModeHistoryKind, code_mode_execute_trace,
+    CodeModeBroker, CodeModeCaller, CodeModeCallerCapabilities, CodeModeExecutionSource,
+    CodeModeHistoryEntry, CodeModeHistoryKind, ToolScope, code_mode_execute_trace,
 };
 use crate::mcp::context::{auth_context_from_extensions, tool_execute_scope_allowed};
 use crate::mcp::envelope::{build_error, build_error_extra};
@@ -155,7 +155,7 @@ pub(crate) fn code_arg(args: &JsonObject) -> Result<&str, DispatchToolError> {
 fn route_scoped_capability_filter(
     args: &JsonObject,
     route_allowed: Option<&BTreeSet<String>>,
-) -> Result<CodeModeCapabilityFilter, DispatchToolError> {
+) -> Result<ToolScope, DispatchToolError> {
     let requested_upstreams = string_array_arg(args, "upstreams")?;
     if let Some(allowed) = route_allowed
         && requested_upstreams
@@ -171,12 +171,12 @@ fn route_scoped_capability_filter(
 
     let tools = string_array_arg(args, "tools")?;
     let Some(allowed) = route_allowed else {
-        return Ok(CodeModeCapabilityFilter::new(requested_upstreams, tools));
+        return Ok(ToolScope::new(requested_upstreams, tools));
     };
     let filter = if requested_upstreams.is_empty() {
-        CodeModeCapabilityFilter::scoped_namespaces(allowed.iter().cloned().collect(), tools)
+        ToolScope::scoped_namespaces(allowed.iter().cloned().collect(), tools)
     } else {
-        CodeModeCapabilityFilter::scoped_namespaces(requested_upstreams, tools)
+        ToolScope::scoped_namespaces(requested_upstreams, tools)
     };
     Ok(filter)
 }

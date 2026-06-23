@@ -106,6 +106,7 @@ pub enum FeatureClass {
     ProductSlice,
     BinaryOnly,
     HelperInternal,
+    ExtractedCrate,
     AggregateDefault,
     IntentionalException,
 }

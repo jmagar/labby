@@ -110,7 +110,7 @@ const CODEMODE_TOP_LEVEL_RESERVED: &[&str] = &["search", "describe", "run", "ste
 /// KNOWN COLLISION: `movie.search` and `movie_search` both map to `movie_search`
 /// — last insert wins when building the namespace. A `tracing::debug!` is emitted
 /// when a collision is detected.
-pub fn tool_name_to_snake(name: &str) -> String {
+pub(crate) fn tool_name_to_snake(name: &str) -> String {
     if name.is_empty() {
         return "_".to_string();
     }

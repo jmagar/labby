@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use crate::dispatch::error::ToolError;
 use crate::dispatch::gateway::code_mode::{
-    CodeModeBroker, CodeModeCaller, CodeModeCapabilityFilter, CodeModeSourceLookup, CodeModeSurface,
+    CodeModeBroker, CodeModeCaller, CodeModeSourceLookup, CodeModeSurface, ToolScope,
 };
 use crate::dispatch::helpers::{action_schema, help_payload, lab_home, require_str, to_json};
 use labby_codemode::CodeModeExecutionResponse;
@@ -70,7 +70,7 @@ impl SnippetPromotionContext {
             actor_key: None,
             is_admin: true,
             route_scope: "root".to_string(),
-            capability_filter_fingerprint: CodeModeCapabilityFilter::default().fingerprint(),
+            capability_filter_fingerprint: ToolScope::default().fingerprint(),
         }
     }
 }
@@ -321,7 +321,7 @@ async fn execute_snippet_outcome(
             CodeModeCaller::TrustedLocal,
             CodeModeSurface::Cli,
             config,
-            CodeModeCapabilityFilter::default(),
+            ToolScope::default(),
         )
         .await
         .map_err(|error| error.into_tool_error())?;

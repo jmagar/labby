@@ -7,16 +7,16 @@ It also includes a product-local device runtime subsystem. That subsystem is sep
 ## Core Shape
 
 - One workspace
-- Four crates (`lab-apis`, `lab`, `lab-auth`, and `lab-winjob`)
-- One binary
+- Reusable `labby-*` crates plus one product binary crate
+- One `labby` binary
 - A small set of feature-gated product slices
 - One MCP tool per service
 
 ## Crate Split
 
-### `crates/lab-apis`
+### `crates/labby-apis`
 
-`lab-apis` is the pure SDK layer. It owns:
+`labby-apis` is the pure SDK layer. It owns:
 
 - typed service clients
 - request and response models
@@ -30,47 +30,83 @@ It also includes a product-local device runtime subsystem. That subsystem is sep
 It does not own CLI parsing, MCP transport, HTTP routing, `.env` file loading,
 or shell-facing UX.
 
-### `crates/lab-auth`
+### `crates/labby-auth`
 
-`lab-auth` is the auth middleware crate. It owns:
+`labby-auth` is the auth middleware crate. It owns:
 
 - OAuth 2.0 authorization server (Google OIDC provider)
 - JWT signing and validation (RS256)
 - SQLite-backed token and session storage
 - axum middleware and route handlers
+- upstream OAuth manager/cache/runtime helpers
 
-It is separated from `lab-apis` because it depends on `axum`, which is
+It is separated from `labby-apis` because it depends on `axum`, which is
 forbidden in the pure SDK crate. It does not own CLI parsing or MCP transport.
 
-### `crates/lab-winjob`
+### `crates/labby-runtime`
 
-`lab-winjob` is the small Windows Job Object helper crate. It contains the
-platform FFI needed for process-tree reaping on Windows so the main `lab` crate
-can keep `unsafe_code = "forbid"`.
+`labby-runtime` owns surface-neutral contracts and helpers used across product
+and extracted runtime crates:
 
-### `crates/lab`
+- `ToolError`
+- gateway config DTOs
+- dispatch helper payloads
+- redaction and path-safety helpers
+- shared security/spawn guards
+- feature-gated pure DTO dependencies
 
-`lab` is the product binary. It owns:
+### `crates/labby-codemode`
+
+`labby-codemode` is the client-neutral Code Mode execution kernel. It owns the
+Javy/QuickJS runner protocol, warm runner pool, result shaping, snippet engine,
+and TypeScript descriptor generation. Hosts inject tools through `CodeModeHost`.
+
+### `crates/labby-gateway`
+
+`labby-gateway` is the reusable gateway runtime. It owns upstream MCP proxy
+pools, discovery/import orchestration, virtual servers, protected routes,
+gateway OAuth lifecycle, manager state, and the Code Mode host adapter. It does
+not own product config rendering or `.env` writes; those are injected by the
+host through `GatewayConfigStore`.
+
+### `crates/labby-web`
+
+`labby-web` owns embedded and filesystem static asset serving for Labby web UI
+exports, including symlink escape defense.
+
+### `crates/labby-winjob`
+
+`labby-winjob` is the small Windows Job Object helper crate. It contains the
+platform FFI needed for process-tree reaping on Windows so the main workspace
+can keep `unsafe_code = "forbid"` elsewhere.
+
+### `crates/labby`
+
+`labby` is the product binary. It owns:
 
 - CLI commands
 - MCP server registration and dispatch
+- HTTP API route mounting
 - config loading
 - output rendering
 - install/uninstall flows
 - doctor and operator workflows
 - the device runtime and fleet state store
+- product-local dispatch and config-store adapters
 
-It must stay thin at the surface boundary, but it still owns shared product dispatch and product-local systems such as gateway and upstream management.
+It must stay thin at the surface boundary. Reusable gateway, Code Mode, auth,
+web-serving, and runtime helpers stay in their extracted crates.
 
 ## Golden Rule
 
-If behavior is shared across product surfaces, it belongs in one shared execution layer. Upstream API logic belongs in `lab-apis`; product-surface dispatch belongs in `crates/lab/src/dispatch`. The CLI and MCP layers are adapters, not logic owners.
+If behavior is shared across product surfaces, it belongs in one shared execution layer. Upstream API logic belongs in `labby-apis`; reusable gateway/runtime/code-mode behavior belongs in the extracted `labby-*` crates; product-surface dispatch belongs in `crates/labby/src/dispatch`. The CLI, MCP, HTTP, and web layers are adapters, not logic owners.
 
 That rule is structural, not aspirational:
 
-- `lab-apis` has no `clap`, `rmcp`, or `axum`
-- `lab-auth` has no `clap` or `rmcp`
-- `lab` depends on `lab-apis` and `lab-auth` rather than duplicating service logic
+- `labby-apis` has no `clap`, `rmcp`, or `axum`
+- `labby-auth` has no `clap` or `rmcp`
+- `labby-runtime` has no product-surface transport dependencies
+- `labby` depends on extracted crates rather than duplicating runtime logic
 
 ## Module Layout
 
@@ -80,14 +116,14 @@ The workspace uses modern Rust module layout:
 - a module `foo` is declared in `foo.rs`
 - its submodules live in `foo/`
 
-Per-service layout in `lab-apis`:
+Per-service layout in `labby-apis`:
 
 - `<service>.rs`
 - `<service>/client.rs`
 - `<service>/types.rs`
 - `<service>/error.rs`
 
-Per-service layout in `lab` typically includes:
+Per-service layout in `labby` typically includes:
 
 - `src/dispatch/<service>.rs` plus `src/dispatch/<service>/`
 - `src/cli/<service>.rs`
@@ -157,7 +193,7 @@ opts into:
 
 All three consume the same service metadata and service clients.
 
-The canonical ownership and dependency rules between `lab-apis`, the shared dispatch layer, and the product surfaces live in [DISPATCH.md](./DISPATCH.md).
+The canonical ownership and dependency rules between `labby-apis`, extracted runtime crates, the shared dispatch layer, and the product surfaces live in [DISPATCH.md](./dev/DISPATCH.md).
 
 ## Logging Shape
 
@@ -167,8 +203,8 @@ The canonical source of truth is [OBSERVABILITY.md](./OBSERVABILITY.md).
 
 High-level ownership is:
 
-- `lab` owns caller context and dispatch logging
-- `lab-apis::core::HttpClient` owns outbound request logging and transport failure detail
+- `labby` owns caller context and dispatch logging
+- `labby-apis::core::HttpClient` owns outbound request logging and transport failure detail
 
 Required boundary rules:
 
@@ -183,16 +219,16 @@ Field-level requirements, redaction rules, and verification gates live in [OBSER
 
 Normal request flow:
 
-1. Load config in `lab`
+1. Load config in `labby`
 2. Construct the correct SDK client or product-local subsystem
-3. Dispatch through the shared `crates/lab/src/dispatch` layer
+3. Dispatch through the shared `crates/labby/src/dispatch` layer
 4. Let `HttpClient` handle auth, retry, timeout, and error mapping for upstream-backed services
 5. Return typed or surface-neutral data to the caller surface
 6. Render via CLI, MCP envelope, API envelope, or web view
 
 ## Config Boundary
 
-`lab-apis` never reads config files or ambient env on its own. Config loading lives in `lab`.
+`labby-apis` never reads config files or ambient env on its own. Config loading lives in `labby`.
 
 - secrets: `~/.lab/.env`
 - preferences: `config.toml` (`./` → `~/.lab/` → `~/.config/lab/`)
@@ -209,16 +245,16 @@ feature flag.
 For a first-class service or capability, add only the surfaces it actually
 supports:
 
-- a `lab-apis` module when the service needs pure data types, SDK clients, or
+- a `labby-apis` module when the service needs pure data types, SDK clients, or
   shared metadata
-- one shared dispatch entry in `crates/lab/src/dispatch`
+- one shared dispatch entry in `crates/labby/src/dispatch`
 - CLI, MCP, API, and web adapters only when the service exposes those surfaces
 - one `PluginMeta` when it participates in generated env/service metadata
 - one health-check implementation when it models a remotely configured service
 
-Product-local surfaces are explicit. `crates/lab-apis::marketplace` exports pure
+Product-local surfaces are explicit. `crates/labby-apis::marketplace` exports pure
 types while all dispatch and filesystem behavior lives under
-`crates/lab/src/dispatch/marketplace/`; [`GATEWAY.md`](./services/GATEWAY.md)
+`crates/labby/src/dispatch/marketplace/`; [`GATEWAY.md`](./services/GATEWAY.md)
 documents the product-local management surface for runtime upstream
 configuration; and [`DEVICE_RUNTIME.md`](./runtime/DEVICE_RUNTIME.md) describes
 the device runtime that turns every `labby serve` process into either the fleet

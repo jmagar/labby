@@ -351,17 +351,22 @@ The workspace uses Rust 2024, resolver 3, and a single workspace version.
 
 | Path | Role |
 | --- | --- |
-| [crates/lab-apis](./crates/lab-apis) | Pure SDK/domain crate for shared models, auth primitives, metadata, registry clients, ACP types, setup/doctor/stash/marketplace/device/deploy types. |
-| [crates/lab-auth](./crates/lab-auth) | OAuth/JWT/session middleware and route support for the hosted runtime. |
-| [crates/lab](./crates/lab) | Product binary crate: CLI, MCP, HTTP API, dispatch, config loading, Labby runtime, gateway, ACP orchestration, logs, setup, and output rendering. |
-| [crates/lab-winjob](./crates/lab-winjob) | Windows Job Object process-tree support, isolated so the main workspace can keep `unsafe_code = "forbid"`. |
+| [crates/labby-apis](./crates/labby-apis) | Pure SDK/domain crate for shared models, auth primitives, metadata, registry clients, ACP types, setup/doctor/stash/marketplace/device/deploy types. |
+| [crates/labby-auth](./crates/labby-auth) | OAuth/JWT/session middleware, route support, and upstream OAuth runtime. |
+| [crates/labby-runtime](./crates/labby-runtime) | Surface-neutral contracts and helpers: `ToolError`, gateway config DTOs, dispatch helpers, redaction, path safety, and security helpers. |
+| [crates/labby-codemode](./crates/labby-codemode) | Client-neutral Code Mode runner kernel, broker, result shaping, snippets, and TypeScript descriptor generation. |
+| [crates/labby-gateway](./crates/labby-gateway) | Gateway manager, upstream MCP proxy pool, Code Mode host adapter, discovery/imports, virtual servers, protected routes, and OAuth lifecycle. |
+| [crates/labby-web](./crates/labby-web) | Embedded/filesystem web asset serving with symlink escape defense. |
+| [crates/labby](./crates/labby) | Product binary crate: CLI, MCP, HTTP API, config loading, product dispatch, ACP orchestration, logs, setup, and output rendering. |
+| [crates/labby-winjob](./crates/labby-winjob) | Windows Job Object process-tree support, isolated so the main workspace can keep `unsafe_code = "forbid"`. |
 | [apps/gateway-admin](./apps/gateway-admin/README.md) | Labby web UI, statically exported and served by `labby serve`. |
 | [plugins](./plugins) | Claude/Codex plugin assets, skills, hooks, and monitor definitions. |
 | [docs](./docs/README.md) | Topic documentation and generated inventories. |
 
 Shared behavior belongs in the shared execution layer. Upstream/domain logic
-belongs in `lab-apis`; product dispatch belongs in `crates/lab/src/dispatch`;
-CLI, MCP, HTTP, and web adapters stay thin. See
+belongs in `labby-apis`; reusable gateway/runtime/code-mode behavior belongs in
+the extracted `labby-*` crates; product dispatch belongs in
+`crates/labby/src/dispatch`; CLI, MCP, HTTP, and web adapters stay thin. See
 [Architecture](./docs/ARCH.md) and [Dispatch](./docs/dev/DISPATCH.md).
 
 ## Development
@@ -430,7 +435,7 @@ artifact.
 ### ACP Runtime Notes
 
 The Rust ACP SDK is pinned exactly in
-[crates/lab/Cargo.toml](./crates/lab/Cargo.toml) as
+[crates/labby/Cargo.toml](./crates/labby/Cargo.toml) as
 `agent-client-protocol = "=0.13.1"` with the `unstable` feature. Model/config
 discovery depends on reading `session_config_options()` from the raw
 `NewSessionResponse` before `attach_session`, and model switching uses

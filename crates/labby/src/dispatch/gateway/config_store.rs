@@ -116,22 +116,19 @@ impl GatewayConfigStore for LabConfigStore {
     }
 
     fn persist(&self, cfg: &GatewayConfig) -> Result<(), ToolError> {
-        // Apply the gateway-owned sections into the live LabConfig, then render
-        // the FULL LabConfig through the foreign-key-preserving toml_edit path.
-        let mut snapshot = {
-            let guard = self
-                .config
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            guard.clone()
-        };
-        snapshot.apply_gateway_config(cfg);
-        write_gateway_config(&self.config_path, &snapshot)?;
-
+        // Reload the latest full LabConfig under the write lock before applying
+        // gateway-owned sections. Other Labby surfaces may have updated known
+        // non-gateway config sections on disk after this store was constructed;
+        // persisting gateway state must not overwrite those newer values with a
+        // stale in-memory snapshot.
         let mut guard = self
             .config
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut snapshot = load_gateway_config(&self.config_path)?;
+        snapshot.apply_gateway_config(cfg);
+        write_gateway_config(&self.config_path, &snapshot)?;
+
         *guard = snapshot;
         Ok(())
     }
@@ -446,6 +443,45 @@ url = \"https://alpha.example.com/mcp\"
         assert!(
             rendered.contains("foo = 1"),
             "foreign section value must survive, got:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn persist_preserves_known_non_gateway_disk_changes_after_store_creation() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        let initial = "\
+[api]
+cors_origins = [\"https://old.example.com\"]
+
+[gateway]
+
+[[upstream]]
+name = \"alpha\"
+enabled = true
+url = \"https://alpha.example.com/mcp\"
+";
+        std::fs::write(&path, initial).expect("write initial config");
+
+        let loaded = load_gateway_config(&path).expect("load config");
+        let store = LabConfigStore::new(Arc::new(RwLock::new(loaded.clone())), path.clone());
+
+        let edited_on_disk = initial.replace("https://old.example.com", "https://new.example.com");
+        std::fs::write(&path, edited_on_disk).expect("simulate separate config edit");
+
+        let mut gw = loaded.to_gateway_config();
+        gw.upstream[0].enabled = false;
+        store.persist(&gw).expect("persist gateway mutation");
+
+        let reloaded = load_gateway_config(&path).expect("reload config");
+        assert!(
+            !reloaded.upstream[0].enabled,
+            "gateway upstream mutation must persist"
+        );
+        assert_eq!(
+            reloaded.api.cors_origins,
+            vec!["https://new.example.com"],
+            "known non-gateway disk edits must survive gateway persistence"
         );
     }
 

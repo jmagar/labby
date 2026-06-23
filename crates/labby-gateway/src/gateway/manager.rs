@@ -106,7 +106,7 @@ pub struct GatewayManager {
     /// progress wait for it to finish rather than spawning a second reprobe.
     pub(super) code_mode_refresh_inflight: Arc<Mutex<()>>,
     /// Cached rendered Code Mode discovery catalog, keyed by a fingerprint of
-    /// the live healthy tool list. Avoids regenerating `CodeModeCatalogEntry`
+    /// the live healthy tool list. Avoids regenerating `ToolDescriptor`
     /// structs (including TS `.signature`/`.dts` via `generate_tool_types`),
     /// the serialized JSON blob, and the JS proxy string on every lookup when
     /// the upstream catalog has not changed between calls.

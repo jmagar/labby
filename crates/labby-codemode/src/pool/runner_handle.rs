@@ -136,7 +136,7 @@ pub(crate) struct PooledRunner {
 impl PooledRunner {
     /// Spawn a fresh long-lived runner process using the host-supplied
     /// re-invocation (program + args). Defaults to `current_exe()` +
-    /// `["internal", "code-mode-runner"]` via [`RunnerSpawn::default`].
+    /// `["internal", "code-mode-runner"]` via [`RunnerSpawn::try_default`].
     pub(crate) fn spawn(spawn: &super::super::pool::RunnerSpawn) -> Result<Self, ToolError> {
         // Each runner gets its own isolated cwd. It is a long-lived TempDir; the
         // runner creates a fresh per-execution subdir under it on every `Start`.

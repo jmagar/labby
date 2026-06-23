@@ -515,7 +515,7 @@ impl GatewayManager {
         &self,
         fingerprint: &str,
     ) -> Option<(
-        Vec<crate::gateway::code_mode::CodeModeCatalogEntry>,
+        Vec<crate::gateway::code_mode::ToolDescriptor>,
         String,
         usize,
     )> {

@@ -1145,7 +1145,7 @@ async fn build_gateway_runtime(
             }),
         },
         gateway_runtime,
-    );
+    )?;
     gateway_manager.set_notifier(CatalogChangeNotifier::new(notify_tx));
     let gateway_manager = Arc::new(gateway_manager);
     // Seed config for both transports so MCP catalog visibility and code-mode

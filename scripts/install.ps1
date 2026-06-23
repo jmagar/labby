@@ -102,7 +102,7 @@ if (-not (Install-FromRelease)) {
         Fail @"
 could not install: no prebuilt release for this Windows arch and no cargo toolchain found.
 Install a Rust toolchain (https://rustup.rs) and re-run, or build from a clone:
-  git clone https://github.com/$Repo; cd lab; cargo install --path crates/lab --bin labby --all-features
+  git clone https://github.com/$Repo; cd lab; cargo install --path crates/labby --bin labby --all-features
 "@
     }
 }

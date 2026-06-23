@@ -450,15 +450,14 @@ impl LabMcpServer {
                     .route_scope
                     .allowed_upstreams()
                     .map(|allowed| {
-                        crate::dispatch::gateway::code_mode::CodeModeCapabilityFilter::scoped_namespaces(
+                        crate::dispatch::gateway::code_mode::ToolScope::scoped_namespaces(
                             allowed.iter().cloned().collect(),
                             Vec::new(),
                         )
                         .fingerprint()
                     })
                     .unwrap_or_else(|| {
-                        crate::dispatch::gateway::code_mode::CodeModeCapabilityFilter::default()
-                            .fingerprint()
+                        crate::dispatch::gateway::code_mode::ToolScope::default().fingerprint()
                     });
                 let promotion_context =
                     crate::dispatch::snippets::dispatch::SnippetPromotionContext {

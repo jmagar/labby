@@ -74,8 +74,8 @@ async fn handle(
             .map(ToOwned::to_owned),
         is_admin: has_admin_scope(auth.as_ref()),
         route_scope: "root".to_string(),
-        capability_filter_fingerprint:
-            crate::dispatch::gateway::code_mode::CodeModeCapabilityFilter::default().fingerprint(),
+        capability_filter_fingerprint: crate::dispatch::gateway::code_mode::ToolScope::default()
+            .fingerprint(),
     };
 
     handle_action_with_meta(

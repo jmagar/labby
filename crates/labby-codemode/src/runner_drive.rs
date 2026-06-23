@@ -194,7 +194,8 @@ impl<H: CodeModeHost> CodeModeBroker<'_, H> {
         &self,
         cfg: RunnerConfig,
     ) -> Result<CodeModeExecutionResponse, CodeModeExecutionError> {
-        let mut runner = PooledRunner::spawn(&super::pool::RunnerSpawn::default())?;
+        let spawn = super::pool::RunnerSpawn::try_default()?;
+        let mut runner = PooledRunner::spawn(&spawn)?;
         let outcome = self.drive_runner(&mut runner, &cfg).await;
         // The runner handle's Drop kills the process on every path here, so a
         // standalone runner is never leaked or reused.

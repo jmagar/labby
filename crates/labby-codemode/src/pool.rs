@@ -43,13 +43,16 @@ pub struct RunnerSpawn {
     pub args: Vec<String>,
 }
 
-impl Default for RunnerSpawn {
-    fn default() -> Self {
-        let program = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("labby"));
-        Self {
+impl RunnerSpawn {
+    pub fn try_default() -> Result<Self, ToolError> {
+        let program = std::env::current_exe().map_err(|err| ToolError::Sdk {
+            sdk_kind: "internal_error".to_string(),
+            message: format!("failed to resolve current executable for Code Mode runner: {err}"),
+        })?;
+        Ok(Self {
             program,
             args: vec!["internal".to_string(), "code-mode-runner".to_string()],
-        }
+        })
     }
 }
 
@@ -80,8 +83,11 @@ impl RunnerPool {
     /// pooling is disabled (`size == 0`) the pool holds no slots and every
     /// checkout returns an ephemeral runner — i.e. the spawn-per-execution
     /// fallback.
-    pub fn from_env() -> Self {
-        Self::with_config_and_spawn(PoolConfig::from_env(), RunnerSpawn::default())
+    pub fn from_env() -> Result<Self, ToolError> {
+        Ok(Self::with_config_and_spawn(
+            PoolConfig::from_env(),
+            RunnerSpawn::try_default()?,
+        ))
     }
 
     /// Build a pool with an explicit, host-supplied runner spawn seam.
@@ -91,7 +97,10 @@ impl RunnerPool {
 
     #[cfg(test)]
     pub(crate) fn with_config(config: PoolConfig) -> Self {
-        Self::with_config_and_spawn(config, RunnerSpawn::default())
+        Self::with_config_and_spawn(
+            config,
+            RunnerSpawn::try_default().expect("test process must expose current executable"),
+        )
     }
 
     fn with_config_and_spawn(config: PoolConfig, spawn: RunnerSpawn) -> Self {

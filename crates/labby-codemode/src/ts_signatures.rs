@@ -19,12 +19,12 @@ use super::namespaced_tool_id;
 use super::preamble::{namespace_segment, tool_name_to_snake};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolTypes {
-    pub signature: String,
-    pub dts: String,
+pub(crate) struct ToolTypes {
+    pub(crate) signature: String,
+    pub(crate) dts: String,
 }
 
-pub fn generate_tool_types(
+pub(crate) fn generate_tool_types(
     namespace: &str,
     tool: &str,
     description: &str,
@@ -71,7 +71,7 @@ pub fn generate_tool_types(
     ToolTypes { signature, dts }
 }
 
-pub fn json_schema_to_type(schema: Option<&Value>) -> String {
+pub(crate) fn json_schema_to_type(schema: Option<&Value>) -> String {
     let Some(schema) = schema else {
         return "unknown".to_string();
     };

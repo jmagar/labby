@@ -59,8 +59,11 @@ impl GatewayManager {
     ///
     /// Collapses the duplicated builder chains in `cli/gateway.rs`,
     /// `cli/serve.rs`, and test harnesses into one call site.
-    pub fn from_config(cfg: GatewayManagerConfig, runtime: GatewayRuntimeHandle) -> Self {
-        let mut manager = Self::with_store(cfg.config_path, runtime, cfg.store)
+    pub fn from_config(
+        cfg: GatewayManagerConfig,
+        runtime: GatewayRuntimeHandle,
+    ) -> Result<Self, ToolError> {
+        let mut manager = Self::try_with_store(cfg.config_path, runtime, cfg.store)?
             .with_builtin_service_registry(cfg.registry);
 
         if let Some(connector) = cfg.in_process_connector {
@@ -72,7 +75,7 @@ impl GatewayManager {
                 .with_oauth_client_cache(oauth.cache)
                 .with_oauth_resources(oauth.sqlite, oauth.key, oauth.redirect_uri);
         }
-        manager
+        Ok(manager)
     }
 }
 
@@ -94,8 +97,19 @@ impl GatewayManager {
         runtime: GatewayRuntimeHandle,
         store: Arc<dyn GatewayConfigStore>,
     ) -> Self {
+        Self::try_with_store(path, runtime, store)
+            .expect("current executable must resolve for Code Mode runner pool")
+    }
+
+    /// Construct a manager with an explicit host-owned config store, surfacing
+    /// runner bootstrap failures for production constructors.
+    pub fn try_with_store(
+        path: PathBuf,
+        runtime: GatewayRuntimeHandle,
+        store: Arc<dyn GatewayConfigStore>,
+    ) -> Result<Self, ToolError> {
         let registry: Arc<dyn GatewayServiceRegistry> = Arc::new(EmptyServiceRegistry);
-        Self {
+        Ok(Self {
             path,
             store,
             runtime,
@@ -117,8 +131,8 @@ impl GatewayManager {
             code_mode_refresh_inflight: Arc::new(Mutex::new(())),
             code_mode_catalog_render_cache: Arc::new(Mutex::new(None)),
             code_mode_snippet_metadata_cache: Arc::new(Mutex::new(None)),
-            code_mode_runner_pool: Arc::new(crate::gateway::code_mode::RunnerPool::from_env()),
-        }
+            code_mode_runner_pool: Arc::new(crate::gateway::code_mode::RunnerPool::from_env()?),
+        })
     }
 
     /// Override the `.env` path used by config persistence helpers (test only).

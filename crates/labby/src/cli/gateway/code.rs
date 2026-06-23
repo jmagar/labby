@@ -44,7 +44,7 @@ pub(super) async fn run_gateway_code(
                     caller,
                     surface,
                     config,
-                    crate::dispatch::gateway::code_mode::CodeModeCapabilityFilter::default(),
+                    crate::dispatch::gateway::code_mode::ToolScope::default(),
                 )
                 .await?;
             crate::output::print(&response, format)?;

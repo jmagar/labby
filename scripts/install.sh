@@ -118,7 +118,7 @@ main() {
     else
         fail "could not install: no prebuilt release for $(uname -s)/$(uname -m) and no cargo toolchain found.
 Install a Rust toolchain (https://rustup.rs) and re-run, or build from a clone:
-  git clone https://github.com/${REPO} && cd lab && cargo install --path crates/lab --bin labby --all-features"
+  git clone https://github.com/${REPO} && cd lab && cargo install --path crates/labby --bin labby --all-features"
     fi
 
     if ! command -v labby >/dev/null 2>&1; then

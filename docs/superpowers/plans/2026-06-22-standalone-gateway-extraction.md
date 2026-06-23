@@ -1251,7 +1251,7 @@ fn has_admin_scope(auth: &AuthContext) -> bool {
 pub async fn dispatch_gateway(
     State(state): State<crate::state::GatewayState>,
     Extension(auth): Extension<AuthContext>,
-    Json(req): Json<lab_runtime::gateway::GatewayActionRequest>,
+    Json(req): Json<lab_runtime::gateway_config::GatewayActionRequest>,
 ) -> Result<Json<serde_json::Value>, crate::error::ApiError> {
     if state.gateway_action_requires_admin(&req.action) && !has_admin_scope(&auth) {
         return Err(crate::error::ApiError::forbidden(format!(
