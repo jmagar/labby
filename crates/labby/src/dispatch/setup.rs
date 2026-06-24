@@ -12,6 +12,7 @@ mod claude_plugins;
 mod client;
 mod dispatch;
 mod draft;
+pub(crate) mod host_service;
 mod params;
 mod plugin_hook;
 mod secret_mask;

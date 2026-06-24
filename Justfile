@@ -54,9 +54,19 @@ build-release:
     install -D -m 755 target/release/labby bin/labby
     just link-bin
 
-# Symlink the compiled binary into PATH.
+# Copy the compiled binary into PATH.
 # Called automatically by `just build-release` and `just install`.
 link-bin profile="release":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if systemctl --user is-active --quiet labby.service 2>/dev/null; then
+      echo "error: labby.service is active; use 'just host-sync' so the service restarts onto the new binary" >&2
+      exit 1
+    fi
+    profile="{{profile}}"
+    just _install-labby-bin "$profile"
+
+_install-labby-bin profile:
     #!/usr/bin/env bash
     set -euo pipefail
     profile="{{profile}}"
@@ -70,11 +80,68 @@ link-bin profile="release":
       exit 1
     fi
     mkdir -p ~/.local/bin
-    ln -sf "$LABBY_BIN" ~/.local/bin/labby
+    if [ -x ~/.local/bin/labby ]; then
+      cp -f ~/.local/bin/labby ~/.local/bin/labby.prev
+    fi
+    install -D -m 755 "$LABBY_BIN" ~/.local/bin/labby.new
+    mv ~/.local/bin/labby.new ~/.local/bin/labby
     echo "labby → $LABBY_BIN"
 
-# Build local release-fast binary when stale, sync PATH/container bind binary,
-# rebuild the dev image only when runtime inputs changed, and restart container.
+# Build release-fast binary, copy it to the durable host path, and restart the
+# host user service. This is the preferred Labby gateway workflow because stdio
+# MCP tools, SSH config, agent caches, and credentials live on the host.
+host-sync:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    profile="{{local_release_profile}}"
+    if command -v mold >/dev/null 2>&1; then
+      export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=mold"
+    fi
+    CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-16}" cargo build --workspace --all-features --profile "$profile" --bin labby
+    just _install-labby-bin "$profile"
+    if systemctl --user is-active --quiet labby.service; then
+      ~/.local/bin/labby setup host-service restart -y
+      ~/.local/bin/labby setup host-service status --json
+    else
+      echo "error: labby.service is not active; run: just host-service-install" >&2
+      exit 1
+    fi
+
+host-service-install:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    profile="{{local_release_profile}}"
+    if command -v mold >/dev/null 2>&1; then
+      export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=mold"
+    fi
+    CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-16}" cargo build --workspace --all-features --profile "$profile" --bin labby
+    just _install-labby-bin "$profile"
+    ~/.local/bin/labby setup host-service install -y
+
+host-service-restart:
+    ~/.local/bin/labby setup host-service restart -y
+    ~/.local/bin/labby setup host-service status --json
+
+host-service-status:
+    ~/.local/bin/labby setup host-service status --json
+
+# Explicit container compatibility path. Prefer host-sync for normal gateway
+# development; this remains useful for prod-like image smoke and Docker-specific
+# ACP adapter changes.
+dev-container: web-build build-release
+    docker compose -f docker-compose.yml restart
+
+dev-container-debug:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    nightly_rustc=$(rustup which --toolchain nightly rustc)
+    RUSTC="$nightly_rustc" RUSTC_WRAPPER="" RUSTFLAGS="-C link-arg=-fuse-ld=mold -Z codegen-backend=cranelift" \
+        cargo build -p labby --all-features
+    install -D -m 755 target/debug/labby bin/labby
+    docker compose -f docker-compose.yml restart
+
+# Explicit container sync path. The normal gateway workflow is host-sync.
+# Rebuilds the dev image only when runtime inputs changed, then restarts Docker.
 sync-container:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -149,24 +216,16 @@ install: build-release
 ensure-host-dirs:
     scripts/ensure-host-dirs
 
-# Start the dev container for the first time (or after docker-compose changes)
+# Start the explicit Docker compatibility container path for the first time (or
+# after docker-compose changes).
 dev-up: ensure-host-dirs
     docker compose -f docker-compose.yml up -d
 
-# Release build + web assets → hot-swap into running dev container (no image rebuild)
-dev: web-build build-release
-    docker compose -f docker-compose.yml restart
+# Backward-compatible alias for explicit Docker compatibility smoke.
+dev: dev-container
 
-# Debug build with Cranelift codegen (fastest compile) → hot-swap into running dev container.
-# Uses nightly toolchain — RUSTFLAGS explicitly includes mold since env var overrides config.toml.
-dev-debug:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    nightly_rustc=$(rustup which --toolchain nightly rustc)
-    RUSTC="$nightly_rustc" RUSTC_WRAPPER="" RUSTFLAGS="-C link-arg=-fuse-ld=mold -Z codegen-backend=cranelift" \
-        cargo build -p labby --all-features
-    install -D -m 755 target/debug/labby bin/labby
-    docker compose -f docker-compose.yml restart
+# Backward-compatible alias for explicit Docker debug smoke.
+dev-debug: dev-container-debug
 
 # Verify Docker ACP provider config, provider health, and a minimal Codex ACP prompt.
 acp-smoke *ARGS:

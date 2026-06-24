@@ -13,10 +13,12 @@
 //! includes browser launch + headless detection; that wiring can land
 //! incrementally without breaking the CLI surface contract.
 
+use std::future::Future;
 use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::{Args, Subcommand, ValueEnum};
+use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::output::theme::CliTheme;
@@ -65,6 +67,8 @@ impl SetupModeArg {
 pub enum SetupCommand {
     /// Manage the local setup draft.
     Draft(DraftArgs),
+    /// Manage the host user systemd Labby gateway service.
+    HostService(HostServiceArgs),
     /// List installed Claude Code lab plugins.
     InstalledPlugins {
         /// Bypass the short in-process cache.
@@ -105,6 +109,38 @@ pub enum SetupCommand {
 pub struct DraftArgs {
     #[command(subcommand)]
     pub command: DraftCommand,
+}
+
+#[derive(Debug, Args)]
+pub struct HostServiceArgs {
+    #[command(subcommand)]
+    pub command: HostServiceCommand,
+}
+
+#[derive(Debug, PartialEq, Eq, Subcommand)]
+pub enum HostServiceCommand {
+    /// Print the user systemd unit that Labby would install.
+    Unit,
+    /// Install and start labby.service under systemd --user.
+    Install {
+        /// Confirm installation and service start.
+        #[arg(short = 'y', long, alias = "no-confirm")]
+        yes: bool,
+    },
+    /// Read labby.service status.
+    Status,
+    /// Restart labby.service.
+    Restart {
+        /// Confirm service restart.
+        #[arg(short = 'y', long, alias = "no-confirm")]
+        yes: bool,
+    },
+    /// Stop, disable, and remove labby.service.
+    Uninstall {
+        /// Confirm service removal.
+        #[arg(short = 'y', long, alias = "no-confirm")]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -244,6 +280,9 @@ async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<Exit
         SetupCommand::Draft(args) => {
             run_draft_command(args, format).await?;
         }
+        SetupCommand::HostService(args) => {
+            run_host_service_command(args, format).await?;
+        }
         SetupCommand::InstalledPlugins { force } => {
             let value =
                 crate::dispatch::setup::dispatch("plugins.installed", json!({ "force": force }))
@@ -319,6 +358,95 @@ async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<Exit
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+async fn run_host_service_command(args: HostServiceArgs, format: OutputFormat) -> Result<()> {
+    match args.command {
+        HostServiceCommand::Unit => {
+            run_host_service_logged(
+                "host_service.unit",
+                format,
+                crate::dispatch::setup::host_service::unit,
+            )
+            .await?;
+        }
+        HostServiceCommand::Install { yes } => {
+            require_host_service_confirmation("install", yes)?;
+            run_host_service_logged(
+                "host_service.install",
+                format,
+                crate::dispatch::setup::host_service::install,
+            )
+            .await?;
+        }
+        HostServiceCommand::Status => {
+            run_host_service_logged(
+                "host_service.status",
+                format,
+                crate::dispatch::setup::host_service::status,
+            )
+            .await?;
+        }
+        HostServiceCommand::Restart { yes } => {
+            require_host_service_confirmation("restart", yes)?;
+            run_host_service_logged(
+                "host_service.restart",
+                format,
+                crate::dispatch::setup::host_service::restart,
+            )
+            .await?;
+        }
+        HostServiceCommand::Uninstall { yes } => {
+            require_host_service_confirmation("uninstall", yes)?;
+            run_host_service_logged(
+                "host_service.uninstall",
+                format,
+                crate::dispatch::setup::host_service::uninstall,
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+fn require_host_service_confirmation(action: &str, yes: bool) -> Result<()> {
+    if yes {
+        return Ok(());
+    }
+    let error = crate::dispatch::error::ToolError::ConfirmationRequired {
+        message: format!("setup host-service {action} is destructive; pass -y/--yes to confirm"),
+    };
+    Err(anyhow::anyhow!(
+        "{}",
+        serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
+    ))
+}
+
+async fn run_host_service_logged<F, Fut, T>(
+    action: &'static str,
+    format: OutputFormat,
+    operation: F,
+) -> Result<()>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<T, crate::dispatch::error::ToolError>>,
+    T: Serialize,
+{
+    crate::cli::helpers::run_action_command(
+        "setup",
+        action.to_string(),
+        json!({}),
+        format,
+        |_action, _params| async move {
+            let value = operation().await?;
+            serde_json::to_value(value).map_err(|err| crate::dispatch::error::ToolError::Sdk {
+                sdk_kind: "internal_error".to_string(),
+                message: err.to_string(),
+            })
+        },
+    )
+    .await?;
+    Ok(())
 }
 
 async fn run_draft_command(args: DraftArgs, format: OutputFormat) -> Result<()> {
@@ -470,5 +598,70 @@ mod tests {
             panic!("expected setup draft discard subcommand");
         };
         assert!(discard.yes);
+    }
+
+    #[test]
+    fn parses_host_service_subcommands() {
+        for (command, flag, expected) in [
+            ("unit", None, HostServiceCommand::Unit),
+            (
+                "install",
+                Some("-y"),
+                HostServiceCommand::Install { yes: true },
+            ),
+            ("status", None, HostServiceCommand::Status),
+            (
+                "restart",
+                Some("-y"),
+                HostServiceCommand::Restart { yes: true },
+            ),
+            (
+                "uninstall",
+                Some("-y"),
+                HostServiceCommand::Uninstall { yes: true },
+            ),
+            (
+                "restart",
+                Some("--no-confirm"),
+                HostServiceCommand::Restart { yes: true },
+            ),
+        ] {
+            let mut args = vec!["labby", "setup", "host-service", command];
+            if let Some(flag) = flag {
+                args.push(flag);
+            }
+            let cli = crate::cli::Cli::try_parse_from(args).unwrap();
+            let crate::cli::Command::Setup(args) = cli.command else {
+                panic!("expected setup command");
+            };
+            let Some(SetupCommand::HostService(HostServiceArgs { command: actual })) = args.command
+            else {
+                panic!("expected setup host-service subcommand");
+            };
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn host_service_destructive_commands_require_confirmation_envelope() {
+        for command in [
+            HostServiceCommand::Install { yes: false },
+            HostServiceCommand::Restart { yes: false },
+            HostServiceCommand::Uninstall { yes: false },
+        ] {
+            let err = run_host_service_command(
+                HostServiceArgs { command },
+                OutputFormat::from_json_flag(
+                    true,
+                    crate::output::ColorPolicy::Plain,
+                    crate::output::RenderEnv::stdout(),
+                ),
+            )
+            .await
+            .unwrap_err();
+            let envelope: Value = serde_json::from_str(&err.to_string()).unwrap();
+
+            assert_eq!(envelope["kind"], "confirmation_required");
+        }
     }
 }

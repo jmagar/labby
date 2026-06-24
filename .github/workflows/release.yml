@@ -20,8 +20,9 @@ env:
   RUSTFLAGS: -D warnings
   # .cargo/config.toml sets rustc-wrapper = "scripts/cargo-rustc-wrapper" for
   # local dev. The wrapper is a shell script: Windows runners cannot exec it
-  # (os error 193) and the cross/aarch64 container cannot either, so disable
-  # it for all release jobs (mirrors ci.yml).
+  # (os error 193) and the cross/aarch64 container cannot either, so clear
+  # ambient wrappers and override Cargo's build.rustc-wrapper for all release
+  # jobs (mirrors ci.yml).
   RUSTC_WRAPPER: ""
   CARGO_BUILD_RUSTC_WRAPPER: ""
 

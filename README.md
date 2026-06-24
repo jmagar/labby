@@ -381,13 +381,18 @@ just lint             # skill drift + cargo wrapper smoke + clippy -D warnings +
 just deny             # cargo deny check
 just build            # cargo build --workspace --all-features
 just build-release    # release build, bin/labby install, ~/.local/bin symlink
+just host-service-install # install/start labby.service under systemd --user
+just host-sync        # release-fast rebuild + install ~/.local/bin/labby + restart host service
+just host-service-status # inspect the host Labby gateway service
+just dev-container    # explicit Docker compatibility/prod-like smoke path
+just dev-container-debug # explicit Docker debug binary path
 just web-build        # cd apps/gateway-admin && pnpm build
 just web-watch        # rebuild web assets when frontend files change
 just run -- help      # cargo run --all-features -- <args>
 just chat-local       # local Labby chat workflow with browser auth disabled
-just dev-up           # start the trusted local Docker dev stack
-just dev              # web build + release rebuild + dev-container restart
-just dev-debug        # nightly/cranelift debug rebuild + dev-container restart
+just dev-up           # start the explicit Docker compatibility stack
+just dev              # alias for just dev-container
+just dev-debug        # alias for just dev-container-debug
 just install          # build-release + symlink ~/.local/bin/labby
 just prod-run         # local prod-like image smoke on port 18765
 just mcp-token        # rotate LAB_MCP_HTTP_TOKEN in .env
@@ -407,6 +412,16 @@ only for narrow local slices or when a tool specifically requires it.
 
 Frontend changes should also run the relevant `pnpm` scripts under
 `apps/gateway-admin`, and `just web-build` when exported assets matter.
+
+### Host Gateway Runtime
+
+The default local and dookie gateway runtime is the host user service:
+`~/.local/bin/labby serve` managed by `systemd --user` as `labby.service`.
+This keeps stdio MCP tools, SSH config, local binaries, agent caches, and
+credentials in the same namespace as the gateway. Use `just host-service-install`
+once, then `just host-sync` for ordinary Rust changes. Docker remains available
+for prod-like image smoke and adapter-container work, but it is no longer the
+preferred agent gateway runtime.
 
 ### Dev Container
 

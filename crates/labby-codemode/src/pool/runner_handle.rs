@@ -158,7 +158,10 @@ impl PooledRunner {
 
         let mut child = cmd.spawn().map_err(|err| ToolError::Sdk {
             sdk_kind: "internal_error".to_string(),
-            message: format!("failed to spawn Code Mode runner: {err}"),
+            message: format!(
+                "failed to spawn Code Mode runner from `{}`: {err}",
+                spawn.program.display()
+            ),
         })?;
         let child_pid = child.id();
 

@@ -32,6 +32,7 @@ process-wrap = { version = "9.1.0", default-features = false, features = [
 nix = { version = "0.31", default-features = false, features = [
   "signal",
   "process",
+  "user",
 ] }
 sysinfo = { version = "0.38", default-features = false, features = [
   "system",
