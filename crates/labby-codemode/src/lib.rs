@@ -22,6 +22,7 @@ pub mod error {
 
 mod artifacts;
 mod broker;
+mod config;
 mod execute;
 pub mod host;
 mod normalize;
@@ -54,6 +55,7 @@ mod tests_ts_signatures;
 
 pub use broker::CodeModeBroker;
 pub(crate) use broker::lab_action_unknown_tool_hint;
+pub use config::{MAX_SOURCE_BYTES, SERVICE};
 pub use host::{CodeModeHost, ResolvedSnippet, ToolCallOutcome, ToolsRender};
 /// Re-export so hosts can name the config type from one crate path.
 pub use labby_runtime::CodeModeConfig;

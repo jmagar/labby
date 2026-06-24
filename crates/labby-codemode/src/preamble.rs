@@ -170,11 +170,24 @@ pub(crate) fn namespace_segment(name: &str) -> String {
 pub(crate) fn generate_discovery_js(entries: &[CodeModeDiscoveryEntry]) -> Result<String, String> {
     let json = serde_json::to_string(entries)
         .map_err(|err| format!("failed to serialize Code Mode discovery catalog: {err}"))?;
+    let types_map: serde_json::Map<String, serde_json::Value> = entries
+        .iter()
+        .filter(|entry| !entry.dts.is_empty())
+        .map(|entry| {
+            (
+                entry.id.clone(),
+                serde_json::Value::String(entry.dts.clone()),
+            )
+        })
+        .collect();
+    let types_json = serde_json::to_string(&serde_json::Value::Object(types_map))
+        .map_err(|err| format!("failed to serialize Code Mode type lookup: {err}"))?;
     Ok(format!(
         r##"
 globalThis.codemode = globalThis.codemode || {{}};
 var codemode = globalThis.codemode;
 var __codemodeDiscovery = {json};
+var __codemodeTypes = {types_json};
 function __codemodeNormalize(value) {{
   return String(value == null ? "" : value)
     .toLowerCase()
@@ -191,7 +204,8 @@ codemode.search = function(input) {{
     ? Math.max(1, Math.min(50, Number(input.limit)))
     : 50;
   var tokens = __codemodeTokens(query);
-  if (!tokens.length) return Promise.resolve({{ results: [], total: 0, truncated: false }});
+  var __codemodeNoMatchHint = "No matches. Broaden or try synonyms, or call codemode.__meta__.upstreams() to list namespaces and search by upstream name.";
+  if (!tokens.length) return Promise.resolve({{ results: [], total: 0, truncated: false, hint: __codemodeNoMatchHint }});
   var scored = [];
   for (var i = 0; i < __codemodeDiscovery.length; i++) {{
     var entry = __codemodeDiscovery[i];
@@ -235,6 +249,9 @@ codemode.search = function(input) {{
     return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
   }});
   var total = scored.length;
+  if (total === 0) {{
+    return Promise.resolve({{ results: [], total: 0, truncated: false, hint: __codemodeNoMatchHint }});
+  }}
   return Promise.resolve({{ results: scored.slice(0, limit), total: total, truncated: total > limit }});
 }};
 codemode.describe = function(target) {{
@@ -292,6 +309,10 @@ codemode.describe = function(target) {{
     markdown = "# " + entry.name + "\n\nKind: snippet\n\nName: `" + entry.name + "`\n\nDescription: " + entry.description + "\n\nRun: `codemode.run(" + JSON.stringify(entry.name) + ", input)`\n" + (inputLines ? "\nInputs:\n" + inputLines + "\n" : "\nInputs: none\n");
   }} else {{
     markdown = "# " + entry.path + "\n\n" + entry.description + "\n\n- kind: `tool`\n- id: `" + entry.id + "`\n- helper: `" + entry.helper + "`\n- signature: `" + entry.signature + "`\n";
+    var typeBody = __codemodeTypes[entry.id];
+    if (typeBody) {{
+      markdown += "\nParameters (TypeScript):\n\n```typescript\n" + typeBody + "```\n";
+    }}
   }}
   return Promise.resolve({{
     path: entry.path,
@@ -425,6 +446,8 @@ mod tests {
             signature: format!("codemode.{path}(params: unknown): Promise<unknown>"),
             tags: Vec::new(),
             inputs: Vec::new(),
+            schema: None,
+            dts: String::new(),
         }
     }
 
@@ -516,6 +539,57 @@ mod tests {
         assert!(js.contains("ambiguous_target"));
         assert!(js.contains("unknown_tool"));
         assert!(js.contains("Promise.resolve().then(fn)"));
+    }
+
+    #[test]
+    fn discovery_describe_surfaces_tool_type_body() {
+        let mut entry = discovery_entry("github", "list_tags", "List repository tags");
+        entry.dts =
+            "type GithubListTagsInput = { owner: string; repo: string; perPage?: number };\n"
+                .to_string();
+        let js = generate_discovery_js(&[entry]).expect("js");
+
+        assert!(js.contains("__codemodeTypes"));
+        assert!(js.contains("GithubListTagsInput"));
+        assert!(js.contains("github::list_tags"));
+        assert!(js.contains("```typescript"));
+        assert!(js.contains("owner"));
+        assert!(js.contains("repo"));
+        assert!(js.contains("perPage"));
+    }
+
+    #[test]
+    fn discovery_search_index_stays_lean_when_tools_carry_types() {
+        let mut entry = discovery_entry("github", "list_tags", "List repository tags");
+        entry.schema = Some(serde_json::json!({
+            "type": "object",
+            "properties": { "owner": { "type": "string" } },
+            "required": ["owner"],
+        }));
+        entry.dts = "type GithubListTagsInput = { owner: string };\n".to_string();
+        let js = generate_discovery_js(&[entry]).expect("js");
+
+        let discovery_slice = js
+            .split("var __codemodeTypes")
+            .next()
+            .expect("discovery array precedes type lookup");
+        assert!(!discovery_slice.contains("\"properties\""));
+        assert!(!discovery_slice.contains("\"required\""));
+        assert!(!js.contains("\"properties\""));
+    }
+
+    #[test]
+    fn discovery_search_zero_result_returns_actionable_hint() {
+        let entries = vec![discovery_entry(
+            "github",
+            "list_tags",
+            "List repository tags",
+        )];
+        let js = generate_discovery_js(&entries).expect("js");
+
+        assert!(js.contains("hint: __codemodeNoMatchHint"));
+        assert!(js.contains("codemode.__meta__.upstreams()"));
+        assert_eq!(js.matches("hint: __codemodeNoMatchHint").count(), 2);
     }
 
     #[test]

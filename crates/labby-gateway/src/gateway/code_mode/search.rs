@@ -78,7 +78,7 @@ async fn catalog_from_tools(
     {
         tracing::debug!(
             surface = "dispatch",
-            service = "codemode",
+            service = labby_codemode::SERVICE,
             action = "catalog.build",
             entry_count = entries.len(),
             "Code Mode discovery catalog served from render cache"

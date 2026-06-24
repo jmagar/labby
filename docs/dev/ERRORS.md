@@ -70,6 +70,8 @@ Dispatch layers may add the following kinds on top of SDK errors:
 > `err.kind` don't fall into the default branch.
 - `code_mode_fuel_exhausted` — **reserved, not currently emitted.** Belongs to the dead Wasmtime reference engine (`wasm_runner.rs`), which is never run on the live path. Would map to HTTP 408 if the Wasmtime path were ever revived.
 - `code_mode_timeout` — **reserved, not currently emitted.** Same dead-Wasmtime origin as above. On the live Javy/QuickJS runner, a wall-clock backstop interruption surfaces as the canonical `timeout` kind, not `code_mode_timeout`. Would map to HTTP 408 if the Wasmtime path were ever revived. See [CODE_MODE.md](./CODE_MODE.md) "Runner Architecture".
+- `call_budget_exceeded` — Code Mode rejected a `callTool` invocation after the per-run fan-out budget was reached. The in-sandbox promise rejects with this recoverable kind; reduce fan-out or split work across multiple `codemode` calls.
+- `result_too_large` — Code Mode rejected a single upstream `callTool` result before sending it into the runner because the serialized result exceeded the host-side result cap. Use `writeArtifact` for large payloads or reduce the upstream result.
 - `queue_saturated` — bounded runtime queue is full; caller should retry after the current work drains. HTTP 429.
 - `session_limit_exceeded` — ACP registry has reached `MAX_CONCURRENT_SESSIONS` (20); no new provider processes will be launched until existing sessions are closed. HTTP 429.
 - `too_many_subscribers` — a single ACP session has reached `MAX_SUBSCRIBERS_PER_SESSION` (32) concurrent SSE subscribers; the caller must reconnect later. HTTP 429.

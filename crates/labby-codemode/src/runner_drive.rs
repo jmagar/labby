@@ -23,6 +23,10 @@ use super::artifacts::{
     ActiveArtifactRun, CodeModeArtifactReceipt, CodeModeArtifactWrite, code_mode_artifact_root,
     write_code_mode_artifact,
 };
+use super::config::{
+    MAX_SNIPPET_RESOLVED_BYTES_PER_RUN, MAX_SNIPPET_RESOLVES_PER_RUN, calltool_result_max_bytes,
+    max_calltool_per_run,
+};
 use super::pool::RunnerPool;
 use super::pool::runner_handle::PooledRunner;
 use super::protocol::{CodeModeRunnerInput, CodeModeRunnerOutput};
@@ -34,8 +38,6 @@ use super::types::{
 };
 
 const ARTIFACT_WRITE_CALL_ID: &str = "code_mode::write_artifact";
-const MAX_SNIPPET_RESOLVES_PER_RUN: usize = 32;
-const MAX_SNIPPET_RESOLVED_BYTES_PER_RUN: usize = 256 * 1024;
 
 // Concrete future type for pending tool calls.
 // Using Pin<Box<dyn Future>> keeps the FuturesUnordered type concrete so the
@@ -83,6 +85,9 @@ struct DriveState {
     artifact_root: PathBuf,
     snippet_resolves: usize,
     snippet_resolved_bytes: usize,
+    calls_enqueued: u64,
+    max_calls_per_run: u64,
+    calltool_result_max_bytes: usize,
 }
 
 impl DriveState {
@@ -97,6 +102,9 @@ impl DriveState {
             artifact_root,
             snippet_resolves: 0,
             snippet_resolved_bytes: 0,
+            calls_enqueued: 0,
+            max_calls_per_run: max_calltool_per_run(),
+            calltool_result_max_bytes: calltool_result_max_bytes(),
         }
     }
 }
@@ -309,15 +317,33 @@ impl<H: CodeModeHost> CodeModeBroker<'_, H> {
 
                     match msg {
                         CodeModeRunnerOutput::ToolCall { seq, id, params } => {
-                            enqueue_tool_call(
-                                self,
-                                seq,
-                                id,
-                                params,
-                                deadline,
-                                cfg,
-                                &mut pending_tool_calls,
-                            );
+                            state.calls_enqueued = state.calls_enqueued.saturating_add(1);
+                            if state.calls_enqueued > state.max_calls_per_run {
+                                if let Err(err) = reject_tool_call_over_budget(
+                                    seq,
+                                    id,
+                                    state.max_calls_per_run,
+                                    stdin,
+                                    child,
+                                    child_pid,
+                                    deadline,
+                                    &mut state,
+                                )
+                                .await
+                                {
+                                    return DriveOutcome::RunnerUnhealthy(err);
+                                }
+                            } else {
+                                enqueue_tool_call(
+                                    self,
+                                    seq,
+                                    id,
+                                    params,
+                                    deadline,
+                                    cfg,
+                                    &mut pending_tool_calls,
+                                );
+                            }
                         }
                         CodeModeRunnerOutput::ArtifactWrite {
                             seq,
@@ -516,6 +542,55 @@ fn enqueue_tool_call<'a, H: CodeModeHost>(
         let elapsed_ms = call_start.elapsed().as_millis();
         (seq, call_id, redacted_params, result, elapsed_ms)
     }));
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn reject_tool_call_over_budget(
+    seq: u64,
+    id: String,
+    budget: u64,
+    stdin: &mut ChildStdin,
+    child: &mut tokio::process::Child,
+    child_pid: Option<u32>,
+    deadline: tokio::time::Instant,
+    state: &mut DriveState,
+) -> Result<(), CodeModeExecutionError> {
+    if state.calls_enqueued == budget.saturating_add(1) {
+        tracing::warn!(
+            surface = "dispatch",
+            service = "code_mode",
+            action = "codemode",
+            kind = "call_budget_exceeded",
+            budget,
+            "Code Mode run exceeded the per-run callTool fan-out budget; rejecting further calls"
+        );
+    }
+    write_runner_input_by_deadline(
+        stdin,
+        &CodeModeRunnerInput::ToolError {
+            seq,
+            kind: "call_budget_exceeded".to_string(),
+            message: format!(
+                "per-run callTool budget of {budget} exceeded; reduce fan-out or split the work across multiple codemode calls"
+            ),
+        },
+        deadline,
+        child,
+        child_pid,
+        &state.calls,
+    )
+    .await?;
+    state.calls.push((
+        seq,
+        CodeModeExecutedCall {
+            id,
+            ok: false,
+            elapsed_ms: 0,
+            params: None,
+            error_kind: Some("call_budget_exceeded".to_string()),
+        },
+    ));
+    Ok(())
 }
 
 /// Handle an `ArtifactWrite` event from the runner.
@@ -750,6 +825,36 @@ async fn handle_completed_tool_call(
     };
     match result {
         Ok(result) => {
+            let serialized_len = serde_json::to_vec(&result).map(|v| v.len()).unwrap_or(0);
+            if serialized_len > state.calltool_result_max_bytes {
+                let max = state.calltool_result_max_bytes;
+                write_runner_input_by_deadline(
+                    stdin,
+                    &CodeModeRunnerInput::ToolError {
+                        seq,
+                        kind: "result_too_large".to_string(),
+                        message: format!(
+                            "callTool result is {serialized_len} bytes; maximum is {max} bytes (use writeArtifact for large payloads)"
+                        ),
+                    },
+                    deadline,
+                    child,
+                    child_pid,
+                    &state.calls,
+                )
+                .await?;
+                state.calls.push((
+                    seq,
+                    CodeModeExecutedCall {
+                        id,
+                        ok: false,
+                        elapsed_ms,
+                        params,
+                        error_kind: Some("result_too_large".to_string()),
+                    },
+                ));
+                return Ok(());
+            }
             state.calls.push((
                 seq,
                 CodeModeExecutedCall {

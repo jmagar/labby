@@ -245,6 +245,14 @@ pub(crate) struct CodeModeDiscoveryEntry {
     pub(crate) signature: String,
     pub(crate) tags: Vec<String>,
     pub(crate) inputs: Vec<CodeModeSnippetInputEntry>,
+    /// Input JSON Schema for the underlying tool. Carried from the catalog for
+    /// describe-time type rendering, but skipped from the serialized search
+    /// index so the per-execute preamble stays compact.
+    #[serde(skip)]
+    pub(crate) schema: Option<Value>,
+    /// Generated `.d.ts` declaration block for the tool.
+    #[serde(skip)]
+    pub(crate) dts: String,
 }
 
 impl CodeModeDiscoveryEntry {
@@ -275,6 +283,8 @@ impl CodeModeDiscoveryEntry {
             signature: entry.signature.clone(),
             tags: entry.tags.clone(),
             inputs: entry.inputs.clone(),
+            schema: entry.schema.clone(),
+            dts: entry.dts.clone(),
         }
     }
 }

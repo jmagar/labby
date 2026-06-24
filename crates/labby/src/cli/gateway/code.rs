@@ -2,6 +2,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use anyhow::Result;
+use labby_codemode::MAX_SOURCE_BYTES;
 
 use crate::cli::gateway::{GatewayCodeArgs, GatewayCodeCommand};
 use crate::dispatch::gateway::code_mode::{CodeModeBroker, CodeModeCaller, CodeModeSurface};
@@ -13,8 +14,6 @@ pub(super) async fn run_gateway_code(
     args: GatewayCodeArgs,
     format: OutputFormat,
 ) -> Result<ExitCode> {
-    const CODE_MODE_CLI_MAX_SOURCE_BYTES: u64 = 20 * 1024;
-
     let broker = CodeModeBroker::new(Some(manager.as_ref()));
     let caller = CodeModeCaller::TrustedLocal;
     let surface = CodeModeSurface::Cli;
@@ -36,7 +35,7 @@ pub(super) async fn run_gateway_code(
             crate::output::print(&updated, format)?;
         }
         GatewayCodeCommand::Exec { code, file } => {
-            let code = read_code_mode_source(code, file, CODE_MODE_CLI_MAX_SOURCE_BYTES)?;
+            let code = read_code_mode_source(code, file, MAX_SOURCE_BYTES as u64)?;
             let config = manager.code_mode_config().await;
             let response = broker
                 .execute(
@@ -83,5 +82,19 @@ fn read_code_mode_source(
             Ok(buf)
         }
         _ => anyhow::bail!("provide exactly one of --code or --file"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_source_limit_is_shared_const_boundary() {
+        let at_limit = "a".repeat(MAX_SOURCE_BYTES);
+        assert!(read_code_mode_source(Some(at_limit), None, MAX_SOURCE_BYTES as u64).is_ok());
+
+        let over_limit = "a".repeat(MAX_SOURCE_BYTES + 1);
+        assert!(read_code_mode_source(Some(over_limit), None, MAX_SOURCE_BYTES as u64).is_err());
     }
 }

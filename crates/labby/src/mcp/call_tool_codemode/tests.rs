@@ -7,7 +7,7 @@ use super::{
 };
 use crate::config::CodeModeResultShapePolicy;
 use labby_codemode::{
-    CodeModeExecutedCall, CodeModeExecutionResponse, CodeModeResultShapeMetadata,
+    CodeModeExecutedCall, CodeModeExecutionResponse, CodeModeResultShapeMetadata, MAX_SOURCE_BYTES,
 };
 use serde_json::{Value, json};
 
@@ -54,6 +54,24 @@ fn code_arg_rejects_missing_or_blank_code() {
     let mut args = serde_json::Map::new();
     args.insert("code".to_string(), Value::String("  \n\t ".to_string()));
     let err = code_arg(&args).expect_err("blank code must be invalid");
+    assert_eq!(err.kind(), "invalid_param");
+}
+
+#[test]
+fn code_arg_source_limit_is_shared_const_boundary() {
+    let mut args = serde_json::Map::new();
+    args.insert(
+        "code".to_string(),
+        Value::String("a".repeat(MAX_SOURCE_BYTES)),
+    );
+    assert!(code_arg(&args).is_ok());
+
+    let mut args = serde_json::Map::new();
+    args.insert(
+        "code".to_string(),
+        Value::String("a".repeat(MAX_SOURCE_BYTES + 1)),
+    );
+    let err = code_arg(&args).expect_err("over-limit code must be invalid");
     assert_eq!(err.kind(), "invalid_param");
 }
 

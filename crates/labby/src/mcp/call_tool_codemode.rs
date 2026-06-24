@@ -3,8 +3,7 @@
 //! Extracted from `server.rs` (bead `lab-kvji.24.1.5`) as inherent
 //! `impl LabMcpServer` helpers. Each helper is reached only after the
 //! service-name match in `call_tool_impl` and self-`return`s its result.
-//! Owns the single definition of `CODE_MODE_DESCRIPTION` and
-//! `CODE_MODE_MAX_CODE_BYTES`, plus `string_array_arg`.
+//! Owns the single definition of `CODE_MODE_DESCRIPTION`, plus `string_array_arg`.
 //!
 //! This branch logs via `tracing` directly (not `emit_dispatch_notification`)
 //! and fires `notify_catalog_changes` around the broker call.
@@ -12,6 +11,7 @@
 use std::collections::BTreeSet;
 use std::time::Instant;
 
+use labby_codemode::{MAX_SOURCE_BYTES, SERVICE as CODE_MODE_SERVICE};
 use rmcp::ErrorData;
 use rmcp::RoleServer;
 use rmcp::model::{CallToolResult, Content, JsonObject, Meta};
@@ -30,7 +30,6 @@ use crate::mcp::result_format::{
 };
 use crate::mcp::server::LabMcpServer;
 
-pub(crate) const CODE_MODE_MAX_CODE_BYTES: usize = 20_000;
 /// Tool description for the primary `codemode` MCP tool.
 ///
 /// This description is what the model receives. Keep it under 8192 bytes.
@@ -143,10 +142,10 @@ pub(crate) fn code_arg(args: &JsonObject) -> Result<&str, DispatchToolError> {
             message: "code must not be empty".to_string(),
         });
     }
-    if code.len() > CODE_MODE_MAX_CODE_BYTES {
+    if code.len() > MAX_SOURCE_BYTES {
         return Err(DispatchToolError::Sdk {
             sdk_kind: "invalid_param".to_string(),
-            message: "code exceeds max length 20000 bytes".to_string(),
+            message: format!("code exceeds max length {MAX_SOURCE_BYTES} bytes"),
         });
     }
     Ok(code)
@@ -253,7 +252,7 @@ impl LabMcpServer {
         let capability_filter_fingerprint = capability_filter.fingerprint();
         tracing::info!(
             surface = "mcp",
-            service = "codemode",
+            service = CODE_MODE_SERVICE,
             code_mode_tool = %service,
             action = "call_tool",
             subject,
@@ -295,7 +294,7 @@ impl LabMcpServer {
                 let elapsed_ms = started.elapsed().as_millis();
                 tracing::warn!(
                     surface = "mcp",
-                    service = "codemode",
+                    service = CODE_MODE_SERVICE,
                     code_mode_tool = %service,
                     action = "call_tool",
                     subject,
@@ -348,7 +347,7 @@ impl LabMcpServer {
         if response.ui.is_some() {
             tracing::info!(
                 surface = "mcp",
-                service = "codemode",
+                service = CODE_MODE_SERVICE,
                 code_mode_tool = %service,
                 action = "mcp_app.mirror",
                 subject,
@@ -377,7 +376,7 @@ impl LabMcpServer {
             })
             .await;
         let is_admin = auth.is_none_or(|auth| auth.scopes.iter().any(|scope| scope == "lab:admin"));
-        if is_admin && code.len() <= CODE_MODE_MAX_CODE_BYTES {
+        if is_admin && code.len() <= MAX_SOURCE_BYTES {
             manager
                 .record_code_mode_source(CodeModeExecutionSource {
                     execution_id: execution_id.clone(),
@@ -432,7 +431,7 @@ impl LabMcpServer {
             .unwrap_or_else(|| "legacy".to_string());
         tracing::info!(
             surface = "mcp",
-            service = "codemode",
+            service = CODE_MODE_SERVICE,
             code_mode_tool = %service,
             action = "call_tool",
             subject,

@@ -112,7 +112,7 @@ impl LabMcpServer {
             debug_assert!(CODE_MODE_DESCRIPTION.len() < 8192);
             tracing::info!(
                 surface = "mcp",
-                service = "codemode",
+                service = labby_codemode::SERVICE,
                 action = "tool.describe",
                 description_bytes = CODE_MODE_DESCRIPTION.len(),
                 "registered primary Code Mode description"
@@ -123,7 +123,7 @@ impl LabMcpServer {
                 .unwrap_or_else(|| "<missing>".to_string());
             tracing::info!(
                 surface = "mcp",
-                service = "codemode",
+                service = labby_codemode::SERVICE,
                 action = "mcp_app.advertise",
                 resource_uri = %codemode_resource_uri,
                 skybridge_uri = %codemode_skybridge_uri,
