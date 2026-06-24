@@ -24,9 +24,10 @@ async () => {
 }
 ```
 
-Always run `codemode.search()` before calling an upstream. The live catalog is
-the authority for tool IDs, schemas, output schemas, signatures, and helper
-names.
+Always run `codemode.search()` before calling an upstream, then call
+`codemode.describe()` for the exact target when you need parameter details. The
+live catalog is the authority for tool IDs, signatures, helper names, and
+generated TypeScript parameter docs.
 
 ## Complete Working Examples
 
@@ -92,16 +93,17 @@ Each `codemode.search()` entry contains:
 | Field | Meaning |
 | --- | --- |
 | `id` | Canonical `<upstream>::<tool>` ID for `callTool`. |
-| `upstream` | Upstream gateway name. |
+| `namespace` | Upstream gateway name. |
 | `name` | Upstream tool name. |
 | `description` | Sanitized tool description. |
-| `schema` | Input JSON schema. |
-| `output_schema` | Output JSON schema when provided. |
 | `signature` | Compact callable signature. |
-| `dts` | TypeScript declaration for the `codemode.*` helper. |
+| `kind` | `tool` or `snippet`. |
+| `tags` | Snippet tags when present. |
 
 The catalog searched by `codemode.search()` is complete and in-sandbox; only
-your filtered return value enters the model context.
+your filtered return value enters the model context. Use `codemode.describe()`
+for exact target docs, including generated TypeScript parameter declarations
+for tools.
 
 ## Codemode Arguments
 
@@ -257,7 +259,8 @@ Common error kinds:
 | `validation_failed` | Fix nested schema validation errors. |
 | `confirmation_required` | Inspect the upstream schema and provide confirmation where that upstream expects it. |
 | `unknown_tool` | Rerun `codemode.search()`; use `<upstream>::<tool>` IDs only. |
-| `tool_call_limit_exceeded` | Reduce fan-out or split the work. |
+| `call_budget_exceeded` | Reduce fan-out or split the work. |
+| `result_too_large` | Reduce the upstream payload or write large data to an artifact. |
 | `timeout` | Split work into smaller executions. |
 | `oauth_needs_reauth` | Check `labby gateway mcp auth status <upstream> --json`. |
 
@@ -268,6 +271,8 @@ Implementation facts that affect operation:
 - `codemode.search()` runs inside the sandbox and cannot call tools.
 - `codemode` uses root `[code_mode]` config for timeout, response, token, log,
   and final-result shaping limits.
+- Host-side env knobs also bound runner pool overflow, artifact size/retention,
+  per-run `callTool` fan-out, and per-call result size.
 - The runner process starts with a cleared environment and temp cwd.
 - The parent host brokers all tool calls, validates schemas, applies
   confirmations, and terminates runaway executions.

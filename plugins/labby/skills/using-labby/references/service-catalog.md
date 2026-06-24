@@ -125,9 +125,9 @@ Error recovery:
   confirmation field exactly where that tool expects it.
 - `unknown_tool`: rerun `codemode.search`; Code Mode only accepts `<upstream>::<tool>` IDs,
   not `lab::...` action IDs.
-- `tool_call_limit_exceeded`: stale legacy error text; current Code Mode is
-  bounded by wall-clock time, sandbox resources, output caps, and host-side
-  tool policy.
+- `call_budget_exceeded`: reduce fan-out or split the work across executions.
+- `result_too_large`: reduce the upstream payload or write large data to an
+  artifact.
 - `timeout`: split work across executions or reduce upstream calls.
 
 For Code Mode `codemode`, follow the live schema exactly for tool params. For
