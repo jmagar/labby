@@ -684,8 +684,8 @@ mod tests {
         api::state::AppState,
         config::NodeRole,
         dispatch::gateway::{
-            SHARED_GATEWAY_OAUTH_SUBJECT,
-            manager::{GatewayManager, GatewayRuntimeHandle},
+            SHARED_GATEWAY_OAUTH_SUBJECT, config_store::test_gateway_manager,
+            manager::GatewayRuntimeHandle,
         },
         oauth::upstream::encryption::load_key,
     };
@@ -973,7 +973,7 @@ mod tests {
         }
         let key = load_key("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=").unwrap();
         let manager = Arc::new(
-            GatewayManager::new(dir.path().join("lab.toml"), GatewayRuntimeHandle::default())
+            test_gateway_manager(dir.path().join("lab.toml"), GatewayRuntimeHandle::default())
                 .with_oauth_resources(
                     store.clone(),
                     key,

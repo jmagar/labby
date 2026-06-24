@@ -19,20 +19,31 @@
 //! those sections; non-gateway sections and foreign top-level keys are never
 //! touched by the manager.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+#[cfg(any(test, feature = "testkit"))]
+use std::collections::HashMap;
+#[cfg(any(test, feature = "testkit"))]
 use std::fs;
 use std::future::Future;
+#[cfg(any(test, feature = "testkit"))]
 use std::io::Write as _;
-use std::path::{Path, PathBuf};
+#[cfg(any(test, feature = "testkit"))]
+use std::path::Path;
+use std::path::PathBuf;
 use std::pin::Pin;
+#[cfg(any(test, feature = "testkit"))]
 use std::sync::atomic::{AtomicU32, Ordering};
+#[cfg(any(test, feature = "testkit"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use labby_runtime::error::ToolError;
 use labby_runtime::gateway_config::{GatewayConfig, ResolvedPublicUrls};
+#[cfg(any(test, feature = "testkit"))]
 use tempfile::NamedTempFile;
 
+#[cfg(any(test, feature = "testkit"))]
 const ENV_BACKUP_RETAIN: usize = 10;
+#[cfg(any(test, feature = "testkit"))]
 static ENV_BACKUP_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 /// Boxed future returned by the store's async env-write methods.
@@ -87,26 +98,26 @@ pub trait GatewayConfigStore: Send + Sync {
         service: &'a str,
         values: &'a BTreeMap<String, String>,
     ) -> StoreFuture<'a, Result<(), ToolError>>;
-
-    /// Read raw `KEY=value` pairs from the `.env` file (best-effort).
-    fn read_env_values(&self, path: &Path) -> BTreeMap<String, String>;
 }
 
-/// Default filesystem-backed [`GatewayConfigStore`].
+/// Testkit filesystem-backed [`GatewayConfigStore`].
 ///
 /// Persists a bare [`GatewayConfig`] to `config.toml` via the gateway crate's
 /// own foreign-key-preserving render path (gateway sections only) and writes
-/// credentials to a sibling `.env` file. This is the store used by tests and by
-/// any standalone caller that does not need the host's full `LabConfig`-backed
+/// credentials to a sibling `.env` file. This is the store used by tests and
+/// testkit callers that do not need the host's full `LabConfig`-backed
 /// preservation of non-gateway sections.
 ///
-/// Production Labby injects its own store (which keeps `LabConfig` and the
-/// verbatim host render path) through `GatewayManager::from_config`.
+/// Production hosts inject their own store (which keeps `LabConfig` and the
+/// verbatim host render path) through `GatewayManager::from_config` or
+/// `GatewayManager::with_store`.
+#[cfg(any(test, feature = "testkit"))]
 pub struct FsGatewayConfigStore {
     config_path: PathBuf,
     env_path: PathBuf,
 }
 
+#[cfg(any(test, feature = "testkit"))]
 impl FsGatewayConfigStore {
     /// Build a store for `config_path`, deriving the `.env` path as a sibling
     /// `.env` file (or `~/.lab/.env` when `config_path` has no parent).
@@ -134,6 +145,7 @@ impl FsGatewayConfigStore {
     }
 }
 
+#[cfg(any(test, feature = "testkit"))]
 fn merge_env_pairs(path: &Path, pairs: &[(String, String)]) -> Result<(), ToolError> {
     if pairs.is_empty() {
         return Ok(());
@@ -209,6 +221,7 @@ fn merge_env_pairs(path: &Path, pairs: &[(String, String)]) -> Result<(), ToolEr
     write_env_lines_atomically(path, parent, &out_lines)
 }
 
+#[cfg(any(test, feature = "testkit"))]
 fn dedupe_pairs(pairs: &[(String, String)]) -> Vec<(String, String)> {
     let mut deduped: Vec<(String, String)> = Vec::new();
     for (key, value) in pairs {
@@ -222,6 +235,7 @@ fn dedupe_pairs(pairs: &[(String, String)]) -> Vec<(String, String)> {
     deduped
 }
 
+#[cfg(any(test, feature = "testkit"))]
 fn parse_env_values(lines: &[&str]) -> HashMap<String, String> {
     lines
         .iter()
@@ -237,6 +251,7 @@ fn parse_env_values(lines: &[&str]) -> HashMap<String, String> {
         .collect()
 }
 
+#[cfg(any(test, feature = "testkit"))]
 fn write_env_lines_atomically(
     path: &Path,
     parent: &Path,
@@ -261,6 +276,7 @@ fn write_env_lines_atomically(
     restrict_secret_file_permissions(path)
 }
 
+#[cfg(any(test, feature = "testkit"))]
 fn create_env_backup(path: &Path) -> Result<PathBuf, ToolError> {
     reject_env_symlink(path)?;
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
@@ -286,6 +302,7 @@ fn create_env_backup(path: &Path) -> Result<PathBuf, ToolError> {
     Ok(backup)
 }
 
+#[cfg(any(test, feature = "testkit"))]
 fn reject_env_symlink(path: &Path) -> Result<(), ToolError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(ToolError::Sdk {
@@ -304,6 +321,7 @@ fn reject_env_symlink(path: &Path) -> Result<(), ToolError> {
     }
 }
 
+#[cfg(any(test, feature = "testkit"))]
 fn prune_env_backups(parent: &Path, file_name: &str) -> Result<(), ToolError> {
     let prefix = format!("{file_name}.bak.");
     let mut backups = Vec::new();
@@ -332,6 +350,7 @@ fn prune_env_backups(parent: &Path, file_name: &str) -> Result<(), ToolError> {
 
 /// Double-quote an env value when it contains whitespace or shell metacharacters
 /// so `dotenvy` can read it back.
+#[cfg(any(test, feature = "testkit"))]
 fn quote_env_value(v: &str) -> String {
     let needs_quotes = v
         .chars()
@@ -344,6 +363,7 @@ fn quote_env_value(v: &str) -> String {
     }
 }
 
+#[cfg(any(test, feature = "testkit"))]
 fn unquote_env_value(value: &str) -> String {
     value
         .strip_prefix('"')
@@ -354,6 +374,7 @@ fn unquote_env_value(value: &str) -> String {
         )
 }
 
+#[cfg(any(test, feature = "testkit"))]
 fn restrict_secret_file_permissions(path: &Path) -> Result<(), ToolError> {
     #[cfg(unix)]
     {
@@ -367,6 +388,7 @@ fn restrict_secret_file_permissions(path: &Path) -> Result<(), ToolError> {
     Ok(())
 }
 
+#[cfg(any(test, feature = "testkit"))]
 impl GatewayConfigStore for FsGatewayConfigStore {
     fn public_urls(&self) -> ResolvedPublicUrls {
         ResolvedPublicUrls::default()
@@ -403,13 +425,6 @@ impl GatewayConfigStore for FsGatewayConfigStore {
                 values.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
             self.write_env_pairs(&pairs)
         })
-    }
-
-    fn read_env_values(&self, path: &Path) -> BTreeMap<String, String> {
-        dotenvy::from_path_iter(path)
-            .ok()
-            .map(|iter| iter.filter_map(Result::ok).collect())
-            .unwrap_or_default()
     }
 }
 

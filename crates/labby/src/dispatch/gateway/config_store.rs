@@ -14,7 +14,7 @@
 //! clients.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use labby_gateway::gateway::config_store::{GatewayConfigStore, StoreFuture};
@@ -160,13 +160,6 @@ impl GatewayConfigStore for LabConfigStore {
             self.write_creds_and_refresh(creds).await
         })
     }
-
-    fn read_env_values(&self, path: &Path) -> BTreeMap<String, String> {
-        dotenvy::from_path_iter(path)
-            .ok()
-            .map(|iter| iter.filter_map(Result::ok).collect())
-            .unwrap_or_default()
-    }
 }
 
 /// Map a service's `{FIELD: value}` set to host [`EnvCredential`]s. A
@@ -191,6 +184,16 @@ fn values_to_service_creds(service: &str, values: &BTreeMap<String, String>) -> 
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+pub(crate) fn test_gateway_manager(
+    path: PathBuf,
+    runtime: labby_gateway::gateway::manager::GatewayRuntimeHandle,
+) -> labby_gateway::gateway::manager::GatewayManager {
+    let config = Arc::new(RwLock::new(LabConfig::default()));
+    let store = Arc::new(LabConfigStore::new(config, path.clone()));
+    labby_gateway::gateway::manager::GatewayManager::with_store(path, runtime, store)
 }
 
 /// Host-owned `config.toml` render path: serialize the full [`LabConfig`] and

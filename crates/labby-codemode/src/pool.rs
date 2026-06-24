@@ -108,15 +108,10 @@ impl RunnerPool {
             .map(|_| Arc::new(Mutex::new(None)))
             .collect::<Vec<_>>();
         let free_slots = (0..config.size).collect::<VecDeque<_>>();
-        // Overflow permits bound simultaneous ephemeral runners. When pooling is
-        // disabled (kill switch) the overflow path serves every request, so
-        // allow generous-but-bounded ephemeral concurrency that matches the old
-        // always-spawn behavior under load.
-        let overflow = if config.is_disabled() {
-            config.max_overflow.max(64)
-        } else {
-            config.max_overflow.max(1)
-        };
+        // Overflow permits bound simultaneous ephemeral runners. Honor explicit
+        // low values even when pooling is disabled so the kill switch can also
+        // reduce resource pressure; only avoid a zero-permit deadlock.
+        let overflow = config.max_overflow.max(1);
         Self {
             config,
             spawn,
@@ -129,6 +124,11 @@ impl RunnerPool {
     #[cfg(test)]
     pub(crate) fn config(&self) -> PoolConfig {
         self.config
+    }
+
+    #[cfg(test)]
+    pub(crate) fn available_overflow_permits(&self) -> usize {
+        self.overflow_permits.available_permits()
     }
 
     /// Check out a runner for one execution.
@@ -543,8 +543,13 @@ mod tests {
     /// ephemeral runner, matching the spawn-per-execution fallback.
     #[tokio::test]
     async fn pool_disabled_serves_only_ephemeral_runners() {
-        let pool = RunnerPool::with_config(cfg(0, 100, 0));
+        let pool = RunnerPool::with_config(cfg(0, 100, 2));
         assert!(pool.config().is_disabled());
+        assert_eq!(
+            pool.available_overflow_permits(),
+            2,
+            "disabled pooling must honor configured overflow concurrency"
+        );
         let mut a = pool.checkout_stub().await.expect("a");
         let mut b = pool.checkout_stub().await.expect("b");
         assert!(!a.is_pooled(), "disabled pool → ephemeral lease");
@@ -556,6 +561,28 @@ mod tests {
         );
         a.release().await;
         b.release().await;
+    }
+
+    #[tokio::test]
+    async fn disabled_pool_respects_low_overflow_limit() {
+        let pool = RunnerPool::with_config(cfg(0, 100, 1));
+        assert!(pool.config().is_disabled());
+        assert_eq!(
+            pool.available_overflow_permits(),
+            1,
+            "disabled pooling must not inflate an explicit low overflow limit"
+        );
+    }
+
+    #[tokio::test]
+    async fn disabled_pool_raises_zero_overflow_to_one_permit() {
+        let pool = RunnerPool::with_config(cfg(0, 100, 0));
+        assert!(pool.config().is_disabled());
+        assert_eq!(
+            pool.available_overflow_permits(),
+            1,
+            "zero overflow is raised only enough to avoid deadlock"
+        );
     }
 
     /// Dropping a lease without finalizing is fail-safe: the slot index returns

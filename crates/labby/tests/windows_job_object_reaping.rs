@@ -10,6 +10,7 @@
     clippy::single_char_pattern,
     clippy::unnested_or_patterns
 )]
+#![cfg(all(windows, feature = "gateway"))]
 //! Windows Job Object process-tree reaping integration test.
 //!
 //! This test is `#[ignore]` because it requires a real Windows host to

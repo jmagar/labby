@@ -73,7 +73,10 @@
     {
       "crate_name": "labby",
       "feature": "gateway",
-      "dependencies": [],
+      "dependencies": [
+        "dep:labby-codemode",
+        "dep:labby-gateway"
+      ],
       "included_in_default": true,
       "included_in_all": true,
       "classification": "product_slice",
@@ -225,8 +228,8 @@
       "crate_name": "labby-auth",
       "feature": "default",
       "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": false,
+      "included_in_default": true,
+      "included_in_all": true,
       "classification": "aggregate_default",
       "mapped_crate_feature": null,
       "exception_reason": "aggregate/default feature"
@@ -238,8 +241,8 @@
         "dep:axum",
         "dep:tower"
       ],
-      "included_in_default": false,
-      "included_in_all": false,
+      "included_in_default": true,
+      "included_in_all": true,
       "classification": "extracted_crate",
       "mapped_crate_feature": null,
       "exception_reason": "extracted crate feature"
@@ -252,8 +255,8 @@
         "dep:oauth2",
         "dep:anyhow"
       ],
-      "included_in_default": false,
-      "included_in_all": false,
+      "included_in_default": true,
+      "included_in_all": true,
       "classification": "extracted_crate",
       "mapped_crate_feature": null,
       "exception_reason": "extracted crate feature"
@@ -262,8 +265,8 @@
       "crate_name": "labby-codemode",
       "feature": "no_features",
       "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": false,
+      "included_in_default": true,
+      "included_in_all": true,
       "classification": "extracted_crate",
       "mapped_crate_feature": null,
       "exception_reason": "extracted crate has no Cargo features"
@@ -318,8 +321,8 @@
       "crate_name": "labby-web",
       "feature": "default",
       "dependencies": [],
-      "included_in_default": false,
-      "included_in_all": false,
+      "included_in_default": true,
+      "included_in_all": true,
       "classification": "aggregate_default",
       "mapped_crate_feature": null,
       "exception_reason": "aggregate/default feature"

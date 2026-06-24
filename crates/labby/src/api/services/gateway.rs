@@ -154,7 +154,9 @@ mod tests {
     use crate::config::{
         LabConfig, UpstreamConfig, VirtualServerConfig, VirtualServerSurfacesConfig,
     };
-    use crate::dispatch::gateway::config_store::{load_gateway_config, write_gateway_config};
+    use crate::dispatch::gateway::config_store::{
+        load_gateway_config, test_gateway_manager, write_gateway_config,
+    };
     use crate::dispatch::gateway::manager::{GatewayManager, GatewayRuntimeHandle};
     use crate::registry::build_default_registry;
 
@@ -168,7 +170,7 @@ mod tests {
             NEXT_ID.fetch_add(1, Ordering::Relaxed)
         ));
         (
-            Arc::new(GatewayManager::new(
+            Arc::new(test_gateway_manager(
                 path.clone(),
                 GatewayRuntimeHandle::default(),
             )),

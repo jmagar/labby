@@ -15,7 +15,9 @@ use labby_runtime::gateway_config::GatewayConfig;
 
 use crate::gateway::code_mode::{CodeModeHistory, CodeModeSourceStore};
 use crate::gateway::config::{normalize_config, validate_config};
-use crate::gateway::config_store::{FsGatewayConfigStore, GatewayConfigStore};
+#[cfg(any(test, feature = "testkit"))]
+use crate::gateway::config_store::FsGatewayConfigStore;
+use crate::gateway::config_store::GatewayConfigStore;
 use crate::gateway::protected_routes::ProtectedRouteIndex;
 use crate::gateway::service_registry::{EmptyServiceRegistry, GatewayServiceRegistry};
 use crate::gateway::types::CatalogChangeNotifier;
@@ -80,12 +82,11 @@ impl GatewayManager {
 }
 
 impl GatewayManager {
-    /// Construct a manager with a default filesystem-backed config store.
+    /// Construct a manager with the testkit filesystem-backed config store.
     ///
-    /// Production callers use [`Self::from_config`] (which injects the host's
-    /// `LabConfig`-backed store). This `new` is the construction entry point
-    /// tests use; it persists a bare `GatewayConfig` to `path` and credentials
-    /// to a sibling `.env`.
+    /// Production callers use [`Self::from_config`] or [`Self::with_store`] so
+    /// the host owns config rendering and credential persistence.
+    #[cfg(any(test, feature = "testkit"))]
     pub fn new(path: PathBuf, runtime: GatewayRuntimeHandle) -> Self {
         let store = Arc::new(FsGatewayConfigStore::new(path.clone()));
         Self::with_store(path, runtime, store)
@@ -232,7 +233,7 @@ impl GatewayManager {
         self.seed_config_unchecked(config).await;
     }
 
-    #[cfg(any(test, feature = "testkit"))]
+    #[doc(hidden)]
     pub async fn seed_config_unchecked_for_tests(&self, config: GatewayConfig) {
         self.seed_config_unchecked(config).await;
     }
@@ -272,7 +273,7 @@ impl GatewayManager {
         .with_relay_timeout(relay_timeout)
     }
 
-    #[cfg(any(test, feature = "testkit"))]
+    #[doc(hidden)]
     pub async fn replace_config_for_tests(
         &self,
         upstream: Vec<labby_runtime::gateway_config::UpstreamConfig>,

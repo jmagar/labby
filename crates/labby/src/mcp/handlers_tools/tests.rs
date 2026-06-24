@@ -113,10 +113,12 @@ async fn code_mode_manager(
     enabled: bool,
 ) -> Arc<crate::dispatch::gateway::manager::GatewayManager> {
     let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
-    let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-        std::path::PathBuf::from("config.toml"),
-        runtime,
-    ));
+    let manager = Arc::new(
+        crate::dispatch::gateway::config_store::test_gateway_manager(
+            std::path::PathBuf::from("config.toml"),
+            runtime,
+        ),
+    );
     manager
         .seed_config_unchecked_for_tests(
             crate::config::LabConfig {
@@ -155,10 +157,12 @@ async fn code_mode_manager_with_pool_and_upstreams(
 ) -> Arc<crate::dispatch::gateway::manager::GatewayManager> {
     let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
     runtime.swap(Some(pool)).await;
-    let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-        std::path::PathBuf::from("config.toml"),
-        runtime,
-    ));
+    let manager = Arc::new(
+        crate::dispatch::gateway::config_store::test_gateway_manager(
+            std::path::PathBuf::from("config.toml"),
+            runtime,
+        ),
+    );
     manager
         .seed_config_unchecked_for_tests(
             crate::config::LabConfig {
@@ -2176,10 +2180,12 @@ async fn protected_scope_denies_direct_code_mode_calls_when_hidden() {
 #[tokio::test]
 async fn server_reads_current_pool_from_gateway_manager() {
     let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
-    let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-        std::path::PathBuf::from("config.toml"),
-        runtime.clone(),
-    ));
+    let manager = Arc::new(
+        crate::dispatch::gateway::config_store::test_gateway_manager(
+            std::path::PathBuf::from("config.toml"),
+            runtime.clone(),
+        ),
+    );
     let notifier = crate::mcp::peers::PeerNotifier::default();
     let server = LabMcpServer {
         registry: Arc::new(ToolRegistry::new()),
@@ -2207,7 +2213,7 @@ async fn server_reads_current_pool_from_gateway_manager() {
 async fn snapshot_catalog_hides_mcp_disabled_virtual_services() {
     let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
     let manager = Arc::new(
-        crate::dispatch::gateway::manager::GatewayManager::new(
+        crate::dispatch::gateway::config_store::test_gateway_manager(
             std::path::PathBuf::from("config.toml"),
             runtime,
         )
@@ -2249,10 +2255,12 @@ async fn snapshot_catalog_hides_mcp_disabled_virtual_services() {
 #[ignore = "gateway-pivot: hardcoded plex/radarr fixtures; rework with kept-service fixtures post-pivot"]
 async fn service_actions_json_filters_to_allowed_mcp_actions() {
     let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
-    let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-        std::path::PathBuf::from("config.toml"),
-        runtime,
-    ));
+    let manager = Arc::new(
+        crate::dispatch::gateway::config_store::test_gateway_manager(
+            std::path::PathBuf::from("config.toml"),
+            runtime,
+        ),
+    );
     manager
         .seed_config_unchecked_for_tests(
             crate::config::LabConfig {

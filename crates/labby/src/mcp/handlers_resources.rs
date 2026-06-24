@@ -655,10 +655,12 @@ mod tests {
         route_scope: crate::mcp::route_scope::McpRouteScope,
     ) -> LabMcpServer {
         let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
-        let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-            std::path::PathBuf::from("config.toml"),
-            runtime,
-        ));
+        let manager = std::sync::Arc::new(
+            crate::dispatch::gateway::config_store::test_gateway_manager(
+                std::path::PathBuf::from("config.toml"),
+                runtime,
+            ),
+        );
         manager
             .seed_config_unchecked_for_tests(
                 crate::config::LabConfig {

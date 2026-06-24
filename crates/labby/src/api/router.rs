@@ -2576,10 +2576,12 @@ mod tests {
     #[tokio::test]
     async fn protected_mcp_route_metadata_uses_host_and_path_resource() {
         let tempdir = tempfile::tempdir().unwrap();
-        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-            tempdir.path().join("gateway.toml"),
-            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
-        ));
+        let manager = Arc::new(
+            crate::dispatch::gateway::config_store::test_gateway_manager(
+                tempdir.path().join("gateway.toml"),
+                crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+            ),
+        );
         let config =
             protected_route_config("syslog", "mcp.tootie.tv", "/syslog", "http://10.0.0.2:3100");
         manager
@@ -2615,10 +2617,12 @@ mod tests {
     #[tokio::test]
     async fn protected_mcp_route_metadata_compatibility_alias_matches_resource() {
         let tempdir = tempfile::tempdir().unwrap();
-        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-            tempdir.path().join("gateway.toml"),
-            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
-        ));
+        let manager = Arc::new(
+            crate::dispatch::gateway::config_store::test_gateway_manager(
+                tempdir.path().join("gateway.toml"),
+                crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+            ),
+        );
         let config =
             protected_route_config("syslog", "mcp.tootie.tv", "/syslog", "http://10.0.0.2:3100");
         manager
@@ -2654,10 +2658,12 @@ mod tests {
     #[tokio::test]
     async fn protected_mcp_route_unauthorized_header_points_to_route_metadata() {
         let tempdir = tempfile::tempdir().unwrap();
-        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-            tempdir.path().join("gateway.toml"),
-            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
-        ));
+        let manager = Arc::new(
+            crate::dispatch::gateway::config_store::test_gateway_manager(
+                tempdir.path().join("gateway.toml"),
+                crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+            ),
+        );
         let config =
             protected_route_config("syslog", "mcp.tootie.tv", "/syslog", "http://10.0.0.2:3100");
         manager
@@ -2703,10 +2709,12 @@ mod tests {
             .await;
 
         let tempdir = tempfile::tempdir().unwrap();
-        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-            tempdir.path().join("gateway.toml"),
-            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
-        ));
+        let manager = Arc::new(
+            crate::dispatch::gateway::config_store::test_gateway_manager(
+                tempdir.path().join("gateway.toml"),
+                crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+            ),
+        );
         let config = protected_route_config("syslog", "mcp.tootie.tv", "/syslog", &backend.uri());
         manager
             .seed_config_unchecked_for_tests(config.to_gateway_config())
@@ -2763,10 +2771,12 @@ mod tests {
             .await;
 
         let tempdir = tempfile::tempdir().unwrap();
-        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-            tempdir.path().join("gateway.toml"),
-            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
-        ));
+        let manager = Arc::new(
+            crate::dispatch::gateway::config_store::test_gateway_manager(
+                tempdir.path().join("gateway.toml"),
+                crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+            ),
+        );
         let config = crate::config::LabConfig {
             upstream: vec![crate::config::UpstreamConfig {
                 name: "axon".to_string(),
@@ -2854,10 +2864,12 @@ mod tests {
             .await;
 
         let tempdir = tempfile::tempdir().unwrap();
-        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-            tempdir.path().join("gateway.toml"),
-            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
-        ));
+        let manager = Arc::new(
+            crate::dispatch::gateway::config_store::test_gateway_manager(
+                tempdir.path().join("gateway.toml"),
+                crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+            ),
+        );
         let config = protected_route_config("syslog", "syslog.tootie.tv", "/mcp", &backend.uri());
         manager
             .seed_config_unchecked_for_tests(config.to_gateway_config())
@@ -2907,10 +2919,12 @@ mod tests {
     #[tokio::test]
     async fn protected_gateway_subset_unauthorized_header_points_to_route_metadata() {
         let tempdir = tempfile::tempdir().unwrap();
-        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-            tempdir.path().join("gateway.toml"),
-            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
-        ));
+        let manager = Arc::new(
+            crate::dispatch::gateway::config_store::test_gateway_manager(
+                tempdir.path().join("gateway.toml"),
+                crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+            ),
+        );
         let config = protected_gateway_subset_config();
         manager
             .seed_config_unchecked_for_tests(config.to_gateway_config())
@@ -2944,10 +2958,12 @@ mod tests {
     #[tokio::test]
     async fn protected_gateway_subset_dispatches_to_scoped_router_after_auth() {
         let tempdir = tempfile::tempdir().unwrap();
-        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-            tempdir.path().join("gateway.toml"),
-            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
-        ));
+        let manager = Arc::new(
+            crate::dispatch::gateway::config_store::test_gateway_manager(
+                tempdir.path().join("gateway.toml"),
+                crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+            ),
+        );
         let config = protected_gateway_subset_config();
         manager
             .seed_config_unchecked_for_tests(config.to_gateway_config())
@@ -3003,10 +3019,12 @@ mod tests {
     #[tokio::test]
     async fn protected_route_invalid_backend_url_returns_structured_error() {
         let tempdir = tempfile::tempdir().unwrap();
-        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-            tempdir.path().join("gateway.toml"),
-            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
-        ));
+        let manager = Arc::new(
+            crate::dispatch::gateway::config_store::test_gateway_manager(
+                tempdir.path().join("gateway.toml"),
+                crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+            ),
+        );
         let config = crate::config::LabConfig {
             protected_mcp_routes: vec![crate::config::ProtectedMcpRouteConfig {
                 name: "bad".to_string(),
@@ -3070,10 +3088,12 @@ mod tests {
     #[tokio::test]
     async fn gateway_oauth_routes_require_auth() {
         let tempdir = tempfile::tempdir().unwrap();
-        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-            tempdir.path().join("gateway.toml"),
-            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
-        ));
+        let manager = Arc::new(
+            crate::dispatch::gateway::config_store::test_gateway_manager(
+                tempdir.path().join("gateway.toml"),
+                crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+            ),
+        );
         let state = AppState::new().with_gateway_manager(manager);
         let app = build_router_with_bearer(state, Some("secret-token".into()), None);
         let response = app
@@ -3093,10 +3113,12 @@ mod tests {
     #[tokio::test]
     async fn browser_oauth_callback_bypasses_bearer_auth() {
         let tempdir = tempfile::tempdir().unwrap();
-        let manager = Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-            tempdir.path().join("gateway.toml"),
-            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
-        ));
+        let manager = Arc::new(
+            crate::dispatch::gateway::config_store::test_gateway_manager(
+                tempdir.path().join("gateway.toml"),
+                crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+            ),
+        );
         let state = AppState::new().with_gateway_manager(manager);
         let app = build_router_with_bearer(state, Some("secret-token".into()), None);
         let response = app

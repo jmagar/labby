@@ -24,6 +24,9 @@ const DEFAULT_RECYCLE_AFTER: u64 = 100;
 /// Default cap on simultaneous overflow (ephemeral) runners. Bounds total
 /// concurrent runner processes to `pool_size + max_overflow`.
 const DEFAULT_MAX_OVERFLOW: usize = 8;
+/// Hard ceiling on overflow runners so a typo cannot permit unbounded process
+/// fan-out. The disabled-pool path must still honor lower explicit values.
+pub(crate) const MAX_OVERFLOW: usize = 64;
 
 /// Resolved, validated pool configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,7 +44,7 @@ impl PoolConfig {
     pub(crate) fn from_env() -> Self {
         let size = parse_env(POOL_SIZE_ENV, DEFAULT_POOL_SIZE).min(MAX_POOL_SIZE);
         let recycle_after = parse_env_u64(RECYCLE_AFTER_ENV, DEFAULT_RECYCLE_AFTER).max(1);
-        let max_overflow = parse_env(MAX_OVERFLOW_ENV, DEFAULT_MAX_OVERFLOW);
+        let max_overflow = parse_env(MAX_OVERFLOW_ENV, DEFAULT_MAX_OVERFLOW).min(MAX_OVERFLOW);
         Self {
             size,
             recycle_after,
@@ -101,5 +104,11 @@ mod tests {
     fn size_is_clamped_to_max() {
         assert_eq!(DEFAULT_POOL_SIZE.min(MAX_POOL_SIZE), DEFAULT_POOL_SIZE);
         assert_eq!(1000usize.min(MAX_POOL_SIZE), MAX_POOL_SIZE);
+    }
+
+    #[test]
+    fn overflow_is_clamped_to_max() {
+        assert_eq!(DEFAULT_MAX_OVERFLOW.min(MAX_OVERFLOW), DEFAULT_MAX_OVERFLOW);
+        assert_eq!(1000usize.min(MAX_OVERFLOW), MAX_OVERFLOW);
     }
 }

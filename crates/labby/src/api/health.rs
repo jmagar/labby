@@ -144,12 +144,12 @@ mod tests {
         use std::path::PathBuf;
         use std::sync::Arc;
 
-        use crate::dispatch::gateway::manager::GatewayManager;
+        use crate::dispatch::gateway::config_store::test_gateway_manager;
         use crate::dispatch::gateway::manager::GatewayRuntimeHandle;
 
         let runtime = GatewayRuntimeHandle::default();
         // Pool starts as None — manager is wired but pool not yet loaded.
-        let manager = Arc::new(GatewayManager::new(PathBuf::from("/tmp/test"), runtime));
+        let manager = Arc::new(test_gateway_manager(PathBuf::from("/tmp/test"), runtime));
         let state = AppState::new().with_gateway_manager(manager);
 
         let resp = ready(State(state)).await.into_response();

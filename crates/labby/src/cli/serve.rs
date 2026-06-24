@@ -1079,8 +1079,13 @@ async fn build_gateway_runtime(
         );
         None
     } else {
-        crate::oauth::upstream::runtime::build_upstream_oauth_runtime(&config.upstream, auth_config)
-            .await?
+        let upstream_oauth_key = std::env::var("LAB_OAUTH_ENCRYPTION_KEY").ok();
+        crate::oauth::upstream::runtime::build_upstream_oauth_runtime(
+            &config.upstream,
+            auth_config,
+            upstream_oauth_key.as_deref(),
+        )
+        .await?
     };
     tracing::info!(
         subsystem = "gateway_client",
@@ -2052,10 +2057,12 @@ mod tests {
     #[tokio::test]
     async fn protected_gateway_subset_builder_mounts_scoped_mcp_service() {
         let tempdir = tempfile::tempdir().expect("tempdir");
-        let manager = std::sync::Arc::new(crate::dispatch::gateway::manager::GatewayManager::new(
-            tempdir.path().join("gateway.toml"),
-            crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
-        ));
+        let manager = std::sync::Arc::new(
+            crate::dispatch::gateway::config_store::test_gateway_manager(
+                tempdir.path().join("gateway.toml"),
+                crate::dispatch::gateway::manager::GatewayRuntimeHandle::default(),
+            ),
+        );
         let config = LabConfig {
             protected_mcp_routes: vec![crate::config::ProtectedMcpRouteConfig {
                 name: "media".to_string(),

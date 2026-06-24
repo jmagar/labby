@@ -3,7 +3,7 @@
 //! `use super::*;` to inherit these fixtures and imports.
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -77,10 +77,6 @@ impl GatewayConfigStore for SlowPersistStore {
         _values: &'a BTreeMap<String, String>,
     ) -> StoreFuture<'a, Result<(), labby_runtime::error::ToolError>> {
         Box::pin(async { Ok(()) })
-    }
-
-    fn read_env_values(&self, _path: &Path) -> BTreeMap<String, String> {
-        BTreeMap::new()
     }
 }
 

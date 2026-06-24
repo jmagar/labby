@@ -46,10 +46,10 @@ const SHARED_NON_SERVICES: &[&str] = &[
     // Shared subsystems (not 4-file action-dispatched services):
     "node",
     "security",
-    // `upstream` is now a one-line compatibility shim (`crate::dispatch::upstream`
-    // re-exports `labby_gateway::upstream::*`); the proxy-pool runtime moved to the
-    // standalone `lab-gateway` crate. It stays classified as a shared subsystem so
-    // every surface keeps importing `crate::dispatch::upstream::*` unchanged.
+    // `upstream` is now a temporary compatibility shim (`crate::dispatch::upstream`
+    // re-exports `labby_gateway::upstream::*`) while adapter call sites migrate.
+    // It stays classified as a shared subsystem only so this test keeps enforcing
+    // service-to-service dispatch boundaries during the transition.
     "upstream",
     // Shared leaf modules (utility substrate every service may use):
     "error",

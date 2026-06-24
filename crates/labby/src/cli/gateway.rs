@@ -29,9 +29,11 @@ pub(crate) async fn build_manager(
     discover_upstreams: bool,
 ) -> Result<Arc<GatewayManager>> {
     let auth_config = resolve_auth_for_config(config)?;
+    let upstream_oauth_key = std::env::var("LAB_OAUTH_ENCRYPTION_KEY").ok();
     let upstream_oauth_runtime = crate::oauth::upstream::runtime::build_upstream_oauth_runtime(
         &config.upstream,
         &auth_config,
+        upstream_oauth_key.as_deref(),
     )
     .await?;
     build_manager_with_upstream_oauth_runtime(config, discover_upstreams, upstream_oauth_runtime)

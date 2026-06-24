@@ -1,6 +1,9 @@
-# dispatch/gateway/code_mode/ — Code Mode Runner
+# labby-codemode — Host-Neutral Code Mode Runner
 
-This directory owns the JavaScript execution sandbox. Read before editing.
+This crate owns the host-neutral JavaScript execution sandbox. Gateway-specific
+catalog/search wiring lives in `labby-gateway`; this crate should stay focused
+on runner execution, protocol, snippet/artifact handling, normalization, and
+shared Code Mode data types.
 
 ---
 
@@ -8,7 +11,7 @@ This directory owns the JavaScript execution sandbox. Read before editing.
 
 The live Code Mode runner is a **Javy/QuickJS subprocess** communicated with
 over a framed stdio line protocol. There is NO Wasmtime/fuel path on any live
-code path. `wasm_runner.rs` is dead code kept for reference only.
+code path; the old Wasmtime runner reference file was deleted during extraction.
 
 Execution limits (QuickJS side):
 - **30-second wall-clock timeout** — enforced by `runner_drive.rs` via `tokio::time::timeout`.
@@ -158,26 +161,27 @@ env_clear lands" comment — that state is in the past.
 | `pool/config.rs` | `PoolConfig`: env-driven pool size / recycle / overflow knobs and the kill switch. |
 | `runner_io.rs` | Framed stdio line protocol with the child process. |
 | `execute.rs` | `execute()` entry point: build context, inject preamble, call driver, return result. Also owns mcp-ui widget capture: `extract_ui_link` records an upstream result's `_meta.ui` (last-wins, into the per-run `CodeModeBroker::ui_capture` sink) before the envelope is unwrapped, and `apply_ui_opt_in` surfaces it on the final response while preserving `{ __ui: <result> }` unwrapping compatibility. |
-| `search.rs` | `search()` entry point: project catalog, call driver, return filtered tool list. |
+| `host.rs` | Host trait and adapters that let gateway or tests provide tool/snippet/artifact behavior without coupling this crate back to gateway. |
+| `broker.rs` | Broker implementation for tool calls, snippet resolution, artifact writes, and per-run UI capture. |
 | `preamble.rs` | Injects the `callTool` bridge stub and catalog proxy into the JS environment. |
 | `protocol.rs` | Wire types for all parent↔runner messages (serialization-stable). |
 | `schema.rs` | JSON Schema helpers for tool description injection. |
 | `normalize.rs` | Result normalization after runner returns. |
+| `shape.rs` | Result shape metadata helpers. |
 | `truncate.rs` | Output size limiting before returning to caller. |
 | `trace.rs` | Execution span helpers (`tracing`). |
 | `types.rs` | Shared Code Mode types: tool descriptors, callers, scopes, execution responses, traces, and UI links. |
 | `ts_signatures.rs` | **Live** TypeScript signature / `.d.ts` generator called by `types.rs::CodeModeCatalogEntry::upstream_tool`. NOT legacy shims. |
 | `util.rs` | Small utilities: JS source wrapping, ID generation. |
 | `artifacts.rs` | Artifact write handler: path containment check, size cap, atomic write. |
-| `catalog_cache.rs` | Per-run catalog snapshot cache to avoid repeated pool reads. |
+| `snippet.rs`, `snippet/store.rs` | Snippet resolution types and filesystem-backed snippet store. |
 | `wrapper.rs` | Wraps caller snippets in the async IIFE harness expected by the runner. |
-| `wasm_runner.rs` | **DEAD CODE.** Wasmtime runner stub. Never call into this. |
 
 ---
 
 ## Rules
 
-- Do not call `wasm_runner.rs` from any live code path.
+- Do not reintroduce Wasmtime/fuel execution paths; the live kind is `"timeout"`.
 - Do not add `code_mode_fuel_exhausted` to new match arms; the live kind is `"timeout"`.
 - Do not expose host network APIs to the runner child.
 - Keep `protocol.rs` as the single serialization-stable wire contract. The
@@ -192,4 +196,4 @@ env_clear lands" comment — that state is in the past.
 
 - `docs/dev/CODE_MODE.md` — surface documentation and examples (authoritative)
 - `docs/dev/ERRORS.md` — `"timeout"` and artifact kinds
-- Parent: `crates/labby-gateway/src/gateway/CLAUDE.md` — trust model, runner env isolation (`env_clear`)
+- Host integration: `crates/labby-gateway/src/gateway/CLAUDE.md` — gateway trust model and catalog/search wiring

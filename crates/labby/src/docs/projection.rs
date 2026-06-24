@@ -186,6 +186,7 @@ fn env_docs(
 fn build_feature_matrix(repo_root: &Path) -> Result<FeatureMatrix> {
     let lab = read_manifest(&repo_root.join("crates/labby/Cargo.toml"))?;
     let apis = read_manifest(&repo_root.join("crates/labby-apis/Cargo.toml"))?;
+    let lab_dependencies = lab.dependencies;
     let lab_features = lab.features;
     let api_features = apis.features;
     let lab_all = feature_set(&lab_features, "all");
@@ -254,11 +255,39 @@ fn build_feature_matrix(repo_root: &Path) -> Result<FeatureMatrix> {
 
     for crate_name in EXTRACTED_FEATURE_CRATES {
         let manifest = read_manifest(&repo_root.join(format!("crates/{crate_name}/Cargo.toml")))?;
-        push_extracted_crate_features(crate_name, manifest.features, &mut features);
+        let default_active = dependency_active_features(
+            &lab_dependencies,
+            crate_name,
+            &manifest.features,
+            &lab_default,
+        );
+        let all_active =
+            dependency_active_features(&lab_dependencies, crate_name, &manifest.features, &lab_all);
+        push_extracted_crate_features(
+            crate_name,
+            manifest.features,
+            Some((&default_active, &all_active)),
+            &mut features,
+        );
     }
     for crate_name in EXTRACTED_FEATURELESS_CRATES {
         let manifest = read_manifest(&repo_root.join(format!("crates/{crate_name}/Cargo.toml")))?;
-        push_extracted_featureless_crate(crate_name, manifest.features, &mut features);
+        let default_active = dependency_active_features(
+            &lab_dependencies,
+            crate_name,
+            &manifest.features,
+            &lab_default,
+        );
+        let all_active =
+            dependency_active_features(&lab_dependencies, crate_name, &manifest.features, &lab_all);
+        push_extracted_featureless_crate(
+            crate_name,
+            manifest.features,
+            dependency_is_active(&lab_dependencies, crate_name, &lab_default),
+            dependency_is_active(&lab_dependencies, crate_name, &lab_all),
+            Some((&default_active, &all_active)),
+            &mut features,
+        );
     }
 
     features.sort_by(|a, b| {
@@ -275,6 +304,7 @@ fn build_feature_matrix(repo_root: &Path) -> Result<FeatureMatrix> {
 fn push_extracted_crate_features(
     crate_name: &str,
     crate_features: BTreeMap<String, Vec<String>>,
+    product_active: Option<(&BTreeSet<String>, &BTreeSet<String>)>,
     features: &mut Vec<FeatureDoc>,
 ) {
     let default = feature_set(&crate_features, "default");
@@ -289,8 +319,14 @@ fn push_extracted_crate_features(
             crate_name: crate_name.to_string(),
             feature: feature.clone(),
             dependencies: deps,
-            included_in_default: default.contains(feature.as_str()),
-            included_in_all: all.contains(feature.as_str()),
+            included_in_default: product_active.map_or_else(
+                || default.contains(feature.as_str()),
+                |(active, _)| active.contains(feature.as_str()),
+            ),
+            included_in_all: product_active.map_or_else(
+                || all.contains(feature.as_str()),
+                |(_, active)| active.contains(feature.as_str()),
+            ),
             classification,
             mapped_crate_feature: None,
             exception_reason: exception_reason(classification).map(str::to_string),
@@ -301,6 +337,9 @@ fn push_extracted_crate_features(
 fn push_extracted_featureless_crate(
     crate_name: &str,
     crate_features: BTreeMap<String, Vec<String>>,
+    included_in_default: bool,
+    included_in_all: bool,
+    product_active: Option<(&BTreeSet<String>, &BTreeSet<String>)>,
     features: &mut Vec<FeatureDoc>,
 ) {
     if crate_features.is_empty() {
@@ -308,14 +347,14 @@ fn push_extracted_featureless_crate(
             crate_name: crate_name.to_string(),
             feature: "no_features".to_string(),
             dependencies: Vec::new(),
-            included_in_default: false,
-            included_in_all: false,
+            included_in_default,
+            included_in_all,
             classification: FeatureClass::ExtractedCrate,
             mapped_crate_feature: None,
             exception_reason: Some("extracted crate has no Cargo features".to_string()),
         });
     } else {
-        push_extracted_crate_features(crate_name, crate_features, features);
+        push_extracted_crate_features(crate_name, crate_features, product_active, features);
     }
 }
 
@@ -329,6 +368,101 @@ fn read_manifest(path: &Path) -> Result<CargoManifest> {
 struct CargoManifest {
     #[serde(default)]
     features: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    dependencies: BTreeMap<String, CargoDependency>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum CargoDependency {
+    Version(String),
+    Detailed {
+        #[serde(default)]
+        features: Vec<String>,
+        #[serde(default)]
+        optional: bool,
+        #[serde(default = "default_true", rename = "default-features")]
+        default_features: bool,
+    },
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn dependency_is_active(
+    dependencies: &BTreeMap<String, CargoDependency>,
+    crate_name: &str,
+    product_features: &BTreeSet<String>,
+) -> bool {
+    dependencies.get(crate_name).is_some_and(|dependency| {
+        !dependency.is_optional() || product_features.contains(&format!("dep:{crate_name}"))
+    })
+}
+
+fn dependency_active_features(
+    dependencies: &BTreeMap<String, CargoDependency>,
+    crate_name: &str,
+    crate_features: &BTreeMap<String, Vec<String>>,
+    product_features: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    let mut active = BTreeSet::new();
+    let Some(dependency) = dependencies.get(crate_name) else {
+        return active;
+    };
+    if !dependency_is_active(dependencies, crate_name, product_features) {
+        return active;
+    }
+    if dependency.default_features() && crate_features.contains_key("default") {
+        insert_feature_closure(crate_features, "default", &mut active);
+    }
+    for feature in dependency.features() {
+        insert_feature_closure(crate_features, feature, &mut active);
+    }
+    active
+}
+
+fn insert_feature_closure(
+    features: &BTreeMap<String, Vec<String>>,
+    name: &str,
+    out: &mut BTreeSet<String>,
+) {
+    out.insert(name.to_string());
+    out.extend(feature_set(features, name));
+}
+
+impl CargoDependency {
+    fn features(&self) -> &[String] {
+        match self {
+            Self::Version(version) => {
+                let _ = version;
+                &[]
+            }
+            Self::Detailed { features, .. } => features,
+        }
+    }
+
+    fn is_optional(&self) -> bool {
+        match self {
+            Self::Version(version) => {
+                let _ = version;
+                false
+            }
+            Self::Detailed { optional, .. } => *optional,
+        }
+    }
+
+    fn default_features(&self) -> bool {
+        match self {
+            Self::Version(version) => {
+                let _ = version;
+                true
+            }
+            Self::Detailed {
+                default_features, ..
+            } => *default_features,
+        }
+    }
 }
 
 fn feature_set(features: &BTreeMap<String, Vec<String>>, name: &str) -> BTreeSet<String> {

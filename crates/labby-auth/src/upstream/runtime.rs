@@ -26,6 +26,7 @@ pub struct UpstreamOauthRuntime {
 pub async fn build_upstream_oauth_runtime(
     upstreams: &[UpstreamConfig],
     auth_config: &AuthConfig,
+    encryption_key_raw: Option<&str>,
 ) -> Result<Option<UpstreamOauthRuntime>> {
     let Some(public_url) = auth_config.public_url.as_ref() else {
         tracing::info!(
@@ -35,20 +36,22 @@ pub async fn build_upstream_oauth_runtime(
         );
         return Ok(None);
     };
-    let Ok(encryption_key_raw) = std::env::var("LAB_OAUTH_ENCRYPTION_KEY") else {
+    let Some(encryption_key_raw) =
+        encryption_key_raw.and_then(|value| (!value.trim().is_empty()).then_some(value))
+    else {
         tracing::info!(
             subsystem = "gateway_client",
             phase = "oauth.runtime.disabled",
-            "upstream oauth runtime disabled because LAB_OAUTH_ENCRYPTION_KEY is unset"
+            "upstream oauth runtime disabled because no encryption key is configured"
         );
         return Ok(None);
     };
     anyhow::ensure!(
         public_url.scheme() == "https",
-        "LAB_PUBLIC_URL must be absolute https:// when upstream oauth is configured"
+        "public_url must be absolute https:// when upstream oauth is configured"
     );
     let key = load_key(&encryption_key_raw)
-        .map_err(|error| anyhow::anyhow!("invalid LAB_OAUTH_ENCRYPTION_KEY: {error}"))?;
+        .map_err(|error| anyhow::anyhow!("invalid upstream OAuth encryption key: {error}"))?;
     let sqlite = SqliteStore::open(auth_config.sqlite_path.clone())
         .await
         .context("open sqlite store for upstream oauth")?;

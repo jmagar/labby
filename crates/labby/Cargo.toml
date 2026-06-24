@@ -20,8 +20,8 @@ test = false
 labby-apis = { path = "../labby-apis", default-features = false }
 labby-auth = { path = "../labby-auth", features = ["http-axum", "upstream-oauth-rmcp"] }
 labby-runtime = { path = "../labby-runtime" }
-labby-codemode = { path = "../labby-codemode" }
-labby-gateway = { path = "../labby-gateway" }
+labby-codemode = { path = "../labby-codemode", optional = true }
+labby-gateway = { path = "../labby-gateway", optional = true }
 labby-web = { path = "../labby-web" }
 
 tokio = { workspace = true, features = ["process"] }
@@ -120,9 +120,6 @@ labby-winjob = { path = "../labby-winjob" }
 
 [dev-dependencies]
 labby-auth = { path = "../labby-auth", features = ["http-axum", "upstream-oauth-rmcp"] }
-# Enable labby-gateway's testkit pool inspection helpers for `lab`'s gateway
-# tests only — never compiled into the production binary.
-labby-gateway = { path = "../labby-gateway", features = ["testkit"] }
 wiremock.workspace = true
 proptest = "1"
 
@@ -144,7 +141,7 @@ path = "src/lib.rs"
 acp_registry = ["labby-apis/acp_registry", "labby-runtime/acp_registry"]
 node-runtime = []
 all = ["labby-apis/all", "lab-admin", "acp_registry", "deploy", "gateway", "marketplace"]
-gateway = []
+gateway = ["dep:labby-codemode", "dep:labby-gateway"]
 marketplace = ["labby-apis/mcpregistry", "labby-runtime/marketplace"]
 services-all = [
 ]

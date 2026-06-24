@@ -280,6 +280,7 @@ impl ToolRegistry {
 // gateway pool can enumerate services and hand each one back to the
 // `mcp::in_process_peer` connector (which downcasts via `as_any`).
 
+#[cfg(feature = "gateway")]
 impl labby_gateway::registry::InProcessService for RegisteredService {
     fn service_name(&self) -> &'static str {
         self.name
@@ -294,6 +295,7 @@ impl labby_gateway::registry::InProcessService for RegisteredService {
     }
 }
 
+#[cfg(feature = "gateway")]
 impl labby_gateway::registry::InProcessServiceRegistry for ToolRegistry {
     fn in_process_services(&self) -> Vec<Box<dyn labby_gateway::registry::InProcessService>> {
         self.services
@@ -315,6 +317,7 @@ impl labby_gateway::registry::InProcessServiceRegistry for ToolRegistry {
 // for a service. It depends only on the `GatewayServiceRegistry` trait (a
 // supertrait of `InProcessServiceRegistry`); we implement it here for
 // `ToolRegistry` and inject it at manager construction.
+#[cfg(feature = "gateway")]
 impl labby_gateway::gateway::service_registry::GatewayServiceRegistry for ToolRegistry {
     fn service_names(&self) -> Vec<&'static str> {
         self.services.iter().map(|service| service.name).collect()
