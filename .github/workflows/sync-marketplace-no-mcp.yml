@@ -1,16 +1,11 @@
 name: Sync marketplace-no-mcp
 
-# Regenerates the long-lived `marketplace-no-mcp` branch as a clean mirror of
-# `main` minus bundled MCP server registrations. The branch is a GENERATED
-# artifact: it is always exactly `main` + the deterministic no-mcp transform.
-# Do NOT hand-edit it — change `main` and/or plugins/scripts/apply-no-mcp-marketplace.
-
 on:
   push:
     branches:
       - main
   schedule:
-    - cron: "37 9 * * *"
+    - cron: "17 9 * * *"
   workflow_dispatch:
 
 permissions:
@@ -36,69 +31,70 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Regenerate marketplace-no-mcp from main
-        id: gen
+      - name: Merge main into marketplace-no-mcp
+        id: merge
         run: |
           git fetch origin main marketplace-no-mcp
-          main_sha=$(git rev-parse origin/main)
-          old_sha=$(git rev-parse origin/marketplace-no-mcp)
-          old_tree=$(git rev-parse "origin/marketplace-no-mcp^{tree}")
-          echo "main_sha=$main_sha" >> "$GITHUB_OUTPUT"
-          echo "old_sha=$old_sha" >> "$GITHUB_OUTPUT"
-          # Start fresh from main so the branch never accumulates drift.
-          git switch -C marketplace-no-mcp origin/main
-          python3 plugins/scripts/apply-no-mcp-marketplace
-          git add -A
-          git commit -m "chore: regenerate marketplace-no-mcp from main ${main_sha}" || true
-          new_tree=$(git rev-parse "HEAD^{tree}")
-          echo "new_tree=$new_tree" >> "$GITHUB_OUTPUT"
-          echo "old_tree=$old_tree" >> "$GITHUB_OUTPUT"
-          if [ "$new_tree" = "$old_tree" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+          echo "old_no_mcp_sha=$(git rev-parse origin/marketplace-no-mcp)" >> "$GITHUB_OUTPUT"
+          echo "main_sha=$(git rev-parse origin/main)" >> "$GITHUB_OUTPUT"
+          git switch marketplace-no-mcp
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo "marketplace-no-mcp already contains main; nothing to merge"
           else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git merge --no-commit --no-ff origin/main || true
+            git read-tree --reset -u origin/main
+            git commit --no-edit
           fi
+          echo "merged_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Validate manifests + no-MCP invariant
+      - name: Apply no-MCP variant rules
         run: |
-          python3 - <<'PY'
-          import glob, json, sys
-          problems = []
-          for mk in (".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"):
-              try:
-                  data = json.load(open(mk))
-              except FileNotFoundError:
-                  continue
-              if not isinstance(data.get("plugins"), list):
-                  problems.append(f"{mk}: plugins must be a list")
-              if not str(data.get("name", "")).endswith("-no-mcp"):
-                  problems.append(f"{mk}: name must end with -no-mcp")
-          for f in sorted(glob.glob("plugins/*/.mcp.json")):
-              if json.load(open(f)).get("mcpServers"):
-                  problems.append(f"{f}: still ships mcpServers")
-          if problems:
-              print("FAIL:")
-              for p in problems:
-                  print("  -", p)
-              sys.exit(1)
-          print("ok: marketplaces valid; no local plugin ships an MCP server")
-          PY
+          python3 plugins/scripts/apply-no-mcp-marketplace
+          plugins/scripts/check-no-mcp-drift --check-current
 
-      - name: Force-push regenerated branch (only when content changed)
-        if: steps.gen.outputs.changed == 'true'
+      - name: Commit and push marketplace-no-mcp
+        id: push
         run: |
-          git push --force-with-lease=marketplace-no-mcp:${{ steps.gen.outputs.old_sha }} \
-            origin HEAD:marketplace-no-mcp
+          committed=false
+          pushed=false
+          if ! git diff --quiet; then
+            git add -A
+            git commit -m "chore: sync marketplace-no-mcp from main"
+            committed=true
+          fi
+          ahead_count=$(git rev-list --count origin/marketplace-no-mcp..HEAD)
+          echo "ahead_count=$ahead_count" >> "$GITHUB_OUTPUT"
+          if [ "$ahead_count" = "0" ]; then
+            echo "marketplace-no-mcp already up to date"
+            echo "committed=$committed" >> "$GITHUB_OUTPUT"
+            echo "pushed=$pushed" >> "$GITHUB_OUTPUT"
+            echo "new_no_mcp_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git push origin HEAD:marketplace-no-mcp
+          pushed=true
+          echo "committed=$committed" >> "$GITHUB_OUTPUT"
+          echo "pushed=$pushed" >> "$GITHUB_OUTPUT"
+          echo "new_no_mcp_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Summary
+      - name: Verify pushed no-MCP drift
+        run: |
+          git fetch origin main marketplace-no-mcp
+          plugins/scripts/check-no-mcp-drift --compare-ref
+
+      - name: Write sync summary
         if: always()
         run: |
           {
-            echo "## marketplace-no-mcp regenerate"
+            echo "## marketplace-no-mcp sync"
             echo
             echo "| Field | Value |"
             echo "|---|---|"
-            echo "| main sha | \`${{ steps.gen.outputs.main_sha }}\` |"
-            echo "| old no-mcp sha | \`${{ steps.gen.outputs.old_sha }}\` |"
-            echo "| content changed | \`${{ steps.gen.outputs.changed }}\` |"
+            echo "| main sha | \`${{ steps.merge.outputs.main_sha }}\` |"
+            echo "| old no-MCP sha | \`${{ steps.merge.outputs.old_no_mcp_sha }}\` |"
+            echo "| merged sha | \`${{ steps.merge.outputs.merged_sha }}\` |"
+            echo "| new no-MCP sha | \`${{ steps.push.outputs.new_no_mcp_sha }}\` |"
+            echo "| ahead commits before push | \`${{ steps.push.outputs.ahead_count }}\` |"
+            echo "| committed generated changes | \`${{ steps.push.outputs.committed }}\` |"
+            echo "| pushed branch | \`${{ steps.push.outputs.pushed }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"

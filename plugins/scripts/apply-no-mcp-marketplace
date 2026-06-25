@@ -1,154 +1,86 @@
 #!/usr/bin/env python3
-"""Apply lab's no-MCP marketplace variant rules.
+"""Apply this repo's no-MCP marketplace variant rules.
 
-Deterministic transform so the long-lived `marketplace-no-mcp` branch can be
-refreshed from `main` by automation (.github/workflows/sync-marketplace-no-mcp.yml),
-instead of being hand-edited. Every plugin/skill entry stays intact; only bundled
-MCP server registrations are removed, for environments (e.g. OpenClaw on agent-os)
-where MCP is provided centrally via the Labby gateway / agent config.
-
-Rules:
-  1. Local plugins: empty mcpServers in plugins/<name>/.mcp.json AND
-     plugins/<name>/mcp.json (the rmcp family uses the no-dot name), plus any
-     inline mcpServers object in a plugin.json. Files are kept (not deleted) so
-     plugin manifests' references stay valid (OpenClaw tolerates an empty map
-     but not always a missing referenced file).
-  2. Marketplace manifests (.claude-plugin + .agents/plugins): append a -no-mcp
-     suffix to the marketplace name (format-preserving) so the variant can be
-     registered alongside the full marketplace.
-  3. External git-subdir/github plugins in NO_MCP_REF_NAMES are repointed to the
-     NO_MCP_REF branch in their own repo (those repos ship a verified, MCP-free
-     marketplace-no-mcp branch). The ref is inserted format-preserving.
+The long-lived `marketplace-no-mcp` branch is a deterministic transform of
+`main`: keep plugin assets, hooks, commands, and skills, but remove bundled MCP
+server registrations for environments where MCP servers are registered
+elsewhere.
 """
 
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
+from typing import Any
+
 
 ROOT = Path(__file__).resolve().parents[2]
-PLUGINS = ROOT / "plugins"
-MARKETPLACES = [
-    ROOT / ".claude-plugin" / "marketplace.json",
-    ROOT / ".agents" / "plugins" / "marketplace.json",
-]
-
-NO_MCP_SUFFIX = "-no-mcp"
-NO_MCP_REF = "marketplace-no-mcp"
-
-# External plugins whose own repo ships a verified MCP-free marketplace-no-mcp
-# branch. Repointing their source.ref makes the no-mcp marketplace pull the
-# stripped variant. (Verified 2026-06-21: each repo's no-mcp branch ships 0
-# MCP servers.)
-NO_MCP_REF_NAMES = {
-    "axon", "lumen", "ytdl-mcp", "rarcane", "cortex",
-    "unraid", "tailscale", "gotify", "unifi", "apprise",
-}
+PLUGIN_ROOT = ROOT / "plugins"
 
 
-def write_json(path: Path, data) -> None:
+def read_json(path: Path) -> Any:
+    return json.loads(path.read_text())
+
+
+def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=True) + "\n")
 
 
-def empty_local_mcp_configs() -> list[Path]:
-    changed = []
-    targets = set(PLUGINS.glob("*/.mcp.json")) | set(PLUGINS.glob("*/mcp.json"))
-    targets |= set(PLUGINS.glob("*/.claude-plugin/plugin.json"))
-    for path in sorted(targets):
-        try:
-            data = json.loads(path.read_text())
-        except Exception:
+def candidate_paths() -> list[Path]:
+    paths: set[Path] = set()
+    for root in (ROOT, PLUGIN_ROOT):
+        if not root.exists():
             continue
-        if isinstance(data, dict) and isinstance(data.get("mcpServers"), dict) and data["mcpServers"]:
-            data["mcpServers"] = {}
+        paths.update(root.glob(".mcp.json"))
+        paths.update(root.glob("mcp.json"))
+        paths.update(root.glob("*/.mcp.json"))
+        paths.update(root.glob("*/mcp.json"))
+    return sorted(paths)
+
+
+def manifest_paths() -> list[Path]:
+    paths: set[Path] = set()
+    for root in (ROOT, PLUGIN_ROOT):
+        if not root.exists():
+            continue
+        paths.update(root.glob(".claude-plugin/plugin.json"))
+        paths.update(root.glob(".codex-plugin/plugin.json"))
+        paths.update(root.glob("gemini-extension.json"))
+        paths.update(root.glob("*/.claude-plugin/plugin.json"))
+        paths.update(root.glob("*/.codex-plugin/plugin.json"))
+        paths.update(root.glob("*/gemini-extension.json"))
+    return sorted(paths)
+
+
+def remove_mcp_configs() -> list[Path]:
+    removed = []
+    for path in candidate_paths():
+        if path.exists():
+            path.unlink()
+            removed.append(path.relative_to(ROOT))
+    return removed
+
+
+def strip_manifest_mcp_servers() -> list[Path]:
+    changed = []
+    for path in manifest_paths():
+        data = read_json(path)
+        if isinstance(data, dict) and "mcpServers" in data:
+            data.pop("mcpServers")
             write_json(path, data)
             changed.append(path.relative_to(ROOT))
     return changed
 
 
-def _insert_ref(text: str, plugin: str, ref: str) -> tuple[str, bool]:
-    """Insert `"ref": <ref>` as the last key of <plugin>'s source object,
-    preserving the surrounding formatting. No-op if a ref is already present."""
-    m = re.search(r'"name"\s*:\s*"' + re.escape(plugin) + r'"', text)
-    if not m:
-        return text, False
-    sidx = text.find('"source"', m.end())
-    if sidx == -1:
-        return text, False
-    brace = text.find("{", sidx)
-    if brace == -1:
-        return text, False
-    depth = 0
-    i = brace
-    while i < len(text):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                break
-        i += 1
-    if i >= len(text) or '"ref"' in text[brace:i + 1]:
-        return text, False
-    indent = "                "
-    for line in text[brace + 1:i].split("\n"):
-        if line.strip().startswith('"'):
-            indent = line[: len(line) - len(line.lstrip())]
-            break
-    j = i - 1
-    while j > brace and text[j] in " \t\r\n":
-        j -= 1
-    insertion = ",\n" + indent + '"ref": ' + json.dumps(ref)
-    return text[: j + 1] + insertion + text[j + 1:], True
-
-
-def transform_marketplace(path: Path) -> list[str]:
-    if not path.exists():
-        return []
-    text = path.read_text()
-    data = json.loads(text)
-    changes: list[str] = []
-
-    name = data.get("name")
-    if isinstance(name, str) and not name.endswith(NO_MCP_SUFFIX):
-        new_text, n = re.subn(
-            r'("name"\s*:\s*)"' + re.escape(name) + r'"',
-            lambda mm: mm.group(1) + json.dumps(name + NO_MCP_SUFFIX),
-            text,
-            count=1,
-        )
-        if n != 1:
-            raise SystemExit(f"{path.relative_to(ROOT)}: could not uniquely rewrite marketplace name {name!r}")
-        text = new_text
-        changes.append(f"{path.relative_to(ROOT)}: name -> {name}{NO_MCP_SUFFIX}")
-
-    for plugin in data.get("plugins", []):
-        if not isinstance(plugin, dict):
-            continue
-        nm = plugin.get("name")
-        src = plugin.get("source")
-        if nm not in NO_MCP_REF_NAMES or not isinstance(src, dict) or src.get("ref") == NO_MCP_REF:
-            continue
-        text, ok = _insert_ref(text, nm, NO_MCP_REF)
-        if ok:
-            changes.append(f"{path.relative_to(ROOT)}: ref {nm} -> {NO_MCP_REF}")
-
-    if changes:
-        path.write_text(text)
-    return changes
-
-
 def main() -> int:
-    emptied = empty_local_mcp_configs()
-    market: list[str] = []
-    for path in MARKETPLACES:
-        market += transform_marketplace(path)
-    for path in emptied:
-        print(f"emptied mcpServers: {path}")
-    for change in market:
-        print(f"marketplace: {change}")
-    if not emptied and not market:
+    removed = remove_mcp_configs()
+    stripped = strip_manifest_mcp_servers()
+
+    if removed:
+        print("removed MCP configs: " + ", ".join(str(path) for path in removed))
+    if stripped:
+        print("stripped manifest MCP servers: " + ", ".join(str(path) for path in stripped))
+    if not removed and not stripped:
         print("no-MCP marketplace rules already applied")
     return 0
 
