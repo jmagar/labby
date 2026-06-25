@@ -17,7 +17,7 @@ use rmcp::service::RequestContext;
 use serde_json::Value;
 
 #[cfg(feature = "gateway")]
-use crate::mcp::call_tool_codemode::code_mode_description;
+use crate::mcp::call_tool_codemode::{CodeModeUpstreamDescription, code_mode_description};
 use crate::mcp::catalog::CODE_MODE_TOOL_NAME;
 use crate::mcp::completion::action_schema;
 use crate::mcp::context::auth_context_from_extensions;
@@ -109,9 +109,8 @@ impl LabMcpServer {
                 Value::Object(map) => Arc::new(map),
                 _ => unreachable!("execute schema must be an object"),
             };
-            let code_mode_upstreams = self.code_mode_upstream_names_for_description().await;
+            let code_mode_upstreams = self.code_mode_upstreams_for_description().await;
             let code_mode_description = code_mode_description(&code_mode_upstreams);
-            debug_assert!(code_mode_description.len() < 8192);
             tracing::info!(
                 surface = "mcp",
                 service = labby_codemode::SERVICE,
@@ -259,7 +258,7 @@ impl LabMcpServer {
     }
 
     #[cfg(feature = "gateway")]
-    async fn code_mode_upstream_names_for_description(&self) -> Vec<String> {
+    async fn code_mode_upstreams_for_description(&self) -> Vec<CodeModeUpstreamDescription> {
         let Some(manager) = &self.gateway_manager else {
             return Vec::new();
         };
@@ -269,11 +268,17 @@ impl LabMcpServer {
             .upstream
             .into_iter()
             .filter(|upstream| upstream.enabled)
-            .map(|upstream| upstream.name)
-            .filter(|name| self.route_scope.allows_upstream(name))
+            .filter(|upstream| self.route_scope.allows_upstream(&upstream.name))
+            .map(|upstream| CodeModeUpstreamDescription {
+                name: upstream.name,
+                hint: upstream
+                    .code_mode_hint
+                    .as_deref()
+                    .and_then(labby_runtime::gateway_config::normalize_code_mode_hint),
+            })
             .collect::<Vec<_>>();
-        upstreams.sort();
-        upstreams.dedup();
+        upstreams.sort_by(|a, b| a.name.cmp(&b.name));
+        upstreams.dedup_by(|a, b| a.name == b.name);
         upstreams
     }
 }

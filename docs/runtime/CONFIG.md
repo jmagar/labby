@@ -599,6 +599,7 @@ url = "https://lab2.example.com/mcp"
 bearer_token_env = "LAB_UPSTREAM_TOKEN"
 proxy_resources = true
 expose_tools = ["search_repos", "github_*"]
+code_mode_hint = "search repositories, issues, pull requests, and code"
 
 [[upstream]]
 name = "local-server"
@@ -608,6 +609,8 @@ proxy_resources = false
 ```
 
 `expose_tools` is optional. When present, it limits which discovered upstream tools are republished by the gateway. Entries support exact names and simple `*` wildcards.
+
+`code_mode_hint` is optional operator-approved one-line capability metadata rendered beside this upstream namespace in the Code Mode tool description. It is display metadata only and never changes routing, auth, exposure, or execution.
 
 ### Gateway-Managed Protected MCP Routes
 

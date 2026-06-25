@@ -286,6 +286,7 @@ pub(crate) fn entry_to_upstream(
         expose_tools: None,
         expose_resources: None,
         expose_prompts: None,
+        code_mode_hint: None,
         oauth: None,
         imported_from: Some(
             ImportSource::new(source_client, source_path, imported_at)

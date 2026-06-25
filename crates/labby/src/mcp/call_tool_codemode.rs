@@ -125,18 +125,39 @@ or split into multiple `codemode` calls.
 Lab actions (`lab::*` tool IDs) are not available in Code Mode. For Lab built-in \
 actions, use the native Lab service tools instead of Code Mode.";
 
+pub(crate) const CODE_MODE_DESCRIPTION_MAX_BYTES: usize = 8192;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CodeModeUpstreamDescription {
+    pub(crate) name: String,
+    pub(crate) hint: Option<String>,
+}
+
+fn push_description_line(out: &mut String, line: &str) {
+    if out.len() + line.len() <= CODE_MODE_DESCRIPTION_MAX_BYTES {
+        out.push_str(line);
+    }
+}
+
 #[must_use]
-pub(crate) fn code_mode_description(upstreams: &[String]) -> String {
-    let upstreams = if upstreams.is_empty() {
-        "- none currently configured".to_string()
-    } else {
-        upstreams
-            .iter()
-            .map(|name| format!("- `{name}`"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    format!("{CODE_MODE_DESCRIPTION_BODY}\n\n## Available upstream namespaces\n\n{upstreams}")
+pub(crate) fn code_mode_description(upstreams: &[CodeModeUpstreamDescription]) -> String {
+    let mut out = format!("{CODE_MODE_DESCRIPTION_BODY}\n\n## Available upstream namespaces\n\n");
+    if upstreams.is_empty() {
+        push_description_line(&mut out, "- none currently configured\n");
+        return out.trim_end().to_string();
+    }
+    for upstream in upstreams {
+        let line = match upstream
+            .hint
+            .as_deref()
+            .and_then(labby_runtime::gateway_config::normalize_code_mode_hint)
+        {
+            Some(hint) => format!("- `{}` -- {}\n", upstream.name, hint),
+            None => format!("- `{}`\n", upstream.name),
+        };
+        push_description_line(&mut out, &line);
+    }
+    out.trim_end().to_string()
 }
 
 pub(crate) fn string_array_arg(

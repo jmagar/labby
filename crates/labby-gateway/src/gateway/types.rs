@@ -61,6 +61,8 @@ pub struct GatewayConfigView {
     pub expose_resources: Option<Vec<String>>,
     #[serde(default)]
     pub expose_prompts: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_mode_hint: Option<String>,
     #[serde(default)]
     pub code_mode_enabled: bool,
     /// Set when this server was imported from an external config; absent for manual entries.

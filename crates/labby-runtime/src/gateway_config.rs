@@ -16,6 +16,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+pub const CODE_MODE_HINT_MAX_CHARS: usize = 240;
+pub const CODE_MODE_HINT_MAX_WORDS: usize = 24;
+pub const CODE_MODE_HINT_SANITIZER_VERSION: &str = "code_mode_hint_v1";
+
 // ─── serde default helpers ───────────────────────────────────────────────────
 
 /// Serde default for boolean fields that default to `true`.
@@ -298,6 +302,12 @@ pub struct UpstreamConfig {
     /// Optional allowlist of prompt names/patterns to expose from this upstream.
     #[serde(default)]
     pub expose_prompts: Option<Vec<String>>,
+    /// Optional short model-visible capability hint for this upstream in Code Mode.
+    ///
+    /// This is operator-approved display metadata only. It must not affect
+    /// routing, auth, enablement, exposure policy, or tool execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_mode_hint: Option<String>,
     /// Optional outbound OAuth configuration. Mutually exclusive with
     /// `bearer_token_env` — setting both is a config error.
     #[serde(default)]
@@ -306,6 +316,130 @@ pub struct UpstreamConfig {
     /// external MCP config rather than added manually. Omitted for manual entries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imported_from: Option<ImportSource>,
+}
+
+/// Normalize an operator-approved Code Mode upstream capability hint.
+///
+/// Hints are model-visible metadata, so this is intentionally a positive
+/// policy: short ASCII-ish single-line capability summaries with simple
+/// punctuation only. Anything that looks like instructions, local endpoints,
+/// paths, markup, secrets, control text, or second-person language is omitted.
+#[must_use]
+pub fn normalize_code_mode_hint(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > CODE_MODE_HINT_MAX_CHARS {
+        return None;
+    }
+    let mut previous_was_space = false;
+    let mut normalized = String::with_capacity(trimmed.len());
+    for ch in trimmed.chars() {
+        if ch.is_control()
+            || matches!(
+                ch,
+                '`'
+                    | '<'
+                    | '>'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+                    | '\\'
+                    | '|'
+                    | '#'
+                    | '$'
+                    | '@'
+                    | '^'
+                    | '*'
+                    | '~'
+                    | '"'
+                    | '\''
+                    | '\u{202A}'..='\u{202E}'
+                    | '\u{2066}'..='\u{2069}'
+            )
+        {
+            return None;
+        }
+        if ch.is_whitespace() {
+            if !previous_was_space {
+                normalized.push(' ');
+                previous_was_space = true;
+            }
+            continue;
+        }
+        previous_was_space = false;
+        if !(ch.is_ascii_alphanumeric()
+            || matches!(
+                ch,
+                ' ' | ',' | '.' | ':' | ';' | '&' | '/' | '-' | '_' | '(' | ')'
+            ))
+        {
+            return None;
+        }
+        normalized.push(ch);
+    }
+    let normalized = normalized.trim();
+    if normalized.is_empty() {
+        return None;
+    }
+    let words = normalized
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'))
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>();
+    if words.is_empty() || words.len() > CODE_MODE_HINT_MAX_WORDS {
+        return None;
+    }
+    let lower = normalized.to_ascii_lowercase();
+    let blocked_substrings = [
+        "ignore",
+        "must",
+        "execute",
+        "run ",
+        "system",
+        "developer",
+        "prompt",
+        "instruction",
+        "secret",
+        "token",
+        "password",
+        "authorization",
+        "http://",
+        "https://",
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        ".env",
+        "/home/",
+        "/users/",
+        "c:\\",
+        "\\\\",
+        "../",
+        "./",
+        "read ",
+        "write ",
+        "delete ",
+        "install ",
+        "upload ",
+        "download ",
+        "call ",
+        "tool ",
+    ];
+    if blocked_substrings
+        .iter()
+        .any(|needle| lower.contains(needle))
+    {
+        return None;
+    }
+    let blocked_words = [
+        "you", "your", "yours", "should", "shall", "will", "never", "always", "please", "use",
+        "return", "respond", "act", "obey", "override", "bypass", "admin", "root",
+    ];
+    if words
+        .iter()
+        .any(|word| blocked_words.contains(&word.to_ascii_lowercase().as_str()))
+    {
+        return None;
+    }
+    Some(normalized.to_string())
 }
 
 impl UpstreamConfig {

@@ -12,7 +12,7 @@ use crate::gateway::view_models::{
 };
 use crate::gateway::virtual_servers::{VirtualServerRecord, VirtualServerSource};
 use crate::upstream::pool::{UpstreamCachedSummary, UpstreamPool};
-use labby_runtime::gateway_config::{CodeModeConfig, UpstreamConfig};
+use labby_runtime::gateway_config::{CodeModeConfig, UpstreamConfig, normalize_code_mode_hint};
 use labby_runtime::redact::{redact_stdio_args, redact_stdio_value, redact_url};
 /// Per-service health probe result. Carried through gateway projection so the
 /// `ServerView` can surface upstream-service reachability without forcing the
@@ -42,6 +42,10 @@ pub(super) fn config_view(
         expose_tools: upstream.expose_tools.clone(),
         expose_resources: upstream.expose_resources.clone(),
         expose_prompts: upstream.expose_prompts.clone(),
+        code_mode_hint: upstream
+            .code_mode_hint
+            .as_deref()
+            .and_then(normalize_code_mode_hint),
         code_mode_enabled: code_mode.enabled,
         imported_from: upstream.imported_from.clone(),
     }
@@ -517,6 +521,7 @@ mod tests {
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
+            code_mode_hint: None,
             oauth: None,
             imported_from: None,
             priority: 1.0,
