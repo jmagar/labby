@@ -17,7 +17,7 @@ use rmcp::service::RequestContext;
 use serde_json::Value;
 
 #[cfg(feature = "gateway")]
-use crate::mcp::call_tool_codemode::CODE_MODE_DESCRIPTION;
+use crate::mcp::call_tool_codemode::code_mode_description;
 use crate::mcp::catalog::CODE_MODE_TOOL_NAME;
 use crate::mcp::completion::action_schema;
 use crate::mcp::context::auth_context_from_extensions;
@@ -109,12 +109,15 @@ impl LabMcpServer {
                 Value::Object(map) => Arc::new(map),
                 _ => unreachable!("execute schema must be an object"),
             };
-            debug_assert!(CODE_MODE_DESCRIPTION.len() < 8192);
+            let code_mode_upstreams = self.code_mode_upstream_names_for_description().await;
+            let code_mode_description = code_mode_description(&code_mode_upstreams);
+            debug_assert!(code_mode_description.len() < 8192);
             tracing::info!(
                 surface = "mcp",
                 service = labby_codemode::SERVICE,
                 action = "tool.describe",
-                description_bytes = CODE_MODE_DESCRIPTION.len(),
+                description_bytes = code_mode_description.len(),
+                upstream_count = code_mode_upstreams.len(),
                 "registered primary Code Mode description"
             );
             let codemode_resource_uri = code_mode_app_resource_uri_for_tool(CODE_MODE_TOOL_NAME)
@@ -132,7 +135,7 @@ impl LabMcpServer {
             tools.push(
                 Tool::new(
                     CODE_MODE_TOOL_NAME,
-                    CODE_MODE_DESCRIPTION,
+                    code_mode_description,
                     Arc::clone(&execute_schema),
                 )
                 .with_raw_output_schema(Arc::clone(&trace_output_schema))
@@ -253,6 +256,25 @@ impl LabMcpServer {
         .await;
 
         Ok(ListToolsResult::with_all_items(tools))
+    }
+
+    #[cfg(feature = "gateway")]
+    async fn code_mode_upstream_names_for_description(&self) -> Vec<String> {
+        let Some(manager) = &self.gateway_manager else {
+            return Vec::new();
+        };
+        let mut upstreams = manager
+            .current_config()
+            .await
+            .upstream
+            .into_iter()
+            .filter(|upstream| upstream.enabled)
+            .map(|upstream| upstream.name)
+            .filter(|name| self.route_scope.allows_upstream(name))
+            .collect::<Vec<_>>();
+        upstreams.sort();
+        upstreams.dedup();
+        upstreams
     }
 }
 

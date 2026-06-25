@@ -629,6 +629,56 @@ async fn protected_code_mode_list_tools_hides_raw_siblings_and_disallowed_builti
 }
 
 #[tokio::test]
+async fn codemode_description_lists_route_scoped_enabled_upstreams() {
+    let apps = fixture_upstream_config("apps");
+    let mut hidden = fixture_upstream_config("hidden");
+    hidden.enabled = false;
+    let pool = Arc::new(UpstreamPool::new());
+    let manager = code_mode_manager_with_pool_multi(true, vec![apps, hidden], pool).await;
+    let server = test_server(
+        completion_test_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::protected_subset(
+            "media",
+            ["apps"],
+            ["radarr"],
+            true,
+        ),
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = rmcp::service::RequestContext::new(
+        rmcp::model::NumberOrString::Number(1),
+        running.peer().clone(),
+    );
+
+    let result = running
+        .service()
+        .list_tools_impl(None, context)
+        .await
+        .expect("list tools");
+    let codemode = result
+        .tools
+        .iter()
+        .find(|tool| tool.name.as_ref() == CODE_MODE_TOOL_NAME)
+        .expect("codemode tool");
+    let description = codemode
+        .description
+        .as_ref()
+        .expect("codemode description")
+        .as_ref();
+
+    assert!(description.contains("## Available upstream namespaces"));
+    assert!(description.contains("- `apps`"));
+    assert!(!description.contains("- `hidden`"));
+    assert!(!description.contains("- `sonarr`"));
+    assert!(description.contains("Never guess helper or method names"));
+}
+
+#[tokio::test]
 async fn protected_list_tools_filters_disallowed_builtins_when_code_mode_is_off() {
     let server = test_server(
         completion_test_registry(),
