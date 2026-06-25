@@ -233,9 +233,9 @@ jobs:
     # skipped, so untrusted code can't execute on the runner — while our own
     # branch PRs (e.g. Windows reaping work) get pre-merge Windows verification.
     #
-    # The runner is steamy's Windows host with rustup, cargo-nextest, NASM,
-    # CMake, and LLVM/libclang preinstalled and a persistent warm target dir —
-    # no toolchain/cache actions needed.
+    # The runner is steamy's Windows host with rustup, NASM, CMake, and
+    # LLVM/libclang preinstalled and a persistent warm target dir — no
+    # toolchain/cache actions needed.
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -246,6 +246,7 @@ jobs:
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
+      - uses: taiki-e/install-action@nextest
       - name: Check Windows Job Object helper crate
         shell: pwsh
         run: cargo check -p labby-winjob --all-targets --locked
