@@ -253,16 +253,16 @@ jobs:
           $version = "0.9.138"
           $target = "x86_64-pc-windows-msvc"
           $base = "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$version"
-          $zip = Join-Path $env:RUNNER_TEMP "cargo-nextest.zip"
+          $archive = Join-Path $env:RUNNER_TEMP "cargo-nextest.tar.gz"
           $shaFile = Join-Path $env:RUNNER_TEMP "cargo-nextest.sha256"
           $extractDir = Join-Path $env:RUNNER_TEMP "cargo-nextest"
           $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
 
-          Invoke-WebRequest "$base/cargo-nextest-$version-$target.zip" -OutFile $zip
+          Invoke-WebRequest "$base/cargo-nextest-$version-$target.tar.gz" -OutFile $archive
           Invoke-WebRequest "$base/cargo-nextest-$version-$target.sha256" -OutFile $shaFile
 
           $expected = (Get-Content $shaFile -Raw).Split(" ")[0].Trim().ToLowerInvariant()
-          $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $expected) {
             throw "cargo-nextest checksum mismatch: expected $expected, got $actual"
           }
@@ -270,7 +270,8 @@ jobs:
           if (Test-Path $extractDir) {
             Remove-Item -Recurse -Force $extractDir
           }
-          Expand-Archive -Path $zip -DestinationPath $extractDir -Force
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+          tar -xzf $archive -C $extractDir
           $exe = Get-ChildItem -Path $extractDir -Recurse -Filter cargo-nextest.exe | Select-Object -First 1
           if (-not $exe) {
             throw "cargo-nextest.exe not found in release archive"
