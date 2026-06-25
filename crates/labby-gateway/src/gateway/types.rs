@@ -159,6 +159,8 @@ pub struct PendingImportView {
     pub command: Option<String>,
     pub source_client: String,
     pub source_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enrichment_suggestion: Option<GatewayHintProposalView>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -184,6 +186,57 @@ pub struct GatewayRuntimeView {
 pub struct GatewayView {
     pub config: GatewayConfigView,
     pub runtime: GatewayRuntimeView,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enrichment_suggestion: Option<GatewayHintProposalView>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GatewayEnrichmentProvider {
+    #[default]
+    Deterministic,
+    Claude,
+    Codex,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GatewayHintProposalStatus {
+    Suggested,
+    Existing,
+    MetadataInsufficient,
+    ProviderUnavailable,
+    InvalidProviderOutput,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GatewayHintProposalView {
+    pub upstream: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    pub status: GatewayHintProposalStatus,
+    pub metadata_hash: String,
+    pub provider: GatewayEnrichmentProvider,
+    pub tool_count: usize,
+    pub resource_count: usize,
+    pub prompt_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub existing_hint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GatewayEnrichmentPreviewView {
+    pub provider: GatewayEnrichmentProvider,
+    pub proposals: Vec<GatewayHintProposalView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GatewayHintApplyView {
+    pub upstream: String,
+    pub hint: String,
+    pub applied: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_hint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

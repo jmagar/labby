@@ -17,6 +17,7 @@ mod config_mutation;
 pub mod config_store;
 pub mod discovery;
 mod dispatch;
+mod enrichment;
 pub mod manager;
 pub mod oauth;
 mod oauth_lifecycle;

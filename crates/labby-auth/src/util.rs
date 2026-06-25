@@ -2,9 +2,12 @@
 
 use std::fmt::Write as _;
 use std::path::Path;
+#[cfg(feature = "http-axum")]
 use std::time::Duration;
 
+#[cfg(feature = "http-axum")]
 use base64::Engine;
+#[cfg(feature = "http-axum")]
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use sha2::{Digest, Sha256};
 
@@ -18,6 +21,7 @@ pub fn now_unix() -> i64 {
     i64::try_from(secs).unwrap_or(i64::MAX)
 }
 
+#[cfg(feature = "http-axum")]
 pub(crate) fn random_token(bytes: usize) -> Result<String, AuthError> {
     let mut buf = vec![0_u8; bytes];
     getrandom::fill(&mut buf)
@@ -67,21 +71,25 @@ pub(crate) fn set_restrictive_permissions(_path: &Path) -> Result<(), AuthError>
     Ok(())
 }
 
+#[cfg(feature = "http-axum")]
 pub(crate) fn duration_secs_i64(duration: Duration, field: &str) -> Result<i64, AuthError> {
     i64::try_from(duration.as_secs())
         .map_err(|_| AuthError::Config(format!("{field} exceeds supported range")))
 }
 
+#[cfg(feature = "http-axum")]
 pub(crate) fn duration_secs_usize(duration: Duration, field: &str) -> Result<usize, AuthError> {
     usize::try_from(duration.as_secs())
         .map_err(|_| AuthError::Config(format!("{field} exceeds supported range")))
 }
 
+#[cfg(feature = "http-axum")]
 pub(crate) fn timestamp_usize(timestamp: i64, field: &str) -> Result<usize, AuthError> {
     usize::try_from(timestamp)
         .map_err(|_| AuthError::Storage(format!("{field} is negative or exceeds usize range")))
 }
 
+#[cfg(feature = "http-axum")]
 pub(crate) fn expires_at(
     created_at: i64,
     duration: Duration,

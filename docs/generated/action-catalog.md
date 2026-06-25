@@ -56,6 +56,8 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `gateway` | `gateway.discovered_prompts` | false | false | `name*: string` | `string[]` | cli, mcp, api, web |
 | `gateway` | `gateway.discovered_resources` | false | false | `name*: string` | `string[]` | cli, mcp, api, web |
 | `gateway` | `gateway.discovered_tools` | false | false | `name*: string` | `GatewayToolExposureRowView[]` | cli, mcp, api, web |
+| `gateway` | `gateway.enrich.apply` | false | true | `upstream*: string`<br>`hint*: string`<br>`metadata_hash*: string` | `GatewayHintApplyView` | cli, mcp, api, web |
+| `gateway` | `gateway.enrich.preview` | false | false | `upstreams: array`<br>`all: boolean`<br>`provider: string`<br>`max_upstreams: integer`<br>`timeout_ms: integer` | `GatewayEnrichmentPreviewView` | cli, mcp, api, web |
 | `gateway` | `gateway.get` | false | false | `name*: string` | `GatewayView` | cli, mcp, api, web |
 | `gateway` | `gateway.import` | false | false | `all: boolean`<br>`names: string[]`<br>`clients: string[]` | `ImportResultView` | cli, mcp, api, web |
 | `gateway` | `gateway.import_pending.approve` | false | false | `name*: string` | `PendingImportView` | cli, mcp, api, web |

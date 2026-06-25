@@ -122,6 +122,72 @@ pub const ACTIONS: &[ActionSpec] = &[
         }],
     },
     ActionSpec {
+        name: "gateway.enrich.preview",
+        description: "Preview Code Mode upstream hint proposals from cached gateway metadata",
+        destructive: false,
+        requires_admin: true,
+        returns: "GatewayEnrichmentPreviewView",
+        params: &[
+            ParamSpec {
+                name: "upstreams",
+                ty: "array",
+                required: false,
+                description: "Gateway upstream names to preview",
+            },
+            ParamSpec {
+                name: "all",
+                ty: "boolean",
+                required: false,
+                description: "Preview enabled upstreams up to the max-upstreams cap",
+            },
+            ParamSpec {
+                name: "provider",
+                ty: "string",
+                required: false,
+                description: "Preview provider: deterministic, claude, or codex",
+            },
+            ParamSpec {
+                name: "max_upstreams",
+                ty: "integer",
+                required: false,
+                description: "Maximum upstreams to preview, capped at 25",
+            },
+            ParamSpec {
+                name: "timeout_ms",
+                ty: "integer",
+                required: false,
+                description: "Provider subprocess timeout in milliseconds",
+            },
+        ],
+    },
+    ActionSpec {
+        name: "gateway.enrich.apply",
+        description: "Persist an operator-approved Code Mode upstream hint after hash validation",
+        destructive: true,
+        requires_admin: true,
+        returns: "GatewayHintApplyView",
+        params: &[
+            ParamSpec {
+                name: "upstream",
+                ty: "string",
+                required: true,
+                description: "Gateway upstream name",
+            },
+            ParamSpec {
+                name: "hint",
+                ty: "string",
+                required: true,
+                description: "Approved one-line Code Mode capability hint",
+            },
+            ParamSpec {
+                name: "metadata_hash",
+                ty: "string",
+                required: true,
+                description: "Metadata hash from the preview proposal",
+            },
+        ],
+    },
+    ActionSpec {
         name: "gateway.supported_services",
         description: "List metadata-backed Lab services that can be added as virtual servers",
         destructive: false,
@@ -874,7 +940,7 @@ mod tests {
     #[test]
     fn gateway_actions_are_not_destructive_under_data_loss_definition() {
         for spec in ACTIONS {
-            if spec.name == "gateway.code_mode.set" {
+            if matches!(spec.name, "gateway.code_mode.set" | "gateway.enrich.apply") {
                 continue;
             }
             assert!(

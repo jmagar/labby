@@ -1467,6 +1467,92 @@
   },
   {
     "service": "gateway",
+    "action": "gateway.enrich.apply",
+    "description": "Persist an operator-approved Code Mode upstream hint after hash validation",
+    "destructive": true,
+    "params": [
+      {
+        "name": "upstream",
+        "ty": "string",
+        "required": true,
+        "description": "Gateway upstream name"
+      },
+      {
+        "name": "hint",
+        "ty": "string",
+        "required": true,
+        "description": "Approved one-line Code Mode capability hint"
+      },
+      {
+        "name": "metadata_hash",
+        "ty": "string",
+        "required": true,
+        "description": "Metadata hash from the preview proposal"
+      }
+    ],
+    "returns": "GatewayHintApplyView",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "gateway",
+    "action": "gateway.enrich.preview",
+    "description": "Preview Code Mode upstream hint proposals from cached gateway metadata",
+    "destructive": false,
+    "params": [
+      {
+        "name": "upstreams",
+        "ty": "array",
+        "required": false,
+        "description": "Gateway upstream names to preview"
+      },
+      {
+        "name": "all",
+        "ty": "boolean",
+        "required": false,
+        "description": "Preview enabled upstreams up to the max-upstreams cap"
+      },
+      {
+        "name": "provider",
+        "ty": "string",
+        "required": false,
+        "description": "Preview provider: deterministic, claude, or codex"
+      },
+      {
+        "name": "max_upstreams",
+        "ty": "integer",
+        "required": false,
+        "description": "Maximum upstreams to preview, capped at 25"
+      },
+      {
+        "name": "timeout_ms",
+        "ty": "integer",
+        "required": false,
+        "description": "Provider subprocess timeout in milliseconds"
+      }
+    ],
+    "returns": "GatewayEnrichmentPreviewView",
+    "surface_availability": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "gateway",
     "action": "gateway.get",
     "description": "Get one configured gateway",
     "destructive": false,

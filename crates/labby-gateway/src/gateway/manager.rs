@@ -45,6 +45,7 @@ mod code_mode_resolve;
 mod code_mode_runtime;
 mod config_ops;
 mod core;
+mod enrichment;
 mod import_matchers;
 mod imports;
 mod oauth_resources;

@@ -38,6 +38,19 @@ pub struct UpstreamToolExposureRow {
     pub matched_by: Option<String>,
 }
 
+/// Cached, sanitized-at-source catalog data used by gateway enrichment.
+///
+/// This is intentionally schema-free and provenance-free. It is assembled from
+/// the already-discovered in-memory catalog only, so callers can preview
+/// enrichment without connecting to stdio upstreams or reading resources.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UpstreamEnrichmentCatalogEntry {
+    pub upstream: String,
+    pub tool_rows: Vec<UpstreamToolExposureRow>,
+    pub resource_count: usize,
+    pub prompt_count: usize,
+}
+
 /// Runtime metadata for process-backed upstream connections.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UpstreamRuntimeOwner {

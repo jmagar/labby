@@ -12,12 +12,13 @@ use super::client::require_gateway_manager;
 use super::manager::{GatewayManager, ImportTombstoneSelector};
 use super::params::{
     CodeModeSetParams, GatewayAddParams, GatewayClientConfigParams, GatewayDiscoverParams,
-    GatewayImportParams, GatewayImportTombstoneParams, GatewayMcpCleanupParams,
-    GatewayMcpToggleParams, GatewayNameParams, GatewayOauthNameParams, GatewayReloadParams,
-    GatewayStatusParams, GatewayTestParams, GatewayUpdateParams, GatewayUpdatePatch,
-    ProtectedRouteNameParams, ProtectedRouteSpecParams, ProtectedRouteUpdateParams,
-    ServiceConfigGetParams, ServiceConfigSetParams, VirtualServerMcpPolicyParams,
-    VirtualServerNameParams, VirtualServerSurfaceParams,
+    GatewayEnrichApplyParams, GatewayEnrichPreviewParams, GatewayImportParams,
+    GatewayImportTombstoneParams, GatewayMcpCleanupParams, GatewayMcpToggleParams,
+    GatewayNameParams, GatewayOauthNameParams, GatewayReloadParams, GatewayStatusParams,
+    GatewayTestParams, GatewayUpdateParams, GatewayUpdatePatch, ProtectedRouteNameParams,
+    ProtectedRouteSpecParams, ProtectedRouteUpdateParams, ServiceConfigGetParams,
+    ServiceConfigSetParams, VirtualServerMcpPolicyParams, VirtualServerNameParams,
+    VirtualServerSurfaceParams,
 };
 use super::types::{
     DiscoveredServerView, ImportErrorView, ImportSkipReason, ImportSkipView,
@@ -46,6 +47,14 @@ pub async fn dispatch_with_manager(
             handle_tool_actions(manager, action, params_value).await
         }
         "gateway.discover" => handle_discover(manager, params_value).await,
+        "gateway.enrich.preview" => {
+            let params: GatewayEnrichPreviewParams = parse_params(params_value)?;
+            to_json(manager.preview_enrichment(params).await?)
+        }
+        "gateway.enrich.apply" => {
+            let params: GatewayEnrichApplyParams = parse_params(params_value)?;
+            to_json(manager.apply_enrichment(params).await?)
+        }
         "gateway.import" => handle_import(manager, params_value).await,
         "gateway.import_pending.list" => to_json(manager.list_pending_imports().await),
         "gateway.import_pending.approve" => {

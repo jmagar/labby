@@ -44,6 +44,8 @@ fn gateway_actions_include_management_surface() {
     assert!(names.contains(&"gateway.discovered_tools"));
     assert!(names.contains(&"gateway.discovered_resources"));
     assert!(names.contains(&"gateway.discovered_prompts"));
+    assert!(names.contains(&"gateway.enrich.preview"));
+    assert!(names.contains(&"gateway.enrich.apply"));
     assert!(names.contains(&"gateway.oauth.probe"));
     assert!(names.contains(&"gateway.oauth.start"));
     assert!(names.contains(&"gateway.oauth.status"));
@@ -54,7 +56,7 @@ fn gateway_actions_include_management_surface() {
     assert!(names.contains(&"gateway.public_urls.get"));
 
     for spec in ACTIONS {
-        if spec.name == "gateway.code_mode.set" {
+        if matches!(spec.name, "gateway.code_mode.set" | "gateway.enrich.apply") {
             continue;
         }
         assert!(
@@ -63,6 +65,82 @@ fn gateway_actions_include_management_surface() {
             spec.name
         );
     }
+}
+
+#[tokio::test]
+async fn enrich_preview_dispatch_defaults_to_deterministic_provider() {
+    let manager = test_manager();
+    manager
+        .replace_config_for_tests(vec![upstream_fixture(
+            "github",
+            Some("https://example.invalid/mcp".to_string()),
+            None,
+        )])
+        .await;
+
+    let value = dispatch_with_manager(
+        &manager,
+        "gateway.enrich.preview",
+        json!({"upstreams": ["github"]}),
+    )
+    .await
+    .expect("preview dispatch");
+
+    assert_eq!(value["provider"], json!("deterministic"));
+    assert_eq!(value["proposals"][0]["upstream"], json!("github"));
+}
+
+#[tokio::test]
+async fn enrich_preview_dispatch_rejects_empty_selection() {
+    let manager = test_manager();
+    let err = dispatch_with_manager(&manager, "gateway.enrich.preview", json!({}))
+        .await
+        .expect_err("empty selection must fail");
+
+    assert_eq!(err.kind(), "invalid_param");
+}
+
+#[tokio::test]
+async fn enrich_apply_dispatch_persists_hint() {
+    let manager = test_manager();
+    manager
+        .replace_config_for_tests(vec![upstream_fixture(
+            "github",
+            Some("https://example.invalid/mcp".to_string()),
+            None,
+        )])
+        .await;
+    let preview = dispatch_with_manager(
+        &manager,
+        "gateway.enrich.preview",
+        json!({"upstreams": ["github"]}),
+    )
+    .await
+    .expect("preview");
+    let hash = preview["proposals"][0]["metadata_hash"]
+        .as_str()
+        .expect("hash")
+        .to_string();
+
+    let applied = dispatch_with_manager(
+        &manager,
+        "gateway.enrich.apply",
+        json!({
+            "upstream": "github",
+            "hint": "search repositories",
+            "metadata_hash": hash,
+        }),
+    )
+    .await
+    .expect("apply");
+
+    assert_eq!(applied["hint"], json!("search repositories"));
+    assert_eq!(
+        manager.current_config().await.upstream[0]
+            .code_mode_hint
+            .as_deref(),
+        Some("search repositories")
+    );
 }
 
 #[test]

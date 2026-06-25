@@ -109,59 +109,66 @@ impl GatewayManager {
         owner: Option<UpstreamRuntimeOwner>,
     ) -> Result<GatewayView, ToolError> {
         let started = Instant::now();
-        let _mutation_guard = self.config_mutation.lock().await;
-        let mut cfg = self.config.read().await.clone();
+        let spec_name = spec.name.clone();
 
-        // Trim and validate bearer_token_env unconditionally so whitespace typos
-        // are caught before they silently fail env-var lookup later.
-        if let Some(ref env_name) = spec.bearer_token_env {
-            let trimmed = env_name.trim().to_string();
-            validate_bearer_token_env_name(&trimmed)?;
-            spec.bearer_token_env = Some(trimmed);
-        }
-
-        if let Some(token_value) = bearer_token_value.as_deref().map(str::trim)
-            && !token_value.is_empty()
         {
-            let env_name =
-                resolve_gateway_bearer_env_name(&spec.name, spec.bearer_token_env.as_deref())?;
-            spec.bearer_token_env = Some(env_name.clone());
-            insert_upstream(&mut cfg, spec.clone())?;
-            self.persist_gateway_bearer_token(&env_name, token_value)
-                .await?;
-        } else {
-            insert_upstream(&mut cfg, spec.clone())?;
+            let _mutation_guard = self.config_mutation.lock().await;
+            let mut cfg = self.config.read().await.clone();
+
+            // Trim and validate bearer_token_env unconditionally so whitespace typos
+            // are caught before they silently fail env-var lookup later.
+            if let Some(ref env_name) = spec.bearer_token_env {
+                let trimmed = env_name.trim().to_string();
+                validate_bearer_token_env_name(&trimmed)?;
+                spec.bearer_token_env = Some(trimmed);
+            }
+
+            if let Some(token_value) = bearer_token_value.as_deref().map(str::trim)
+                && !token_value.is_empty()
+            {
+                let env_name =
+                    resolve_gateway_bearer_env_name(&spec.name, spec.bearer_token_env.as_deref())?;
+                spec.bearer_token_env = Some(env_name.clone());
+                insert_upstream(&mut cfg, spec.clone())?;
+                self.persist_gateway_bearer_token(&env_name, token_value)
+                    .await?;
+            } else {
+                insert_upstream(&mut cfg, spec.clone())?;
+            }
+
+            // Log only after validation (inside insert_upstream) has passed so
+            // spec.name is confirmed well-formed before it enters any log sink.
+            tracing::info!(
+                surface = "dispatch",
+                service = "gateway",
+                action = "gateway.add",
+                event = "install.start",
+                phase = "start",
+                gateway = %spec.name,
+                target = ?redacted_gateway_target(&spec),
+                "gateway reconcile"
+            );
+            self.persist_config(cfg).await?;
+            let diff = self.reload_with_origin_unlocked(origin, owner).await?;
+            tracing::info!(
+                surface = "dispatch",
+                service = "gateway",
+                action = "gateway.add",
+                event = "install.finish",
+                phase = "finish",
+                gateway = %spec.name,
+                target = ?redacted_gateway_target(&spec),
+                tools_changed = diff.tools_changed,
+                resources_changed = diff.resources_changed,
+                prompts_changed = diff.prompts_changed,
+                elapsed_ms = started.elapsed().as_millis(),
+                "gateway reconcile"
+            );
         }
 
-        // Log only after validation (inside insert_upstream) has passed so
-        // spec.name is confirmed well-formed before it enters any log sink.
-        tracing::info!(
-            surface = "dispatch",
-            service = "gateway",
-            action = "gateway.add",
-            event = "install.start",
-            phase = "start",
-            gateway = %spec.name,
-            target = ?redacted_gateway_target(&spec),
-            "gateway reconcile"
-        );
-        self.persist_config(cfg).await?;
-        let diff = self.reload_with_origin_unlocked(origin, owner).await?;
-        tracing::info!(
-            surface = "dispatch",
-            service = "gateway",
-            action = "gateway.add",
-            event = "install.finish",
-            phase = "finish",
-            gateway = %spec.name,
-            target = ?redacted_gateway_target(&spec),
-            tools_changed = diff.tools_changed,
-            resources_changed = diff.resources_changed,
-            prompts_changed = diff.prompts_changed,
-            elapsed_ms = started.elapsed().as_millis(),
-            "gateway reconcile"
-        );
-        self.get(&spec.name).await
+        let mut view = self.get(&spec_name).await?;
+        view.enrichment_suggestion = self.preview_enrichment_for_new_upstream(&spec_name).await;
+        Ok(view)
     }
 
     /// Add multiple upstream servers in a single config-persist + reload cycle.
@@ -180,49 +187,54 @@ impl GatewayManager {
             return Ok(BatchAddOutcome::default());
         }
         let started = std::time::Instant::now();
-        let _mutation_guard = self.config_mutation.lock().await;
-        let mut cfg = self.config.read().await.clone();
+        let (added_names, errors) = {
+            let _mutation_guard = self.config_mutation.lock().await;
+            let mut cfg = self.config.read().await.clone();
 
-        let mut added_names = Vec::new();
-        let mut errors: Vec<(String, ToolError)> = Vec::new();
-        for mut spec in specs {
-            if let Some(ref env_name) = spec.bearer_token_env {
-                let trimmed = env_name.trim().to_string();
-                if let Err(e) = validate_bearer_token_env_name(&trimmed) {
-                    errors.push((spec.name, e));
-                    continue;
+            let mut added_names = Vec::new();
+            let mut errors: Vec<(String, ToolError)> = Vec::new();
+            for mut spec in specs {
+                if let Some(ref env_name) = spec.bearer_token_env {
+                    let trimmed = env_name.trim().to_string();
+                    if let Err(e) = validate_bearer_token_env_name(&trimmed) {
+                        errors.push((spec.name, e));
+                        continue;
+                    }
+                    spec.bearer_token_env = Some(trimmed);
                 }
-                spec.bearer_token_env = Some(trimmed);
+                match insert_upstream(&mut cfg, spec.clone()) {
+                    Ok(()) => added_names.push(spec.name),
+                    Err(e) => errors.push((spec.name, e)),
+                }
             }
-            match insert_upstream(&mut cfg, spec.clone()) {
-                Ok(()) => added_names.push(spec.name),
-                Err(e) => errors.push((spec.name, e)),
+
+            if added_names.is_empty() && !errors.is_empty() {
+                // Every spec failed — return the first error to the caller.
+                return Err(errors.remove(0).1);
             }
-        }
 
-        if added_names.is_empty() && !errors.is_empty() {
-            // Every spec failed — return the first error to the caller.
-            return Err(errors.remove(0).1);
-        }
+            self.persist_config(cfg).await?;
+            let diff = self.reload_with_origin_unlocked(origin, owner).await?;
 
-        self.persist_config(cfg).await?;
-        let diff = self.reload_with_origin_unlocked(origin, owner).await?;
+            tracing::info!(
+                surface = "dispatch",
+                service = "gateway",
+                action = "gateway.import",
+                event = "batch_install.finish",
+                added = added_names.len(),
+                skipped = errors.len(),
+                tools_changed = diff.tools_changed,
+                elapsed_ms = started.elapsed().as_millis(),
+                "gateway batch reconcile"
+            );
 
-        tracing::info!(
-            surface = "dispatch",
-            service = "gateway",
-            action = "gateway.import",
-            event = "batch_install.finish",
-            added = added_names.len(),
-            skipped = errors.len(),
-            tools_changed = diff.tools_changed,
-            elapsed_ms = started.elapsed().as_millis(),
-            "gateway batch reconcile"
-        );
+            (added_names, errors)
+        };
 
         let mut views = Vec::new();
         for name in &added_names {
-            if let Ok(view) = self.get(name).await {
+            if let Ok(mut view) = self.get(name).await {
+                view.enrichment_suggestion = self.preview_enrichment_for_new_upstream(name).await;
                 views.push(view);
             }
         }
@@ -358,6 +370,7 @@ impl GatewayManager {
                 name: removed.name,
                 ..GatewayRuntimeView::default()
             },
+            enrichment_suggestion: None,
         })
     }
 

@@ -1247,6 +1247,7 @@ Commands:
   pending          Manage pending discovered servers waiting for approval
   public-urls      Show resolved public URL configuration (app and MCP gateway)
   code             Search, inspect, and execute Code Mode snippets through dispatch
+  enrich           Generate and approve Code Mode upstream hint proposals
   help             Print this message or the help of the given subcommand(s)
 
 Options:
@@ -2508,6 +2509,90 @@ Options:
 ```
 
 ## `labby gateway code help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
+## `labby gateway enrich`
+
+```text
+Generate and approve Code Mode upstream hint proposals
+
+Usage: enrich [OPTIONS] [COMMAND]
+
+Commands:
+  apply
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --upstream <UPSTREAMS>
+
+
+      --all
+
+
+      --provider <PROVIDER>
+          [default: deterministic]
+          [possible values: deterministic, claude, codex]
+
+      --max-upstreams <MAX_UPSTREAMS>
+
+
+      --timeout-ms <TIMEOUT_MS>
+
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway enrich apply`
+
+```text
+Usage: apply [OPTIONS] --upstream <UPSTREAM> --hint <HINT> --metadata-hash <METADATA_HASH>
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --upstream <UPSTREAM>
+
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --hint <HINT>
+
+
+      --metadata-hash <METADATA_HASH>
+
+
+  -y, --yes
+
+
+  -h, --help
+          Print help
+```
+
+## `labby gateway enrich help`
 
 ```text
 Print this message or the help of the given subcommand(s)

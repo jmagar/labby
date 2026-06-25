@@ -1596,6 +1596,52 @@
           }
         }
       },
+      "GatewayGatewayEnrichApplyParams": {
+        "type": "object",
+        "required": [
+          "upstream",
+          "hint",
+          "metadata_hash",
+          "confirm"
+        ],
+        "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
+          "hint": {
+            "type": "string"
+          },
+          "metadata_hash": {
+            "type": "string"
+          },
+          "upstream": {
+            "type": "string"
+          }
+        }
+      },
+      "GatewayGatewayEnrichPreviewParams": {
+        "type": "object",
+        "properties": {
+          "all": {
+            "type": "boolean"
+          },
+          "max_upstreams": {
+            "type": "integer"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "type": "integer"
+          },
+          "upstreams": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "GatewayGatewayGetParams": {
         "type": "object",
         "required": [
