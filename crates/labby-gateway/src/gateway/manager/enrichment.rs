@@ -1,16 +1,28 @@
 use labby_runtime::error::ToolError;
 
 use crate::gateway::enrichment::collector::{
-    SelectedUpstream, collect_enrichment_inputs, select_upstreams_for_preview,
+    EnrichmentInputStats, MAX_MANUAL_UPSTREAMS, SelectedUpstream, collect_enrichment_inputs,
+    select_upstreams_for_preview,
 };
 use crate::gateway::enrichment::provider::{ProviderRunner, run_provider_preview};
 use crate::gateway::params::{GatewayEnrichApplyParams, GatewayEnrichPreviewParams};
 use crate::gateway::types::{
-    GatewayEnrichmentPreviewStatsView, GatewayEnrichmentPreviewView, GatewayEnrichmentProvider,
-    GatewayHintApplyView, GatewayHintProposalView,
+    GatewayCatalogDiff, GatewayEnrichmentPreviewStatsView, GatewayEnrichmentPreviewView,
+    GatewayEnrichmentProvider, GatewayHintApplyView, GatewayHintProposalView,
 };
 
 use super::GatewayManager;
+
+impl From<EnrichmentInputStats> for GatewayEnrichmentPreviewStatsView {
+    fn from(stats: EnrichmentInputStats) -> Self {
+        Self {
+            bytes: stats.bytes,
+            upstream_count: stats.upstream_count,
+            tool_count: stats.tool_count,
+            truncated: stats.truncated,
+        }
+    }
+}
 
 impl GatewayManager {
     pub async fn preview_enrichment(
@@ -18,9 +30,22 @@ impl GatewayManager {
         mut params: GatewayEnrichPreviewParams,
     ) -> Result<GatewayEnrichmentPreviewView, ToolError> {
         let cfg = self.current_config().await;
+        let selection_truncated = params.all
+            && cfg
+                .upstream
+                .iter()
+                .filter(|upstream| upstream.enabled)
+                .count()
+                > params
+                    .max_upstreams
+                    .unwrap_or(MAX_MANUAL_UPSTREAMS)
+                    .min(MAX_MANUAL_UPSTREAMS);
         let selected = select_upstreams_for_preview(&cfg, &params)?;
         let pool = self.current_pool().await;
-        let collected = collect_enrichment_inputs(pool.as_deref(), &cfg, &selected).await?;
+        let mut collected = collect_enrichment_inputs(pool.as_deref(), &cfg, &selected).await?;
+        if selection_truncated {
+            collected.stats.truncated = true;
+        }
         let mut runner = ProviderRunner::default();
         if let Some(timeout_ms) = params.timeout_ms.take() {
             runner.timeout_ms = timeout_ms;
@@ -28,12 +53,7 @@ impl GatewayManager {
         let proposals = run_provider_preview(params.provider, &collected.inputs, &runner).await?;
         Ok(GatewayEnrichmentPreviewView {
             provider: params.provider,
-            stats: GatewayEnrichmentPreviewStatsView {
-                bytes: collected.stats.bytes,
-                upstream_count: collected.stats.upstream_count,
-                tool_count: collected.stats.tool_count,
-                truncated: collected.stats.truncated,
-            },
+            stats: collected.stats.into(),
             proposals,
         })
     }
@@ -82,6 +102,11 @@ impl GatewayManager {
             .and_then(labby_runtime::gateway_config::normalize_code_mode_hint);
         upstream.code_mode_hint = Some(hint.clone());
         self.persist_config(cfg).await?;
+        self.notify_catalog_changes(&GatewayCatalogDiff {
+            tools_changed: true,
+            resources_changed: false,
+            prompts_changed: false,
+        });
 
         Ok(GatewayHintApplyView {
             upstream: params.upstream,
@@ -94,8 +119,8 @@ impl GatewayManager {
     pub(crate) async fn preview_enrichment_for_new_upstream(
         &self,
         upstream: &str,
-    ) -> Option<GatewayHintProposalView> {
-        let preview = tokio::time::timeout(
+    ) -> (Option<GatewayHintProposalView>, Option<String>) {
+        let preview_result = tokio::time::timeout(
             std::time::Duration::from_secs(2),
             self.preview_enrichment(GatewayEnrichPreviewParams {
                 upstreams: vec![upstream.to_string()],
@@ -105,10 +130,37 @@ impl GatewayManager {
                 timeout_ms: Some(2_000),
             }),
         )
-        .await
-        .ok()?
-        .ok()?;
-        preview.proposals.into_iter().next()
+        .await;
+        let preview = match preview_result {
+            Ok(Ok(preview)) => preview,
+            Ok(Err(err)) => {
+                let message = err.to_string();
+                tracing::warn!(
+                    surface = "dispatch",
+                    service = "gateway",
+                    action = "gateway.enrich.preview",
+                    upstream,
+                    kind = %err.kind(),
+                    error = %message,
+                    "gateway enrichment suggestion skipped"
+                );
+                return (None, Some(message));
+            }
+            Err(_) => {
+                let message = "gateway enrichment suggestion timed out".to_string();
+                tracing::warn!(
+                    surface = "dispatch",
+                    service = "gateway",
+                    action = "gateway.enrich.preview",
+                    upstream,
+                    kind = "timeout",
+                    error = %message,
+                    "gateway enrichment suggestion skipped"
+                );
+                return (None, Some(message));
+            }
+        };
+        (preview.proposals.into_iter().next(), None)
     }
 }
 

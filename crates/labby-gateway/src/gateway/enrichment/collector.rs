@@ -72,12 +72,6 @@ pub(crate) fn select_upstreams_for_preview(
         });
     }
 
-    let configured = cfg
-        .upstream
-        .iter()
-        .map(|upstream| (upstream.name.as_str(), upstream))
-        .collect::<BTreeMap<_, _>>();
-
     if params.all {
         let limit = params
             .max_upstreams
@@ -95,6 +89,12 @@ pub(crate) fn select_upstreams_for_preview(
             })
             .collect());
     }
+
+    let configured = cfg
+        .upstream
+        .iter()
+        .map(|upstream| (upstream.name.as_str(), upstream))
+        .collect::<BTreeMap<_, _>>();
 
     let mut selected = Vec::new();
     let mut seen = BTreeSet::new();
@@ -186,23 +186,22 @@ pub(crate) async fn collect_enrichment_inputs(
         inputs.push(input);
     }
 
-    let mut stats = EnrichmentInputStats {
-        bytes: serde_json::to_vec(&inputs).map_or(0, |bytes| bytes.len()),
-        upstream_count: inputs.len(),
-        tool_count: total_tools,
-        truncated,
-    };
+    let mut stats = input_stats(&inputs, truncated);
     while stats.bytes > MAX_PROVIDER_INPUT_BYTES && !inputs.is_empty() {
         truncated = true;
         inputs.pop();
-        stats = EnrichmentInputStats {
-            bytes: serde_json::to_vec(&inputs).map_or(0, |bytes| bytes.len()),
-            upstream_count: inputs.len(),
-            tool_count: inputs.iter().map(|input| input.tool_names.len()).sum(),
-            truncated,
-        };
+        stats = input_stats(&inputs, truncated);
     }
     Ok(CollectedEnrichmentInputs { inputs, stats })
+}
+
+fn input_stats(inputs: &[UpstreamEnrichmentInput], truncated: bool) -> EnrichmentInputStats {
+    EnrichmentInputStats {
+        bytes: serde_json::to_vec(inputs).map_or(0, |bytes| bytes.len()),
+        upstream_count: inputs.len(),
+        tool_count: inputs.iter().map(|input| input.tool_names.len()).sum(),
+        truncated,
+    }
 }
 
 fn input_from_upstream(

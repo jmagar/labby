@@ -109,6 +109,7 @@ impl GatewayManager {
             )
             .await,
             enrichment_suggestion: None,
+            enrichment_suggestion_error: None,
         })
     }
 

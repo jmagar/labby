@@ -56,7 +56,17 @@ fn gateway_actions_include_management_surface() {
     assert!(names.contains(&"gateway.public_urls.get"));
 
     for spec in ACTIONS {
-        if matches!(spec.name, "gateway.code_mode.set" | "gateway.enrich.apply") {
+        if matches!(
+            spec.name,
+            "gateway.code_mode.set"
+                | "gateway.enrich.preview"
+                | "gateway.enrich.apply"
+                | "gateway.import"
+                | "gateway.import_pending.approve"
+                | "gateway.import_pending.reject"
+                | "gateway.import_tombstones.clear"
+                | "gateway.import_tombstones.restore"
+        ) {
             continue;
         }
         assert!(
@@ -65,6 +75,33 @@ fn gateway_actions_include_management_surface() {
             spec.name
         );
     }
+}
+
+#[test]
+fn import_mutations_are_destructive() {
+    for name in [
+        "gateway.import",
+        "gateway.import_pending.approve",
+        "gateway.import_pending.reject",
+        "gateway.import_tombstones.clear",
+        "gateway.import_tombstones.restore",
+    ] {
+        let spec = ACTIONS
+            .iter()
+            .find(|spec| spec.name == name)
+            .unwrap_or_else(|| panic!("{name} action"));
+        assert!(spec.destructive, "{name} mutates gateway import state");
+    }
+}
+
+#[test]
+fn enrich_preview_is_destructive_because_external_providers_spawn() {
+    let spec = ACTIONS
+        .iter()
+        .find(|spec| spec.name == "gateway.enrich.preview")
+        .expect("gateway.enrich.preview action");
+
+    assert!(spec.destructive);
 }
 
 #[tokio::test]

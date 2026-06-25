@@ -385,26 +385,28 @@ impl UpstreamPool {
             .filter(|(name, _)| upstream_allowed(allowed, name))
             .map(|(name, entry)| {
                 let mut tool_rows = Vec::new();
-                for tool in entry.tools.values() {
-                    let matched_by = entry.exposure_policy.matched_by(tool.tool.name.as_ref());
-                    let Some(matched_by) = matched_by else {
-                        continue;
-                    };
-                    insert_bounded_tool_row(
-                        &mut tool_rows,
-                        UpstreamToolExposureRow {
-                            name: tool.tool.name.to_string(),
-                            description: tool
-                                .tool
-                                .description
-                                .as_ref()
-                                .map(ToString::to_string)
-                                .filter(|text| !text.trim().is_empty()),
-                            exposed: true,
-                            matched_by: Some(matched_by),
-                        },
-                        row_limit,
-                    );
+                if entry.tool_health.is_routable() {
+                    for tool in entry.tools.values() {
+                        let matched_by = entry.exposure_policy.matched_by(tool.tool.name.as_ref());
+                        let Some(matched_by) = matched_by else {
+                            continue;
+                        };
+                        insert_bounded_tool_row(
+                            &mut tool_rows,
+                            UpstreamToolExposureRow {
+                                name: tool.tool.name.to_string(),
+                                description: tool
+                                    .tool
+                                    .description
+                                    .as_ref()
+                                    .map(ToString::to_string)
+                                    .filter(|text| !text.trim().is_empty()),
+                                exposed: true,
+                                matched_by: Some(matched_by),
+                            },
+                            row_limit,
+                        );
+                    }
                 }
                 UpstreamEnrichmentCatalogEntry {
                     upstream: name.clone(),

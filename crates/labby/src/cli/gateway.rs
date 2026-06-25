@@ -372,6 +372,33 @@ mod tests {
     }
 
     #[test]
+    fn gateway_enrich_preview_parser_captures_approval_args() {
+        let cli = Cli::try_parse_from([
+            "lab",
+            "gateway",
+            "enrich",
+            "--upstream",
+            "github",
+            "--provider",
+            "codex",
+            "--yes",
+        ])
+        .expect("gateway enrich preview parses");
+
+        let Command::Gateway(args) = cli.command else {
+            panic!("expected gateway command");
+        };
+        let GatewayCommand::Enrich(args) = args.command else {
+            panic!("expected gateway enrich command");
+        };
+
+        assert!(args.command.is_none());
+        assert_eq!(args.upstreams, vec!["github"]);
+        assert_eq!(args.provider, "codex");
+        assert!(args.yes);
+    }
+
+    #[test]
     fn gateway_add_defaults_resource_proxying_on() {
         let cli = Cli::try_parse_from([
             "lab",

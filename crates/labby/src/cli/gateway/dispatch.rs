@@ -390,16 +390,19 @@ pub(super) async fn dispatch_command(
                 },
                 GatewayCommand::PublicUrls => ("gateway.public_urls.get".to_string(), json!({})),
                 GatewayCommand::Enrich(args) => match args.command {
-                    None => (
-                        "gateway.enrich.preview".to_string(),
-                        json!({
-                            "upstreams": args.upstreams,
-                            "all": args.all,
-                            "provider": args.provider,
-                            "max_upstreams": args.max_upstreams,
-                            "timeout_ms": args.timeout_ms,
-                        }),
-                    ),
+                    None => {
+                        confirmed = args.yes;
+                        (
+                            "gateway.enrich.preview".to_string(),
+                            json!({
+                                "upstreams": args.upstreams,
+                                "all": args.all,
+                                "provider": args.provider,
+                                "max_upstreams": args.max_upstreams,
+                                "timeout_ms": args.timeout_ms,
+                            }),
+                        )
+                    }
                     Some(GatewayEnrichCommand::Apply(args)) => {
                         confirmed = args.yes;
                         (

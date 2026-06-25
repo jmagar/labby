@@ -113,7 +113,7 @@ impl GatewayManager {
         let started = Instant::now();
         let spec_name = spec.name.clone();
 
-        {
+        let mut view = {
             let _mutation_guard = self.config_mutation.lock().await;
             let mut cfg = self.config.read().await.clone();
 
@@ -166,10 +166,13 @@ impl GatewayManager {
                 elapsed_ms = started.elapsed().as_millis(),
                 "gateway reconcile"
             );
-        }
 
-        let mut view = self.get(&spec_name).await?;
-        view.enrichment_suggestion = self.preview_enrichment_for_new_upstream(&spec_name).await;
+            self.get(&spec_name).await?
+        };
+        let (suggestion, suggestion_error) =
+            self.preview_enrichment_for_new_upstream(&spec_name).await;
+        view.enrichment_suggestion = suggestion;
+        view.enrichment_suggestion_error = suggestion_error;
         Ok(view)
     }
 
@@ -189,7 +192,7 @@ impl GatewayManager {
             return Ok(BatchAddOutcome::default());
         }
         let started = std::time::Instant::now();
-        let (added_names, errors) = {
+        let (mut views, errors) = {
             let _mutation_guard = self.config_mutation.lock().await;
             let mut cfg = self.config.read().await.clone();
 
@@ -230,20 +233,29 @@ impl GatewayManager {
                 "gateway batch reconcile"
             );
 
-            (added_names, errors)
+            let mut views = Vec::new();
+            for name in &added_names {
+                match self.get(name).await {
+                    Ok(view) => views.push(view),
+                    Err(err) => errors.push((name.clone(), err)),
+                }
+            }
+
+            (views, errors)
         };
 
-        let mut views = Vec::new();
-        for name in added_names.iter().take(MAX_BATCH_ENRICHMENT_SUGGESTIONS) {
-            if let Ok(mut view) = self.get(name).await {
-                view.enrichment_suggestion = self.preview_enrichment_for_new_upstream(name).await;
-                views.push(view);
-            }
+        let suggestion_names = views
+            .iter()
+            .take(MAX_BATCH_ENRICHMENT_SUGGESTIONS)
+            .map(|view| view.config.name.clone())
+            .collect::<Vec<_>>();
+        let mut suggestions = Vec::with_capacity(suggestion_names.len());
+        for name in suggestion_names {
+            suggestions.push(self.preview_enrichment_for_new_upstream(&name).await);
         }
-        for name in added_names.iter().skip(MAX_BATCH_ENRICHMENT_SUGGESTIONS) {
-            if let Ok(view) = self.get(name).await {
-                views.push(view);
-            }
+        for (view, (suggestion, suggestion_error)) in views.iter_mut().zip(suggestions) {
+            view.enrichment_suggestion = suggestion;
+            view.enrichment_suggestion_error = suggestion_error;
         }
         Ok(BatchAddOutcome { views, errors })
     }
@@ -378,6 +390,7 @@ impl GatewayManager {
                 ..GatewayRuntimeView::default()
             },
             enrichment_suggestion: None,
+            enrichment_suggestion_error: None,
         })
     }
 

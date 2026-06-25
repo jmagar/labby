@@ -191,6 +191,7 @@ fn code_mode_description_enforces_release_byte_budget() {
         .collect::<Vec<_>>();
     let description = code_mode_description(&upstreams);
     assert!(description.len() <= CODE_MODE_DESCRIPTION_MAX_BYTES);
+    assert!(description.contains("more omitted; use codemode.search"));
 }
 
 #[test]

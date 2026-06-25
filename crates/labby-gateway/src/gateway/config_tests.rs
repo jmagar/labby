@@ -159,6 +159,31 @@ fn unsafe_code_mode_hint_is_not_model_visible() {
         .is_none()
     );
     assert!(
+        labby_runtime::gateway_config::normalize_code_mode_hint(
+            "search repositories at https://example.com/api"
+        )
+        .is_none()
+    );
+    assert!(
+        labby_runtime::gateway_config::normalize_code_mode_hint(
+            "read local config from ../secrets/config.toml"
+        )
+        .is_none()
+    );
+    assert!(
+        labby_runtime::gateway_config::normalize_code_mode_hint(
+            "query api.example.com:443 metrics"
+        )
+        .is_none()
+    );
+    assert!(
+        labby_runtime::gateway_config::normalize_code_mode_hint("query 10.1.0.1 metrics").is_none()
+    );
+    assert!(
+        labby_runtime::gateway_config::normalize_code_mode_hint("connect to C:/Users/Jacob/config")
+            .is_none()
+    );
+    assert!(
         labby_runtime::gateway_config::normalize_code_mode_hint("safe capability summary")
             .is_some()
     );

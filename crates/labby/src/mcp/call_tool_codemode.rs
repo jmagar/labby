@@ -142,6 +142,16 @@ fn push_description_line(out: &mut String, line: &str) -> bool {
     }
 }
 
+fn append_truncation_marker(out: &mut String, omitted_count: usize) {
+    let marker = format!("- {omitted_count} more omitted; use codemode.search\n");
+    while out.len() + marker.len() > CODE_MODE_DESCRIPTION_MAX_BYTES {
+        if out.pop().is_none() {
+            break;
+        }
+    }
+    out.push_str(&marker);
+}
+
 #[must_use]
 pub(crate) fn code_mode_description(upstreams: &[CodeModeUpstreamDescription]) -> String {
     let mut out = format!("{CODE_MODE_DESCRIPTION_BODY}\n\n## Available upstream namespaces\n\n");
@@ -149,7 +159,7 @@ pub(crate) fn code_mode_description(upstreams: &[CodeModeUpstreamDescription]) -
         push_description_line(&mut out, "- none currently configured\n");
         return out.trim_end().to_string();
     }
-    for upstream in upstreams {
+    for (idx, upstream) in upstreams.iter().enumerate() {
         let line = match upstream
             .hint
             .as_deref()
@@ -159,6 +169,12 @@ pub(crate) fn code_mode_description(upstreams: &[CodeModeUpstreamDescription]) -
             None => format!("- `{}`\n", upstream.name),
         };
         if !push_description_line(&mut out, &line) {
+            append_truncation_marker(&mut out, upstreams.len() - idx);
+            tracing::warn!(
+                omitted_count = upstreams.len() - idx,
+                max_bytes = CODE_MODE_DESCRIPTION_MAX_BYTES,
+                "code mode upstream namespace description truncated"
+            );
             break;
         }
     }

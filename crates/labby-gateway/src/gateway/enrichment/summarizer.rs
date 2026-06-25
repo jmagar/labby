@@ -31,17 +31,18 @@ fn summarize_one(input: &UpstreamEnrichmentInput) -> GatewayHintProposalView {
         ))
     }
     .and_then(|raw| normalize_code_mode_hint(&raw));
+    let status = if existing_hint.is_some() {
+        GatewayHintProposalStatus::Existing
+    } else if hint.is_some() {
+        GatewayHintProposalStatus::Suggested
+    } else {
+        GatewayHintProposalStatus::MetadataInsufficient
+    };
 
     GatewayHintProposalView {
         upstream: input.name.clone(),
         hint,
-        status: if existing_hint.is_some() {
-            GatewayHintProposalStatus::Existing
-        } else if input.tool_names.is_empty() {
-            GatewayHintProposalStatus::MetadataInsufficient
-        } else {
-            GatewayHintProposalStatus::Suggested
-        },
+        status,
         metadata_hash: input.metadata_hash.clone(),
         provider: GatewayEnrichmentProvider::Deterministic,
         tool_count: input.tool_names.len(),

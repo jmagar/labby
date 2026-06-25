@@ -1506,11 +1506,11 @@
     "service": "gateway",
     "action": "gateway.enrich.preview",
     "description": "Preview Code Mode upstream hint proposals from cached gateway metadata",
-    "destructive": false,
+    "destructive": true,
     "params": [
       {
         "name": "upstreams",
-        "ty": "array",
+        "ty": "string[]",
         "required": false,
         "description": "Gateway upstream names to preview"
       },
@@ -1530,7 +1530,7 @@
         "name": "max_upstreams",
         "ty": "integer",
         "required": false,
-        "description": "Maximum upstreams to preview, capped at 25"
+        "description": "Maximum enabled upstreams to preview when all=true, capped at 25"
       },
       {
         "name": "timeout_ms",
@@ -1580,7 +1580,7 @@
     "service": "gateway",
     "action": "gateway.import",
     "description": "Import discovered MCP servers into the gateway config as disabled-by-default entries. Servers are marked with their discovery source.",
-    "destructive": false,
+    "destructive": true,
     "params": [
       {
         "name": "all",
@@ -1617,7 +1617,7 @@
     "service": "gateway",
     "action": "gateway.import_pending.approve",
     "description": "Approve a pending discovered server and add it to the gateway config as disabled-by-default",
-    "destructive": false,
+    "destructive": true,
     "params": [
       {
         "name": "name",
@@ -1626,7 +1626,7 @@
         "description": "Name of the pending server to approve"
       }
     ],
-    "returns": "PendingImportApprovalView",
+    "returns": "PendingImportView",
     "surface_availability": {
       "cli": true,
       "mcp": true,
@@ -1660,7 +1660,7 @@
     "service": "gateway",
     "action": "gateway.import_pending.reject",
     "description": "Reject a pending discovered server and tombstone it so it never re-appears",
-    "destructive": false,
+    "destructive": true,
     "params": [
       {
         "name": "name",
@@ -1685,7 +1685,7 @@
     "service": "gateway",
     "action": "gateway.import_tombstones.clear",
     "description": "Clear one import tombstone so a previously deleted imported server can be imported again",
-    "destructive": false,
+    "destructive": true,
     "params": [
       {
         "name": "name",
@@ -1752,7 +1752,7 @@
     "service": "gateway",
     "action": "gateway.import_tombstones.restore",
     "description": "Atomically clear one import tombstone and restore the matching discovered server as disabled",
-    "destructive": false,
+    "destructive": true,
     "params": [
       {
         "name": "name",

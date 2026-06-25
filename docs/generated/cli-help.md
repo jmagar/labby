@@ -2557,6 +2557,9 @@ Options:
       --timeout-ms <TIMEOUT_MS>
 
 
+  -y, --yes
+          Skip confirmation for provider-backed preview runs
+
   -h, --help
           Print help
 ```

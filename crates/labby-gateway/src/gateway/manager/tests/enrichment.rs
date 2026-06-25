@@ -117,10 +117,42 @@ async fn enrich_preview_all_is_capped_and_deterministic() {
         .expect("preview all");
 
     assert_eq!(preview.proposals.len(), MAX_MANUAL_UPSTREAMS);
+    assert_eq!(preview.stats.upstream_count, MAX_MANUAL_UPSTREAMS);
+    assert_eq!(preview.stats.tool_count, MAX_MANUAL_UPSTREAMS);
+    assert!(preview.stats.truncated);
     assert!(preview.proposals.iter().all(|proposal| {
         proposal.provider == GatewayEnrichmentProvider::Deterministic
             && proposal.status == GatewayHintProposalStatus::Suggested
     }));
+}
+
+#[tokio::test]
+async fn enrich_preview_all_reports_explicit_max_truncation_stats() {
+    let upstreams = (0..5)
+        .map(|idx| fixture_http_upstream(&format!("up-{idx}")))
+        .collect::<Vec<_>>();
+    let (manager, pool) = code_mode_manager_with_upstreams(upstreams).await;
+    for idx in 0..5 {
+        let name = format!("up-{idx}");
+        pool.insert_entry_for_tests(&name, healthy_entry_with_tool(&name, "search"))
+            .await;
+    }
+
+    let preview = manager
+        .preview_enrichment(GatewayEnrichPreviewParams {
+            upstreams: Vec::new(),
+            all: true,
+            provider: GatewayEnrichmentProvider::Deterministic,
+            max_upstreams: Some(3),
+            timeout_ms: None,
+        })
+        .await
+        .expect("preview all");
+
+    assert_eq!(preview.proposals.len(), 3);
+    assert_eq!(preview.stats.upstream_count, 3);
+    assert_eq!(preview.stats.tool_count, 3);
+    assert!(preview.stats.truncated);
 }
 
 #[tokio::test]
@@ -201,6 +233,73 @@ async fn enrich_apply_rejects_stale_metadata_hash() {
         .expect_err("stale hash must fail");
 
     assert_eq!(err.kind(), "stale_suggestion");
+}
+
+#[tokio::test]
+async fn enrich_apply_rejects_hash_after_catalog_drift() {
+    let (manager, pool) =
+        code_mode_manager_with_upstreams(vec![fixture_http_upstream("github")]).await;
+    pool.insert_entry_for_tests("github", healthy_entry_with_tool("github", "search_repos"))
+        .await;
+
+    let preview = manager
+        .preview_enrichment(GatewayEnrichPreviewParams {
+            upstreams: vec!["github".to_string()],
+            all: false,
+            provider: GatewayEnrichmentProvider::Deterministic,
+            max_upstreams: None,
+            timeout_ms: None,
+        })
+        .await
+        .expect("preview");
+    pool.insert_entry_for_tests("github", healthy_entry_with_tool("github", "list_issues"))
+        .await;
+
+    let err = manager
+        .apply_enrichment(GatewayEnrichApplyParams {
+            upstream: "github".to_string(),
+            hint: "search repositories".to_string(),
+            metadata_hash: preview.proposals[0].metadata_hash.clone(),
+        })
+        .await
+        .expect_err("catalog drift must make the preview stale");
+
+    assert_eq!(err.kind(), "stale_suggestion");
+}
+
+#[tokio::test]
+async fn enrich_apply_notifies_tool_description_change() {
+    let (mut manager, pool) =
+        code_mode_manager_with_upstreams(vec![fixture_http_upstream("github")]).await;
+    pool.insert_entry_for_tests("github", healthy_entry_with_tool("github", "search_repos"))
+        .await;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    manager.set_notifier(crate::gateway::types::CatalogChangeNotifier::new(tx));
+
+    let preview = manager
+        .preview_enrichment(GatewayEnrichPreviewParams {
+            upstreams: vec!["github".to_string()],
+            all: false,
+            provider: GatewayEnrichmentProvider::Deterministic,
+            max_upstreams: None,
+            timeout_ms: None,
+        })
+        .await
+        .expect("preview");
+
+    manager
+        .apply_enrichment(GatewayEnrichApplyParams {
+            upstream: "github".to_string(),
+            hint: "search repositories".to_string(),
+            metadata_hash: preview.proposals[0].metadata_hash.clone(),
+        })
+        .await
+        .expect("apply");
+
+    let diff = rx.recv().await.expect("catalog notification");
+    assert!(diff.tools_changed);
+    assert!(!diff.resources_changed);
+    assert!(!diff.prompts_changed);
 }
 
 #[tokio::test]

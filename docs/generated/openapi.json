@@ -1621,8 +1621,14 @@
       },
       "GatewayGatewayEnrichPreviewParams": {
         "type": "object",
+        "required": [
+          "confirm"
+        ],
         "properties": {
           "all": {
+            "type": "boolean"
+          },
+          "confirm": {
             "type": "boolean"
           },
           "max_upstreams": {
@@ -1655,6 +1661,9 @@
       },
       "GatewayGatewayImportParams": {
         "type": "object",
+        "required": [
+          "confirm"
+        ],
         "properties": {
           "all": {
             "type": "boolean"
@@ -1664,6 +1673,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "confirm": {
+            "type": "boolean"
           },
           "names": {
             "type": "array",
@@ -1676,9 +1688,13 @@
       "GatewayGatewayImport_pendingApproveParams": {
         "type": "object",
         "required": [
-          "name"
+          "name",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           }
@@ -1687,9 +1703,13 @@
       "GatewayGatewayImport_pendingRejectParams": {
         "type": "object",
         "required": [
-          "name"
+          "name",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           }
@@ -1698,9 +1718,13 @@
       "GatewayGatewayImport_tombstonesClearParams": {
         "type": "object",
         "required": [
-          "name"
+          "name",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           },
@@ -1721,9 +1745,13 @@
       "GatewayGatewayImport_tombstonesRestoreParams": {
         "type": "object",
         "required": [
-          "name"
+          "name",
+          "confirm"
         ],
         "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           },

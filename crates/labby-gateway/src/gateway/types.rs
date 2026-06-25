@@ -159,13 +159,10 @@ pub struct PendingImportView {
     pub command: Option<String>,
     pub source_client: String,
     pub source_path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PendingImportApprovalView {
-    pub import: PendingImportView,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enrichment_suggestion: Option<GatewayHintProposalView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enrichment_suggestion_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -193,6 +190,8 @@ pub struct GatewayView {
     pub runtime: GatewayRuntimeView,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enrichment_suggestion: Option<GatewayHintProposalView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enrichment_suggestion_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]

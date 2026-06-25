@@ -389,6 +389,9 @@ pub fn normalize_code_mode_hint(raw: &str) -> Option<String> {
         return None;
     }
     let lower = normalized.to_ascii_lowercase();
+    if looks_like_path_or_endpoint(normalized, &lower) {
+        return None;
+    }
     let blocked_substrings = [
         "ignore",
         "must",
@@ -440,6 +443,43 @@ pub fn normalize_code_mode_hint(raw: &str) -> Option<String> {
         return None;
     }
     Some(normalized.to_string())
+}
+
+fn looks_like_path_or_endpoint(normalized: &str, lower: &str) -> bool {
+    if lower.contains("://") || lower.contains("www.") || normalized.contains('/') {
+        return true;
+    }
+    normalized.split_whitespace().any(|raw| {
+        let token = raw.trim_matches(|ch: char| matches!(ch, ',' | '.' | ':' | ';' | '(' | ')'));
+        let lower = token.to_ascii_lowercase();
+        let bytes = lower.as_bytes();
+        if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+            return true;
+        }
+        let host = lower
+            .split_once(':')
+            .map_or(lower.as_str(), |(host, port)| {
+                if !host.is_empty() && port.chars().all(|ch| ch.is_ascii_digit()) {
+                    host
+                } else {
+                    lower.as_str()
+                }
+            });
+        let parts = host.split('.').collect::<Vec<_>>();
+        if parts.len() == 4 && parts.iter().all(|part| part.parse::<u8>().is_ok()) {
+            return true;
+        }
+        parts.len() >= 2
+            && parts.iter().all(|part| {
+                !part.is_empty()
+                    && part
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+            })
+            && parts
+                .last()
+                .is_some_and(|last| (2..=63).contains(&last.len()))
+    })
 }
 
 impl UpstreamConfig {

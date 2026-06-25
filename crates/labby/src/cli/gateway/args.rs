@@ -56,6 +56,9 @@ pub struct GatewayEnrichArgs {
     pub max_upstreams: Option<usize>,
     #[arg(long)]
     pub timeout_ms: Option<u64>,
+    /// Skip confirmation for provider-backed preview runs.
+    #[arg(short = 'y', long, alias = "no-confirm")]
+    pub yes: bool,
 }
 
 #[derive(Debug, Subcommand)]
