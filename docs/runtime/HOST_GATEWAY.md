@@ -13,9 +13,13 @@ config. Do not bake public bind settings into the systemd unit.
 ## Install
 
 ```bash
-just host-service-install
+labby setup host-service install --install-self -y
 systemctl --user --no-pager --full status labby.service
 ```
+
+From a source checkout, `just host-service-install` is a convenience wrapper
+that builds `labby`, installs it to `~/.local/bin/labby`, then runs the same
+CLI host-service install path.
 
 ## Migrate From The Docker Dev Container
 
@@ -24,7 +28,7 @@ the configured local MCP HTTP port:
 
 ```bash
 docker compose -f docker-compose.yml stop labby-master
-just host-service-install
+labby setup host-service install --install-self -y
 labby setup host-service status --json
 labby gateway list
 ```
@@ -32,10 +36,13 @@ labby gateway list
 ## Update The Running Host Gateway
 
 ```bash
-just host-sync
+labby setup host-service restart --install-self -y
 labby setup host-service status --json
 labby gateway code exec --json --code 'async () => 1'
 ```
+
+From a source checkout, `just host-sync` remains the rebuild-and-restart
+shortcut for ordinary Rust changes.
 
 ## Verify The Public MCP Route
 

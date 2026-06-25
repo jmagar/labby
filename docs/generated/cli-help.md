@@ -816,17 +816,20 @@ Install and start labby.service under systemd --user
 Usage: install [OPTIONS]
 
 Options:
+      --install-self
+          Copy this labby binary into ~/.local/bin/labby before installing the service
+
       --json
           Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Confirm installation and service start
 
       --color <COLOR>
           Control human-readable CLI styling
 
           [default: auto]
           [possible values: auto, plain, color]
+
+  -y, --yes
+          Confirm installation and service start
 
   -h, --help
           Print help
@@ -861,17 +864,20 @@ Restart labby.service
 Usage: restart [OPTIONS]
 
 Options:
+      --install-self
+          Copy this labby binary into ~/.local/bin/labby before restarting the service
+
       --json
           Emit JSON instead of human-readable tables
-
-  -y, --yes
-          Confirm service restart
 
       --color <COLOR>
           Control human-readable CLI styling
 
           [default: auto]
           [possible values: auto, plain, color]
+
+  -y, --yes
+          Confirm service restart
 
   -h, --help
           Print help

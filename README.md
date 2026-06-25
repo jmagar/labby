@@ -381,9 +381,10 @@ just lint             # skill drift + cargo wrapper smoke + clippy -D warnings +
 just deny             # cargo deny check
 just build            # cargo build --workspace --all-features
 just build-release    # release build, bin/labby install, ~/.local/bin symlink
-just host-service-install # install/start labby.service under systemd --user
-just host-sync        # release-fast rebuild + install ~/.local/bin/labby + restart host service
-just host-service-status # inspect the host Labby gateway service
+labby setup host-service install --install-self -y # install current binary + start systemd user service
+labby setup host-service restart --install-self -y # reinstall current binary + restart service
+labby setup host-service status --json # inspect the host Labby gateway service
+just host-sync        # repo dev shortcut: rebuild + install ~/.local/bin/labby + restart host service
 just dev-container    # explicit Docker compatibility/prod-like smoke path
 just dev-container-debug # explicit Docker debug binary path
 just web-build        # cd apps/gateway-admin && pnpm build
@@ -418,10 +419,13 @@ Frontend changes should also run the relevant `pnpm` scripts under
 The default local and dookie gateway runtime is the host user service:
 `~/.local/bin/labby serve` managed by `systemd --user` as `labby.service`.
 This keeps stdio MCP tools, SSH config, local binaries, agent caches, and
-credentials in the same namespace as the gateway. Use `just host-service-install`
-once, then `just host-sync` for ordinary Rust changes. Docker remains available
-for prod-like image smoke and adapter-container work, but it is no longer the
-preferred agent gateway runtime.
+credentials in the same namespace as the gateway. Use
+`labby setup host-service install --install-self -y` to install the currently
+running binary and start the service, then
+`labby setup host-service restart --install-self -y` after replacing that binary.
+From a source checkout, `just host-sync` remains the rebuild-and-restart
+developer shortcut. Docker remains available for prod-like image smoke and
+adapter-container work, but it is no longer the preferred agent gateway runtime.
 
 ### Dev Container
 

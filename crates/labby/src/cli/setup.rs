@@ -123,6 +123,9 @@ pub enum HostServiceCommand {
     Unit,
     /// Install and start labby.service under systemd --user.
     Install {
+        /// Copy this labby binary into ~/.local/bin/labby before installing the service.
+        #[arg(long)]
+        install_self: bool,
         /// Confirm installation and service start.
         #[arg(short = 'y', long, alias = "no-confirm")]
         yes: bool,
@@ -131,6 +134,9 @@ pub enum HostServiceCommand {
     Status,
     /// Restart labby.service.
     Restart {
+        /// Copy this labby binary into ~/.local/bin/labby before restarting the service.
+        #[arg(long)]
+        install_self: bool,
         /// Confirm service restart.
         #[arg(short = 'y', long, alias = "no-confirm")]
         yes: bool,
@@ -370,8 +376,14 @@ async fn run_host_service_command(args: HostServiceArgs, format: OutputFormat) -
             )
             .await?;
         }
-        HostServiceCommand::Install { yes } => {
+        HostServiceCommand::Install {
+            install_self: install_self_flag,
+            yes,
+        } => {
             require_host_service_confirmation("install", yes)?;
+            if install_self_flag {
+                install_self()?;
+            }
             run_host_service_logged(
                 "host_service.install",
                 format,
@@ -387,8 +399,14 @@ async fn run_host_service_command(args: HostServiceArgs, format: OutputFormat) -
             )
             .await?;
         }
-        HostServiceCommand::Restart { yes } => {
+        HostServiceCommand::Restart {
+            install_self: install_self_flag,
+            yes,
+        } => {
             require_host_service_confirmation("restart", yes)?;
+            if install_self_flag {
+                install_self()?;
+            }
             run_host_service_logged(
                 "host_service.restart",
                 format,
@@ -607,13 +625,19 @@ mod tests {
             (
                 "install",
                 Some("-y"),
-                HostServiceCommand::Install { yes: true },
+                HostServiceCommand::Install {
+                    install_self: false,
+                    yes: true,
+                },
             ),
             ("status", None, HostServiceCommand::Status),
             (
                 "restart",
                 Some("-y"),
-                HostServiceCommand::Restart { yes: true },
+                HostServiceCommand::Restart {
+                    install_self: false,
+                    yes: true,
+                },
             ),
             (
                 "uninstall",
@@ -623,7 +647,10 @@ mod tests {
             (
                 "restart",
                 Some("--no-confirm"),
-                HostServiceCommand::Restart { yes: true },
+                HostServiceCommand::Restart {
+                    install_self: false,
+                    yes: true,
+                },
             ),
         ] {
             let mut args = vec!["labby", "setup", "host-service", command];
@@ -642,11 +669,54 @@ mod tests {
         }
     }
 
+    #[test]
+    fn parses_host_service_install_self_flag() {
+        for (subcommand, expected) in [
+            (
+                "install",
+                HostServiceCommand::Install {
+                    install_self: true,
+                    yes: true,
+                },
+            ),
+            (
+                "restart",
+                HostServiceCommand::Restart {
+                    install_self: true,
+                    yes: true,
+                },
+            ),
+        ] {
+            let cli = crate::cli::Cli::try_parse_from([
+                "labby",
+                "setup",
+                "host-service",
+                subcommand,
+                "--install-self",
+                "-y",
+            ])
+            .unwrap();
+            let crate::cli::Command::Setup(args) = cli.command else {
+                panic!("expected setup command");
+            };
+            let Some(SetupCommand::HostService(HostServiceArgs { command })) = args.command else {
+                panic!("expected setup host-service subcommand");
+            };
+            assert_eq!(command, expected);
+        }
+    }
+
     #[tokio::test]
     async fn host_service_destructive_commands_require_confirmation_envelope() {
         for command in [
-            HostServiceCommand::Install { yes: false },
-            HostServiceCommand::Restart { yes: false },
+            HostServiceCommand::Install {
+                install_self: false,
+                yes: false,
+            },
+            HostServiceCommand::Restart {
+                install_self: false,
+                yes: false,
+            },
             HostServiceCommand::Uninstall { yes: false },
         ] {
             let err = run_host_service_command(

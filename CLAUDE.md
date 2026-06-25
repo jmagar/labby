@@ -335,8 +335,12 @@ The normal local/dookie Labby gateway should run on the host as
 `systemd --user` service `labby.service`, executing `~/.local/bin/labby serve`.
 This is preferred over the Docker dev container because the gateway launches
 stdio MCP tools and depends on host SSH config, agent credentials, local
-binaries, and user caches. Use `just host-service-install` once, then
-`just host-sync` after Rust changes.
+binaries, and user caches. The canonical service lifecycle is
+`labby setup host-service install --install-self -y`,
+`labby setup host-service restart --install-self -y`, and
+`labby setup host-service status --json`. In this checkout, `just host-sync`
+is only the developer shortcut that rebuilds from source before calling the
+CLI lifecycle.
 
 The Docker Compose stack is still supported for prod-like image smoke and
 Docker-specific ACP adapter work. Use `just dev-container` or
