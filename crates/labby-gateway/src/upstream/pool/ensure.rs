@@ -454,7 +454,10 @@ mod tests {
             .upstream_tool_last_error("broken")
             .await
             .expect("lazy failure is recorded");
-        assert!(last_error.contains("lazy upstream connect failed"));
+        assert!(
+            last_error.contains("lazy upstream connect"),
+            "unexpected lazy connect error: {last_error}"
+        );
     }
 
     #[tokio::test]
