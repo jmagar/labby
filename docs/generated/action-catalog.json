@@ -1626,7 +1626,7 @@
         "description": "Name of the pending server to approve"
       }
     ],
-    "returns": "PendingImportView",
+    "returns": "PendingImportApprovalView",
     "surface_availability": {
       "cli": true,
       "mcp": true,

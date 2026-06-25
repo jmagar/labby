@@ -159,6 +159,11 @@ pub struct PendingImportView {
     pub command: Option<String>,
     pub source_client: String,
     pub source_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingImportApprovalView {
+    pub import: PendingImportView,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enrichment_suggestion: Option<GatewayHintProposalView>,
 }
@@ -205,8 +210,6 @@ pub enum GatewayHintProposalStatus {
     Suggested,
     Existing,
     MetadataInsufficient,
-    ProviderUnavailable,
-    InvalidProviderOutput,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -227,7 +230,16 @@ pub struct GatewayHintProposalView {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GatewayEnrichmentPreviewView {
     pub provider: GatewayEnrichmentProvider,
+    pub stats: GatewayEnrichmentPreviewStatsView,
     pub proposals: Vec<GatewayHintProposalView>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GatewayEnrichmentPreviewStatsView {
+    pub bytes: usize,
+    pub upstream_count: usize,
+    pub tool_count: usize,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

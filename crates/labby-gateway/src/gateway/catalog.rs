@@ -527,7 +527,7 @@ pub const ACTIONS: &[ActionSpec] = &[
         description: "Approve a pending discovered server and add it to the gateway config as disabled-by-default",
         destructive: false,
         requires_admin: true,
-        returns: "PendingImportView",
+        returns: "PendingImportApprovalView",
         params: &[ParamSpec {
             name: "name",
             ty: "string",

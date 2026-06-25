@@ -19,6 +19,8 @@ use labby_runtime::gateway_config::{CodeModeConfig, GatewayConfig, UpstreamConfi
 
 use super::GatewayManager;
 
+const MAX_BATCH_ENRICHMENT_SUGGESTIONS: usize = 10;
+
 /// Outcome of a `batch_add` call.
 ///
 /// `views` contains one [`GatewayView`] for each spec that was successfully
@@ -232,9 +234,14 @@ impl GatewayManager {
         };
 
         let mut views = Vec::new();
-        for name in &added_names {
+        for name in added_names.iter().take(MAX_BATCH_ENRICHMENT_SUGGESTIONS) {
             if let Ok(mut view) = self.get(name).await {
                 view.enrichment_suggestion = self.preview_enrichment_for_new_upstream(name).await;
+                views.push(view);
+            }
+        }
+        for name in added_names.iter().skip(MAX_BATCH_ENRICHMENT_SUGGESTIONS) {
+            if let Ok(view) = self.get(name).await {
                 views.push(view);
             }
         }

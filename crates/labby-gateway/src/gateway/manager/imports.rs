@@ -4,7 +4,7 @@
 use crate::gateway::config::insert_upstream;
 use crate::gateway::types::{
     GatewayView, ImportErrorView, ImportResultView, ImportSkipReason, ImportSkipView,
-    ImportTombstoneView, PendingDiscoveryOutcome, PendingImportView,
+    ImportTombstoneView, PendingDiscoveryOutcome, PendingImportApprovalView, PendingImportView,
 };
 use crate::upstream::types::UpstreamRuntimeOwner;
 use labby_runtime::error::ToolError;
@@ -75,7 +75,6 @@ fn pending_import_view(upstream: &UpstreamConfig) -> PendingImportView {
             .as_ref()
             .map(|source| source.path.clone())
             .unwrap_or_default(),
-        enrichment_suggestion: None,
     }
 }
 
@@ -212,8 +211,11 @@ impl GatewayManager {
 
     /// Approve a pending import by name: move from `upstream_pending` into `upstream`
     /// with `enabled = false` (same as auto-import — operator must explicitly enable).
-    pub async fn approve_pending_import(&self, name: &str) -> Result<PendingImportView, ToolError> {
-        let mut view = {
+    pub async fn approve_pending_import(
+        &self,
+        name: &str,
+    ) -> Result<PendingImportApprovalView, ToolError> {
+        let import = {
             let _mutation_guard = self.config_mutation.lock().await;
             let mut cfg = self.config.read().await.clone();
 
@@ -235,8 +237,11 @@ impl GatewayManager {
 
             view
         };
-        view.enrichment_suggestion = self.preview_enrichment_for_new_upstream(name).await;
-        Ok(view)
+        let enrichment_suggestion = self.preview_enrichment_for_new_upstream(name).await;
+        Ok(PendingImportApprovalView {
+            import,
+            enrichment_suggestion,
+        })
     }
 
     /// Reject a pending import by name: tombstone it so it never re-appears.

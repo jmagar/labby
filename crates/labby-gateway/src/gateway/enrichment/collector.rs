@@ -27,7 +27,6 @@ pub(crate) struct UpstreamEnrichmentInput {
     pub(crate) existing_hint: Option<String>,
     pub(crate) transport: String,
     pub(crate) enabled: bool,
-    pub(crate) route_scope: String,
     pub(crate) tool_names: Vec<String>,
     pub(crate) tool_descriptions: Vec<String>,
     pub(crate) resource_count: usize,
@@ -121,7 +120,12 @@ pub(crate) fn select_upstreams_for_preview(
         }
     }
     if selected.len() > MAX_MANUAL_UPSTREAMS {
-        selected.truncate(MAX_MANUAL_UPSTREAMS);
+        return Err(ToolError::InvalidParam {
+            message: format!(
+                "gateway.enrich.preview accepts at most {MAX_MANUAL_UPSTREAMS} explicit upstreams"
+            ),
+            param: "upstreams".to_string(),
+        });
     }
     Ok(selected)
 }
@@ -136,7 +140,10 @@ pub(crate) async fn collect_enrichment_inputs(
         .map(|selected| selected.name.clone())
         .collect::<BTreeSet<_>>();
     let cached = match pool {
-        Some(pool) => pool.cached_enrichment_snapshot(Some(&allowed)).await,
+        Some(pool) => {
+            pool.cached_enrichment_snapshot(Some(&allowed), MAX_TOOLS_PER_UPSTREAM + 1)
+                .await
+        }
         None => Vec::new(),
     }
     .into_iter()
@@ -218,12 +225,13 @@ fn input_from_upstream(
             .filter(|row| row.exposed)
             .take(tool_limit)
         {
-            tool_names.push(sanitize_identifier(&row.name));
+            let tool_name = sanitize_identifier(&row.name);
+            tool_names.push(tool_name);
             if let Some(description) = row.description.as_deref() {
                 let description = sanitize_metadata_text(description, MAX_DESCRIPTION_CHARS);
-                if !description.is_empty() {
-                    tool_descriptions.push(description);
-                }
+                tool_descriptions.push(description);
+            } else {
+                tool_descriptions.push(String::new());
             }
         }
     }
@@ -235,7 +243,6 @@ fn input_from_upstream(
             .and_then(normalize_code_mode_hint),
         transport,
         enabled: upstream.enabled,
-        route_scope: "operator_global".to_string(),
         tool_names,
         tool_descriptions,
         resource_count: cached
@@ -282,25 +289,53 @@ fn sanitize_identifier(input: &str) -> String {
 }
 
 fn redact_for_provider_input(input: &str) -> String {
-    let mut redacted = input.to_string();
+    let lower = input.to_ascii_lowercase();
     for needle in [
-        "Authorization",
         "authorization",
-        "Bearer",
-        "TOKEN",
-        "token",
-        "PASSWORD",
+        "bearer ",
+        "api_key",
+        "apikey",
+        "access_token",
+        "refresh_token",
         "password",
+        "passwd",
+        "secret",
+        "credential",
         ".env",
         "/proc/environ",
-        "LAB_",
+        "lab_",
     ] {
-        redacted = redacted.replace(needle, "[redacted]");
+        if lower.contains(needle) {
+            return "[redacted]".to_string();
+        }
     }
-    redacted
+
+    input
+        .split_whitespace()
+        .map(|part| {
+            let lower = part.to_ascii_lowercase();
+            if lower.starts_with("/home/")
+                || lower.starts_with("/users/")
+                || lower.starts_with("/etc/")
+                || lower.starts_with("/var/run/")
+                || lower.ends_with(".sock")
+            {
+                "[redacted]"
+            } else {
+                part
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub(crate) fn hash_enrichment_input(input: &UpstreamEnrichmentInput) -> String {
+    #[derive(Serialize)]
+    struct CanonicalTool<'a> {
+        name: &'a str,
+        description: &'a str,
+    }
+
     #[derive(Serialize)]
     struct Canonical<'a> {
         sanitizer_version: &'static str,
@@ -308,26 +343,30 @@ pub(crate) fn hash_enrichment_input(input: &UpstreamEnrichmentInput) -> String {
         name: &'a str,
         transport: &'a str,
         enabled: bool,
-        route_scope: &'a str,
-        tool_names: Vec<&'a str>,
-        tool_descriptions: Vec<&'a str>,
+        tools: Vec<CanonicalTool<'a>>,
         resource_count: usize,
         prompt_count: usize,
         caps: BTreeMap<&'static str, usize>,
     }
 
-    let mut tool_names = input
+    let mut tools = input
         .tool_names
         .iter()
-        .map(String::as_str)
+        .enumerate()
+        .map(|(idx, name)| CanonicalTool {
+            name,
+            description: input
+                .tool_descriptions
+                .get(idx)
+                .map(String::as_str)
+                .unwrap_or_default(),
+        })
         .collect::<Vec<_>>();
-    tool_names.sort_unstable();
-    let mut tool_descriptions = input
-        .tool_descriptions
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    tool_descriptions.sort_unstable();
+    tools.sort_by(|left, right| {
+        left.name
+            .cmp(right.name)
+            .then_with(|| left.description.cmp(right.description))
+    });
     let caps = BTreeMap::from([
         ("max_manual_upstreams", MAX_MANUAL_UPSTREAMS),
         ("max_tools_per_upstream", MAX_TOOLS_PER_UPSTREAM),
@@ -342,9 +381,7 @@ pub(crate) fn hash_enrichment_input(input: &UpstreamEnrichmentInput) -> String {
         name: &input.name,
         transport: &input.transport,
         enabled: input.enabled,
-        route_scope: &input.route_scope,
-        tool_names,
-        tool_descriptions,
+        tools,
         resource_count: input.resource_count,
         prompt_count: input.prompt_count,
         caps,
@@ -364,7 +401,6 @@ mod tests {
             existing_hint: existing_hint.map(str::to_string),
             transport: "http".to_string(),
             enabled: true,
-            route_scope: "operator_global".to_string(),
             tool_names: vec!["search".to_string(), "issues.list".to_string()],
             tool_descriptions: vec![
                 "Search repository metadata".to_string(),
@@ -384,6 +420,35 @@ mod tests {
         assert_eq!(
             hash_enrichment_input(&without_hint),
             hash_enrichment_input(&with_hint)
+        );
+    }
+
+    #[test]
+    fn sanitize_metadata_text_redacts_sensitive_provider_input() {
+        assert_eq!(
+            sanitize_metadata_text("Authorization: Bearer super-secret-token", 200),
+            "[redacted]"
+        );
+        assert_eq!(
+            sanitize_metadata_text("reads /home/jacob/.config/app/config.toml", 200),
+            "reads [redacted]"
+        );
+        assert_eq!(
+            sanitize_metadata_text("uses LAB_FOO_TOKEN from .env", 200),
+            "[redacted]"
+        );
+    }
+
+    #[test]
+    fn metadata_hash_preserves_tool_name_description_pairing() {
+        let mut first = sample_input(None);
+        let mut second = sample_input(None);
+        first.tool_descriptions = vec!["one".to_string(), "two".to_string()];
+        second.tool_descriptions = vec!["two".to_string(), "one".to_string()];
+
+        assert_ne!(
+            hash_enrichment_input(&first),
+            hash_enrichment_input(&second)
         );
     }
 }

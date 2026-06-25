@@ -35,6 +35,25 @@ fn upstream_allowed(allowed: Option<&BTreeSet<String>>, upstream: &str) -> bool 
     allowed.is_none_or(|names| names.contains(upstream))
 }
 
+fn insert_bounded_tool_row(
+    rows: &mut Vec<UpstreamToolExposureRow>,
+    row: UpstreamToolExposureRow,
+    limit: usize,
+) {
+    if limit == 0 {
+        return;
+    }
+    let insert_at = rows
+        .binary_search_by(|existing| existing.name.cmp(&row.name))
+        .unwrap_or_else(std::convert::identity);
+    if insert_at < limit {
+        rows.insert(insert_at, row);
+        if rows.len() > limit {
+            rows.pop();
+        }
+    }
+}
+
 impl UpstreamPool {
     /// Get all healthy upstream tools, up to [`MAX_UPSTREAM_TOOLS`] total.
     ///
@@ -357,17 +376,22 @@ impl UpstreamPool {
     pub async fn cached_enrichment_snapshot(
         &self,
         allowed: Option<&BTreeSet<String>>,
+        per_upstream_tool_limit: usize,
     ) -> Vec<UpstreamEnrichmentCatalogEntry> {
+        let row_limit = per_upstream_tool_limit.saturating_add(1);
         let catalog = self.catalog.read().await;
         let mut entries = catalog
             .iter()
             .filter(|(name, _)| upstream_allowed(allowed, name))
             .map(|(name, entry)| {
-                let mut tool_rows = entry
-                    .tools
-                    .values()
-                    .map(|tool| {
-                        let matched_by = entry.exposure_policy.matched_by(tool.tool.name.as_ref());
+                let mut tool_rows = Vec::new();
+                for tool in entry.tools.values() {
+                    let matched_by = entry.exposure_policy.matched_by(tool.tool.name.as_ref());
+                    let Some(matched_by) = matched_by else {
+                        continue;
+                    };
+                    insert_bounded_tool_row(
+                        &mut tool_rows,
                         UpstreamToolExposureRow {
                             name: tool.tool.name.to_string(),
                             description: tool
@@ -376,12 +400,12 @@ impl UpstreamPool {
                                 .as_ref()
                                 .map(ToString::to_string)
                                 .filter(|text| !text.trim().is_empty()),
-                            exposed: matched_by.is_some(),
-                            matched_by,
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                tool_rows.sort_by(|left, right| left.name.cmp(&right.name));
+                            exposed: true,
+                            matched_by: Some(matched_by),
+                        },
+                        row_limit,
+                    );
+                }
                 UpstreamEnrichmentCatalogEntry {
                     upstream: name.clone(),
                     tool_rows,

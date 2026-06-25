@@ -26,6 +26,9 @@ async fn enrich_preview_returns_suggestion_without_persisting_config() {
 
     assert_eq!(before, after, "preview must not mutate in-memory config");
     assert_eq!(preview.proposals.len(), 1);
+    assert_eq!(preview.stats.upstream_count, 1);
+    assert_eq!(preview.stats.tool_count, 1);
+    assert!(!preview.stats.truncated);
     assert_eq!(preview.proposals[0].upstream, "github");
     assert_eq!(
         preview.proposals[0].status,
@@ -65,6 +68,29 @@ async fn enrich_preview_unknown_upstream_is_mapped() {
         .expect_err("unknown upstream must fail");
 
     assert_eq!(err.kind(), "unknown_upstream");
+}
+
+#[tokio::test]
+async fn enrich_preview_rejects_too_many_explicit_upstreams() {
+    let upstreams = (0..(MAX_MANUAL_UPSTREAMS + 1))
+        .map(|idx| fixture_http_upstream(&format!("up-{idx:02}")))
+        .collect::<Vec<_>>();
+    let (manager, _pool) = code_mode_manager_with_upstreams(upstreams).await;
+
+    let err = manager
+        .preview_enrichment(GatewayEnrichPreviewParams {
+            upstreams: (0..(MAX_MANUAL_UPSTREAMS + 1))
+                .map(|idx| format!("up-{idx:02}"))
+                .collect(),
+            all: false,
+            provider: GatewayEnrichmentProvider::Deterministic,
+            max_upstreams: None,
+            timeout_ms: None,
+        })
+        .await
+        .expect_err("explicit selections above the cap must fail");
+
+    assert_eq!(err.kind(), "invalid_param");
 }
 
 #[tokio::test]

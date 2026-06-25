@@ -133,9 +133,12 @@ pub(crate) struct CodeModeUpstreamDescription {
     pub(crate) hint: Option<String>,
 }
 
-fn push_description_line(out: &mut String, line: &str) {
+fn push_description_line(out: &mut String, line: &str) -> bool {
     if out.len() + line.len() <= CODE_MODE_DESCRIPTION_MAX_BYTES {
         out.push_str(line);
+        true
+    } else {
+        false
     }
 }
 
@@ -155,7 +158,9 @@ pub(crate) fn code_mode_description(upstreams: &[CodeModeUpstreamDescription]) -
             Some(hint) => format!("- `{}` -- {}\n", upstream.name, hint),
             None => format!("- `{}`\n", upstream.name),
         };
-        push_description_line(&mut out, &line);
+        if !push_description_line(&mut out, &line) {
+            break;
+        }
     }
     out.trim_end().to_string()
 }

@@ -60,7 +60,7 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `gateway` | `gateway.enrich.preview` | false | false | `upstreams: array`<br>`all: boolean`<br>`provider: string`<br>`max_upstreams: integer`<br>`timeout_ms: integer` | `GatewayEnrichmentPreviewView` | cli, mcp, api, web |
 | `gateway` | `gateway.get` | false | false | `name*: string` | `GatewayView` | cli, mcp, api, web |
 | `gateway` | `gateway.import` | false | false | `all: boolean`<br>`names: string[]`<br>`clients: string[]` | `ImportResultView` | cli, mcp, api, web |
-| `gateway` | `gateway.import_pending.approve` | false | false | `name*: string` | `PendingImportView` | cli, mcp, api, web |
+| `gateway` | `gateway.import_pending.approve` | false | false | `name*: string` | `PendingImportApprovalView` | cli, mcp, api, web |
 | `gateway` | `gateway.import_pending.list` | false | false |  | `PendingImportView[]` | cli, mcp, api, web |
 | `gateway` | `gateway.import_pending.reject` | false | false | `name*: string` | `PendingImportView` | cli, mcp, api, web |
 | `gateway` | `gateway.import_tombstones.clear` | false | false | `name*: string`<br>`source_client: string`<br>`source_path: string`<br>`server_name: string`<br>`transport_fingerprint: string` | `ImportTombstoneView[]` | cli, mcp, api, web |

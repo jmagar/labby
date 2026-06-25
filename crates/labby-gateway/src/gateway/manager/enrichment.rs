@@ -6,8 +6,8 @@ use crate::gateway::enrichment::collector::{
 use crate::gateway::enrichment::provider::{ProviderRunner, run_provider_preview};
 use crate::gateway::params::{GatewayEnrichApplyParams, GatewayEnrichPreviewParams};
 use crate::gateway::types::{
-    GatewayEnrichmentPreviewView, GatewayEnrichmentProvider, GatewayHintApplyView,
-    GatewayHintProposalView,
+    GatewayEnrichmentPreviewStatsView, GatewayEnrichmentPreviewView, GatewayEnrichmentProvider,
+    GatewayHintApplyView, GatewayHintProposalView,
 };
 
 use super::GatewayManager;
@@ -28,6 +28,12 @@ impl GatewayManager {
         let proposals = run_provider_preview(params.provider, &collected.inputs, &runner).await?;
         Ok(GatewayEnrichmentPreviewView {
             provider: params.provider,
+            stats: GatewayEnrichmentPreviewStatsView {
+                bytes: collected.stats.bytes,
+                upstream_count: collected.stats.upstream_count,
+                tool_count: collected.stats.tool_count,
+                truncated: collected.stats.truncated,
+            },
             proposals,
         })
     }
@@ -37,9 +43,9 @@ impl GatewayManager {
         params: GatewayEnrichApplyParams,
     ) -> Result<GatewayHintApplyView, ToolError> {
         let hint = validate_hint(&params.hint)?;
-        let pool = self.current_pool().await;
         let _mutation_guard = self.config_mutation.lock().await;
         let mut cfg = self.config.read().await.clone();
+        let pool = self.current_pool().await;
         let selected = [SelectedUpstream {
             name: params.upstream.clone(),
             explicit: true,

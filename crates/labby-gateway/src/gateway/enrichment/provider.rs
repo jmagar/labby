@@ -1,5 +1,6 @@
 #[cfg(test)]
 use std::path::PathBuf;
+use std::path::{Path, PathBuf as StdPathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -17,6 +18,8 @@ use crate::gateway::types::{
 
 const DEFAULT_TIMEOUT_MS: u64 = 15_000;
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 32 * 1024;
+const MIN_TIMEOUT_MS: u64 = 100;
+const MAX_TIMEOUT_MS: u64 = 60_000;
 const PROVIDER_CONCURRENCY: usize = 2;
 
 static PROVIDER_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
@@ -51,17 +54,29 @@ pub(crate) async fn run_provider_preview(
             let semaphore = PROVIDER_SEMAPHORE
                 .get_or_init(|| Arc::new(Semaphore::new(PROVIDER_CONCURRENCY)))
                 .clone();
-            let _permit = semaphore
-                .acquire_owned()
-                .await
-                .map_err(|_| ToolError::Sdk {
-                    sdk_kind: "provider_unavailable".to_string(),
-                    message: "gateway enrichment provider concurrency limiter is closed"
-                        .to_string(),
-                })?;
-            run_process_provider(provider, inputs, runner).await
+            let timeout = provider_timeout(runner.timeout_ms);
+            tokio::time::timeout(timeout, async move {
+                let _permit = semaphore
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| ToolError::Sdk {
+                        sdk_kind: "provider_unavailable".to_string(),
+                        message: "gateway enrichment provider concurrency limiter is closed"
+                            .to_string(),
+                    })?;
+                run_process_provider(provider, inputs, runner).await
+            })
+            .await
+            .map_err(|_| ToolError::Sdk {
+                sdk_kind: "provider_timeout".to_string(),
+                message: "gateway enrichment provider timed out".to_string(),
+            })?
         }
     }
+}
+
+fn provider_timeout(timeout_ms: u64) -> Duration {
+    Duration::from_millis(timeout_ms.clamp(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS))
 }
 
 async fn run_process_provider(
@@ -74,7 +89,7 @@ async fn run_process_provider(
         message: format!("failed to create isolated provider directory: {err}"),
     })?;
     let prompt = build_provider_prompt(inputs)?;
-    let mut command = provider_command(provider, runner);
+    let mut command = provider_command(provider, runner)?;
     command
         .current_dir(temp.path())
         .env_clear()
@@ -117,8 +132,7 @@ async fn run_process_provider(
     let stdout_task = tokio::spawn(async move { read_capped(stdout, max).await });
     let stderr_task = tokio::spawn(async move { read_capped(stderr, max).await });
 
-    let wait_result =
-        tokio::time::timeout(Duration::from_millis(runner.timeout_ms), child.wait()).await;
+    let wait_result = tokio::time::timeout(provider_timeout(runner.timeout_ms), child.wait()).await;
     let status = match wait_result {
         Ok(Ok(status)) => status,
         Ok(Err(err)) => {
@@ -129,6 +143,7 @@ async fn run_process_provider(
         }
         Err(_) => {
             drop(child.kill().await);
+            drop(child.wait().await);
             return Err(ToolError::Sdk {
                 sdk_kind: "provider_timeout".to_string(),
                 message: "gateway enrichment provider timed out".to_string(),
@@ -166,16 +181,19 @@ async fn run_process_provider(
     parse_provider_output(provider, inputs, &stdout.bytes)
 }
 
-fn provider_command(provider: GatewayEnrichmentProvider, runner: &ProviderRunner) -> Command {
+fn provider_command(
+    provider: GatewayEnrichmentProvider,
+    runner: &ProviderRunner,
+) -> Result<Command, ToolError> {
     #[cfg(not(test))]
     let _ = runner;
     #[cfg(test)]
     if let Some(program) = runner.program_override.as_ref() {
-        return Command::new(program);
+        return Ok(Command::new(program));
     }
     match provider {
         GatewayEnrichmentProvider::Claude => {
-            let mut command = Command::new("claude");
+            let mut command = Command::new(resolve_program("claude")?);
             command.args([
                 "--print",
                 "--output-format",
@@ -190,10 +208,10 @@ fn provider_command(provider: GatewayEnrichmentProvider, runner: &ProviderRunner
                 "--max-budget-usd",
                 "0.10",
             ]);
-            command
+            Ok(command)
         }
         GatewayEnrichmentProvider::Codex => {
-            let mut command = Command::new("codex");
+            let mut command = Command::new(resolve_program("codex")?);
             command.args([
                 "exec",
                 "--sandbox",
@@ -206,9 +224,33 @@ fn provider_command(provider: GatewayEnrichmentProvider, runner: &ProviderRunner
                 "--skip-git-repo-check",
                 "-",
             ]);
-            command
+            Ok(command)
         }
         GatewayEnrichmentProvider::Deterministic => unreachable!("deterministic has no command"),
+    }
+}
+
+fn resolve_program(program: &str) -> Result<StdPathBuf, ToolError> {
+    let path = Path::new(program);
+    if path.components().count() > 1 {
+        return Ok(path.to_path_buf());
+    }
+    let Some(paths) = std::env::var_os("PATH") else {
+        return Err(provider_not_found(program));
+    };
+    for dir in std::env::split_paths(&paths) {
+        let candidate = dir.join(program);
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+    Err(provider_not_found(program))
+}
+
+fn provider_not_found(program: &str) -> ToolError {
+    ToolError::Sdk {
+        sdk_kind: "provider_unavailable".to_string(),
+        message: format!("gateway enrichment provider `{program}` was not found on PATH"),
     }
 }
 
@@ -376,7 +418,6 @@ mod tests {
             existing_hint: None,
             transport: "http".to_string(),
             enabled: true,
-            route_scope: "operator_global".to_string(),
             tool_names: vec!["search".to_string()],
             tool_descriptions: vec!["Search repository metadata".to_string()],
             resource_count: 0,

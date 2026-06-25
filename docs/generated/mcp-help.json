@@ -556,7 +556,7 @@
               "description": "Name of the pending server to approve"
             }
           ],
-          "returns": "PendingImportView"
+          "returns": "PendingImportApprovalView"
         },
         {
           "name": "gateway.import_pending.reject",
