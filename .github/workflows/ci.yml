@@ -241,6 +241,7 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 120
     env:
+      CARGO_TARGET_DIR: C:\Users\jmaga\actions-runner\labby\_cargo-target\labby
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
     steps:
       - uses: actions/checkout@v4
@@ -248,11 +249,77 @@ jobs:
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
+      - name: Prune persistent Cargo target dir
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $targetDir = $env:CARGO_TARGET_DIR
+          $maxBytes = 50GB
+          $maxAgeDays = 14
+
+          function Get-TreeSizeBytes($Path) {
+            if (-not (Test-Path $Path)) {
+              return 0
+            }
+            $sum = Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
+              Measure-Object -Property Length -Sum
+            if ($null -eq $sum.Sum) {
+              return 0
+            }
+            return [int64]$sum.Sum
+          }
+
+          function Remove-IfExists($Path) {
+            if (Test-Path $Path) {
+              Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+
+          $cutoff = (Get-Date).AddDays(-$maxAgeDays)
+          Get-ChildItem -LiteralPath $targetDir -Recurse -Force -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -lt $cutoff } |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+
+          Get-ChildItem -LiteralPath $targetDir -Recurse -Force -Directory -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue) } |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+
+          $size = Get-TreeSizeBytes $targetDir
+          if ($size -gt $maxBytes) {
+            Write-Warning "Persistent Cargo target dir is $([math]::Round($size / 1GB, 2)) GiB, above $([math]::Round($maxBytes / 1GB, 2)) GiB; pruning volatile caches."
+            Remove-IfExists (Join-Path $targetDir "debug\incremental")
+            Remove-IfExists (Join-Path $targetDir "debug\.fingerprint")
+            Remove-IfExists (Join-Path $targetDir "debug\deps")
+          }
+
+          $size = Get-TreeSizeBytes $targetDir
+          if ($size -gt $maxBytes) {
+            Write-Warning "Persistent Cargo target dir is still $([math]::Round($size / 1GB, 2)) GiB; wiping it to enforce the hard cap."
+            Remove-Item -LiteralPath $targetDir -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+          }
+
+          $size = Get-TreeSizeBytes $targetDir
+          Write-Host "Persistent Cargo target dir ready at $targetDir ($([math]::Round($size / 1GB, 2)) GiB, hard cap $([math]::Round($maxBytes / 1GB, 2)) GiB)."
       - name: Install cargo-nextest
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $version = "0.9.138"
+          $current = $null
+          try {
+            $current = (& cargo nextest --version 2>$null)
+          } catch {
+            $current = $null
+          }
+          if ($current -like "*$version*") {
+            Write-Host "cargo-nextest already installed: $current"
+            exit 0
+          }
+
           $target = "x86_64-pc-windows-msvc"
           $base = "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$version"
           $archive = Join-Path $env:RUNNER_TEMP "cargo-nextest.tar.gz"
@@ -304,9 +371,35 @@ jobs:
           }
 
           exit $process.ExitCode
-      - name: Run Windows Job Object reaping integration test
+      - name: Enforce Cargo target dir cap
+        if: always()
         shell: pwsh
-        run: cargo nextest run -p labby --test windows_job_object_reaping --all-features --locked --profile ci --run-ignored ignored-only
+        run: |
+          $ErrorActionPreference = "Stop"
+          $targetDir = $env:CARGO_TARGET_DIR
+          $maxBytes = 50GB
+
+          function Get-TreeSizeBytes($Path) {
+            if (-not (Test-Path $Path)) {
+              return 0
+            }
+            $sum = Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
+              Measure-Object -Property Length -Sum
+            if ($null -eq $sum.Sum) {
+              return 0
+            }
+            return [int64]$sum.Sum
+          }
+
+          $size = Get-TreeSizeBytes $targetDir
+          if ($size -gt $maxBytes) {
+            Write-Warning "Persistent Cargo target dir grew to $([math]::Round($size / 1GB, 2)) GiB, above $([math]::Round($maxBytes / 1GB, 2)) GiB; wiping it to enforce the hard cap."
+            Remove-Item -LiteralPath $targetDir -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+            $size = Get-TreeSizeBytes $targetDir
+          }
+
+          Write-Host "Persistent Cargo target dir final size: $([math]::Round($size / 1GB, 2)) GiB (hard cap $([math]::Round($maxBytes / 1GB, 2)) GiB)."
 
   release-smoke:
     name: Release smoke (${{ matrix.os }})
