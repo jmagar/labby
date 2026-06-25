@@ -233,17 +233,13 @@ jobs:
     # skipped, so untrusted code can't execute on the runner — while our own
     # branch PRs (e.g. Windows reaping work) get pre-merge Windows verification.
     #
-    # The runner is the agent-os sandbox VM (dookie-adjacent Windows 11) with
-    # rustup, cargo-nextest, NASM, CMake, and LLVM/libclang preinstalled and a
-    # persistent warm target dir — no toolchain/cache actions needed.
+    # The runner is steamy's Windows host with rustup, cargo-nextest, NASM,
+    # CMake, and LLVM/libclang preinstalled and a persistent warm target dir —
+    # no toolchain/cache actions needed.
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 120
-    env:
-      # 4-thread / 8 GB VM — cap build parallelism so debug-test linking
-      # does not OOM.
-      CARGO_BUILD_JOBS: "2"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
