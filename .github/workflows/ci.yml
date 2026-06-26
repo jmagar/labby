@@ -85,7 +85,7 @@ jobs:
           PUSH_BEFORE_SHA: ${{ github.event.before }}
           HEAD_SHA: ${{ github.sha }}
         run: |
-          "$LAB_CHANGED_PATHS" \
+          python3 "$LAB_CHANGED_PATHS" \
             --event "$EVENT_NAME" \
             --output "$GITHUB_OUTPUT" \
             --write-changed-files "$RUNNER_TEMP/changed-files.txt"
