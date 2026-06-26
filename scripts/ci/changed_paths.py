@@ -39,8 +39,7 @@ def classify(event: str, paths: list[str]) -> dict[str, bool]:
 
     workflow = any_match(
         paths,
-        lambda p: starts(p, ".github/")
-        or p in {"scripts/ci/changed_paths.py", "scripts/ci/sccache-rustc-wrapper.cmd", "scripts/ci/sccache-rustc-wrapper.ps1"},
+        lambda p: starts(p, ".github/") or p == "scripts/ci/changed_paths.py",
     )
     web = any_match(paths, lambda p: starts(p, "apps/gateway-admin/"))
     generated_docs = any_match(paths, lambda p: starts(p, "docs/generated/"))

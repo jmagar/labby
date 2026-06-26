@@ -336,8 +336,8 @@ jobs:
       SCCACHE_CACHE_SIZE: 20G
       LAB_SCCACHE_EXE: C:\Users\jmaga\.cargo\bin\sccache.exe
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
-      RUSTC_WRAPPER: scripts\ci\sccache-rustc-wrapper.cmd
-      CARGO_BUILD_RUSTC_WRAPPER: scripts\ci\sccache-rustc-wrapper.cmd
+      RUSTC_WRAPPER: C:\Users\jmaga\.cargo\bin\sccache.exe
+      CARGO_BUILD_RUSTC_WRAPPER: C:\Users\jmaga\.cargo\bin\sccache.exe
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
