@@ -61,6 +61,8 @@ pub struct GatewayConfigView {
     pub expose_resources: Option<Vec<String>>,
     #[serde(default)]
     pub expose_prompts: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_mode_hint: Option<String>,
     #[serde(default)]
     pub code_mode_enabled: bool,
     /// Set when this server was imported from an external config; absent for manual entries.
@@ -157,6 +159,10 @@ pub struct PendingImportView {
     pub command: Option<String>,
     pub source_client: String,
     pub source_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enrichment_suggestion: Option<GatewayHintProposalView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enrichment_suggestion_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -176,12 +182,85 @@ pub struct GatewayRuntimeView {
     pub exposed_prompt_count: usize,
     #[serde(default)]
     pub last_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dependency_hint: Option<DependencyHintView>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DependencyHintView {
+    pub code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_command: Option<String>,
+    pub redacted_tail: String,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GatewayView {
     pub config: GatewayConfigView,
     pub runtime: GatewayRuntimeView,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enrichment_suggestion: Option<GatewayHintProposalView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enrichment_suggestion_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GatewayEnrichmentProvider {
+    #[default]
+    Deterministic,
+    Claude,
+    Codex,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GatewayHintProposalStatus {
+    Suggested,
+    Existing,
+    MetadataInsufficient,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GatewayHintProposalView {
+    pub upstream: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    pub status: GatewayHintProposalStatus,
+    pub metadata_hash: String,
+    pub provider: GatewayEnrichmentProvider,
+    pub tool_count: usize,
+    pub resource_count: usize,
+    pub prompt_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub existing_hint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GatewayEnrichmentPreviewView {
+    pub provider: GatewayEnrichmentProvider,
+    pub stats: GatewayEnrichmentPreviewStatsView,
+    pub proposals: Vec<GatewayHintProposalView>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GatewayEnrichmentPreviewStatsView {
+    pub bytes: usize,
+    pub upstream_count: usize,
+    pub tool_count: usize,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GatewayHintApplyView {
+    pub upstream: String,
+    pub hint: String,
+    pub applied: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_hint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

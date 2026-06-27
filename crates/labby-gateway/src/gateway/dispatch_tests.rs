@@ -44,6 +44,8 @@ fn gateway_actions_include_management_surface() {
     assert!(names.contains(&"gateway.discovered_tools"));
     assert!(names.contains(&"gateway.discovered_resources"));
     assert!(names.contains(&"gateway.discovered_prompts"));
+    assert!(names.contains(&"gateway.enrich.preview"));
+    assert!(names.contains(&"gateway.enrich.apply"));
     assert!(names.contains(&"gateway.oauth.probe"));
     assert!(names.contains(&"gateway.oauth.start"));
     assert!(names.contains(&"gateway.oauth.status"));
@@ -54,7 +56,17 @@ fn gateway_actions_include_management_surface() {
     assert!(names.contains(&"gateway.public_urls.get"));
 
     for spec in ACTIONS {
-        if spec.name == "gateway.code_mode.set" {
+        if matches!(
+            spec.name,
+            "gateway.code_mode.set"
+                | "gateway.enrich.preview"
+                | "gateway.enrich.apply"
+                | "gateway.import"
+                | "gateway.import_pending.approve"
+                | "gateway.import_pending.reject"
+                | "gateway.import_tombstones.clear"
+                | "gateway.import_tombstones.restore"
+        ) {
             continue;
         }
         assert!(
@@ -63,6 +75,109 @@ fn gateway_actions_include_management_surface() {
             spec.name
         );
     }
+}
+
+#[test]
+fn import_mutations_are_destructive() {
+    for name in [
+        "gateway.import",
+        "gateway.import_pending.approve",
+        "gateway.import_pending.reject",
+        "gateway.import_tombstones.clear",
+        "gateway.import_tombstones.restore",
+    ] {
+        let spec = ACTIONS
+            .iter()
+            .find(|spec| spec.name == name)
+            .unwrap_or_else(|| panic!("{name} action"));
+        assert!(spec.destructive, "{name} mutates gateway import state");
+    }
+}
+
+#[test]
+fn enrich_preview_is_destructive_because_external_providers_spawn() {
+    let spec = ACTIONS
+        .iter()
+        .find(|spec| spec.name == "gateway.enrich.preview")
+        .expect("gateway.enrich.preview action");
+
+    assert!(spec.destructive);
+}
+
+#[tokio::test]
+async fn enrich_preview_dispatch_defaults_to_deterministic_provider() {
+    let manager = test_manager();
+    manager
+        .replace_config_for_tests(vec![upstream_fixture(
+            "github",
+            Some("https://example.invalid/mcp".to_string()),
+            None,
+        )])
+        .await;
+
+    let value = dispatch_with_manager(
+        &manager,
+        "gateway.enrich.preview",
+        json!({"upstreams": ["github"]}),
+    )
+    .await
+    .expect("preview dispatch");
+
+    assert_eq!(value["provider"], json!("deterministic"));
+    assert_eq!(value["proposals"][0]["upstream"], json!("github"));
+}
+
+#[tokio::test]
+async fn enrich_preview_dispatch_rejects_empty_selection() {
+    let manager = test_manager();
+    let err = dispatch_with_manager(&manager, "gateway.enrich.preview", json!({}))
+        .await
+        .expect_err("empty selection must fail");
+
+    assert_eq!(err.kind(), "invalid_param");
+}
+
+#[tokio::test]
+async fn enrich_apply_dispatch_persists_hint() {
+    let manager = test_manager();
+    manager
+        .replace_config_for_tests(vec![upstream_fixture(
+            "github",
+            Some("https://example.invalid/mcp".to_string()),
+            None,
+        )])
+        .await;
+    let preview = dispatch_with_manager(
+        &manager,
+        "gateway.enrich.preview",
+        json!({"upstreams": ["github"]}),
+    )
+    .await
+    .expect("preview");
+    let hash = preview["proposals"][0]["metadata_hash"]
+        .as_str()
+        .expect("hash")
+        .to_string();
+
+    let applied = dispatch_with_manager(
+        &manager,
+        "gateway.enrich.apply",
+        json!({
+            "upstream": "github",
+            "hint": "search repositories",
+            "metadata_hash": hash,
+        }),
+    )
+    .await
+    .expect("apply");
+
+    assert_eq!(applied["hint"], json!("search repositories"));
+    assert_eq!(
+        manager.current_config().await.upstream[0]
+            .code_mode_hint
+            .as_deref(),
+        Some("search repositories")
+    );
 }
 
 #[test]
@@ -309,6 +424,7 @@ async fn gateway_list_returns_array() {
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
+            code_mode_hint: None,
             oauth: None,
             imported_from: None,
             priority: 1.0,
@@ -348,6 +464,7 @@ async fn gateway_client_config_get_returns_http_and_stdio_configs() {
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
+                code_mode_hint: None,
                 oauth: None,
                 imported_from: None,
                 priority: 1.0,
@@ -365,6 +482,7 @@ async fn gateway_client_config_get_returns_http_and_stdio_configs() {
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
+                code_mode_hint: None,
                 oauth: None,
                 imported_from: None,
                 priority: 1.0,
@@ -530,6 +648,7 @@ async fn gateway_server_get_returns_custom_gateway_row() {
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
+            code_mode_hint: None,
             oauth: None,
             imported_from: None,
             priority: 1.0,
@@ -565,6 +684,7 @@ async fn gateway_list_surfaces_cached_custom_gateway_summary_counts() {
             expose_tools: Some(vec!["scrape".to_string()]),
             expose_resources: None,
             expose_prompts: None,
+            code_mode_hint: None,
             oauth: None,
             imported_from: None,
             priority: 1.0,
@@ -1098,6 +1218,7 @@ async fn gateway_test_spec_stdio_executes_command_and_name_routes_to_config() {
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
+                code_mode_hint: None,
                 oauth: None,
                 imported_from: None,
                 priority: 1.0,
@@ -1115,6 +1236,7 @@ async fn gateway_test_spec_stdio_executes_command_and_name_routes_to_config() {
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
+                code_mode_hint: None,
                 oauth: None,
                 imported_from: None,
                 priority: 1.0,
@@ -1384,6 +1506,7 @@ async fn only_reload_promises_to_pick_up_changed_bearer_token_env_vars() {
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
+            code_mode_hint: None,
             oauth: None,
             imported_from: None,
             priority: 1.0,
@@ -1441,6 +1564,7 @@ async fn gateway_mcp_cleanup_dispatch_returns_cleanup_payload() {
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
+            code_mode_hint: None,
             oauth: None,
             imported_from: None,
             priority: 1.0,
@@ -1517,6 +1641,7 @@ async fn gateway_mcp_disable_with_cleanup_returns_gateway_and_cleanup_payload() 
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
+            code_mode_hint: None,
             oauth: None,
             imported_from: None,
             priority: 1.0,
@@ -1590,6 +1715,7 @@ fn make_discovered_http(name: &str) -> DiscoveredServer {
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
+            code_mode_hint: None,
             oauth: None,
             imported_from: None,
             priority: 1.0,
@@ -1616,6 +1742,7 @@ fn make_discovered_stdio(name: &str, command: &str) -> DiscoveredServer {
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
+            code_mode_hint: None,
             oauth: None,
             imported_from: None,
             priority: 1.0,
@@ -1824,6 +1951,7 @@ fn upstream_fixture(name: &str, url: Option<String>, command: Option<String>) ->
         expose_tools: None,
         expose_resources: None,
         expose_prompts: None,
+        code_mode_hint: None,
         oauth: None,
         imported_from: None,
         priority: 1.0,

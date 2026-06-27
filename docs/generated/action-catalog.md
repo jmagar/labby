@@ -56,14 +56,16 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `gateway` | `gateway.discovered_prompts` | false | false | `name*: string` | `string[]` | cli, mcp, api, web |
 | `gateway` | `gateway.discovered_resources` | false | false | `name*: string` | `string[]` | cli, mcp, api, web |
 | `gateway` | `gateway.discovered_tools` | false | false | `name*: string` | `GatewayToolExposureRowView[]` | cli, mcp, api, web |
+| `gateway` | `gateway.enrich.apply` | false | true | `upstream*: string`<br>`hint*: string`<br>`metadata_hash*: string` | `GatewayHintApplyView` | cli, mcp, api, web |
+| `gateway` | `gateway.enrich.preview` | false | true | `upstreams: string[]`<br>`all: boolean`<br>`provider: string`<br>`max_upstreams: integer`<br>`timeout_ms: integer` | `GatewayEnrichmentPreviewView` | cli, mcp, api, web |
 | `gateway` | `gateway.get` | false | false | `name*: string` | `GatewayView` | cli, mcp, api, web |
-| `gateway` | `gateway.import` | false | false | `all: boolean`<br>`names: string[]`<br>`clients: string[]` | `ImportResultView` | cli, mcp, api, web |
-| `gateway` | `gateway.import_pending.approve` | false | false | `name*: string` | `PendingImportView` | cli, mcp, api, web |
+| `gateway` | `gateway.import` | false | true | `all: boolean`<br>`names: string[]`<br>`clients: string[]` | `ImportResultView` | cli, mcp, api, web |
+| `gateway` | `gateway.import_pending.approve` | false | true | `name*: string` | `PendingImportView` | cli, mcp, api, web |
 | `gateway` | `gateway.import_pending.list` | false | false |  | `PendingImportView[]` | cli, mcp, api, web |
-| `gateway` | `gateway.import_pending.reject` | false | false | `name*: string` | `PendingImportView` | cli, mcp, api, web |
-| `gateway` | `gateway.import_tombstones.clear` | false | false | `name*: string`<br>`source_client: string`<br>`source_path: string`<br>`server_name: string`<br>`transport_fingerprint: string` | `ImportTombstoneView[]` | cli, mcp, api, web |
+| `gateway` | `gateway.import_pending.reject` | false | true | `name*: string` | `PendingImportView` | cli, mcp, api, web |
+| `gateway` | `gateway.import_tombstones.clear` | false | true | `name*: string`<br>`source_client: string`<br>`source_path: string`<br>`server_name: string`<br>`transport_fingerprint: string` | `ImportTombstoneView[]` | cli, mcp, api, web |
 | `gateway` | `gateway.import_tombstones.list` | false | false |  | `ImportTombstoneView[]` | cli, mcp, api, web |
-| `gateway` | `gateway.import_tombstones.restore` | false | false | `name*: string`<br>`source_client: string`<br>`source_path: string`<br>`server_name: string`<br>`transport_fingerprint: string` | `GatewayView` | cli, mcp, api, web |
+| `gateway` | `gateway.import_tombstones.restore` | false | true | `name*: string`<br>`source_client: string`<br>`source_path: string`<br>`server_name: string`<br>`transport_fingerprint: string` | `GatewayView` | cli, mcp, api, web |
 | `gateway` | `gateway.list` | false | false |  | `ServerView[]` | cli, mcp, api, web |
 | `gateway` | `gateway.mcp.cleanup` | false | false | `name*: string`<br>`aggressive: boolean`<br>`dry_run: boolean` | `GatewayCleanupView` | cli, mcp, api, web |
 | `gateway` | `gateway.mcp.disable` | false | false | `name*: string`<br>`cleanup: boolean`<br>`aggressive: boolean` | `GatewayView + optional cleanup result` | cli, mcp, api, web |

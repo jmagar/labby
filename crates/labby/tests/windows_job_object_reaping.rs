@@ -13,16 +13,15 @@
 #![cfg(all(windows, feature = "gateway"))]
 //! Windows Job Object process-tree reaping integration test.
 //!
-//! This test is `#[ignore]` because it requires a real Windows host to
-//! exercise the Win32 Job Object API. It is intended to be run on the
-//! `windows-lab` self-hosted CI runner (the "Test (windows self-hosted)"
-//! job in `.github/workflows/ci.yml`), which compiles and runs
-//! the full test suite on a genuine Windows environment.
+//! This test requires a real Windows host to exercise the Win32 Job Object API.
+//! It is intended to run as part of the normal `windows-lab` self-hosted CI
+//! runner (the "Test (windows self-hosted)" job in `.github/workflows/ci.yml`),
+//! which compiles and runs the full test suite on a genuine Windows
+//! environment.
 //!
 //! On Linux/macOS the test cannot run the Windows-only code, so the entire
-//! module is `#[cfg(windows)]`-gated. The `#[ignore]` attribute additionally
-//! prevents accidental execution via `cargo nextest run` without the
-//! `--include-ignored` flag.
+//! module is `#[cfg(windows)]`-gated, so non-Windows CI never sees a runnable
+//! test case from this target.
 //!
 //! All Win32 FFI used here is routed through the SAFE API exposed by the
 //! `labby-winjob` crate and through the production
@@ -141,13 +140,12 @@ mod windows_job_reaping {
     /// Verify that closing a Job Object handle with `KILL_ON_JOB_CLOSE` terminates
     /// the entire process tree (direct child + grandchild), not just the direct child.
     ///
-    /// This test is `#[ignore]` — run it explicitly on the `windows-lab` CI runner:
+    /// This test runs on the `windows-lab` CI runner as part of normal nextest:
     ///
     /// ```sh
-    /// cargo nextest run --test windows_job_object_reaping --include-ignored
+    /// cargo nextest run --test windows_job_object_reaping
     /// ```
     #[test]
-    #[ignore = "requires real Windows host; run on windows-lab CI runner"]
     fn job_object_kills_grandchild_on_close() {
         let mut direct_child =
             spawn_delayed_two_level_tree().expect("spawn delayed two-level Windows process tree");

@@ -45,8 +45,10 @@ impl IntoResponse for ApiError {
             "auth_failed" => StatusCode::UNAUTHORIZED,
             "not_found" => StatusCode::NOT_FOUND,
             "rate_limited" | "queue_saturated" | "session_limit_exceeded" | "too_many_subscribers" => StatusCode::TOO_MANY_REQUESTS,
-            "sync_in_progress" | "service_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
-            "missing_param" | "invalid_param" | "validation_failed" => {
+            "sync_in_progress" | "service_unavailable" | "provider_unavailable" => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
+            "missing_param" | "invalid_param" | "validation_failed" | "invalid_hint" => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
             "confirmation_required" => StatusCode::UNPROCESSABLE_ENTITY,
@@ -69,15 +71,18 @@ impl IntoResponse for ApiError {
             // and unsupported operations.
             "not_implemented" | "not_supported" => StatusCode::NOT_IMPLEMENTED,
             "secrets_export_not_allowed" => StatusCode::FORBIDDEN,
-            "install_timeout" | "timeout" | "code_mode_timeout" | "code_mode_fuel_exhausted" => {
-                StatusCode::GATEWAY_TIMEOUT
-            }
+            "install_timeout"
+            | "timeout"
+            | "code_mode_timeout"
+            | "code_mode_fuel_exhausted"
+            | "provider_timeout" => StatusCode::GATEWAY_TIMEOUT,
             "oauth_needs_reauth" => StatusCode::UNAUTHORIZED,
             "oauth_state_invalid" => StatusCode::BAD_REQUEST,
             "forbidden" | "dev_preview_read_only" => StatusCode::FORBIDDEN,
             "unknown_action" | "unknown_subaction" | "unknown_instance" | "unknown_target" => {
                 StatusCode::BAD_REQUEST
             }
+            "unknown_upstream" => StatusCode::NOT_FOUND,
             "network_error"
             | "bad_gateway"
             | "server_error"
@@ -98,8 +103,11 @@ impl IntoResponse for ApiError {
             | "integrity_missing"
             | "integrity_mismatch"
             | "deploy_failed"
-            | "not_connected" => StatusCode::BAD_GATEWAY,
-            "conflict" | "ambiguous_tool" | "restart_required" => StatusCode::CONFLICT,
+            | "not_connected"
+            | "invalid_provider_output" => StatusCode::BAD_GATEWAY,
+            "conflict" | "ambiguous_tool" | "restart_required" | "stale_suggestion" => {
+                StatusCode::CONFLICT
+            }
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         // Serialize the inner ToolError directly — byte-identical to the MCP
@@ -216,6 +224,22 @@ mod tests {
         })
         .into_response();
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn gateway_enrichment_kinds_map_to_non_500_statuses() {
+        assert_eq!(status_for("invalid_hint"), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(status_for("stale_suggestion"), StatusCode::CONFLICT);
+        assert_eq!(status_for("unknown_upstream"), StatusCode::NOT_FOUND);
+        assert_eq!(
+            status_for("provider_unavailable"),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(status_for("provider_timeout"), StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(
+            status_for("invalid_provider_output"),
+            StatusCode::BAD_GATEWAY
+        );
     }
 
     #[test]

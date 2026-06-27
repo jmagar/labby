@@ -179,7 +179,7 @@ mod tests {
     use crate::oauth::upstream::encryption::load_key;
     use crate::oauth::upstream::runtime::build_upstream_oauth_runtime_from_parts;
 
-    use super::{GatewayCommand, build_manager_with_upstream_oauth_runtime};
+    use super::{GatewayCommand, GatewayEnrichCommand, build_manager_with_upstream_oauth_runtime};
 
     #[test]
     fn gateway_cli_parser_accepts_expected_commands() {
@@ -307,6 +307,95 @@ mod tests {
             Cli::try_parse_from(["lab", "gateway", "code", "exec", "--file", "snippet.js",])
                 .is_ok()
         );
+        assert!(Cli::try_parse_from(["lab", "gateway", "enrich", "--upstream", "github"]).is_ok());
+        assert!(
+            Cli::try_parse_from([
+                "lab",
+                "gateway",
+                "enrich",
+                "--all",
+                "--provider",
+                "codex",
+                "--max-upstreams",
+                "5",
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "lab",
+                "gateway",
+                "enrich",
+                "apply",
+                "--upstream",
+                "github",
+                "--hint",
+                "search repositories",
+                "--metadata-hash",
+                "abc123",
+            ])
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn gateway_enrich_apply_parser_captures_approval_args() {
+        let cli = Cli::try_parse_from([
+            "lab",
+            "gateway",
+            "enrich",
+            "apply",
+            "--upstream",
+            "github",
+            "--hint",
+            "search repositories",
+            "--metadata-hash",
+            "abc123",
+            "--yes",
+        ])
+        .expect("gateway enrich apply parses");
+
+        let Command::Gateway(args) = cli.command else {
+            panic!("expected gateway command");
+        };
+        let GatewayCommand::Enrich(args) = args.command else {
+            panic!("expected gateway enrich command");
+        };
+        let Some(GatewayEnrichCommand::Apply(args)) = args.command else {
+            panic!("expected gateway enrich apply command");
+        };
+
+        assert_eq!(args.upstream, "github");
+        assert_eq!(args.hint, "search repositories");
+        assert_eq!(args.metadata_hash, "abc123");
+        assert!(args.yes);
+    }
+
+    #[test]
+    fn gateway_enrich_preview_parser_captures_approval_args() {
+        let cli = Cli::try_parse_from([
+            "lab",
+            "gateway",
+            "enrich",
+            "--upstream",
+            "github",
+            "--provider",
+            "codex",
+            "--yes",
+        ])
+        .expect("gateway enrich preview parses");
+
+        let Command::Gateway(args) = cli.command else {
+            panic!("expected gateway command");
+        };
+        let GatewayCommand::Enrich(args) = args.command else {
+            panic!("expected gateway enrich command");
+        };
+
+        assert!(args.command.is_none());
+        assert_eq!(args.upstreams, vec!["github"]);
+        assert_eq!(args.provider, "codex");
+        assert!(args.yes);
     }
 
     #[test]
@@ -375,6 +464,7 @@ mod tests {
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
+                code_mode_hint: None,
                 oauth: Some(UpstreamOauthConfig {
                     mode: UpstreamOauthMode::AuthorizationCodePkce,
                     registration: UpstreamOauthRegistration::Dynamic,

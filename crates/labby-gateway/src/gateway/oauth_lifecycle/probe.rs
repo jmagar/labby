@@ -280,6 +280,7 @@ fn register_transient_manager(
         expose_tools: None,
         expose_resources: None,
         expose_prompts: None,
+        code_mode_hint: None,
         oauth: Some(UpstreamOauthConfig {
             mode: UpstreamOauthMode::AuthorizationCodePkce,
             registration,

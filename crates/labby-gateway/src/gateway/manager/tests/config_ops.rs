@@ -148,6 +148,7 @@ async fn add_with_bearer_token_value_writes_env_and_references_generated_env_var
                 expose_tools: None,
                 expose_resources: None,
                 expose_prompts: None,
+                code_mode_hint: None,
                 oauth: None,
                 imported_from: None,
                 priority: 1.0,
@@ -194,6 +195,35 @@ async fn concurrent_gateway_adds_persist_both_gateways() {
         .map(|upstream| upstream.name.as_str())
         .collect::<BTreeSet<_>>();
     assert_eq!(names, BTreeSet::from(["alpha", "bravo"]));
+}
+
+#[tokio::test]
+async fn batch_add_returns_successful_views_and_preserves_errors() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config.toml");
+    let manager = GatewayManager::new(path, GatewayRuntimeHandle::default());
+
+    let outcome = manager
+        .batch_add(
+            vec![
+                fixture_stdio_upstream("alpha"),
+                fixture_stdio_upstream("bravo"),
+                fixture_stdio_upstream("bad name"),
+            ],
+            None,
+            None,
+        )
+        .await
+        .expect("partial batch succeeds");
+
+    let imported = outcome
+        .views
+        .iter()
+        .map(|view| view.config.name.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(imported, BTreeSet::from(["alpha", "bravo"]));
+    assert_eq!(outcome.errors.len(), 1);
+    assert_eq!(outcome.errors[0].0, "bad name");
 }
 
 // Re-fixtured post-gateway-pivot: the virtual server is backed by the kept

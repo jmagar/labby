@@ -456,7 +456,7 @@ mod tests {
             .expect("lazy failure is recorded");
         assert!(
             last_error.contains("lazy upstream connect"),
-            "last_error should record the lazy-connect failure path, got: {last_error}"
+            "unexpected lazy connect error: {last_error}"
         );
     }
 

@@ -59,6 +59,12 @@ Dispatch layers may add the following kinds on top of SDK errors:
 - `invalid_code_mode_id` — Code Mode tool id parsing failed. Valid ids are `<upstream-name>::<tool-name>` only; Lab actions use `tool_execute`/`invoke`. HTTP 422.
 - `route_scope_denied` — caller requested a service, upstream, tool, resource, prompt, or Code Mode target that is not exposed by the current protected MCP route scope. MCP tool result error envelope.
 - `restart_required` — requested configuration change was persisted or rejected because the live runtime cannot safely apply it until `labby serve` restarts. HTTP 409.
+- `invalid_hint` — Gateway enrichment hint failed validation. HTTP 422.
+- `stale_suggestion` — Gateway enrichment apply used a suggestion hash that no longer matches current sanitized metadata. Regenerate preview and retry. HTTP 409.
+- `unknown_upstream` — Gateway enrichment referenced an upstream namespace that is not configured or visible to the caller. HTTP 404.
+- `provider_unavailable` — Gateway enrichment provider executable, auth, or runtime was unavailable; retry with `provider=deterministic` or after configuring the provider. HTTP 503.
+- `provider_timeout` — Gateway enrichment provider exceeded the bounded preview timeout. HTTP 504.
+- `invalid_provider_output` — Gateway enrichment provider returned malformed, oversized, or unsafe output. HTTP 502.
 - `path_traversal` — a path escapes its target root (contains `..`, is absolute, or canonicalizes outside the root). This is the **canonical** path-escape kind, emitted across the dispatch layer (`path_safety.rs`, `helpers::reject_path_traversal`, the Code Mode artifact containment check, and stash import/export) and by the ACP binary installer (`AcpInstallerError::PathTraversal` → `path_traversal`). HTTP 422. The older `path_traversal_rejected` spelling is retained only by the Fleet-WS marketplace installer (see below) for back-compat; new emitters must use `path_traversal`.
 - `symlink_rejected` — a symlink was encountered along a write/walk path where symlinks are disallowed. Emitted by the dispatch layer (stash save/import/export, Code Mode artifact containment) and the Fleet-WS marketplace installer. HTTP 422.
 

@@ -5,14 +5,15 @@ use regex::Regex;
 
 use crate::gateway::service_registry::GatewayServiceRegistry;
 use crate::gateway::types::{
-    GatewayConfigView, GatewayRuntimeView, ServiceConfigFieldView, ServiceConfigView,
+    DependencyHintView, GatewayConfigView, GatewayRuntimeView, ServiceConfigFieldView,
+    ServiceConfigView,
 };
 use crate::gateway::view_models::{
     ServerConfigSummaryView, ServerView, SurfaceStateView, SurfaceStatesView,
 };
 use crate::gateway::virtual_servers::{VirtualServerRecord, VirtualServerSource};
 use crate::upstream::pool::{UpstreamCachedSummary, UpstreamPool};
-use labby_runtime::gateway_config::{CodeModeConfig, UpstreamConfig};
+use labby_runtime::gateway_config::{CodeModeConfig, UpstreamConfig, normalize_code_mode_hint};
 use labby_runtime::redact::{redact_stdio_args, redact_stdio_value, redact_url};
 /// Per-service health probe result. Carried through gateway projection so the
 /// `ServerView` can surface upstream-service reachability without forcing the
@@ -24,6 +25,8 @@ pub(crate) struct ServiceHealth {
 }
 
 const WARNING_UNKNOWN_SERVICE: &str = "unknown_service";
+const DIAGNOSTIC_TAIL_MAX_LINES: usize = 12;
+const DIAGNOSTIC_TAIL_MAX_BYTES: usize = 2048;
 
 pub(super) fn config_view(
     upstream: &UpstreamConfig,
@@ -42,6 +45,10 @@ pub(super) fn config_view(
         expose_tools: upstream.expose_tools.clone(),
         expose_resources: upstream.expose_resources.clone(),
         expose_prompts: upstream.expose_prompts.clone(),
+        code_mode_hint: upstream
+            .code_mode_hint
+            .as_deref()
+            .and_then(normalize_code_mode_hint),
         code_mode_enabled: code_mode.enabled,
         imported_from: upstream.imported_from.clone(),
     }
@@ -202,6 +209,9 @@ pub(super) fn operator_visible_upstream_error(message: Option<String>) -> Option
 }
 
 pub(super) fn upstream_warning_code(message: &str) -> &'static str {
+    if dependency_hint_from_error(message).is_some() {
+        return "dependency_missing";
+    }
     let lower = message.to_ascii_lowercase();
     if lower.contains("auth required")
         || lower.contains("unauthorized")
@@ -227,6 +237,95 @@ pub(super) fn upstream_warning_code(message: &str) -> &'static str {
     }
 }
 
+pub(super) fn dependency_hint_from_error(message: &str) -> Option<DependencyHintView> {
+    let lower = message.to_ascii_lowercase();
+    let (code, package_hint, install_command) = if lower.contains("ffmpeg: command not found")
+        || lower.contains("ffmpeg.exe: command not found")
+        || (lower.contains("no such file or directory") && lower.contains("ffmpeg"))
+        || (lower.contains("enoent") && lower.contains("ffmpeg"))
+    {
+        (
+            "missing_leaf_dependency",
+            Some("ffmpeg"),
+            Some("sudo apt install ffmpeg"),
+        )
+    } else if lower.contains("failed to run `uvx`")
+        || lower.contains("failed to spawn `uvx`")
+        || (lower.contains("enoent") && lower.contains("uvx"))
+    {
+        (
+            "missing_runtime_floor",
+            Some("uv"),
+            Some("labby setup --provision --yes"),
+        )
+    } else if lower.contains("failed to run `npx`")
+        || lower.contains("failed to spawn `npx`")
+        || (lower.contains("enoent") && lower.contains("npx"))
+    {
+        (
+            "missing_runtime_floor",
+            Some("nodejs"),
+            Some("labby setup --provision --yes"),
+        )
+    } else if lower.contains("failed to run `python`")
+        || lower.contains("failed to spawn `python`")
+        || (lower.contains("enoent") && lower.contains("python"))
+    {
+        (
+            "missing_runtime_floor",
+            Some("python"),
+            Some("labby setup --provision --yes"),
+        )
+    } else {
+        return None;
+    };
+
+    let (redacted_tail, truncated) = redacted_diagnostic_tail(message);
+    Some(DependencyHintView {
+        code: code.to_string(),
+        package_hint: package_hint.map(str::to_string),
+        install_command: install_command.map(str::to_string),
+        redacted_tail,
+        truncated,
+    })
+}
+
+fn redacted_diagnostic_tail(message: &str) -> (String, bool) {
+    let mut truncated = false;
+    let lines = message.lines().collect::<Vec<_>>();
+    let selected = if lines.len() > DIAGNOSTIC_TAIL_MAX_LINES {
+        truncated = true;
+        &lines[lines.len() - DIAGNOSTIC_TAIL_MAX_LINES..]
+    } else {
+        &lines[..]
+    };
+    let joined = selected.join("\n");
+    let capped = if joined.len() > DIAGNOSTIC_TAIL_MAX_BYTES {
+        truncated = true;
+        let mut start = joined.len() - DIAGNOSTIC_TAIL_MAX_BYTES;
+        while start < joined.len() && !joined.is_char_boundary(start) {
+            start += 1;
+        }
+        format!("…[truncated]\n{}", &joined[start..])
+    } else {
+        joined
+    };
+    let redacted = redact_secret_like_segments(&redact_stdio_value(&capped))
+        .lines()
+        .map(|line| {
+            if let Some((prefix, _)) = line.split_once("Authorization: Bearer ") {
+                format!("{prefix}Authorization: Bearer [redacted]")
+            } else if line.contains("TS_AUTHKEY=") {
+                "TS_AUTHKEY=[redacted]".to_string()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    (redacted, truncated)
+}
+
 pub(super) async fn upstream_summary(
     pool: Option<&UpstreamPool>,
     upstream_name: &str,
@@ -249,22 +348,22 @@ pub(super) async fn server_view_from_upstream(
         Some(pool) => pool.upstream_last_error(&upstream.name).await,
         None => None,
     });
+    let dependency_hint = last_error.as_deref().and_then(dependency_hint_from_error);
     let health = match pool {
         Some(pool) => pool.upstream_tool_health(&upstream.name).await,
         None => None,
     };
     // Health-aware connectivity (mirrors `server_view_from_virtual_server`): an
-    // upstream counts as connected when it is actively exposing capabilities OR
-    // it is healthy with no recorded error. The health term keeps lazily
+    // upstream counts as connected when it has no recorded error and is either
+    // actively exposing capabilities or healthy. The health term keeps lazily
     // discovered upstreams — whose catalog stays empty until their first use —
-    // from rendering as "Disconnected" at rest, while upstreams with a recorded
-    // error or an open circuit breaker still surface as down.
+    // from rendering as "Disconnected" at rest, while upstreams with stale
+    // exposed counts plus a current error still surface as down.
     let exposing_capabilities = summary.exposed_tool_count > 0
         || summary.exposed_resource_count > 0
         || summary.exposed_prompt_count > 0;
-    let health_ok =
-        last_error.is_none() && health.map(|health| health.is_routable()).unwrap_or(false);
-    let connected = exposing_capabilities || health_ok;
+    let health_ok = health.map(|health| health.is_routable()).unwrap_or(false);
+    let connected = last_error.is_none() && (exposing_capabilities || health_ok);
     let enabled = upstream.enabled;
     let pid = match pool {
         Some(pool) => pool
@@ -295,15 +394,25 @@ pub(super) async fn server_view_from_upstream(
             },
             ..SurfaceStatesView::default()
         },
-        warnings: last_error
-            .as_ref()
-            .map(|message| {
+        warnings: match (&last_error, &dependency_hint) {
+            (Some(message), Some(hint)) => {
+                vec![super::view_models::ServerWarningView {
+                    code: hint.code.clone(),
+                    message: hint
+                        .install_command
+                        .as_ref()
+                        .map(|cmd| format!("missing dependency; suggested fix: {cmd}"))
+                        .unwrap_or_else(|| message.clone()),
+                }]
+            }
+            (Some(message), None) => {
                 vec![super::view_models::ServerWarningView {
                     code: upstream_warning_code(message).to_string(),
                     message: message.clone(),
                 }]
-            })
-            .unwrap_or_default(),
+            }
+            _ => Vec::new(),
+        },
         config_summary: ServerConfigSummaryView {
             transport: Some(if upstream.command.is_some() {
                 "stdio".to_string()
@@ -485,6 +594,9 @@ pub(super) async fn runtime_view(
         None => summary.exposed_prompt_count,
     };
 
+    let last_error = operator_visible_upstream_error(pool.upstream_last_error(name).await);
+    let dependency_hint = last_error.as_deref().and_then(dependency_hint_from_error);
+
     GatewayRuntimeView {
         name: name.to_string(),
         tool_count: summary.discovered_tool_count,
@@ -493,7 +605,8 @@ pub(super) async fn runtime_view(
         exposed_tool_count: summary.exposed_tool_count,
         exposed_resource_count: summary.exposed_resource_count,
         exposed_prompt_count: summary.exposed_prompt_count,
-        last_error: operator_visible_upstream_error(pool.upstream_last_error(name).await),
+        last_error,
+        dependency_hint,
     }
 }
 
@@ -517,6 +630,7 @@ mod tests {
             expose_tools: None,
             expose_resources: None,
             expose_prompts: None,
+            code_mode_hint: None,
             oauth: None,
             imported_from: None,
             priority: 1.0,
@@ -563,6 +677,57 @@ mod tests {
             rendered.contains("[REDACTED]") && !rendered.contains("ghp_"),
             "bare positional token must be redacted, got: {rendered}"
         );
+    }
+
+    #[test]
+    fn dependency_hint_classifies_ffmpeg_without_raw_secret_leak() {
+        let token = ["sk", "abcdefghijklmnopqrstuvwxyz"].join("-");
+        let hint = dependency_hint_from_error(&format!(
+            "server failed\nAuthorization: Bearer {token}\nffmpeg: command not found"
+        ))
+        .expect("dependency hint");
+
+        assert_eq!(hint.code, "missing_leaf_dependency");
+        assert_eq!(hint.package_hint.as_deref(), Some("ffmpeg"));
+        assert_eq!(
+            hint.install_command.as_deref(),
+            Some("sudo apt install ffmpeg")
+        );
+        assert!(!hint.redacted_tail.contains(&token));
+    }
+
+    #[test]
+    fn dependency_hint_classifies_runtime_enoent() {
+        let hint = dependency_hint_from_error("failed to run `uvx`: No such file or directory")
+            .expect("dependency hint");
+
+        assert_eq!(hint.code, "missing_runtime_floor");
+        assert_eq!(hint.package_hint.as_deref(), Some("uv"));
+        assert_eq!(
+            hint.install_command.as_deref(),
+            Some("labby setup --provision --yes")
+        );
+    }
+
+    #[test]
+    fn dependency_hint_ignores_auth_failures() {
+        assert!(dependency_hint_from_error("server exited because API_KEY is missing").is_none());
+        assert!(dependency_hint_from_error("401 unauthorized invalid_token").is_none());
+    }
+
+    #[test]
+    fn diagnostic_tail_is_bounded() {
+        let long = (0..20)
+            .map(|line| format!("line-{line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let hint = dependency_hint_from_error(&format!("{long}\nffmpeg: command not found"))
+            .expect("dependency hint");
+
+        assert!(hint.truncated);
+        assert!(!hint.redacted_tail.contains("line-0"));
+        assert!(hint.redacted_tail.contains("ffmpeg: command not found"));
     }
 
     #[test]

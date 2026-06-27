@@ -193,6 +193,7 @@ fn fixture_upstream_config(name: &str) -> crate::config::UpstreamConfig {
         expose_tools: None,
         expose_resources: None,
         expose_prompts: None,
+        code_mode_hint: None,
         oauth: None,
         imported_from: None,
         priority: 1.0,
@@ -633,8 +634,9 @@ async fn codemode_description_lists_route_scoped_enabled_upstreams() {
     let apps = fixture_upstream_config("apps");
     let mut hidden = fixture_upstream_config("hidden");
     hidden.enabled = false;
+    let sonarr = fixture_upstream_config("sonarr");
     let pool = Arc::new(UpstreamPool::new());
-    let manager = code_mode_manager_with_pool_multi(true, vec![apps, hidden], pool).await;
+    let manager = code_mode_manager_with_pool_multi(true, vec![apps, hidden, sonarr], pool).await;
     let server = test_server(
         completion_test_registry(),
         Some(manager),

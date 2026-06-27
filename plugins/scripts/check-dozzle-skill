@@ -8,6 +8,16 @@ target="plugins/dozzle"
 
 failures=0
 
+if [[ ! -d "$target" ]]; then
+  if [[ "${LAB_ALLOW_MISSING_DOZZLE:-0}" != "1" ]]; then
+    printf 'dozzle skill check failed: %s is not present in this checkout\n' "$target" >&2
+    printf 'set LAB_ALLOW_MISSING_DOZZLE=1 only when the retired Dozzle plugin checkout is intentionally absent\n' >&2
+    exit 1
+  fi
+  printf 'dozzle skill check skipped: %s is not present in this checkout\n' "$target"
+  exit 0
+fi
+
 check_absent() {
   local description="$1"
   local pattern="$2"

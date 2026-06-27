@@ -70,8 +70,13 @@ labby serve --host 127.0.0.1 --port 8765
 ```
 
 The install scripts download the requested GitHub Release asset, verify its
-checksum, and install `labby` onto the user PATH. Override with
-`LAB_INSTALL_DIR`, `LAB_INSTALL_VERSION`, or `LAB_INSTALL_REPO`.
+checksum, and install `labby` onto the user PATH. They do **not** perform
+operator provisioning or environment setup. The scripts only install the binary
+(from a release or fallback source build); all first-run provisioning is handled
+inside `labby` via `labby serve` bootstrap and `labby setup`.
+
+Override install behavior with `LAB_INSTALL_DIR`, `LAB_INSTALL_VERSION`, or
+`LAB_INSTALL_REPO`.
 
 ### Build From Source
 
@@ -104,6 +109,17 @@ generates a token, writes a minimal `~/.lab/.env`, reloads it into the running
 process, prints the setup URL, and continues. The token itself is stored in
 `~/.lab/.env` rather than printed.
 
+Bootstrap writes these required `setup` keys if no env exists yet:
+
+- `LAB_MCP_HTTP_TOKEN` (generated random 64-character hex token)
+- `LAB_MCP_TRANSPORT=http`
+- `LAB_MCP_HTTP_HOST=127.0.0.1`
+- `LAB_MCP_HTTP_PORT=8765`
+- `LAB_AUTH_MODE=bearer`
+
+It also enforces secure file creation via Lab's `env_merge` path (`0600` perms on
+Unix) and then skips creating anything else until the web wizard runs.
+
 For explicit setup:
 
 ```bash
@@ -117,6 +133,23 @@ labby serve --host 127.0.0.1 --port 8765
 Open `http://127.0.0.1:8765/setup` or `http://127.0.0.1:8765/`.
 Build static Labby assets with `just web-build` first when running from a source
 checkout.
+
+### Self-Host The Gateway
+
+The supported self-hosted gateway substrate is an amd64 Debian 13 Incus system
+container. Docker is retained for explicit development/image smoke, but it is
+not the primary production boundary for Labby because stdio MCP servers and
+agent CLIs are installed and launched at runtime.
+
+```bash
+scripts/incus-bootstrap.sh --version vX.Y.Z
+incus exec labby -- systemctl status labby --no-pager
+incus exec labby -- curl -fsS http://127.0.0.1:8765/ready
+```
+
+See [docs/runtime/HOST_GATEWAY.md](./docs/runtime/HOST_GATEWAY.md) for the
+Incus runbook, `/dev/net/tun` Tailscale passthrough, manual `claude`/`codex`/
+`gemini` login checklist, and rollback commands.
 
 ## Core Workflows
 

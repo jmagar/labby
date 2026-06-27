@@ -38,6 +38,44 @@ pub enum GatewayCommand {
     PublicUrls,
     /// Search, inspect, and execute Code Mode snippets through dispatch
     Code(GatewayCodeArgs),
+    /// Generate and approve Code Mode upstream hint proposals.
+    Enrich(GatewayEnrichArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct GatewayEnrichArgs {
+    #[command(subcommand)]
+    pub command: Option<GatewayEnrichCommand>,
+    #[arg(long = "upstream")]
+    pub upstreams: Vec<String>,
+    #[arg(long)]
+    pub all: bool,
+    #[arg(long, default_value = "deterministic", value_parser = ["deterministic", "claude", "codex"])]
+    pub provider: String,
+    #[arg(long)]
+    pub max_upstreams: Option<usize>,
+    #[arg(long)]
+    pub timeout_ms: Option<u64>,
+    /// Skip confirmation for provider-backed preview runs.
+    #[arg(short = 'y', long, alias = "no-confirm")]
+    pub yes: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum GatewayEnrichCommand {
+    Apply(GatewayEnrichApplyArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct GatewayEnrichApplyArgs {
+    #[arg(long)]
+    pub upstream: String,
+    #[arg(long)]
+    pub hint: String,
+    #[arg(long, alias = "suggestion-hash")]
+    pub metadata_hash: String,
+    #[arg(short = 'y', long, alias = "no-confirm")]
+    pub yes: bool,
 }
 
 #[derive(Debug, Args)]

@@ -27,6 +27,7 @@ use super::{GatewayManager, GatewayRuntimeHandle};
 mod cleanup;
 mod code_mode;
 mod config_ops;
+mod enrichment;
 mod imports;
 mod inspection;
 mod lifecycle;
@@ -200,6 +201,7 @@ fn fixture_stdio_upstream(name: &str) -> UpstreamConfig {
         expose_tools: None,
         expose_resources: None,
         expose_prompts: None,
+        code_mode_hint: None,
         oauth: None,
         imported_from: None,
         priority: 1.0,
@@ -220,6 +222,7 @@ fn fixture_http_upstream(name: &str) -> UpstreamConfig {
         expose_tools: None,
         expose_resources: None,
         expose_prompts: None,
+        code_mode_hint: None,
         oauth: None,
         imported_from: None,
         priority: 1.0,

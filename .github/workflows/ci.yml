@@ -347,9 +347,9 @@ jobs:
     # skipped, so untrusted code can't execute on the runner — while our own
     # branch PRs (e.g. Windows reaping work) get pre-merge Windows verification.
     #
-    # The runner is the agent-os sandbox VM (dookie-adjacent Windows 11) with
-    # rustup, cargo-nextest, NASM, CMake, and LLVM/libclang preinstalled and a
-    # persistent warm target dir — no toolchain/cache actions needed.
+    # The runner is steamy's Windows host with rustup, NASM, CMake, and
+    # LLVM/libclang preinstalled and a persistent warm target dir — no
+    # toolchain/cache actions needed.
     if: >-
       needs.changes.outputs.rust_test == 'true' &&
       (
@@ -358,15 +358,200 @@ jobs:
       )
     timeout-minutes: 120
     env:
-      # 4-thread / 8 GB VM — cap build parallelism so debug-test linking
-      # does not OOM.
-      CARGO_BUILD_JOBS: "2"
+      CARGO_TARGET_DIR: C:\Users\jmaga\actions-runner\labby\_cargo-target\labby
+      SCCACHE_DIR: C:\Users\jmaga\actions-runner\labby\_sccache\labby
+      SCCACHE_CACHE_SIZE: 20G
+      LAB_SCCACHE_EXE: C:\Users\jmaga\.cargo\bin\sccache.exe
+      LIBCLANG_PATH: C:\Program Files\LLVM\bin
+      RUSTC_WRAPPER: C:\Users\jmaga\.cargo\bin\sccache.exe
+      CARGO_BUILD_RUSTC_WRAPPER: C:\Users\jmaga\.cargo\bin\sccache.exe
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
+      - name: Prune persistent Windows build caches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $targetDir = $env:CARGO_TARGET_DIR
+          $sccacheDir = $env:SCCACHE_DIR
+          $targetMaxBytes = 50GB
+          $sccacheMaxBytes = 20GB
+          $maxAgeDays = 14
+
+          function Get-TreeSizeBytes($Path) {
+            if (-not (Test-Path $Path)) {
+              return 0
+            }
+            $sum = Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
+              Measure-Object -Property Length -Sum
+            if ($null -eq $sum.Sum) {
+              return 0
+            }
+            return [int64]$sum.Sum
+          }
+
+          function Remove-IfExists($Path) {
+            if (Test-Path $Path) {
+              Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          function Prune-ByAge($Path, $MaxAgeDays) {
+            if (-not (Test-Path $Path)) {
+              return
+            }
+            $cutoff = (Get-Date).AddDays(-$MaxAgeDays)
+            Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.LastWriteTime -lt $cutoff } |
+              Remove-Item -Force -ErrorAction SilentlyContinue
+
+            Get-ChildItem -LiteralPath $Path -Recurse -Force -Directory -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending |
+              Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue) } |
+              Remove-Item -Force -ErrorAction SilentlyContinue
+          }
+
+          function Enforce-HardCap($Path, $MaxBytes, $Label) {
+            $size = Get-TreeSizeBytes $Path
+            if ($size -gt $MaxBytes) {
+              Write-Warning "$Label is $([math]::Round($size / 1GB, 2)) GiB, above $([math]::Round($MaxBytes / 1GB, 2)) GiB; wiping it to enforce the hard cap."
+              Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
+              New-Item -ItemType Directory -Force -Path $Path | Out-Null
+              $size = Get-TreeSizeBytes $Path
+            }
+            Write-Host "$Label ready at $Path ($([math]::Round($size / 1GB, 2)) GiB, hard cap $([math]::Round($MaxBytes / 1GB, 2)) GiB)."
+          }
+
+          function Remove-TargetBuildDirs($TargetDir, $Patterns) {
+            $buildDir = Join-Path $TargetDir "debug\build"
+            if (-not (Test-Path $buildDir)) {
+              return
+            }
+            foreach ($pattern in $Patterns) {
+              Get-ChildItem -LiteralPath $buildDir -Directory -Filter $pattern -ErrorAction SilentlyContinue |
+                Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+          New-Item -ItemType Directory -Force -Path $sccacheDir | Out-Null
+
+          # Native bindgen outputs can be left half-written by interrupted runs,
+          # and Cargo may then reuse the stale build dir until the include! fails.
+          Remove-TargetBuildDirs $targetDir @("libsqlite3-sys-*")
+
+          Prune-ByAge $targetDir $maxAgeDays
+          Prune-ByAge $sccacheDir $maxAgeDays
+
+          $size = Get-TreeSizeBytes $targetDir
+          if ($size -gt $targetMaxBytes) {
+            Write-Warning "Persistent Cargo target dir is $([math]::Round($size / 1GB, 2)) GiB, above $([math]::Round($targetMaxBytes / 1GB, 2)) GiB; pruning volatile caches."
+            Remove-IfExists (Join-Path $targetDir "debug\incremental")
+            Remove-IfExists (Join-Path $targetDir "debug\.fingerprint")
+            Remove-IfExists (Join-Path $targetDir "debug\deps")
+          }
+
+          Enforce-HardCap $targetDir $targetMaxBytes "Persistent Cargo target dir"
+          Enforce-HardCap $sccacheDir $sccacheMaxBytes "Persistent sccache dir"
+      - name: Install sccache
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "0.16.0"
+          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+          $sccacheExe = Join-Path $cargoBin "sccache.exe"
+          $current = $null
+          if (Test-Path $sccacheExe) {
+            try {
+              $current = (& $sccacheExe --version 2>$null)
+            } catch {
+              $current = $null
+            }
+          }
+          if ($current -like "*$version*") {
+            Write-Host "sccache already installed: $current"
+            $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            exit 0
+          }
+
+          $target = "x86_64-pc-windows-msvc"
+          $base = "https://github.com/mozilla/sccache/releases/download/v$version"
+          $archive = Join-Path $env:RUNNER_TEMP "sccache.tar.gz"
+          $shaFile = Join-Path $env:RUNNER_TEMP "sccache.sha256"
+          $extractDir = Join-Path $env:RUNNER_TEMP "sccache"
+
+          Invoke-WebRequest "$base/sccache-v$version-$target.tar.gz" -OutFile $archive
+          Invoke-WebRequest "$base/sccache-v$version-$target.tar.gz.sha256" -OutFile $shaFile
+
+          $expected = ((Get-Content $shaFile -Raw) -split "\s+")[0].Trim().ToLowerInvariant()
+          $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "sccache checksum mismatch: expected $expected, got $actual"
+          }
+
+          if (Test-Path $extractDir) {
+            Remove-Item -Recurse -Force $extractDir
+          }
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+          tar -xzf $archive -C $extractDir
+          $exe = Get-ChildItem -Path $extractDir -Recurse -Filter sccache.exe | Select-Object -First 1
+          if (-not $exe) {
+            throw "sccache.exe not found in release archive"
+          }
+
+          New-Item -ItemType Directory -Force -Path $cargoBin | Out-Null
+          Copy-Item $exe.FullName $sccacheExe -Force
+          $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & $sccacheExe --version
+      - name: Install cargo-nextest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "0.9.138"
+          $current = $null
+          try {
+            $current = (& cargo nextest --version 2>$null)
+          } catch {
+            $current = $null
+          }
+          if ($current -like "*$version*") {
+            Write-Host "cargo-nextest already installed: $current"
+            exit 0
+          }
+
+          $target = "x86_64-pc-windows-msvc"
+          $base = "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$version"
+          $archive = Join-Path $env:RUNNER_TEMP "cargo-nextest.tar.gz"
+          $shaFile = Join-Path $env:RUNNER_TEMP "cargo-nextest.sha256"
+          $extractDir = Join-Path $env:RUNNER_TEMP "cargo-nextest"
+          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+
+          Invoke-WebRequest "$base/cargo-nextest-$version-$target.tar.gz" -OutFile $archive
+          Invoke-WebRequest "$base/cargo-nextest-$version-$target.sha256" -OutFile $shaFile
+
+          $expected = (Get-Content $shaFile -Raw).Split(" ")[0].Trim().ToLowerInvariant()
+          $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "cargo-nextest checksum mismatch: expected $expected, got $actual"
+          }
+
+          if (Test-Path $extractDir) {
+            Remove-Item -Recurse -Force $extractDir
+          }
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+          tar -xzf $archive -C $extractDir
+          $exe = Get-ChildItem -Path $extractDir -Recurse -Filter cargo-nextest.exe | Select-Object -First 1
+          if (-not $exe) {
+            throw "cargo-nextest.exe not found in release archive"
+          }
+
+          New-Item -ItemType Directory -Force -Path $cargoBin | Out-Null
+          Copy-Item $exe.FullName (Join-Path $cargoBin "cargo-nextest.exe") -Force
+          $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & (Join-Path $cargoBin "cargo-nextest.exe") --version
       - name: Check Windows Job Object helper crate
         shell: pwsh
         run: cargo check -p labby-winjob --all-targets --locked
@@ -380,17 +565,59 @@ jobs:
             -NoNewWindow `
             -PassThru
 
-          while (-not $process.HasExited) {
-            Start-Sleep -Seconds 60
-            if (-not $process.HasExited) {
-              Write-Host "Windows nextest still running at $(Get-Date -Format o)"
-            }
+          while (-not $process.WaitForExit(5000)) {
+            Write-Host "Windows nextest still running at $(Get-Date -Format o)"
           }
 
           exit $process.ExitCode
       - name: Run Windows Job Object reaping integration test
         shell: pwsh
         run: cargo nextest run -p labby --test windows_job_object_reaping --all-features --locked --profile ci --run-ignored ignored-only
+      - name: Show sccache stats
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path $env:LAB_SCCACHE_EXE) {
+            & $env:LAB_SCCACHE_EXE --show-stats
+          } else {
+            Write-Warning "sccache.exe was not installed at $env:LAB_SCCACHE_EXE"
+          }
+      - name: Enforce Windows build cache caps
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $targetDir = $env:CARGO_TARGET_DIR
+          $sccacheDir = $env:SCCACHE_DIR
+          $targetMaxBytes = 50GB
+          $sccacheMaxBytes = 20GB
+
+          function Get-TreeSizeBytes($Path) {
+            if (-not (Test-Path $Path)) {
+              return 0
+            }
+            $sum = Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
+              Measure-Object -Property Length -Sum
+            if ($null -eq $sum.Sum) {
+              return 0
+            }
+            return [int64]$sum.Sum
+          }
+
+          function Enforce-HardCap($Path, $MaxBytes, $Label) {
+            New-Item -ItemType Directory -Force -Path $Path | Out-Null
+            $size = Get-TreeSizeBytes $Path
+            if ($size -gt $MaxBytes) {
+              Write-Warning "$Label grew to $([math]::Round($size / 1GB, 2)) GiB, above $([math]::Round($MaxBytes / 1GB, 2)) GiB; wiping it to enforce the hard cap."
+              Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
+              New-Item -ItemType Directory -Force -Path $Path | Out-Null
+              $size = Get-TreeSizeBytes $Path
+            }
+            Write-Host "$Label final size: $([math]::Round($size / 1GB, 2)) GiB (hard cap $([math]::Round($MaxBytes / 1GB, 2)) GiB)."
+          }
+
+          Enforce-HardCap $targetDir $targetMaxBytes "Persistent Cargo target dir"
+          Enforce-HardCap $sccacheDir $sccacheMaxBytes "Persistent sccache dir"
 
   release-smoke:
     name: Release smoke (${{ matrix.os }})

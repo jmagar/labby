@@ -341,7 +341,7 @@ impl GatewayManager {
         Ok(diff)
     }
 
-    fn notify_catalog_changes(&self, diff: &GatewayCatalogDiff) {
+    pub(super) fn notify_catalog_changes(&self, diff: &GatewayCatalogDiff) {
         if !diff.tools_changed && !diff.resources_changed && !diff.prompts_changed {
             return;
         }

@@ -12,8 +12,8 @@ use serde_json::Value;
 use labby_runtime::gateway_config::UpstreamConfig;
 
 use super::super::types::{
-    UpstreamCapability, UpstreamHealth, UpstreamRuntimeMetadata, UpstreamTool,
-    UpstreamToolExposureRow,
+    UpstreamCapability, UpstreamEnrichmentCatalogEntry, UpstreamHealth, UpstreamRuntimeMetadata,
+    UpstreamTool, UpstreamToolExposureRow,
 };
 use super::UpstreamPool;
 use super::helpers::UpstreamCachedSummary;
@@ -33,6 +33,25 @@ pub(crate) const MAX_UPSTREAM_PROMPTS: usize = 1000;
 
 fn upstream_allowed(allowed: Option<&BTreeSet<String>>, upstream: &str) -> bool {
     allowed.is_none_or(|names| names.contains(upstream))
+}
+
+fn insert_bounded_tool_row(
+    rows: &mut Vec<UpstreamToolExposureRow>,
+    row: UpstreamToolExposureRow,
+    limit: usize,
+) {
+    if limit == 0 {
+        return;
+    }
+    let insert_at = rows
+        .binary_search_by(|existing| existing.name.cmp(&row.name))
+        .unwrap_or_else(std::convert::identity);
+    if insert_at < limit {
+        rows.insert(insert_at, row);
+        if rows.len() > limit {
+            rows.pop();
+        }
+    }
 }
 
 impl UpstreamPool {
@@ -347,6 +366,66 @@ impl UpstreamPool {
             .collect();
         rows.sort_by(|left, right| left.name.cmp(&right.name));
         rows
+    }
+
+    /// Return one deterministic cached catalog snapshot for enrichment previews.
+    ///
+    /// This never connects, probes, reads resources/prompts, or calls upstream
+    /// tools. It clones bounded metadata from the in-memory catalog under a
+    /// single read lock, allowing callers to filter and cap outside the lock.
+    pub async fn cached_enrichment_snapshot(
+        &self,
+        allowed: Option<&BTreeSet<String>>,
+        per_upstream_tool_limit: usize,
+    ) -> Vec<UpstreamEnrichmentCatalogEntry> {
+        let row_limit = per_upstream_tool_limit.saturating_add(1);
+        let catalog = self.catalog.read().await;
+        let mut entries = catalog
+            .iter()
+            .filter(|(name, _)| upstream_allowed(allowed, name))
+            .map(|(name, entry)| {
+                let mut tool_rows = Vec::new();
+                if entry.tool_health.is_routable() {
+                    for tool in entry.tools.values() {
+                        let matched_by = entry.exposure_policy.matched_by(tool.tool.name.as_ref());
+                        let Some(matched_by) = matched_by else {
+                            continue;
+                        };
+                        insert_bounded_tool_row(
+                            &mut tool_rows,
+                            UpstreamToolExposureRow {
+                                name: tool.tool.name.to_string(),
+                                description: tool
+                                    .tool
+                                    .description
+                                    .as_ref()
+                                    .map(ToString::to_string)
+                                    .filter(|text| !text.trim().is_empty()),
+                                exposed: true,
+                                matched_by: Some(matched_by),
+                            },
+                            row_limit,
+                        );
+                    }
+                }
+                UpstreamEnrichmentCatalogEntry {
+                    upstream: name.clone(),
+                    tool_rows,
+                    resource_count: if entry.resource_health.is_routable() {
+                        entry.resource_count
+                    } else {
+                        0
+                    },
+                    prompt_count: if entry.prompt_health.is_routable() {
+                        entry.prompt_count
+                    } else {
+                        0
+                    },
+                }
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| left.upstream.cmp(&right.upstream));
+        entries
     }
 
     pub async fn cached_upstream_summary(

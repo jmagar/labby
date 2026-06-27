@@ -5,9 +5,9 @@ use anyhow::Result;
 use serde_json::{Map, Value, json};
 
 use crate::cli::gateway::{
-    GatewayArgs, GatewayCommand, GatewayMcpAuthCommand, GatewayMcpCommand, GatewayPendingCommand,
-    GatewayProtectedRouteCommand, GatewayProtectedRouteUpdateArgs, GatewayProtectedRouteUpsertArgs,
-    GatewayQuarantineCommand, GatewayUpdateArgs,
+    GatewayArgs, GatewayCommand, GatewayEnrichCommand, GatewayMcpAuthCommand, GatewayMcpCommand,
+    GatewayPendingCommand, GatewayProtectedRouteCommand, GatewayProtectedRouteUpdateArgs,
+    GatewayProtectedRouteUpsertArgs, GatewayQuarantineCommand, GatewayUpdateArgs,
 };
 use crate::cli::helpers::{run_action_command, run_confirmable_action_command};
 use crate::config::ProtectedMcpRouteConfig;
@@ -389,6 +389,32 @@ pub(super) async fn dispatch_command(
                     }
                 },
                 GatewayCommand::PublicUrls => ("gateway.public_urls.get".to_string(), json!({})),
+                GatewayCommand::Enrich(args) => match args.command {
+                    None => {
+                        confirmed = args.yes;
+                        (
+                            "gateway.enrich.preview".to_string(),
+                            json!({
+                                "upstreams": args.upstreams,
+                                "all": args.all,
+                                "provider": args.provider,
+                                "max_upstreams": args.max_upstreams,
+                                "timeout_ms": args.timeout_ms,
+                            }),
+                        )
+                    }
+                    Some(GatewayEnrichCommand::Apply(args)) => {
+                        confirmed = args.yes;
+                        (
+                            "gateway.enrich.apply".to_string(),
+                            json!({
+                                "upstream": args.upstream,
+                                "hint": args.hint,
+                                "metadata_hash": args.metadata_hash,
+                            }),
+                        )
+                    }
+                },
                 GatewayCommand::Mcp(_) => unreachable!("handled above"),
                 GatewayCommand::Code(_) => unreachable!("handled above"),
             };

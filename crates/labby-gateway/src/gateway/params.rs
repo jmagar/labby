@@ -2,6 +2,7 @@ use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use crate::gateway::types::GatewayEnrichmentProvider;
 use crate::upstream::types::UpstreamRuntimeOwner;
 use labby_runtime::gateway_config::{
     CodeModeConfig, CodeModeResultShapePolicy, ProtectedMcpRouteConfig, UpstreamConfig,
@@ -129,6 +130,27 @@ pub(crate) struct GatewayAddParams {
     pub origin: Option<String>,
     #[serde(default)]
     pub owner: Option<GatewayRuntimeOwnerParams>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GatewayEnrichPreviewParams {
+    #[serde(default)]
+    pub upstreams: Vec<String>,
+    #[serde(default)]
+    pub all: bool,
+    #[serde(default)]
+    pub provider: GatewayEnrichmentProvider,
+    #[serde(default)]
+    pub max_upstreams: Option<usize>,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayEnrichApplyParams {
+    pub upstream: String,
+    pub hint: String,
+    pub metadata_hash: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

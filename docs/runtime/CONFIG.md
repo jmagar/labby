@@ -85,9 +85,20 @@ bearer token, writes a minimal `~/.lab/.env` (token + loopback MCP defaults via
 the atomic `env_merge` path), reloads that file into the process environment via
 `dotenvy` so the token is visible process-wide, prints the
 `http://<host>:<port>/setup` URL once, points the operator to the generated env
-file for the token, and continues startup. The web `/setup` wizard then owns all
-further configuration. Set `LAB_MCP_HTTP_TOKEN` or `LAB_AUTH_MODE=oauth`
-beforehand to opt out. The generated `~/.lab/.env` is written `0600` on Unix;
+file for the token, and continues startup.
+
+It writes these base keys:
+
+- `LAB_MCP_HTTP_TOKEN` (generated token, 64-char hex)
+- `LAB_MCP_TRANSPORT=http`
+- `LAB_MCP_HTTP_HOST=127.0.0.1`
+- `LAB_MCP_HTTP_PORT=8765`
+- `LAB_AUTH_MODE=bearer`
+
+The web `/setup` wizard then owns all further configuration.
+
+Set `LAB_MCP_HTTP_TOKEN` or `LAB_AUTH_MODE=oauth` beforehand to opt out.
+The generated `~/.lab/.env` is written `0600` on Unix;
 **Windows ACL hardening is still pending**
 (`env_merge::set_secure_perms` is a no-op on non-unix), so on Windows the token
 file sits at default ACLs. The `setup.bootstrap` action exposes this primitive
@@ -599,6 +610,7 @@ url = "https://lab2.example.com/mcp"
 bearer_token_env = "LAB_UPSTREAM_TOKEN"
 proxy_resources = true
 expose_tools = ["search_repos", "github_*"]
+code_mode_hint = "search repositories, issues, pull requests, and code"
 
 [[upstream]]
 name = "local-server"
@@ -608,6 +620,8 @@ proxy_resources = false
 ```
 
 `expose_tools` is optional. When present, it limits which discovered upstream tools are republished by the gateway. Entries support exact names and simple `*` wildcards.
+
+`code_mode_hint` is optional operator-approved one-line capability metadata rendered beside this upstream namespace in the Code Mode tool description. It is display metadata only and never changes routing, auth, exposure, or execution.
 
 ### Gateway-Managed Protected MCP Routes
 

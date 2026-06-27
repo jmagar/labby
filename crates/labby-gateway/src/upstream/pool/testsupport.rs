@@ -43,6 +43,7 @@ pub(super) fn test_upstream_config() -> UpstreamConfig {
         expose_tools: None,
         expose_resources: None,
         expose_prompts: None,
+        code_mode_hint: None,
         oauth: None,
         imported_from: None,
         priority: 1.0,

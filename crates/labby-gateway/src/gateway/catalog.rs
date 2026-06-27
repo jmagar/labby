@@ -122,6 +122,72 @@ pub const ACTIONS: &[ActionSpec] = &[
         }],
     },
     ActionSpec {
+        name: "gateway.enrich.preview",
+        description: "Preview Code Mode upstream hint proposals from cached gateway metadata",
+        destructive: true,
+        requires_admin: true,
+        returns: "GatewayEnrichmentPreviewView",
+        params: &[
+            ParamSpec {
+                name: "upstreams",
+                ty: "string[]",
+                required: false,
+                description: "Gateway upstream names to preview",
+            },
+            ParamSpec {
+                name: "all",
+                ty: "boolean",
+                required: false,
+                description: "Preview enabled upstreams up to the max-upstreams cap",
+            },
+            ParamSpec {
+                name: "provider",
+                ty: "string",
+                required: false,
+                description: "Preview provider: deterministic, claude, or codex",
+            },
+            ParamSpec {
+                name: "max_upstreams",
+                ty: "integer",
+                required: false,
+                description: "Maximum enabled upstreams to preview when all=true, capped at 25",
+            },
+            ParamSpec {
+                name: "timeout_ms",
+                ty: "integer",
+                required: false,
+                description: "Provider subprocess timeout in milliseconds",
+            },
+        ],
+    },
+    ActionSpec {
+        name: "gateway.enrich.apply",
+        description: "Persist an operator-approved Code Mode upstream hint after hash validation",
+        destructive: true,
+        requires_admin: true,
+        returns: "GatewayHintApplyView",
+        params: &[
+            ParamSpec {
+                name: "upstream",
+                ty: "string",
+                required: true,
+                description: "Gateway upstream name",
+            },
+            ParamSpec {
+                name: "hint",
+                ty: "string",
+                required: true,
+                description: "Approved one-line Code Mode capability hint",
+            },
+            ParamSpec {
+                name: "metadata_hash",
+                ty: "string",
+                required: true,
+                description: "Metadata hash from the preview proposal",
+            },
+        ],
+    },
+    ActionSpec {
         name: "gateway.supported_services",
         description: "List metadata-backed Lab services that can be added as virtual servers",
         destructive: false,
@@ -424,7 +490,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.import",
         description: "Import discovered MCP servers into the gateway config as disabled-by-default entries. Servers are marked with their discovery source.",
-        destructive: false,
+        destructive: true,
         requires_admin: true,
         returns: "ImportResultView",
         params: &[
@@ -459,7 +525,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.import_pending.approve",
         description: "Approve a pending discovered server and add it to the gateway config as disabled-by-default",
-        destructive: false,
+        destructive: true,
         requires_admin: true,
         returns: "PendingImportView",
         params: &[ParamSpec {
@@ -472,7 +538,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.import_pending.reject",
         description: "Reject a pending discovered server and tombstone it so it never re-appears",
-        destructive: false,
+        destructive: true,
         requires_admin: true,
         returns: "PendingImportView",
         params: &[ParamSpec {
@@ -493,7 +559,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.import_tombstones.clear",
         description: "Clear one import tombstone so a previously deleted imported server can be imported again",
-        destructive: false,
+        destructive: true,
         requires_admin: true,
         returns: "ImportTombstoneView[]",
         params: &[
@@ -527,7 +593,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "gateway.import_tombstones.restore",
         description: "Atomically clear one import tombstone and restore the matching discovered server as disabled",
-        destructive: false,
+        destructive: true,
         requires_admin: true,
         returns: "GatewayView",
         params: &[
@@ -874,7 +940,17 @@ mod tests {
     #[test]
     fn gateway_actions_are_not_destructive_under_data_loss_definition() {
         for spec in ACTIONS {
-            if spec.name == "gateway.code_mode.set" {
+            if matches!(
+                spec.name,
+                "gateway.code_mode.set"
+                    | "gateway.enrich.preview"
+                    | "gateway.enrich.apply"
+                    | "gateway.import"
+                    | "gateway.import_pending.approve"
+                    | "gateway.import_pending.reject"
+                    | "gateway.import_tombstones.clear"
+                    | "gateway.import_tombstones.restore"
+            ) {
                 continue;
             }
             assert!(

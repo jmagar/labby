@@ -75,6 +75,8 @@ fn pending_import_view(upstream: &UpstreamConfig) -> PendingImportView {
             .as_ref()
             .map(|source| source.path.clone())
             .unwrap_or_default(),
+        enrichment_suggestion: None,
+        enrichment_suggestion_error: None,
     }
 }
 
@@ -212,25 +214,32 @@ impl GatewayManager {
     /// Approve a pending import by name: move from `upstream_pending` into `upstream`
     /// with `enabled = false` (same as auto-import — operator must explicitly enable).
     pub async fn approve_pending_import(&self, name: &str) -> Result<PendingImportView, ToolError> {
-        let _mutation_guard = self.config_mutation.lock().await;
-        let mut cfg = self.config.read().await.clone();
+        let mut view = {
+            let _mutation_guard = self.config_mutation.lock().await;
+            let mut cfg = self.config.read().await.clone();
 
-        let idx = cfg
-            .upstream_pending
-            .iter()
-            .position(|u| u.name == name)
-            .ok_or_else(|| ToolError::Sdk {
-                sdk_kind: "not_found".into(),
-                message: format!("pending import `{name}` not found"),
-            })?;
+            let idx = cfg
+                .upstream_pending
+                .iter()
+                .position(|u| u.name == name)
+                .ok_or_else(|| ToolError::Sdk {
+                    sdk_kind: "not_found".into(),
+                    message: format!("pending import `{name}` not found"),
+                })?;
 
-        let mut spec = cfg.upstream_pending.remove(idx);
-        let view = pending_import_view(&spec);
+            let mut spec = cfg.upstream_pending.remove(idx);
+            let view = pending_import_view(&spec);
 
-        spec.enabled = false;
-        cfg.upstream.push(spec);
-        self.persist_config(cfg).await?;
+            spec.enabled = false;
+            cfg.upstream.push(spec);
+            self.persist_config(cfg).await?;
 
+            view
+        };
+        let (enrichment_suggestion, enrichment_suggestion_error) =
+            self.preview_enrichment_for_new_upstream(name).await;
+        view.enrichment_suggestion = enrichment_suggestion;
+        view.enrichment_suggestion_error = enrichment_suggestion_error;
         Ok(view)
     }
 
