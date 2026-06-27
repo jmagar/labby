@@ -85,9 +85,20 @@ bearer token, writes a minimal `~/.lab/.env` (token + loopback MCP defaults via
 the atomic `env_merge` path), reloads that file into the process environment via
 `dotenvy` so the token is visible process-wide, prints the
 `http://<host>:<port>/setup` URL once, points the operator to the generated env
-file for the token, and continues startup. The web `/setup` wizard then owns all
-further configuration. Set `LAB_MCP_HTTP_TOKEN` or `LAB_AUTH_MODE=oauth`
-beforehand to opt out. The generated `~/.lab/.env` is written `0600` on Unix;
+file for the token, and continues startup.
+
+It writes these base keys:
+
+- `LAB_MCP_HTTP_TOKEN` (generated token, 64-char hex)
+- `LAB_MCP_TRANSPORT=http`
+- `LAB_MCP_HTTP_HOST=127.0.0.1`
+- `LAB_MCP_HTTP_PORT=8765`
+- `LAB_AUTH_MODE=bearer`
+
+The web `/setup` wizard then owns all further configuration.
+
+Set `LAB_MCP_HTTP_TOKEN` or `LAB_AUTH_MODE=oauth` beforehand to opt out.
+The generated `~/.lab/.env` is written `0600` on Unix;
 **Windows ACL hardening is still pending**
 (`env_merge::set_secure_perms` is a no-op on non-unix), so on Windows the token
 file sits at default ACLs. The `setup.bootstrap` action exposes this primitive

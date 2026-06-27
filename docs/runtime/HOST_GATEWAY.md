@@ -107,6 +107,10 @@ labby setup host-service install --install-self -y
 systemctl status labby --no-pager
 ```
 
+`host-service install` writes or updates `/etc/systemd/system/labby.service`,
+installs the current binary when `--install-self` is provided, enables the unit,
+and restarts the service.
+
 The unit runs:
 
 ```text
