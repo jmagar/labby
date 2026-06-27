@@ -70,8 +70,13 @@ labby serve --host 127.0.0.1 --port 8765
 ```
 
 The install scripts download the requested GitHub Release asset, verify its
-checksum, and install `labby` onto the user PATH. Override with
-`LAB_INSTALL_DIR`, `LAB_INSTALL_VERSION`, or `LAB_INSTALL_REPO`.
+checksum, and install `labby` onto the user PATH. They do **not** perform
+operator provisioning or environment setup. The scripts only install the binary
+(from a release or fallback source build); all first-run provisioning is handled
+inside `labby` via `labby serve` bootstrap and `labby setup`.
+
+Override install behavior with `LAB_INSTALL_DIR`, `LAB_INSTALL_VERSION`, or
+`LAB_INSTALL_REPO`.
 
 ### Build From Source
 
@@ -103,6 +108,17 @@ you. If `LAB_MCP_HTTP_TOKEN` is absent and `LAB_AUTH_MODE` is not `oauth`, it
 generates a token, writes a minimal `~/.lab/.env`, reloads it into the running
 process, prints the setup URL, and continues. The token itself is stored in
 `~/.lab/.env` rather than printed.
+
+Bootstrap writes these required `setup` keys if no env exists yet:
+
+- `LAB_MCP_HTTP_TOKEN` (generated random 64-character hex token)
+- `LAB_MCP_TRANSPORT=http`
+- `LAB_MCP_HTTP_HOST=127.0.0.1`
+- `LAB_MCP_HTTP_PORT=8765`
+- `LAB_AUTH_MODE=bearer`
+
+It also enforces secure file creation via Lab's `env_merge` path (`0600` perms on
+Unix) and then skips creating anything else until the web wizard runs.
 
 For explicit setup:
 

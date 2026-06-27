@@ -17,6 +17,9 @@ labby setup host-service install --install-self -y
 systemctl --user --no-pager --full status labby.service
 ```
 
+`host-service install` writes (or updates) `~/.config/systemd/user/labby.service`
+with `ExecStart=%h/.local/bin/labby serve`, enables it, and restarts the service.
+
 From a source checkout, `just host-service-install` is a convenience wrapper
 that builds `labby`, installs it to `~/.local/bin/labby`, then runs the same
 CLI host-service install path.
@@ -40,6 +43,9 @@ labby setup host-service restart --install-self -y
 labby setup host-service status --json
 labby gateway code exec --json --code 'async () => 1'
 ```
+
+`restart --install-self` copies the current `labby` binary to `~/.local/bin/labby`
+before restarting.
 
 From a source checkout, `just host-sync` remains the rebuild-and-restart
 shortcut for ordinary Rust changes.
