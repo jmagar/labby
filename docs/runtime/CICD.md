@@ -1,26 +1,45 @@
 # CI/CD
 
-Last updated: 2026-05-01
+Last updated: 2026-06-27
 
 This document is the authoritative contract for CI, release, and artifact delivery in `lab`. All pipeline implementations must conform to this spec.
 
+## CI Path Routing
+
+`ci.yml` starts with a `changes` job that runs `scripts/ci/changed_paths.py`.
+That classifier maps the changed file list into stable routing categories:
+`docs`, `workflow`, `rust`, `web`, `docker`, `security`, and `release`.
+Scheduled and manual runs enable every category so periodic/manual validation
+stays broad.
+
+Branch protection should require the stable aggregate `ci-gate` check. The
+heavy jobs below may be skipped when their category is false; `ci-gate` treats
+`success` and intentionally `skipped` jobs as acceptable, and fails on failed or
+cancelled dependencies. `secret-scan` remains always-on because secrets can be
+introduced in any file type.
+
 ## CI Checks
 
-Every push and pull request must pass all of the following:
+Every push and pull request must pass `ci-gate`, which covers the following
+jobs when their changed-path category is enabled:
 
-| Check | Command |
-|-------|---------|
-| Workflow lint | `actionlint` over `.github/workflows/` |
-| Frontend build | `./.github/actions/build-gateway-admin` (`pnpm install --frozen-lockfile && pnpm build` in `apps/gateway-admin`) |
-| Compile | `cargo check --workspace --all-features` |
-| Generated docs freshness | `just docs-check` |
-| Format | `cargo fmt --all -- --check` |
-| Lint | `cargo clippy --workspace --all-features -- -D warnings` |
-| Deny | `cargo deny check` |
-| Tests | `cargo nextest run --workspace --all-features --profile ci` |
-| Tests (Windows) | same nextest run on the self-hosted `agent-os-lab` Windows runner; skipped on PRs (fork code must not reach a self-hosted runner) — runs on pushes to main, the weekly schedule, and manual dispatch |
-| Release smoke | `cargo build --workspace --all-features --release` — Linux on every run; Windows only on pushes to main, the weekly schedule, and manual dispatch (skipped on PRs: 20-25 min runner time, and Linux cross-checking is blocked by aws-lc-sys needing a Windows C toolchain) |
-| Container smoke | Docker build using `config/Dockerfile` |
+| Check | Category | Command |
+|-------|----------|---------|
+| Secret scan | always | `gitleaks/gitleaks-action@v2` full-history scan |
+| Workflow lint | `workflow` | `actionlint` over `.github/workflows/` |
+| Frontend build | `rust`, `web`, `docker`, or `release` | `./.github/actions/build-gateway-admin` (`pnpm install --frozen-lockfile && pnpm build` in `apps/gateway-admin`) |
+| Compile | `rust` | `cargo check --workspace --all-features` |
+| Feature slices | `rust` | `cargo check -p labby --no-default-features --features <slice>` |
+| Extracted crate slices | `rust` | crate-specific `cargo check` commands for extracted runtime crates |
+| Generated docs freshness | `rust` | `just docs-check` |
+| Format | `rust` | `cargo fmt --all -- --check` |
+| Lint | `rust` | `cargo clippy --workspace --all-features -- -D warnings` |
+| Deny | `security` | `cargo deny check` |
+| Tests (Linux) | `rust` | `cargo nextest run --workspace --all-features --profile ci` on the self-hosted `linux-lab` runner for trusted events |
+| Tests (Linux fork PR fallback) | `rust` | same nextest run on `ubuntu-latest` for fork PRs |
+| Tests (Windows) | `rust` | same nextest run on the self-hosted `agent-os-lab` Windows runner, with fork PRs excluded from self-hosted runners |
+| Release smoke | `release` | `cargo build --workspace --all-features --release`; Windows release smoke still skips PRs via the matrix |
+| Container smoke | `docker` | Docker build using `config/Dockerfile` |
 
 Clippy runs with `-D warnings` — zero warnings are permitted. This is enforced at the workspace lint layer.
 
@@ -37,8 +56,9 @@ Labby assets. It is a production build gate, not a TypeScript strictness gate:
 - **Scheduled runs:** `CI` runs weekly on Monday at 09:23 UTC to keep
   dependency/advisory visibility fresh even when no PR is active
 - **Job split:**
-  - Frontend assets build once, then Rust compile/lint/test jobs download the exported `apps/gateway-admin/out` artifact
-  - Fast checks (actionlint, frontend-assets, check, fmt, clippy, deny, test, release-smoke, container) on every push and PR
+  - `changes` classifies paths first and exports category booleans
+  - Frontend assets build once when required, then Rust compile/lint/test jobs download the exported `apps/gateway-admin/out` artifact
+  - Heavy jobs run only when their category is enabled; `ci-gate` is the stable required check for branch protection
   - Release builds on `vX.Y.Z` tags only
   - Container image publishing and GitHub Release publishing after successful tag builds
 

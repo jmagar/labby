@@ -29,6 +29,61 @@ env:
   CARGO_BUILD_RUSTC_WRAPPER: ""
 
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    outputs:
+      all: ${{ steps.classify.outputs.all }}
+      docs: ${{ steps.classify.outputs.docs }}
+      workflow: ${{ steps.classify.outputs.workflow }}
+      rust: ${{ steps.classify.outputs.rust }}
+      web: ${{ steps.classify.outputs.web }}
+      docker: ${{ steps.classify.outputs.docker }}
+      security: ${{ steps.classify.outputs.security }}
+      release: ${{ steps.classify.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prepare trusted changed path classifier
+        run: |
+          set -euo pipefail
+          classifier="scripts/ci/changed_paths.py"
+          trusted="/tmp/lab-changed-paths.py"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            if ! git show "${{ github.event.pull_request.base.sha }}:$classifier" > "$trusted" 2>/dev/null; then
+              cat > "$trusted" <<'PY'
+          #!/usr/bin/env python3
+          import argparse
+          from pathlib import Path
+          keys = "all docs workflow rust web docker security release".split()
+          parser = argparse.ArgumentParser()
+          parser.add_argument("--event", required=True)
+          parser.add_argument("--output", type=Path, required=True)
+          parser.add_argument("--write-changed-files", type=Path)
+          args, _ = parser.parse_known_args()
+          if args.write_changed_files:
+              args.write_changed_files.write_text("")
+          args.output.write_text("".join(f"{key}=true\n" for key in keys))
+          for key in keys:
+              print(f"{key}=true")
+          PY
+            fi
+          else
+            cp "$classifier" "$trusted"
+          fi
+          chmod +x "$trusted"
+          echo "LAB_CHANGED_PATHS=$trusted" >> "$GITHUB_ENV"
+      - name: Classify changed paths
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: python3 "$LAB_CHANGED_PATHS" --event "$EVENT_NAME" --output "$GITHUB_OUTPUT" --write-changed-files changed-files.txt
+
   secret-scan:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
@@ -46,6 +101,8 @@ jobs:
   actionlint:
     name: Actionlint
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.workflow == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -56,6 +113,14 @@ jobs:
   frontend-assets:
     name: Frontend assets
     runs-on: ubuntu-latest
+    needs: changes
+    if: >-
+      ${{
+        needs.changes.outputs.rust == 'true' ||
+        needs.changes.outputs.web == 'true' ||
+        needs.changes.outputs.docker == 'true' ||
+        needs.changes.outputs.release == 'true'
+      }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/build-gateway-admin
@@ -70,6 +135,8 @@ jobs:
   fmt:
     name: Format
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.94.1
@@ -80,6 +147,8 @@ jobs:
   deny:
     name: Cargo Deny
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.security == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
@@ -87,7 +156,8 @@ jobs:
   check:
     name: Check
     runs-on: ubuntu-latest
-    needs: frontend-assets
+    needs: [changes, frontend-assets]
+    if: ${{ needs.changes.outputs.rust == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -101,7 +171,8 @@ jobs:
   feature-slices:
     name: Feature slice (${{ matrix.slice }})
     runs-on: ubuntu-latest
-    needs: frontend-assets
+    needs: [changes, frontend-assets]
+    if: ${{ needs.changes.outputs.rust == 'true' }}
     # CLAUDE.md's intent is that each standalone product slice compiles on its
     # own (--no-default-features --features <slice>) to catch cross-slice
     # coupling — a shared module referencing a feature-gated one unconditionally.
@@ -131,6 +202,8 @@ jobs:
   extracted-crate-slices:
     name: Extracted crate slice (${{ matrix.name }})
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
     env:
       RUSTFLAGS: ""
     strategy:
@@ -172,7 +245,8 @@ jobs:
   docs-check:
     name: Generated docs
     runs-on: ubuntu-latest
-    needs: frontend-assets
+    needs: [changes, frontend-assets]
+    if: ${{ needs.changes.outputs.rust == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -187,7 +261,8 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
-    needs: frontend-assets
+    needs: [changes, frontend-assets]
+    if: ${{ needs.changes.outputs.rust == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -202,8 +277,44 @@ jobs:
 
   test:
     name: Test
+    # Self-hosted Linux runner on a PUBLIC repo: fork PRs must NEVER reach it.
+    # Run on self-hosted for trusted events and same-repo PRs only.
+    # Fork PRs are routed to `test-fork` on github-hosted Ubuntu.
+    runs-on: [self-hosted, linux-lab]
+    if: >-
+      needs.changes.outputs.rust == 'true' &&
+      (
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
+    needs: [changes, frontend-assets]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: gateway-admin-out
+          path: apps/gateway-admin/out
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --workspace --all-features --locked --profile ci
+      - name: Upload nextest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextest-junit
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+  test-fork:
+    name: Test
     runs-on: ubuntu-latest
-    needs: frontend-assets
+    needs: [changes, frontend-assets]
+    if: >-
+      needs.changes.outputs.rust == 'true' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -226,7 +337,7 @@ jobs:
   test-windows:
     name: Test (windows self-hosted)
     runs-on: [self-hosted, windows-lab]
-    needs: frontend-assets
+    needs: [changes, frontend-assets]
     # Self-hosted runner on a PUBLIC repo: fork PRs must NEVER reach it.
     # Run for pushes/schedule/dispatch, and for same-repo pull requests only
     # (head repo == base repo). Fork PRs (head.repo.full_name != repo) are
@@ -237,8 +348,11 @@ jobs:
     # rustup, cargo-nextest, NASM, CMake, and LLVM/libclang preinstalled and a
     # persistent warm target dir — no toolchain/cache actions needed.
     if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      needs.changes.outputs.rust == 'true' &&
+      (
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
     timeout-minutes: 120
     env:
       # 4-thread / 8 GB VM — cap build parallelism so debug-test linking
@@ -278,7 +392,8 @@ jobs:
   release-smoke:
     name: Release smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    needs: frontend-assets
+    needs: [changes, frontend-assets]
+    if: ${{ needs.changes.outputs.release == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -318,7 +433,8 @@ jobs:
   container:
     name: Container build + smoke
     runs-on: ubuntu-latest
-    needs: frontend-assets
+    needs: [changes, frontend-assets]
+    if: ${{ needs.changes.outputs.docker == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -367,3 +483,53 @@ jobs:
         run: |
           docker stop  lab-ci-smoke 2>/dev/null || true
           docker rm -f lab-ci-smoke 2>/dev/null || true
+
+  ci-gate:
+    name: ci-gate
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - changes
+      - secret-scan
+      - actionlint
+      - frontend-assets
+      - fmt
+      - deny
+      - check
+      - feature-slices
+      - extracted-crate-slices
+      - docs-check
+      - clippy
+      - test
+      - test-fork
+      - test-windows
+      - release-smoke
+      - container
+    steps:
+      - name: verify required jobs passed or were intentionally skipped
+        run: |
+          set -euo pipefail
+          require_success_or_skipped() {
+            local name="$1"
+            local result="$2"
+            case "$result" in
+              success|skipped) printf '%s=%s\n' "$name" "$result" ;;
+              *) echo "::error::$name concluded $result" >&2; exit 1 ;;
+            esac
+          }
+          require_success_or_skipped changes "${{ needs.changes.result }}"
+          require_success_or_skipped secret-scan "${{ needs.secret-scan.result }}"
+          require_success_or_skipped actionlint "${{ needs.actionlint.result }}"
+          require_success_or_skipped frontend-assets "${{ needs.frontend-assets.result }}"
+          require_success_or_skipped fmt "${{ needs.fmt.result }}"
+          require_success_or_skipped deny "${{ needs.deny.result }}"
+          require_success_or_skipped check "${{ needs.check.result }}"
+          require_success_or_skipped feature-slices "${{ needs.feature-slices.result }}"
+          require_success_or_skipped extracted-crate-slices "${{ needs.extracted-crate-slices.result }}"
+          require_success_or_skipped docs-check "${{ needs.docs-check.result }}"
+          require_success_or_skipped clippy "${{ needs.clippy.result }}"
+          require_success_or_skipped test "${{ needs.test.result }}"
+          require_success_or_skipped test-fork "${{ needs.test-fork.result }}"
+          require_success_or_skipped test-windows "${{ needs.test-windows.result }}"
+          require_success_or_skipped release-smoke "${{ needs.release-smoke.result }}"
+          require_success_or_skipped container "${{ needs.container.result }}"
