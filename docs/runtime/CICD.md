@@ -25,7 +25,7 @@ jobs when their changed-path category is enabled:
 
 | Check | Category | Command |
 |-------|----------|---------|
-| Secret scan | always | `gitleaks/gitleaks-action@v2` full-history scan |
+| Secret scan | always | `gitleaks/gitleaks-action@v3` full-history scan with existing historical findings baselined in `.gitleaksignore` |
 | Workflow lint | `workflow` | `actionlint` over `.github/workflows/` |
 | Frontend build | `rust`, `web`, `docker`, or `release` | `./.github/actions/build-gateway-admin` (`pnpm install --frozen-lockfile && pnpm build` in `apps/gateway-admin`) |
 | Compile | `rust` | `cargo check --workspace --all-features` |
@@ -61,6 +61,15 @@ Labby assets. It is a production build gate, not a TypeScript strictness gate:
   - Heavy jobs run only when their category is enabled; `ci-gate` is the stable required check for branch protection
   - Release builds on `vX.Y.Z` tags only
   - Container image publishing and GitHub Release publishing after successful tag builds
+
+## Linux Self-hosted Runner
+
+The Linux full test job runs on a self-hosted runner with labels `self-hosted`
+and `linux-lab` for trusted events.
+
+- Fork PRs are still validated on `ubuntu-latest` via `test-fork`.
+- Runner setup and containerized registration are documented in
+  [Actions runner setup](./ACTIONS_RUNNER.md).
 
 ## Build Matrix
 

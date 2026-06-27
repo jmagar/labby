@@ -4,8 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+---
+
+## [0.27.0] - 2026-06-25
+
 ### Added
 
+- **Code Mode upstream namespace context** — the synthetic `codemode` MCP tool
+  description now includes the current enabled, route-visible upstream namespace
+  names, plus top-level `upstreams` and `tools` schema inputs so agents can
+  scope runs without inventing sandbox-only knobs.
 - **Configurable upstream relay timeout** — new `upstream_relay_timeout_ms` gateway setting (default 5 minutes) bounds relayed upstream tool calls on the opt-in `LAB_UPSTREAM_RELAY_ELICITATION` elicitation-relay path. Exposed in the settings registry and `config get`, and folded into the pool-rebuild fingerprint so a reload applies it.
 
 ### Removed

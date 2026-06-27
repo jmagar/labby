@@ -35,8 +35,10 @@ jobs:
         id: merge
         run: |
           git fetch origin main marketplace-no-mcp
-          echo "old_no_mcp_sha=$(git rev-parse origin/marketplace-no-mcp)" >> "$GITHUB_OUTPUT"
-          echo "main_sha=$(git rev-parse origin/main)" >> "$GITHUB_OUTPUT"
+          {
+            echo "old_no_mcp_sha=$(git rev-parse origin/marketplace-no-mcp)"
+            echo "main_sha=$(git rev-parse origin/main)"
+          } >> "$GITHUB_OUTPUT"
           git switch marketplace-no-mcp
           if git merge-base --is-ancestor origin/main HEAD; then
             echo "marketplace-no-mcp already contains main; nothing to merge"
@@ -63,19 +65,24 @@ jobs:
             committed=true
           fi
           ahead_count=$(git rev-list --count origin/marketplace-no-mcp..HEAD)
-          echo "ahead_count=$ahead_count" >> "$GITHUB_OUTPUT"
           if [ "$ahead_count" = "0" ]; then
             echo "marketplace-no-mcp already up to date"
-            echo "committed=$committed" >> "$GITHUB_OUTPUT"
-            echo "pushed=$pushed" >> "$GITHUB_OUTPUT"
-            echo "new_no_mcp_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            {
+              echo "ahead_count=$ahead_count"
+              echo "committed=$committed"
+              echo "pushed=$pushed"
+              echo "new_no_mcp_sha=$(git rev-parse HEAD)"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git push origin HEAD:marketplace-no-mcp
           pushed=true
-          echo "committed=$committed" >> "$GITHUB_OUTPUT"
-          echo "pushed=$pushed" >> "$GITHUB_OUTPUT"
-          echo "new_no_mcp_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          {
+            echo "ahead_count=$ahead_count"
+            echo "committed=$committed"
+            echo "pushed=$pushed"
+            echo "new_no_mcp_sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Verify pushed no-MCP drift
         run: |

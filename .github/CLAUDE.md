@@ -27,7 +27,7 @@ their category is enabled:
 
 | Job | Category | Command |
 |-----|----------|---------|
-| secret-scan | always | `gitleaks/gitleaks-action@v2` — full-history secret scan (SAST) |
+| secret-scan | always | `gitleaks/gitleaks-action@v3` — full-history secret scan (SAST) with existing historical findings baselined in `.gitleaksignore` |
 | actionlint | `workflow` | `go run github.com/rhysd/actionlint/cmd/actionlint@latest` |
 | frontend-assets | `rust`, `web`, `docker`, or `release` | `pnpm install --frozen-lockfile && pnpm build` in `apps/gateway-admin` |
 | check | `rust` | `cargo check --workspace --all-features` |

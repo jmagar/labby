@@ -2,7 +2,7 @@
 //! `server.rs` (bead `lab-kvji.24.1.6`).
 
 use super::{
-    CODE_MODE_DESCRIPTION, code_arg, code_mode_execute_trace, route_scoped_capability_filter,
+    code_arg, code_mode_description, code_mode_execute_trace, route_scoped_capability_filter,
     string_array_arg,
 };
 use crate::config::CodeModeResultShapePolicy;
@@ -103,30 +103,42 @@ fn scoped_capability_filter_defaults_to_route_allowed_upstreams() {
 fn code_mode_description_contains_protocol_contract() {
     // Source of truth: docs/contracts/CODE_NODE_CONTRACT_FOR_RETARD_AGENTS.md
     // Full spec:       docs/specs/CODE_MODE_SPEC_FOR_RETARD_AGENTS.md
-    assert!(CODE_MODE_DESCRIPTION.contains("callTool<T = unknown>"));
+    let description = code_mode_description(&["github".to_string(), "rustarr".to_string()]);
+    assert!(description.contains("callTool<T = unknown>"));
+    assert!(description.contains("Successful return: the upstream tool's structuredContent"));
+    assert!(description.contains("JSON.parse(String(e.message))"));
+    assert!(description.contains("Retry-safe:"));
+    assert!(description.contains("Promise.all"));
     assert!(
-        CODE_MODE_DESCRIPTION.contains("Successful return: the upstream tool's structuredContent")
-    );
-    assert!(CODE_MODE_DESCRIPTION.contains("JSON.parse(String(e.message))"));
-    assert!(CODE_MODE_DESCRIPTION.contains("Retry-safe:"));
-    assert!(CODE_MODE_DESCRIPTION.contains("Promise.all"));
-    assert!(
-        CODE_MODE_DESCRIPTION.contains("codemode"),
+        description.contains("codemode"),
         "description must explain the codemode typed helper namespace"
     );
     assert!(
-        CODE_MODE_DESCRIPTION.contains("codemode.search()"),
+        description.contains("codemode.search"),
         "description must make in-sandbox discovery primary"
     );
+    assert!(description.contains("Never guess helper or method names"));
+    assert!(description.contains("Available upstream namespaces"));
+    assert!(description.contains("- `github`"));
+    assert!(description.contains("- `rustarr`"));
+    assert!(description.contains("writeArtifact"));
+    assert!(description.contains("call_budget_exceeded"));
     assert!(
-        !CODE_MODE_DESCRIPTION.contains("search.dts"),
+        !description.contains("search.dts"),
         "description must not imply primary codemode discovery returns legacy dts"
     );
     assert!(
-        !CODE_MODE_DESCRIPTION.contains("For Lab built-in actions use the `execute` tool"),
+        !description.contains("For Lab built-in actions use the `execute` tool"),
         "description must not point codemode callers at a removed execute tool"
     );
-    assert!(CODE_MODE_DESCRIPTION.len() < 8192);
+    assert!(description.len() < 8192);
+}
+
+#[test]
+fn code_mode_description_handles_empty_upstream_snapshot() {
+    let description = code_mode_description(&[]);
+    assert!(description.contains("## Available upstream namespaces"));
+    assert!(description.contains("- none currently configured"));
 }
 
 #[test]

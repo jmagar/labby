@@ -2251,7 +2251,7 @@ dependencies = [
 
 [[package]]
 name = "labby"
-version = "0.26.1"
+version = "0.27.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -2324,7 +2324,7 @@ dependencies = [
 
 [[package]]
 name = "labby-apis"
-version = "0.26.1"
+version = "0.27.0"
 dependencies = [
  "futures",
  "percent-encoding",
@@ -2342,7 +2342,7 @@ dependencies = [
 
 [[package]]
 name = "labby-auth"
-version = "0.26.1"
+version = "0.27.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2373,7 +2373,7 @@ dependencies = [
 
 [[package]]
 name = "labby-codemode"
-version = "0.26.1"
+version = "0.27.0"
 dependencies = [
  "anyhow",
  "boa_ast",
@@ -2399,7 +2399,7 @@ dependencies = [
 
 [[package]]
 name = "labby-gateway"
-version = "0.26.1"
+version = "0.27.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2444,7 +2444,7 @@ dependencies = [
 
 [[package]]
 name = "labby-runtime"
-version = "0.26.1"
+version = "0.27.0"
 dependencies = [
  "jiff",
  "labby-apis",
@@ -2461,7 +2461,7 @@ dependencies = [
 
 [[package]]
 name = "labby-web"
-version = "0.26.1"
+version = "0.27.0"
 dependencies = [
  "tempfile",
  "thiserror 2.0.18",
@@ -2471,7 +2471,7 @@ dependencies = [
 
 [[package]]
 name = "labby-winjob"
-version = "0.26.1"
+version = "0.27.0"
 dependencies = [
  "tracing",
  "windows-sys 0.59.0",
