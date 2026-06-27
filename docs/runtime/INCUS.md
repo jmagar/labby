@@ -87,6 +87,10 @@ scripts/incus-bootstrap.sh --local-binary target/debug/labby
 
 The release path should still use `--version vX.Y.Z`.
 
+Release archives are currently published for amd64 Linux. On arm64 hosts, use
+`--local-binary` with a locally built `labby` binary, or opt into the slower
+source build fallback with `--allow-source-fallback` / `LAB_ALLOW_SOURCE_FALLBACK=1`.
+
 ## Tailscale
 
 Tailscale runs inside the container and gets its own tailnet identity. `/dev/net/tun`

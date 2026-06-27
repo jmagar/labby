@@ -112,11 +112,14 @@ export function GatewayTable({
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [copiedGatewayId, setCopiedGatewayId] = useState<string | null>(null)
   const [expandedMobileGatewayId, setExpandedMobileGatewayId] = useState<string | null>(null)
-  const [disableConfirmationGateway, setDisableConfirmationGateway] = useState<Gateway | null>(null)
+  const [disableConfirmationGatewayId, setDisableConfirmationGatewayId] = useState<string | null>(null)
+  const disableConfirmationGateway = disableConfirmationGatewayId
+    ? gateways.find((gateway) => gateway.id === disableConfirmationGatewayId) ?? null
+    : null
 
   const requestToggleEnabled = (gateway: Gateway) => {
     if (gateway.enabled ?? true) {
-      setDisableConfirmationGateway(gateway)
+      setDisableConfirmationGatewayId(gateway.id)
       return
     }
     onToggleEnabled(gateway)
@@ -124,8 +127,8 @@ export function GatewayTable({
 
   const confirmDisableGateway = () => {
     const gateway = disableConfirmationGateway
+    setDisableConfirmationGatewayId(null)
     if (!gateway) return
-    setDisableConfirmationGateway(null)
     onToggleEnabled(gateway)
   }
 
@@ -872,12 +875,12 @@ export function GatewayTable({
         </Table>
       </div>
       <ActionConfirmationDialog
-        open={disableConfirmationGateway !== null}
+        open={disableConfirmationGatewayId !== null}
         title="Disable server?"
         description="Connected clients should no longer have access to this server. Existing sessions may fail until the gateway is enabled again."
         confirmLabel="Disable server"
         onOpenChange={(open) => {
-          if (!open) setDisableConfirmationGateway(null)
+          if (!open) setDisableConfirmationGatewayId(null)
         }}
         onConfirm={confirmDisableGateway}
       />

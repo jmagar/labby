@@ -299,7 +299,12 @@ ln -sfn "$dir/bin/npx" "$HOME/.local/bin/npx""#,
                 run_as_lab(
                     r#"set -eu
 	mkdir -p "$HOME/.local/bin"
-	curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$HOME/.local/bin" sh
+	tmp="$(mktemp -d)"
+	trap 'rm -rf "$tmp"' EXIT
+	installer="$tmp/uv-install.sh"
+	curl -fsSL -o "$installer" https://astral.sh/uv/install.sh
+	test -s "$installer"
+	env UV_INSTALL_DIR="$HOME/.local/bin" sh "$installer"
 	"$HOME/.local/bin/uv" python install
 	python_path="$("$HOME/.local/bin/uv" python find)"
 	ln -sfn "$python_path" "$HOME/.local/bin/python"

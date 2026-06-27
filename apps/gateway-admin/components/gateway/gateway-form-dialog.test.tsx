@@ -13,6 +13,10 @@ import type {
   UpdateGatewayInput,
 } from '@/lib/types/gateway'
 
+const TEST_PROTECTED_MCP_HOST = 'mcp.example.test'
+
+process.env.NEXT_PUBLIC_PROTECTED_MCP_HOST = TEST_PROTECTED_MCP_HOST
+
 test('new custom URL auto-switches to OAuth and shows blocked popup fallback', async () => {
   const window = installGatewayDialogDom()
   let openCalls = 0
@@ -935,7 +939,7 @@ function protectedRouteFixture(name: string, publicPath: string, upstream: strin
   return {
     name,
     enabled: true,
-    public_host: 'mcp.example.com',
+    public_host: TEST_PROTECTED_MCP_HOST,
     public_path: publicPath,
     upstream,
     backend_url: '',

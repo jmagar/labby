@@ -34,6 +34,7 @@ pub use client::NodeRpcPort;
 pub use dispatch::{dispatch, dispatch_with_port};
 pub use mcp_params::resolve_search_for_rest;
 pub const LAB_REGISTRY_META_NAMESPACE: &str = "dev.labby/registry";
+pub(crate) const LEGACY_LAB_REGISTRY_META_NAMESPACE: &str = "tv.tootie.lab/registry";
 
 #[cfg(test)]
 #[allow(clippy::panic)]

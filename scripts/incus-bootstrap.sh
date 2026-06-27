@@ -70,19 +70,22 @@ ensure_tun_device() {
         return
     fi
 
-    tun_type="$(incus config device get "$NAME" tun type 2>/dev/null || true)"
     tun_path="$(incus config device get "$NAME" tun path 2>/dev/null || true)"
-    if [ -z "$tun_type" ] && [ -z "$tun_path" ]; then
+    if [ -z "$tun_path" ]; then
         run incus config device add "$NAME" tun unix-char path=/dev/net/tun
-    elif [ "$tun_type" = "unix-char" ] && [ "$tun_path" = "/dev/net/tun" ]; then
+    elif [ "$tun_path" = "/dev/net/tun" ]; then
         say "TUN passthrough already configured"
     else
-        fail "existing Incus device '$NAME/tun' is not /dev/net/tun unix-char passthrough (type=$tun_type path=$tun_path)"
+        fail "existing Incus device '$NAME/tun' does not point at /dev/net/tun (path=$tun_path)"
     fi
 
     if [ "$DRY_RUN" -eq 0 ]; then
         incus exec "$NAME" -- test -c /dev/net/tun || fail "$NAME is missing /dev/net/tun"
     fi
+}
+
+cleanup_ts_authkey() {
+    incus exec "$NAME" -- rm -f /run/labby-ts-authkey >/dev/null 2>&1 || true
 }
 
 while [ "$#" -gt 0 ]; do
@@ -176,14 +179,14 @@ if [ -n "${TS_AUTHKEY:-}" ]; then
 	if [ "$DRY_RUN" -eq 1 ]; then
 		say "+ incus exec $(quote "$NAME") -- tailscale up $ts_args"
 	else
-		trap 'incus exec "$NAME" -- rm -f /run/labby-ts-authkey >/dev/null 2>&1 || true' EXIT INT TERM
+		trap cleanup_ts_authkey EXIT INT TERM
 		printf '%s' "$TS_AUTHKEY" | incus exec "$NAME" -- sh -c "umask 077; cat > /run/labby-ts-authkey"
 		set +e
 		# shellcheck disable=SC2086
 		incus exec "$NAME" -- tailscale up $ts_args
 		ts_status=$?
 		set -e
-		incus exec "$NAME" -- rm -f /run/labby-ts-authkey
+		cleanup_ts_authkey
 		trap - EXIT INT TERM
 		if [ "$ts_status" -ne 0 ]; then
 			exit "$ts_status"

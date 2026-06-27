@@ -87,7 +87,8 @@ interface GatewayFormDialogProps {
 type FormMode = 'custom' | 'lab'
 type GatewayAuthSource = 'paste' | 'env'
 
-const PROTECTED_MCP_PUBLIC_HOST = process.env.NEXT_PUBLIC_PROTECTED_MCP_HOST || 'mcp.example.com'
+const PROTECTED_MCP_PUBLIC_HOST = process.env.NEXT_PUBLIC_PROTECTED_MCP_HOST?.trim() ?? ''
+const PROTECTED_MCP_PUBLIC_HOST_LABEL = PROTECTED_MCP_PUBLIC_HOST || 'protected host not configured'
 const PROTECTED_ROUTE_SCOPES = ['mcp:read', 'mcp:write']
 const gatewayInputClassName =
   'border-aurora-border-strong bg-aurora-page-bg/80 shadow-[var(--aurora-highlight-medium)] placeholder:text-aurora-text-muted/70 hover:border-aurora-accent-primary/35 focus-visible:bg-aurora-control-surface'
@@ -649,6 +650,9 @@ export function GatewayFormDialog({
           ? error.message
           : 'Invalid protected route path'
       }
+      if (!PROTECTED_MCP_PUBLIC_HOST) {
+        newErrors.protectedPublicPath = 'Set NEXT_PUBLIC_PROTECTED_MCP_HOST before creating protected routes'
+      }
     }
 
     if (transport === 'http' && authMode === 'oauth' && !protectedPublicPath.trim()) {
@@ -1058,10 +1062,11 @@ export function GatewayFormDialog({
   const protectedRoutePreview = (() => {
     const normalized = protectedPublicPath.trim()
     if (!normalized) return null
+    const publicHost = PROTECTED_MCP_PUBLIC_HOST || '<protected-host>'
     try {
-      return `https://${PROTECTED_MCP_PUBLIC_HOST}${normalizeProtectedPublicPath(normalized)}`
+      return `https://${publicHost}${normalizeProtectedPublicPath(normalized)}`
     } catch {
-      return `https://${PROTECTED_MCP_PUBLIC_HOST}/${normalized.replace(/^\/+/, '')}`
+      return `https://${publicHost}/${normalized.replace(/^\/+/, '')}`
     }
   })()
   const jsonHasText = jsonText.trim().length > 0
@@ -1376,7 +1381,7 @@ export function GatewayFormDialog({
                   <FieldLabel htmlFor="protected-public-path">Public path</FieldLabel>
                   <div className="flex overflow-hidden rounded-aurora-1 border border-aurora-border-strong bg-aurora-page-bg/80 shadow-[var(--aurora-highlight-medium)] transition-[border-color,box-shadow,background-color] hover:border-aurora-accent-primary/35 focus-within:border-aurora-accent-primary focus-within:bg-aurora-control-surface focus-within:ring-2 focus-within:ring-aurora-accent-primary/34">
                     <span className="hidden items-center border-r border-aurora-border-strong px-3 text-[13px] text-aurora-text-muted sm:flex">
-                      https://{PROTECTED_MCP_PUBLIC_HOST}/
+                      https://{PROTECTED_MCP_PUBLIC_HOST_LABEL}/
                     </span>
                     <Input
                       id="protected-public-path"
@@ -1399,7 +1404,7 @@ export function GatewayFormDialog({
                     <datalist id="protected-route-path-options">
                       {protectedRoutePathOptions.map((path) => (
                         <option key={path} value={path.replace(/^\//, '')}>
-                          {`https://${PROTECTED_MCP_PUBLIC_HOST}${path}`}
+                          {`https://${PROTECTED_MCP_PUBLIC_HOST_LABEL}${path}`}
                         </option>
                       ))}
                     </datalist>

@@ -4,8 +4,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/jmagar/lab/main/scripts/install.sh | sh
 #
 # Downloads the latest GitHub release archive for this platform, verifies its
-# SHA-256, and installs the binary to ~/.local/bin/labby. When no release
-# asset exists (or the platform has no prebuilt archive) it falls back to
+# SHA-256, and installs the binary to ~/.local/bin/labby. When explicitly
+# enabled with LAB_ALLOW_SOURCE_FALLBACK=1, a release failure falls back to
 # `cargo install --git` if a Rust toolchain is available.
 #
 # This script's ONLY job is bootstrap: getting `labby` onto PATH. Everything
@@ -81,7 +81,10 @@ install_binary_atomic() {
     # $1 = source binary, installs atomically as "$INSTALL_DIR/labby".
     mkdir -p "$INSTALL_DIR"
     tmp_bin="$(mktemp "$INSTALL_DIR/.labby.XXXXXX")"
-    install -m 755 "$1" "$tmp_bin"
+    if ! install -m 755 "$1" "$tmp_bin"; then
+        rm -f "$tmp_bin"
+        return 1
+    fi
     mv -f "$tmp_bin" "$INSTALL_DIR/labby"
 }
 
@@ -93,7 +96,11 @@ install_from_release() {
     arch="$(uname -m)"
     case "$arch" in
         aarch64 | arm64)
-            say "no prebuilt release archive for $arch — using the build-from-source fallback"
+            if [ "$ALLOW_SOURCE_FALLBACK" = "1" ]; then
+                say "no prebuilt release archive for $arch — using the build-from-source fallback"
+            else
+                say "no prebuilt release archive for $arch"
+            fi
             return 1
             ;;
     esac

@@ -8,6 +8,40 @@ All notable changes to this project will be documented in this file.
 
 ## [0.28.0] - 2026-06-27
 
+### Added
+
+- **Incus gateway deployment artifact** — added a standalone Incus profile YAML
+  and a host bootstrap script that consumes it, validates the Incus substrate,
+  pushes the selected Labby binary, provisions the container with
+  `labby setup --provision`, and optionally joins Tailscale inside the container.
+- **Incus runtime docs and reference capture** — documented the supported Ubuntu
+  24.04 system-container shape, system service model, provisioning boundaries,
+  rollback steps, and saved the reviewed Incus jail article as a local reference.
+
+### Changed
+
+- **Self-hosted gateway default** — the documented gateway runtime now favors an
+  Incus system container with the hardened `/etc/systemd/system/labby.service`
+  system unit. Docker Compose remains available for explicit dev-container and
+  image-smoke paths.
+- **Installer fallback contract** — source builds are now opt-in with
+  `LAB_ALLOW_SOURCE_FALLBACK=1` / `--allow-source-fallback`; unsupported release
+  platforms fail clearly instead of implying a hidden fallback.
+
+### Fixed
+
+- **Incus bootstrap hardening** — TUN validation now accepts valid `/dev/net/tun`
+  passthrough devices without reading an invalid `type` config key, and
+  Tailscale auth-key cleanup can no longer mask the `tailscale up` exit status.
+- **Provisioning installer hardening** — the `uv` installer is downloaded to a
+  checked temporary file before execution instead of piping directly into `sh`.
+- **Gateway admin protected routes** — the UI no longer falls back to
+  `mcp.example.com`; protected-route saves now fail closed until
+  `NEXT_PUBLIC_PROTECTED_MCP_HOST` is configured.
+- **MCP registry metadata compatibility** — locally curated registry metadata
+  written under the legacy `tv.tootie.lab/registry` namespace is still read and
+  filtered while new writes use `dev.labby/registry`.
+
 ---
 
 ## [0.27.0] - 2026-06-25
