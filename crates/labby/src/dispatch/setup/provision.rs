@@ -725,13 +725,25 @@ mod tests {
     async fn failed_command_redacts_stdout_and_stderr() {
         let stdout_token = ["sk", "stdout-secret"].join("-");
         let stderr_token = ["tskey", "stderr-secret"].join("-");
-        let script = format!(
-            "printf 'Authorization: Bearer {stdout_token}'; printf 'TS_AUTHKEY={stderr_token}' >&2; exit 9"
-        );
-        let err = run_checked("sh", &["-c", script.as_str()])
-            .await
-            .unwrap_err()
-            .to_string();
+        #[cfg(unix)]
+        let (program, args) = {
+            let script = format!(
+                "printf 'Authorization: Bearer {stdout_token}'; printf 'TS_AUTHKEY={stderr_token}' >&2; exit 9"
+            );
+            ("sh", vec!["-c".to_string(), script])
+        };
+        #[cfg(windows)]
+        let (program, args) = {
+            let script = format!(
+                "[Console]::Out.Write('Authorization: Bearer {stdout_token}'); [Console]::Error.Write('TS_AUTHKEY={stderr_token}'); exit 9"
+            );
+            (
+                "pwsh",
+                vec!["-NoProfile".to_string(), "-Command".to_string(), script],
+            )
+        };
+        let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+        let err = run_checked(program, &args).await.unwrap_err().to_string();
 
         assert!(!err.contains(&stdout_token));
         assert!(!err.contains(&stderr_token));
