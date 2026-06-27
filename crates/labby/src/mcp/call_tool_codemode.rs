@@ -3,7 +3,8 @@
 //! Extracted from `server.rs` (bead `lab-kvji.24.1.5`) as inherent
 //! `impl LabMcpServer` helpers. Each helper is reached only after the
 //! service-name match in `call_tool_impl` and self-`return`s its result.
-//! Owns the single definition of `CODE_MODE_DESCRIPTION`, plus `string_array_arg`.
+//! Owns the single definition of the Code Mode tool description renderer, plus
+//! `string_array_arg`.
 //!
 //! This branch logs via `tracing` directly (not `emit_dispatch_notification`)
 //! and fires `notify_catalog_changes` around the broker call.
@@ -30,28 +31,29 @@ use crate::mcp::result_format::{
 };
 use crate::mcp::server::LabMcpServer;
 
-/// Tool description for the primary `codemode` MCP tool.
+/// Static body for the primary `codemode` MCP tool description.
 ///
-/// This description is what the model receives. Keep it under 8192 bytes.
-pub(crate) const CODE_MODE_DESCRIPTION: &str = "\
-Execute a JavaScript async arrow function in the Code Mode sandbox. This is the primary Lab gateway tool.
+/// The final model-visible description is rendered with the current upstream
+/// namespace snapshot by [`code_mode_description`]. Keep the rendered result
+/// under 8192 bytes.
+pub(crate) const CODE_MODE_DESCRIPTION_BODY: &str = "\
+Execute JavaScript in a sandbox with access to the Labby gateway catalog.
 
-Inside the sandbox:
-- `await codemode.search(\"short intent phrase\")` searches the reduced in-execution catalog.
-- `await codemode.describe(\"upstream.tool\")` returns compact docs for an exact tool or snippet target.
-- `await codemode.run(\"snippet-name\", input)` runs a discovered Code Mode snippet.
-- `await codemode.<upstream>.<tool>(params)` calls a discovered upstream method.
-- `await callTool(\"upstream::tool\", params)` is the raw escape hatch.
+## Workflow
+
+1. Discover: `const hits = await codemode.search({ query: \"short intent phrase\", limit: 5 });`
+2. Inspect: `const docs = await codemode.describe(hits.results[0].path);`
+3. Call: `await codemode.<upstream>.<tool>(params)` or `await callTool(\"upstream::tool\", params);`
+
+Never guess helper or method names. If you have not already confirmed the exact \
+tool, run `codemode.search(...)` first. `codemode.search` returns compact \
+signatures; `codemode.describe(\"upstream.tool\")` returns focused TypeScript \
+declarations and call details.
 
 Pass `code` as `async () => { ... }` — the sandbox awaits its return value. \
-Every upstream MCP tool is callable two ways: `callTool(id, params)`, or the \
-auto-generated `codemode.<upstream>.<tool>(params)` helper (a thin wrapper over \
-the same callTool, named from the live catalog).
-Snippets are discoverable through `codemode.search` and `codemode.describe`; \
-run them with `codemode.run(\"<snippet>\", input)`.
+Whatever it returns becomes `result`.
 
 ```ts
-// code is an async arrow function; whatever it returns becomes `result`.
 async () => {
   const hits = await codemode.search({ query: 'github issues', limit: 1 });
   const docs = await codemode.describe(hits.results[0].path);
@@ -59,6 +61,21 @@ async () => {
   return { tool: docs.path, count: issues.items.length };
 }
 ```
+
+Available globals: `codemode`, `callTool`, and `writeArtifact`. There is no \
+`require`, `process`, `fs`, `fetch`, Node.js, Deno, or Bun API. All external I/O \
+goes through gateway tools.
+
+Optional top-level inputs to this MCP tool:
+- `upstreams`: restrict this run to specific upstream namespaces.
+- `tools`: restrict this run to specific tools; accepts raw tool names or \
+`upstream::tool` ids.
+
+Every upstream MCP tool is callable two ways: `callTool(id, params)`, or the \
+auto-generated `codemode.<upstream>.<tool>(params)` helper (a thin wrapper over \
+the same callTool, named from the live catalog). Snippets are discoverable \
+through `codemode.search` and `codemode.describe`; run them with \
+`codemode.run(\"<snippet>\", input)`.
 
 `Promise.all([...])` dispatches `callTool` requests in parallel — batch independent \
 reads instead of awaiting serially.
@@ -97,9 +114,8 @@ the sandbox before returning — that is the point of Code Mode.
 Budget:
 - Time: a 30 s wall-clock timeout bounds the whole run. Split work across \
 calls or reduce local computation if the `timeout` kind is returned.
-- Tool calls: Code Mode does not impose a per-run call-count cap. The whole \
-run remains bounded by wall-clock time, sandbox memory/stack, output caps, and \
-host-side tool policy.
+- Tool calls: default 512 `callTool` calls per run, configurable by the host up \
+to 2048. Extra tool calls reject with `call_budget_exceeded`.
 - Memory: 64 MiB heap limit enforced by the QuickJS runtime. Reduce the data \
 processed inside the sandbox if the runner exits with `server_error`.
 - Stack: QuickJS enforces a native stack depth limit; avoid deep recursion.
@@ -108,6 +124,20 @@ or split into multiple `codemode` calls.
 
 Lab actions (`lab::*` tool IDs) are not available in Code Mode. For Lab built-in \
 actions, use the native Lab service tools instead of Code Mode.";
+
+#[must_use]
+pub(crate) fn code_mode_description(upstreams: &[String]) -> String {
+    let upstreams = if upstreams.is_empty() {
+        "- none currently configured".to_string()
+    } else {
+        upstreams
+            .iter()
+            .map(|name| format!("- `{name}`"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    format!("{CODE_MODE_DESCRIPTION_BODY}\n\n## Available upstream namespaces\n\n{upstreams}")
+}
 
 pub(crate) fn string_array_arg(
     args: &serde_json::Map<String, Value>,

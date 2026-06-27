@@ -1,6 +1,6 @@
 # Custom labels for self-hosted runners so actionlint's runner-label check
-# recognizes them. agent-os-lab (Windows sandbox VM) carries windows-lab.
-# linux-lab is the trusted Linux self-hosted CI runner.
+# recognizes them. tootie-lab-linux carries linux-lab, and agent-os-lab carries
+# windows-lab.
 self-hosted-runner:
   labels:
     - linux-lab
