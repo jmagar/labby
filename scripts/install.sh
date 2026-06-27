@@ -16,12 +16,16 @@
 #   LAB_INSTALL_DIR     install directory       (default: ~/.local/bin)
 #   LAB_INSTALL_REPO    owner/repo to fetch     (default: jmagar/lab)
 #   LAB_INSTALL_VERSION release tag, e.g. v0.22.2 (default: latest)
+#   LAB_REQUIRE_CHECKSUM fail if the .sha256 asset is absent (default: 0)
+#   LAB_ALLOW_SOURCE_FALLBACK allow cargo fallback after release failure (default: 1)
 
 set -eu
 
 REPO="${LAB_INSTALL_REPO:-jmagar/lab}"
 INSTALL_DIR="${LAB_INSTALL_DIR:-$HOME/.local/bin}"
 VERSION="${LAB_INSTALL_VERSION:-latest}"
+REQUIRE_CHECKSUM="${LAB_REQUIRE_CHECKSUM:-0}"
+ALLOW_SOURCE_FALLBACK="${LAB_ALLOW_SOURCE_FALLBACK:-1}"
 
 say() { printf '%s\n' "$*" >&2; }
 fail() { say "install.sh: $*"; exit 1; }
@@ -91,6 +95,7 @@ install_from_release() {
             || fail "checksum verification FAILED for $asset — aborting"
         say "sha256 verified"
     else
+        [ "$REQUIRE_CHECKSUM" = "1" ] && fail "no .sha256 asset published for $asset and LAB_REQUIRE_CHECKSUM=1"
         say "warning: no .sha256 asset published — skipping checksum verification"
     fi
 
@@ -113,6 +118,9 @@ install_from_source() {
 main() {
     if install_from_release; then
         :
+    elif [ "$ALLOW_SOURCE_FALLBACK" != "1" ]; then
+        fail "could not install: release install failed and LAB_ALLOW_SOURCE_FALLBACK=$ALLOW_SOURCE_FALLBACK disables source fallback.
+Choose a supported prebuilt release or re-run with LAB_ALLOW_SOURCE_FALLBACK=1 to build from source."
     elif install_from_source; then
         :
     else

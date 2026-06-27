@@ -118,6 +118,23 @@ Open `http://127.0.0.1:8765/setup` or `http://127.0.0.1:8765/`.
 Build static Labby assets with `just web-build` first when running from a source
 checkout.
 
+### Self-Host The Gateway
+
+The supported self-hosted gateway substrate is an amd64 Debian 13 Incus system
+container. Docker is retained for explicit development/image smoke, but it is
+not the primary production boundary for Labby because stdio MCP servers and
+agent CLIs are installed and launched at runtime.
+
+```bash
+scripts/incus-bootstrap.sh --version vX.Y.Z
+incus exec labby -- systemctl status labby --no-pager
+incus exec labby -- curl -fsS http://127.0.0.1:8765/ready
+```
+
+See [docs/runtime/HOST_GATEWAY.md](./docs/runtime/HOST_GATEWAY.md) for the
+Incus runbook, `/dev/net/tun` Tailscale passthrough, manual `claude`/`codex`/
+`gemini` login checklist, and rollback commands.
+
 ## Core Workflows
 
 ### Start Labby

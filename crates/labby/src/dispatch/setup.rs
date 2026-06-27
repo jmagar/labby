@@ -15,6 +15,7 @@ mod draft;
 pub(crate) mod host_service;
 mod params;
 mod plugin_hook;
+pub(crate) mod provision;
 mod secret_mask;
 mod settings;
 mod state;

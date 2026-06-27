@@ -182,6 +182,19 @@ pub struct GatewayRuntimeView {
     pub exposed_prompt_count: usize,
     #[serde(default)]
     pub last_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dependency_hint: Option<DependencyHintView>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DependencyHintView {
+    pub code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_command: Option<String>,
+    pub redacted_tail: String,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

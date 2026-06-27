@@ -26,6 +26,35 @@ fn is_nonessential_capability_error(message: &str) -> bool {
         || message.starts_with("does not implement MCP resources discovery")
 }
 
+#[cfg(feature = "gateway")]
+fn dependency_fix_hint(message: &str) -> Option<&'static str> {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("ffmpeg: command not found")
+        || lower.contains("ffmpeg.exe: command not found")
+        || (lower.contains("no such file or directory") && lower.contains("ffmpeg"))
+        || (lower.contains("enoent") && lower.contains("ffmpeg"))
+    {
+        Some("missing leaf dependency `ffmpeg`; suggested fix: sudo apt install ffmpeg")
+    } else if lower.contains("failed to run `uvx`")
+        || lower.contains("failed to spawn `uvx`")
+        || (lower.contains("enoent") && lower.contains("uvx"))
+    {
+        Some("missing runtime floor `uv`; suggested fix: labby setup --provision --yes")
+    } else if lower.contains("failed to run `npx`")
+        || lower.contains("failed to spawn `npx`")
+        || (lower.contains("enoent") && lower.contains("npx"))
+    {
+        Some("missing runtime floor `nodejs`; suggested fix: labby setup --provision --yes")
+    } else if lower.contains("failed to run `python`")
+        || lower.contains("failed to spawn `python`")
+        || (lower.contains("enoent") && lower.contains("python"))
+    {
+        Some("missing runtime floor `python`; suggested fix: labby setup --provision --yes")
+    } else {
+        None
+    }
+}
+
 /// Run the gateway upstream pool health check and return a `Report`.
 ///
 /// Returns a single informational `Finding` when the gateway manager is not
@@ -92,7 +121,9 @@ pub async fn check_gateway_upstreams() -> Report {
                 .await
                 .filter(|msg| !is_nonessential_capability_error(msg));
 
-            let (severity, message) = upstream_finding(name, *health, last_error.as_deref());
+            let dependency_hint = last_error.as_deref().and_then(dependency_fix_hint);
+            let (severity, message) =
+                upstream_finding(name, *health, last_error.as_deref(), dependency_hint);
             findings.push(Finding {
                 service: "gateway".to_string(),
                 check: format!("upstream:{name}"),
@@ -112,10 +143,16 @@ fn upstream_finding(
     name: &str,
     health: UpstreamHealth,
     last_error: Option<&str>,
+    dependency_hint: Option<&str>,
 ) -> (Severity, String) {
     match health {
         UpstreamHealth::Healthy => {
-            if let Some(err) = last_error {
+            if let Some(hint) = dependency_hint {
+                (
+                    Severity::Warn,
+                    format!("`{name}` is routable but has a dependency warning: {hint}"),
+                )
+            } else if let Some(err) = last_error {
                 // Healthy but has a stale warning (e.g. partial capability failure).
                 (
                     Severity::Warn,
@@ -136,6 +173,9 @@ fn upstream_finding(
                 "degraded"
             };
             let error_detail = last_error.map(|e| format!(": {e}")).unwrap_or_default();
+            let error_detail = dependency_hint
+                .map(|hint| format!(": {hint}"))
+                .unwrap_or(error_detail);
             (
                 Severity::Fail,
                 format!(
@@ -154,7 +194,7 @@ mod tests {
 
     #[test]
     fn healthy_upstream_no_error_is_ok() {
-        let (sev, msg) = upstream_finding("my-server", UpstreamHealth::Healthy, None);
+        let (sev, msg) = upstream_finding("my-server", UpstreamHealth::Healthy, None, None);
         assert!(matches!(sev, Severity::Ok));
         assert!(msg.contains("my-server"));
     }
@@ -165,6 +205,7 @@ mod tests {
             "my-server",
             UpstreamHealth::Healthy,
             Some("prompts not supported"),
+            None,
         );
         assert!(matches!(sev, Severity::Warn));
     }
@@ -177,6 +218,7 @@ mod tests {
                 consecutive_failures: CIRCUIT_BREAKER_THRESHOLD,
             },
             Some("connection refused"),
+            None,
         );
         assert!(matches!(sev, Severity::Fail));
         assert!(msg.contains("circuit breaker OPEN"));
@@ -191,9 +233,31 @@ mod tests {
                 consecutive_failures: CIRCUIT_BREAKER_THRESHOLD - 1,
             },
             None,
+            None,
         );
         assert!(matches!(sev, Severity::Fail));
         assert!(msg.contains("degraded"));
         assert!(!msg.contains("circuit breaker OPEN"));
+    }
+
+    #[test]
+    fn dependency_hint_rewrites_doctor_error_detail() {
+        let hint = dependency_fix_hint("ffmpeg: command not found").expect("hint");
+        let (sev, msg) = upstream_finding(
+            "media-upstream",
+            UpstreamHealth::Unhealthy {
+                consecutive_failures: 1,
+            },
+            Some("ffmpeg: command not found"),
+            Some(hint),
+        );
+
+        assert!(matches!(sev, Severity::Fail));
+        assert!(msg.contains("sudo apt install ffmpeg"));
+    }
+
+    #[test]
+    fn dependency_hint_does_not_match_auth_errors() {
+        assert!(dependency_fix_hint("server exited because API_KEY is missing").is_none());
     }
 }

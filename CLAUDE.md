@@ -329,22 +329,25 @@ Default verification targets the all-features build. If you run a reduced featur
 - **`labby doctor`** — comprehensive health audit: checks env vars, reachability, auth, version for every enabled service. Emits human-readable table by default, `--json` for CI. Exit code reflects worst severity.
 - **`bin/health-check`** — repo-level shell helper for CI/CD smoke tests.
 
-### Host Labby gateway
+### Labby gateway runtime
 
-The normal local/dookie Labby gateway should run on the host as
-`systemd --user` service `labby.service`, executing `~/.local/bin/labby serve`.
-This is preferred over the Docker dev container because the gateway launches
-stdio MCP tools and depends on host SSH config, agent credentials, local
-binaries, and user caches. The canonical service lifecycle is
-`labby setup host-service install --install-self -y`,
-`labby setup host-service restart --install-self -y`, and
-`labby setup host-service status --json`. In this checkout, `just host-sync`
-is only the developer shortcut that rebuilds from source before calling the
-CLI lifecycle.
+The primary supported self-hosted Labby gateway runtime is an amd64 Debian 13
+Incus system container. The host-side entrypoint is
+`scripts/incus-bootstrap.sh --version vX.Y.Z`; the in-box converger is
+`labby setup --provision`. The provision command is intentionally local
+CLI-only and must not be exposed through MCP, HTTP, Code Mode, or remote admin
+actions.
 
-The Docker Compose stack is still supported for prod-like image smoke and
-Docker-specific ACP adapter work. Use `just dev-container` or
-`just dev-container-debug` explicitly when testing that path.
+The default service is a hardened system unit at
+`/etc/systemd/system/labby.service`, running `User=lab`, `Group=lab`, and
+`ExecStart=/usr/local/bin/labby serve`. Do not reintroduce `systemd --user`,
+linger, `%h` unit paths, or `~/.local/bin/labby` as the supported self-hosted
+gateway service model. Preserve a user-service fallback only if it is explicit
+and clearly non-default.
+
+The Docker Compose stack is still supported only for explicit dev-container,
+prod-like image smoke, and Docker-specific ACP adapter work. Use
+`just dev-container` or `just dev-container-debug` when testing that path.
 
 ### Bearer auth in dev (driving the UI with agent-browser)
 

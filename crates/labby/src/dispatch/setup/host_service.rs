@@ -1,6 +1,6 @@
-//! CLI-only management helpers for the host `systemd --user` Labby service.
+//! CLI-only management helpers for the system `labby.service`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 use std::time::Duration;
@@ -11,6 +11,9 @@ use tokio::process::Command;
 use crate::dispatch::error::ToolError;
 
 const SERVICE_NAME: &str = "labby.service";
+const LAB_USER: &str = "lab";
+const LAB_HOME: &str = "/home/lab";
+const SYSTEM_UNIT_DIR: &str = "/etc/systemd/system";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
 const READY_POLL_INTERVAL: Duration = Duration::from_millis(300);
@@ -49,16 +52,15 @@ struct CommandCapture {
 }
 
 pub(crate) async fn unit() -> Result<String, ToolError> {
-    Ok(unit_text())
+    Ok(unit_text().to_string())
 }
 
 pub(crate) async fn install() -> Result<HostServiceOutcome, ToolError> {
     preflight_port_available("install").await?;
-    let home = current_home()?;
-    let path = unit_path(&home);
+    let path = unit_path();
     let text = unit_text();
-    std::fs::create_dir_all(unit_dir(&home)).map_err(io_error)?;
-    let changed = std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str());
+    std::fs::create_dir_all(unit_dir()).map_err(io_error)?;
+    let changed = std::fs::read_to_string(&path).ok().as_deref() != Some(text);
     if changed {
         atomic_write(&path, text.as_bytes())?;
     }
@@ -95,8 +97,7 @@ pub(crate) async fn install() -> Result<HostServiceOutcome, ToolError> {
 }
 
 pub(crate) async fn status() -> Result<HostServiceStatus, ToolError> {
-    let home = current_home()?;
-    let path = unit_path(&home);
+    let path = unit_path();
     let installed = path.is_file();
     let (docker_labby_master_running, docker_labby_master_error) =
         match docker_labby_master_running().await {
@@ -142,7 +143,17 @@ pub(crate) async fn status() -> Result<HostServiceStatus, ToolError> {
         Some(false) => Some(false),
         None => None,
     };
-    let local_ready = ready_response.map(|ready| ready && ready_owned_by_service == Some(true));
+    let local_ready = match (ready_response, ready_owned_by_service) {
+        (Some(true), Some(true)) => Some(true),
+        (Some(true), Some(false)) => {
+            local_ready_error.get_or_insert_with(|| {
+                "ready endpoint responded, but the listener is not labby.service".to_string()
+            });
+            Some(false)
+        }
+        (Some(false), _) => Some(false),
+        (None, _) | (Some(true), None) => None,
+    };
 
     Ok(HostServiceStatus {
         installed,
@@ -161,10 +172,43 @@ pub(crate) async fn status() -> Result<HostServiceStatus, ToolError> {
     })
 }
 
+pub(crate) async fn installed_and_ready() -> Result<bool, ToolError> {
+    let path = unit_path();
+    if !unit_file_is_current(&path) || !Path::new("/usr/local/bin/labby").is_file() {
+        return Ok(false);
+    }
+
+    let output = match run_systemctl(&[
+        "show",
+        SERVICE_NAME,
+        "--property=LoadState,ActiveState,MainPID",
+        "--no-pager",
+    ])
+    .await
+    {
+        Ok(output) => output,
+        Err(err) if command_not_found(&err) => return Ok(false),
+        Err(err) => return Err(err),
+    };
+    let props = parse_systemctl_show(&output.stdout);
+    if non_empty_prop(&props, "LoadState").as_deref() != Some("loaded")
+        || non_empty_prop(&props, "ActiveState").as_deref() != Some("active")
+    {
+        return Ok(false);
+    }
+    let Some(main_pid) = parse_main_pid(&props) else {
+        return Ok(false);
+    };
+    if check_ready().await.unwrap_or(false) {
+        readiness_owner_matches(Some(main_pid)).await
+    } else {
+        Ok(false)
+    }
+}
+
 pub(crate) async fn restart() -> Result<HostServiceOutcome, ToolError> {
     preflight_port_available("restart").await?;
-    let home = current_home()?;
-    let path = unit_path(&home);
+    let path = unit_path();
     let restart = run_systemctl(&["restart", SERVICE_NAME]).await?;
     let mut stderr = restart.stderr;
     if let Err(err) = poll_ready().await {
@@ -188,8 +232,7 @@ pub(crate) async fn restart() -> Result<HostServiceOutcome, ToolError> {
 }
 
 pub(crate) async fn uninstall() -> Result<HostServiceOutcome, ToolError> {
-    let home = current_home()?;
-    let path = unit_path(&home);
+    let path = unit_path();
     let mut stdout = String::new();
     let mut stderr = String::new();
     if path.exists() {
@@ -220,45 +263,60 @@ pub(crate) async fn uninstall() -> Result<HostServiceOutcome, ToolError> {
     }
 }
 
-fn unit_text() -> String {
+fn unit_text() -> &'static str {
     r"[Unit]
 Description=Labby host gateway
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/labby serve
-WorkingDirectory=%h
-Environment=PATH=%h/.local/bin:%h/.cargo/bin:%h/.local/share/mise/shims:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
-EnvironmentFile=-%h/.lab/.env
+User=lab
+Group=lab
+ExecStart=/usr/local/bin/labby serve
+WorkingDirectory=/home/lab
+Environment=HOME=/home/lab
+Environment=XDG_CACHE_HOME=/home/lab/.cache
+Environment=XDG_CONFIG_HOME=/home/lab/.config
+Environment=XDG_DATA_HOME=/home/lab/.local/share
+Environment=PATH=/home/lab/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/home/lab/.lab/.env
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/lab/.lab /home/lab/.local /home/lab/.cache /home/lab/.config /home/lab/.npm /home/lab/.codex /home/lab/.claude /home/lab/.gemini /home/lab/downloads
+ProtectHome=read-only
+PrivateTmp=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+CapabilityBoundingSet=
+SystemCallFilter=@system-service
+TasksMax=1000
+MemoryMax=4G
 Restart=on-failure
 RestartSec=3
-StartLimitIntervalSec=60
-StartLimitBurst=5
 KillSignal=SIGINT
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
 "
-    .to_string()
 }
 
-fn unit_dir(home: &Path) -> PathBuf {
-    home.join(".config/systemd/user")
+fn unit_file_is_current(path: &Path) -> bool {
+    std::fs::read_to_string(path).ok().as_deref() == Some(unit_text())
 }
 
-fn unit_path(home: &Path) -> PathBuf {
-    unit_dir(home).join(SERVICE_NAME)
+fn unit_dir() -> PathBuf {
+    PathBuf::from(SYSTEM_UNIT_DIR)
 }
 
-fn current_home() -> Result<PathBuf, ToolError> {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| ToolError::Sdk {
-            sdk_kind: "internal_error".to_string(),
-            message: "HOME is not set; cannot manage user systemd service".to_string(),
-        })
+fn unit_path() -> PathBuf {
+    unit_dir().join(SERVICE_NAME)
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), ToolError> {
@@ -281,7 +339,7 @@ async fn append_optional_verify(
     stdout: &mut String,
     stderr: &mut String,
 ) -> Result<(), ToolError> {
-    match run_command("systemd-analyze", &["--user", "verify", path_to_str(path)?]).await {
+    match run_command("systemd-analyze", &["verify", path_to_str(path)?]).await {
         Ok(output) => {
             stdout.push_str(&output.stdout);
             stderr.push_str(&output.stderr);
@@ -304,6 +362,14 @@ async fn preflight_port_available(operation: &str) -> Result<(), ToolError> {
     } else {
         (None, None)
     };
+    if docker_running != Some(true)
+        && holder.is_some()
+        && active_state.as_deref() == Some("active")
+        && (main_pid.is_some_and(|pid| process_listens_on_port(pid, port))
+            || lab_user_listens_on_port(port))
+    {
+        return Ok(());
+    }
     preflight_decision(
         operation,
         port,
@@ -370,7 +436,7 @@ fn configured_local_port_from(
 }
 
 fn env_file_value(key: &str) -> Option<String> {
-    let path = current_home().ok()?.join(".lab/.env");
+    let path = Path::new(LAB_HOME).join(".lab/.env");
     let text = std::fs::read_to_string(path).ok()?;
     for line in text.lines() {
         let line = line.trim();
@@ -418,7 +484,10 @@ async fn readiness_owner_matches(main_pid: Option<u32>) -> Result<bool, ToolErro
     let Some(holder) = port_holder(configured_local_port()).await? else {
         return Ok(false);
     };
-    Ok(holder_contains_pid(&holder, pid))
+    let port = configured_local_port();
+    Ok(holder_contains_pid(&holder, pid)
+        || process_listens_on_port(pid, port)
+        || lab_user_listens_on_port(port))
 }
 
 fn holder_can_be_host_service_from(
@@ -447,6 +516,90 @@ fn holder_contains_pid(holder: &str, pid: u32) -> bool {
     })
 }
 
+fn process_listens_on_port(pid: u32, port: u16) -> bool {
+    let inodes = listener_socket_inodes(port);
+    !inodes.is_empty() && process_has_socket_inode(pid, &inodes)
+}
+
+fn listener_socket_inodes(port: u16) -> BTreeSet<String> {
+    let mut inodes = BTreeSet::new();
+    for (_, inode) in listener_socket_entries(port) {
+        inodes.insert(inode);
+    }
+    inodes
+}
+
+fn lab_user_listens_on_port(port: u16) -> bool {
+    let Some(uid) = lab_uid() else {
+        return false;
+    };
+    listener_socket_entries(port)
+        .into_iter()
+        .any(|(listener_uid, _)| listener_uid == uid)
+}
+
+fn lab_uid() -> Option<u32> {
+    std::fs::read_to_string("/etc/passwd")
+        .ok()?
+        .lines()
+        .find_map(|line| {
+            let mut fields = line.split(':');
+            let name = fields.next()?;
+            let uid = fields.nth(1)?;
+            (name == LAB_USER).then(|| uid.parse().ok()).flatten()
+        })
+}
+
+fn listener_socket_entries(port: u16) -> Vec<(u32, String)> {
+    let mut entries = Vec::new();
+    collect_listener_socket_entries("/proc/net/tcp", port, &mut entries);
+    collect_listener_socket_entries("/proc/net/tcp6", port, &mut entries);
+    entries
+}
+
+fn collect_listener_socket_entries(path: &str, port: u16, entries: &mut Vec<(u32, String)>) {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return;
+    };
+    for line in text.lines().skip(1) {
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        if fields.len() <= 9 || fields[3] != "0A" {
+            continue;
+        }
+        let Some((_, port_hex)) = fields[1].rsplit_once(':') else {
+            continue;
+        };
+        if u16::from_str_radix(port_hex, 16).ok() == Some(port) {
+            let Ok(uid) = fields[7].parse::<u32>() else {
+                continue;
+            };
+            entries.push((uid, fields[9].to_string()));
+        }
+    }
+}
+
+fn process_has_socket_inode(pid: u32, inodes: &BTreeSet<String>) -> bool {
+    let fd_dir = format!("/proc/{pid}/fd");
+    let Ok(entries) = std::fs::read_dir(fd_dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let Ok(target) = std::fs::read_link(entry.path()) else {
+            return false;
+        };
+        let Some(target) = target.to_str() else {
+            return false;
+        };
+        let Some(inode) = target
+            .strip_prefix("socket:[")
+            .and_then(|rest| rest.strip_suffix(']'))
+        else {
+            return false;
+        };
+        inodes.contains(inode)
+    })
+}
+
 async fn docker_labby_master_running() -> Result<Option<bool>, ToolError> {
     match run_command(
         "docker",
@@ -466,16 +619,24 @@ async fn poll_ready() -> Result<(), String> {
     let mut last_err = String::new();
     while tokio::time::Instant::now() < deadline {
         match check_ready().await {
-            Ok(true) => match systemctl_main_pid().await {
-                Ok(main_pid) => match readiness_owner_matches(main_pid).await {
-                    Ok(true) => return Ok(()),
-                    Ok(false) => {
-                        last_err =
-                            "ready endpoint responded, but the listener is not labby.service"
-                                .to_string();
+            Ok(true) => match systemctl_service_identity().await {
+                Ok((active_state, main_pid)) if active_state.as_deref() == Some("active") => {
+                    match readiness_owner_matches(main_pid).await {
+                        Ok(true) => return Ok(()),
+                        Ok(false) => {
+                            last_err =
+                                "ready endpoint responded, but the listener is not labby.service"
+                                    .to_string();
+                        }
+                        Err(err) => last_err = err.to_string(),
                     }
-                    Err(err) => last_err = err.to_string(),
-                },
+                }
+                Ok((active_state, _)) => {
+                    last_err = format!(
+                        "ready endpoint responded, but {SERVICE_NAME} is not active ({})",
+                        active_state.unwrap_or_else(|| "unknown".to_string())
+                    );
+                }
                 Err(err) => last_err = err.to_string(),
             },
             Ok(false) => last_err = "ready endpoint returned non-success".to_string(),
@@ -484,10 +645,6 @@ async fn poll_ready() -> Result<(), String> {
         tokio::time::sleep(READY_POLL_INTERVAL).await;
     }
     Err(last_err)
-}
-
-async fn systemctl_main_pid() -> Result<Option<u32>, ToolError> {
-    Ok(systemctl_service_identity().await?.1)
 }
 
 async fn systemctl_service_identity() -> Result<(Option<String>, Option<u32>), ToolError> {
@@ -548,9 +705,7 @@ fn parse_main_pid(props: &BTreeMap<String, String>) -> Option<u32> {
 }
 
 async fn run_systemctl(args: &[&str]) -> Result<CommandCapture, ToolError> {
-    let mut command_args = vec!["--user"];
-    command_args.extend_from_slice(args);
-    run_command("systemctl", &command_args).await
+    run_command("systemctl", args).await
 }
 
 async fn run_command(program: &str, args: &[&str]) -> Result<CommandCapture, ToolError> {
@@ -622,14 +777,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unit_uses_durable_host_binary_and_lab_env() {
+    fn unit_uses_hardened_system_binary_and_lab_env() {
         let unit = unit_text();
 
         assert!(unit.contains("Description=Labby host gateway"));
-        assert!(unit.contains("ExecStart=%h/.local/bin/labby serve"));
-        assert!(unit.contains("WorkingDirectory=%h"));
-        assert!(unit.contains("Environment=PATH=%h/.local/bin:%h/.cargo/bin:%h/.local/share/mise/shims:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin"));
-        assert!(unit.contains("EnvironmentFile=-%h/.lab/.env"));
+        assert!(unit.contains("User=lab"));
+        assert!(unit.contains("Group=lab"));
+        assert!(unit.contains("ExecStart=/usr/local/bin/labby serve"));
+        assert!(unit.contains("WorkingDirectory=/home/lab"));
+        assert!(unit.contains("Environment=HOME=/home/lab"));
+        assert!(
+            unit.contains("Environment=PATH=/home/lab/.local/bin:/usr/local/bin:/usr/bin:/bin")
+        );
+        assert!(unit.contains("EnvironmentFile=-/home/lab/.lab/.env"));
+        assert!(unit.contains("WantedBy=multi-user.target"));
+        assert!(!unit.contains("%h"));
     }
 
     #[test]
@@ -652,12 +814,34 @@ mod tests {
     }
 
     #[test]
-    fn unit_path_lives_under_user_systemd_dir() {
-        let home = Path::new("/home/example");
+    fn unit_contains_hardening_baseline() {
+        let unit = unit_text();
 
+        for directive in [
+            "NoNewPrivileges=true",
+            "ProtectSystem=strict",
+            "ProtectHome=read-only",
+            "PrivateTmp=true",
+            "RestrictNamespaces=true",
+            "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX",
+            "RestrictSUIDSGID=true",
+            "LockPersonality=true",
+            "ProtectKernelTunables=true",
+            "ProtectKernelModules=true",
+            "CapabilityBoundingSet=",
+            "SystemCallFilter=@system-service",
+            "TasksMax=1000",
+            "MemoryMax=4G",
+        ] {
+            assert!(unit.contains(directive), "missing {directive}");
+        }
+    }
+
+    #[test]
+    fn unit_path_lives_under_systemd_system_dir() {
         assert_eq!(
-            unit_path(home),
-            PathBuf::from("/home/example/.config/systemd/user/labby.service")
+            unit_path(),
+            PathBuf::from("/etc/systemd/system/labby.service")
         );
     }
 

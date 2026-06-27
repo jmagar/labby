@@ -651,7 +651,7 @@ Usage: setup [OPTIONS] [COMMAND]
 
 Commands:
   draft                Manage the local setup draft
-  host-service         Manage the host user systemd Labby gateway service
+  host-service         Manage the systemd Labby gateway service
   installed-plugins    List installed Claude Code lab plugins
   services-status      Join service configuration, draft, and Claude plugin state
   plugin-hook          Run binary-owned local setup checks for Claude plugin hooks
@@ -669,17 +669,29 @@ Options:
       --json
           Emit JSON instead of human-readable tables
 
-      --mode <MODE>
-          Setup UI mode. Standalone setup defaults to full; /setup-core passes plugin
-
-          [default: full]
-          [possible values: plugin, full]
+      --provision
+          Provision this Debian 13/Incus box for the Labby gateway
 
       --color <COLOR>
           Control human-readable CLI styling
 
           [default: auto]
           [possible values: auto, plain, color]
+
+      --dry-run
+          Print the provisioning plan and do not mutate anything
+
+  -y, --yes
+          Confirm provisioning without prompting
+
+      --skip-deps
+          Skip runtime dependency installation and only converge user/service state
+
+      --mode <MODE>
+          Setup UI mode. Standalone setup defaults to full; /setup-core passes plugin
+
+          [default: full]
+          [possible values: plugin, full]
 
       --no-setup
           Skip the wizard and exit cleanly. Equivalent to LAB_SKIP_SETUP=1
@@ -761,13 +773,13 @@ Arguments:
 ## `labby setup host-service`
 
 ```text
-Manage the host user systemd Labby gateway service
+Manage the systemd Labby gateway service
 
 Usage: host-service [OPTIONS] <COMMAND>
 
 Commands:
-  unit       Print the user systemd unit that Labby would install
-  install    Install and start labby.service under systemd --user
+  unit       Print the system unit that Labby would install
+  install    Install and start labby.service as a system unit
   status     Read labby.service status
   restart    Restart labby.service
   uninstall  Stop, disable, and remove labby.service
@@ -790,7 +802,7 @@ Options:
 ## `labby setup host-service unit`
 
 ```text
-Print the user systemd unit that Labby would install
+Print the system unit that Labby would install
 
 Usage: unit [OPTIONS]
 
@@ -811,13 +823,13 @@ Options:
 ## `labby setup host-service install`
 
 ```text
-Install and start labby.service under systemd --user
+Install and start labby.service as a system unit
 
 Usage: install [OPTIONS]
 
 Options:
       --install-self
-          Copy this labby binary into ~/.local/bin/labby before installing the service
+          Copy this labby binary into /usr/local/bin/labby before installing the service
 
       --json
           Emit JSON instead of human-readable tables
@@ -865,7 +877,7 @@ Usage: restart [OPTIONS]
 
 Options:
       --install-self
-          Copy this labby binary into ~/.local/bin/labby before restarting the service
+          Copy this labby binary into /usr/local/bin/labby before restarting the service
 
       --json
           Emit JSON instead of human-readable tables

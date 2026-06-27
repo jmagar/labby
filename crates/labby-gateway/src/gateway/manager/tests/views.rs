@@ -229,6 +229,29 @@ async fn runtime_view_includes_last_upstream_error() {
         runtime.last_error.as_deref(),
         Some("stdio handshake failed")
     );
+    assert!(runtime.dependency_hint.is_none());
+}
+
+#[tokio::test]
+async fn runtime_view_includes_dependency_hint_for_missing_leaf_dependency() {
+    let pool = UpstreamPool::new();
+    let now = std::time::Instant::now();
+    let mut entry = fixture_upstream_entry("broken-upstream", HashMap::new());
+    entry.tool_health = UpstreamHealth::Unhealthy {
+        consecutive_failures: 1,
+    };
+    entry.tool_unhealthy_since = Some(now);
+    entry.tool_last_error = Some("ffmpeg: command not found".to_string());
+
+    pool.insert_entry_for_tests("broken-upstream", entry).await;
+
+    let runtime = runtime_view(Some(&pool), "broken-upstream", None).await;
+    let hint = runtime.dependency_hint.expect("dependency hint");
+    assert_eq!(hint.package_hint.as_deref(), Some("ffmpeg"));
+    assert_eq!(
+        hint.install_command.as_deref(),
+        Some("sudo apt install ffmpeg")
+    );
 }
 
 #[tokio::test]
@@ -357,5 +380,29 @@ async fn errored_upstream_reports_disconnected_even_when_circuit_closed() {
     assert_eq!(
         view.warnings.first().map(|warning| warning.code.as_str()),
         Some("auth_failed")
+    );
+}
+
+#[tokio::test]
+async fn errored_upstream_reports_disconnected_even_with_stale_exposed_counts() {
+    let pool = UpstreamPool::new();
+    let mut entry = healthy_entry_with_tool("broken-upstream", "transcode");
+    entry.tool_health = UpstreamHealth::Unhealthy {
+        consecutive_failures: 1,
+    };
+    entry.tool_last_error = Some("ffmpeg: command not found".to_string());
+    pool.insert_entry_for_tests("broken-upstream", entry).await;
+
+    let upstream = fixture_http_upstream("broken-upstream");
+    let view = server_view_from_upstream(Some(&pool), &upstream).await;
+    assert!(
+        !view.connected,
+        "stale exposed counts must not hide current upstream errors"
+    );
+    assert!(!view.surfaces.mcp.connected);
+    assert_eq!(view.exposed_tool_count, 1);
+    assert_eq!(
+        view.warnings.first().map(|warning| warning.code.as_str()),
+        Some("missing_leaf_dependency")
     );
 }

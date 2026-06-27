@@ -36,7 +36,7 @@ lint: skill-drift test-cargo-wrapper
 
 # Check hand-authored skills for known stale or unsafe patterns
 skill-drift:
-    plugins/scripts/check-dozzle-skill
+    LAB_ALLOW_MISSING_DOZZLE=1 plugins/scripts/check-dozzle-skill
 
 # License and vulnerability audit
 deny:
@@ -59,7 +59,7 @@ build-release:
 link-bin profile="release":
     #!/usr/bin/env bash
     set -euo pipefail
-    if systemctl --user is-active --quiet labby.service 2>/dev/null; then
+    if systemctl is-active --quiet labby.service 2>/dev/null; then
       echo "error: labby.service is active; use 'just host-sync' so the service restarts onto the new binary" >&2
       exit 1
     fi
@@ -87,9 +87,9 @@ _install-labby-bin profile:
     mv ~/.local/bin/labby.new ~/.local/bin/labby
     echo "labby → $LABBY_BIN"
 
-# Build release-fast binary, copy it to the durable host path, and restart the
-# host user service. This is the preferred Labby gateway workflow because stdio
-# MCP tools, SSH config, agent caches, and credentials live on the host.
+# Build release-fast binary, copy it to the system service path, and restart the
+# system Labby gateway service. The primary self-hosted runtime is the Incus
+# system-container path; this source checkout shortcut assumes sudo access.
 host-sync:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -98,10 +98,11 @@ host-sync:
       export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=mold"
     fi
     CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-16}" cargo build --workspace --all-features --profile "$profile" --bin labby
-    just _install-labby-bin "$profile"
-    if systemctl --user is-active --quiet labby.service; then
-      ~/.local/bin/labby setup host-service restart -y
-      ~/.local/bin/labby setup host-service status --json
+    LABBY_BIN="target/$profile/labby"
+    sudo install -D -m 755 "$LABBY_BIN" /usr/local/bin/labby
+    if systemctl is-active --quiet labby.service; then
+      sudo /usr/local/bin/labby setup host-service restart -y
+      sudo /usr/local/bin/labby setup host-service status --json
     else
       echo "error: labby.service is not active; run: just host-service-install" >&2
       exit 1
@@ -115,15 +116,20 @@ host-service-install:
       export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=mold"
     fi
     CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-16}" cargo build --workspace --all-features --profile "$profile" --bin labby
-    just _install-labby-bin "$profile"
-    ~/.local/bin/labby setup host-service install -y
+    LAB_TARGET_DIR="${CARGO_TARGET_DIR:-target}"
+    case "$LAB_TARGET_DIR" in
+      /*) LABBY_BIN="$LAB_TARGET_DIR/$profile/labby" ;;
+      *)  LABBY_BIN="$(pwd)/$LAB_TARGET_DIR/$profile/labby" ;;
+    esac
+    sudo install -D -m 755 "$LABBY_BIN" /usr/local/bin/labby
+    sudo /usr/local/bin/labby setup host-service install -y
 
 host-service-restart:
-    ~/.local/bin/labby setup host-service restart -y
-    ~/.local/bin/labby setup host-service status --json
+    sudo /usr/local/bin/labby setup host-service restart -y
+    sudo /usr/local/bin/labby setup host-service status --json
 
 host-service-status:
-    ~/.local/bin/labby setup host-service status --json
+    sudo /usr/local/bin/labby setup host-service status --json
 
 # Explicit container compatibility path. Prefer host-sync for normal gateway
 # development; this remains useful for prod-like image smoke and Docker-specific

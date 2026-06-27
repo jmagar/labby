@@ -13,7 +13,7 @@ The docs are split by topic so contributors do not have to recover architecture,
 - Use [SERVICES.md](./dev/SERVICES.md), [CLI.md](./surfaces/CLI.md), and [MCP.md](./surfaces/MCP.md) for current surface-specific behavior. [TUI.md](./surfaces/TUI.md) records deferred TUI status.
 - Use [design/CLI_DESIGN_SYSTEM.md](./design/CLI_DESIGN_SYSTEM.md) for the human-readable CLI output language and shared color policy.
 - Use [design/component-development.md](./design/component-development.md) and [design/design-system-contract.md](./design/design-system-contract.md) when building or revising Labby web UI components.
-- Use [CONFIG.md](./runtime/CONFIG.md) and [OPERATIONS.md](./OPERATIONS.md) for setup and operator workflows.
+- Use [CONFIG.md](./runtime/CONFIG.md), [HOST_GATEWAY.md](./runtime/HOST_GATEWAY.md), and [OPERATIONS.md](./OPERATIONS.md) for setup, Incus gateway deployment, and operator workflows.
 - Refer to [OAUTH.md](./runtime/OAUTH.md) for bearer vs OAuth mode selection, Google-backed authorization flow, lab-issued JWT behavior, and callback-forwarding constraints.
 - Use [GATEWAY.md](./services/GATEWAY.md) when managing upstream MCP gateways over CLI, MCP, `/v1/gateway`, or Gateway-managed OAuth protected MCP routes.
 - Use [acp/README.md](./acp/README.md) for ACP service architecture, the `acp` vs `chat` boundary, and gateway integration direction.
@@ -70,15 +70,16 @@ The docs are split by topic so contributors do not have to recover architecture,
 ### If You Are Operating the Project
 
 1. [CONFIG.md](./runtime/CONFIG.md)
-2. [TRANSPORT.md](./surfaces/TRANSPORT.md)
-3. [OAUTH.md](./runtime/OAUTH.md) (if deploying with OAuth)
-4. [GATEWAY.md](./services/GATEWAY.md) (if managing upstream MCP gateways)
-5. [UPSTREAM.md](./services/UPSTREAM.md) (if proxying upstream MCP servers)
-6. [DEVICE_RUNTIME.md](./runtime/DEVICE_RUNTIME.md)
-7. [NODE_RUNTIME_CONTRACT.md](./runtime/NODE_RUNTIME_CONTRACT.md)
-8. [DEPLOY.md](./runtime/DEPLOY.md)
-9. [OPERATIONS.md](./OPERATIONS.md)
-10. [CLI.md](./surfaces/CLI.md)
+2. [HOST_GATEWAY.md](./runtime/HOST_GATEWAY.md)
+3. [TRANSPORT.md](./surfaces/TRANSPORT.md)
+4. [OAUTH.md](./runtime/OAUTH.md) (if deploying with OAuth)
+5. [GATEWAY.md](./services/GATEWAY.md) (if managing upstream MCP gateways)
+6. [UPSTREAM.md](./services/UPSTREAM.md) (if proxying upstream MCP servers)
+7. [DEVICE_RUNTIME.md](./runtime/DEVICE_RUNTIME.md)
+8. [NODE_RUNTIME_CONTRACT.md](./runtime/NODE_RUNTIME_CONTRACT.md)
+9. [DEPLOY.md](./runtime/DEPLOY.md)
+10. [OPERATIONS.md](./OPERATIONS.md)
+11. [CLI.md](./surfaces/CLI.md)
 
 ## Topic Map
 
@@ -160,6 +161,8 @@ The docs are split by topic so contributors do not have to recover architecture,
   Deferred TUI status.
 - [CONFIG.md](./runtime/CONFIG.md)
   Env and TOML config ownership, load order, secrets handling, and instance naming.
+- [HOST_GATEWAY.md](./runtime/HOST_GATEWAY.md)
+  Primary amd64 Debian 13 Incus gateway runtime, in-box provisioning, hardened system service, Tailscale TUN passthrough, Docker smoke path, and rollback.
 - [ENV.md](./runtime/ENV.md)
   Deployment-ready env examples and auth-mode variables.
 - [OBSERVABILITY.md](./dev/OBSERVABILITY.md)

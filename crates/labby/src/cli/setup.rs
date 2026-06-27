@@ -14,6 +14,7 @@
 //! incrementally without breaking the CLI surface contract.
 
 use std::future::Future;
+use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
 
 use anyhow::Result;
@@ -26,6 +27,22 @@ use crate::output::{OutputFormat, print};
 
 #[derive(Debug, Args)]
 pub struct SetupArgs {
+    /// Provision this Debian 13/Incus box for the Labby gateway.
+    #[arg(long)]
+    pub provision: bool,
+
+    /// Print the provisioning plan and do not mutate anything.
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Confirm provisioning without prompting.
+    #[arg(short = 'y', long, alias = "no-confirm")]
+    pub yes: bool,
+
+    /// Skip runtime dependency installation and only converge user/service state.
+    #[arg(long)]
+    pub skip_deps: bool,
+
     /// Setup UI mode. Standalone setup defaults to full; /setup-core passes plugin.
     #[arg(long, value_enum, default_value_t = SetupModeArg::Full)]
     pub mode: SetupModeArg,
@@ -67,7 +84,7 @@ impl SetupModeArg {
 pub enum SetupCommand {
     /// Manage the local setup draft.
     Draft(DraftArgs),
-    /// Manage the host user systemd Labby gateway service.
+    /// Manage the systemd Labby gateway service.
     HostService(HostServiceArgs),
     /// List installed Claude Code lab plugins.
     InstalledPlugins {
@@ -119,11 +136,11 @@ pub struct HostServiceArgs {
 
 #[derive(Debug, PartialEq, Eq, Subcommand)]
 pub enum HostServiceCommand {
-    /// Print the user systemd unit that Labby would install.
+    /// Print the system unit that Labby would install.
     Unit,
-    /// Install and start labby.service under systemd --user.
+    /// Install and start labby.service as a system unit.
     Install {
-        /// Copy this labby binary into ~/.local/bin/labby before installing the service.
+        /// Copy this labby binary into /usr/local/bin/labby before installing the service.
         #[arg(long)]
         install_self: bool,
         /// Confirm installation and service start.
@@ -134,7 +151,7 @@ pub enum HostServiceCommand {
     Status,
     /// Restart labby.service.
     Restart {
-        /// Copy this labby binary into ~/.local/bin/labby before restarting the service.
+        /// Copy this labby binary into /usr/local/bin/labby before restarting the service.
         #[arg(long)]
         install_self: bool,
         /// Confirm service restart.
@@ -222,7 +239,32 @@ fn install_self() -> Result<std::path::PathBuf> {
     Ok(dest)
 }
 
+fn install_self_system() -> Result<std::path::PathBuf> {
+    let exe = std::env::current_exe()?;
+    let bin_dir = std::path::PathBuf::from("/usr/local/bin");
+    std::fs::create_dir_all(&bin_dir)?;
+    let dest = bin_dir.join("labby");
+    if dest == exe {
+        return Ok(dest);
+    }
+    let tmp = bin_dir.join(".labby.tmp");
+    std::fs::copy(&exe, &tmp)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
+    }
+    std::fs::rename(&tmp, &dest)?;
+    Ok(dest)
+}
+
 pub async fn run(args: SetupArgs, format: OutputFormat) -> Result<ExitCode> {
+    if args.provision {
+        return run_provision(args, format).await;
+    }
+    if args.dry_run || args.yes || args.skip_deps {
+        anyhow::bail!("--dry-run, --yes, and --skip-deps are only valid with --provision");
+    }
     if let Some(command) = args.command {
         return run_command(command, format).await;
     }
@@ -278,6 +320,50 @@ pub async fn run(args: SetupArgs, format: OutputFormat) -> Result<ExitCode> {
         "{}",
         theme.muted("Tip: set LAB_SKIP_SETUP=1 to suppress this message in CI.")
     );
+    Ok(ExitCode::SUCCESS)
+}
+
+async fn run_provision(args: SetupArgs, format: OutputFormat) -> Result<ExitCode> {
+    if args.command.is_some() {
+        anyhow::bail!("--provision cannot be combined with a setup subcommand");
+    }
+    let mut yes = args.yes;
+    let plan = crate::dispatch::setup::provision::provision_plan_text(args.skip_deps);
+    if !format.is_json() {
+        println!("{plan}");
+    }
+    if !args.dry_run && !yes {
+        if !io::stdin().is_terminal() {
+            anyhow::bail!("setup --provision requires --yes when stdin is not a TTY");
+        }
+        eprint!("Proceed? [y/N] ");
+        io::stderr().flush()?;
+        let mut answer = String::new();
+        io::stdin().read_line(&mut answer)?;
+        yes = matches!(answer.trim(), "y" | "Y" | "yes" | "YES");
+        if !yes {
+            anyhow::bail!("setup --provision cancelled");
+        }
+    }
+    let outcome = crate::dispatch::setup::provision::provision(
+        crate::dispatch::setup::provision::ProvisionOptions {
+            dry_run: args.dry_run,
+            yes,
+            skip_deps: args.skip_deps,
+        },
+    )
+    .await?;
+    if format.is_json() {
+        print(&serde_json::to_value(outcome)?, format)?;
+    } else if outcome.dry_run {
+        println!("dry-run complete; no changes made");
+    } else {
+        println!(
+            "provision complete: executed={}, skipped={}",
+            outcome.executed.len(),
+            outcome.skipped.len()
+        );
+    }
     Ok(ExitCode::SUCCESS)
 }
 
@@ -382,7 +468,7 @@ async fn run_host_service_command(args: HostServiceArgs, format: OutputFormat) -
         } => {
             require_host_service_confirmation("install", yes)?;
             if install_self_flag {
-                install_self()?;
+                install_self_system()?;
             }
             run_host_service_logged(
                 "host_service.install",
@@ -405,7 +491,7 @@ async fn run_host_service_command(args: HostServiceArgs, format: OutputFormat) -
         } => {
             require_host_service_confirmation("restart", yes)?;
             if install_self_flag {
-                install_self()?;
+                install_self_system()?;
             }
             run_host_service_logged(
                 "host_service.restart",
@@ -523,6 +609,10 @@ mod tests {
     async fn no_setup_flag_exits_cleanly() {
         let code = run(
             SetupArgs {
+                provision: false,
+                dry_run: false,
+                yes: false,
+                skip_deps: false,
                 mode: SetupModeArg::Full,
                 no_setup: true,
                 no_browser: true,
@@ -600,6 +690,26 @@ mod tests {
                 _ => panic!("unexpected setup subcommand for {command}"),
             }
         }
+    }
+
+    #[test]
+    fn parses_setup_provision_flags() {
+        let cli = crate::cli::Cli::try_parse_from([
+            "labby",
+            "setup",
+            "--provision",
+            "--dry-run",
+            "--skip-deps",
+        ])
+        .unwrap();
+        let crate::cli::Command::Setup(args) = cli.command else {
+            panic!("expected setup command");
+        };
+
+        assert!(args.provision);
+        assert!(args.dry_run);
+        assert!(args.skip_deps);
+        assert!(args.command.is_none());
     }
 
     #[test]
