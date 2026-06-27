@@ -17,6 +17,7 @@ Every push and pull request must pass all of the following:
 | Format | `cargo fmt --all -- --check` |
 | Lint | `cargo clippy --workspace --all-features -- -D warnings` |
 | Deny | `cargo deny check` |
+| Secret scan | `gitleaks/gitleaks-action@v3` full-history scan with existing historical findings baselined in `.gitleaksignore` |
 | Tests | `cargo nextest run --workspace --all-features --profile ci` |
 | Tests (Linux) | same nextest run on the self-hosted `linux-lab` runner (`self-hosted`, `linux-lab`) for trusted events |
 | Tests (Linux fork PR fallback) | same nextest run on `ubuntu-latest` for fork PRs |
