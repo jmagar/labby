@@ -8,9 +8,9 @@ This document is the authoritative contract for CI, release, and artifact delive
 
 `ci.yml` starts with a `changes` job that runs `scripts/ci/changed_paths.py`.
 That classifier maps the changed file list into stable routing categories:
-`docs`, `workflow`, `rust`, `web`, `docker`, `security`, and `release`.
-Scheduled and manual runs enable every category so periodic/manual validation
-stays broad.
+`docs`, `docs_check`, `workflow`, `rust_compile`, `rust_test`, `web`,
+`docker`, `security`, and `release`. Scheduled and manual runs enable every
+category so periodic/manual validation stays broad.
 
 Branch protection should require the stable aggregate `ci-gate` check. The
 heavy jobs below may be skipped when their category is false; `ci-gate` treats
@@ -27,17 +27,17 @@ jobs when their changed-path category is enabled:
 |-------|----------|---------|
 | Secret scan | always | `gitleaks/gitleaks-action@v3` full-history scan with existing historical findings baselined in `.gitleaksignore` |
 | Workflow lint | `workflow` | `actionlint` over `.github/workflows/` |
-| Frontend build | `rust`, `web`, `docker`, or `release` | `./.github/actions/build-gateway-admin` (`pnpm install --frozen-lockfile && pnpm build` in `apps/gateway-admin`) |
-| Compile | `rust` | `cargo check --workspace --all-features` |
-| Feature slices | `rust` | `cargo check -p labby --no-default-features --features <slice>` |
-| Extracted crate slices | `rust` | crate-specific `cargo check` commands for extracted runtime crates |
-| Generated docs freshness | `rust` | `just docs-check` |
-| Format | `rust` | `cargo fmt --all -- --check` |
-| Lint | `rust` | `cargo clippy --workspace --all-features -- -D warnings` |
+| Frontend build | `rust_compile`, `docs_check`, `web`, `docker`, or `release` | `./.github/actions/build-gateway-admin` (`pnpm install --frozen-lockfile && pnpm build` in `apps/gateway-admin`) |
+| Compile | `rust_compile` | `cargo check --workspace --all-features` |
+| Feature slices | `rust_compile` | `cargo check -p labby --no-default-features --features <slice>` |
+| Extracted crate slices | `rust_compile` | crate-specific `cargo check` commands for extracted runtime crates |
+| Generated docs freshness | `docs_check` | `just docs-check` |
+| Format | `rust_compile` | `cargo fmt --all -- --check` |
+| Lint | `rust_compile` | `cargo clippy --workspace --all-features -- -D warnings` |
 | Deny | `security` | `cargo deny check` |
-| Tests (Linux) | `rust` | `cargo nextest run --workspace --all-features --profile ci` on the self-hosted `linux-lab` runner for trusted events |
-| Tests (Linux fork PR fallback) | `rust` | same nextest run on `ubuntu-latest` for fork PRs |
-| Tests (Windows) | `rust` | same nextest run on the self-hosted `agent-os-lab` Windows runner, with fork PRs excluded from self-hosted runners |
+| Tests (Linux) | `rust_test` | `cargo nextest run --workspace --all-features --profile ci` on the self-hosted `linux-lab` runner for trusted events |
+| Tests (Linux fork PR fallback) | `rust_test` | same nextest run on `ubuntu-latest` for fork PRs |
+| Tests (Windows) | `rust_test` | same nextest run on the self-hosted `agent-os-lab` Windows runner, with fork PRs excluded from self-hosted runners |
 | Release smoke | `release` | `cargo build --workspace --all-features --release`; Windows release smoke still skips PRs via the matrix |
 | Container smoke | `docker` | Docker build using `config/Dockerfile` |
 

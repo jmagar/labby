@@ -12,10 +12,10 @@ This directory contains the GitHub Actions workflows for `lab`. The authoritativ
 ## CI Path Routing
 
 `ci.yml` starts with a `changes` job that runs `scripts/ci/changed_paths.py`.
-It emits `docs`, `workflow`, `rust`, `web`, `docker`, `security`, and
-`release` outputs. Scheduled and manual runs enable every category. Branch
-protection should require the stable `ci-gate` job; individual heavyweight jobs
-may be skipped when their category is false, and `ci-gate` treats
+It emits `docs`, `docs_check`, `workflow`, `rust_compile`, `rust_test`, `web`,
+`docker`, `security`, and `release` outputs. Scheduled and manual runs enable
+every category. Branch protection should require the stable `ci-gate` job;
+individual heavyweight jobs may be skipped when their category is false, and `ci-gate` treats
 `success|skipped` as acceptable.
 
 `secret-scan` remains always-on because secrets can be introduced in any path.
@@ -29,17 +29,17 @@ their category is enabled:
 |-----|----------|---------|
 | secret-scan | always | `gitleaks/gitleaks-action@v3` — full-history secret scan (SAST) with existing historical findings baselined in `.gitleaksignore` |
 | actionlint | `workflow` | `go run github.com/rhysd/actionlint/cmd/actionlint@latest` |
-| frontend-assets | `rust`, `web`, `docker`, or `release` | `pnpm install --frozen-lockfile && pnpm build` in `apps/gateway-admin` |
-| check | `rust` | `cargo check --workspace --all-features` |
-| feature-slices | `rust` | `cargo check -p labby --no-default-features --features <slice>` per slice (`gateway`/`marketplace`/`fs`/`deploy`/`acp_registry`) — catches cross-slice coupling (a shared module unconditionally referencing a feature-gated one). Gates compilation only; overrides the global `-D warnings` because per-slice dead-code warnings are expected. |
-| extracted-crate-slices | `rust` | crate-specific `cargo check` commands for extracted runtime crates |
-| fmt | `rust` | `cargo fmt --all -- --check` |
-| clippy | `rust` | `cargo clippy --workspace --all-features -- -D warnings` |
+| frontend-assets | `rust_compile`, `docs_check`, `web`, `docker`, or `release` | `pnpm install --frozen-lockfile && pnpm build` in `apps/gateway-admin` |
+| check | `rust_compile` | `cargo check --workspace --all-features` |
+| feature-slices | `rust_compile` | `cargo check -p labby --no-default-features --features <slice>` per slice (`gateway`/`marketplace`/`fs`/`deploy`/`acp_registry`) — catches cross-slice coupling (a shared module unconditionally referencing a feature-gated one). Gates compilation only; overrides the global `-D warnings` because per-slice dead-code warnings are expected. |
+| extracted-crate-slices | `rust_compile` | crate-specific `cargo check` commands for extracted runtime crates |
+| fmt | `rust_compile` | `cargo fmt --all -- --check` |
+| clippy | `rust_compile` | `cargo clippy --workspace --all-features -- -D warnings` |
 | deny | `security` | `cargo deny check` (via `EmbarkStudios/cargo-deny-action`) |
-| docs-check (name: `Generated docs`) | `rust` | `just docs-check` — the generated-docs freshness gate; fails if `docs/generated/*` (action catalog, MCP help, CLI help) drift from the registry. This is the only freshness check; there is **no** standalone `doc-freshness.yml` or `code-conventions.yml` workflow — only `ci.yml` and `release.yml` exist. |
-| test | `rust` | `cargo nextest run --workspace --all-features --profile ci` (`self-hosted` `linux-lab` runner for trusted events) |
-| test-fork | `rust` | same `cargo nextest` command on `ubuntu-latest` for fork PRs only |
-| test-windows | `rust` | same nextest run on the self-hosted `agent-os-lab` runner (label `windows-lab`); fork PRs never reach this runner |
+| docs-check (name: `Generated docs`) | `docs_check` | `just docs-check` — the generated-docs freshness gate; fails if `docs/generated/*` (action catalog, MCP help, CLI help) drift from the registry. This is the only freshness check; there is **no** standalone `doc-freshness.yml` or `code-conventions.yml` workflow — only `ci.yml` and `release.yml` exist. |
+| test | `rust_test` | `cargo nextest run --workspace --all-features --profile ci` (`self-hosted` `linux-lab` runner for trusted events) |
+| test-fork | `rust_test` | same `cargo nextest` command on `ubuntu-latest` for fork PRs only |
+| test-windows | `rust_test` | same nextest run on the self-hosted `agent-os-lab` runner (label `windows-lab`); fork PRs never reach this runner |
 | release-smoke | `release` | `cargo build --workspace --all-features --release` — Windows skipped on PRs (see below) |
 | container | `docker` | Docker build with `config/Dockerfile` |
 

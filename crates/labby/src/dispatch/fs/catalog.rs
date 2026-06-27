@@ -12,6 +12,7 @@ use labby_apis::core::action::{ActionSpec, ParamSpec};
 /// Full action catalog for the `fs` service. Includes both `fs.list`
 /// (MCP + HTTP) and `fs.preview` (HTTP-only). Built-in actions `help` and
 /// `schema` are handled inline in `dispatch.rs` and are not listed here.
+#[allow(dead_code)] // Read by fs dispatch/API adapters when the fs service is mounted.
 pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "fs.list",

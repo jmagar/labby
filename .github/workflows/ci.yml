@@ -35,8 +35,10 @@ jobs:
     outputs:
       all: ${{ steps.classify.outputs.all }}
       docs: ${{ steps.classify.outputs.docs }}
+      docs_check: ${{ steps.classify.outputs.docs_check }}
       workflow: ${{ steps.classify.outputs.workflow }}
-      rust: ${{ steps.classify.outputs.rust }}
+      rust_compile: ${{ steps.classify.outputs.rust_compile }}
+      rust_test: ${{ steps.classify.outputs.rust_test }}
       web: ${{ steps.classify.outputs.web }}
       docker: ${{ steps.classify.outputs.docker }}
       security: ${{ steps.classify.outputs.security }}
@@ -56,7 +58,7 @@ jobs:
           #!/usr/bin/env python3
           import argparse
           from pathlib import Path
-          keys = "all docs workflow rust web docker security release".split()
+          keys = "all docs docs_check workflow rust_compile rust_test web docker security release".split()
           parser = argparse.ArgumentParser()
           parser.add_argument("--event", required=True)
           parser.add_argument("--output", type=Path, required=True)
@@ -116,7 +118,8 @@ jobs:
     needs: changes
     if: >-
       ${{
-        needs.changes.outputs.rust == 'true' ||
+        needs.changes.outputs.rust_compile == 'true' ||
+        needs.changes.outputs.docs_check == 'true' ||
         needs.changes.outputs.web == 'true' ||
         needs.changes.outputs.docker == 'true' ||
         needs.changes.outputs.release == 'true'
@@ -136,7 +139,7 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     needs: changes
-    if: ${{ needs.changes.outputs.rust == 'true' }}
+    if: ${{ needs.changes.outputs.rust_compile == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.94.1
@@ -157,7 +160,7 @@ jobs:
     name: Check
     runs-on: ubuntu-latest
     needs: [changes, frontend-assets]
-    if: ${{ needs.changes.outputs.rust == 'true' }}
+    if: ${{ needs.changes.outputs.rust_compile == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -172,7 +175,7 @@ jobs:
     name: Feature slice (${{ matrix.slice }})
     runs-on: ubuntu-latest
     needs: [changes, frontend-assets]
-    if: ${{ needs.changes.outputs.rust == 'true' }}
+    if: ${{ needs.changes.outputs.rust_compile == 'true' }}
     # CLAUDE.md's intent is that each standalone product slice compiles on its
     # own (--no-default-features --features <slice>) to catch cross-slice
     # coupling — a shared module referencing a feature-gated one unconditionally.
@@ -203,7 +206,7 @@ jobs:
     name: Extracted crate slice (${{ matrix.name }})
     runs-on: ubuntu-latest
     needs: changes
-    if: ${{ needs.changes.outputs.rust == 'true' }}
+    if: ${{ needs.changes.outputs.rust_compile == 'true' }}
     env:
       RUSTFLAGS: ""
     strategy:
@@ -246,7 +249,7 @@ jobs:
     name: Generated docs
     runs-on: ubuntu-latest
     needs: [changes, frontend-assets]
-    if: ${{ needs.changes.outputs.rust == 'true' }}
+    if: ${{ needs.changes.outputs.docs_check == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -262,7 +265,7 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     needs: [changes, frontend-assets]
-    if: ${{ needs.changes.outputs.rust == 'true' }}
+    if: ${{ needs.changes.outputs.rust_compile == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -282,7 +285,7 @@ jobs:
     # Fork PRs are routed to `test-fork` on github-hosted Ubuntu.
     runs-on: [self-hosted, linux-lab]
     if: >-
-      needs.changes.outputs.rust == 'true' &&
+      needs.changes.outputs.rust_test == 'true' &&
       (
         github.event_name != 'pull_request' ||
         github.event.pull_request.head.repo.full_name == github.repository
@@ -312,7 +315,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [changes, frontend-assets]
     if: >-
-      needs.changes.outputs.rust == 'true' &&
+      needs.changes.outputs.rust_test == 'true' &&
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name != github.repository
     steps:
@@ -348,7 +351,7 @@ jobs:
     # rustup, cargo-nextest, NASM, CMake, and LLVM/libclang preinstalled and a
     # persistent warm target dir — no toolchain/cache actions needed.
     if: >-
-      needs.changes.outputs.rust == 'true' &&
+      needs.changes.outputs.rust_test == 'true' &&
       (
         github.event_name != 'pull_request' ||
         github.event.pull_request.head.repo.full_name == github.repository

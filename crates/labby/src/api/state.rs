@@ -77,6 +77,7 @@ pub struct AppState {
     /// Canonical absolute path of the configured workspace root, or
     /// `None` when `workspace.root` is invalid at startup.
     /// Backs the `dispatch/fs/` service (workspace filesystem browser).
+    #[allow(dead_code)] // Used by fs HTTP routes when that surface is mounted.
     pub workspace_root: Option<Arc<PathBuf>>,
     /// When true, `/v1/*` skips auth middleware for hosted UI requests.
     pub web_ui_auth_disabled: bool,
@@ -254,6 +255,7 @@ impl AppState {
     /// absolute path — the fs service assumes `starts_with` checks against
     /// this value are sound.
     #[must_use]
+    #[allow(dead_code)] // Called by `labby serve` when fs HTTP routes are enabled.
     pub fn with_workspace_root(mut self, root: PathBuf) -> Self {
         self.workspace_root = Some(Arc::new(root));
         self

@@ -20,6 +20,7 @@ use crate::dispatch::error::ToolError;
 #[cfg(feature = "fs")]
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 
+#[allow(dead_code)] // Used by fs dispatch/API adapters when the fs service is mounted.
 pub(crate) fn not_configured_error() -> ToolError {
     ToolError::Sdk {
         sdk_kind: "workspace_not_configured".to_string(),
@@ -33,12 +34,14 @@ pub(crate) fn not_configured_error() -> ToolError {
 /// Called once at startup (from `cli::serve`). Keep pure — no logging, no
 /// side effects. The returned path is what callers feed into
 /// `AppState::with_workspace_root`.
+#[allow(dead_code)] // Called during `labby serve` fs setup.
 pub fn resolve_workspace_root(config: &LabConfig) -> std::io::Result<PathBuf> {
     let root = crate::config::workspace_root_path(config)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))?;
     canonicalize_workspace_dir(root)
 }
 
+#[allow(dead_code)] // Helper for `resolve_workspace_root`.
 fn canonicalize_workspace_dir(path: PathBuf) -> std::io::Result<PathBuf> {
     if !path.is_absolute() {
         return Err(std::io::Error::new(
@@ -64,11 +67,13 @@ fn canonicalize_workspace_dir(path: PathBuf) -> std::io::Result<PathBuf> {
     Ok(canonical)
 }
 
+#[allow(dead_code)] // Read by MCP fs dispatch when no AppState is available.
 static WORKSPACE_ROOT: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 /// Return the canonical workspace root, or a structured error if config is
 /// invalid. First call canonicalizes; subsequent calls
 /// return the cached value.
+#[allow(dead_code)] // Read by MCP fs dispatch when the fs service is mounted.
 pub fn require_workspace_root() -> Result<&'static PathBuf, ToolError> {
     let cached = WORKSPACE_ROOT.get_or_init(|| {
         let cfg = crate::config::load_toml(&crate::config::toml_candidates()).ok()?;

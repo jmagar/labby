@@ -13,8 +13,10 @@ from pathlib import Path
 OUTPUT_KEYS = [
     "all",
     "docs",
+    "docs_check",
     "workflow",
-    "rust",
+    "rust_compile",
+    "rust_test",
     "web",
     "docker",
     "security",
@@ -42,6 +44,7 @@ def classify(event: str, paths: list[str]) -> dict[str, bool]:
         lambda p: starts(p, ".github/workflows/", ".github/actions/")
         or p
         in {
+            ".github/actionlint.yaml",
             "scripts/ci/changed_paths.py",
             "crates/labby/tests/ci_changed_paths.rs",
         },
@@ -51,8 +54,18 @@ def classify(event: str, paths: list[str]) -> dict[str, bool]:
         lambda p: starts(p, "docs/")
         or p in {"README.md", "CHANGELOG.md", "CLAUDE.md", "AGENTS.md", "GEMINI.md"},
     )
+    docs_check = docs or any_match(
+        paths,
+        lambda p: starts(p, "docs/generated/")
+        or p
+        in {
+            "crates/labby/tests/ci_changed_paths.rs",
+            "scripts/ci/changed_paths.py",
+            "Justfile",
+        },
+    )
     web = any_match(paths, lambda p: starts(p, "apps/gateway-admin/"))
-    rust = any_match(
+    rust_sources = any_match(
         paths,
         lambda p: starts(
             p,
@@ -60,7 +73,10 @@ def classify(event: str, paths: list[str]) -> dict[str, bool]:
             "tests/",
             ".cargo/",
         )
-        or p
+    )
+    rust_manifests = any_match(
+        paths,
+        lambda p: p
         in {
             "Cargo.toml",
             "Cargo.lock",
@@ -71,6 +87,14 @@ def classify(event: str, paths: list[str]) -> dict[str, bool]:
             "deny.toml",
         },
     )
+    rust_compile = rust_sources or rust_manifests
+    rust_test = rust_sources
+    security = any_match(
+        paths,
+        lambda p: p in {"Cargo.lock", "deny.toml", ".gitleaksignore"} or starts(p, ".cargo/"),
+    )
+    security = security or rust_sources
+    docs_check = docs_check or rust_sources
     docker_inputs = any_match(
         paths,
         lambda p: starts(p, "config/", "scripts/")
@@ -84,15 +108,16 @@ def classify(event: str, paths: list[str]) -> dict[str, bool]:
             "docker-compose.prod.yaml",
         },
     )
-    docker = rust or web or docker_inputs
-    security = rust or any_match(paths, lambda p: p in {"Cargo.lock", "deny.toml"} or starts(p, ".cargo/"))
-    release = rust or web or any_match(paths, lambda p: starts(p, "release/"))
+    docker = rust_compile or web or docker_inputs
+    release = rust_compile or web or any_match(paths, lambda p: starts(p, "release/"))
 
     result = {
         "all": False,
         "docs": docs,
+        "docs_check": docs_check,
         "workflow": workflow,
-        "rust": rust,
+        "rust_compile": rust_compile,
+        "rust_test": rust_test,
         "web": web,
         "docker": docker,
         "security": security,
