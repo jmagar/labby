@@ -9,36 +9,48 @@ This directory contains the GitHub Actions workflows for `lab`. The authoritativ
 | `workflows/ci.yml` | push/PR to `main`, weekly schedule, manual dispatch | Correctness, release-smoke, and container-smoke checks |
 | `workflows/release.yml` | push of `v*.*.*` tag, manual dispatch | Release builds, container image, and GitHub Release |
 
+## CI Path Routing
+
+`ci.yml` starts with a `changes` job that runs `scripts/ci/changed_paths.py`.
+It emits `docs`, `workflow`, `rust`, `web`, `docker`, `security`, and
+`release` outputs. Scheduled and manual runs enable every category. Branch
+protection should require the stable `ci-gate` job; individual heavyweight jobs
+may be skipped when their category is false, and `ci-gate` treats
+`success|skipped` as acceptable.
+
+`secret-scan` remains always-on because secrets can be introduced in any path.
+
 ## CI Checks (ci.yml)
 
-Every push and PR to `main` must pass all jobs:
+Every push and PR to `main` must pass `ci-gate`, which covers these jobs when
+their category is enabled:
 
-| Job | Command |
-|-----|---------|
-| secret-scan | `gitleaks/gitleaks-action@v3` — full-history secret scan (SAST) with existing historical findings baselined in `.gitleaksignore` |
-| actionlint | `go run github.com/rhysd/actionlint/cmd/actionlint@latest` |
-| frontend-assets | `pnpm install --frozen-lockfile && pnpm build` in `apps/gateway-admin` |
-| check | `cargo check --workspace --all-features` |
-| feature-slices | `cargo check -p labby --no-default-features --features <slice>` per slice (`gateway`/`marketplace`/`fs`/`deploy`/`acp_registry`) — catches cross-slice coupling (a shared module unconditionally referencing a feature-gated one). Gates compilation only; overrides the global `-D warnings` because per-slice dead-code warnings are expected. |
-| fmt | `cargo fmt --all -- --check` |
-| clippy | `cargo clippy --workspace --all-features -- -D warnings` |
-| deny | `cargo deny check` (via `EmbarkStudios/cargo-deny-action`) |
-| docs-check (name: `Generated docs`) | `just docs-check` — the generated-docs freshness gate; fails if `docs/generated/*` (action catalog, MCP help, CLI help) drift from the registry. This is the only freshness check; there is **no** standalone `doc-freshness.yml` or `code-conventions.yml` workflow — only `ci.yml` and `release.yml` exist. |
-| test | `cargo nextest run --workspace --all-features --profile ci` (`self-hosted` `linux-lab` runner for trusted events) |
-| test-fork | same `cargo nextest` command on `ubuntu-latest` for fork PRs only |
-| test-windows | same nextest run on the self-hosted `agent-os-lab` runner (label `windows-lab`); skipped on PRs — push/schedule/dispatch only |
-| release-smoke | `cargo build --workspace --all-features --release` — Linux always; Windows skipped on PRs (see below) |
-| container | Docker build with `config/Dockerfile` |
+| Job | Category | Command |
+|-----|----------|---------|
+| secret-scan | always | `gitleaks/gitleaks-action@v3` — full-history secret scan (SAST) with existing historical findings baselined in `.gitleaksignore` |
+| actionlint | `workflow` | `go run github.com/rhysd/actionlint/cmd/actionlint@latest` |
+| frontend-assets | `rust`, `web`, `docker`, or `release` | `pnpm install --frozen-lockfile && pnpm build` in `apps/gateway-admin` |
+| check | `rust` | `cargo check --workspace --all-features` |
+| feature-slices | `rust` | `cargo check -p labby --no-default-features --features <slice>` per slice (`gateway`/`marketplace`/`fs`/`deploy`/`acp_registry`) — catches cross-slice coupling (a shared module unconditionally referencing a feature-gated one). Gates compilation only; overrides the global `-D warnings` because per-slice dead-code warnings are expected. |
+| extracted-crate-slices | `rust` | crate-specific `cargo check` commands for extracted runtime crates |
+| fmt | `rust` | `cargo fmt --all -- --check` |
+| clippy | `rust` | `cargo clippy --workspace --all-features -- -D warnings` |
+| deny | `security` | `cargo deny check` (via `EmbarkStudios/cargo-deny-action`) |
+| docs-check (name: `Generated docs`) | `rust` | `just docs-check` — the generated-docs freshness gate; fails if `docs/generated/*` (action catalog, MCP help, CLI help) drift from the registry. This is the only freshness check; there is **no** standalone `doc-freshness.yml` or `code-conventions.yml` workflow — only `ci.yml` and `release.yml` exist. |
+| test | `rust` | `cargo nextest run --workspace --all-features --profile ci` (`self-hosted` `linux-lab` runner for trusted events) |
+| test-fork | `rust` | same `cargo nextest` command on `ubuntu-latest` for fork PRs only |
+| test-windows | `rust` | same nextest run on the self-hosted `agent-os-lab` runner (label `windows-lab`); fork PRs never reach this runner |
+| release-smoke | `release` | `cargo build --workspace --all-features --release` — Windows skipped on PRs (see below) |
+| container | `docker` | Docker build with `config/Dockerfile` |
 
 Most jobs run on `ubuntu-latest`. Linux test runs on `linux-lab` for trusted
 events and `test-fork` uses `ubuntu-latest` for fork PRs. Windows is a
-supported target; the release
-smoke matrix includes `windows-latest` to prove the native MSVC release binary
-builds, but ONLY on pushes to main, the weekly schedule, and manual dispatch —
-it is skipped on PRs (20-25 min of runner time per PR, and a Linux cross-check
-is not viable because aws-lc-sys requires a real Windows C toolchain even under
-`cargo check`). Windows breakage therefore surfaces on the post-merge main run,
-not in the PR.
+supported target; the release smoke matrix includes `windows-latest` to prove
+the native MSVC release binary builds, but ONLY when the `release` category is
+enabled and the event is not a PR. Windows release smoke is skipped on PRs
+(20-25 min of runner time per PR, and a Linux cross-check is not viable because
+aws-lc-sys requires a real Windows C toolchain even under `cargo check`).
+Windows breakage therefore surfaces on the post-merge main run, not in the PR.
 
 `RUSTFLAGS: -D warnings` is set globally — zero warnings permitted. The lone
 exception is the `feature-slices` job, which overrides it to `""` because
