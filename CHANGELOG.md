@@ -33,6 +33,9 @@ All notable changes to this project will be documented in this file.
 - **Incus bootstrap hardening** — TUN validation now accepts valid `/dev/net/tun`
   passthrough devices without reading an invalid `type` config key, and
   Tailscale auth-key cleanup can no longer mask the `tailscale up` exit status.
+- **Existing Incus container convergence** — bootstrapping an existing container
+  whose root disk uses a different Incus storage pool now derives and attaches a
+  rootless runtime profile instead of trying to replace the immutable root disk.
 - **Provisioning installer hardening** — the `uv` installer is downloaded to a
   checked temporary file before execution instead of piping directly into `sh`.
 - **Gateway admin protected routes** — the UI no longer falls back to
