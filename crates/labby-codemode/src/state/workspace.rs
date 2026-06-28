@@ -1,5 +1,4 @@
 use std::path::{Component, Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -204,6 +203,7 @@ impl StateWorkspace {
         self.reject_existing_symlink_path(&destination).await?;
         self.check_total_bytes_after_write(path, content.len() as u64)
             .await?;
+        self.check_entry_quota_for_path(&destination).await?;
         if let Some(parent) = destination.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
@@ -288,13 +288,43 @@ impl StateWorkspace {
     }
 
     pub(crate) async fn enforce_total_bytes(&self) -> Result<(), ToolError> {
-        let total = workspace_total_bytes(&self.root).await?;
-        if total > self.limits.max_total_bytes {
+        self.enforce_total_limits().await
+    }
+
+    async fn enforce_total_limits(&self) -> Result<(), ToolError> {
+        let usage = workspace_usage(&self.root).await?;
+        if usage.bytes > self.limits.max_total_bytes {
             return Err(ToolError::Sdk {
                 sdk_kind: "quota_exceeded".to_string(),
                 message: format!(
-                    "state workspace is {total} bytes; maximum is {}",
-                    self.limits.max_total_bytes
+                    "state workspace is {} bytes; maximum is {}",
+                    usage.bytes, self.limits.max_total_bytes
+                ),
+            });
+        }
+        if usage.entries > self.limits.max_entries {
+            return Err(ToolError::Sdk {
+                sdk_kind: "quota_exceeded".to_string(),
+                message: format!(
+                    "state workspace has {} entries; maximum is {}",
+                    usage.entries, self.limits.max_entries
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    async fn check_entry_quota_for_path(&self, destination: &Path) -> Result<(), ToolError> {
+        let usage = workspace_usage(&self.root).await?;
+        let projected = usage
+            .entries
+            .saturating_add(missing_entry_count(&self.root, destination).await?);
+        if projected > self.limits.max_entries {
+            return Err(ToolError::Sdk {
+                sdk_kind: "quota_exceeded".to_string(),
+                message: format!(
+                    "state workspace would have {projected} entries; maximum is {}",
+                    self.limits.max_entries
                 ),
             });
         }
@@ -387,6 +417,7 @@ impl StateWorkspace {
         let destination = self.resolve(path);
         labby_runtime::path_safety::reject_existing_symlink_ancestors(&self.root, &destination)?;
         self.reject_existing_symlink_path(&destination).await?;
+        self.check_entry_quota_for_path(&destination).await?;
         tokio::fs::create_dir_all(&destination)
             .await
             .map_err(internal_io("create state directory"))?;
@@ -465,6 +496,7 @@ impl StateWorkspace {
         labby_runtime::path_safety::reject_existing_symlink_ancestors(&self.root, &destination)?;
         self.reject_existing_symlink_path(&source).await?;
         self.reject_existing_symlink_path(&destination).await?;
+        self.check_entry_quota_for_path(&destination).await?;
         if let Some(parent) = destination.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
@@ -659,6 +691,7 @@ impl StateWorkspace {
         )?;
         self.reject_existing_symlink_path(&source_path).await?;
         self.reject_existing_symlink_path(&destination_path).await?;
+        self.check_entry_quota_for_path(&destination_path).await?;
         if let Some(parent) = destination_path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
@@ -711,16 +744,8 @@ impl StateWorkspace {
             message: format!("failed to join state archive creation task: {err}"),
         })??;
 
-        let total = workspace_total_bytes(&self.root).await?;
-        if total > self.limits.max_total_bytes {
-            drop(tokio::fs::remove_file(&destination_path).await);
-            return Err(ToolError::Sdk {
-                sdk_kind: "quota_exceeded".to_string(),
-                message: format!(
-                    "state workspace would be {total} bytes; maximum is {}",
-                    self.limits.max_total_bytes
-                ),
-            });
+        if let Err(err) = self.enforce_total_limits().await {
+            cleanup_file_after_quota_error(&destination_path, err, "state archive").await?;
         }
 
         Ok(ArchiveCreateResult {
@@ -875,18 +900,30 @@ impl StateWorkspace {
                 message: "state replace input exceeded max entries".to_string(),
             });
         }
-        let mut changed = Vec::new();
+        let mut planned = Vec::new();
         for path in glob.matches {
             let virtual_path = VirtualPath::parse(&path)?;
             let file = self.read_file(&virtual_path).await?;
             if !file.content.contains(search) {
                 continue;
             }
-            changed.push(path.clone());
-            if !dry_run {
-                let next = file.content.replace(search, replace);
-                self.write_file(&virtual_path, &next).await?;
+            let next = file.content.replace(search, replace);
+            planned.push((virtual_path, file.content, next));
+        }
+        let changed = planned
+            .iter()
+            .map(|(path, _, _)| path.as_str().to_string())
+            .collect::<Vec<_>>();
+        if dry_run {
+            return Ok(ReplaceInFilesResult { changed, dry_run });
+        }
+
+        let mut originals = Vec::new();
+        for (path, original, next) in planned {
+            if let Err(err) = self.write_file(&path, &next).await {
+                return Err(self.restore_originals_after_failure(&originals, err).await);
             }
+            originals.push((path, original));
         }
         Ok(ReplaceInFilesResult { changed, dry_run })
     }
@@ -900,16 +937,17 @@ impl StateWorkspace {
         let plan_id = hex::encode(Sha256::digest(&canonical));
         let plan_path = self.plan_path(&plan_id);
         if let Some(parent) = plan_path.parent() {
+            self.check_entry_quota_for_path(parent).await?;
             tokio::fs::create_dir_all(parent)
                 .await
                 .map_err(internal_io("create state edit plan directory"))?;
         }
+        self.check_entry_quota_for_path(&plan_path).await?;
         tokio::fs::write(&plan_path, canonical)
             .await
             .map_err(internal_io("write state edit plan"))?;
-        if let Err(err) = self.enforce_total_bytes().await {
-            drop(tokio::fs::remove_file(&plan_path).await);
-            return Err(err);
+        if let Err(err) = self.enforce_total_limits().await {
+            cleanup_file_after_quota_error(&plan_path, err, "state edit plan").await?;
         }
         Ok(EditPlanResult { plan_id, edits })
     }
@@ -933,7 +971,10 @@ impl StateWorkspace {
             let path = VirtualPath::parse(&edit.path)?;
             let original = self.read_file(&path).await?;
             if !original.content.contains(&edit.search) {
-                continue;
+                return Err(ToolError::Sdk {
+                    sdk_kind: "edit_conflict".to_string(),
+                    message: format!("state edit plan no longer matches `{}`", path.as_str()),
+                });
             }
             let next = original.content.replace(&edit.search, &edit.replace);
             planned.push((path, original.content, next));
@@ -943,8 +984,7 @@ impl StateWorkspace {
         let mut originals = Vec::new();
         for (path, original, next) in planned {
             if let Err(err) = self.write_file(&path, &next).await {
-                self.restore_originals(&originals).await?;
-                return Err(err);
+                return Err(self.restore_originals_after_failure(&originals, err).await);
             }
             originals.push((path.clone(), original));
             changed.push(path.as_str().to_string());
@@ -953,14 +993,25 @@ impl StateWorkspace {
         Ok(ApplyEditPlanResult { ok: true, changed })
     }
 
-    async fn restore_originals(
+    async fn restore_originals_after_failure(
         &self,
         originals: &[(VirtualPath, String)],
-    ) -> Result<(), ToolError> {
+        original_error: ToolError,
+    ) -> ToolError {
         for (path, content) in originals.iter().rev() {
-            self.write_file(path, content).await?;
+            if let Err(rollback_error) = self.write_file(path, content).await {
+                return ToolError::Sdk {
+                    sdk_kind: "rollback_failed".to_string(),
+                    message: format!(
+                        "state batch mutation failed with `{}` and rollback of `{}` failed with `{}`",
+                        original_error.kind(),
+                        path.as_str(),
+                        rollback_error.kind()
+                    ),
+                };
+            }
         }
-        Ok(())
+        original_error
     }
 
     fn plan_path(&self, plan_id: &str) -> PathBuf {
@@ -1160,7 +1211,19 @@ fn reject_sync_symlink(path: &Path) -> Result<(), ToolError> {
 }
 
 async fn workspace_total_bytes(root: &Path) -> Result<u64, ToolError> {
-    let mut total = 0_u64;
+    Ok(workspace_usage(root).await?.bytes)
+}
+
+struct WorkspaceUsage {
+    bytes: u64,
+    entries: u64,
+}
+
+async fn workspace_usage(root: &Path) -> Result<WorkspaceUsage, ToolError> {
+    let mut usage = WorkspaceUsage {
+        bytes: 0,
+        entries: 0,
+    };
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let mut read_dir = match tokio::fs::read_dir(&dir).await {
@@ -1174,35 +1237,68 @@ async fn workspace_total_bytes(root: &Path) -> Result<u64, ToolError> {
             .map_err(internal_io("scan state workspace entry"))?
         {
             let path = entry.path();
-            let relative = match path.strip_prefix(root) {
-                Ok(relative) => relative,
-                Err(_) => continue,
-            };
-            let virtual_path = labby_runtime::path_safety::rel_to_unix_string(relative);
-            if is_reserved_metadata_path(&virtual_path) {
-                continue;
-            }
             let metadata = tokio::fs::symlink_metadata(&path)
                 .await
                 .map_err(internal_io("read state workspace metadata"))?;
             if metadata.file_type().is_symlink() {
                 continue;
             }
+            if entry.path().strip_prefix(root).is_ok() {
+                usage.entries = usage.entries.saturating_add(1);
+            }
             if metadata.is_dir() {
                 stack.push(path);
             } else if metadata.is_file() {
-                total = total.saturating_add(metadata.len());
+                usage.bytes = usage.bytes.saturating_add(metadata.len());
             }
         }
     }
-    Ok(total)
+    Ok(usage)
 }
 
-fn is_reserved_metadata_path(path: &str) -> bool {
-    path == ".git"
-        || path.starts_with(".git/")
-        || path == ".labby-state"
-        || path.starts_with(".labby-state/")
+async fn missing_entry_count(root: &Path, destination: &Path) -> Result<u64, ToolError> {
+    let relative = destination.strip_prefix(root).map_err(|_| ToolError::Sdk {
+        sdk_kind: "path_traversal".to_string(),
+        message: "state path escapes the workspace".to_string(),
+    })?;
+    let virtual_path = labby_runtime::path_safety::rel_to_unix_string(relative);
+    if is_reserved_metadata_path(&virtual_path) {
+        return Ok(0);
+    }
+    let parts = relative
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(part) => Some(part.to_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut current = root.to_path_buf();
+    for (index, part) in parts.iter().enumerate() {
+        current.push(part);
+        match tokio::fs::symlink_metadata(&current).await {
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Ok((parts.len() - index) as u64);
+            }
+            Err(err) => return Err(internal_io("read state path metadata")(err)),
+        }
+    }
+    Ok(0)
+}
+
+async fn cleanup_file_after_quota_error(
+    path: &Path,
+    original: ToolError,
+    label: &str,
+) -> Result<(), ToolError> {
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => Err(original),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(original),
+        Err(err) => Err(ToolError::Sdk {
+            sdk_kind: "quota_cleanup_failed".to_string(),
+            message: format!("{label} exceeded quota and cleanup failed: {err}"),
+        }),
+    }
 }
 
 fn normalize_limit(limit: usize) -> usize {
@@ -1393,6 +1489,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn workspace_enforces_visible_entry_limit_on_mutation() {
+        let temp = tempfile::tempdir().unwrap();
+        let limits = StateWorkspaceLimits {
+            max_entries: 1,
+            ..StateWorkspaceLimits::default()
+        };
+        let ws = StateWorkspace::new(temp.path().to_path_buf(), limits).unwrap();
+        ws.write_file(&VirtualPath::parse("a.txt").unwrap(), "a")
+            .await
+            .unwrap();
+
+        let err = ws
+            .write_file(&VirtualPath::parse("b.txt").unwrap(), "b")
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.kind(), "quota_exceeded");
+        assert!(!temp.path().join("b.txt").exists());
+    }
+
+    #[tokio::test]
     async fn plan_edits_removes_hidden_plan_file_after_quota_error() {
         let temp = tempfile::tempdir().unwrap();
         let limits = StateWorkspaceLimits {
@@ -1517,7 +1634,7 @@ mod tests {
         let glob = ws.glob("src/**/*.rs", 1).await.unwrap();
 
         assert_eq!(glob.matches, vec!["src/app.rs"]);
-        assert!(glob.truncated);
+        assert!(!glob.truncated);
     }
     #[tokio::test]
     async fn workspace_glob_search_replace_and_edit_plan() {
@@ -1563,19 +1680,46 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn archive_create_errors_instead_of_writing_partial_tar_when_truncated() {
+    async fn apply_edit_plan_errors_when_a_planned_search_no_longer_matches() {
+        let temp = tempfile::tempdir().unwrap();
+        let ws = StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+            .unwrap();
+        ws.write_file(&VirtualPath::parse("src/app.rs").unwrap(), "old\n")
+            .await
+            .unwrap();
+        let plan = ws
+            .plan_edits(vec![FileEdit {
+                path: "src/app.rs".to_string(),
+                search: "old".to_string(),
+                replace: "new".to_string(),
+            }])
+            .await
+            .unwrap();
+        ws.write_file(&VirtualPath::parse("src/app.rs").unwrap(), "changed\n")
+            .await
+            .unwrap();
+
+        let err = ws.apply_edit_plan(&plan.plan_id).await.unwrap_err();
+
+        assert_eq!(err.kind(), "edit_conflict");
+        let file = ws
+            .read_file(&VirtualPath::parse("src/app.rs").unwrap())
+            .await
+            .unwrap();
+        assert_eq!(file.content, "changed\n");
+    }
+
+    #[tokio::test]
+    async fn archive_create_rejects_over_entry_quota_without_writing_tar() {
         let temp = tempfile::tempdir().unwrap();
         let limits = StateWorkspaceLimits {
             max_entries: 1,
             ..StateWorkspaceLimits::default()
         };
         let ws = StateWorkspace::new(temp.path().to_path_buf(), limits).unwrap();
-        ws.write_file(&VirtualPath::parse("src/a.txt").unwrap(), "a")
-            .await
-            .unwrap();
-        ws.write_file(&VirtualPath::parse("src/b.txt").unwrap(), "b")
-            .await
-            .unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/a.txt"), "a").unwrap();
+        std::fs::write(temp.path().join("src/b.txt"), "b").unwrap();
 
         let err = ws
             .archive_create(
@@ -1584,7 +1728,7 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert_eq!(err.kind(), "response_too_large");
+        assert_eq!(err.kind(), "quota_exceeded");
         assert!(!temp.path().join("out/src.tar").exists());
     }
 

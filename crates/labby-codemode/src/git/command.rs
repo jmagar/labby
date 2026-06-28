@@ -20,7 +20,7 @@ pub(crate) struct GitCommandSpec {
 impl GitCommandSpec {
     pub(crate) fn status() -> Self {
         Self {
-            args: git_base_args(["status", "--short"]),
+            args: git_base_args(["status", "--short", "--", ".", ":(exclude).labby-state"]),
             cwd: None,
             remote_preflight: None,
             push_remote_preflight: None,
@@ -109,6 +109,9 @@ impl GitCommandSpec {
                 let mut args = git_base_args(["diff", "--"]);
                 if let Some(path) = params.path {
                     args.push(VirtualPath::parse(&path)?.as_str().to_string());
+                } else {
+                    args.push(".".to_string());
+                    args.push(":(exclude).labby-state".to_string());
                 }
                 Ok(Self {
                     args,
@@ -443,7 +446,10 @@ mod tests {
                 "-c",
                 "protocol.ext.allow=never",
                 "status",
-                "--short"
+                "--short",
+                "--",
+                ".",
+                ":(exclude).labby-state"
             ]
         );
         assert_eq!(cmd.cwd, None);

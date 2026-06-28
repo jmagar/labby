@@ -32,13 +32,17 @@ pub(crate) async fn dispatch_git_method(
     if let Some(destination) = &spec.clone_destination {
         ensure_clone_destination_allowed(&workdir, destination).await?;
     }
-    let stdout = run_git(&workdir, &spec.args).await?;
+    let mut stdout = run_git(&workdir, &spec.args).await?;
+    if matches!(method, "status" | "diff") {
+        stdout = scrub_git_reserved_metadata(&stdout);
+    }
     if git_method_mutates_workspace(method) {
         if let Err(err) = workspace.enforce_total_bytes().await {
             if let Some(destination) = &spec.clone_destination {
-                cleanup_clone_destination(&workdir, destination).await;
+                cleanup_clone_destination(&workdir, destination, err).await?;
+            } else {
+                return Err(err);
             }
-            return Err(err);
         }
     }
     if method == "remoteList" {
@@ -123,17 +127,39 @@ async fn ensure_clone_destination_allowed(
 async fn cleanup_clone_destination(
     workspace_root: &Path,
     destination: &crate::state::path::VirtualPath,
-) {
+    original: ToolError,
+) -> Result<(), ToolError> {
     let path = workspace_root.join(destination.as_str());
-    match tokio::fs::symlink_metadata(&path).await {
+    let cleanup = match tokio::fs::symlink_metadata(&path).await {
         Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
-            drop(tokio::fs::remove_dir_all(&path).await);
+            tokio::fs::remove_dir_all(&path).await
         }
         Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
-            drop(tokio::fs::remove_file(&path).await);
+            tokio::fs::remove_file(&path).await
         }
-        _ => {}
-    }
+        Ok(_) | Err(_) => return Err(original),
+    };
+    cleanup.map_err(|err| ToolError::Sdk {
+        sdk_kind: "quota_cleanup_failed".to_string(),
+        message: format!(
+            "git clone exceeded quota and cleanup of `{}` failed: {err}",
+            destination.as_str()
+        ),
+    })?;
+    Err(original)
+}
+
+fn scrub_git_reserved_metadata(stdout: &str) -> String {
+    stdout
+        .lines()
+        .filter(|line| !line_mentions_reserved_metadata(line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn line_mentions_reserved_metadata(line: &str) -> bool {
+    line.split_whitespace()
+        .any(|part| part == ".labby-state" || part.starts_with(".labby-state/"))
 }
 
 #[derive(Clone, Copy)]
@@ -256,9 +282,17 @@ async fn run_capped_command(mut command: Command) -> Result<CappedGitOutput, Too
     })?;
     Ok(CappedGitOutput {
         status,
-        stdout: stdout_result.as_ref().expect("stdout result set").bytes.clone(),
+        stdout: stdout_result
+            .as_ref()
+            .expect("stdout result set")
+            .bytes
+            .clone(),
         stdout_truncated: stdout_result.expect("stdout result set").truncated,
-        stderr: stderr_result.as_ref().expect("stderr result set").bytes.clone(),
+        stderr: stderr_result
+            .as_ref()
+            .expect("stderr result set")
+            .bytes
+            .clone(),
         stderr_truncated: stderr_result.expect("stderr result set").truncated,
     })
 }
@@ -563,6 +597,34 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.kind(), "symlink_rejected");
+    }
+
+    #[tokio::test]
+    async fn git_status_hides_reserved_runtime_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace =
+            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+                .unwrap();
+        dispatch_git_method(&workspace, "init", json!({}))
+            .await
+            .unwrap();
+        std::fs::create_dir_all(temp.path().join(".labby-state/plans")).unwrap();
+        std::fs::write(temp.path().join(".labby-state/plans/abc.json"), "{}").unwrap();
+        workspace
+            .write_file(
+                &crate::state::path::VirtualPath::parse("visible.txt").unwrap(),
+                "visible\n",
+            )
+            .await
+            .unwrap();
+
+        let status = dispatch_git_method(&workspace, "status", json!({}))
+            .await
+            .unwrap();
+        let stdout = status["stdout"].as_str().unwrap();
+
+        assert!(stdout.contains("visible.txt"));
+        assert!(!stdout.contains(".labby-state"));
     }
 
     #[cfg(unix)]
