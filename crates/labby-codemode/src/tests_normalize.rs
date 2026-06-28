@@ -389,6 +389,16 @@ fn normalize_user_code_strips_arrow_expression_trailing_semicolon() {
 }
 
 #[test]
+fn normalize_user_code_does_not_strip_https_url_inside_arrow_body() {
+    let source = r#"async () => { return { url: "https://github.com/jmagar/example.git" }; }"#;
+    let result = super::normalize_user_code(source);
+    assert!(
+        result.contains("https://github.com/jmagar/example.git"),
+        "URL string must survive normalization, got: {result}"
+    );
+}
+
+#[test]
 fn normalize_user_code_finds_export_default_after_prologue() {
     // A module with prologue statements before `export default` used to fall
     // through to the loose-wrap path (requiring exactly one module item),

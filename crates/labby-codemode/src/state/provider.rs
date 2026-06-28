@@ -18,6 +18,51 @@ struct WriteFileParams {
 }
 
 #[derive(Deserialize)]
+struct OptionalRecursivePathParams {
+    path: String,
+    #[serde(default)]
+    recursive: bool,
+}
+
+#[derive(Deserialize)]
+struct FromToParams {
+    from: String,
+    to: String,
+}
+
+#[derive(Deserialize)]
+struct WalkTreeParams {
+    path: String,
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct WriteJsonParams {
+    path: String,
+    value: Value,
+    #[serde(default)]
+    pretty: bool,
+}
+
+#[derive(Deserialize)]
+struct HashFileParams {
+    path: String,
+    algorithm: String,
+}
+
+#[derive(Deserialize)]
+struct ArchiveCreateParams {
+    source: String,
+    destination: String,
+}
+
+#[derive(Deserialize)]
+struct ArchiveListParams {
+    path: String,
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
 struct GlobParams {
     pattern: String,
     limit: Option<usize>,
@@ -70,9 +115,125 @@ pub(crate) async fn dispatch_state_method(
                 .await?;
             Ok(json!({ "ok": true, "path": params.path }))
         }
+        "appendFile" => {
+            let params: WriteFileParams = serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace
+                .append_file(&VirtualPath::parse(&params.path)?, &params.content)
+                .await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "exists" => {
+            let params: PathParams = serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace.exists(&VirtualPath::parse(&params.path)?).await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "stat" => {
+            let params: PathParams = serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace.stat(&VirtualPath::parse(&params.path)?).await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "mkdir" => {
+            let params: PathParams = serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace.mkdir(&VirtualPath::parse(&params.path)?).await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "rm" => {
+            let params: OptionalRecursivePathParams =
+                serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace
+                .remove(&VirtualPath::parse(&params.path)?, params.recursive)
+                .await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "cp" => {
+            let params: FromToParams = serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace
+                .copy(
+                    &VirtualPath::parse(&params.from)?,
+                    &VirtualPath::parse(&params.to)?,
+                )
+                .await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "mv" => {
+            let params: FromToParams = serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace
+                .move_path(
+                    &VirtualPath::parse(&params.from)?,
+                    &VirtualPath::parse(&params.to)?,
+                )
+                .await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "walkTree" | "summarizeTree" => {
+            let params: WalkTreeParams = serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace
+                .walk_tree(
+                    &VirtualPath::parse_read_scope(&params.path)?,
+                    params.limit.unwrap_or(default_search_limit()),
+                )
+                .await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "readJson" => {
+            let params: PathParams = serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace
+                .read_json(&VirtualPath::parse(&params.path)?)
+                .await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "writeJson" => {
+            let params: WriteJsonParams = serde_json::from_value(params).map_err(invalid_params)?;
+            workspace
+                .write_json(
+                    &VirtualPath::parse(&params.path)?,
+                    &params.value,
+                    params.pretty,
+                )
+                .await?;
+            Ok(json!({ "ok": true, "path": params.path }))
+        }
+        "hashFile" => {
+            let params: HashFileParams = serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace
+                .hash_file(&VirtualPath::parse(&params.path)?, &params.algorithm)
+                .await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "detectFile" => {
+            let params: PathParams = serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace
+                .detect_file(&VirtualPath::parse(&params.path)?)
+                .await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "archiveCreate" => {
+            let params: ArchiveCreateParams =
+                serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace
+                .archive_create(
+                    &VirtualPath::parse(&params.source)?,
+                    &VirtualPath::parse(&params.destination)?,
+                )
+                .await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "archiveList" => {
+            let params: ArchiveListParams =
+                serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace
+                .archive_list(
+                    &VirtualPath::parse_read_scope(&params.path)?,
+                    params.limit.unwrap_or(default_search_limit()),
+                )
+                .await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
         "list" | "readdir" => {
             let params: PathParams = serde_json::from_value(params).map_err(invalid_params)?;
-            let result = workspace.list(&VirtualPath::parse(&params.path)?).await?;
+            let result = workspace
+                .list(&VirtualPath::parse_read_scope(&params.path)?)
+                .await?;
             serde_json::to_value(result).map_err(serialize_error)
         }
         "glob" => {
@@ -178,6 +339,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_and_walk_accept_workspace_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace =
+            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+                .unwrap();
+        dispatch_state_method(
+            &workspace,
+            "writeFile",
+            json!({"path": "src/app.rs", "content": "fn main() {}\n"}),
+        )
+        .await
+        .unwrap();
+
+        let listed = dispatch_state_method(&workspace, "list", json!({"path": "/"}))
+            .await
+            .unwrap();
+        assert_eq!(listed["entries"], json!(["src"]));
+
+        let walked = dispatch_state_method(&workspace, "walkTree", json!({"path": "."}))
+            .await
+            .unwrap();
+        let paths = walked["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["path"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert!(paths.contains(&"src"));
+        assert!(paths.contains(&"src/app.rs"));
+    }
+
+    #[tokio::test]
+    async fn write_dispatch_rejects_git_metadata_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace =
+            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+                .unwrap();
+
+        let err = dispatch_state_method(
+            &workspace,
+            "writeFile",
+            json!({
+                "path": "repo/.git/config",
+                "content": "[credential]\n\thelper = !echo owned\n"
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.kind(), "permission_denied");
+        assert!(!temp.path().join("repo/.git/config").exists());
+    }
+
+    #[tokio::test]
     async fn search_replace_plan_and_apply_dispatch() {
         let temp = tempfile::tempdir().unwrap();
         let workspace =
@@ -229,5 +444,243 @@ mod tests {
             .await
             .unwrap();
         assert!(result["content"].as_str().unwrap().contains("eprintln"));
+    }
+
+    #[tokio::test]
+    async fn apply_edit_plan_leaves_no_hidden_rollback_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace =
+            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+                .unwrap();
+        dispatch_state_method(
+            &workspace,
+            "writeFile",
+            json!({"path": "src/app.rs", "content": "println!(\"hi\");\n"}),
+        )
+        .await
+        .unwrap();
+
+        let plan = dispatch_state_method(
+            &workspace,
+            "planEdits",
+            json!({"edits": [{ "path": "src/app.rs", "search": "println", "replace": "eprintln" }]}),
+        )
+        .await
+        .unwrap();
+        dispatch_state_method(
+            &workspace,
+            "applyEditPlan",
+            json!({"planId": plan["plan_id"].as_str().unwrap()}),
+        )
+        .await
+        .unwrap();
+
+        assert!(!temp.path().join(".labby-state/rollback").exists());
+    }
+
+    #[tokio::test]
+    async fn plan_edits_enforces_hidden_state_quota() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = StateWorkspace::new(
+            temp.path().to_path_buf(),
+            StateWorkspaceLimits {
+                max_file_bytes: 1024 * 1024,
+                max_total_bytes: 16,
+                max_entries: 10_000,
+                max_result_bytes: 1024 * 1024,
+            },
+        )
+        .unwrap();
+
+        let err = dispatch_state_method(
+            &workspace,
+            "planEdits",
+            json!({"edits": [{ "path": "src/app.rs", "search": "println", "replace": "eprintln" }]}),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.kind(), "quota_exceeded");
+    }
+
+    #[tokio::test]
+    async fn v2_state_filesystem_methods_round_trip() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace =
+            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+                .unwrap();
+
+        dispatch_state_method(&workspace, "mkdir", json!({"path": "src"}))
+            .await
+            .unwrap();
+        dispatch_state_method(
+            &workspace,
+            "writeFile",
+            json!({"path": "src/app.rs", "content": "fn main() {}\n"}),
+        )
+        .await
+        .unwrap();
+        dispatch_state_method(
+            &workspace,
+            "appendFile",
+            json!({"path": "src/app.rs", "content": "// tail\n"}),
+        )
+        .await
+        .unwrap();
+
+        let stat = dispatch_state_method(&workspace, "stat", json!({"path": "src/app.rs"}))
+            .await
+            .unwrap();
+        assert_eq!(stat["kind"], "file");
+        assert!(stat["bytes"].as_u64().unwrap() > 0);
+
+        let exists = dispatch_state_method(&workspace, "exists", json!({"path": "src/app.rs"}))
+            .await
+            .unwrap();
+        assert_eq!(exists["exists"], true);
+
+        dispatch_state_method(
+            &workspace,
+            "cp",
+            json!({"from": "src/app.rs", "to": "src/copy.rs"}),
+        )
+        .await
+        .unwrap();
+        dispatch_state_method(
+            &workspace,
+            "mv",
+            json!({"from": "src/copy.rs", "to": "src/moved.rs"}),
+        )
+        .await
+        .unwrap();
+        let tree =
+            dispatch_state_method(&workspace, "walkTree", json!({"path": "src", "limit": 10}))
+                .await
+                .unwrap();
+        assert!(
+            tree["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["path"] == "src/moved.rs")
+        );
+
+        dispatch_state_method(&workspace, "rm", json!({"path": "src/moved.rs"}))
+            .await
+            .unwrap();
+        let gone = dispatch_state_method(&workspace, "exists", json!({"path": "src/moved.rs"}))
+            .await
+            .unwrap();
+        assert_eq!(gone["exists"], false);
+    }
+
+    #[tokio::test]
+    async fn v2_state_rejects_lstat_alias() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace =
+            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+                .unwrap();
+
+        let err = dispatch_state_method(&workspace, "lstat", json!({"path": "src/app.rs"}))
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), "unknown_tool");
+    }
+
+    #[tokio::test]
+    async fn v2_json_hash_and_detect_methods_round_trip() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace =
+            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+                .unwrap();
+
+        dispatch_state_method(
+            &workspace,
+            "writeJson",
+            json!({
+                "path": "data/config.json",
+                "value": {"enabled": true, "count": 2},
+                "pretty": true
+            }),
+        )
+        .await
+        .unwrap();
+
+        let json_value =
+            dispatch_state_method(&workspace, "readJson", json!({"path": "data/config.json"}))
+                .await
+                .unwrap();
+        assert_eq!(json_value["value"]["enabled"], true);
+
+        let hash = dispatch_state_method(
+            &workspace,
+            "hashFile",
+            json!({"path": "data/config.json", "algorithm": "sha256"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(hash["algorithm"], "sha256");
+        assert_eq!(hash["hex"].as_str().unwrap().len(), 64);
+
+        let detected = dispatch_state_method(
+            &workspace,
+            "detectFile",
+            json!({"path": "data/config.json"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(detected["extension"], "json");
+        assert_eq!(detected["text"], true);
+    }
+
+    #[tokio::test]
+    async fn v2_archive_create_and_list_stays_in_workspace() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace =
+            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+                .unwrap();
+
+        dispatch_state_method(
+            &workspace,
+            "writeFile",
+            json!({"path": "src/a.txt", "content": "a"}),
+        )
+        .await
+        .unwrap();
+        dispatch_state_method(
+            &workspace,
+            "writeFile",
+            json!({"path": "src/b.txt", "content": "b"}),
+        )
+        .await
+        .unwrap();
+        dispatch_state_method(
+            &workspace,
+            "archiveCreate",
+            json!({"source": "src", "destination": "out/src.tar"}),
+        )
+        .await
+        .unwrap();
+        let listing = dispatch_state_method(
+            &workspace,
+            "archiveList",
+            json!({"path": "out/src.tar", "limit": 10}),
+        )
+        .await
+        .unwrap();
+        assert!(
+            listing["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry == "a.txt")
+        );
+        assert!(
+            listing["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry == "b.txt")
+        );
     }
 }

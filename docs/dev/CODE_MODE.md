@@ -28,15 +28,21 @@ Inside the sandbox:
 
 ### Local State And Git Providers
 
-Code Mode also exposes two local sandbox globals: `state` and `git`. They are
-not upstream MCP tools and they do not grant host filesystem or shell access.
-All paths are virtual workspace paths rooted inside `$LAB_HOME/code-mode-workspaces/`.
+Unscoped admin/trusted-local Code Mode also exposes two local sandbox globals:
+`state` and `git`. They are not upstream MCP tools and they do not grant host
+filesystem or shell access. Route-scoped Code Mode runs do not receive these
+globals, and hand-written `callTool("state::...")` / `callTool("git::...")`
+calls are denied at dispatch time. All paths are virtual workspace paths rooted
+inside `$LAB_HOME/code-mode-workspaces/`. Parameters use the documented
+JavaScript names; result payloads preserve the existing serialized Rust field
+names where those names are already part of the Code Mode contract.
 
 V1 state methods:
 
 - `state.readFile({ path })`
 - `state.writeFile({ path, content })`
-- `state.list({ path })` / `state.readdir({ path })`
+- `state.list({ path })` / `state.readdir({ path })`; use `"/"` or `"."` for
+  the workspace root
 - `state.glob({ pattern, limit })`
 - `state.searchFiles({ pattern, query, limit })`
 - `state.replaceInFiles({ pattern, search, replace, dryRun })`
@@ -45,15 +51,47 @@ V1 state methods:
 
 V1 git methods:
 
-- `git.init({})`
-- `git.status({})`
-- `git.add({ path })`
-- `git.commit({ message, authorName, authorEmail })`
-- `git.log({ limit })`
-- `git.diff({ path })`
+- `git.init({ cwd })`
+- `git.status({ cwd })`
+- `git.add({ path, cwd })`
+- `git.commit({ message, authorName, authorEmail, cwd })`
+- `git.log({ limit, cwd })`
+- `git.diff({ path, cwd })`
 
-Remote git operations, hidden git auth, checkout/branch/remotes, archive/hash/detect,
-advanced JSON helpers, and broad file-management APIs are not V1.
+V2 state methods add:
+
+- `state.appendFile({ path, content })`
+- `state.exists({ path })`
+- `state.stat({ path })`
+- `state.mkdir({ path })`
+- `state.rm({ path, recursive })`
+- `state.cp({ from, to })` for files
+- `state.mv({ from, to })`
+- `state.walkTree({ path, limit })` / `state.summarizeTree({ path, limit })`
+- `state.readJson({ path })`
+- `state.writeJson({ path, value, pretty })`
+- `state.hashFile({ path, algorithm: "sha256" })`
+- `state.detectFile({ path })`
+- `state.archiveCreate({ source, destination })` to a `.tar` destination
+- `state.archiveList({ path, limit })`
+
+V2 git methods add:
+
+- `git.branch({ name, delete, list, cwd })`; omit `name` or pass `list: true`
+  to list branches
+- `git.checkout({ ref, create, cwd })`
+- `git.remoteList({ cwd })` returns `stdout` and structured `remotes`
+- `git.remoteAdd({ name, url, cwd })`
+- `git.remoteRemove({ name, cwd })`
+- `git.clone({ url, directory, cwd })`
+
+Remote git URLs must be explicit `https://github.com/...` URLs without embedded
+credentials. Labby does not inject hidden credentials or host git config into
+Code Mode. Use `cwd` to run git commands inside a workspace-relative child repo,
+for example after cloning into `directory: "repo"`. Clones are shallow
+(`--depth 1`). V2 does not expose `fetch`, `pull`, or `push`; those remote
+mutation methods are deferred until Code Mode has an explicit transaction and
+credential model for them.
 
 Example:
 
@@ -422,10 +460,13 @@ run, so isolation holds by construction.
   fresh `javy::Runtime` → run → emit `done`/`error` → reset and read the next
   `start`. It exits only when the parent closes stdin.
 - **Per-execution isolation.** Each run resets the `callTool` sequence counter and
-  creates a fresh, empty per-execution working-directory jail (removing the prior
-  one), so a long-lived process never accumulates JS or filesystem state across
-  callers. The 64 MiB heap, 30 s wall-clock timeout, and stack limit are enforced
-  per execution.
+  creates a fresh, empty per-execution QuickJS working-directory jail (removing
+  the prior one), so a long-lived process never accumulates JS runtime state
+  across callers. Code Mode's `state.*` and `git.*` local providers deliberately
+  use a separate persistent workspace under `LAB_HOME/code-mode-workspaces/`;
+  persistence is scoped to that workspace and guarded by virtual path, symlink,
+  quota, archive, and git remote restrictions. The 64 MiB heap, 30 s wall-clock
+  timeout, and stack limit are enforced per execution.
 - **Bounded pool, one execution per runner.** `N` runners serve `N` concurrent
   executions. When all are busy, an extra request is served by a bounded
   ephemeral (overflow) runner rather than queueing unboundedly.

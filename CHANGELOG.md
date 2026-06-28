@@ -10,6 +10,9 @@ All notable changes to this project will be documented in this file.
   APIs and local-only `git.*` commands inside the Code Mode sandbox, backed by a
   jailed `$LAB_HOME/code-mode-workspaces/` workspace with path, quota, output,
   and git process guards.
+- **Code Mode state/git V2** — expanded local Code Mode workspace APIs with
+  safe filesystem mutation helpers, JSON/hash/detect/archive helpers, guarded
+  git branch/remote commands, and explicit unauthenticated remote git operations.
 
 ---
 

@@ -51,6 +51,14 @@ impl VirtualPath {
         Ok(Self(value))
     }
 
+    pub(crate) fn parse_read_scope(raw: &str) -> Result<Self, ToolError> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || trimmed == "." || trimmed == "/" {
+            return Ok(Self(String::new()));
+        }
+        Self::parse(raw)
+    }
+
     pub(crate) fn as_str(&self) -> &str {
         &self.0
     }
@@ -70,13 +78,11 @@ fn path_traversal(raw: &str) -> ToolError {
 
 fn reject_credential_like_path(path: &str) -> Result<(), ToolError> {
     let lower = path.to_ascii_lowercase();
-    if lower
-        .split('/')
-        .any(|segment| segment == ".git" || segment == ".labby-state")
-    {
+    if is_reserved_metadata_path(&lower) {
         return Err(ToolError::Sdk {
             sdk_kind: "permission_denied".to_string(),
-            message: "state path is denied because it targets provider metadata".to_string(),
+            message: "state path is denied because runtime metadata is managed by Labby"
+                .to_string(),
         });
     }
 
@@ -99,6 +105,11 @@ fn reject_credential_like_path(path: &str) -> Result<(), ToolError> {
         });
     }
     Ok(())
+}
+
+pub(crate) fn is_reserved_metadata_path(path: &str) -> bool {
+    path.split('/')
+        .any(|part| part.eq_ignore_ascii_case(".git") || part.eq_ignore_ascii_case(".labby-state"))
 }
 
 #[cfg(test)]
@@ -125,6 +136,13 @@ mod tests {
     }
 
     #[test]
+    fn virtual_path_read_scope_accepts_workspace_root() {
+        for raw in ["", ".", "/"] {
+            assert_eq!(VirtualPath::parse_read_scope(raw).unwrap().as_str(), "");
+        }
+    }
+
+    #[test]
     fn virtual_path_normalizes_windows_separators() {
         assert_eq!(
             VirtualPath::parse("src\\\\app.rs").unwrap().as_str(),
@@ -138,10 +156,17 @@ mod tests {
             ".env",
             "src/.env",
             ".ssh/id_ed25519",
+            ".git",
             ".git/config",
             ".git/HEAD",
             "src/.git/config",
+            "src/.git/hooks/pre-commit",
             ".labby-state/plans/abc.json",
+            "repo/.git/config",
+            "repo/.git/hooks/pre-commit",
+            ".labby-state",
+            ".labby-state/plans/demo.json",
+            "repo/.labby-state/tmp/file",
         ] {
             let err = VirtualPath::parse(raw).expect_err("credential path should fail");
             assert_eq!(err.kind(), "permission_denied");

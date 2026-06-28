@@ -423,20 +423,92 @@ fn strip_suffix_line_comment(source: &str) -> &str {
 /// occurrence may be inside a string literal we must not disturb.
 fn strip_trailing_comment(source: &str) -> &str {
     let trimmed = source.trim_end();
-    if let Some(idx) = trimmed.rfind("//") {
-        // Only treat as a trailing line comment if nothing but the comment text
-        // follows on the last line (no earlier `//` that could be in a string).
-        if trimmed.matches("//").count() == 1 && !trimmed[idx..].contains('\n') {
-            return trimmed[..idx].trim_end();
-        }
-    }
-    if trimmed.ends_with("*/")
-        && let Some(start) = trimmed.rfind("/*")
-        && trimmed.matches("/*").count() == 1
-    {
+    if let Some(start) = trailing_comment_start(trimmed) {
         return trimmed[..start].trim_end();
     }
     trimmed
+}
+
+fn trailing_comment_start(source: &str) -> Option<usize> {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum State {
+        Code,
+        Single,
+        Double,
+        Template,
+        LineComment(usize),
+        BlockComment(usize),
+    }
+
+    let mut state = State::Code;
+    let mut escaped = false;
+    let mut iter = source.char_indices().peekable();
+    while let Some((idx, ch)) = iter.next() {
+        match state {
+            State::Code => match ch {
+                '\'' => state = State::Single,
+                '"' => state = State::Double,
+                '`' => state = State::Template,
+                '/' if iter.peek().is_some_and(|(_, next)| *next == '/') => {
+                    iter.next();
+                    state = State::LineComment(idx);
+                }
+                '/' if iter.peek().is_some_and(|(_, next)| *next == '*') => {
+                    iter.next();
+                    state = State::BlockComment(idx);
+                }
+                _ => {}
+            },
+            State::Single => {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '\'' {
+                    state = State::Code;
+                }
+            }
+            State::Double => {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    state = State::Code;
+                }
+            }
+            State::Template => {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '`' {
+                    state = State::Code;
+                }
+            }
+            State::LineComment(start) => {
+                if ch == '\n' {
+                    state = State::Code;
+                } else if iter.peek().is_none() {
+                    return Some(start);
+                }
+            }
+            State::BlockComment(start) => {
+                if ch == '*' && iter.peek().is_some_and(|(_, next)| *next == '/') {
+                    iter.next();
+                    if iter.peek().is_none() {
+                        return Some(start);
+                    }
+                    state = State::Code;
+                }
+            }
+        }
+    }
+
+    match state {
+        State::LineComment(start) => Some(start),
+        _ => None,
+    }
 }
 
 fn function_declaration_name(

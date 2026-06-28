@@ -586,13 +586,22 @@ fn enqueue_local_provider_call(
     pending_tool_calls: &mut FuturesUnordered<ToolCallFut<'_>>,
 ) {
     let redacted_params = super::trace::redact_trace_params(&params, cfg.trace_params);
+    let caller = cfg.caller.clone();
+    let capability_filter = cfg.capability_filter.clone();
     pending_tool_calls.push(Box::pin(async move {
         let call_start = std::time::Instant::now();
         let _guard = LOCAL_PROVIDER_LOCK
             .get_or_init(|| Mutex::new(()))
             .lock()
             .await;
-        let result = dispatch_local_provider_stub(local, params).await;
+        let result = if super::execute::local_providers_allowed(&caller, &capability_filter) {
+            dispatch_local_provider_stub(local, params).await
+        } else {
+            Err(ToolError::Forbidden {
+                message: "local Code Mode providers require unscoped lab:admin".to_string(),
+                required_scopes: vec!["lab:admin".to_string()],
+            })
+        };
         let elapsed_ms = call_start.elapsed().as_millis();
         (seq, id, redacted_params, result, elapsed_ms)
     }));
