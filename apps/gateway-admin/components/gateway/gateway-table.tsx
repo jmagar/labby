@@ -128,7 +128,7 @@ export function GatewayTable({
   const confirmDisableGateway = () => {
     const gateway = disableConfirmationGateway
     setDisableConfirmationGatewayId(null)
-    if (!gateway) return
+    if (!gateway || !(gateway.enabled ?? true)) return
     onToggleEnabled(gateway)
   }
 

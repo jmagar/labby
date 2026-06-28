@@ -5,6 +5,8 @@ set -eu
 
 NAME="labby"
 IMAGE="images:ubuntu/24.04"
+PROFILE_NAME="labby-gateway"
+PROFILE_FILE="config/incus/labby-gateway-profile.yaml"
 VERSION="${LAB_INSTALL_VERSION:-}"
 LOCAL_BINARY=""
 DRY_RUN=0
@@ -22,6 +24,8 @@ Usage: scripts/incus-bootstrap.sh --version vX.Y.Z [options]
 Options:
   --name NAME                 Container name (default: labby)
   --image IMAGE               Incus image alias (default: images:ubuntu/24.04)
+  --profile-name NAME          Incus profile name (default: labby-gateway)
+  --profile-file PATH          Incus profile YAML (default: config/incus/labby-gateway-profile.yaml)
   --version TAG               Labby release tag to install, e.g. v0.22.2
   --local-binary PATH          Push a locally built labby binary instead of downloading a release
   --dry-run                   Print commands only
@@ -56,6 +60,13 @@ verify_container_substrate() {
     arch="$(incus exec "$NAME" -- uname -m | tr -d '\r')"
     case "$arch" in
         x86_64 | amd64) ;;
+        aarch64 | arm64)
+            if [ -n "$LOCAL_BINARY" ] || [ "$ALLOW_SOURCE_FALLBACK" -eq 1 ]; then
+                say "$NAME is $arch; continuing because --local-binary or --allow-source-fallback was provided"
+            else
+                fail "$NAME must be amd64/x86_64 for the release install path; found architecture: $arch. Use --local-binary or --allow-source-fallback for arm64."
+            fi
+            ;;
         *) fail "$NAME must be amd64/x86_64 for the supported Labby runtime; found architecture: $arch" ;;
     esac
 
@@ -65,19 +76,23 @@ verify_container_substrate() {
 }
 
 ensure_tun_device() {
-    if [ "$INCUS_AVAILABLE" -eq 0 ] && [ "$DRY_RUN" -eq 1 ]; then
-        run incus config device add "$NAME" tun unix-char path=/dev/net/tun
+    if [ "$DRY_RUN" -eq 1 ]; then
+        say "+ incus config show $(quote "$NAME") --expanded # verify profile-provided tun device"
         return
     fi
 
-    tun_path="$(incus config device get "$NAME" tun path 2>/dev/null || true)"
-    if [ -z "$tun_path" ]; then
-        run incus config device add "$NAME" tun unix-char path=/dev/net/tun
-    elif [ "$tun_path" = "/dev/net/tun" ]; then
-        say "TUN passthrough already configured"
-    else
-        fail "existing Incus device '$NAME/tun' does not point at /dev/net/tun (path=$tun_path)"
-    fi
+    tun_path="$(
+        incus config show "$NAME" --expanded |
+            awk '
+                /^devices:/ { in_devices = 1; next }
+                in_devices && /^  tun:/ { in_tun = 1; next }
+                in_tun && /^    path:/ { print $2; exit }
+                in_tun && /^  [^ ]/ { in_tun = 0 }
+            '
+    )"
+    [ "$tun_path" = "/dev/net/tun" ] \
+        || fail "Incus profile '$PROFILE_NAME' must provide tun.path=/dev/net/tun (found: ${tun_path:-missing})"
+    say "TUN passthrough configured by profile"
 
     if [ "$DRY_RUN" -eq 0 ]; then
         incus exec "$NAME" -- test -c /dev/net/tun || fail "$NAME is missing /dev/net/tun"
@@ -88,10 +103,52 @@ cleanup_ts_authkey() {
     incus exec "$NAME" -- rm -f /run/labby-ts-authkey >/dev/null 2>&1 || true
 }
 
+ensure_profile() {
+    [ "$DRY_RUN" -eq 0 ] && [ -f "$PROFILE_FILE" ] \
+        || [ "$DRY_RUN" -eq 1 ] \
+        || fail "--profile-file path does not exist: $PROFILE_FILE"
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        say "+ incus profile show $(quote "$PROFILE_NAME") >/dev/null 2>&1 || incus profile create $(quote "$PROFILE_NAME")"
+        say "+ incus profile edit $(quote "$PROFILE_NAME") < $(quote "$PROFILE_FILE")"
+        return
+    fi
+
+    if ! incus profile show "$PROFILE_NAME" >/dev/null 2>&1; then
+        run incus profile create "$PROFILE_NAME"
+    fi
+    incus profile edit "$PROFILE_NAME" < "$PROFILE_FILE"
+}
+
+container_has_profile() {
+    incus config show "$NAME" |
+        awk -v profile="$PROFILE_NAME" '
+            /^profiles:/ { in_profiles = 1; next }
+            in_profiles && /^- / { if (substr($0, 3) == profile) found = 1; next }
+            in_profiles && /^[^ ]/ { in_profiles = 0 }
+            END { exit found ? 0 : 1 }
+        '
+}
+
+ensure_container_profile() {
+    if [ "$DRY_RUN" -eq 1 ]; then
+        say "+ incus profile add $(quote "$NAME") $(quote "$PROFILE_NAME") # if missing"
+        return
+    fi
+
+    if container_has_profile; then
+        say "profile already applied: $PROFILE_NAME"
+    else
+        run incus profile add "$NAME" "$PROFILE_NAME"
+    fi
+}
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --name) NAME="${2:?missing --name value}"; shift 2 ;;
         --image) IMAGE="${2:?missing --image value}"; shift 2 ;;
+        --profile-name) PROFILE_NAME="${2:?missing --profile-name value}"; shift 2 ;;
+        --profile-file) PROFILE_FILE="${2:?missing --profile-file value}"; shift 2 ;;
         --version) VERSION="${2:?missing --version value}"; shift 2 ;;
         --local-binary) LOCAL_BINARY="${2:?missing --local-binary value}"; shift 2 ;;
         --dry-run|--print-only) DRY_RUN=1; shift ;;
@@ -133,14 +190,15 @@ if [ "$INCUS_AVAILABLE" -eq 1 ] && ! incus info >/dev/null 2>&1; then
     fi
 fi
 
+ensure_profile
+
 if [ "$INCUS_AVAILABLE" -eq 0 ] && [ "$DRY_RUN" -eq 1 ]; then
-    run incus launch "$IMAGE" "$NAME" -c security.privileged=true -c security.nesting=false
+    run incus launch "$IMAGE" "$NAME" --profile default --profile "$PROFILE_NAME"
 elif ! incus list "$NAME" -c n --format csv 2>/dev/null | grep -qx "$NAME"; then
-    run incus launch "$IMAGE" "$NAME" -c security.privileged=true -c security.nesting=false
+    run incus launch "$IMAGE" "$NAME" --profile default --profile "$PROFILE_NAME"
 else
     say "container exists: $NAME"
-    run incus config set "$NAME" security.privileged true
-    run incus config set "$NAME" security.nesting false
+    ensure_container_profile
     if ! incus list "$NAME" -c s --format csv 2>/dev/null | grep -qx RUNNING; then
         run incus start "$NAME"
     fi

@@ -1,0 +1,12 @@
+config:
+  raw.lxc: |-
+    lxc.apparmor.profile=unconfined
+  security.nesting: "false"
+  security.privileged: "true"
+description: Labby gateway Incus profile
+devices:
+  tun:
+    path: /dev/net/tun
+    type: unix-char
+name: labby-gateway
+used_by: []

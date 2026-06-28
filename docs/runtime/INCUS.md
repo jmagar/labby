@@ -12,16 +12,20 @@ keeping the gateway inside a container boundary.
 
 The supported Incus substrate is currently:
 
-- amd64 / x86_64
+- amd64 / x86_64 for the normal release install path
+- arm64 / aarch64 only with `--local-binary` or `--allow-source-fallback`
 - Ubuntu 24.04 (`images:ubuntu/24.04`)
 - Incus system container
-- privileged container with nesting disabled
+- `config/incus/labby-gateway-profile.yaml` applied as the `labby-gateway`
+  Incus profile
+- privileged container with nesting disabled and AppArmor unconfined for the
+  gateway workload
 - `/dev/net/tun` passthrough when Tailscale is enabled
 
-The amd64 constraint exists because the release binary includes Code Mode's
-QuickJS engine (`rquickjs-sys`), which does not cross-compile cleanly in the
-current release path. ARM hosts can build from source, but they should not
-expect the same prebuilt cold-start path.
+The amd64 release-path constraint exists because the release binary includes
+Code Mode's QuickJS engine (`rquickjs-sys`), which does not cross-compile
+cleanly in the current release path. ARM hosts can build from source or push a
+local binary, but they should not expect the same prebuilt cold-start path.
 
 ## Deployment Choices
 
@@ -68,11 +72,16 @@ Run the bootstrap from a checkout with a pinned release tag:
 scripts/incus-bootstrap.sh --version vX.Y.Z
 ```
 
-The script is idempotent. It creates or reuses the `labby` container, launches
-`images:ubuntu/24.04`, sets `security.privileged=true` and
-`security.nesting=false`, validates that the container is amd64 Ubuntu 24.04,
-configures `/dev/net/tun` as a `unix-char` passthrough, installs
-`/usr/local/bin/labby`, then runs:
+The declarative Incus shape lives in
+`config/incus/labby-gateway-profile.yaml`. The bootstrap script creates or
+updates that profile, launches `images:ubuntu/24.04` with it, and attaches it to
+an existing container when needed. The profile owns `security.privileged=true`,
+`security.nesting=false`, AppArmor unconfined via `raw.lxc`, and the
+`/dev/net/tun` `unix-char` passthrough.
+
+The script is idempotent. It creates or reuses the `labby` container, validates
+that the container is amd64 Ubuntu 24.04, verifies the expanded profile-provided
+TUN device, installs `/usr/local/bin/labby`, then runs:
 
 ```bash
 incus exec labby -- labby setup --provision --yes

@@ -12,7 +12,6 @@ use tokio::process::Command;
 use crate::dispatch::error::ToolError;
 
 const SERVICE_NAME: &str = "labby.service";
-const LAB_USER: &str = "lab";
 const LAB_HOME: &str = "/home/lab";
 const SYSTEM_UNIT_DIR: &str = "/etc/systemd/system";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
@@ -369,8 +368,7 @@ async fn preflight_port_available(operation: &str) -> Result<u16, ToolError> {
     if docker_running != Some(true)
         && holder.is_some()
         && active_state.as_deref() == Some("active")
-        && (main_pid.is_some_and(|pid| process_listens_on_port(pid, port))
-            || lab_user_listens_on_port(port))
+        && main_pid.is_some_and(|pid| process_listens_on_port(pid, port))
     {
         return Ok(port);
     }
@@ -489,9 +487,7 @@ async fn readiness_owner_matches(main_pid: Option<u32>, port: u16) -> Result<boo
     let Some(holder) = port_holder(port).await? else {
         return Ok(false);
     };
-    Ok(holder_contains_pid(&holder, pid)
-        || process_listens_on_port(pid, port)
-        || lab_user_listens_on_port(port))
+    Ok(holder_contains_pid(&holder, pid) || process_listens_on_port(pid, port))
 }
 
 fn holder_can_be_host_service_from(
@@ -527,41 +523,20 @@ fn process_listens_on_port(pid: u32, port: u16) -> bool {
 
 fn listener_socket_inodes(port: u16) -> BTreeSet<String> {
     let mut inodes = BTreeSet::new();
-    for (_, inode) in listener_socket_entries(port) {
+    for inode in listener_socket_entries(port) {
         inodes.insert(inode);
     }
     inodes
 }
 
-fn lab_user_listens_on_port(port: u16) -> bool {
-    let Some(uid) = lab_uid() else {
-        return false;
-    };
-    listener_socket_entries(port)
-        .into_iter()
-        .any(|(listener_uid, _)| listener_uid == uid)
-}
-
-fn lab_uid() -> Option<u32> {
-    std::fs::read_to_string("/etc/passwd")
-        .ok()?
-        .lines()
-        .find_map(|line| {
-            let mut fields = line.split(':');
-            let name = fields.next()?;
-            let uid = fields.nth(1)?;
-            (name == LAB_USER).then(|| uid.parse().ok()).flatten()
-        })
-}
-
-fn listener_socket_entries(port: u16) -> Vec<(u32, String)> {
+fn listener_socket_entries(port: u16) -> Vec<String> {
     let mut entries = Vec::new();
     collect_listener_socket_entries("/proc/net/tcp", port, &mut entries);
     collect_listener_socket_entries("/proc/net/tcp6", port, &mut entries);
     entries
 }
 
-fn collect_listener_socket_entries(path: &str, port: u16, entries: &mut Vec<(u32, String)>) {
+fn collect_listener_socket_entries(path: &str, port: u16, entries: &mut Vec<String>) {
     let Ok(text) = std::fs::read_to_string(path) else {
         return;
     };
@@ -574,10 +549,7 @@ fn collect_listener_socket_entries(path: &str, port: u16, entries: &mut Vec<(u32
             continue;
         };
         if u16::from_str_radix(port_hex, 16).ok() == Some(port) {
-            let Ok(uid) = fields[7].parse::<u32>() else {
-                continue;
-            };
-            entries.push((uid, fields[9].to_string()));
+            entries.push(fields[9].to_string());
         }
     }
 }

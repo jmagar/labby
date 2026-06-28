@@ -52,6 +52,11 @@ async function renderClient(element: React.ReactElement) {
 
   return {
     container,
+    rerender: async (next: React.ReactElement) => {
+      await act(async () => {
+        root.render(next)
+      })
+    },
     unmount: async () => {
       await act(async () => root.unmount())
       container.remove()
@@ -123,5 +128,39 @@ test('gateway table asks before disabling an enabled server', async () => {
   click(confirmButton ?? null)
 
   assert.equal(disableCalls, 1)
+  await view.unmount()
+})
+
+test('gateway table does not re-enable a server that changes state while disable confirmation is open', async () => {
+  installDom()
+  const { GatewayTable } = await import('./gateway-table')
+  let toggleCalls = 0
+  const props = {
+    density: 'comfortable' as const,
+    onEdit: () => {},
+    onTest: () => {},
+    onReload: () => {},
+    onCleanup: () => {},
+    onClearCleanupHistory: () => {},
+    onToggleEnabled: () => {
+      toggleCalls += 1
+    },
+    onDelete: () => {},
+  }
+  const view = await renderClient(<GatewayTable gateways={[gateway]} {...props} />)
+
+  const disableButton = [...view.container.querySelectorAll('button')]
+    .find((button) => button.textContent?.includes('Disable server'))
+  click(disableButton ?? null)
+
+  await view.rerender(<GatewayTable gateways={[{ ...gateway, enabled: false }]} {...props} />)
+
+  const dialog = document.body.querySelector('[data-slot="alert-dialog-content"]')
+  assert.ok(dialog)
+  const confirmButton = [...dialog.querySelectorAll('button')]
+    .find((button) => button.textContent?.trim() === 'Disable server')
+  click(confirmButton ?? null)
+
+  assert.equal(toggleCalls, 0)
   await view.unmount()
 })
