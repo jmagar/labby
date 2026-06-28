@@ -61,6 +61,29 @@ pub(crate) struct WalkTreeResult {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub(crate) struct JsonReadResult {
+    pub(crate) path: String,
+    pub(crate) value: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct HashFileResult {
+    pub(crate) path: String,
+    pub(crate) algorithm: String,
+    pub(crate) hex: String,
+    pub(crate) bytes: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct DetectFileResult {
+    pub(crate) path: String,
+    pub(crate) extension: String,
+    pub(crate) text: bool,
+    pub(crate) json: bool,
+    pub(crate) bytes: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct GlobResult {
     pub(crate) matches: Vec<String>,
     pub(crate) truncated: bool,
@@ -492,6 +515,97 @@ impl StateWorkspace {
             entries,
             truncated: false,
         })
+    }
+
+    pub(crate) async fn read_json(
+        &self,
+        path: &VirtualPath,
+    ) -> Result<JsonReadResult, ToolError> {
+        let file = self.read_file(path).await?;
+        let value = serde_json::from_str(&file.content).map_err(|err| ToolError::InvalidParam {
+            message: format!("state file is not valid JSON: {err}"),
+            param: "path".to_string(),
+        })?;
+        Ok(JsonReadResult {
+            path: path.as_str().to_string(),
+            value,
+        })
+    }
+
+    pub(crate) async fn write_json(
+        &self,
+        path: &VirtualPath,
+        value: &serde_json::Value,
+        pretty: bool,
+    ) -> Result<(), ToolError> {
+        let mut content = if pretty {
+            serde_json::to_string_pretty(value).map_err(serialize_error)?
+        } else {
+            serde_json::to_string(value).map_err(serialize_error)?
+        };
+        content.push('\n');
+        self.write_file(path, &content).await
+    }
+
+    pub(crate) async fn hash_file(
+        &self,
+        path: &VirtualPath,
+        algorithm: &str,
+    ) -> Result<HashFileResult, ToolError> {
+        if algorithm != "sha256" {
+            return Err(ToolError::InvalidParam {
+                message: "state hashFile only supports sha256".to_string(),
+                param: "algorithm".to_string(),
+            });
+        }
+        let bytes = self.read_file_bytes(path).await?;
+        Ok(HashFileResult {
+            path: path.as_str().to_string(),
+            algorithm: algorithm.to_string(),
+            hex: hex::encode(Sha256::digest(&bytes)),
+            bytes: bytes.len(),
+        })
+    }
+
+    pub(crate) async fn detect_file(
+        &self,
+        path: &VirtualPath,
+    ) -> Result<DetectFileResult, ToolError> {
+        let bytes = self.read_file_bytes(path).await?;
+        let extension = Path::new(path.as_str())
+            .extension()
+            .map(|value| value.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        let text = std::str::from_utf8(&bytes).is_ok();
+        let json = extension == "json" || serde_json::from_slice::<serde_json::Value>(&bytes).is_ok();
+        Ok(DetectFileResult {
+            path: path.as_str().to_string(),
+            extension,
+            text,
+            json,
+            bytes: bytes.len(),
+        })
+    }
+
+    async fn read_file_bytes(&self, path: &VirtualPath) -> Result<Vec<u8>, ToolError> {
+        let destination = self.resolve(path);
+        labby_runtime::path_safety::reject_existing_symlink_ancestors(&self.root, &destination)?;
+        self.reject_existing_symlink_path(&destination).await?;
+        let file = tokio::fs::File::open(&destination)
+            .await
+            .map_err(not_found_or_internal("open state file"))?;
+        let mut bytes = Vec::new();
+        file.take(self.limits.max_file_bytes as u64 + 1)
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(internal_io("read state file"))?;
+        if bytes.len() > self.limits.max_file_bytes {
+            return Err(ToolError::Sdk {
+                sdk_kind: "response_too_large".to_string(),
+                message: "state file exceeded max readable bytes".to_string(),
+            });
+        }
+        Ok(bytes)
     }
 
     pub(crate) async fn list(&self, path: &VirtualPath) -> Result<ListResult, ToolError> {

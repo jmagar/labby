@@ -37,6 +37,20 @@ struct WalkTreeParams {
 }
 
 #[derive(Deserialize)]
+struct WriteJsonParams {
+    path: String,
+    value: Value,
+    #[serde(default)]
+    pretty: bool,
+}
+
+#[derive(Deserialize)]
+struct HashFileParams {
+    path: String,
+    algorithm: String,
+}
+
+#[derive(Deserialize)]
 struct GlobParams {
     pattern: String,
     limit: Option<usize>,
@@ -146,6 +160,36 @@ pub(crate) async fn dispatch_state_method(
                     &VirtualPath::parse(&params.path)?,
                     params.limit.unwrap_or(default_search_limit()),
                 )
+                .await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "readJson" => {
+            let params: PathParams = serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace.read_json(&VirtualPath::parse(&params.path)?).await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "writeJson" => {
+            let params: WriteJsonParams = serde_json::from_value(params).map_err(invalid_params)?;
+            workspace
+                .write_json(
+                    &VirtualPath::parse(&params.path)?,
+                    &params.value,
+                    params.pretty,
+                )
+                .await?;
+            Ok(json!({ "ok": true, "path": params.path }))
+        }
+        "hashFile" => {
+            let params: HashFileParams = serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace
+                .hash_file(&VirtualPath::parse(&params.path)?, &params.algorithm)
+                .await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "detectFile" => {
+            let params: PathParams = serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace
+                .detect_file(&VirtualPath::parse(&params.path)?)
                 .await?;
             serde_json::to_value(result).map_err(serialize_error)
         }
@@ -379,5 +423,48 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(gone["exists"], false);
+    }
+
+    #[tokio::test]
+    async fn v2_json_hash_and_detect_methods_round_trip() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace =
+            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+                .unwrap();
+
+        dispatch_state_method(
+            &workspace,
+            "writeJson",
+            json!({
+                "path": "data/config.json",
+                "value": {"enabled": true, "count": 2},
+                "pretty": true
+            }),
+        )
+        .await
+        .unwrap();
+
+        let json_value =
+            dispatch_state_method(&workspace, "readJson", json!({"path": "data/config.json"}))
+                .await
+                .unwrap();
+        assert_eq!(json_value["value"]["enabled"], true);
+
+        let hash = dispatch_state_method(
+            &workspace,
+            "hashFile",
+            json!({"path": "data/config.json", "algorithm": "sha256"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(hash["algorithm"], "sha256");
+        assert_eq!(hash["hex"].as_str().unwrap().len(), 64);
+
+        let detected =
+            dispatch_state_method(&workspace, "detectFile", json!({"path": "data/config.json"}))
+                .await
+                .unwrap();
+        assert_eq!(detected["extension"], "json");
+        assert_eq!(detected["text"], true);
     }
 }
