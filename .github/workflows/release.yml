@@ -155,42 +155,16 @@ jobs:
             ghcr.io/${{ github.repository }}:${{ github.ref_name }}
             ghcr.io/${{ github.repository }}:latest
 
-  marketplace:
-    name: Marketplace
-    needs: frontend-assets
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: gateway-admin-out
-          path: apps/gateway-admin/out
-      - uses: dtolnay/rust-toolchain@1.94.1
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@just
-      - name: Generate marketplace
-        run: just marketplace
-      - name: Upload marketplace artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: lab-marketplace
-          path: target/marketplace/
-          if-no-files-found: error
-
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, container, marketplace]
+    needs: [build, container]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           pattern: lab-*
           merge-multiple: true
-      - uses: actions/download-artifact@v4
-        with:
-          name: lab-marketplace
-          path: lab-marketplace
       - uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -198,5 +172,4 @@ jobs:
             lab-*.tar.gz.sha256
             lab-*.zip
             lab-*.zip.sha256
-            lab-marketplace/**
           generate_release_notes: true
