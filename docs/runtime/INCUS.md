@@ -64,6 +64,11 @@ Host networking and storage still matter. On node-a, live testing required
 `incusbr0` because Docker's FORWARD/NAT policy blocked container outbound
 networking.
 
+The bootstrap creates and uses a dedicated ZFS Incus storage pool named
+`labby-zfs` by default, backed by `rpool/labby-incus`. Override the dataset with
+`LABBY_INCUS_ZFS_SOURCE` or `--zfs-source`; override the Incus pool name with
+`--storage-pool`.
+
 ## Bootstrap
 
 Run the bootstrap from a checkout with a pinned release tag:
@@ -76,8 +81,8 @@ The declarative Incus shape lives in
 `config/incus/labby-gateway-profile.yaml`. The bootstrap script creates or
 updates that profile, launches `images:ubuntu/24.04` with it, and attaches it to
 an existing container when needed. The profile owns `security.privileged=true`,
-`security.nesting=false`, AppArmor unconfined via `raw.lxc`, and the
-`/dev/net/tun` `unix-char` passthrough.
+`security.nesting=false`, AppArmor unconfined via `raw.lxc`, a ZFS root disk on
+`labby-zfs`, and `/dev/net/tun` access through a raw LXC bind mount.
 
 The script is idempotent. It creates or reuses the `labby` container, validates
 that the container is amd64 Ubuntu 24.04, verifies the expanded profile-provided
@@ -99,6 +104,21 @@ The release path should still use `--version vX.Y.Z`.
 Release archives are currently published for amd64 Linux. On arm64 hosts, use
 `--local-binary` with a locally built `labby` binary, or opt into the slower
 source build fallback with `--allow-source-fallback` / `LAB_ALLOW_SOURCE_FALLBACK=1`.
+
+## Golden Snapshots
+
+ZFS-backed Incus storage makes configured golden containers cheap to snapshot and
+clone. After a successful provision run:
+
+```bash
+incus stop labby-golden
+incus snapshot create labby-golden configured-v1
+incus copy labby-golden/configured-v1 labby-test-1
+```
+
+Do not start multiple clones that carry the same Tailscale machine state at the
+same time. For parallel clone testing, reset and rejoin Tailscale in each clone
+with a fresh ephemeral key before running networked checks.
 
 ## Tailscale
 

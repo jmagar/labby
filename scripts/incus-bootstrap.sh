@@ -7,6 +7,8 @@ NAME="labby"
 IMAGE="images:ubuntu/24.04"
 PROFILE_NAME="labby-gateway"
 PROFILE_FILE="config/incus/labby-gateway-profile.yaml"
+STORAGE_POOL_NAME="labby-zfs"
+STORAGE_POOL_SOURCE="${LABBY_INCUS_ZFS_SOURCE:-rpool/labby-incus}"
 VERSION="${LAB_INSTALL_VERSION:-}"
 LOCAL_BINARY=""
 DRY_RUN=0
@@ -26,6 +28,8 @@ Options:
   --image IMAGE               Incus image alias (default: images:ubuntu/24.04)
   --profile-name NAME          Incus profile name (default: labby-gateway)
   --profile-file PATH          Incus profile YAML (default: config/incus/labby-gateway-profile.yaml)
+  --storage-pool NAME          ZFS Incus storage pool used by the profile root disk (default: labby-zfs)
+  --zfs-source DATASET          ZFS dataset for the storage pool (default: rpool/labby-incus)
   --version TAG               Labby release tag to install, e.g. v0.22.2
   --local-binary PATH          Push a locally built labby binary instead of downloading a release
   --dry-run                   Print commands only
@@ -35,6 +39,7 @@ Options:
 
 Environment:
   TS_AUTHKEY                  Optional Tailscale auth key for in-container join
+  LABBY_INCUS_ZFS_SOURCE       Optional ZFS dataset source (default: rpool/labby-incus)
 USAGE
 }
 
@@ -77,12 +82,13 @@ verify_container_substrate() {
 
 ensure_tun_device() {
     if [ "$DRY_RUN" -eq 1 ]; then
-        say "+ incus config show $(quote "$NAME") --expanded # verify profile-provided tun device"
+        say "+ incus config show $(quote "$NAME") --expanded # verify profile-provided tun access"
         return
     fi
 
+    expanded_config="$(incus config show "$NAME" --expanded)"
     tun_path="$(
-        incus config show "$NAME" --expanded |
+        printf '%s\n' "$expanded_config" |
             awk '
                 /^devices:/ { in_devices = 1; next }
                 in_devices && /^  tun:/ { in_tun = 1; next }
@@ -90,9 +96,13 @@ ensure_tun_device() {
                 in_tun && /^  [^ ]/ { in_tun = 0 }
             '
     )"
-    [ "$tun_path" = "/dev/net/tun" ] \
-        || fail "Incus profile '$PROFILE_NAME' must provide tun.path=/dev/net/tun (found: ${tun_path:-missing})"
-    say "TUN passthrough configured by profile"
+    if [ "$tun_path" = "/dev/net/tun" ]; then
+        say "TUN passthrough configured by profile device"
+    elif printf '%s\n' "$expanded_config" | grep -Fq "lxc.mount.entry = /dev/net/tun dev/net/tun none bind,create=file 0 0"; then
+        say "TUN passthrough configured by raw.lxc bind mount"
+    else
+        fail "Incus profile '$PROFILE_NAME' must provide /dev/net/tun via a tun device or raw.lxc bind mount"
+    fi
 
     if [ "$DRY_RUN" -eq 0 ]; then
         incus exec "$NAME" -- test -c /dev/net/tun || fail "$NAME is missing /dev/net/tun"
@@ -103,6 +113,22 @@ cleanup_ts_authkey() {
     incus exec "$NAME" -- rm -f /run/labby-ts-authkey >/dev/null 2>&1 || true
 }
 
+ensure_storage_pool() {
+    if [ "$DRY_RUN" -eq 1 ]; then
+        say "+ incus storage show $(quote "$STORAGE_POOL_NAME") >/dev/null 2>&1 || incus storage create $(quote "$STORAGE_POOL_NAME") zfs source=$(quote "$STORAGE_POOL_SOURCE")"
+        return
+    fi
+
+    if incus storage show "$STORAGE_POOL_NAME" >/dev/null 2>&1; then
+        driver="$(incus storage show "$STORAGE_POOL_NAME" | awk '$1 == "driver:" { print $2; exit }')"
+        [ "$driver" = "zfs" ] \
+            || fail "Incus storage pool '$STORAGE_POOL_NAME' exists but uses driver '$driver', expected zfs"
+        say "storage pool already exists: $STORAGE_POOL_NAME"
+    else
+        run incus storage create "$STORAGE_POOL_NAME" zfs source="$STORAGE_POOL_SOURCE"
+    fi
+}
+
 ensure_profile() {
     [ "$DRY_RUN" -eq 0 ] && [ -f "$PROFILE_FILE" ] \
         || [ "$DRY_RUN" -eq 1 ] \
@@ -110,14 +136,28 @@ ensure_profile() {
 
     if [ "$DRY_RUN" -eq 1 ]; then
         say "+ incus profile show $(quote "$PROFILE_NAME") >/dev/null 2>&1 || incus profile create $(quote "$PROFILE_NAME")"
-        say "+ incus profile edit $(quote "$PROFILE_NAME") < $(quote "$PROFILE_FILE")"
+        if [ "$STORAGE_POOL_NAME" = "labby-zfs" ]; then
+            say "+ incus profile edit $(quote "$PROFILE_NAME") < $(quote "$PROFILE_FILE")"
+        else
+            say "+ sed 's/^    pool: .*/    pool: $STORAGE_POOL_NAME/' $(quote "$PROFILE_FILE") | incus profile edit $(quote "$PROFILE_NAME")"
+        fi
         return
     fi
 
     if ! incus profile show "$PROFILE_NAME" >/dev/null 2>&1; then
         run incus profile create "$PROFILE_NAME"
     fi
-    incus profile edit "$PROFILE_NAME" < "$PROFILE_FILE"
+    profile_source="$PROFILE_FILE"
+    profile_tmp=""
+    if [ "$STORAGE_POOL_NAME" != "labby-zfs" ]; then
+        profile_tmp="$(mktemp)"
+        sed "s/^    pool: .*/    pool: $STORAGE_POOL_NAME/" "$PROFILE_FILE" > "$profile_tmp"
+        profile_source="$profile_tmp"
+    fi
+    incus profile edit "$PROFILE_NAME" < "$profile_source"
+    if [ -n "$profile_tmp" ]; then
+        rm -f "$profile_tmp"
+    fi
 }
 
 container_has_profile() {
@@ -149,6 +189,8 @@ while [ "$#" -gt 0 ]; do
         --image) IMAGE="${2:?missing --image value}"; shift 2 ;;
         --profile-name) PROFILE_NAME="${2:?missing --profile-name value}"; shift 2 ;;
         --profile-file) PROFILE_FILE="${2:?missing --profile-file value}"; shift 2 ;;
+        --storage-pool) STORAGE_POOL_NAME="${2:?missing --storage-pool value}"; shift 2 ;;
+        --zfs-source) STORAGE_POOL_SOURCE="${2:?missing --zfs-source value}"; shift 2 ;;
         --version) VERSION="${2:?missing --version value}"; shift 2 ;;
         --local-binary) LOCAL_BINARY="${2:?missing --local-binary value}"; shift 2 ;;
         --dry-run|--print-only) DRY_RUN=1; shift ;;
@@ -190,6 +232,7 @@ if [ "$INCUS_AVAILABLE" -eq 1 ] && ! incus info >/dev/null 2>&1; then
     fi
 fi
 
+ensure_storage_pool
 ensure_profile
 
 if [ "$INCUS_AVAILABLE" -eq 0 ] && [ "$DRY_RUN" -eq 1 ]; then
