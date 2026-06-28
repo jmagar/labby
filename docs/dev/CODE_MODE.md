@@ -52,8 +52,37 @@ V1 git methods:
 - `git.log({ limit })`
 - `git.diff({ path })`
 
-Remote git operations, hidden git auth, checkout/branch/remotes, archive/hash/detect,
-advanced JSON helpers, and broad file-management APIs are not V1.
+V2 state methods add:
+
+- `state.appendFile({ path, content })`
+- `state.exists({ path })`
+- `state.stat({ path })` / `state.lstat({ path })`
+- `state.mkdir({ path })`
+- `state.rm({ path, recursive })`
+- `state.cp({ from, to })`
+- `state.mv({ from, to })`
+- `state.walkTree({ path, limit })` / `state.summarizeTree({ path, limit })`
+- `state.readJson({ path })`
+- `state.writeJson({ path, value, pretty })`
+- `state.hashFile({ path, algorithm: "sha256" })`
+- `state.detectFile({ path })`
+- `state.archiveCreate({ source, destination })`
+- `state.archiveList({ path, limit })`
+
+V2 git methods add:
+
+- `git.branch({ name, delete })`
+- `git.checkout({ ref, create })`
+- `git.remoteList({})`
+- `git.remoteAdd({ name, url })`
+- `git.remoteRemove({ name })`
+- `git.clone({ url, directory })`
+- `git.fetch({ remote })`
+- `git.pull({ remote, branch })`
+- `git.push({ remote, branch })`
+
+Remote git URLs must be explicit `https://` URLs without embedded credentials.
+Labby does not inject hidden credentials or host git config into Code Mode.
 
 Example:
 

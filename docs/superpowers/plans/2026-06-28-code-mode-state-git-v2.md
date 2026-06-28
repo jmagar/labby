@@ -1,6 +1,6 @@
 # Code Mode State And Git V2 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Extend Labby Code Mode's V1 local `state.*` and `git.*` providers with the remaining V2 workspace APIs, local git branch/remote controls, guarded remote git operations, docs, and smoke coverage.
 
@@ -53,7 +53,7 @@
   - `StateWorkspace::move_path(&VirtualPath, &VirtualPath) -> Result<MutationResult, ToolError>`
   - `StateWorkspace::walk_tree(&VirtualPath, limit: usize) -> Result<WalkTreeResult, ToolError>`
 
-- [ ] **Step 1: Write failing provider tests**
+- [x] **Step 1: Write failing provider tests**
 
 Add these tests to `crates/labby-codemode/src/state/provider.rs`:
 
@@ -86,13 +86,13 @@ async fn v2_state_filesystem_methods_round_trip() {
 }
 ```
 
-- [ ] **Step 2: Run tests and confirm failure**
+- [x] **Step 2: Run tests and confirm failure**
 
 Run: `cargo test -p labby-codemode v2_state_filesystem_methods_round_trip --all-features`
 
 Expected: FAIL with `unknown state method`.
 
-- [ ] **Step 3: Add result and param types**
+- [x] **Step 3: Add result and param types**
 
 In `state/workspace.rs`, add serializable result types:
 
@@ -153,7 +153,7 @@ struct WalkTreeParams {
 }
 ```
 
-- [ ] **Step 4: Implement workspace methods**
+- [x] **Step 4: Implement workspace methods**
 
 Implement with existing quota and symlink checks:
 
@@ -182,7 +182,7 @@ mv: cp then rm source, or rename only after source/destination symlink checks an
 walkTree: bounded recursive walk from the requested directory, excluding ".labby-state/".
 ```
 
-- [ ] **Step 5: Add provider dispatch arms**
+- [x] **Step 5: Add provider dispatch arms**
 
 Add arms in `dispatch_state_method`:
 
@@ -197,13 +197,13 @@ Add arms in `dispatch_state_method`:
 "walkTree" | "summarizeTree" => { /* parse WalkTreeParams, call walk_tree */ }
 ```
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run: `cargo test -p labby-codemode state:: --all-features`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/labby-codemode/src/state/provider.rs crates/labby-codemode/src/state/workspace.rs crates/labby-codemode/src/state/path.rs
@@ -226,7 +226,7 @@ git commit -m "feat: add code mode state filesystem v2"
   - `hashFile({ path, algorithm })`
   - `detectFile({ path })`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add to `state/provider.rs` tests:
 
@@ -256,13 +256,13 @@ async fn v2_json_hash_and_detect_methods_round_trip() {
 }
 ```
 
-- [ ] **Step 2: Run tests and confirm failure**
+- [x] **Step 2: Run tests and confirm failure**
 
 Run: `cargo test -p labby-codemode v2_json_hash_and_detect_methods_round_trip --all-features`
 
 Expected: FAIL with `unknown state method`.
 
-- [ ] **Step 3: Add workspace implementations**
+- [x] **Step 3: Add workspace implementations**
 
 Implement:
 
@@ -300,7 +300,7 @@ pub(crate) struct DetectFileResult {
 }
 ```
 
-- [ ] **Step 4: Add provider dispatch arms**
+- [x] **Step 4: Add provider dispatch arms**
 
 Add:
 
@@ -313,13 +313,13 @@ Add:
 
 Reject unsupported hash algorithms with `InvalidParam { param: "algorithm" }`.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run: `cargo test -p labby-codemode state:: --all-features`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/labby-codemode/src/state/provider.rs crates/labby-codemode/src/state/workspace.rs
@@ -341,7 +341,7 @@ git commit -m "feat: add code mode state json and hash helpers"
   - `archiveCreate({ source, destination })`
   - `archiveList({ path, limit })`
 
-- [ ] **Step 1: Write failing archive tests**
+- [x] **Step 1: Write failing archive tests**
 
 Add to `state/provider.rs` tests:
 
@@ -361,13 +361,13 @@ async fn v2_archive_create_and_list_stays_in_workspace() {
 }
 ```
 
-- [ ] **Step 2: Run tests and confirm failure**
+- [x] **Step 2: Run tests and confirm failure**
 
 Run: `cargo test -p labby-codemode v2_archive_create_and_list_stays_in_workspace --all-features`
 
 Expected: FAIL with `unknown state method`.
 
-- [ ] **Step 3: Add minimal tar support**
+- [x] **Step 3: Add minimal tar support**
 
 If the standard library is insufficient, add this dependency:
 
@@ -405,7 +405,7 @@ archiveList rejects absolute, parent-dir, and Windows-prefix archive member path
 No archive extraction is included in V2.
 ```
 
-- [ ] **Step 4: Add provider dispatch arms**
+- [x] **Step 4: Add provider dispatch arms**
 
 Add:
 
@@ -414,13 +414,13 @@ Add:
 "archiveList" => { /* ArchiveListParams { path, limit } */ }
 ```
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run: `cargo test -p labby-codemode state:: --all-features`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/labby-codemode/Cargo.toml crates/labby-codemode/src/state/provider.rs crates/labby-codemode/src/state/workspace.rs
@@ -449,7 +449,7 @@ git commit -m "feat: add code mode state archive helpers"
   - `pull({ remote, branch })`
   - `push({ remote, branch })`
 
-- [ ] **Step 1: Write failing command tests**
+- [x] **Step 1: Write failing command tests**
 
 Add to `git/command.rs` tests:
 
@@ -475,13 +475,13 @@ fn git_v2_builds_branch_checkout_and_remote_args() {
 }
 ```
 
-- [ ] **Step 2: Run tests and confirm failure**
+- [x] **Step 2: Run tests and confirm failure**
 
 Run: `cargo test -p labby-codemode git_v2_ --all-features`
 
 Expected: FAIL with unsupported methods.
 
-- [ ] **Step 3: Add param structs and validators**
+- [x] **Step 3: Add param structs and validators**
 
 In `git/command.rs`:
 
@@ -536,7 +536,7 @@ remote URLs: allow only https:// URLs with no username/password and no query/fra
 clone directory: VirtualPath, must not be "." or include ".git".
 ```
 
-- [ ] **Step 4: Add command arms**
+- [x] **Step 4: Add command arms**
 
 Add structured argv arms:
 
@@ -554,7 +554,7 @@ push: git push <remote-or-origin> <branch-or-HEAD>
 
 Keep the existing `base_args` config isolation. Do not add credential helpers.
 
-- [ ] **Step 5: Add provider tests**
+- [x] **Step 5: Add provider tests**
 
 Add to `git/provider.rs`:
 
@@ -575,13 +575,13 @@ async fn git_v2_branch_checkout_and_remote_list_work_locally() {
 }
 ```
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run: `cargo test -p labby-codemode git:: --all-features`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/labby-codemode/src/git/command.rs crates/labby-codemode/src/git/provider.rs
@@ -602,7 +602,7 @@ git commit -m "feat: add guarded code mode git v2 commands"
 - Consumes: all V2 state and git methods from Tasks 1-4.
 - Produces: user-facing V2 documentation, smoke proof, and completed plan checklist.
 
-- [ ] **Step 1: Update docs with exact V2 surface**
+- [x] **Step 1: Update docs with exact V2 surface**
 
 In `docs/dev/CODE_MODE.md`, extend the local providers section with:
 
@@ -640,7 +640,7 @@ Remote git URLs must be explicit `https://` URLs without embedded credentials.
 Labby does not inject hidden credentials or host git config into Code Mode.
 ```
 
-- [ ] **Step 2: Add changelog entry**
+- [x] **Step 2: Add changelog entry**
 
 Under `[Unreleased]`, add:
 
@@ -650,7 +650,7 @@ Under `[Unreleased]`, add:
   git branch/remote commands, and explicit unauthenticated remote git operations.
 ```
 
-- [ ] **Step 3: Add smoke script**
+- [x] **Step 3: Add smoke script**
 
 Create `tests/smoke-code-mode-state-git-v2.sh`:
 
@@ -684,7 +684,7 @@ cargo run --all-features -- --json gateway code exec --code 'async () => {
 }'
 ```
 
-- [ ] **Step 4: Run focused verification**
+- [x] **Step 4: Run focused verification**
 
 Run:
 
@@ -696,7 +696,7 @@ bash tests/smoke-code-mode-state-git-v2.sh
 
 Expected: all PASS.
 
-- [ ] **Step 5: Run full verification**
+- [x] **Step 5: Run full verification**
 
 Run:
 
@@ -707,7 +707,7 @@ cargo build --workspace --all-features
 
 Expected: all PASS. The existing empty `labby-web` embedded-assets warning is acceptable if it appears unchanged.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add docs/dev/CODE_MODE.md CHANGELOG.md tests/smoke-code-mode-state-git-v2.sh docs/superpowers/plans/2026-06-28-code-mode-state-git-v2.md
