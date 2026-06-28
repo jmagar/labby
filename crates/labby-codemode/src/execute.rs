@@ -500,5 +500,9 @@ mod tests {
             &CodeModeCaller::TrustedLocal,
             &ToolScope::scoped_namespaces(vec!["github".to_string()], vec![])
         ));
+        assert!(!local_providers_allowed(
+            &CodeModeCaller::TrustedLocal,
+            &ToolScope::new(vec![], vec!["github::list_pull_requests".to_string()])
+        ));
     }
 }

@@ -863,7 +863,7 @@ impl ToolScope {
 
     #[must_use]
     pub fn is_scoped(&self) -> bool {
-        self.namespaces.is_some()
+        self.namespaces.is_some() || !self.tools.is_empty()
     }
 
     #[must_use]

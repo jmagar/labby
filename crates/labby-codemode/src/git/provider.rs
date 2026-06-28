@@ -29,9 +29,17 @@ pub(crate) async fn dispatch_git_method(
     if let Some(branch) = &spec.branch_preflight {
         ensure_branch_ref_allowed(&workdir, branch).await?;
     }
+    if let Some(destination) = &spec.clone_destination {
+        ensure_clone_destination_allowed(&workdir, destination).await?;
+    }
     let stdout = run_git(&workdir, &spec.args).await?;
     if git_method_mutates_workspace(method) {
-        workspace.enforce_total_bytes().await?;
+        if let Err(err) = workspace.enforce_total_bytes().await {
+            if let Some(destination) = &spec.clone_destination {
+                cleanup_clone_destination(&workdir, destination).await;
+            }
+            return Err(err);
+        }
     }
     if method == "remoteList" {
         return Ok(json!({ "ok": true, "stdout": stdout, "remotes": parse_remote_list(&stdout) }));
@@ -85,6 +93,49 @@ async fn ensure_branch_ref_allowed(workspace_root: &Path, branch: &str) -> Resul
         })
 }
 
+async fn ensure_clone_destination_allowed(
+    workspace_root: &Path,
+    destination: &crate::state::path::VirtualPath,
+) -> Result<(), ToolError> {
+    let path = workspace_root.join(destination.as_str());
+    labby_runtime::path_safety::reject_existing_symlink_ancestors(workspace_root, &path)?;
+    match tokio::fs::symlink_metadata(&path).await {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(ToolError::Sdk {
+            sdk_kind: "permission_denied".to_string(),
+            message: "git clone destination is denied because it is a symlink".to_string(),
+        }),
+        Ok(metadata) if metadata.is_dir() => Err(ToolError::InvalidParam {
+            message: "git clone destination must be absent".to_string(),
+            param: "directory".to_string(),
+        }),
+        Ok(_) => Err(ToolError::InvalidParam {
+            message: "git clone destination must be absent".to_string(),
+            param: "directory".to_string(),
+        }),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(ToolError::Sdk {
+            sdk_kind: "internal_error".to_string(),
+            message: format!("failed to inspect git clone destination: {err}"),
+        }),
+    }
+}
+
+async fn cleanup_clone_destination(
+    workspace_root: &Path,
+    destination: &crate::state::path::VirtualPath,
+) {
+    let path = workspace_root.join(destination.as_str());
+    match tokio::fs::symlink_metadata(&path).await {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+            drop(tokio::fs::remove_dir_all(&path).await);
+        }
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+            drop(tokio::fs::remove_file(&path).await);
+        }
+        _ => {}
+    }
+}
+
 #[derive(Clone, Copy)]
 enum RemoteUrlMode {
     Fetch,
@@ -131,21 +182,29 @@ pub(crate) async fn run_git(workspace_root: &Path, args: &[String]) -> Result<St
         })?;
     let output = result?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if output.stdout_truncated {
+        return Err(git_output_too_large(MAX_GIT_STDOUT_BYTES, "stdout"));
+    }
+    if output.stderr_truncated {
+        return Err(git_output_too_large(MAX_GIT_STDERR_BYTES, "stderr"));
+    }
+    let stdout = bounded_git_output(&output.stdout, MAX_GIT_STDOUT_BYTES, "stdout")?;
+    let stderr = bounded_git_output(&output.stderr, MAX_GIT_STDERR_BYTES, "stderr")?;
     if !output.status.success() {
         return Err(ToolError::Sdk {
             sdk_kind: "git_failed".to_string(),
-            message: format!("git failed: {}", redact_git_output(&stderr)),
+            message: format!("git failed: {stderr}"),
         });
     }
-    Ok(redact_git_output(&stdout))
+    Ok(stdout)
 }
 
 struct CappedGitOutput {
     status: std::process::ExitStatus,
     stdout: Vec<u8>,
+    stdout_truncated: bool,
     stderr: Vec<u8>,
+    stderr_truncated: bool,
 }
 
 struct CappedPipe {
@@ -197,8 +256,10 @@ async fn run_capped_command(mut command: Command) -> Result<CappedGitOutput, Too
     })?;
     Ok(CappedGitOutput {
         status,
-        stdout: stdout_result.expect("stdout result set").bytes,
-        stderr: stderr_result.expect("stderr result set").bytes,
+        stdout: stdout_result.as_ref().expect("stdout result set").bytes.clone(),
+        stdout_truncated: stdout_result.expect("stdout result set").truncated,
+        stderr: stderr_result.as_ref().expect("stderr result set").bytes.clone(),
+        stderr_truncated: stderr_result.expect("stderr result set").truncated,
     })
 }
 
@@ -272,6 +333,20 @@ fn redact_git_output(value: &str) -> String {
     let tokenish = regex::Regex::new(r"(ghp_|github_pat_|glpat-)[A-Za-z0-9_]+")
         .expect("static git token redaction regex");
     tokenish.replace_all(&value, "[REDACTED]").to_string()
+}
+
+fn bounded_git_output(bytes: &[u8], max_bytes: usize, stream: &str) -> Result<String, ToolError> {
+    if bytes.len() > max_bytes {
+        return Err(git_output_too_large(max_bytes, stream));
+    }
+    Ok(redact_git_output(&String::from_utf8_lossy(bytes)))
+}
+
+fn git_output_too_large(max_bytes: usize, stream: &str) -> ToolError {
+    ToolError::Sdk {
+        sdk_kind: "response_too_large".to_string(),
+        message: format!("git {stream} exceeded maximum output of {max_bytes} bytes"),
+    }
 }
 
 fn parse_remote_list(stdout: &str) -> Vec<Value> {
@@ -388,7 +463,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn git_v2_rejects_existing_unsafe_remote_before_network_call() {
+    async fn git_v2_does_not_expose_deferred_remote_mutations() {
         let temp = tempfile::tempdir().unwrap();
         let workspace =
             StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
@@ -396,16 +471,6 @@ mod tests {
         dispatch_git_method(&workspace, "init", json!({}))
             .await
             .unwrap();
-        run_git(
-            workspace.root_path(),
-            &[
-                "config".to_string(),
-                "remote.origin.url".to_string(),
-                "file:///tmp/repo".to_string(),
-            ],
-        )
-        .await
-        .unwrap();
 
         for method in ["fetch", "pull", "push"] {
             let err = dispatch_git_method(
@@ -415,52 +480,8 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert_eq!(
-                err.kind(),
-                "invalid_param",
-                "{method} should preflight remote URL"
-            );
+            assert_eq!(err.kind(), "unknown_tool", "{method} should be deferred");
         }
-    }
-
-    #[tokio::test]
-    async fn git_v2_rejects_existing_unsafe_pushurl_before_push() {
-        let temp = tempfile::tempdir().unwrap();
-        let workspace =
-            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
-                .unwrap();
-        dispatch_git_method(&workspace, "init", json!({}))
-            .await
-            .unwrap();
-        run_git(
-            workspace.root_path(),
-            &[
-                "config".to_string(),
-                "remote.origin.url".to_string(),
-                "https://github.com/jmagar/example.git".to_string(),
-            ],
-        )
-        .await
-        .unwrap();
-        run_git(
-            workspace.root_path(),
-            &[
-                "config".to_string(),
-                "remote.origin.pushurl".to_string(),
-                "ssh://github.com/jmagar/example.git".to_string(),
-            ],
-        )
-        .await
-        .unwrap();
-
-        let err = dispatch_git_method(
-            &workspace,
-            "push",
-            json!({"branch": "HEAD", "remote": "origin"}),
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(err.kind(), "invalid_param");
     }
 
     #[tokio::test]
@@ -542,6 +563,66 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.kind(), "symlink_rejected");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn git_v2_rejects_symlink_clone_destination_before_network_call() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), temp.path().join("link")).unwrap();
+        let workspace =
+            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+                .unwrap();
+
+        let err = dispatch_git_method(
+            &workspace,
+            "clone",
+            json!({
+                "url": "https://github.com/jmagar/example.git",
+                "directory": "link"
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.kind(), "symlink_rejected");
+        assert!(std::fs::read_dir(outside.path()).unwrap().next().is_none());
+    }
+
+    #[tokio::test]
+    async fn git_v2_clone_requires_absent_destination() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("repo")).unwrap();
+        let workspace =
+            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+                .unwrap();
+
+        let err = dispatch_git_method(
+            &workspace,
+            "clone",
+            json!({
+                "url": "https://github.com/jmagar/example.git",
+                "directory": "repo"
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.kind(), "invalid_param");
+        assert!(
+            std::fs::read_dir(temp.path().join("repo"))
+                .unwrap()
+                .next()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn git_output_caps_error_instead_of_silently_truncating() {
+        let bytes = vec![b'x'; MAX_GIT_STDOUT_BYTES + 1];
+        let err = bounded_git_output(&bytes, MAX_GIT_STDOUT_BYTES, "stdout").unwrap_err();
+        assert_eq!(err.kind(), "response_too_large");
     }
 
     #[tokio::test]

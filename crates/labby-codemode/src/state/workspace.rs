@@ -8,7 +8,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::error::ToolError;
 
-use super::path::VirtualPath;
+use super::path::{VirtualPath, is_reserved_metadata_path};
 use super::quota::StateWorkspaceLimits;
 
 #[derive(Debug, Clone)]
@@ -403,7 +403,7 @@ impl StateWorkspace {
         path: &VirtualPath,
         recursive: bool,
     ) -> Result<MutationResult, ToolError> {
-        if path.as_str() == ".labby-state" || path.as_str().starts_with(".labby-state/") {
+        if is_reserved_metadata_path(path.as_str()) {
             return Err(ToolError::Sdk {
                 sdk_kind: "permission_denied".to_string(),
                 message: "state metadata paths cannot be removed".to_string(),
@@ -505,7 +505,7 @@ impl StateWorkspace {
                     Err(_) => continue,
                 };
                 let virtual_path = labby_runtime::path_safety::rel_to_unix_string(relative);
-                if virtual_path == ".labby-state" || virtual_path.starts_with(".labby-state/") {
+                if is_reserved_metadata_path(&virtual_path) {
                     continue;
                 }
                 let metadata = tokio::fs::symlink_metadata(&path)
@@ -768,7 +768,12 @@ impl StateWorkspace {
             .map_err(internal_io("read state directory entry"))?
         {
             let name = entry.file_name().to_string_lossy().to_string();
-            if path.as_str().is_empty() && name == ".labby-state" {
+            let child_path = if path.as_str().is_empty() {
+                name.clone()
+            } else {
+                format!("{}/{}", path.as_str(), name)
+            };
+            if is_reserved_metadata_path(&child_path) {
                 continue;
             }
             entries.push(name);
@@ -902,7 +907,10 @@ impl StateWorkspace {
         tokio::fs::write(&plan_path, canonical)
             .await
             .map_err(internal_io("write state edit plan"))?;
-        self.enforce_total_bytes().await?;
+        if let Err(err) = self.enforce_total_bytes().await {
+            drop(tokio::fs::remove_file(&plan_path).await);
+            return Err(err);
+        }
         Ok(EditPlanResult { plan_id, edits })
     }
 
@@ -1382,6 +1390,80 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.kind(), "quota_exceeded");
+    }
+
+    #[tokio::test]
+    async fn plan_edits_removes_hidden_plan_file_after_quota_error() {
+        let temp = tempfile::tempdir().unwrap();
+        let limits = StateWorkspaceLimits {
+            max_file_bytes: 1024,
+            max_total_bytes: 1,
+            ..StateWorkspaceLimits::default()
+        };
+        let ws = StateWorkspace::new(temp.path().to_path_buf(), limits).unwrap();
+
+        let err = ws
+            .plan_edits(vec![FileEdit {
+                path: "src/app.rs".to_string(),
+                search: "println".to_string(),
+                replace: "eprintln".to_string(),
+            }])
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.kind(), "quota_exceeded");
+        let plans_dir = temp.path().join(".labby-state").join("plans");
+        let remaining = std::fs::read_dir(&plans_dir)
+            .map(|entries| entries.count())
+            .unwrap_or(0);
+        assert_eq!(remaining, 0);
+    }
+
+    #[tokio::test]
+    async fn workspace_recursive_reads_hide_reserved_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let ws = StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+            .unwrap();
+        std::fs::create_dir_all(temp.path().join("repo/.git/hooks")).unwrap();
+        std::fs::write(temp.path().join("repo/.git/config"), "[core]\n").unwrap();
+        std::fs::create_dir_all(temp.path().join("repo/.labby-state/plans")).unwrap();
+        std::fs::write(temp.path().join("repo/.labby-state/plans/plan.json"), "{}").unwrap();
+        ws.write_file(
+            &VirtualPath::parse("repo/src/app.rs").unwrap(),
+            "fn main() {}\n",
+        )
+        .await
+        .unwrap();
+
+        let listed = ws.list(&VirtualPath::parse("repo").unwrap()).await.unwrap();
+        assert_eq!(listed.entries, vec!["src"]);
+
+        let walked = ws
+            .walk_tree(&VirtualPath::parse("repo").unwrap(), 100)
+            .await
+            .unwrap();
+        assert!(
+            walked
+                .entries
+                .iter()
+                .all(|entry| !entry.path.contains("/.git/")
+                    && !entry.path.contains("/.labby-state/"))
+        );
+
+        let glob = ws.glob("repo/**/*", 100).await.unwrap();
+        assert_eq!(glob.matches, vec!["repo/src/app.rs"]);
+
+        ws.archive_create(
+            &VirtualPath::parse("repo").unwrap(),
+            &VirtualPath::parse("out/repo.tar").unwrap(),
+        )
+        .await
+        .unwrap();
+        let archive = ws
+            .archive_list(&VirtualPath::parse("out/repo.tar").unwrap(), 100)
+            .await
+            .unwrap();
+        assert_eq!(archive.entries, vec!["src/app.rs"]);
     }
 
     #[cfg(unix)]

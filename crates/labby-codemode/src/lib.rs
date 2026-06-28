@@ -11,6 +11,10 @@
 //! Vocabulary is deliberately host-source-neutral: a tool is an opaque `id`
 //! (`<namespace>::<tool>`) plus JSON params; a tool descriptor is the neutral
 //! [`ToolDescriptor`]; the visibility filter is the neutral [`ToolScope`].
+//! The only exception is the runner-reserved local `state`/`git` provider set:
+//! those namespaces are not host upstream tools and are injected only for
+//! unscoped admin/trusted-local callers. Scoped runs must not discover or
+//! dispatch them.
 //!
 //! Runtime: Javy/QuickJS via a hardened subprocess (NOT Wasmtime). See
 //! `CLAUDE.md` for the sandbox containment invariants.

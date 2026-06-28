@@ -78,13 +78,11 @@ fn path_traversal(raw: &str) -> ToolError {
 
 fn reject_credential_like_path(path: &str) -> Result<(), ToolError> {
     let lower = path.to_ascii_lowercase();
-    if lower
-        .split('/')
-        .any(|segment| segment == ".git" || segment == ".labby-state")
-    {
+    if is_reserved_metadata_path(&lower) {
         return Err(ToolError::Sdk {
             sdk_kind: "permission_denied".to_string(),
-            message: "state path is denied because it targets provider metadata".to_string(),
+            message: "state path is denied because runtime metadata is managed by Labby"
+                .to_string(),
         });
     }
 
@@ -107,6 +105,11 @@ fn reject_credential_like_path(path: &str) -> Result<(), ToolError> {
         });
     }
     Ok(())
+}
+
+pub(crate) fn is_reserved_metadata_path(path: &str) -> bool {
+    path.split('/')
+        .any(|part| part.eq_ignore_ascii_case(".git") || part.eq_ignore_ascii_case(".labby-state"))
 }
 
 #[cfg(test)]
@@ -159,6 +162,11 @@ mod tests {
             "src/.git/config",
             "src/.git/hooks/pre-commit",
             ".labby-state/plans/abc.json",
+            "repo/.git/config",
+            "repo/.git/hooks/pre-commit",
+            ".labby-state",
+            ".labby-state/plans/demo.json",
+            "repo/.labby-state/tmp/file",
         ] {
             let err = VirtualPath::parse(raw).expect_err("credential path should fail");
             assert_eq!(err.kind(), "permission_denied");

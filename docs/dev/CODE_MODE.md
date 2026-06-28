@@ -84,15 +84,14 @@ V2 git methods add:
 - `git.remoteAdd({ name, url, cwd })`
 - `git.remoteRemove({ name, cwd })`
 - `git.clone({ url, directory, cwd })`
-- `git.fetch({ remote, cwd })`
-- `git.pull({ remote, branch, cwd })`
-- `git.push({ remote, branch, cwd })`
 
 Remote git URLs must be explicit `https://github.com/...` URLs without embedded
 credentials. Labby does not inject hidden credentials or host git config into
 Code Mode. Use `cwd` to run git commands inside a workspace-relative child repo,
 for example after cloning into `directory: "repo"`. Clones are shallow
-(`--depth 1`).
+(`--depth 1`). V2 does not expose `fetch`, `pull`, or `push`; those remote
+mutation methods are deferred until Code Mode has an explicit transaction and
+credential model for them.
 
 Example:
 

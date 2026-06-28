@@ -375,9 +375,6 @@ globalThis.git = Object.freeze({
   remoteAdd: function(params) { return __labLocalProviderCall("git::remoteAdd", params); },
   remoteRemove: function(params) { return __labLocalProviderCall("git::remoteRemove", params); },
   clone: function(params) { return __labLocalProviderCall("git::clone", params); },
-  fetch: function(params) { return __labLocalProviderCall("git::fetch", params); },
-  pull: function(params) { return __labLocalProviderCall("git::pull", params); },
-  push: function(params) { return __labLocalProviderCall("git::push", params); },
   log: function(params) { return __labLocalProviderCall("git::log", params); },
   diff: function(params) { return __labLocalProviderCall("git::diff", params); }
 });

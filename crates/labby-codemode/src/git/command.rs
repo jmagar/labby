@@ -14,6 +14,7 @@ pub(crate) struct GitCommandSpec {
     pub(crate) remote_preflight: Option<String>,
     pub(crate) push_remote_preflight: Option<String>,
     pub(crate) branch_preflight: Option<String>,
+    pub(crate) clone_destination: Option<VirtualPath>,
 }
 
 impl GitCommandSpec {
@@ -24,6 +25,7 @@ impl GitCommandSpec {
             remote_preflight: None,
             push_remote_preflight: None,
             branch_preflight: None,
+            clone_destination: None,
         }
     }
 
@@ -35,6 +37,7 @@ impl GitCommandSpec {
                 remote_preflight: None,
                 push_remote_preflight: None,
                 branch_preflight: None,
+                clone_destination: None,
             }),
             "status" => {
                 let cwd = parse_cwd(params)?;
@@ -54,6 +57,7 @@ impl GitCommandSpec {
                     remote_preflight: None,
                     push_remote_preflight: None,
                     branch_preflight: None,
+                    clone_destination: None,
                 })
             }
             "commit" => {
@@ -83,6 +87,7 @@ impl GitCommandSpec {
                     remote_preflight: None,
                     push_remote_preflight: None,
                     branch_preflight: None,
+                    clone_destination: None,
                 })
             }
             "log" => {
@@ -96,6 +101,7 @@ impl GitCommandSpec {
                     remote_preflight: None,
                     push_remote_preflight: None,
                     branch_preflight: None,
+                    clone_destination: None,
                 })
             }
             "diff" => {
@@ -110,6 +116,7 @@ impl GitCommandSpec {
                     remote_preflight: None,
                     push_remote_preflight: None,
                     branch_preflight: None,
+                    clone_destination: None,
                 })
             }
             "branch" => {
@@ -127,6 +134,7 @@ impl GitCommandSpec {
                         remote_preflight: None,
                         push_remote_preflight: None,
                         branch_preflight: None,
+                        clone_destination: None,
                     });
                 }
                 let name = params.name.unwrap();
@@ -143,6 +151,7 @@ impl GitCommandSpec {
                     remote_preflight: None,
                     push_remote_preflight: None,
                     branch_preflight: Some(name),
+                    clone_destination: None,
                 })
             }
             "checkout" => {
@@ -160,6 +169,7 @@ impl GitCommandSpec {
                     remote_preflight: None,
                     push_remote_preflight: None,
                     branch_preflight: Some(params.git_ref),
+                    clone_destination: None,
                 })
             }
             "remoteList" => Ok(Self {
@@ -168,6 +178,7 @@ impl GitCommandSpec {
                 remote_preflight: None,
                 push_remote_preflight: None,
                 branch_preflight: None,
+                clone_destination: None,
             }),
             "remoteAdd" => {
                 let params: RemoteAddParams = parse_params(params)?;
@@ -182,6 +193,7 @@ impl GitCommandSpec {
                     remote_preflight: None,
                     push_remote_preflight: None,
                     branch_preflight: None,
+                    clone_destination: None,
                 })
             }
             "remoteRemove" => {
@@ -195,6 +207,7 @@ impl GitCommandSpec {
                     remote_preflight: None,
                     push_remote_preflight: None,
                     branch_preflight: None,
+                    clone_destination: None,
                 })
             }
             "clone" => {
@@ -211,54 +224,7 @@ impl GitCommandSpec {
                     remote_preflight: None,
                     push_remote_preflight: None,
                     branch_preflight: None,
-                })
-            }
-            "fetch" => {
-                let params: PullPushParams = parse_params(params)?;
-                let remote = params.remote.unwrap_or_else(|| "origin".to_string());
-                validate_remote_name(&remote, "remote")?;
-                let mut args = git_base_args(["fetch"]);
-                args.push(remote.clone());
-                Ok(Self {
-                    args,
-                    cwd: parse_optional_cwd(params.cwd)?,
-                    remote_preflight: Some(remote),
-                    push_remote_preflight: None,
-                    branch_preflight: None,
-                })
-            }
-            "pull" => {
-                let params: PullPushParams = parse_params(params)?;
-                let remote = params.remote.unwrap_or_else(|| "origin".to_string());
-                let branch = params.branch.unwrap_or_else(|| "HEAD".to_string());
-                validate_remote_name(&remote, "remote")?;
-                validate_git_ref(&branch, "branch")?;
-                let mut args = git_base_args(["pull", "--ff-only"]);
-                args.push(remote.clone());
-                args.push(branch.clone());
-                Ok(Self {
-                    args,
-                    cwd: parse_optional_cwd(params.cwd)?,
-                    remote_preflight: Some(remote),
-                    push_remote_preflight: None,
-                    branch_preflight: branch_preflight(branch),
-                })
-            }
-            "push" => {
-                let params: PullPushParams = parse_params(params)?;
-                let remote = params.remote.unwrap_or_else(|| "origin".to_string());
-                let branch = params.branch.unwrap_or_else(|| "HEAD".to_string());
-                validate_remote_name(&remote, "remote")?;
-                validate_git_ref(&branch, "branch")?;
-                let mut args = git_base_args(["push"]);
-                args.push(remote.clone());
-                args.push(branch.clone());
-                Ok(Self {
-                    args,
-                    cwd: parse_optional_cwd(params.cwd)?,
-                    remote_preflight: None,
-                    push_remote_preflight: Some(remote),
-                    branch_preflight: branch_preflight(branch),
+                    clone_destination: Some(directory),
                 })
             }
             other => Err(ToolError::Sdk {
@@ -370,13 +336,6 @@ struct CloneParams {
     cwd: Option<String>,
 }
 
-#[derive(Deserialize)]
-struct PullPushParams {
-    remote: Option<String>,
-    branch: Option<String>,
-    cwd: Option<String>,
-}
-
 fn validate_remote_name(value: &str, param: &str) -> Result<(), ToolError> {
     let valid = !value.is_empty()
         && value.len() <= 64
@@ -448,17 +407,16 @@ pub(crate) fn validate_remote_url(value: &str, param: &str) -> Result<(), ToolEr
 }
 
 fn validate_clone_directory(value: &str) -> Result<(), ToolError> {
-    if value.split('/').any(|part| part == ".git") {
+    if value
+        .split('/')
+        .any(|part| part.eq_ignore_ascii_case(".git") || part.eq_ignore_ascii_case(".labby-state"))
+    {
         return Err(invalid_param(
             "directory",
-            "git clone directory must not include .git",
+            "git clone directory must not include reserved metadata paths",
         ));
     }
     Ok(())
-}
-
-fn branch_preflight(value: String) -> Option<String> {
-    if value == "HEAD" { None } else { Some(value) }
 }
 
 fn invalid_param(param: &str, message: &str) -> ToolError {
