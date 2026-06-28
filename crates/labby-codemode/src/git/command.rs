@@ -67,6 +67,87 @@ impl GitCommandSpec {
                 }
                 Ok(Self { args })
             }
+            "branch" => {
+                let params: BranchParams = parse_params(params)?;
+                validate_git_ref(&params.name, "name")?;
+                let mut args = if params.delete {
+                    base_args(["branch", "-D"])
+                } else {
+                    base_args(["branch"])
+                };
+                args.push(params.name);
+                Ok(Self { args })
+            }
+            "checkout" => {
+                let params: CheckoutParams = parse_params(params)?;
+                validate_git_ref(&params.git_ref, "ref")?;
+                let mut args = if params.create {
+                    base_args(["checkout", "-b"])
+                } else {
+                    base_args(["checkout"])
+                };
+                args.push(params.git_ref);
+                Ok(Self { args })
+            }
+            "remoteList" => Ok(Self {
+                args: base_args(["remote", "-v"]),
+            }),
+            "remoteAdd" => {
+                let params: RemoteAddParams = parse_params(params)?;
+                validate_remote_name(&params.name, "name")?;
+                validate_remote_url(&params.url, "url")?;
+                let mut args = base_args(["remote", "add"]);
+                args.push(params.name);
+                args.push(params.url);
+                Ok(Self { args })
+            }
+            "remoteRemove" => {
+                let params: RemoteNameParams = parse_params(params)?;
+                validate_remote_name(&params.name, "name")?;
+                let mut args = base_args(["remote", "remove"]);
+                args.push(params.name);
+                Ok(Self { args })
+            }
+            "clone" => {
+                let params: CloneParams = parse_params(params)?;
+                validate_remote_url(&params.url, "url")?;
+                let directory = VirtualPath::parse(&params.directory)?;
+                validate_clone_directory(directory.as_str())?;
+                let mut args = base_args(["clone", "--depth", "1", "--"]);
+                args.push(params.url);
+                args.push(directory.as_str().to_string());
+                Ok(Self { args })
+            }
+            "fetch" => {
+                let params: PullPushParams = parse_params(params)?;
+                let remote = params.remote.unwrap_or_else(|| "origin".to_string());
+                validate_remote_name(&remote, "remote")?;
+                let mut args = base_args(["fetch"]);
+                args.push(remote);
+                Ok(Self { args })
+            }
+            "pull" => {
+                let params: PullPushParams = parse_params(params)?;
+                let remote = params.remote.unwrap_or_else(|| "origin".to_string());
+                let branch = params.branch.unwrap_or_else(|| "HEAD".to_string());
+                validate_remote_name(&remote, "remote")?;
+                validate_git_ref(&branch, "branch")?;
+                let mut args = base_args(["pull", "--ff-only"]);
+                args.push(remote);
+                args.push(branch);
+                Ok(Self { args })
+            }
+            "push" => {
+                let params: PullPushParams = parse_params(params)?;
+                let remote = params.remote.unwrap_or_else(|| "origin".to_string());
+                let branch = params.branch.unwrap_or_else(|| "HEAD".to_string());
+                validate_remote_name(&remote, "remote")?;
+                validate_git_ref(&branch, "branch")?;
+                let mut args = base_args(["push"]);
+                args.push(remote);
+                args.push(branch);
+                Ok(Self { args })
+            }
             other => Err(ToolError::Sdk {
                 sdk_kind: "unknown_tool".to_string(),
                 message: format!("unknown git method `{other}`"),
@@ -118,6 +199,116 @@ struct OptionalPathParams {
     path: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BranchParams {
+    name: String,
+    #[serde(default)]
+    delete: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CheckoutParams {
+    #[serde(rename = "ref")]
+    git_ref: String,
+    #[serde(default)]
+    create: bool,
+}
+
+#[derive(Deserialize)]
+struct RemoteNameParams {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct RemoteAddParams {
+    name: String,
+    url: String,
+}
+
+#[derive(Deserialize)]
+struct CloneParams {
+    url: String,
+    directory: String,
+}
+
+#[derive(Deserialize)]
+struct PullPushParams {
+    remote: Option<String>,
+    branch: Option<String>,
+}
+
+fn validate_remote_name(value: &str, param: &str) -> Result<(), ToolError> {
+    let valid = !value.is_empty()
+        && value.len() <= 64
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'));
+    if valid {
+        Ok(())
+    } else {
+        Err(invalid_param(
+            param,
+            "git remote name must be 1-64 ASCII alnum, dash, underscore, or dot chars",
+        ))
+    }
+}
+
+fn validate_git_ref(value: &str, param: &str) -> Result<(), ToolError> {
+    let invalid = value.trim().is_empty()
+        || value != value.trim()
+        || value.starts_with('-')
+        || value.ends_with('/')
+        || value.ends_with(".lock")
+        || value.contains("..")
+        || value
+            .chars()
+            .any(|ch| ch.is_whitespace() || matches!(ch, '~' | '^' | ':' | '?' | '*' | '[' | '\\'));
+    if invalid {
+        Err(invalid_param(param, "git ref is not allowed"))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_remote_url(value: &str, param: &str) -> Result<(), ToolError> {
+    if !value.starts_with("https://") || value.contains('?') || value.contains('#') {
+        return Err(invalid_param(
+            param,
+            "git remote URL must be an explicit https URL without query or fragment",
+        ));
+    }
+    let remainder = &value["https://".len()..];
+    let Some((authority, path)) = remainder.split_once('/') else {
+        return Err(invalid_param(param, "git remote URL must include a path"));
+    };
+    if authority.is_empty() || path.is_empty() || authority.contains('@') {
+        return Err(invalid_param(
+            param,
+            "git remote URL must not include embedded credentials",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_clone_directory(value: &str) -> Result<(), ToolError> {
+    if value.split('/').any(|part| part == ".git") {
+        return Err(invalid_param(
+            "directory",
+            "git clone directory must not include .git",
+        ));
+    }
+    Ok(())
+}
+
+fn invalid_param(param: &str, message: &str) -> ToolError {
+    ToolError::InvalidParam {
+        message: message.to_string(),
+        param: param.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,7 +333,7 @@ mod tests {
 
     #[test]
     fn git_rejects_unsupported_method() {
-        assert!(GitCommandSpec::for_method("push", serde_json::json!({})).is_err());
+        assert!(GitCommandSpec::for_method("rebase", serde_json::json!({})).is_err());
     }
 
     #[test]
@@ -150,5 +341,47 @@ mod tests {
         let err = GitCommandSpec::for_method("add", serde_json::json!({"path": "../outside"}))
             .unwrap_err();
         assert_eq!(err.kind(), "path_traversal");
+    }
+
+    #[test]
+    fn git_v2_rejects_unsafe_remote_urls() {
+        for url in [
+            "file:///tmp/repo",
+            "ssh://host/repo",
+            "git@github.com:owner/repo.git",
+            "https://user:token@example.com/repo.git",
+        ] {
+            let err = GitCommandSpec::for_method(
+                "remoteAdd",
+                serde_json::json!({"name": "origin", "url": url}),
+            )
+            .unwrap_err();
+            assert_eq!(err.kind(), "invalid_param");
+        }
+    }
+
+    #[test]
+    fn git_v2_builds_branch_checkout_and_remote_args() {
+        let branch =
+            GitCommandSpec::for_method("branch", serde_json::json!({"name": "feature/demo"}))
+                .unwrap();
+        assert!(branch
+            .args
+            .ends_with(&["branch".to_string(), "feature/demo".to_string()]));
+
+        let checkout =
+            GitCommandSpec::for_method("checkout", serde_json::json!({"ref": "feature/demo"}))
+                .unwrap();
+        assert!(checkout.args.ends_with(&[
+            "checkout".to_string(),
+            "feature/demo".to_string()
+        ]));
+
+        let remote = GitCommandSpec::for_method(
+            "remoteAdd",
+            serde_json::json!({"name": "origin", "url": "https://github.com/jmagar/example.git"}),
+        )
+        .unwrap();
+        assert!(remote.args.iter().any(|arg| arg == "remote"));
     }
 }

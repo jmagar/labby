@@ -230,7 +230,6 @@ mod tests {
             .unwrap();
         assert!(log["stdout"].as_str().unwrap().contains("initial state"));
     }
-
     #[test]
     fn redacts_only_https_userinfo_and_tokens() {
         let redacted = redact_git_output(
@@ -240,5 +239,43 @@ mod tests {
         assert!(redacted.contains("https://[REDACTED]@example.com/b"));
         assert!(!redacted.contains("user:pass"));
         assert!(!redacted.contains("ghp_abcdefghijklmnopqrstuvwxyz"));
+    }
+
+    #[tokio::test]
+    async fn git_v2_branch_checkout_and_remote_list_work_locally() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace =
+            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+                .unwrap();
+        workspace
+            .write_file(
+                &crate::state::path::VirtualPath::parse("README.md").unwrap(),
+                "hi\n",
+            )
+            .await
+            .unwrap();
+        dispatch_git_method(&workspace, "init", json!({}))
+            .await
+            .unwrap();
+        dispatch_git_method(&workspace, "add", json!({"path": "README.md"}))
+            .await
+            .unwrap();
+        dispatch_git_method(
+            &workspace,
+            "commit",
+            json!({"message": "init", "authorName": "Lab", "authorEmail": "lab@example.invalid"}),
+        )
+        .await
+        .unwrap();
+        dispatch_git_method(&workspace, "branch", json!({"name": "feature/demo"}))
+            .await
+            .unwrap();
+        dispatch_git_method(&workspace, "checkout", json!({"ref": "feature/demo"}))
+            .await
+            .unwrap();
+        let remotes = dispatch_git_method(&workspace, "remoteList", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(remotes["ok"], true);
     }
 }
