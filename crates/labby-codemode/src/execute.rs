@@ -137,7 +137,11 @@ impl<H: CodeModeHost> CodeModeBroker<'_, H> {
         scope: &ToolScope,
     ) -> Result<String, ToolError> {
         let Some(host) = self.host else {
-            return Ok(super::preamble::generate_local_provider_js());
+            return Ok(if local_providers_allowed(caller, scope) {
+                super::preamble::generate_local_provider_js()
+            } else {
+                String::new()
+            });
         };
         let include_snippets = caller.can_use_snippets() && !scope.is_scoped();
         // CLI with no explicit namespace scope can be served from the host's
@@ -184,7 +188,11 @@ impl<H: CodeModeHost> CodeModeBroker<'_, H> {
                     message,
                 },
             )?;
-        let local_provider_js = super::preamble::generate_local_provider_js();
+        let local_provider_js = if local_providers_allowed(caller, scope) {
+            super::preamble::generate_local_provider_js()
+        } else {
+            String::new()
+        };
         Ok(format!(
             "{local_provider_js}\n{discovery_js}\n{namespace_js}"
         ))
@@ -384,6 +392,10 @@ impl<H: CodeModeHost> CodeModeBroker<'_, H> {
     }
 }
 
+pub(crate) fn local_providers_allowed(caller: &CodeModeCaller, scope: &ToolScope) -> bool {
+    caller.is_admin() && !scope.is_scoped()
+}
+
 fn ui_resource_uri(ui_meta: &Value) -> Option<&str> {
     ui_meta.get("resourceUri").and_then(Value::as_str)
 }
@@ -392,7 +404,7 @@ fn ui_resource_uri(ui_meta: &Value) -> Option<&str> {
 mod tests {
     use super::*;
     use crate::host::NoopHost;
-    use crate::types::UiLink;
+    use crate::types::{CodeModeCallerCapabilities, UiLink};
     use serde_json::json;
 
     fn response_with_result(result: Value) -> CodeModeExecutionResponse {
@@ -454,5 +466,43 @@ mod tests {
             response.ui.as_ref().expect("widget attached").ui_meta["resourceUri"],
             "ui://ytdl-mcp/youtube-search.html"
         );
+    }
+
+    #[test]
+    fn local_providers_require_unscoped_admin_scope() {
+        assert!(local_providers_allowed(
+            &CodeModeCaller::TrustedLocal,
+            &ToolScope::default()
+        ));
+        assert!(local_providers_allowed(
+            &CodeModeCaller::Scoped {
+                capabilities: CodeModeCallerCapabilities {
+                    can_execute: true,
+                    can_use_snippets: true,
+                    is_admin: true,
+                },
+                sub: Some("admin".to_string()),
+            },
+            &ToolScope::default()
+        ));
+        assert!(!local_providers_allowed(
+            &CodeModeCaller::Scoped {
+                capabilities: CodeModeCallerCapabilities {
+                    can_execute: true,
+                    can_use_snippets: false,
+                    is_admin: false,
+                },
+                sub: Some("user".to_string()),
+            },
+            &ToolScope::default()
+        ));
+        assert!(!local_providers_allowed(
+            &CodeModeCaller::TrustedLocal,
+            &ToolScope::scoped_namespaces(vec!["github".to_string()], vec![])
+        ));
+        assert!(!local_providers_allowed(
+            &CodeModeCaller::TrustedLocal,
+            &ToolScope::new(vec![], vec!["github::list_pull_requests".to_string()])
+        ));
     }
 }

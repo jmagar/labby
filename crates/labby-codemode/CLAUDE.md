@@ -5,6 +5,14 @@ catalog/search wiring lives in `labby-gateway`; this crate should stay focused
 on runner execution, protocol, snippet/artifact handling, normalization, and
 shared Code Mode data types.
 
+Exception: this crate also owns Labby's runner-reserved local Code Mode
+providers (`state` and `git`). They are not host upstream tools. They may be
+injected and dispatched only for unscoped admin/trusted-local callers; any
+route-scoped or tool-scoped run must not see or call them. If Code Mode later
+gains tenant/workspace identity beyond the current local workspace model, move
+the local-provider policy behind a typed host-supplied context rather than
+letting these namespaces become general host tools.
+
 ---
 
 ## Runtime — Javy/QuickJS via subprocess stdio (NOT Wasmtime)
