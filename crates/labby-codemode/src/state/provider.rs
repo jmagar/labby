@@ -51,6 +51,18 @@ struct HashFileParams {
 }
 
 #[derive(Deserialize)]
+struct ArchiveCreateParams {
+    source: String,
+    destination: String,
+}
+
+#[derive(Deserialize)]
+struct ArchiveListParams {
+    path: String,
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
 struct GlobParams {
     pattern: String,
     limit: Option<usize>,
@@ -190,6 +202,28 @@ pub(crate) async fn dispatch_state_method(
             let params: PathParams = serde_json::from_value(params).map_err(invalid_params)?;
             let result = workspace
                 .detect_file(&VirtualPath::parse(&params.path)?)
+                .await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "archiveCreate" => {
+            let params: ArchiveCreateParams =
+                serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace
+                .archive_create(
+                    &VirtualPath::parse(&params.source)?,
+                    &VirtualPath::parse(&params.destination)?,
+                )
+                .await?;
+            serde_json::to_value(result).map_err(serialize_error)
+        }
+        "archiveList" => {
+            let params: ArchiveListParams =
+                serde_json::from_value(params).map_err(invalid_params)?;
+            let result = workspace
+                .archive_list(
+                    &VirtualPath::parse(&params.path)?,
+                    params.limit.unwrap_or(default_search_limit()),
+                )
                 .await?;
             serde_json::to_value(result).map_err(serialize_error)
         }
@@ -466,5 +500,56 @@ mod tests {
                 .unwrap();
         assert_eq!(detected["extension"], "json");
         assert_eq!(detected["text"], true);
+    }
+
+    #[tokio::test]
+    async fn v2_archive_create_and_list_stays_in_workspace() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace =
+            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+                .unwrap();
+
+        dispatch_state_method(
+            &workspace,
+            "writeFile",
+            json!({"path": "src/a.txt", "content": "a"}),
+        )
+        .await
+        .unwrap();
+        dispatch_state_method(
+            &workspace,
+            "writeFile",
+            json!({"path": "src/b.txt", "content": "b"}),
+        )
+        .await
+        .unwrap();
+        dispatch_state_method(
+            &workspace,
+            "archiveCreate",
+            json!({"source": "src", "destination": "out/src.tar"}),
+        )
+        .await
+        .unwrap();
+        let listing = dispatch_state_method(
+            &workspace,
+            "archiveList",
+            json!({"path": "out/src.tar", "limit": 10}),
+        )
+        .await
+        .unwrap();
+        assert!(
+            listing["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry == "a.txt")
+        );
+        assert!(
+            listing["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry == "b.txt")
+        );
     }
 }

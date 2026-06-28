@@ -27,6 +27,7 @@ ulid = "1"
 sha2 = "0.11"
 hex = "0.4"
 regex = "1"
+tar = "0.4"
 tokio-util = { version = "0.7", features = ["codec"] }
 
 # QuickJS/Javy sandbox runtime (runner subprocess only). `anyhow` is required
