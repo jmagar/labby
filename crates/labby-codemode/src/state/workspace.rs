@@ -531,10 +531,7 @@ impl StateWorkspace {
         })
     }
 
-    pub(crate) async fn read_json(
-        &self,
-        path: &VirtualPath,
-    ) -> Result<JsonReadResult, ToolError> {
+    pub(crate) async fn read_json(&self, path: &VirtualPath) -> Result<JsonReadResult, ToolError> {
         let file = self.read_file(path).await?;
         let value = serde_json::from_str(&file.content).map_err(|err| ToolError::InvalidParam {
             message: format!("state file is not valid JSON: {err}"),
@@ -591,7 +588,8 @@ impl StateWorkspace {
             .map(|value| value.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
         let text = std::str::from_utf8(&bytes).is_ok();
-        let json = extension == "json" || serde_json::from_slice::<serde_json::Value>(&bytes).is_ok();
+        let json =
+            extension == "json" || serde_json::from_slice::<serde_json::Value>(&bytes).is_ok();
         Ok(DetectFileResult {
             path: path.as_str().to_string(),
             extension,
@@ -716,14 +714,13 @@ impl StateWorkspace {
         labby_runtime::path_safety::reject_existing_symlink_ancestors(&self.root, &archive_path)?;
         self.reject_existing_symlink_path(&archive_path).await?;
         let path_string = path.as_str().to_string();
-        let (entries, truncated) = tokio::task::spawn_blocking(move || {
-            list_tar_archive(&archive_path, limit)
-        })
-        .await
-        .map_err(|err| ToolError::Sdk {
-            sdk_kind: "internal_error".to_string(),
-            message: format!("failed to join state archive listing task: {err}"),
-        })??;
+        let (entries, truncated) =
+            tokio::task::spawn_blocking(move || list_tar_archive(&archive_path, limit))
+                .await
+                .map_err(|err| ToolError::Sdk {
+                    sdk_kind: "internal_error".to_string(),
+                    message: format!("failed to join state archive listing task: {err}"),
+                })??;
         Ok(ArchiveListResult {
             path: path_string,
             entries,
@@ -1106,7 +1103,8 @@ fn has_windows_drive_prefix(path: &str) -> bool {
 }
 
 fn reject_sync_symlink(path: &Path) -> Result<(), ToolError> {
-    let metadata = std::fs::symlink_metadata(path).map_err(not_found_or_internal("read state path metadata"))?;
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(not_found_or_internal("read state path metadata"))?;
     if metadata.file_type().is_symlink() {
         return Err(ToolError::Sdk {
             sdk_kind: "permission_denied".to_string(),

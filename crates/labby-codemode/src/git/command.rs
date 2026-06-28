@@ -365,17 +365,20 @@ mod tests {
         let branch =
             GitCommandSpec::for_method("branch", serde_json::json!({"name": "feature/demo"}))
                 .unwrap();
-        assert!(branch
-            .args
-            .ends_with(&["branch".to_string(), "feature/demo".to_string()]));
+        assert!(
+            branch
+                .args
+                .ends_with(&["branch".to_string(), "feature/demo".to_string()])
+        );
 
         let checkout =
             GitCommandSpec::for_method("checkout", serde_json::json!({"ref": "feature/demo"}))
                 .unwrap();
-        assert!(checkout.args.ends_with(&[
-            "checkout".to_string(),
-            "feature/demo".to_string()
-        ]));
+        assert!(
+            checkout
+                .args
+                .ends_with(&["checkout".to_string(), "feature/demo".to_string()])
+        );
 
         let remote = GitCommandSpec::for_method(
             "remoteAdd",

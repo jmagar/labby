@@ -177,7 +177,9 @@ pub(crate) async fn dispatch_state_method(
         }
         "readJson" => {
             let params: PathParams = serde_json::from_value(params).map_err(invalid_params)?;
-            let result = workspace.read_json(&VirtualPath::parse(&params.path)?).await?;
+            let result = workspace
+                .read_json(&VirtualPath::parse(&params.path)?)
+                .await?;
             serde_json::to_value(result).map_err(serialize_error)
         }
         "writeJson" => {
@@ -494,10 +496,13 @@ mod tests {
         assert_eq!(hash["algorithm"], "sha256");
         assert_eq!(hash["hex"].as_str().unwrap().len(), 64);
 
-        let detected =
-            dispatch_state_method(&workspace, "detectFile", json!({"path": "data/config.json"}))
-                .await
-                .unwrap();
+        let detected = dispatch_state_method(
+            &workspace,
+            "detectFile",
+            json!({"path": "data/config.json"}),
+        )
+        .await
+        .unwrap();
         assert_eq!(detected["extension"], "json");
         assert_eq!(detected["text"], true);
     }
