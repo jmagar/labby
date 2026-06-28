@@ -37,7 +37,6 @@ mod runner_io;
 mod schema;
 mod shape;
 pub mod snippet;
-#[allow(dead_code)]
 mod state;
 mod trace;
 mod truncate;

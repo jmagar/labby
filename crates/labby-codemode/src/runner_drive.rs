@@ -17,7 +17,10 @@ use ulid::Ulid;
 
 use crate::error::ToolError;
 use crate::host::CodeModeHost;
-use crate::local_provider::LocalProviderCall;
+use crate::local_provider::{LocalProviderCall, LocalProviderName};
+use crate::state::provider::dispatch_state_method;
+use crate::state::quota::StateWorkspaceLimits;
+use crate::state::workspace::StateWorkspace;
 
 use super::CodeModeBroker;
 use super::artifacts::{
@@ -604,16 +607,24 @@ async fn dispatch_local_provider_stub(
     local: LocalProviderCall,
     params: Value,
 ) -> Result<Value, ToolError> {
-    let provider = local.provider.as_str();
-    drop(params);
     drop(local.params);
-    Err(ToolError::Sdk {
-        sdk_kind: "unknown_tool".to_string(),
-        message: format!(
-            "Code Mode local provider `{provider}` method `{}` is not implemented yet",
-            local.method
-        ),
-    })
+    let provider_name = local.provider.as_str();
+    match local.provider {
+        LocalProviderName::State => {
+            let workspace_root = labby_runtime::lab_home()
+                .join("code-mode-workspaces")
+                .join("default");
+            let workspace = StateWorkspace::new(workspace_root, StateWorkspaceLimits::default())?;
+            dispatch_state_method(&workspace, &local.method, params).await
+        }
+        LocalProviderName::Git => Err(ToolError::Sdk {
+            sdk_kind: "unknown_tool".to_string(),
+            message: format!(
+                "Code Mode local provider `{provider_name}` method `{}` is not implemented yet",
+                local.method
+            ),
+        }),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

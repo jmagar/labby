@@ -599,7 +599,7 @@ git commit -m "feat: add code mode state workspace"
 - Produces: `dispatch_state_method(workspace: &StateWorkspace, method: &str, params: Value) -> Result<Value, ToolError>`.
 - Produces V1 methods: `readFile`, `writeFile`, `list`, `readdir`, `glob`, `searchFiles`, `replaceInFiles`, `planEdits`, `applyEditPlan`.
 
-- [ ] **Step 1: Write failing provider dispatch tests**
+- [x] **Step 1: Write failing provider dispatch tests**
 
 In `state/provider.rs`:
 
@@ -619,7 +619,7 @@ async fn write_and_read_file_dispatch_round_trip() {
 }
 ```
 
-- [ ] **Step 2: Implement method param parsing and dispatch**
+- [x] **Step 2: Implement method param parsing and dispatch**
 
 Create `state/provider.rs`:
 
@@ -687,7 +687,7 @@ fn serialize_error(err: serde_json::Error) -> ToolError {
 
 Wire `pub(crate) mod provider;` in `state.rs`.
 
-- [ ] **Step 3: Implement glob/search/replace/plan/apply**
+- [x] **Step 3: Implement glob/search/replace/plan/apply**
 
 Add bounded state operations as ordinary `StateWorkspace` methods and call them from
 `dispatch_state_method`. Do not add public methods outside the V1 list.
@@ -774,7 +774,7 @@ Implementation details:
 - `planEdits`: validate each `FileEdit` with `VirtualPath::parse`, reject empty `search`, compute a stable plan id with `sha256` over canonical JSON for the edit list, persist the plan as JSON under `.labby-state/plans/<plan_id>.json` inside the jailed workspace, and return the plan id plus normalized edits.
 - `applyEditPlan`: read `.labby-state/plans/<plan_id>.json`, copy each target file to `.labby-state/rollback/<plan_id>/...` before editing, apply replacements using `write_file`, and on the first failure restore already-modified files from rollback copies before returning the error.
 
-- [ ] **Step 4: Connect state provider to runner drive**
+- [x] **Step 4: Connect state provider to runner drive**
 
 In `runner_drive.rs`, when a local provider call is `LocalProviderName::State`, construct/open the current workspace and call `dispatch_state_method`. Settle the runner with `ToolResult` or `ToolError` exactly like upstream calls.
 
@@ -788,7 +788,7 @@ let value = dispatch_state_method(&workspace, &local.method, params).await?;
 
 If `CodeModeConfig` does not yet carry `lab_home`, add a host-neutral config field or a `CodeModeHost` method that returns the workspace root.
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `cargo test -p labby-codemode state:: --all-features`
 
@@ -798,7 +798,7 @@ Run: `cargo test -p labby-codemode --all-features`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/labby-codemode/src/state.rs crates/labby-codemode/src/state crates/labby-codemode/src/runner_drive.rs crates/labby-codemode/src/config.rs
