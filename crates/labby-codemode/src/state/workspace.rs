@@ -287,6 +287,20 @@ impl StateWorkspace {
         Ok(())
     }
 
+    pub(crate) async fn enforce_total_bytes(&self) -> Result<(), ToolError> {
+        let total = workspace_total_bytes(&self.root).await?;
+        if total > self.limits.max_total_bytes {
+            return Err(ToolError::Sdk {
+                sdk_kind: "quota_exceeded".to_string(),
+                message: format!(
+                    "state workspace is {total} bytes; maximum is {}",
+                    self.limits.max_total_bytes
+                ),
+            });
+        }
+        Ok(())
+    }
+
     pub(crate) async fn read_file(&self, path: &VirtualPath) -> Result<ReadFileResult, ToolError> {
         let destination = self.resolve(path);
         labby_runtime::path_safety::reject_existing_symlink_ancestors(&self.root, &destination)?;
@@ -753,7 +767,11 @@ impl StateWorkspace {
             .await
             .map_err(internal_io("read state directory entry"))?
         {
-            entries.push(entry.file_name().to_string_lossy().to_string());
+            let name = entry.file_name().to_string_lossy().to_string();
+            if path.as_str().is_empty() && name == ".labby-state" {
+                continue;
+            }
+            entries.push(name);
             if entries.len() as u64 > self.limits.max_entries {
                 return Err(ToolError::Sdk {
                     sdk_kind: "response_too_large".to_string(),
@@ -884,6 +902,7 @@ impl StateWorkspace {
         tokio::fs::write(&plan_path, canonical)
             .await
             .map_err(internal_io("write state edit plan"))?;
+        self.enforce_total_bytes().await?;
         Ok(EditPlanResult { plan_id, edits })
     }
 
@@ -901,50 +920,37 @@ impl StateWorkspace {
             message: format!("failed to parse state edit plan: {err}"),
         })?;
 
-        let mut changed = Vec::new();
-        let rollback_root = self
-            .root
-            .join(".labby-state")
-            .join("rollback")
-            .join(plan_id);
+        let mut planned = Vec::new();
         for edit in edits {
             let path = VirtualPath::parse(&edit.path)?;
             let original = self.read_file(&path).await?;
             if !original.content.contains(&edit.search) {
                 continue;
             }
-            let rollback_path = rollback_root.join(path.as_str());
-            if let Some(parent) = rollback_path.parent() {
-                tokio::fs::create_dir_all(parent)
-                    .await
-                    .map_err(internal_io("create state rollback directory"))?;
-            }
-            tokio::fs::write(&rollback_path, original.content.as_bytes())
-                .await
-                .map_err(internal_io("write state rollback file"))?;
             let next = original.content.replace(&edit.search, &edit.replace);
+            planned.push((path, original.content, next));
+        }
+
+        let mut changed = Vec::new();
+        let mut originals = Vec::new();
+        for (path, original, next) in planned {
             if let Err(err) = self.write_file(&path, &next).await {
-                self.restore_rollbacks(&rollback_root, &changed).await?;
+                self.restore_originals(&originals).await?;
                 return Err(err);
             }
+            originals.push((path.clone(), original));
             changed.push(path.as_str().to_string());
         }
 
         Ok(ApplyEditPlanResult { ok: true, changed })
     }
 
-    async fn restore_rollbacks(
+    async fn restore_originals(
         &self,
-        rollback_root: &Path,
-        changed: &[String],
+        originals: &[(VirtualPath, String)],
     ) -> Result<(), ToolError> {
-        for path in changed.iter().rev() {
-            let rollback_path = rollback_root.join(path);
-            let content = tokio::fs::read_to_string(&rollback_path)
-                .await
-                .map_err(internal_io("read state rollback file"))?;
-            self.write_file(&VirtualPath::parse(path)?, &content)
-                .await?;
+        for (path, content) in originals.iter().rev() {
+            self.write_file(path, content).await?;
         }
         Ok(())
     }

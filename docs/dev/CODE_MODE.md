@@ -28,18 +28,21 @@ Inside the sandbox:
 
 ### Local State And Git Providers
 
-Code Mode also exposes two local sandbox globals: `state` and `git`. They are
-not upstream MCP tools and they do not grant host filesystem or shell access.
-All paths are virtual workspace paths rooted inside `$LAB_HOME/code-mode-workspaces/`.
-Parameters use the documented JavaScript names; result payloads preserve the
-existing serialized Rust field names where those names are already part of the
-Code Mode contract.
+Unscoped admin/trusted-local Code Mode also exposes two local sandbox globals:
+`state` and `git`. They are not upstream MCP tools and they do not grant host
+filesystem or shell access. Route-scoped Code Mode runs do not receive these
+globals, and hand-written `callTool("state::...")` / `callTool("git::...")`
+calls are denied at dispatch time. All paths are virtual workspace paths rooted
+inside `$LAB_HOME/code-mode-workspaces/`. Parameters use the documented
+JavaScript names; result payloads preserve the existing serialized Rust field
+names where those names are already part of the Code Mode contract.
 
 V1 state methods:
 
 - `state.readFile({ path })`
 - `state.writeFile({ path, content })`
-- `state.list({ path })` / `state.readdir({ path })`
+- `state.list({ path })` / `state.readdir({ path })`; use `"/"` or `"."` for
+  the workspace root
 - `state.glob({ pattern, limit })`
 - `state.searchFiles({ pattern, query, limit })`
 - `state.replaceInFiles({ pattern, search, replace, dryRun })`
@@ -74,7 +77,8 @@ V2 state methods add:
 
 V2 git methods add:
 
-- `git.branch({ name, delete, cwd })`
+- `git.branch({ name, delete, list, cwd })`; omit `name` or pass `list: true`
+  to list branches
 - `git.checkout({ ref, create, cwd })`
 - `git.remoteList({ cwd })` returns `stdout` and structured `remotes`
 - `git.remoteAdd({ name, url, cwd })`

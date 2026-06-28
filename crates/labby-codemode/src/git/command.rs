@@ -114,19 +114,35 @@ impl GitCommandSpec {
             }
             "branch" => {
                 let params: BranchParams = parse_params(params)?;
-                validate_git_ref(&params.name, "name")?;
+                if params.delete && params.name.is_none() {
+                    return Err(invalid_param(
+                        "name",
+                        "git branch delete requires a branch name",
+                    ));
+                }
+                if params.list || params.name.is_none() {
+                    return Ok(Self {
+                        args: git_base_args(["branch", "--list"]),
+                        cwd: parse_optional_cwd(params.cwd)?,
+                        remote_preflight: None,
+                        push_remote_preflight: None,
+                        branch_preflight: None,
+                    });
+                }
+                let name = params.name.unwrap();
+                validate_git_ref(&name, "name")?;
                 let mut args = if params.delete {
                     git_base_args(["branch", "-D"])
                 } else {
                     git_base_args(["branch"])
                 };
-                args.push(params.name.clone());
+                args.push(name.clone());
                 Ok(Self {
                     args,
                     cwd: parse_optional_cwd(params.cwd)?,
                     remote_preflight: None,
                     push_remote_preflight: None,
-                    branch_preflight: Some(params.name),
+                    branch_preflight: Some(name),
                 })
             }
             "checkout" => {
@@ -316,7 +332,9 @@ struct OptionalPathParams {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BranchParams {
-    name: String,
+    name: Option<String>,
+    #[serde(default)]
+    list: bool,
     #[serde(default)]
     delete: bool,
     cwd: Option<String>,

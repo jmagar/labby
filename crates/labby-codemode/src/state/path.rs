@@ -51,6 +51,14 @@ impl VirtualPath {
         Ok(Self(value))
     }
 
+    pub(crate) fn parse_read_scope(raw: &str) -> Result<Self, ToolError> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || trimmed == "." || trimmed == "/" {
+            return Ok(Self(String::new()));
+        }
+        Self::parse(raw)
+    }
+
     pub(crate) fn as_str(&self) -> &str {
         &self.0
     }
@@ -125,6 +133,13 @@ mod tests {
     }
 
     #[test]
+    fn virtual_path_read_scope_accepts_workspace_root() {
+        for raw in ["", ".", "/"] {
+            assert_eq!(VirtualPath::parse_read_scope(raw).unwrap().as_str(), "");
+        }
+    }
+
+    #[test]
     fn virtual_path_normalizes_windows_separators() {
         assert_eq!(
             VirtualPath::parse("src\\\\app.rs").unwrap().as_str(),
@@ -138,9 +153,11 @@ mod tests {
             ".env",
             "src/.env",
             ".ssh/id_ed25519",
+            ".git",
             ".git/config",
             ".git/HEAD",
             "src/.git/config",
+            "src/.git/hooks/pre-commit",
             ".labby-state/plans/abc.json",
         ] {
             let err = VirtualPath::parse(raw).expect_err("credential path should fail");

@@ -30,10 +30,17 @@ pub(crate) async fn dispatch_git_method(
         ensure_branch_ref_allowed(&workdir, branch).await?;
     }
     let stdout = run_git(&workdir, &spec.args).await?;
+    if git_method_mutates_workspace(method) {
+        workspace.enforce_total_bytes().await?;
+    }
     if method == "remoteList" {
         return Ok(json!({ "ok": true, "stdout": stdout, "remotes": parse_remote_list(&stdout) }));
     }
     Ok(json!({ "ok": true, "stdout": stdout }))
+}
+
+fn git_method_mutates_workspace(method: &str) -> bool {
+    !matches!(method, "status" | "log" | "diff" | "remoteList")
 }
 
 async fn git_workdir(
@@ -361,6 +368,15 @@ mod tests {
         dispatch_git_method(&workspace, "branch", json!({"name": "feature/demo"}))
             .await
             .unwrap();
+        let branches = dispatch_git_method(&workspace, "branch", json!({}))
+            .await
+            .unwrap();
+        assert!(
+            branches["stdout"]
+                .as_str()
+                .unwrap()
+                .contains("feature/demo")
+        );
         dispatch_git_method(&workspace, "checkout", json!({"ref": "feature/demo"}))
             .await
             .unwrap();

@@ -169,7 +169,7 @@ pub(crate) async fn dispatch_state_method(
             let params: WalkTreeParams = serde_json::from_value(params).map_err(invalid_params)?;
             let result = workspace
                 .walk_tree(
-                    &VirtualPath::parse(&params.path)?,
+                    &VirtualPath::parse_read_scope(&params.path)?,
                     params.limit.unwrap_or(default_search_limit()),
                 )
                 .await?;
@@ -223,7 +223,7 @@ pub(crate) async fn dispatch_state_method(
                 serde_json::from_value(params).map_err(invalid_params)?;
             let result = workspace
                 .archive_list(
-                    &VirtualPath::parse(&params.path)?,
+                    &VirtualPath::parse_read_scope(&params.path)?,
                     params.limit.unwrap_or(default_search_limit()),
                 )
                 .await?;
@@ -231,7 +231,9 @@ pub(crate) async fn dispatch_state_method(
         }
         "list" | "readdir" => {
             let params: PathParams = serde_json::from_value(params).map_err(invalid_params)?;
-            let result = workspace.list(&VirtualPath::parse(&params.path)?).await?;
+            let result = workspace
+                .list(&VirtualPath::parse_read_scope(&params.path)?)
+                .await?;
             serde_json::to_value(result).map_err(serialize_error)
         }
         "glob" => {
@@ -337,6 +339,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_and_walk_accept_workspace_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace =
+            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+                .unwrap();
+        dispatch_state_method(
+            &workspace,
+            "writeFile",
+            json!({"path": "src/app.rs", "content": "fn main() {}\n"}),
+        )
+        .await
+        .unwrap();
+
+        let listed = dispatch_state_method(&workspace, "list", json!({"path": "/"}))
+            .await
+            .unwrap();
+        assert_eq!(listed["entries"], json!(["src"]));
+
+        let walked = dispatch_state_method(&workspace, "walkTree", json!({"path": "."}))
+            .await
+            .unwrap();
+        let paths = walked["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["path"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert!(paths.contains(&"src"));
+        assert!(paths.contains(&"src/app.rs"));
+    }
+
+    #[tokio::test]
+    async fn write_dispatch_rejects_git_metadata_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace =
+            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+                .unwrap();
+
+        let err = dispatch_state_method(
+            &workspace,
+            "writeFile",
+            json!({
+                "path": "repo/.git/config",
+                "content": "[credential]\n\thelper = !echo owned\n"
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.kind(), "permission_denied");
+        assert!(!temp.path().join("repo/.git/config").exists());
+    }
+
+    #[tokio::test]
     async fn search_replace_plan_and_apply_dispatch() {
         let temp = tempfile::tempdir().unwrap();
         let workspace =
@@ -388,6 +444,63 @@ mod tests {
             .await
             .unwrap();
         assert!(result["content"].as_str().unwrap().contains("eprintln"));
+    }
+
+    #[tokio::test]
+    async fn apply_edit_plan_leaves_no_hidden_rollback_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace =
+            StateWorkspace::new(temp.path().to_path_buf(), StateWorkspaceLimits::default())
+                .unwrap();
+        dispatch_state_method(
+            &workspace,
+            "writeFile",
+            json!({"path": "src/app.rs", "content": "println!(\"hi\");\n"}),
+        )
+        .await
+        .unwrap();
+
+        let plan = dispatch_state_method(
+            &workspace,
+            "planEdits",
+            json!({"edits": [{ "path": "src/app.rs", "search": "println", "replace": "eprintln" }]}),
+        )
+        .await
+        .unwrap();
+        dispatch_state_method(
+            &workspace,
+            "applyEditPlan",
+            json!({"planId": plan["plan_id"].as_str().unwrap()}),
+        )
+        .await
+        .unwrap();
+
+        assert!(!temp.path().join(".labby-state/rollback").exists());
+    }
+
+    #[tokio::test]
+    async fn plan_edits_enforces_hidden_state_quota() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = StateWorkspace::new(
+            temp.path().to_path_buf(),
+            StateWorkspaceLimits {
+                max_file_bytes: 1024 * 1024,
+                max_total_bytes: 16,
+                max_entries: 10_000,
+                max_result_bytes: 1024 * 1024,
+            },
+        )
+        .unwrap();
+
+        let err = dispatch_state_method(
+            &workspace,
+            "planEdits",
+            json!({"edits": [{ "path": "src/app.rs", "search": "println", "replace": "eprintln" }]}),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.kind(), "quota_exceeded");
     }
 
     #[tokio::test]
