@@ -2,6 +2,34 @@
 #![cfg(test)]
 
 #[test]
+fn state_and_git_globals_are_present_in_preamble() {
+    let js = crate::preamble::generate_local_provider_js();
+    assert!(js.contains("function __labLocalProviderCall"));
+    assert!(js.contains("return callTool(id, params == null ? {} : params);"));
+    assert!(js.contains("globalThis.state"));
+    assert!(js.contains("globalThis.git"));
+    for method in [
+        "state::readFile",
+        "state::writeFile",
+        "state::list",
+        "state::readdir",
+        "state::glob",
+        "state::searchFiles",
+        "state::replaceInFiles",
+        "state::planEdits",
+        "state::applyEditPlan",
+        "git::init",
+        "git::status",
+        "git::add",
+        "git::commit",
+        "git::log",
+        "git::diff",
+    ] {
+        assert!(js.contains(method), "{method} missing from preamble");
+    }
+}
+
+#[test]
 fn normalize_user_code_strips_javascript_markdown_fences() {
     let fenced = "```javascript\nconsole.log('hi');\n```";
     let result = super::normalize_user_code(fenced);

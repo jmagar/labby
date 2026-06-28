@@ -137,7 +137,7 @@ impl<H: CodeModeHost> CodeModeBroker<'_, H> {
         scope: &ToolScope,
     ) -> Result<String, ToolError> {
         let Some(host) = self.host else {
-            return Ok(String::new());
+            return Ok(super::preamble::generate_local_provider_js());
         };
         let include_snippets = caller.can_use_snippets() && !scope.is_scoped();
         // CLI with no explicit namespace scope can be served from the host's
@@ -184,7 +184,10 @@ impl<H: CodeModeHost> CodeModeBroker<'_, H> {
                     message,
                 },
             )?;
-        Ok(format!("{discovery_js}\n{namespace_js}"))
+        let local_provider_js = super::preamble::generate_local_provider_js();
+        Ok(format!(
+            "{local_provider_js}\n{discovery_js}\n{namespace_js}"
+        ))
     }
 
     async fn execute_sandboxed(

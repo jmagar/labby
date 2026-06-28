@@ -14,6 +14,34 @@ use super::protocol::CodeModeRunnerOutput;
 use super::schema::validate_code_mode_params_against_schema;
 
 #[test]
+fn local_provider_ids_are_detected_before_upstream_ids() {
+    let state = crate::local_provider::try_parse_local_provider_call("state::readFile")
+        .expect("parse succeeds")
+        .expect("state provider detected");
+    assert_eq!(state.provider.as_str(), "state");
+    assert_eq!(state.method, "readFile");
+
+    let git = crate::local_provider::try_parse_local_provider_call("git::status")
+        .expect("parse succeeds")
+        .expect("git provider detected");
+    assert_eq!(git.provider.as_str(), "git");
+    assert_eq!(git.method, "status");
+
+    assert!(
+        crate::local_provider::try_parse_local_provider_call("movie::search")
+            .expect("ordinary upstream id is valid")
+            .is_none()
+    );
+}
+
+#[test]
+fn local_provider_ids_reject_bad_methods() {
+    let err = crate::local_provider::try_parse_local_provider_call("state::")
+        .expect_err("empty local method is rejected");
+    assert_eq!(err.kind(), "invalid_param");
+}
+
+#[test]
 fn artifact_write_protocol_round_trips() {
     let output = CodeModeRunnerOutput::ArtifactWrite {
         seq: 7,

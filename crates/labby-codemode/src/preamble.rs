@@ -332,6 +332,36 @@ codemode.step = function(name, fn) {{
     ))
 }
 
+pub(crate) fn generate_local_provider_js() -> String {
+    r#"
+function __labLocalProviderCall(id, params) {
+  return callTool(id, params == null ? {} : params);
+}
+globalThis.state = Object.freeze({
+  readFile: function(params) { return __labLocalProviderCall("state::readFile", params); },
+  writeFile: function(params) { return __labLocalProviderCall("state::writeFile", params); },
+  list: function(params) { return __labLocalProviderCall("state::list", params); },
+  readdir: function(params) { return __labLocalProviderCall("state::readdir", params); },
+  glob: function(params) { return __labLocalProviderCall("state::glob", params); },
+  searchFiles: function(params) { return __labLocalProviderCall("state::searchFiles", params); },
+  replaceInFiles: function(params) { return __labLocalProviderCall("state::replaceInFiles", params); },
+  planEdits: function(params) { return __labLocalProviderCall("state::planEdits", params); },
+  applyEditPlan: function(params) { return __labLocalProviderCall("state::applyEditPlan", params); }
+});
+var state = globalThis.state;
+globalThis.git = Object.freeze({
+  init: function(params) { return __labLocalProviderCall("git::init", params); },
+  status: function(params) { return __labLocalProviderCall("git::status", params); },
+  add: function(params) { return __labLocalProviderCall("git::add", params); },
+  commit: function(params) { return __labLocalProviderCall("git::commit", params); },
+  log: function(params) { return __labLocalProviderCall("git::log", params); },
+  diff: function(params) { return __labLocalProviderCall("git::diff", params); }
+});
+var git = globalThis.git;
+"#
+    .to_string()
+}
+
 /// Generate a JavaScript preamble string that defines the `codemode` proxy
 /// namespace, plus `codemode.__meta__.namespaces()` and a `__namespaces__`
 /// script-global, for use inside the sandbox.

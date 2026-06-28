@@ -26,6 +26,35 @@ Inside the sandbox:
 - `await codemode.github.list_pull_requests(params)` calls the generated helper.
 - `await callTool("github::list_pull_requests", params)` calls the raw bridge.
 
+### Local State And Git Providers
+
+Code Mode also exposes two local sandbox globals: `state` and `git`. They are
+not upstream MCP tools and they do not grant host filesystem or shell access.
+All paths are virtual workspace paths rooted inside `$LAB_HOME/code-mode-workspaces/`.
+
+V1 state methods:
+
+- `state.readFile({ path })`
+- `state.writeFile({ path, content })`
+- `state.list({ path })` / `state.readdir({ path })`
+- `state.glob({ pattern, limit })`
+- `state.searchFiles({ pattern, query, limit })`
+- `state.replaceInFiles({ pattern, search, replace, dryRun })`
+- `state.planEdits({ edits })`
+- `state.applyEditPlan({ planId })`
+
+V1 git methods:
+
+- `git.init({})`
+- `git.status({})`
+- `git.add({ path })`
+- `git.commit({ message, authorName, authorEmail })`
+- `git.log({ limit })`
+- `git.diff({ path })`
+
+Remote git operations, hidden git auth, checkout/branch/remotes, archive/hash/detect,
+advanced JSON helpers, and broad file-management APIs are not V1.
+
 Example:
 
 ```ts

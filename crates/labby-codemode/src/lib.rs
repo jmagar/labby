@@ -24,7 +24,9 @@ mod artifacts;
 mod broker;
 mod config;
 mod execute;
+mod git;
 pub mod host;
+mod local_provider;
 mod normalize;
 mod pool;
 mod preamble;
@@ -36,6 +38,7 @@ mod runner_io;
 mod schema;
 mod shape;
 pub mod snippet;
+mod state;
 mod trace;
 mod truncate;
 /// Live TypeScript signature / `.d.ts` generator for Code Mode tool descriptors.

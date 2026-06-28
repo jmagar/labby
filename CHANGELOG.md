@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Code Mode local state and git providers** — added V1 `state.*` workspace
+  APIs and local-only `git.*` commands inside the Code Mode sandbox, backed by a
+  jailed `$LAB_HOME/code-mode-workspaces/` workspace with path, quota, output,
+  and git process guards.
+
 ---
 
 ## [0.28.0] - 2026-06-27

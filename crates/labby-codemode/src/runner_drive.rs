@@ -8,15 +8,22 @@
 //! select loop readable.
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use futures::{StreamExt, stream::FuturesUnordered};
 use serde_json::{Value, json};
 use tokio::process::ChildStdin;
+use tokio::sync::Mutex;
 use ulid::Ulid;
 
 use crate::error::ToolError;
+use crate::git::provider::dispatch_git_method;
 use crate::host::CodeModeHost;
+use crate::local_provider::{LocalProviderCall, LocalProviderName};
+use crate::state::provider::dispatch_state_method;
+use crate::state::quota::StateWorkspaceLimits;
+use crate::state::workspace::StateWorkspace;
 
 use super::CodeModeBroker;
 use super::artifacts::{
@@ -36,6 +43,8 @@ use super::types::{
     CodeModeCaller, CodeModeExecutedCall, CodeModeExecutionError, CodeModeExecutionResponse,
     CodeModeSurface, ToolScope,
 };
+
+static LOCAL_PROVIDER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 const ARTIFACT_WRITE_CALL_ID: &str = "code_mode::write_artifact";
 
@@ -334,15 +343,39 @@ impl<H: CodeModeHost> CodeModeBroker<'_, H> {
                                     return DriveOutcome::RunnerUnhealthy(err);
                                 }
                             } else {
-                                enqueue_tool_call(
-                                    self,
-                                    seq,
-                                    id,
-                                    params,
-                                    deadline,
-                                    cfg,
-                                    &mut pending_tool_calls,
-                                );
+                                match crate::local_provider::try_parse_local_provider_call(&id) {
+                                    Ok(Some(local)) => {
+                                        enqueue_local_provider_call(
+                                            seq,
+                                            id,
+                                            local,
+                                            params,
+                                            cfg,
+                                            &mut pending_tool_calls,
+                                        );
+                                    }
+                                    Ok(None) => {
+                                        enqueue_tool_call(
+                                            self,
+                                            seq,
+                                            id,
+                                            params,
+                                            deadline,
+                                            cfg,
+                                            &mut pending_tool_calls,
+                                        );
+                                    }
+                                    Err(err) => {
+                                        enqueue_rejected_tool_call(
+                                            seq,
+                                            id,
+                                            params,
+                                            err,
+                                            cfg,
+                                            &mut pending_tool_calls,
+                                        );
+                                    }
+                                }
                             }
                         }
                         CodeModeRunnerOutput::ArtifactWrite {
@@ -542,6 +575,66 @@ fn enqueue_tool_call<'a, H: CodeModeHost>(
         let elapsed_ms = call_start.elapsed().as_millis();
         (seq, call_id, redacted_params, result, elapsed_ms)
     }));
+}
+
+fn enqueue_local_provider_call(
+    seq: u64,
+    id: String,
+    local: LocalProviderCall,
+    params: Value,
+    cfg: &RunnerConfig,
+    pending_tool_calls: &mut FuturesUnordered<ToolCallFut<'_>>,
+) {
+    let redacted_params = super::trace::redact_trace_params(&params, cfg.trace_params);
+    pending_tool_calls.push(Box::pin(async move {
+        let call_start = std::time::Instant::now();
+        let _guard = LOCAL_PROVIDER_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .await;
+        let result = dispatch_local_provider_stub(local, params).await;
+        let elapsed_ms = call_start.elapsed().as_millis();
+        (seq, id, redacted_params, result, elapsed_ms)
+    }));
+}
+
+fn enqueue_rejected_tool_call(
+    seq: u64,
+    id: String,
+    params: Value,
+    err: ToolError,
+    cfg: &RunnerConfig,
+    pending_tool_calls: &mut FuturesUnordered<ToolCallFut<'_>>,
+) {
+    let redacted_params = super::trace::redact_trace_params(&params, cfg.trace_params);
+    pending_tool_calls.push(Box::pin(
+        async move { (seq, id, redacted_params, Err(err), 0) },
+    ));
+}
+
+async fn dispatch_local_provider_stub(
+    local: LocalProviderCall,
+    params: Value,
+) -> Result<Value, ToolError> {
+    drop(local.params);
+    let provider_name = local.provider.as_str();
+    match local.provider {
+        LocalProviderName::State => {
+            let workspace_root = labby_runtime::lab_home()
+                .join("code-mode-workspaces")
+                .join("default");
+            let workspace = StateWorkspace::new(workspace_root, StateWorkspaceLimits::default())?;
+            dispatch_state_method(&workspace, &local.method, params).await
+        }
+        LocalProviderName::Git => {
+            let workspace_root = labby_runtime::lab_home()
+                .join("code-mode-workspaces")
+                .join("default");
+            let workspace = StateWorkspace::new(workspace_root, StateWorkspaceLimits::default())?;
+            let _ = provider_name;
+            dispatch_git_method(&workspace, &local.method, params).await
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
