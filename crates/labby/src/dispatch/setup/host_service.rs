@@ -58,7 +58,7 @@ pub(crate) async fn unit() -> Result<String, ToolError> {
 }
 
 pub(crate) async fn install() -> Result<HostServiceOutcome, ToolError> {
-    preflight_port_available("install").await?;
+    let port = preflight_port_available("install").await?;
     let path = unit_path();
     let text = unit_text();
     std::fs::create_dir_all(unit_dir()).map_err(io_error)?;
@@ -79,7 +79,7 @@ pub(crate) async fn install() -> Result<HostServiceOutcome, ToolError> {
     let restart = run_systemctl(&["restart", SERVICE_NAME]).await?;
     stdout.push_str(&restart.stdout);
     stderr.push_str(&restart.stderr);
-    if let Err(err) = poll_ready().await {
+    if let Err(err) = poll_ready(port).await {
         stderr.push_str(&format!("\nreadiness failed: {err}"));
         return Err(ToolError::Sdk {
             sdk_kind: "internal_error".into(),
@@ -100,13 +100,14 @@ pub(crate) async fn install() -> Result<HostServiceOutcome, ToolError> {
 
 pub(crate) async fn status() -> Result<HostServiceStatus, ToolError> {
     let path = unit_path();
+    let port = configured_local_port();
     let installed = path.is_file();
     let (docker_labby_master_running, docker_labby_master_error) =
         match docker_labby_master_running().await {
             Ok(value) => (value, None),
             Err(err) => (None, Some(err.user_message().to_string())),
         };
-    let (ready_response, mut local_ready_error) = match check_ready().await {
+    let (ready_response, mut local_ready_error) = match check_ready(port).await {
         Ok(value) => (Some(value), None),
         Err(err) => (None, Some(err)),
     };
@@ -135,7 +136,7 @@ pub(crate) async fn status() -> Result<HostServiceStatus, ToolError> {
 
     let process_exe = main_pid.and_then(process_exe);
     let ready_owned_by_service = match ready_response {
-        Some(true) => match readiness_owner_matches(main_pid).await {
+        Some(true) => match readiness_owner_matches(main_pid, port).await {
             Ok(value) => Some(value),
             Err(err) => {
                 local_ready_error = Some(err.user_message().to_string());
@@ -176,6 +177,7 @@ pub(crate) async fn status() -> Result<HostServiceStatus, ToolError> {
 
 pub(crate) async fn installed_and_ready() -> Result<bool, ToolError> {
     let path = unit_path();
+    let port = configured_local_port();
     if !unit_file_is_current(&path) || !Path::new("/usr/local/bin/labby").is_file() {
         return Ok(false);
     }
@@ -201,19 +203,19 @@ pub(crate) async fn installed_and_ready() -> Result<bool, ToolError> {
     let Some(main_pid) = parse_main_pid(&props) else {
         return Ok(false);
     };
-    if check_ready().await.unwrap_or(false) {
-        readiness_owner_matches(Some(main_pid)).await
+    if check_ready(port).await.unwrap_or(false) {
+        readiness_owner_matches(Some(main_pid), port).await
     } else {
         Ok(false)
     }
 }
 
 pub(crate) async fn restart() -> Result<HostServiceOutcome, ToolError> {
-    preflight_port_available("restart").await?;
+    let port = preflight_port_available("restart").await?;
     let path = unit_path();
     let restart = run_systemctl(&["restart", SERVICE_NAME]).await?;
     let mut stderr = restart.stderr;
-    if let Err(err) = poll_ready().await {
+    if let Err(err) = poll_ready(port).await {
         stderr.push_str(&format!("\nreadiness failed: {err}"));
         return Err(ToolError::Sdk {
             sdk_kind: "internal_error".into(),
@@ -355,7 +357,7 @@ async fn append_optional_verify(
     }
 }
 
-async fn preflight_port_available(operation: &str) -> Result<(), ToolError> {
+async fn preflight_port_available(operation: &str) -> Result<u16, ToolError> {
     let docker_running = docker_labby_master_running().await?;
     let port = configured_local_port();
     let holder = port_holder(port).await?;
@@ -370,7 +372,7 @@ async fn preflight_port_available(operation: &str) -> Result<(), ToolError> {
         && (main_pid.is_some_and(|pid| process_listens_on_port(pid, port))
             || lab_user_listens_on_port(port))
     {
-        return Ok(());
+        return Ok(port);
     }
     preflight_decision(
         operation,
@@ -379,7 +381,8 @@ async fn preflight_port_available(operation: &str) -> Result<(), ToolError> {
         holder.as_deref(),
         active_state.as_deref(),
         main_pid,
-    )
+    )?;
+    Ok(port)
 }
 
 fn preflight_decision(
@@ -479,14 +482,13 @@ async fn port_holder(port: u16) -> Result<Option<String>, ToolError> {
     }
 }
 
-async fn readiness_owner_matches(main_pid: Option<u32>) -> Result<bool, ToolError> {
+async fn readiness_owner_matches(main_pid: Option<u32>, port: u16) -> Result<bool, ToolError> {
     let Some(pid) = main_pid else {
         return Ok(false);
     };
-    let Some(holder) = port_holder(configured_local_port()).await? else {
+    let Some(holder) = port_holder(port).await? else {
         return Ok(false);
     };
-    let port = configured_local_port();
     Ok(holder_contains_pid(&holder, pid)
         || process_listens_on_port(pid, port)
         || lab_user_listens_on_port(port))
@@ -616,14 +618,14 @@ async fn docker_labby_master_running() -> Result<Option<bool>, ToolError> {
     }
 }
 
-async fn poll_ready() -> Result<(), String> {
+async fn poll_ready(port: u16) -> Result<(), String> {
     let deadline = tokio::time::Instant::now() + READY_TIMEOUT;
     let mut last_err = String::new();
     while tokio::time::Instant::now() < deadline {
-        match check_ready().await {
+        match check_ready(port).await {
             Ok(true) => match systemctl_service_identity().await {
                 Ok((active_state, main_pid)) if active_state.as_deref() == Some("active") => {
-                    match readiness_owner_matches(main_pid).await {
+                    match readiness_owner_matches(main_pid, port).await {
                         Ok(true) => return Ok(()),
                         Ok(false) => {
                             last_err =
@@ -664,8 +666,8 @@ async fn systemctl_service_identity() -> Result<(Option<String>, Option<u32>), T
     ))
 }
 
-async fn check_ready() -> Result<bool, String> {
-    let url = format!("http://127.0.0.1:{}/ready", configured_local_port());
+async fn check_ready(port: u16) -> Result<bool, String> {
+    let url = format!("http://127.0.0.1:{port}/ready");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()
