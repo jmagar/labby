@@ -44,9 +44,10 @@ jobs:
       security: ${{ steps.classify.outputs.security }}
       release: ${{ steps.classify.outputs.release }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Prepare trusted changed path classifier
         run: |
           set -euo pipefail
@@ -92,9 +93,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -106,7 +108,9 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.workflow == 'true' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: stable
@@ -125,7 +129,9 @@ jobs:
         needs.changes.outputs.release == 'true'
       }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/build-gateway-admin
       - name: Upload gateway-admin export
         uses: actions/upload-artifact@v4
@@ -141,7 +147,9 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.rust_compile == 'true' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.94.1
         with:
           components: rustfmt
@@ -153,7 +161,9 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.security == 'true' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: EmbarkStudios/cargo-deny-action@v2
 
   check:
@@ -162,8 +172,10 @@ jobs:
     needs: [changes, frontend-assets]
     if: ${{ needs.changes.outputs.rust_compile == 'true' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
@@ -193,8 +205,10 @@ jobs:
       matrix:
         slice: [gateway, marketplace, fs, deploy, acp_registry]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
@@ -240,7 +254,9 @@ jobs:
           - name: labby-winjob
             command: cargo check -p labby-winjob --all-targets --locked
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.94.1
       - uses: Swatinem/rust-cache@v2
       - run: ${{ matrix.command }}
@@ -251,8 +267,10 @@ jobs:
     needs: [changes, frontend-assets]
     if: ${{ needs.changes.outputs.docs_check == 'true' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
@@ -267,8 +285,10 @@ jobs:
     needs: [changes, frontend-assets]
     if: ${{ needs.changes.outputs.rust_compile == 'true' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
@@ -292,8 +312,10 @@ jobs:
       )
     needs: [changes, frontend-assets]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
@@ -319,8 +341,10 @@ jobs:
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name != github.repository
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
@@ -366,8 +390,10 @@ jobs:
       RUSTC_WRAPPER: C:\Users\jmaga\.cargo\bin\sccache.exe
       CARGO_BUILD_RUSTC_WRAPPER: C:\Users\jmaga\.cargo\bin\sccache.exe
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
@@ -635,8 +661,10 @@ jobs:
         # instead of blocking every PR.
         os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
@@ -666,8 +694,10 @@ jobs:
     needs: [changes, frontend-assets]
     if: ${{ needs.changes.outputs.docker == 'true' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out

@@ -1,6 +1,6 @@
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::gateway::types::GatewayEnrichmentProvider;
 use crate::upstream::types::UpstreamRuntimeOwner;
@@ -151,6 +151,11 @@ pub struct GatewayEnrichApplyParams {
     pub upstream: String,
     pub hint: String,
     pub metadata_hash: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct GatewayEnrichmentScope {
+    pub route_visible_upstreams: Option<BTreeSet<String>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

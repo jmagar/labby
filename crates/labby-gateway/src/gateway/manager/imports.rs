@@ -2,6 +2,7 @@
 //! import tombstone management.
 
 use crate::gateway::config::insert_upstream;
+use crate::gateway::params::GatewayEnrichmentScope;
 use crate::gateway::types::{
     GatewayView, ImportErrorView, ImportResultView, ImportSkipReason, ImportSkipView,
     ImportTombstoneView, PendingDiscoveryOutcome, PendingImportView,
@@ -214,6 +215,15 @@ impl GatewayManager {
     /// Approve a pending import by name: move from `upstream_pending` into `upstream`
     /// with `enabled = false` (same as auto-import — operator must explicitly enable).
     pub async fn approve_pending_import(&self, name: &str) -> Result<PendingImportView, ToolError> {
+        self.approve_pending_import_scoped(name, GatewayEnrichmentScope::default())
+            .await
+    }
+
+    pub async fn approve_pending_import_scoped(
+        &self,
+        name: &str,
+        enrichment_scope: GatewayEnrichmentScope,
+    ) -> Result<PendingImportView, ToolError> {
         let mut view = {
             let _mutation_guard = self.config_mutation.lock().await;
             let mut cfg = self.config.read().await.clone();
@@ -236,8 +246,9 @@ impl GatewayManager {
 
             view
         };
-        let (enrichment_suggestion, enrichment_suggestion_error) =
-            self.preview_enrichment_for_new_upstream(name).await;
+        let (enrichment_suggestion, enrichment_suggestion_error) = self
+            .preview_enrichment_for_new_upstream(name, enrichment_scope)
+            .await;
         view.enrichment_suggestion = enrichment_suggestion;
         view.enrichment_suggestion_error = enrichment_suggestion_error;
         Ok(view)
