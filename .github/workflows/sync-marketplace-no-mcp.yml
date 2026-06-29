@@ -21,9 +21,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
+          persist-credentials: false
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure git
@@ -56,6 +57,8 @@ jobs:
 
       - name: Commit and push marketplace-no-mcp
         id: push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           committed=false
           pushed=false
@@ -75,7 +78,7 @@ jobs:
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git push origin HEAD:marketplace-no-mcp
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:marketplace-no-mcp
           pushed=true
           {
             echo "ahead_count=$ahead_count"
@@ -91,17 +94,25 @@ jobs:
 
       - name: Write sync summary
         if: always()
+        env:
+          MAIN_SHA: ${{ steps.merge.outputs.main_sha }}
+          OLD_NO_MCP_SHA: ${{ steps.merge.outputs.old_no_mcp_sha }}
+          MERGED_SHA: ${{ steps.merge.outputs.merged_sha }}
+          NEW_NO_MCP_SHA: ${{ steps.push.outputs.new_no_mcp_sha }}
+          AHEAD_COUNT: ${{ steps.push.outputs.ahead_count }}
+          COMMITTED: ${{ steps.push.outputs.committed }}
+          PUSHED: ${{ steps.push.outputs.pushed }}
         run: |
           {
             echo "## marketplace-no-mcp sync"
             echo
             echo "| Field | Value |"
             echo "|---|---|"
-            echo "| main sha | \`${{ steps.merge.outputs.main_sha }}\` |"
-            echo "| old no-MCP sha | \`${{ steps.merge.outputs.old_no_mcp_sha }}\` |"
-            echo "| merged sha | \`${{ steps.merge.outputs.merged_sha }}\` |"
-            echo "| new no-MCP sha | \`${{ steps.push.outputs.new_no_mcp_sha }}\` |"
-            echo "| ahead commits before push | \`${{ steps.push.outputs.ahead_count }}\` |"
-            echo "| committed generated changes | \`${{ steps.push.outputs.committed }}\` |"
-            echo "| pushed branch | \`${{ steps.push.outputs.pushed }}\` |"
+            echo "| main sha | \`${MAIN_SHA}\` |"
+            echo "| old no-MCP sha | \`${OLD_NO_MCP_SHA}\` |"
+            echo "| merged sha | \`${MERGED_SHA}\` |"
+            echo "| new no-MCP sha | \`${NEW_NO_MCP_SHA}\` |"
+            echo "| ahead commits before push | \`${AHEAD_COUNT}\` |"
+            echo "| committed generated changes | \`${COMMITTED}\` |"
+            echo "| pushed branch | \`${PUSHED}\` |"
           } >> "$GITHUB_STEP_SUMMARY"

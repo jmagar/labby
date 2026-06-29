@@ -377,8 +377,8 @@ impl LabMcpServer {
                                 "confirmation_required",
                                 &format!(
                                     "action `{action}` is destructive — pass \
-                                     {{\"confirm\":true}} in params or use a client \
-                                     that supports MCP elicitation"
+                                 {{\"confirm\":true}} in params or use a client \
+                                 that supports MCP elicitation"
                                 ),
                             );
                             return Ok(CallToolResult::error(vec![Content::text(
@@ -492,14 +492,41 @@ impl LabMcpServer {
                     .await;
                 return Ok(result);
             }
-            let params = if service == "gateway" {
-                inject_gateway_origin_param(params, self.request_subject(&context))
+            let result = if service == "gateway" {
+                #[cfg(feature = "gateway")]
+                {
+                    let Some(manager) = &self.gateway_manager else {
+                        let envelope = build_error(
+                            &service,
+                            &action,
+                            "internal_error",
+                            "gateway manager not wired",
+                        );
+                        return Ok(CallToolResult::error(vec![Content::text(
+                            envelope.to_string(),
+                        )]));
+                    };
+                    let params =
+                        inject_gateway_origin_param(params, self.request_subject(&context));
+                    let enrichment_scope = crate::dispatch::gateway::GatewayEnrichmentScope {
+                        route_visible_upstreams: self.route_scope.allowed_upstreams().cloned(),
+                    };
+                    crate::dispatch::gateway::dispatch_with_manager_scoped(
+                        manager,
+                        &action,
+                        params,
+                        enrichment_scope,
+                    )
+                    .await
+                }
+                #[cfg(not(feature = "gateway"))]
+                {
+                    (entry.dispatch)(action.clone(), params).await
+                }
             } else {
-                params
+                (entry.dispatch)(action.clone(), params).await
             };
-            let result = (entry.dispatch)(action.clone(), params)
-                .await
-                .map_err(|te| anyhow::Error::from(DispatchError::from(te)));
+            let result = result.map_err(|te| anyhow::Error::from(DispatchError::from(te)));
             let elapsed_ms = start.elapsed().as_millis();
             let input_tokens = estimate_tokens_args(&args);
             let (result, outcome) = format_dispatch_result(

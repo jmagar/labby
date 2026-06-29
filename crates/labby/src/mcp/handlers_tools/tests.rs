@@ -287,6 +287,31 @@ fn scoped_context(
     context
 }
 
+fn request_context_with_peer(
+    peer: rmcp::service::Peer<rmcp::RoleServer>,
+) -> rmcp::service::RequestContext<rmcp::RoleServer> {
+    rmcp::service::RequestContext::new(rmcp::model::NumberOrString::Number(1), peer)
+}
+
+async fn call_tool_error_text(server: LabMcpServer, tool_name: &str) -> String {
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = request_context_with_peer(running.peer().clone());
+
+    let result = Box::pin(
+        running
+            .service()
+            .call_tool_impl(CallToolRequestParams::new(tool_name.to_string()), context),
+    )
+    .await
+    .expect("call tool result");
+
+    assert!(result.is_error.unwrap_or(false));
+    result.content[0].as_text().expect("text").text.clone()
+}
+
 #[test]
 fn code_mode_tool_meta_points_to_canonical_ui_resource() {
     let codemode = code_mode_tool_meta(CODE_MODE_TOOL_NAME);
@@ -335,7 +360,7 @@ async fn list_tools_advertises_code_mode_output_schemas() {
         crate::mcp::route_scope::McpRouteScope::Root,
         rmcp::model::LoggingLevel::Emergency,
     );
-    let (transport, _client_transport) = tokio::io::duplex(64);
+    let (transport, _client_transport) = tokio::io::duplex(256 * 1024);
     let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
         server, transport, None,
     );
@@ -397,7 +422,7 @@ async fn list_tools_promotes_upstream_mcp_app_tools_when_raw_tools_are_hidden() 
         crate::mcp::route_scope::McpRouteScope::Root,
         rmcp::model::LoggingLevel::Emergency,
     );
-    let (transport, _client_transport) = tokio::io::duplex(64);
+    let (transport, _client_transport) = tokio::io::duplex(256 * 1024);
     let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
         server, transport, None,
     );
@@ -1389,26 +1414,9 @@ async fn call_tool_honors_route_scope_for_mcp_app_sibling_callbacks() {
         ),
         rmcp::model::LoggingLevel::Emergency,
     );
-    let (transport, _client_transport) = tokio::io::duplex(64);
-    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
-        server, transport, None,
-    );
-    let context = rmcp::service::RequestContext::new(
-        rmcp::model::NumberOrString::Number(1),
-        running.peer().clone(),
-    );
 
-    let result = Box::pin(
-        running
-            .service()
-            .call_tool_impl(CallToolRequestParams::new("youtube_probe"), context),
-    )
-    .await
-    .expect("call tool result");
-
-    assert!(result.is_error.unwrap_or(false));
-    let text = result.content[0].as_text().expect("text").text.as_str();
-    let envelope: Value = serde_json::from_str(text).expect("error envelope");
+    let text = call_tool_error_text(server, "youtube_probe").await;
+    let envelope: Value = serde_json::from_str(&text).expect("error envelope");
     assert_eq!(envelope["error"]["kind"], "not_found");
     assert!(
         !text.contains("blocked_apps"),
@@ -1552,26 +1560,9 @@ async fn call_tool_blocks_destructive_direct_mcp_app_callbacks() {
         crate::mcp::route_scope::McpRouteScope::Root,
         rmcp::model::LoggingLevel::Emergency,
     );
-    let (transport, _client_transport) = tokio::io::duplex(64);
-    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
-        server, transport, None,
-    );
-    let context = rmcp::service::RequestContext::new(
-        rmcp::model::NumberOrString::Number(1),
-        running.peer().clone(),
-    );
 
-    let result = Box::pin(
-        running
-            .service()
-            .call_tool_impl(CallToolRequestParams::new("youtube_delete_ui"), context),
-    )
-    .await
-    .expect("call tool result");
-
-    assert!(result.is_error.unwrap_or(false));
-    let text = result.content[0].as_text().expect("text").text.as_str();
-    let envelope: Value = serde_json::from_str(text).expect("error envelope");
+    let text = call_tool_error_text(server, "youtube_delete_ui").await;
+    let envelope: Value = serde_json::from_str(&text).expect("error envelope");
     assert_eq!(envelope["error"]["kind"], "confirmation_required");
 }
 
@@ -2152,7 +2143,7 @@ async fn snapshot_catalog_hides_builtin_tools_when_code_mode_is_enabled() {
         completion_test_registry(),
         Some(code_mode_manager(true).await),
         crate::mcp::route_scope::McpRouteScope::Root,
-        rmcp::model::LoggingLevel::Info,
+        rmcp::model::LoggingLevel::Emergency,
     );
 
     let snapshot = server.snapshot_catalog().await;
@@ -2176,7 +2167,7 @@ async fn snapshot_catalog_shows_no_gateway_tools_when_surface_is_disabled() {
         completion_test_registry(),
         Some(code_mode_manager(false).await),
         crate::mcp::route_scope::McpRouteScope::Root,
-        rmcp::model::LoggingLevel::Info,
+        rmcp::model::LoggingLevel::Emergency,
     );
 
     let snapshot = server.snapshot_catalog().await;
@@ -2301,6 +2292,190 @@ async fn snapshot_catalog_hides_mcp_disabled_virtual_services() {
 
     let snapshot = server.snapshot_catalog().await;
     assert!(!snapshot.tools.contains("deploy"));
+}
+
+#[tokio::test]
+async fn gateway_add_through_mcp_protected_route_suppresses_hidden_enrichment_suggestion() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
+    let pool = Arc::new(UpstreamPool::new());
+    runtime.swap(Some(Arc::clone(&pool))).await;
+    let manager = Arc::new(
+        crate::dispatch::gateway::config_store::test_gateway_manager(
+            dir.path().join("config.toml"),
+            runtime,
+        ),
+    );
+    manager
+        .seed_config_unchecked_for_tests(
+            crate::config::LabConfig {
+                upstream: vec![{
+                    let mut upstream = fixture_upstream_config("rustarr");
+                    upstream.enabled = false;
+                    upstream
+                }],
+                ..crate::config::LabConfig::default()
+            }
+            .to_gateway_config(),
+        )
+        .await;
+    pool.insert_entry_for_test(
+        "github",
+        fixture_upstream_entry(
+            "github",
+            HashMap::from([(
+                "search_repos".to_string(),
+                fixture_upstream_tool(&Arc::<str>::from("github"), "search_repos", None),
+            )]),
+        ),
+    )
+    .await;
+    let mut hidden_spec = fixture_upstream_config("github");
+    hidden_spec.enabled = false;
+
+    let server = test_server(
+        crate::registry::build_default_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::protected_subset(
+            "media-route",
+            ["rustarr".to_string()],
+            ["gateway".to_string()],
+            true,
+        ),
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let peer_server = test_server(
+        ToolRegistry::new(),
+        None,
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(256 * 1024);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        peer_server,
+        transport,
+        None,
+    );
+    let context = request_context_with_peer(running.peer().clone());
+
+    let result = Box::pin(server.call_tool_impl(
+        CallToolRequestParams::new("gateway").with_arguments(serde_json::Map::from_iter([
+            (
+                "action".to_string(),
+                Value::String("gateway.add".to_string()),
+            ),
+            (
+                "params".to_string(),
+                serde_json::json!({ "spec": hidden_spec }),
+            ),
+        ])),
+        context,
+    ))
+    .await
+    .expect("call tool result");
+
+    assert!(!result.is_error.unwrap_or(false));
+    let text = result.content[0].as_text().expect("text").text.as_str();
+    let envelope: Value = serde_json::from_str(text).expect("gateway envelope");
+    assert_eq!(envelope["ok"], true);
+    let view = &envelope["data"];
+    assert_eq!(view["config"]["name"], "github");
+    assert_eq!(view["enrichment_suggestion"], Value::Null);
+    assert!(
+        view["enrichment_suggestion_error"]
+            .as_str()
+            .is_some_and(|message| message.contains("unknown gateway upstream `github`")),
+        "hidden upstream suggestion should fail open with a scoped unknown_upstream error: {view}"
+    );
+}
+
+#[tokio::test]
+async fn gateway_pending_import_approve_through_mcp_protected_route_suppresses_hidden_enrichment_suggestion()
+ {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let runtime = crate::dispatch::gateway::manager::GatewayRuntimeHandle::default();
+    let manager = Arc::new(
+        crate::dispatch::gateway::config_store::test_gateway_manager(
+            dir.path().join("config.toml"),
+            runtime,
+        ),
+    );
+    let mut pending = fixture_upstream_config("paperless");
+    pending.enabled = false;
+    let mut import_source =
+        labby_runtime::gateway_config::ImportSource::new("claude", "/tmp/mcp.json", "now");
+    import_source.server_name = Some("paperless".to_string());
+    import_source.transport_fingerprint = Some("sha256:test".to_string());
+    pending.imported_from = Some(import_source);
+    manager
+        .seed_config_unchecked_for_tests(
+            crate::config::LabConfig {
+                upstream: vec![{
+                    let mut upstream = fixture_upstream_config("rustarr");
+                    upstream.enabled = false;
+                    upstream
+                }],
+                upstream_pending: vec![pending],
+                ..crate::config::LabConfig::default()
+            }
+            .to_gateway_config(),
+        )
+        .await;
+
+    let server = test_server(
+        crate::registry::build_default_registry(),
+        Some(manager),
+        crate::mcp::route_scope::McpRouteScope::protected_subset(
+            "media-route",
+            ["rustarr".to_string()],
+            ["gateway".to_string()],
+            true,
+        ),
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let peer_server = test_server(
+        ToolRegistry::new(),
+        None,
+        crate::mcp::route_scope::McpRouteScope::Root,
+        rmcp::model::LoggingLevel::Emergency,
+    );
+    let (transport, _client_transport) = tokio::io::duplex(256 * 1024);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        peer_server,
+        transport,
+        None,
+    );
+    let context = request_context_with_peer(running.peer().clone());
+
+    let result = Box::pin(server.call_tool_impl(
+        CallToolRequestParams::new("gateway").with_arguments(serde_json::Map::from_iter([
+            (
+                "action".to_string(),
+                Value::String("gateway.import_pending.approve".to_string()),
+            ),
+            (
+                "params".to_string(),
+                serde_json::json!({ "name": "paperless", "confirm": true }),
+            ),
+        ])),
+        context,
+    ))
+    .await
+    .expect("call tool result");
+
+    assert!(!result.is_error.unwrap_or(false));
+    let text = result.content[0].as_text().expect("text").text.as_str();
+    let envelope: Value = serde_json::from_str(text).expect("pending import envelope");
+    assert_eq!(envelope["ok"], true);
+    let view = &envelope["data"];
+    assert_eq!(view["name"], "paperless");
+    assert_eq!(view["enrichment_suggestion"], Value::Null);
+    assert!(
+        view["enrichment_suggestion_error"]
+            .as_str()
+            .is_some_and(|message| message.contains("unknown gateway upstream `paperless`")),
+        "hidden pending import suggestion should fail open with a scoped unknown_upstream error: {view}"
+    );
 }
 
 #[tokio::test]
