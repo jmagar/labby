@@ -121,11 +121,19 @@ scripts/incus-bootstrap.sh \
   --skip-install
 ```
 
-The image bakes in the release `labby` binary and the bounded apt floor,
-including ffmpeg plus Android platform tooling (`adb`, Android SDK platform
-tools, and build tools). It does not bake secrets, Tailscale auth, OAuth/login
-state, or operator config; those remain runtime convergence concerns handled by
-the bootstrap and `labby setup --provision`.
+The image bakes in the release `labby` binary, the bounded apt floor, and the
+agent runtime/toolchain floor: Node, uv-managed Python, Rust, Go, Claude Code,
+Codex, Gemini CLI, ffmpeg, Android platform tooling (`adb`, Android SDK platform
+tools, and build tools), and the Tailscale client. `config/incus/labby-image.yaml`
+is the source of truth for both the apt package list and the named provisioning
+action scripts; bare-metal `labby setup --provision` derives its install and
+verification steps from the same YAML so image builds and non-image provisioning
+do not drift. The image does not bake secrets, Tailscale auth, OAuth/login state,
+operator config, or tailnet join state; those remain runtime convergence
+concerns handled by the bootstrap and `labby setup --provision`. The image build
+script explicitly strips common secret environment variables before invoking
+distrobuilder, and the CI smoke test fails if the exported image contains Labby
+env files, Tailscale state/authkey files, or common secret env vars.
 
 Release archives are currently published for amd64 Linux. On arm64 hosts, use
 `--local-binary` with a locally built `labby` binary, or opt into the slower
