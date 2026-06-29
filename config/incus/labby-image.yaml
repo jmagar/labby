@@ -16,6 +16,8 @@ packages:
   manager: apt
   update: true
   cleanup: true
+  # Source of truth for the Labby gateway apt floor. `labby setup --provision`
+  # derives its bare-metal package install/verification list from this install set.
   repositories:
     - name: ubuntu
       url: |-
@@ -31,6 +33,7 @@ packages:
         - ca-certificates
         - curl
         - xz-utils
+        - python3
         - zsh
         - ffmpeg
         - adb
@@ -38,6 +41,151 @@ packages:
         - android-sdk-platform-tools
         - android-sdk-platform-tools-common
         - android-sdk-build-tools
+
+actions:
+  - trigger: post-packages
+    action: |-
+      #!/usr/bin/env bash
+      set -euo pipefail
+      # LABBY_PROVISION_ACTION: lab-user
+      if ! id -u lab >/dev/null 2>&1; then
+        useradd --create-home --shell /usr/bin/zsh lab
+      fi
+      mkdir -p \
+        /home/lab/.lab \
+        /home/lab/.local/bin \
+        /home/lab/.local/opt \
+        /home/lab/.cache \
+        /home/lab/.config \
+        /home/lab/.npm \
+        /home/lab/.codex \
+        /home/lab/.claude \
+        /home/lab/.gemini \
+        /home/lab/downloads
+      profile=/home/lab/.zprofile
+      touch "$profile"
+      if ! grep -q "LABBY managed PATH" "$profile"; then
+        cat >> "$profile" <<'EOF'
+
+      # LABBY managed PATH
+      export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+      EOF
+      fi
+      chown -R lab:lab /home/lab
+
+  - trigger: post-packages
+    action: |-
+      #!/usr/bin/env bash
+      set -euo pipefail
+      # LABBY_PROVISION_ACTION: node
+      runuser -u lab -- sh -lc '
+      set -eu
+      case "$(uname -m)" in
+        x86_64|amd64) ;;
+        *) echo "unsupported Node static tarball architecture: $(uname -m)" >&2; exit 1 ;;
+      esac
+      mkdir -p "$HOME/.local/bin" "$HOME/.local/opt"
+      base="https://nodejs.org/dist/latest-v24.x"
+      tmp="$(mktemp -d)"
+      trap '\''rm -rf "$tmp"'\'' EXIT
+      asset="$(curl -fsSL "$base/SHASUMS256.txt" | awk '\''/linux-x64.tar.xz$/ {print $2; exit}'\'')"
+      test -n "$asset"
+      curl -fsSL -o "$tmp/$asset" "$base/$asset"
+      curl -fsSL -o "$tmp/SHASUMS256.txt" "$base/SHASUMS256.txt"
+      (cd "$tmp" && grep "  $asset$" SHASUMS256.txt | sha256sum -c -)
+      tar -xJf "$tmp/$asset" -C "$HOME/.local/opt"
+      dir="$HOME/.local/opt/${asset%.tar.xz}"
+      ln -sfn "$dir" "$HOME/.local/opt/node"
+      ln -sfn "$dir/bin/node" "$HOME/.local/bin/node"
+      ln -sfn "$dir/bin/npm" "$HOME/.local/bin/npm"
+      ln -sfn "$dir/bin/npx" "$HOME/.local/bin/npx"
+      '
+
+  - trigger: post-packages
+    action: |-
+      #!/usr/bin/env bash
+      set -euo pipefail
+      # LABBY_PROVISION_ACTION: uv-python
+      runuser -u lab -- sh -lc '
+      set -eu
+      mkdir -p "$HOME/.local/bin"
+      tmp="$(mktemp -d)"
+      trap '\''rm -rf "$tmp"'\'' EXIT
+      installer="$tmp/uv-install.sh"
+      curl -fsSL -o "$installer" https://astral.sh/uv/install.sh
+      test -s "$installer"
+      env UV_INSTALL_DIR="$HOME/.local/bin" sh "$installer"
+      "$HOME/.local/bin/uv" python install
+      python_path="$("$HOME/.local/bin/uv" python find)"
+      ln -sfn "$python_path" "$HOME/.local/bin/python"
+      ln -sfn "$python_path" "$HOME/.local/bin/python3"
+      '
+
+  - trigger: post-packages
+    action: |-
+      #!/usr/bin/env bash
+      set -euo pipefail
+      # LABBY_PROVISION_ACTION: rust-go
+      runuser -u lab -- sh -lc '
+      set -eu
+      mkdir -p "$HOME/.cargo" "$HOME/.local/bin"
+      tmp="$(mktemp -d)"
+      trap '\''rm -rf "$tmp"'\'' EXIT
+      installer="$tmp/rustup-init.sh"
+      curl -fsSL -o "$installer" https://sh.rustup.rs
+      test -s "$installer"
+      sh "$installer" -y --profile minimal --default-toolchain stable
+      '
+      case "$(uname -m)" in
+        x86_64|amd64) go_arch=amd64 ;;
+        aarch64|arm64) go_arch=arm64 ;;
+        *) echo "unsupported Go static tarball architecture: $(uname -m)" >&2; exit 1 ;;
+      esac
+      tmp="$(mktemp -d)"
+      trap 'rm -rf "$tmp"' EXIT
+      go_json="$tmp/go.json"
+      curl -fsSL -o "$go_json" "https://go.dev/dl/?mode=json"
+      go_asset="$(python3 - "$go_json" "$go_arch" <<'PY'
+      import json
+      import sys
+
+      data = json.load(open(sys.argv[1], encoding="utf-8"))
+      arch = sys.argv[2]
+      for release in data:
+          for file in release.get("files", []):
+              if file.get("os") == "linux" and file.get("arch") == arch and file.get("kind") == "archive":
+                  print(file["filename"])
+                  sys.exit(0)
+      sys.exit(1)
+      PY
+      )"
+      test -n "$go_asset"
+      curl -fsSL -o "$tmp/$go_asset" "https://go.dev/dl/$go_asset"
+      rm -rf /usr/local/go
+      tar -C /usr/local -xzf "$tmp/$go_asset"
+      ln -sfn /usr/local/go/bin/go /usr/local/bin/go
+      ln -sfn /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+
+  - trigger: post-packages
+    action: |-
+      #!/usr/bin/env bash
+      set -euo pipefail
+      # LABBY_PROVISION_ACTION: agent-clis
+      runuser -u lab -- sh -lc '
+      set -eu
+      export PATH="$HOME/.local/bin:$PATH"
+      npm config set prefix "$HOME/.local"
+      npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
+      '
+
+  - trigger: post-packages
+    action: |-
+      #!/usr/bin/env bash
+      set -euo pipefail
+      # LABBY_PROVISION_ACTION: tailscale-install
+      if ! command -v tailscale >/dev/null 2>&1; then
+        curl -fsSL https://tailscale.com/install.sh | sh
+      fi
 
 files:
   - generator: copy

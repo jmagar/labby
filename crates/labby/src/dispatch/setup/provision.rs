@@ -22,10 +22,12 @@ const STALE_LOCK_AFTER: Duration = Duration::from_secs(60 * 60);
 const LOCK_PATH: &str = "/var/lock/labby-provision.lock";
 const LAB_USER: &str = "lab";
 const LAB_HOME: &str = "/home/lab";
-const LAB_PATH: &str = "/home/lab/.local/bin:/usr/local/bin:/usr/bin:/bin";
+const LAB_PATH: &str =
+    "/home/lab/.local/bin:/home/lab/.cargo/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin";
 const TS_AUTHKEY_ENV: &str = "TS_AUTHKEY";
 const TS_AUTHKEY_PATH: &str = "/run/labby-ts-authkey";
 const LAB_ZPROFILE: &str = "/home/lab/.zprofile";
+const LABBY_IMAGE_YAML: &str = include_str!("../../../../../config/incus/labby-image.yaml");
 const LAB_USER_DIRS: &[&str] = &[
     "/home/lab/.lab",
     "/home/lab/.local/bin",
@@ -37,22 +39,6 @@ const LAB_USER_DIRS: &[&str] = &[
     "/home/lab/.gemini",
     "/home/lab/downloads",
 ];
-const APT_FLOOR: &[&str] = &[
-    "git",
-    "openssh-client",
-    "gh",
-    "ca-certificates",
-    "curl",
-    "xz-utils",
-    "zsh",
-    "ffmpeg",
-    "adb",
-    "android-sdk",
-    "android-sdk-platform-tools",
-    "android-sdk-platform-tools-common",
-    "android-sdk-build-tools",
-];
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ProvisionOptions {
     pub dry_run: bool,
@@ -89,7 +75,9 @@ enum ActionKind {
     LabUser,
     Node,
     UvPython,
+    RustGo,
     AgentClis,
+    TailscaleInstall,
     TailscaleJoin,
     HostService,
 }
@@ -183,7 +171,7 @@ fn build_plan(skip_deps: bool) -> Vec<ProvisionAction> {
     if !skip_deps {
         actions.push(ProvisionAction {
             privilege: Privilege::Root,
-            label: Cow::Owned(format!("apt install: {}", APT_FLOOR.join(" "))),
+            label: Cow::Owned(format!("apt install: {}", apt_floor().join(" "))),
             kind: ActionKind::AptFloor,
         });
     }
@@ -206,14 +194,24 @@ fn build_plan(skip_deps: bool) -> Vec<ProvisionAction> {
             },
             ProvisionAction {
                 privilege: Privilege::Lab,
+                label: Cow::Borrowed("install rust + go toolchains"),
+                kind: ActionKind::RustGo,
+            },
+            ProvisionAction {
+                privilege: Privilege::Lab,
                 label: Cow::Borrowed("install claude + codex + gemini (npm, user-space)"),
                 kind: ActionKind::AgentClis,
+            },
+            ProvisionAction {
+                privilege: Privilege::Root,
+                label: Cow::Borrowed("install tailscale client"),
+                kind: ActionKind::TailscaleInstall,
             },
         ]);
         if tailscale_authkey().is_some() {
             actions.push(ProvisionAction {
                 privilege: Privilege::Root,
-                label: Cow::Borrowed("install tailscale and join tailnet using TS_AUTHKEY"),
+                label: Cow::Borrowed("join tailnet using TS_AUTHKEY"),
                 kind: ActionKind::TailscaleJoin,
             });
         }
@@ -262,12 +260,17 @@ impl ProvisionAction {
             ActionKind::UvPython => {
                 lab_command_success("command -v uv >/dev/null && command -v uvx >/dev/null && command -v python >/dev/null && command -v python3 >/dev/null && uv python find >/dev/null").await
             }
+            ActionKind::RustGo => {
+                lab_command_success("command -v rustup >/dev/null && command -v rustc >/dev/null && command -v cargo >/dev/null && command -v go >/dev/null && command -v gofmt >/dev/null")
+                    .await
+            }
             ActionKind::AgentClis => {
                 lab_command_success(
                     "command -v claude >/dev/null && command -v codex >/dev/null && command -v gemini >/dev/null",
                 )
                 .await
             }
+            ActionKind::TailscaleInstall => command_success("tailscale", &["version"]).await,
             ActionKind::TailscaleJoin => command_success("tailscale", &["ip", "-4"]).await,
             ActionKind::HostService => super::host_service::installed_and_ready().await,
         }
@@ -278,88 +281,26 @@ impl ProvisionAction {
             ActionKind::AptFloor => {
                 run_checked("apt-get", &["update"]).await?;
                 let mut args = vec!["install", "-y"];
-                args.extend(APT_FLOOR.iter().copied());
+                args.extend(apt_floor());
                 run_checked("apt-get", &args).await?;
             }
             ActionKind::LabUser => {
-                if !command_success("id", &["-u", LAB_USER]).await? {
-                    run_checked(
-                        "useradd",
-                        &["--create-home", "--shell", "/usr/bin/zsh", LAB_USER],
-                    )
-                    .await?;
-                }
-                let mut args = vec!["-p"];
-                args.extend_from_slice(LAB_USER_DIRS);
-                run_checked("mkdir", &args).await?;
-                run_checked(
-                    "sh",
-                    &[
-                        "-c",
-                        r#"set -eu
-profile=/home/lab/.zprofile
-touch "$profile"
-if ! grep -q "LABBY managed PATH" "$profile"; then
-    cat >> "$profile" <<'EOF'
-
-# LABBY managed PATH
-export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
-EOF
-fi"#,
-                    ],
-                )
-                .await?;
-                run_checked("chown", &["-R", "lab:lab", "/home/lab"]).await?;
+                run_image_provision_action("lab-user").await?;
             }
             ActionKind::Node => {
-                run_as_lab(
-                    r#"set -eu
-case "$(uname -m)" in
-    x86_64|amd64) ;;
-    *) echo "unsupported Node static tarball architecture: $(uname -m)" >&2; exit 1 ;;
-esac
-mkdir -p "$HOME/.local/bin" "$HOME/.local/opt"
-base="https://nodejs.org/dist/latest-v24.x"
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-asset="$(curl -fsSL "$base/SHASUMS256.txt" | awk '/linux-x64.tar.xz$/ {print $2; exit}')"
-test -n "$asset"
-curl -fsSL -o "$tmp/$asset" "$base/$asset"
-curl -fsSL -o "$tmp/SHASUMS256.txt" "$base/SHASUMS256.txt"
-(cd "$tmp" && grep "  $asset$" SHASUMS256.txt | sha256sum -c -)
-tar -xJf "$tmp/$asset" -C "$HOME/.local/opt"
-dir="$HOME/.local/opt/${asset%.tar.xz}"
-ln -sfn "$dir" "$HOME/.local/opt/node"
-ln -sfn "$dir/bin/node" "$HOME/.local/bin/node"
-ln -sfn "$dir/bin/npm" "$HOME/.local/bin/npm"
-ln -sfn "$dir/bin/npx" "$HOME/.local/bin/npx""#,
-                )
-                .await?;
+                run_image_provision_action("node").await?;
             }
             ActionKind::UvPython => {
-                run_as_lab(
-                    r#"set -eu
-	mkdir -p "$HOME/.local/bin"
-	tmp="$(mktemp -d)"
-	trap 'rm -rf "$tmp"' EXIT
-	installer="$tmp/uv-install.sh"
-	curl -fsSL -o "$installer" https://astral.sh/uv/install.sh
-	test -s "$installer"
-	env UV_INSTALL_DIR="$HOME/.local/bin" sh "$installer"
-	"$HOME/.local/bin/uv" python install
-	python_path="$("$HOME/.local/bin/uv" python find)"
-	ln -sfn "$python_path" "$HOME/.local/bin/python"
-	ln -sfn "$python_path" "$HOME/.local/bin/python3""#,
-                )
-                .await?;
+                run_image_provision_action("uv-python").await?;
+            }
+            ActionKind::RustGo => {
+                run_image_provision_action("rust-go").await?;
             }
             ActionKind::AgentClis => {
-                run_as_lab(
-                    r#"set -eu
-npm config set prefix "$HOME/.local"
-npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli"#,
-                )
-                .await?;
+                run_image_provision_action("agent-clis").await?;
+            }
+            ActionKind::TailscaleInstall => {
+                run_image_provision_action("tailscale-install").await?;
             }
             ActionKind::TailscaleJoin => {
                 install_and_join_tailscale().await?;
@@ -477,7 +418,7 @@ async fn lab_user_ready() -> Result<bool, ToolError> {
 }
 
 async fn apt_floor_installed() -> Result<bool, ToolError> {
-    for package in APT_FLOOR {
+    for package in apt_floor() {
         let output = run_command("dpkg-query", &["-W", "-f=${db:Status-Abbrev}", package]).await?;
         if !output.status.success() || !output.stdout.starts_with("ii ") {
             return Ok(false);
@@ -486,17 +427,135 @@ async fn apt_floor_installed() -> Result<bool, ToolError> {
     Ok(true)
 }
 
+fn apt_floor() -> Vec<&'static str> {
+    let packages = parse_image_install_packages(LABBY_IMAGE_YAML);
+    assert!(
+        !packages.is_empty(),
+        "config/incus/labby-image.yaml must declare packages.sets action=install packages"
+    );
+    packages
+}
+
+fn parse_image_install_packages(yaml: &str) -> Vec<&str> {
+    let mut in_packages_root = false;
+    let mut in_sets = false;
+    let mut in_install_set = false;
+    let mut in_install_packages = false;
+    let mut packages = Vec::new();
+
+    for line in yaml.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+
+        match (indent, trimmed) {
+            (0, "packages:") => {
+                in_packages_root = true;
+                in_sets = false;
+                in_install_set = false;
+                in_install_packages = false;
+                continue;
+            }
+            (0, _) => {
+                in_packages_root = false;
+                in_sets = false;
+                in_install_set = false;
+                in_install_packages = false;
+            }
+            (2, "sets:") if in_packages_root => {
+                in_sets = true;
+                continue;
+            }
+            (4, "- action: install") if in_sets => {
+                in_install_set = true;
+                in_install_packages = false;
+                continue;
+            }
+            (4, text) if in_sets && text.starts_with("- action:") => {
+                in_install_set = false;
+                in_install_packages = false;
+                continue;
+            }
+            (6, "packages:") if in_install_set => {
+                in_install_packages = true;
+                continue;
+            }
+            _ => {}
+        }
+
+        if in_install_packages {
+            if indent == 8 {
+                if let Some(package) = trimmed.strip_prefix("- ") {
+                    packages.push(package.trim_matches('"').trim_matches('\''));
+                    continue;
+                }
+            }
+            if indent <= 6 {
+                in_install_packages = false;
+            }
+        }
+    }
+
+    packages
+}
+
+async fn run_image_provision_action(name: &str) -> Result<(), ToolError> {
+    let script = image_provision_action(name).ok_or_else(|| ToolError::Sdk {
+        sdk_kind: "internal_error".into(),
+        message: format!(
+            "missing LABBY_PROVISION_ACTION `{name}` in config/incus/labby-image.yaml"
+        ),
+    })?;
+    run_checked("bash", &["-lc", &script]).await?;
+    Ok(())
+}
+
+fn image_provision_action(name: &str) -> Option<String> {
+    let marker = format!("# LABBY_PROVISION_ACTION: {name}");
+    parse_image_action_scripts(LABBY_IMAGE_YAML)
+        .into_iter()
+        .find(|script| script.lines().any(|line| line.trim() == marker))
+}
+
+fn parse_image_action_scripts(yaml: &str) -> Vec<String> {
+    let mut scripts = Vec::new();
+    let mut lines = yaml.lines().peekable();
+
+    while let Some(line) = lines.next() {
+        if line.trim() != "action: |-" {
+            continue;
+        }
+
+        let mut script = String::new();
+        while let Some(next) = lines.peek().copied() {
+            let trimmed = next.trim();
+            let indent = next.len() - next.trim_start().len();
+            if !trimmed.is_empty() && indent <= 4 {
+                break;
+            }
+            let raw = lines.next().expect("peeked line exists");
+            if raw.len() >= 6 {
+                script.push_str(&raw[6..]);
+            }
+            script.push('\n');
+        }
+        scripts.push(script);
+    }
+
+    scripts
+}
+
 async fn install_and_join_tailscale() -> Result<(), ToolError> {
     let authkey = tailscale_authkey().ok_or_else(|| ToolError::MissingParam {
         param: TS_AUTHKEY_ENV.into(),
         message: "TS_AUTHKEY is required to join Tailscale during provisioning".into(),
     })?;
     let result = async {
-        run_checked(
-            "sh",
-            &["-c", "curl -fsSL https://tailscale.com/install.sh | sh"],
-        )
-        .await?;
+        if !command_success("tailscale", &["version"]).await? {
+            run_image_provision_action("tailscale-install").await?;
+        }
         write_tailscale_authkey(&authkey)?;
         run_checked(
             "tailscale",
@@ -552,15 +611,6 @@ async fn command_success(program: &str, args: &[&str]) -> Result<bool, ToolError
         Err(err) if command_not_found(&err) => Ok(false),
         Err(err) => Err(err),
     }
-}
-
-async fn run_as_lab(script: &str) -> Result<CommandCapture, ToolError> {
-    let script = lab_shell_script(script);
-    run_checked(
-        "runuser",
-        &["-u", LAB_USER, "--", "sh", "-lc", script.as_str()],
-    )
-    .await
 }
 
 fn lab_shell_script(script: &str) -> String {
@@ -774,10 +824,73 @@ mod tests {
         assert!(text.contains("adb"));
         assert!(text.contains("android-sdk"));
         assert!(text.contains("[lab ] install node v24.x"));
+        assert!(text.contains("[lab ] install rust + go toolchains"));
         assert!(text.contains("[lab ] install claude + codex + gemini"));
+        assert!(text.contains("[root] install tailscale client"));
         assert!(text.contains("[root] write /etc/systemd/system/labby.service"));
         assert!(text.contains("It will NOT:"));
         assert!(text.contains("install or modify Incus"));
+    }
+
+    #[test]
+    fn apt_floor_is_derived_from_incus_image_yaml() {
+        assert_eq!(
+            apt_floor(),
+            vec![
+                "git",
+                "openssh-client",
+                "gh",
+                "ca-certificates",
+                "curl",
+                "xz-utils",
+                "python3",
+                "zsh",
+                "ffmpeg",
+                "adb",
+                "android-sdk",
+                "android-sdk-platform-tools",
+                "android-sdk-platform-tools-common",
+                "android-sdk-build-tools",
+            ]
+        );
+    }
+
+    #[test]
+    fn install_package_parser_ignores_non_install_sets() {
+        let packages = parse_image_install_packages(
+            r#"
+packages:
+  manager: apt
+  sets:
+    - action: install
+      packages:
+        - curl
+        - adb
+    - action: remove
+      packages:
+        - do-not-install
+
+files:
+  - generator: dump
+"#,
+        );
+
+        assert_eq!(packages, vec!["curl", "adb"]);
+    }
+
+    #[test]
+    fn provision_actions_are_derived_from_incus_image_yaml() {
+        for name in [
+            "lab-user",
+            "node",
+            "uv-python",
+            "rust-go",
+            "agent-clis",
+            "tailscale-install",
+        ] {
+            let script = image_provision_action(name).expect("named action should exist");
+            assert!(script.contains(&format!("LABBY_PROVISION_ACTION: {name}")));
+        }
     }
 
     #[test]
