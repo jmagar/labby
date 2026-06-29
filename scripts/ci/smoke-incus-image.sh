@@ -53,11 +53,11 @@ install_incus_if_needed() {
 }
 
 ensure_incus_ready() {
-    if incus version >/dev/null 2>&1; then
+    if incus info >/dev/null 2>&1; then
         return
     fi
 
-    if have sudo && sudo incus version >/dev/null 2>&1; then
+    if have sudo && sudo incus info >/dev/null 2>&1; then
         INCUS_USE_SUDO=1
         return
     fi
@@ -65,10 +65,10 @@ ensure_incus_ready() {
     log "initializing incus with minimal defaults"
     sudo_cmd incus admin init --minimal || true
 
-    if incus version >/dev/null 2>&1; then
+    if incus info >/dev/null 2>&1; then
         return
     fi
-    if have sudo && sudo incus version >/dev/null 2>&1; then
+    if have sudo && sudo incus info >/dev/null 2>&1; then
         INCUS_USE_SUDO=1
         return
     fi
