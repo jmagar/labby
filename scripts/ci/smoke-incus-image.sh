@@ -83,7 +83,7 @@ default_storage_pool() {
         printf '%s\n' "$pool"
         return
     fi
-    pool="$(incus_cmd storage list --format csv -c n | head -n 1 || true)"
+    pool="$(incus_cmd storage list --format csv | awk -F, 'NF {print $1; exit}' || true)"
     [[ -n "$pool" ]] || die "could not determine an Incus storage pool"
     printf '%s\n' "$pool"
 }
