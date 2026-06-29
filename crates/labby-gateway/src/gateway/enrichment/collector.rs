@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
 use crate::gateway::params::GatewayEnrichPreviewParams;
+use crate::gateway::params::GatewayEnrichmentScope;
 use crate::gateway::projection::sanitize_tool_text;
 use crate::upstream::pool::UpstreamPool;
 use crate::upstream::types::UpstreamEnrichmentCatalogEntry;
@@ -55,10 +56,17 @@ pub(crate) struct SelectedUpstream {
     pub(crate) explicit: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PreviewUpstreamSelection {
+    pub(crate) upstreams: Vec<SelectedUpstream>,
+    pub(crate) truncated: bool,
+}
+
 pub(crate) fn select_upstreams_for_preview(
     cfg: &GatewayConfig,
     params: &GatewayEnrichPreviewParams,
-) -> Result<Vec<SelectedUpstream>, ToolError> {
+    scope: &GatewayEnrichmentScope,
+) -> Result<PreviewUpstreamSelection, ToolError> {
     if params.all && !params.upstreams.is_empty() {
         return Err(ToolError::InvalidParam {
             message: "gateway.enrich.preview requires either `all` or `upstreams`, not both"
@@ -78,17 +86,29 @@ pub(crate) fn select_upstreams_for_preview(
             .max_upstreams
             .unwrap_or(MAX_MANUAL_UPSTREAMS)
             .min(MAX_MANUAL_UPSTREAMS);
-        return Ok(cfg
+        let previewable = cfg
             .upstream
             .iter()
             .filter(|upstream| upstream.enabled)
+            .filter(|upstream| {
+                scope
+                    .route_visible_upstreams
+                    .as_ref()
+                    .is_none_or(|visible| visible.contains(&upstream.name))
+            });
+        let previewable_count = previewable.clone().count();
+        let upstreams = previewable
             .map(|upstream| upstream.name.clone())
             .take(limit)
             .map(|name| SelectedUpstream {
                 name,
                 explicit: false,
             })
-            .collect());
+            .collect();
+        return Ok(PreviewUpstreamSelection {
+            upstreams,
+            truncated: previewable_count > limit,
+        });
     }
 
     let configured = cfg
@@ -113,6 +133,16 @@ pub(crate) fn select_upstreams_for_preview(
                 message: format!("unknown gateway upstream `{name}`"),
             });
         }
+        if scope
+            .route_visible_upstreams
+            .as_ref()
+            .is_some_and(|visible| !visible.contains(name))
+        {
+            return Err(ToolError::Sdk {
+                sdk_kind: "unknown_upstream".to_string(),
+                message: format!("unknown gateway upstream `{name}`"),
+            });
+        }
         if seen.insert(name.to_string()) {
             selected.push(SelectedUpstream {
                 name: name.to_string(),
@@ -128,7 +158,10 @@ pub(crate) fn select_upstreams_for_preview(
             param: "upstreams".to_string(),
         });
     }
-    Ok(selected)
+    Ok(PreviewUpstreamSelection {
+        upstreams: selected,
+        truncated: false,
+    })
 }
 
 pub(crate) async fn collect_enrichment_inputs(

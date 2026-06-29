@@ -10,7 +10,7 @@ use crate::gateway::config::{
     update_upstream, validate_bearer_token_env_name, validate_code_mode,
 };
 use crate::gateway::config_mutation::read_env_values;
-use crate::gateway::params::GatewayUpdatePatch;
+use crate::gateway::params::{GatewayEnrichmentScope, GatewayUpdatePatch};
 use crate::gateway::projection::*;
 use crate::gateway::types::{GatewayRuntimeView, GatewayView, ServiceConfigView};
 use crate::upstream::types::UpstreamRuntimeOwner;
@@ -105,10 +105,28 @@ impl GatewayManager {
 
     pub async fn add(
         &self,
+        spec: UpstreamConfig,
+        bearer_token_value: Option<String>,
+        origin: Option<&str>,
+        owner: Option<UpstreamRuntimeOwner>,
+    ) -> Result<GatewayView, ToolError> {
+        self.add_scoped(
+            spec,
+            bearer_token_value,
+            origin,
+            owner,
+            GatewayEnrichmentScope::default(),
+        )
+        .await
+    }
+
+    pub(crate) async fn add_scoped(
+        &self,
         mut spec: UpstreamConfig,
         bearer_token_value: Option<String>,
         origin: Option<&str>,
         owner: Option<UpstreamRuntimeOwner>,
+        enrichment_scope: GatewayEnrichmentScope,
     ) -> Result<GatewayView, ToolError> {
         let started = Instant::now();
         let spec_name = spec.name.clone();
@@ -169,8 +187,9 @@ impl GatewayManager {
 
             self.get(&spec_name).await?
         };
-        let (suggestion, suggestion_error) =
-            self.preview_enrichment_for_new_upstream(&spec_name).await;
+        let (suggestion, suggestion_error) = self
+            .preview_enrichment_for_new_upstream(&spec_name, enrichment_scope)
+            .await;
         view.enrichment_suggestion = suggestion;
         view.enrichment_suggestion_error = suggestion_error;
         Ok(view)
@@ -187,6 +206,17 @@ impl GatewayManager {
         specs: Vec<UpstreamConfig>,
         origin: Option<&str>,
         owner: Option<UpstreamRuntimeOwner>,
+    ) -> Result<BatchAddOutcome, ToolError> {
+        self.batch_add_scoped(specs, origin, owner, GatewayEnrichmentScope::default())
+            .await
+    }
+
+    pub(crate) async fn batch_add_scoped(
+        &self,
+        specs: Vec<UpstreamConfig>,
+        origin: Option<&str>,
+        owner: Option<UpstreamRuntimeOwner>,
+        enrichment_scope: GatewayEnrichmentScope,
     ) -> Result<BatchAddOutcome, ToolError> {
         if specs.is_empty() {
             return Ok(BatchAddOutcome::default());
@@ -251,7 +281,10 @@ impl GatewayManager {
             .collect::<Vec<_>>();
         let mut suggestions = Vec::with_capacity(suggestion_names.len());
         for name in suggestion_names {
-            suggestions.push(self.preview_enrichment_for_new_upstream(&name).await);
+            suggestions.push(
+                self.preview_enrichment_for_new_upstream(&name, enrichment_scope.clone())
+                    .await,
+            );
         }
         for (view, (suggestion, suggestion_error)) in views.iter_mut().zip(suggestions) {
             view.enrichment_suggestion = suggestion;

@@ -12,13 +12,13 @@ use super::client::require_gateway_manager;
 use super::manager::{GatewayManager, ImportTombstoneSelector};
 use super::params::{
     CodeModeSetParams, GatewayAddParams, GatewayClientConfigParams, GatewayDiscoverParams,
-    GatewayEnrichApplyParams, GatewayEnrichPreviewParams, GatewayImportParams,
-    GatewayImportTombstoneParams, GatewayMcpCleanupParams, GatewayMcpToggleParams,
-    GatewayNameParams, GatewayOauthNameParams, GatewayReloadParams, GatewayStatusParams,
-    GatewayTestParams, GatewayUpdateParams, GatewayUpdatePatch, ProtectedRouteNameParams,
-    ProtectedRouteSpecParams, ProtectedRouteUpdateParams, ServiceConfigGetParams,
-    ServiceConfigSetParams, VirtualServerMcpPolicyParams, VirtualServerNameParams,
-    VirtualServerSurfaceParams,
+    GatewayEnrichApplyParams, GatewayEnrichPreviewParams, GatewayEnrichmentScope,
+    GatewayImportParams, GatewayImportTombstoneParams, GatewayMcpCleanupParams,
+    GatewayMcpToggleParams, GatewayNameParams, GatewayOauthNameParams, GatewayReloadParams,
+    GatewayStatusParams, GatewayTestParams, GatewayUpdateParams, GatewayUpdatePatch,
+    ProtectedRouteNameParams, ProtectedRouteSpecParams, ProtectedRouteUpdateParams,
+    ServiceConfigGetParams, ServiceConfigSetParams, VirtualServerMcpPolicyParams,
+    VirtualServerNameParams, VirtualServerSurfaceParams,
 };
 use super::types::{
     DiscoveredServerView, ImportErrorView, ImportSkipReason, ImportSkipView,
@@ -37,6 +37,21 @@ pub async fn dispatch_with_manager(
     action: &str,
     params_value: Value,
 ) -> Result<Value, ToolError> {
+    dispatch_with_manager_scoped(
+        manager,
+        action,
+        params_value,
+        GatewayEnrichmentScope::default(),
+    )
+    .await
+}
+
+pub async fn dispatch_with_manager_scoped(
+    manager: &GatewayManager,
+    action: &str,
+    params_value: Value,
+    enrichment_scope: GatewayEnrichmentScope,
+) -> Result<Value, ToolError> {
     // Defense-in-depth: built-ins handled here so direct callers of
     // dispatch_with_manager (e.g. HTTP handlers) also get the correct behavior.
     if let Some(result) = handle_builtin(action, &params_value, "gateway", ACTIONS) {
@@ -49,17 +64,29 @@ pub async fn dispatch_with_manager(
         "gateway.discover" => handle_discover(manager, params_value).await,
         "gateway.enrich.preview" => {
             let params: GatewayEnrichPreviewParams = parse_params(params_value)?;
-            to_json(manager.preview_enrichment(params).await?)
+            to_json(
+                manager
+                    .preview_enrichment_scoped(params, enrichment_scope)
+                    .await?,
+            )
         }
         "gateway.enrich.apply" => {
             let params: GatewayEnrichApplyParams = parse_params(params_value)?;
-            to_json(manager.apply_enrichment(params).await?)
+            to_json(
+                manager
+                    .apply_enrichment_scoped(params, enrichment_scope)
+                    .await?,
+            )
         }
-        "gateway.import" => handle_import(manager, params_value).await,
+        "gateway.import" => handle_import(manager, params_value, enrichment_scope).await,
         "gateway.import_pending.list" => to_json(manager.list_pending_imports().await),
         "gateway.import_pending.approve" => {
             let name = require_str(&params_value, "name")?;
-            to_json(manager.approve_pending_import(name).await?)
+            to_json(
+                manager
+                    .approve_pending_import_scoped(name, enrichment_scope)
+                    .await?,
+            )
         }
         "gateway.import_pending.reject" => {
             let name = require_str(&params_value, "name")?;
@@ -89,7 +116,9 @@ pub async fn dispatch_with_manager(
         | "gateway.discovered_tools"
         | "gateway.discovered_resources"
         | "gateway.discovered_prompts"
-        | "gateway.public_urls.get" => handle_gateway_actions(manager, action, params_value).await,
+        | "gateway.public_urls.get" => {
+            handle_gateway_actions(manager, action, params_value, enrichment_scope).await
+        }
         action if action.starts_with("gateway.protected_route.") => {
             handle_protected_route_actions(manager, action, params_value).await
         }
@@ -204,7 +233,11 @@ fn shape_discovered_views(
         .collect()
 }
 
-async fn handle_import(manager: &GatewayManager, params_value: Value) -> Result<Value, ToolError> {
+async fn handle_import(
+    manager: &GatewayManager,
+    params_value: Value,
+    enrichment_scope: GatewayEnrichmentScope,
+) -> Result<Value, ToolError> {
     let params: GatewayImportParams = parse_params(params_value)?;
 
     if !params.names.is_empty() && params.all {
@@ -268,7 +301,7 @@ async fn handle_import(manager: &GatewayManager, params_value: Value) -> Result<
 
     if !specs_to_add.is_empty() {
         let outcome = manager
-            .batch_add(specs_to_add, Some("gateway.import"), None)
+            .batch_add_scoped(specs_to_add, Some("gateway.import"), None, enrichment_scope)
             .await?;
 
         result.imported.extend(outcome.views);
@@ -517,6 +550,7 @@ async fn handle_gateway_actions(
     manager: &GatewayManager,
     action: &str,
     params_value: Value,
+    enrichment_scope: GatewayEnrichmentScope,
 ) -> Result<Value, ToolError> {
     match action {
         "gateway.list" => to_json(manager.list().await?),
@@ -564,11 +598,12 @@ async fn handle_gateway_actions(
             let params: GatewayAddParams = parse_params(params_value)?;
             to_json(
                 manager
-                    .add(
+                    .add_scoped(
                         params.spec,
                         params.bearer_token_value,
                         params.origin.as_deref(),
                         params.owner.map(Into::into),
+                        enrichment_scope,
                     )
                     .await?,
             )

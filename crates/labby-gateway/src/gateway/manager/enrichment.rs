@@ -1,11 +1,13 @@
 use labby_runtime::error::ToolError;
 
 use crate::gateway::enrichment::collector::{
-    EnrichmentInputStats, MAX_MANUAL_UPSTREAMS, SelectedUpstream, UpstreamEnrichmentInput,
-    collect_enrichment_inputs, select_upstreams_for_preview,
+    EnrichmentInputStats, SelectedUpstream, UpstreamEnrichmentInput, collect_enrichment_inputs,
+    select_upstreams_for_preview,
 };
 use crate::gateway::enrichment::provider::{ProviderRunner, run_provider_preview};
-use crate::gateway::params::{GatewayEnrichApplyParams, GatewayEnrichPreviewParams};
+use crate::gateway::params::{
+    GatewayEnrichApplyParams, GatewayEnrichPreviewParams, GatewayEnrichmentScope,
+};
 use crate::gateway::types::{
     GatewayCatalogDiff, GatewayEnrichmentPreviewStatsView, GatewayEnrichmentPreviewView,
     GatewayEnrichmentProvider, GatewayHintApplyView, GatewayHintProposalStatus,
@@ -28,23 +30,23 @@ impl From<EnrichmentInputStats> for GatewayEnrichmentPreviewStatsView {
 impl GatewayManager {
     pub async fn preview_enrichment(
         &self,
+        params: GatewayEnrichPreviewParams,
+    ) -> Result<GatewayEnrichmentPreviewView, ToolError> {
+        self.preview_enrichment_scoped(params, GatewayEnrichmentScope::default())
+            .await
+    }
+
+    pub(crate) async fn preview_enrichment_scoped(
+        &self,
         mut params: GatewayEnrichPreviewParams,
+        scope: GatewayEnrichmentScope,
     ) -> Result<GatewayEnrichmentPreviewView, ToolError> {
         let cfg = self.current_config().await;
-        let selection_truncated = params.all
-            && cfg
-                .upstream
-                .iter()
-                .filter(|upstream| upstream.enabled)
-                .count()
-                > params
-                    .max_upstreams
-                    .unwrap_or(MAX_MANUAL_UPSTREAMS)
-                    .min(MAX_MANUAL_UPSTREAMS);
-        let selected = select_upstreams_for_preview(&cfg, &params)?;
+        let selection = select_upstreams_for_preview(&cfg, &params, &scope)?;
         let pool = self.current_pool().await;
-        let mut collected = collect_enrichment_inputs(pool.as_deref(), &cfg, &selected).await?;
-        if selection_truncated {
+        let mut collected =
+            collect_enrichment_inputs(pool.as_deref(), &cfg, &selection.upstreams).await?;
+        if selection.truncated {
             collected.stats.truncated = true;
         }
         let mut runner = ProviderRunner::default();
@@ -70,6 +72,25 @@ impl GatewayManager {
         &self,
         params: GatewayEnrichApplyParams,
     ) -> Result<GatewayHintApplyView, ToolError> {
+        self.apply_enrichment_scoped(params, GatewayEnrichmentScope::default())
+            .await
+    }
+
+    pub(crate) async fn apply_enrichment_scoped(
+        &self,
+        params: GatewayEnrichApplyParams,
+        scope: GatewayEnrichmentScope,
+    ) -> Result<GatewayHintApplyView, ToolError> {
+        if scope
+            .route_visible_upstreams
+            .as_ref()
+            .is_some_and(|visible| !visible.contains(&params.upstream))
+        {
+            return Err(ToolError::Sdk {
+                sdk_kind: "unknown_upstream".to_string(),
+                message: format!("unknown gateway upstream `{}`", params.upstream),
+            });
+        }
         let hint = validate_hint(&params.hint)?;
         let _mutation_guard = self.config_mutation.lock().await;
         let mut cfg = self.config.read().await.clone();
@@ -127,16 +148,20 @@ impl GatewayManager {
     pub(crate) async fn preview_enrichment_for_new_upstream(
         &self,
         upstream: &str,
+        scope: GatewayEnrichmentScope,
     ) -> (Option<GatewayHintProposalView>, Option<String>) {
         let preview_result = tokio::time::timeout(
             std::time::Duration::from_secs(2),
-            self.preview_enrichment(GatewayEnrichPreviewParams {
-                upstreams: vec![upstream.to_string()],
-                all: false,
-                provider: GatewayEnrichmentProvider::Deterministic,
-                max_upstreams: Some(1),
-                timeout_ms: Some(2_000),
-            }),
+            self.preview_enrichment_scoped(
+                GatewayEnrichPreviewParams {
+                    upstreams: vec![upstream.to_string()],
+                    all: false,
+                    provider: GatewayEnrichmentProvider::Deterministic,
+                    max_upstreams: Some(1),
+                    timeout_ms: Some(2_000),
+                },
+                scope,
+            ),
         )
         .await;
         let preview = match preview_result {

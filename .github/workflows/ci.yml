@@ -44,9 +44,10 @@ jobs:
       security: ${{ steps.classify.outputs.security }}
       release: ${{ steps.classify.outputs.release }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Prepare trusted changed path classifier
         run: |
           set -euo pipefail
@@ -92,10 +93,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v3
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_SUMMARY: "true"
@@ -106,8 +108,10 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.workflow == 'true' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: stable
       - run: go run github.com/rhysd/actionlint/cmd/actionlint@latest
@@ -125,10 +129,12 @@ jobs:
         needs.changes.outputs.release == 'true'
       }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/build-gateway-admin
       - name: Upload gateway-admin export
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out/
@@ -141,8 +147,10 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.rust_compile == 'true' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@aad518f59d88bae90133242f9ddac7f8bbc5dddf
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
@@ -153,8 +161,10 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.security == 'true' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@8f84122a46a358a27cb0625d85ad60ab436a1b87
 
   check:
     name: Check
@@ -162,13 +172,15 @@ jobs:
     needs: [changes, frontend-assets]
     if: ${{ needs.changes.outputs.rust_compile == 'true' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
-      - uses: dtolnay/rust-toolchain@1.94.1
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@aad518f59d88bae90133242f9ddac7f8bbc5dddf
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
       - run: cargo check --workspace --all-features --locked
 
   feature-slices:
@@ -193,13 +205,15 @@ jobs:
       matrix:
         slice: [gateway, marketplace, fs, deploy, acp_registry]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
-      - uses: dtolnay/rust-toolchain@1.94.1
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@aad518f59d88bae90133242f9ddac7f8bbc5dddf
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
       - run: cargo check -p labby --no-default-features --features ${{ matrix.slice }} --all-targets --locked
 
   extracted-crate-slices:
@@ -240,9 +254,11 @@ jobs:
           - name: labby-winjob
             command: cargo check -p labby-winjob --all-targets --locked
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.94.1
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@aad518f59d88bae90133242f9ddac7f8bbc5dddf
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
       - run: ${{ matrix.command }}
 
   docs-check:
@@ -251,14 +267,16 @@ jobs:
     needs: [changes, frontend-assets]
     if: ${{ needs.changes.outputs.docs_check == 'true' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
-      - uses: dtolnay/rust-toolchain@1.94.1
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@just
+      - uses: dtolnay/rust-toolchain@aad518f59d88bae90133242f9ddac7f8bbc5dddf
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: taiki-e/install-action@9cfa436698ecd30b7b47d715cbb8241e4624245a
       - run: just docs-check
 
   clippy:
@@ -267,15 +285,17 @@ jobs:
     needs: [changes, frontend-assets]
     if: ${{ needs.changes.outputs.rust_compile == 'true' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
-      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: dtolnay/rust-toolchain@aad518f59d88bae90133242f9ddac7f8bbc5dddf
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
       - run: cargo clippy --workspace --all-features --locked -- -D warnings
 
   test:
@@ -292,18 +312,20 @@ jobs:
       )
     needs: [changes, frontend-assets]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
-      - uses: dtolnay/rust-toolchain@1.94.1
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@nextest
+      - uses: dtolnay/rust-toolchain@aad518f59d88bae90133242f9ddac7f8bbc5dddf
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: taiki-e/install-action@83a8c001de7da72527da9df53f6ef9d3a1f5b3e2
       - run: cargo nextest run --workspace --all-features --locked --profile ci
       - name: Upload nextest report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: nextest-junit
           path: target/nextest/ci/junit.xml
@@ -319,18 +341,20 @@ jobs:
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name != github.repository
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
-      - uses: dtolnay/rust-toolchain@1.94.1
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@nextest
+      - uses: dtolnay/rust-toolchain@aad518f59d88bae90133242f9ddac7f8bbc5dddf
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: taiki-e/install-action@83a8c001de7da72527da9df53f6ef9d3a1f5b3e2
       - run: cargo nextest run --workspace --all-features --locked --profile ci
       - name: Upload nextest report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: nextest-junit
           path: target/nextest/ci/junit.xml
@@ -361,13 +385,12 @@ jobs:
       CARGO_TARGET_DIR: C:\Users\jmaga\actions-runner\labby\_cargo-target\labby
       SCCACHE_DIR: C:\Users\jmaga\actions-runner\labby\_sccache\labby
       SCCACHE_CACHE_SIZE: 20G
-      LAB_SCCACHE_EXE: C:\Users\jmaga\.cargo\bin\sccache.exe
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
-      RUSTC_WRAPPER: C:\Users\jmaga\.cargo\bin\sccache.exe
-      CARGO_BUILD_RUSTC_WRAPPER: C:\Users\jmaga\.cargo\bin\sccache.exe
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
@@ -460,9 +483,10 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $version = "0.16.0"
-          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
-          $sccacheExe = Join-Path $cargoBin "sccache.exe"
+          $version = "0.15.0"
+          $target = "x86_64-pc-windows-msvc"
+          $installDir = Join-Path $env:RUNNER_TEMP "sccache-$version-$target"
+          $sccacheExe = Join-Path $installDir "sccache.exe"
           $current = $null
           if (Test-Path $sccacheExe) {
             try {
@@ -473,11 +497,13 @@ jobs:
           }
           if ($current -like "*$version*") {
             Write-Host "sccache already installed: $current"
-            $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            $installDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            "LAB_SCCACHE_EXE=$sccacheExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "RUSTC_WRAPPER=$sccacheExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "CARGO_BUILD_RUSTC_WRAPPER=$sccacheExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
             exit 0
           }
 
-          $target = "x86_64-pc-windows-msvc"
           $base = "https://github.com/mozilla/sccache/releases/download/v$version"
           $archive = Join-Path $env:RUNNER_TEMP "sccache.tar.gz"
           $shaFile = Join-Path $env:RUNNER_TEMP "sccache.sha256"
@@ -502,9 +528,12 @@ jobs:
             throw "sccache.exe not found in release archive"
           }
 
-          New-Item -ItemType Directory -Force -Path $cargoBin | Out-Null
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
           Copy-Item $exe.FullName $sccacheExe -Force
-          $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $installDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "LAB_SCCACHE_EXE=$sccacheExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RUSTC_WRAPPER=$sccacheExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CARGO_BUILD_RUSTC_WRAPPER=$sccacheExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           & $sccacheExe --version
       - name: Install cargo-nextest
         shell: pwsh
@@ -635,13 +664,15 @@ jobs:
         # instead of blocking every PR.
         os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
-      - uses: dtolnay/rust-toolchain@1.94.1
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@aad518f59d88bae90133242f9ddac7f8bbc5dddf
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
         with:
           save-if: true
       - run: cargo build --workspace --all-features --locked --release
@@ -666,13 +697,15 @@ jobs:
     needs: [changes, frontend-assets]
     if: ${{ needs.changes.outputs.docker == 'true' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: gateway-admin-out
           path: apps/gateway-admin/out
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: .
           file: config/Dockerfile
