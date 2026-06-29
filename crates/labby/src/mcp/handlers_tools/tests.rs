@@ -293,6 +293,25 @@ fn request_context_with_peer(
     rmcp::service::RequestContext::new(rmcp::model::NumberOrString::Number(1), peer)
 }
 
+async fn call_tool_error_text(server: LabMcpServer, tool_name: &str) -> String {
+    let (transport, _client_transport) = tokio::io::duplex(64);
+    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
+        server, transport, None,
+    );
+    let context = request_context_with_peer(running.peer().clone());
+
+    let result = Box::pin(
+        running
+            .service()
+            .call_tool_impl(CallToolRequestParams::new(tool_name.to_string()), context),
+    )
+    .await
+    .expect("call tool result");
+
+    assert!(result.is_error.unwrap_or(false));
+    result.content[0].as_text().expect("text").text.clone()
+}
+
 #[test]
 fn code_mode_tool_meta_points_to_canonical_ui_resource() {
     let codemode = code_mode_tool_meta(CODE_MODE_TOOL_NAME);
@@ -1395,26 +1414,9 @@ async fn call_tool_honors_route_scope_for_mcp_app_sibling_callbacks() {
         ),
         rmcp::model::LoggingLevel::Emergency,
     );
-    let (transport, _client_transport) = tokio::io::duplex(64);
-    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
-        server, transport, None,
-    );
-    let context = rmcp::service::RequestContext::new(
-        rmcp::model::NumberOrString::Number(1),
-        running.peer().clone(),
-    );
 
-    let result = Box::pin(
-        running
-            .service()
-            .call_tool_impl(CallToolRequestParams::new("youtube_probe"), context),
-    )
-    .await
-    .expect("call tool result");
-
-    assert!(result.is_error.unwrap_or(false));
-    let text = result.content[0].as_text().expect("text").text.as_str();
-    let envelope: Value = serde_json::from_str(text).expect("error envelope");
+    let text = call_tool_error_text(server, "youtube_probe").await;
+    let envelope: Value = serde_json::from_str(&text).expect("error envelope");
     assert_eq!(envelope["error"]["kind"], "not_found");
     assert!(
         !text.contains("blocked_apps"),
@@ -1558,26 +1560,9 @@ async fn call_tool_blocks_destructive_direct_mcp_app_callbacks() {
         crate::mcp::route_scope::McpRouteScope::Root,
         rmcp::model::LoggingLevel::Emergency,
     );
-    let (transport, _client_transport) = tokio::io::duplex(64);
-    let running = rmcp::service::serve_directly::<rmcp::RoleServer, _, _, std::io::Error, _>(
-        server, transport, None,
-    );
-    let context = rmcp::service::RequestContext::new(
-        rmcp::model::NumberOrString::Number(1),
-        running.peer().clone(),
-    );
 
-    let result = Box::pin(
-        running
-            .service()
-            .call_tool_impl(CallToolRequestParams::new("youtube_delete_ui"), context),
-    )
-    .await
-    .expect("call tool result");
-
-    assert!(result.is_error.unwrap_or(false));
-    let text = result.content[0].as_text().expect("text").text.as_str();
-    let envelope: Value = serde_json::from_str(text).expect("error envelope");
+    let text = call_tool_error_text(server, "youtube_delete_ui").await;
+    let envelope: Value = serde_json::from_str(&text).expect("error envelope");
     assert_eq!(envelope["error"]["kind"], "confirmation_required");
 }
 

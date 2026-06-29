@@ -210,11 +210,17 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          gh release create "$RELEASE_TAG" \
-            lab-*.tar.gz \
-            lab-*.tar.gz.sha256 \
-            lab-*.zip \
-            lab-*.zip.sha256 \
-            labby-incus-*.tar.xz \
-            labby-incus-*.tar.xz.sha256 \
-            --generate-notes
+          files=(
+            lab-*.tar.gz
+            lab-*.tar.gz.sha256
+            lab-*.zip
+            lab-*.zip.sha256
+            labby-incus-*.tar.xz
+            labby-incus-*.tar.xz.sha256
+          )
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --generate-notes
+            gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${files[@]}" --generate-notes
+          fi

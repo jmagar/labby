@@ -385,10 +385,7 @@ jobs:
       CARGO_TARGET_DIR: C:\Users\jmaga\actions-runner\labby\_cargo-target\labby
       SCCACHE_DIR: C:\Users\jmaga\actions-runner\labby\_sccache\labby
       SCCACHE_CACHE_SIZE: 20G
-      LAB_SCCACHE_EXE: C:\Users\jmaga\.cargo\bin\sccache.exe
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
-      RUSTC_WRAPPER: C:\Users\jmaga\.cargo\bin\sccache.exe
-      CARGO_BUILD_RUSTC_WRAPPER: C:\Users\jmaga\.cargo\bin\sccache.exe
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
@@ -486,9 +483,10 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $version = "0.16.0"
-          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
-          $sccacheExe = Join-Path $cargoBin "sccache.exe"
+          $version = "0.15.0"
+          $target = "x86_64-pc-windows-msvc"
+          $installDir = Join-Path $env:RUNNER_TEMP "sccache-$version-$target"
+          $sccacheExe = Join-Path $installDir "sccache.exe"
           $current = $null
           if (Test-Path $sccacheExe) {
             try {
@@ -499,11 +497,13 @@ jobs:
           }
           if ($current -like "*$version*") {
             Write-Host "sccache already installed: $current"
-            $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            $installDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            "LAB_SCCACHE_EXE=$sccacheExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "RUSTC_WRAPPER=$sccacheExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "CARGO_BUILD_RUSTC_WRAPPER=$sccacheExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
             exit 0
           }
 
-          $target = "x86_64-pc-windows-msvc"
           $base = "https://github.com/mozilla/sccache/releases/download/v$version"
           $archive = Join-Path $env:RUNNER_TEMP "sccache.tar.gz"
           $shaFile = Join-Path $env:RUNNER_TEMP "sccache.sha256"
@@ -528,9 +528,12 @@ jobs:
             throw "sccache.exe not found in release archive"
           }
 
-          New-Item -ItemType Directory -Force -Path $cargoBin | Out-Null
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
           Copy-Item $exe.FullName $sccacheExe -Force
-          $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $installDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "LAB_SCCACHE_EXE=$sccacheExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RUSTC_WRAPPER=$sccacheExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CARGO_BUILD_RUSTC_WRAPPER=$sccacheExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           & $sccacheExe --version
       - name: Install cargo-nextest
         shell: pwsh

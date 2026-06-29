@@ -36,7 +36,7 @@ impl GatewayManager {
             .await
     }
 
-    pub async fn preview_enrichment_scoped(
+    pub(crate) async fn preview_enrichment_scoped(
         &self,
         mut params: GatewayEnrichPreviewParams,
         scope: GatewayEnrichmentScope,
@@ -76,7 +76,7 @@ impl GatewayManager {
             .await
     }
 
-    pub async fn apply_enrichment_scoped(
+    pub(crate) async fn apply_enrichment_scoped(
         &self,
         params: GatewayEnrichApplyParams,
         scope: GatewayEnrichmentScope,

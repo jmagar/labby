@@ -219,7 +219,7 @@ impl GatewayManager {
             .await
     }
 
-    pub async fn approve_pending_import_scoped(
+    pub(crate) async fn approve_pending_import_scoped(
         &self,
         name: &str,
         enrichment_scope: GatewayEnrichmentScope,

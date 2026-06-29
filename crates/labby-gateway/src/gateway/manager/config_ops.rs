@@ -120,7 +120,7 @@ impl GatewayManager {
         .await
     }
 
-    pub async fn add_scoped(
+    pub(crate) async fn add_scoped(
         &self,
         mut spec: UpstreamConfig,
         bearer_token_value: Option<String>,
@@ -211,7 +211,7 @@ impl GatewayManager {
             .await
     }
 
-    pub async fn batch_add_scoped(
+    pub(crate) async fn batch_add_scoped(
         &self,
         specs: Vec<UpstreamConfig>,
         origin: Option<&str>,
