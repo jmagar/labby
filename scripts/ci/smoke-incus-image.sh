@@ -124,6 +124,20 @@ wait_for_running() {
     die "$name did not reach RUNNING state"
 }
 
+container_file_exists() {
+    local name="$1"
+    local path="$2"
+    local tmp
+
+    tmp="$(mktemp)"
+    if incus_cmd file pull "$name$path" "$tmp" >/dev/null 2>&1; then
+        rm -f "$tmp"
+        return 0
+    fi
+    rm -f "$tmp"
+    return 1
+}
+
 if [[ -z "$image_tar" ]]; then
     image_tar="$(find "$export_dir" -maxdepth 1 -type f -name 'labby-incus-*.tar.xz' -print -quit)"
 fi
@@ -147,6 +161,20 @@ fi
 
 log "launching $container_name"
 incus_cmd init "$image_alias" "$container_name" --profile default --profile "$profile_name"
+
+log "checking stopped image does not contain persisted runtime state"
+for path in \
+    /home/lab/.lab/.env \
+    /root/.lab/.env \
+    /run/labby-ts-authkey \
+    /var/lib/tailscale/tailscaled.state
+do
+    if container_file_exists "$container_name" "$path"; then
+        echo "forbidden baked runtime state exists: $path" >&2
+        exit 1
+    fi
+done
+
 incus_cmd start "$container_name"
 wait_for_running "$container_name"
 
@@ -176,8 +204,7 @@ incus_cmd exec "$container_name" -- sh -lc 'set -eu
 for path in \
     /home/lab/.lab/.env \
     /root/.lab/.env \
-    /run/labby-ts-authkey \
-    /var/lib/tailscale/tailscaled.state
+    /run/labby-ts-authkey
 do
     if test -e "$path"; then
         echo "forbidden runtime state exists: $path" >&2
