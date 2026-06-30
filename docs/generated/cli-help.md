@@ -660,6 +660,7 @@ Commands:
   plugin-connectivity  Validate connectivity to the lab MCP server
   check                Check local setup prerequisites without mutating the filesystem
   repair               Repair missing local setup prerequisites without contacting external services
+  incus-backup         Validate or apply local Incus backup policy
   install              Copy the labby binary into ~/.local/bin so it is callable in your own terminal
   install-plugin       Install the Claude Code plugin for a configured service
   uninstall-plugin     Uninstall the Claude Code plugin for a service
@@ -1112,6 +1113,102 @@ Options:
 
   -h, --help
           Print help
+```
+
+## `labby setup incus-backup`
+
+```text
+Validate or apply local Incus backup policy
+
+Usage: incus-backup [OPTIONS] <COMMAND>
+
+Commands:
+  validate  Validate a backup policy YAML without mutating Incus
+  apply     Apply a backup policy YAML to an Incus instance
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup incus-backup validate`
+
+```text
+Validate a backup policy YAML without mutating Incus
+
+Usage: validate [OPTIONS]
+
+Options:
+      --config <CONFIG>
+          Backup policy YAML to validate
+
+          [default: config/incus/labby-backup.yaml]
+
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby setup incus-backup apply`
+
+```text
+Apply a backup policy YAML to an Incus instance
+
+Usage: apply [OPTIONS] --name <NAME>
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --name <NAME>
+          Incus container name
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --config <CONFIG>
+          Backup policy YAML to apply
+
+          [default: config/incus/labby-backup.yaml]
+
+      --dry-run
+          Print the changes without mutating Incus
+
+  -h, --help
+          Print help
+```
+
+## `labby setup incus-backup help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
 ```
 
 ## `labby setup install`
