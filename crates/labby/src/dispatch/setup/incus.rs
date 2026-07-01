@@ -206,8 +206,7 @@ pub(crate) fn bootstrap_command(
     } else {
         let backup_config = options
             .backup_config
-            .as_ref()
-            .cloned()
+            .clone()
             .or_else(backup_config_from_env)
             .as_ref()
             .map(|path| absolutize_user_path(path))
