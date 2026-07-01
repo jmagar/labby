@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if command -v labby >/dev/null 2>&1; then labby setup plugin-hook --no-repair; else echo 'labby is not installed — install it with: curl -fsSL https://raw.githubusercontent.com/jmagar/lab/main/scripts/install.sh | sh  (then run: labby setup)'; fi",
+            "command": "if command -v labby >/dev/null 2>&1; then labby setup plugin-hook --no-repair; else echo 'labby is not installed — install it with: curl -fsSL https://raw.githubusercontent.com/jmagar/labby/main/scripts/install.sh | sh  (then run: labby setup)'; fi",
             "timeout": 30
           }
         ]

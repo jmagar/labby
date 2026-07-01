@@ -80,7 +80,7 @@ pub enum Command {
     Nodes(nodes::NodesArgs),
     /// Quick reachability check for configured services.
     Health,
-    /// Open the web-based first-run wizard (or settings) — lab-bg3e.3.
+    /// Bootstrap the supported Incus Labby gateway container.
     Setup(setup::SetupArgs),
     /// Generate shell completions.
     Completions(completions::CompletionsArgs),

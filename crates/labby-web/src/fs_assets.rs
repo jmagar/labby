@@ -69,17 +69,17 @@ async fn resolve_candidate_path(base_dir: &Path, request_path: &str) -> PathBuf 
     match tokio::fs::metadata(&candidate).await {
         Ok(metadata) if metadata.is_file() => candidate,
         Ok(metadata) if metadata.is_dir() => candidate.join("index.html"),
-        _ => base_dir.join("index.html"),
+        _ if candidate.extension().is_none() => base_dir.join("index.html"),
+        _ => candidate,
     }
 }
 
 /// Resolve `request_path` against the configured `base_dir`, returning the
 /// canonical path of the file to serve.
 ///
-/// Resolution order matches the previous Labby handler:
-///
 /// 1. Sanitize the path and map it to a candidate (file → itself, directory →
-///    its `index.html`, missing → root `index.html` SPA fallback).
+///    its `index.html`, extensionless missing path → root `index.html` SPA
+///    fallback, file-like missing path → not found).
 /// 2. Canonicalize the configured root and the resolved candidate.
 /// 3. Reject (as [`AssetError::NotFound`]) any resolved path that does not stay
 ///    within the canonical root — this is the symlink-escape defense.

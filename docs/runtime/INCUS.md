@@ -32,7 +32,8 @@ local binary, but they should not expect the same prebuilt cold-start path.
 Use Incus for normal self-hosting:
 
 ```bash
-scripts/incus-bootstrap.sh --version vX.Y.Z
+curl -fsSL https://raw.githubusercontent.com/jmagar/labby/main/scripts/install.sh | sh
+labby setup
 ```
 
 Use bare metal when the host itself is the gateway appliance:
@@ -51,7 +52,7 @@ just dev-container-debug
 
 ## Host Preparation
 
-Install and initialize Incus explicitly on the host first. The bootstrap script
+Install and initialize Incus explicitly on the host first. The bootstrap command
 does not install or initialize Incus:
 
 ```bash
@@ -73,19 +74,22 @@ with `--storage-source`, or the legacy ZFS dataset source with
 
 ## Bootstrap
 
-Run the bootstrap from a checkout with a pinned release tag:
+Install Labby, then run the host-side Incus bootstrap:
 
 ```bash
-scripts/incus-bootstrap.sh --version vX.Y.Z
+curl -fsSL https://raw.githubusercontent.com/jmagar/labby/main/scripts/install.sh | sh
+labby setup
 ```
 
 The declarative Incus shape lives in
 `config/incus/labby-gateway-profile.yaml`, and the default snapshot policy lives
-in `config/incus/labby-backup.yaml`. The bootstrap script creates or updates the
-profile, launches `images:ubuntu/24.04` with it, then applies the snapshot policy
-with Incus instance config. The profile owns `security.privileged=false`,
-`security.nesting=false`, a root disk on the selected storage pool, and
-`/dev/net/tun` access through a raw LXC bind mount.
+in `config/incus/labby-backup.yaml`. `labby setup` embeds those vetted artifacts
+in the binary, materializes them into a temporary workspace, and runs the same
+host bootstrap logic from there. The bootstrap creates or updates the profile,
+launches `images:ubuntu/24.04` with it, then applies the snapshot policy with
+Incus instance config. The profile owns
+`security.privileged=false`, `security.nesting=false`, a root disk on the
+selected storage pool, and `/dev/net/tun` access through a raw LXC bind mount.
 
 Existing containers are idempotently converged too. If an existing container's
 root disk already comes from a different Incus storage pool, the bootstrap
@@ -106,7 +110,7 @@ Override the snapshot policy with `--backup-config PATH` or
 `--no-backup-config`. The backup YAML maps directly to Incus `snapshots.*`
 instance config keys, so Incus owns scheduling and expiry; Labby does not run a
 cron or timer for normal snapshot retention. Bootstrap prefers the Rust-backed
-`labby setup incus-backup apply --name <container> --config <path>` validator
+`labby setup incusbackup apply --name <container> --config <path>` validator
 when a new enough host `labby` is on `PATH`, and falls back to the constrained
 shell parser only for older hosts.
 
@@ -117,14 +121,27 @@ container that owns its own `/home/lab/.lab` state. For an existing single-user
 host setup, seed `/home/lab/.lab` once, fix any host-specific paths once, then
 preserve that container with Incus snapshots/backups.
 
+The web app also serves the installer at `https://labby.tootie.tv/install.sh`
+for convenience. The canonical pipe-to-shell source remains the GitHub-hosted
+script at
+`https://raw.githubusercontent.com/jmagar/labby/main/scripts/install.sh`.
+
 For PR validation before a release exists, push a local binary instead:
 
 ```bash
 cargo build --workspace --all-features --bin labby
-scripts/incus-bootstrap.sh --local-binary target/debug/labby
+target/debug/labby setup incus --local-binary target/debug/labby
 ```
 
-The release path should still use `--version vX.Y.Z`.
+By default, `labby setup` installs the latest Labby release. Use the explicit
+`labby setup incus --version vX.Y.Z` form when you need reproducibility, or set
+`LAB_INSTALL_VERSION` for the checkout-local bootstrap script.
+
+The checkout-local `scripts/incus-bootstrap.sh` remains available for
+contributor debugging and CI image smoke tests, but the supported operator entry
+point is the binary-owned `labby setup` command. The explicit
+`labby setup incus` subcommand remains available for advanced flags such as
+`--local-binary`, `--skip-install`, and storage overrides.
 
 The distrobuilder image definition lives at `config/incus/labby-image.yaml`.
 Release CI builds it as a prebuilt Incus container image:
@@ -191,6 +208,12 @@ key:
 
 ```bash
 TS_AUTHKEY=tskey-... scripts/incus-bootstrap.sh --version vX.Y.Z
+```
+
+With the binary-owned bootstrap:
+
+```bash
+TS_AUTHKEY=tskey-... labby setup
 ```
 
 The same `TS_AUTHKEY` variable is honored by `labby setup --provision --yes`

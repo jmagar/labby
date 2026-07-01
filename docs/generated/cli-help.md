@@ -16,7 +16,7 @@ Commands:
   docs         Generate and verify code-owned documentation artifacts
   nodes        Query nodes from the configured controller
   health       Quick reachability check for configured services
-  setup        Open the web-based first-run wizard (or settings) — lab-bg3e.3
+  setup        Bootstrap the supported Incus Labby gateway container
   completions  Generate shell completions
   gateway      Manage proxied upstream MCP gateways
   snippets     Manage executable Code Mode snippets
@@ -645,11 +645,12 @@ Options:
 ## `labby setup`
 
 ```text
-Open the web-based first-run wizard (or settings) — lab-bg3e.3
+Bootstrap the supported Incus Labby gateway container
 
 Usage: setup [OPTIONS] [COMMAND]
 
 Commands:
+  wizard               Open the web-based first-run wizard or settings flow
   draft                Manage the local setup draft
   host-service         Manage the systemd Labby gateway service
   installed-plugins    List installed Claude Code lab plugins
@@ -660,7 +661,8 @@ Commands:
   plugin-connectivity  Validate connectivity to the lab MCP server
   check                Check local setup prerequisites without mutating the filesystem
   repair               Repair missing local setup prerequisites without contacting external services
-  incus-backup         Validate or apply local Incus backup policy
+  incusbackup          Validate or apply local Incus backup policy
+  incus                Bootstrap or converge the supported Incus Labby gateway container
   install              Copy the labby binary into ~/.local/bin so it is callable in your own terminal
   install-plugin       Install the Claude Code plugin for a configured service
   uninstall-plugin     Uninstall the Claude Code plugin for a service
@@ -680,7 +682,7 @@ Options:
           [possible values: auto, plain, color]
 
       --dry-run
-          Print the provisioning plan and do not mutate anything
+          Print the default Incus/provisioning plan and do not mutate anything
 
   -y, --yes
           Confirm provisioning without prompting
@@ -688,20 +690,41 @@ Options:
       --skip-deps
           Skip runtime dependency installation and only converge user/service state
 
+  -h, --help
+          Print help
+```
+
+## `labby setup wizard`
+
+```text
+Open the web-based first-run wizard or settings flow
+
+Usage: wizard [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
       --mode <MODE>
           Setup UI mode. Standalone setup defaults to full; /setup-core passes plugin
 
           [default: full]
           [possible values: plugin, full]
 
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
       --no-setup
           Skip the wizard and exit cleanly. Equivalent to LAB_SKIP_SETUP=1
 
       --no-browser
-          Do not attempt to open the browser (no-op for now; reserved for the follow-up that adds `webbrowser` integration)
+          Do not attempt to open the browser
 
       --smoke
-          Smoke-test mode: print the state machine snapshot as JSON and exit. Used by `just smoke-setup` for CI verification
+          Smoke-test mode: print the state machine snapshot as JSON and exit
 
   -h, --help
           Print help
@@ -1115,12 +1138,12 @@ Options:
           Print help
 ```
 
-## `labby setup incus-backup`
+## `labby setup incusbackup`
 
 ```text
 Validate or apply local Incus backup policy
 
-Usage: incus-backup [OPTIONS] <COMMAND>
+Usage: incusbackup [OPTIONS] <COMMAND>
 
 Commands:
   validate  Validate a backup policy YAML without mutating Incus
@@ -1141,7 +1164,7 @@ Options:
           Print help
 ```
 
-## `labby setup incus-backup validate`
+## `labby setup incusbackup validate`
 
 ```text
 Validate a backup policy YAML without mutating Incus
@@ -1167,7 +1190,7 @@ Options:
           Print help
 ```
 
-## `labby setup incus-backup apply`
+## `labby setup incusbackup apply`
 
 ```text
 Apply a backup policy YAML to an Incus instance
@@ -1195,11 +1218,14 @@ Options:
       --dry-run
           Print the changes without mutating Incus
 
+  -y, --yes
+          Confirm applying the backup policy without prompting
+
   -h, --help
           Print help
 ```
 
-## `labby setup incus-backup help`
+## `labby setup incusbackup help`
 
 ```text
 Print this message or the help of the given subcommand(s)
@@ -1209,6 +1235,77 @@ Usage: help [COMMAND]...
 Arguments:
   [COMMAND]...
           Print help for the subcommand(s)
+```
+
+## `labby setup incus`
+
+```text
+Bootstrap or converge the supported Incus Labby gateway container
+
+Usage: incus [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --name <NAME>
+          Container name (default: labby)
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --image <IMAGE>
+          Incus image alias (default: images:ubuntu/24.04)
+
+      --profile-name <PROFILE_NAME>
+          Incus profile name (default: labby-gateway)
+
+      --backup-config <BACKUP_CONFIG>
+          Incus snapshot policy YAML path; defaults to the embedded policy
+
+      --no-backup-config
+          Do not apply an Incus snapshot policy
+
+      --runtime-profile-name <RUNTIME_PROFILE_NAME>
+          Rootless profile for existing containers with a different root pool
+
+      --storage-driver <STORAGE_DRIVER>
+          Incus storage driver: zfs, btrfs, or dir
+
+      --storage-pool <STORAGE_POOL>
+          Incus storage pool used by the profile root disk
+
+      --storage-source <STORAGE_SOURCE>
+          Incus storage source path/dataset for the pool
+
+      --version <VERSION>
+          Labby release tag to install, e.g. v0.28.0
+
+          [default: latest]
+
+      --local-binary <LOCAL_BINARY>
+          Push a locally built labby binary instead of downloading a release
+
+      --skip-install
+          Use the labby binary already baked into the selected image
+
+      --dry-run
+          Print bootstrap commands only
+
+      --tailscale-ssh
+          Run tailscale up with --ssh when TS_AUTHKEY is set
+
+      --allow-source-fallback
+          Allow install.sh cargo fallback if the release asset is unavailable
+
+  -y, --yes
+          Confirm bootstrap without prompting
+
+  -h, --help
+          Print help
 ```
 
 ## `labby setup install`

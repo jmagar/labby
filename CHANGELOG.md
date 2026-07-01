@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+---
+
+## [0.29.0] - 2026-07-01
+
 ### Added
 
 - **Code Mode local state and git providers** — added V1 `state.*` workspace
@@ -13,6 +17,11 @@ All notable changes to this project will be documented in this file.
 - **Code Mode state/git V2** — expanded local Code Mode workspace APIs with
   safe filesystem mutation helpers, JSON/hash/detect/archive helpers, guarded
   git branch/remote commands, and explicit unauthenticated remote git operations.
+- **Binary-owned Incus bootstrap** — bare `labby setup` now materializes the
+  supported Incus profile, snapshot policy, and installer artifacts from the
+  binary and converges the gateway container without requiring a source checkout
+  or manual release-version lookup. The old web setup flow remains available as
+  `labby setup wizard`, while `labby setup incus` keeps advanced bootstrap flags.
 
 ---
 
