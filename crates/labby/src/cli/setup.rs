@@ -121,6 +121,7 @@ pub enum SetupCommand {
     /// Repair missing local setup prerequisites without contacting external services.
     Repair,
     /// Validate or apply local Incus backup policy.
+    #[command(alias = "incus-backup")]
     Incusbackup(IncusBackupArgs),
     /// Bootstrap or converge the supported Incus Labby gateway container.
     Incus(IncusBootstrapArgs),
@@ -305,6 +306,9 @@ pub struct IncusBootstrapArgs {
     /// Allow install.sh cargo fallback if the release asset is unavailable.
     #[arg(long)]
     pub allow_source_fallback: bool,
+    /// Confirm bootstrap without prompting.
+    #[arg(short = 'y', long, alias = "no-confirm")]
+    pub yes: bool,
 }
 
 impl Default for IncusBootstrapArgs {
@@ -325,6 +329,7 @@ impl Default for IncusBootstrapArgs {
             dry_run: false,
             tailscale_ssh: false,
             allow_source_fallback: false,
+            yes: false,
         }
     }
 }
@@ -402,12 +407,13 @@ pub async fn run(args: SetupArgs, format: OutputFormat) -> Result<ExitCode> {
         )
         .await;
     }
-    if args.yes || args.skip_deps {
-        anyhow::bail!("--yes and --skip-deps are only valid with --provision");
+    if args.skip_deps {
+        anyhow::bail!("--skip-deps is only valid with --provision");
     }
 
     let incus_args = IncusBootstrapArgs {
         dry_run: args.dry_run,
+        yes: args.yes,
         ..IncusBootstrapArgs::default()
     };
     run_incus_bootstrap_command(incus_args).await?;
@@ -645,6 +651,7 @@ async fn run_incus_backup_command(args: IncusBackupArgs, format: OutputFormat) -
 }
 
 async fn run_incus_bootstrap_command(args: IncusBootstrapArgs) -> Result<()> {
+    confirm_incus_bootstrap(args.dry_run, args.yes)?;
     let options = crate::dispatch::setup::incus::IncusBootstrapOptions {
         name: args.name,
         image: args.image,
@@ -663,6 +670,29 @@ async fn run_incus_bootstrap_command(args: IncusBootstrapArgs) -> Result<()> {
         allow_source_fallback: args.allow_source_fallback,
     };
     crate::dispatch::setup::incus::run_incus_bootstrap(options)?;
+    Ok(())
+}
+
+fn confirm_incus_bootstrap(dry_run: bool, mut yes: bool) -> Result<()> {
+    if dry_run {
+        return Ok(());
+    }
+    if !yes {
+        if !io::stdin().is_terminal() {
+            anyhow::bail!("setup incus requires --yes when stdin is not a TTY");
+        }
+        eprintln!(
+            "This will create or update the Labby Incus container, storage/profile config, in-container labby binary, service state, backup policy, and Tailscale join when TS_AUTHKEY is set."
+        );
+        eprint!("Proceed? [y/N] ");
+        io::stderr().flush()?;
+        let mut answer = String::new();
+        io::stdin().read_line(&mut answer)?;
+        yes = matches!(answer.trim(), "y" | "Y" | "yes" | "YES");
+    }
+    if !yes {
+        anyhow::bail!("setup incus cancelled");
+    }
     Ok(())
 }
 
@@ -846,7 +876,7 @@ mod tests {
 
     #[test]
     fn bare_setup_parses_as_default_incus_bootstrap() {
-        let cli = crate::cli::Cli::try_parse_from(["labby", "setup"]).unwrap();
+        let cli = crate::cli::Cli::try_parse_from(["labby", "setup", "-y"]).unwrap();
         let crate::cli::Command::Setup(args) = cli.command else {
             panic!("expected setup command");
         };
@@ -854,6 +884,7 @@ mod tests {
         assert!(args.command.is_none());
         assert!(!args.provision);
         assert!(!args.dry_run);
+        assert!(args.yes);
     }
 
     #[test]
@@ -989,9 +1020,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_hyphenated_incus_backup_subcommand() {
-        let err = crate::cli::Cli::try_parse_from(["labby", "setup", "incus-backup"]).unwrap_err();
-        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidSubcommand);
+    fn accepts_hidden_hyphenated_incus_backup_alias() {
+        let cli = crate::cli::Cli::try_parse_from(["labby", "setup", "incus-backup", "validate"])
+            .unwrap();
+        let crate::cli::Command::Setup(args) = cli.command else {
+            panic!("expected setup command");
+        };
+        assert!(matches!(
+            args.command,
+            Some(SetupCommand::Incusbackup(IncusBackupArgs {
+                command: IncusBackupCommand::Validate { .. }
+            }))
+        ));
     }
 
     #[test]
@@ -1007,6 +1047,7 @@ mod tests {
             "--name",
             "labby-test",
             "--dry-run",
+            "-y",
         ])
         .unwrap();
         let crate::cli::Command::Setup(args) = cli.command else {
@@ -1019,6 +1060,7 @@ mod tests {
         assert_eq!(args.storage_driver.as_deref(), Some("dir"));
         assert_eq!(args.name.as_deref(), Some("labby-test"));
         assert!(args.dry_run);
+        assert!(args.yes);
     }
 
     #[test]

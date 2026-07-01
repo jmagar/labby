@@ -1298,6 +1298,9 @@ Options:
       --allow-source-fallback
           Allow install.sh cargo fallback if the release asset is unavailable
 
+  -y, --yes
+          Confirm bootstrap without prompting
+
   -h, --help
           Print help
 ```

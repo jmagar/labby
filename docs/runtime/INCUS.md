@@ -32,7 +32,7 @@ local binary, but they should not expect the same prebuilt cold-start path.
 Use Incus for normal self-hosting:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jmagar/lab/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jmagar/labby/main/scripts/install.sh | sh
 labby setup
 ```
 
@@ -77,7 +77,7 @@ with `--storage-source`, or the legacy ZFS dataset source with
 Install Labby, then run the host-side Incus bootstrap:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jmagar/lab/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jmagar/labby/main/scripts/install.sh | sh
 labby setup
 ```
 

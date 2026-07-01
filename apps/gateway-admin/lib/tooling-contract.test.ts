@@ -13,7 +13,8 @@ test('gateway-admin tooling uses the documented bundler module contract', () => 
 })
 
 test('gateway-admin verification scripts exercise unit and browser test contracts', () => {
-  assert.equal(packageJson.scripts.test, 'pnpm run test:unit')
+  assert.equal(packageJson.scripts.test, 'pnpm run test:unit && pnpm run test:install-script')
   assert.match(packageJson.scripts['test:unit'], /tsx --test/)
+  assert.equal(packageJson.scripts['test:install-script'], 'node --test scripts/*.test.mjs')
   assert.equal(packageJson.scripts['test:browser'], 'node --test --experimental-strip-types lib/browser/**/*.test.ts')
 })

@@ -17,15 +17,17 @@ or auto-repair anything. It ships:
 ## Installing labby (server host only)
 
 ```bash
-curl -fsSL https://labby.tootie.tv/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jmagar/labby/main/scripts/install.sh | sh
 labby setup
 ```
 
 The script downloads the latest GitHub release for this platform
 (sha256-verified) into `~/.local/bin/labby`, falling back to
-`cargo install --git https://github.com/jmagar/lab --bin labby --all-features`
+`cargo install --git https://github.com/jmagar/labby --bin labby --all-features`
 when no release asset exists. Everything after install — config, credentials,
 connectivity checks, repair — is owned by `labby setup`.
+The web app also serves the same script at `https://labby.tootie.tv/install.sh`
+for convenience, but GitHub is the canonical installer source.
 
 ## Configuration
 

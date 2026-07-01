@@ -6,8 +6,8 @@
     "name": "Jacob Magar",
     "email": "jmagar@users.noreply.github.com"
   },
-  "repository": "https://github.com/jmagar/lab",
-  "homepage": "https://github.com/jmagar/lab",
+  "repository": "https://github.com/jmagar/labby",
+  "homepage": "https://github.com/jmagar/labby",
   "license": "MIT",
   "keywords": [
     "lab",
@@ -22,9 +22,9 @@
     "server_url": {
       "type": "string",
       "title": "Server URL",
-      "description": "Base URL of the Labby MCP HTTP server (labby serve). Defaults to https://labby.tootie.tv. Set to http://localhost:8765 for a local-only server or another reverse-proxy URL when self-hosting elsewhere. Do NOT include a trailing /mcp — the plugin appends it.",
+      "description": "Base URL of the Labby MCP HTTP server (labby serve). Defaults to loopback so bearer tokens never go to a public host by accident. Set explicitly to https://labby.tootie.tv, or another reverse-proxy URL, only when that is the server you intend to trust. Do NOT include a trailing /mcp — the plugin appends it.",
       "required": true,
-      "default": "https://labby.tootie.tv"
+      "default": "http://localhost:8765"
     },
     "api_token": {
       "type": "string",

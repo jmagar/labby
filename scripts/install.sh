@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install labby — the Lab homelab control plane binary.
 #
-#   curl -fsSL https://labby.tootie.tv/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/jmagar/labby/main/scripts/install.sh | sh
 #
 # Downloads the latest GitHub release archive for this platform, verifies its
 # SHA-256, and installs the binary to ~/.local/bin/labby. When explicitly
@@ -13,14 +13,14 @@
 #
 # Environment overrides:
 #   LAB_INSTALL_DIR     install directory       (default: ~/.local/bin)
-#   LAB_INSTALL_REPO    owner/repo to fetch     (default: jmagar/lab)
+#   LAB_INSTALL_REPO    owner/repo to fetch     (default: jmagar/labby)
 #   LAB_INSTALL_VERSION release tag, e.g. v0.22.2 (default: latest)
 #   LAB_REQUIRE_CHECKSUM fail if the .sha256 asset is absent (default: 1)
 #   LAB_ALLOW_SOURCE_FALLBACK allow cargo fallback after release failure (default: 0)
 
 set -eu
 
-REPO="${LAB_INSTALL_REPO:-jmagar/lab}"
+REPO="${LAB_INSTALL_REPO:-jmagar/labby}"
 INSTALL_DIR="${LAB_INSTALL_DIR:-$HOME/.local/bin}"
 VERSION="${LAB_INSTALL_VERSION:-latest}"
 REQUIRE_CHECKSUM="${LAB_REQUIRE_CHECKSUM:-1}"

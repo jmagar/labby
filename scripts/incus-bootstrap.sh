@@ -537,7 +537,7 @@ else
     run incus file push scripts/install.sh "$NAME/tmp/labby-install.sh"
     run incus exec "$NAME" -- env \
         LAB_INSTALL_DIR=/usr/local/bin \
-        LAB_INSTALL_REPO=jmagar/lab \
+        LAB_INSTALL_REPO=jmagar/labby \
         LAB_INSTALL_VERSION="$VERSION" \
         LAB_REQUIRE_CHECKSUM=1 \
         LAB_ALLOW_SOURCE_FALLBACK="$fallback" \
