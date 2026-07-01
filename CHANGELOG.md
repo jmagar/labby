@@ -23,6 +23,12 @@ All notable changes to this project will be documented in this file.
   or manual release-version lookup. The old web setup flow remains available as
   `labby setup wizard`, while `labby setup incus` keeps advanced bootstrap flags.
 
+### Fixed
+
+- **Incus Tailscale hostname stability** — Incus bootstrap now sets the
+  container hostname and passes an explicit Tailscale hostname during join so
+  images built on CI runners do not register random runner names in the tailnet.
+
 ---
 
 ## [0.28.0] - 2026-06-27

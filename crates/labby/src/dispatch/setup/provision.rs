@@ -25,6 +25,7 @@ const LAB_HOME: &str = "/home/lab";
 const LAB_PATH: &str =
     "/home/lab/.local/bin:/home/lab/.cargo/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin";
 const TS_AUTHKEY_ENV: &str = "TS_AUTHKEY";
+const TS_HOSTNAME_ENV: &str = "LABBY_TAILSCALE_HOSTNAME";
 const TS_AUTHKEY_PATH: &str = "/run/labby-ts-authkey";
 const LAB_ZPROFILE: &str = "/home/lab/.zprofile";
 const LABBY_IMAGE_YAML: &str = include_str!("../../../../../config/incus/labby-image.yaml");
@@ -557,11 +558,16 @@ async fn install_and_join_tailscale() -> Result<(), ToolError> {
             run_image_provision_action("tailscale-install").await?;
         }
         write_tailscale_authkey(&authkey)?;
-        run_checked(
-            "tailscale",
-            &["up", &format!("--auth-key=file:{TS_AUTHKEY_PATH}")],
-        )
-        .await?;
+        let auth_arg = format!("--auth-key=file:{TS_AUTHKEY_PATH}");
+        if let Some(hostname) = tailscale_hostname() {
+            run_checked(
+                "tailscale",
+                &["up", &auth_arg, &format!("--hostname={hostname}")],
+            )
+            .await?;
+        } else {
+            run_checked("tailscale", &["up", &auth_arg]).await?;
+        }
         Ok(())
     }
     .await;
@@ -571,6 +577,13 @@ async fn install_and_join_tailscale() -> Result<(), ToolError> {
 
 fn tailscale_authkey() -> Option<String> {
     std::env::var(TS_AUTHKEY_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn tailscale_hostname() -> Option<String> {
+    std::env::var(TS_HOSTNAME_ENV)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())

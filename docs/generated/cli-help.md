@@ -1298,6 +1298,9 @@ Options:
       --tailscale-ssh
           Run tailscale up with --ssh when TS_AUTHKEY is set
 
+      --tailscale-hostname <TAILSCALE_HOSTNAME>
+          Hostname to register with Tailscale; defaults to the Incus container name
+
       --allow-source-fallback
           Allow install.sh cargo fallback if the release asset is unavailable
 

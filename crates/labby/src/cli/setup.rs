@@ -124,7 +124,7 @@ pub enum SetupCommand {
     #[command(alias = "incus-backup")]
     Incusbackup(IncusBackupArgs),
     /// Bootstrap or converge the supported Incus Labby gateway container.
-    Incus(IncusBootstrapArgs),
+    Incus(Box<IncusBootstrapArgs>),
     /// Copy the labby binary into ~/.local/bin so it is callable in your own terminal.
     Install,
     /// Install the Claude Code plugin for a configured service.
@@ -306,6 +306,9 @@ pub struct IncusBootstrapArgs {
     /// Run tailscale up with --ssh when TS_AUTHKEY is set.
     #[arg(long)]
     pub tailscale_ssh: bool,
+    /// Hostname to register with Tailscale; defaults to the Incus container name.
+    #[arg(long)]
+    pub tailscale_hostname: Option<String>,
     /// Allow install.sh cargo fallback if the release asset is unavailable.
     #[arg(long)]
     pub allow_source_fallback: bool,
@@ -331,6 +334,7 @@ impl Default for IncusBootstrapArgs {
             skip_install: false,
             dry_run: false,
             tailscale_ssh: false,
+            tailscale_hostname: None,
             allow_source_fallback: false,
             yes: false,
         }
@@ -605,7 +609,7 @@ async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<Exit
             run_incus_backup_command(args, format).await?;
         }
         SetupCommand::Incus(args) => {
-            run_incus_bootstrap_command(args, format).await?;
+            run_incus_bootstrap_command(*args, format).await?;
         }
         SetupCommand::Install => {
             let dest = install_self()?;
@@ -684,6 +688,7 @@ async fn run_incus_bootstrap_command(args: IncusBootstrapArgs, format: OutputFor
         skip_install: args.skip_install,
         dry_run: args.dry_run,
         tailscale_ssh: args.tailscale_ssh,
+        tailscale_hostname: args.tailscale_hostname,
         allow_source_fallback: args.allow_source_fallback,
     };
     crate::dispatch::setup::incus::run_incus_bootstrap(options)?;

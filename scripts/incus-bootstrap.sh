@@ -17,6 +17,7 @@ LOCAL_BINARY=""
 SKIP_INSTALL=0
 DRY_RUN=0
 TAILSCALE_SSH=0
+TAILSCALE_HOSTNAME=""
 ALLOW_SOURCE_FALLBACK=0
 APPLY_BACKUP_CONFIG=1
 
@@ -45,6 +46,7 @@ Options:
   --skip-install              Use the labby binary already baked into the selected image
   --dry-run                   Print commands only
   --tailscale-ssh             Run tailscale up with --ssh when TS_AUTHKEY is set
+  --tailscale-hostname NAME    Tailscale hostname (default: container name)
   --allow-source-fallback     Allow install.sh cargo fallback if release asset is unavailable
   -h, --help                  Show this help
 
@@ -468,6 +470,7 @@ while [ "$#" -gt 0 ]; do
         --skip-install) SKIP_INSTALL=1; shift ;;
         --dry-run|--print-only) DRY_RUN=1; shift ;;
         --tailscale-ssh) TAILSCALE_SSH=1; shift ;;
+        --tailscale-hostname) TAILSCALE_HOSTNAME="${2:?missing --tailscale-hostname value}"; shift 2 ;;
         --allow-source-fallback) ALLOW_SOURCE_FALLBACK=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) fail "unknown argument: $1" ;;
@@ -496,6 +499,9 @@ if [ "$SKIP_INSTALL" -eq 1 ] && [ -n "$LOCAL_BINARY" ]; then
 fi
 if [ -n "$LOCAL_BINARY" ] && [ "$DRY_RUN" -eq 0 ] && [ ! -f "$LOCAL_BINARY" ]; then
     fail "--local-binary path does not exist: $LOCAL_BINARY"
+fi
+if [ -z "$TAILSCALE_HOSTNAME" ]; then
+    TAILSCALE_HOSTNAME="$NAME"
 fi
 
 INCUS_AVAILABLE=1
@@ -541,6 +547,7 @@ verify_container_substrate
 ensure_tun_device
 ensure_container_networking
 apply_backup_config
+run incus exec "$NAME" -- hostnamectl set-hostname "$TAILSCALE_HOSTNAME"
 
 if [ "$SKIP_INSTALL" -eq 1 ]; then
     run incus exec "$NAME" -- test -x /usr/local/bin/labby
@@ -572,7 +579,7 @@ if [ -n "${TS_AUTHKEY:-}" ]; then
 	elif ! incus exec "$NAME" -- sh -c "command -v tailscale >/dev/null 2>&1"; then
 		run incus exec "$NAME" -- sh -c "curl -fsSL https://tailscale.com/install.sh | sh"
 	fi
-	ts_args="--auth-key=file:/run/labby-ts-authkey"
+	ts_args="--auth-key=file:/run/labby-ts-authkey --hostname=$TAILSCALE_HOSTNAME"
 	if [ "$TAILSCALE_SSH" -eq 1 ]; then
 		ts_args="$ts_args --ssh"
 	fi

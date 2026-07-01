@@ -60,6 +60,7 @@ pub(crate) struct IncusBootstrapOptions {
     pub skip_install: bool,
     pub dry_run: bool,
     pub tailscale_ssh: bool,
+    pub tailscale_hostname: Option<String>,
     pub allow_source_fallback: bool,
 }
 
@@ -241,6 +242,13 @@ pub(crate) fn bootstrap_command(
     push_flag(&mut args, "--skip-install", options.skip_install);
     push_flag(&mut args, "--dry-run", options.dry_run);
     push_flag(&mut args, "--tailscale-ssh", options.tailscale_ssh);
+    if let Some(hostname) = options
+        .tailscale_hostname
+        .as_deref()
+        .or(options.name.as_deref())
+    {
+        push_option(&mut args, "--tailscale-hostname", Some(hostname));
+    }
     push_flag(
         &mut args,
         "--allow-source-fallback",
@@ -495,6 +503,25 @@ config:
 
         let err = bootstrap_command(&artifacts, &options).unwrap_err();
         assert_eq!(err.kind(), "incus_bootstrap_invalid_options");
+    }
+
+    #[test]
+    fn passes_container_name_as_tailscale_hostname() {
+        let dir = tempfile::tempdir().unwrap();
+        let artifacts = materialize_bootstrap_artifacts(dir.path()).unwrap();
+        let options = IncusBootstrapOptions {
+            name: Some("labby".to_string()),
+            dry_run: true,
+            ..IncusBootstrapOptions::default()
+        };
+
+        let command = bootstrap_command(&artifacts, &options).unwrap();
+
+        assert!(has_arg_pair(
+            &command.args,
+            "--tailscale-hostname",
+            OsStr::new("labby")
+        ));
     }
 
     fn has_arg_pair(args: &[OsString], flag: &str, value: &OsStr) -> bool {
