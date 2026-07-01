@@ -86,6 +86,10 @@ RUN mkdir -p \
 # apps/gateway-admin/out is sent in the build context.)
 COPY apps/gateway-admin/out apps/gateway-admin/out
 COPY docs/generated/env-reference.json docs/generated/env-reference.json
+COPY scripts/incus-bootstrap.sh scripts/incus-bootstrap.sh
+COPY scripts/install.sh scripts/install.sh
+COPY config/incus/labby-backup.yaml config/incus/labby-backup.yaml
+COPY config/incus/labby-gateway-profile.yaml config/incus/labby-gateway-profile.yaml
 COPY config/incus/labby-image.yaml config/incus/labby-image.yaml
 COPY crates/ crates/
 # BuildKit normalizes COPYed file mtimes to a fixed past epoch. That timestamp is

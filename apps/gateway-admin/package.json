@@ -1,17 +1,19 @@
 {
   "name": "gateway-admin",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.9",
   "scripts": {
     "dev": "next dev -H 0.0.0.0",
+    "prebuild": "node scripts/sync-install-script.mjs",
     "build": "next build",
     "start": "python3 -m http.server 3000 -d out",
     "preview": "python3 -m http.server 3000 -d out",
     "lint": "eslint .",
-    "test": "pnpm run test:unit",
+    "test": "pnpm run test:unit && pnpm run test:install-script",
     "test:unit": "tsx --test lib/*.test.ts lib/acp/*.test.ts lib/chat/*.test.ts lib/code-mode-app/*.test.ts lib/server/**/*.test.ts lib/api/**/*.test.ts lib/dashboard/**/*.test.ts lib/fs/**/*.test.ts lib/dev/**/*.test.ts lib/setup/*.test.ts components/**/*.test.tsx",
+    "test:install-script": "node --test scripts/*.test.mjs",
     "test:acp": "tsx --test lib/acp/*.test.ts lib/chat/*.test.ts",
     "test:browser": "node --test --experimental-strip-types lib/browser/**/*.test.ts"
   },

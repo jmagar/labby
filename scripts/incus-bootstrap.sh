@@ -236,7 +236,7 @@ validate_backup_key() {
 }
 
 host_labby_supports_incus_backup() {
-    command -v labby >/dev/null 2>&1 && labby setup incus-backup --help >/dev/null 2>&1
+    command -v labby >/dev/null 2>&1 && labby setup incusbackup --help >/dev/null 2>&1
 }
 
 apply_backup_config_with_shell() {
@@ -254,19 +254,37 @@ EOF
     [ "$applied" -gt 0 ] || fail "$BACKUP_CONFIG_FILE must contain at least one supported config key"
 }
 
+validate_backup_config_with_shell() {
+    validated=0
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        key="${entry%%=*}"
+        validate_backup_key "$key"
+        validated=$((validated + 1))
+    done <<EOF
+$(parse_backup_config)
+EOF
+    [ "$validated" -gt 0 ] || fail "$BACKUP_CONFIG_FILE must contain at least one supported config key"
+}
+
 apply_backup_config() {
     [ "$APPLY_BACKUP_CONFIG" -eq 1 ] || return 0
 
-    [ "$DRY_RUN" -eq 1 ] || [ -f "$BACKUP_CONFIG_FILE" ] \
+    [ -f "$BACKUP_CONFIG_FILE" ] \
         || fail "--backup-config path does not exist: $BACKUP_CONFIG_FILE"
 
     if [ "$DRY_RUN" -eq 1 ]; then
-        say "+ labby setup incus-backup apply --name $(quote "$NAME") --config $(quote "$BACKUP_CONFIG_FILE")"
+        if host_labby_supports_incus_backup; then
+            labby setup incusbackup validate --config "$BACKUP_CONFIG_FILE" >/dev/null
+        else
+            validate_backup_config_with_shell
+        fi
+        say "+ labby setup incusbackup apply --name $(quote "$NAME") --config $(quote "$BACKUP_CONFIG_FILE") --dry-run"
         return
     fi
 
     if host_labby_supports_incus_backup; then
-        run labby setup incus-backup apply --name "$NAME" --config "$BACKUP_CONFIG_FILE"
+        run labby setup incusbackup apply --name "$NAME" --config "$BACKUP_CONFIG_FILE" --yes
     else
         apply_backup_config_with_shell
     fi
@@ -537,7 +555,7 @@ else
     run incus file push scripts/install.sh "$NAME/tmp/labby-install.sh"
     run incus exec "$NAME" -- env \
         LAB_INSTALL_DIR=/usr/local/bin \
-        LAB_INSTALL_REPO=jmagar/lab \
+        LAB_INSTALL_REPO=jmagar/labby \
         LAB_INSTALL_VERSION="$VERSION" \
         LAB_REQUIRE_CHECKSUM=1 \
         LAB_ALLOW_SOURCE_FALLBACK="$fallback" \

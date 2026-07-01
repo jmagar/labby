@@ -23,7 +23,16 @@ runs:
       working-directory: apps/gateway-admin
       run: pnpm install --frozen-lockfile
 
+    - name: Test installer sync
+      shell: bash
+      working-directory: apps/gateway-admin
+      run: pnpm run test:install-script
+
     - name: Build gateway-admin
       shell: bash
       working-directory: apps/gateway-admin
       run: pnpm build
+
+    - name: Verify synced installer is committed
+      shell: bash
+      run: git diff --exit-code -- apps/gateway-admin/public/install.sh

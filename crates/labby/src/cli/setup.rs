@@ -1,7 +1,10 @@
-//! `labby setup` — first-run wizard entry point.
+//! `labby setup` — primary Incus bootstrap entry point.
 //!
-//! Thin CLI shim over the `setup` dispatch service. Detects first-run via
-//! `setup.state`, then prints either:
+//! Bare `labby setup` converges the supported Incus Labby gateway container.
+//! The web configuration flow remains available as `labby setup wizard`.
+//!
+//! The wizard is a thin CLI shim over the `setup` dispatch service. It detects
+//! first-run via `setup.state`, then prints either:
 //!
 //! - first-run: instructions to start `labby serve` and visit `/setup`, or
 //! - re-run: instructions to visit `/settings`.
@@ -32,7 +35,7 @@ pub struct SetupArgs {
     #[arg(long)]
     pub provision: bool,
 
-    /// Print the provisioning plan and do not mutate anything.
+    /// Print the default Incus/provisioning plan and do not mutate anything.
     #[arg(long)]
     pub dry_run: bool,
 
@@ -44,22 +47,22 @@ pub struct SetupArgs {
     #[arg(long)]
     pub skip_deps: bool,
 
-    /// Setup UI mode. Standalone setup defaults to full; /setup-core passes plugin.
-    #[arg(long, value_enum, default_value_t = SetupModeArg::Full)]
+    /// Setup UI mode for `labby setup wizard`.
+    #[arg(long, value_enum, default_value_t = SetupModeArg::Full, hide = true)]
     pub mode: SetupModeArg,
 
     /// Skip the wizard and exit cleanly. Equivalent to LAB_SKIP_SETUP=1.
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub no_setup: bool,
 
     /// Do not attempt to open the browser (no-op for now; reserved for
     /// the follow-up that adds `webbrowser` integration).
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub no_browser: bool,
 
     /// Smoke-test mode: print the state machine snapshot as JSON and exit.
     /// Used by `just smoke-setup` for CI verification.
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub smoke: bool,
 
     #[command(subcommand)]
@@ -83,6 +86,8 @@ impl SetupModeArg {
 
 #[derive(Debug, Subcommand)]
 pub enum SetupCommand {
+    /// Open the web-based first-run wizard or settings flow.
+    Wizard(WizardArgs),
     /// Manage the local setup draft.
     Draft(DraftArgs),
     /// Manage the systemd Labby gateway service.
@@ -116,13 +121,32 @@ pub enum SetupCommand {
     /// Repair missing local setup prerequisites without contacting external services.
     Repair,
     /// Validate or apply local Incus backup policy.
-    IncusBackup(IncusBackupArgs),
+    #[command(alias = "incus-backup")]
+    Incusbackup(IncusBackupArgs),
+    /// Bootstrap or converge the supported Incus Labby gateway container.
+    Incus(IncusBootstrapArgs),
     /// Copy the labby binary into ~/.local/bin so it is callable in your own terminal.
     Install,
     /// Install the Claude Code plugin for a configured service.
     InstallPlugin(PluginMutationArgs),
     /// Uninstall the Claude Code plugin for a service.
     UninstallPlugin(PluginMutationArgs),
+}
+
+#[derive(Debug, Args, Clone, Copy)]
+pub struct WizardArgs {
+    /// Setup UI mode. Standalone setup defaults to full; /setup-core passes plugin.
+    #[arg(long, value_enum, default_value_t = SetupModeArg::Full)]
+    pub mode: SetupModeArg,
+    /// Skip the wizard and exit cleanly. Equivalent to LAB_SKIP_SETUP=1.
+    #[arg(long)]
+    pub no_setup: bool,
+    /// Do not attempt to open the browser.
+    #[arg(long)]
+    pub no_browser: bool,
+    /// Smoke-test mode: print the state machine snapshot as JSON and exit.
+    #[arg(long)]
+    pub smoke: bool,
 }
 
 #[derive(Debug, Args)]
@@ -232,7 +256,85 @@ pub enum IncusBackupCommand {
         /// Print the changes without mutating Incus.
         #[arg(long)]
         dry_run: bool,
+        /// Confirm applying the backup policy without prompting.
+        #[arg(short = 'y', long, alias = "no-confirm")]
+        yes: bool,
     },
+}
+
+#[derive(Debug, Args)]
+pub struct IncusBootstrapArgs {
+    /// Container name (default: labby).
+    #[arg(long)]
+    pub name: Option<String>,
+    /// Incus image alias (default: images:ubuntu/24.04).
+    #[arg(long)]
+    pub image: Option<String>,
+    /// Incus profile name (default: labby-gateway).
+    #[arg(long)]
+    pub profile_name: Option<String>,
+    /// Incus snapshot policy YAML path; defaults to the embedded policy.
+    #[arg(long)]
+    pub backup_config: Option<PathBuf>,
+    /// Do not apply an Incus snapshot policy.
+    #[arg(long)]
+    pub no_backup_config: bool,
+    /// Rootless profile for existing containers with a different root pool.
+    #[arg(long)]
+    pub runtime_profile_name: Option<String>,
+    /// Incus storage driver: zfs, btrfs, or dir.
+    #[arg(long)]
+    pub storage_driver: Option<String>,
+    /// Incus storage pool used by the profile root disk.
+    #[arg(long)]
+    pub storage_pool: Option<String>,
+    /// Incus storage source path/dataset for the pool.
+    #[arg(long)]
+    pub storage_source: Option<String>,
+    /// Labby release tag to install, e.g. v0.28.0.
+    #[arg(long, default_value = "latest")]
+    pub version: Option<String>,
+    /// Push a locally built labby binary instead of downloading a release.
+    #[arg(long)]
+    pub local_binary: Option<PathBuf>,
+    /// Use the labby binary already baked into the selected image.
+    #[arg(long)]
+    pub skip_install: bool,
+    /// Print bootstrap commands only.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Run tailscale up with --ssh when TS_AUTHKEY is set.
+    #[arg(long)]
+    pub tailscale_ssh: bool,
+    /// Allow install.sh cargo fallback if the release asset is unavailable.
+    #[arg(long)]
+    pub allow_source_fallback: bool,
+    /// Confirm bootstrap without prompting.
+    #[arg(short = 'y', long, alias = "no-confirm")]
+    pub yes: bool,
+}
+
+impl Default for IncusBootstrapArgs {
+    fn default() -> Self {
+        Self {
+            name: None,
+            image: None,
+            profile_name: None,
+            backup_config: None,
+            no_backup_config: false,
+            runtime_profile_name: None,
+            storage_driver: None,
+            storage_pool: None,
+            storage_source: None,
+            version: Some("latest".to_string()),
+            local_binary: None,
+            skip_install: false,
+            dry_run: false,
+            tailscale_ssh: false,
+            allow_source_fallback: false,
+            yes: false,
+        }
+    }
 }
 
 /// Default URL for the embedded web UI (per Q1: 127.0.0.1:8765).
@@ -293,20 +395,47 @@ pub async fn run(args: SetupArgs, format: OutputFormat) -> Result<ExitCode> {
     if args.provision {
         return run_provision(args, format).await;
     }
-    if args.dry_run || args.yes || args.skip_deps {
-        anyhow::bail!("--dry-run, --yes, and --skip-deps are only valid with --provision");
-    }
     if let Some(command) = args.command {
         return run_command(command, format).await;
     }
+    if setup_skip_requested()
+        || args.smoke
+        || args.no_setup
+        || args.no_browser
+        || !matches!(args.mode, SetupModeArg::Full)
+    {
+        return run_wizard(
+            WizardArgs {
+                mode: args.mode,
+                no_setup: args.no_setup,
+                no_browser: args.no_browser,
+                smoke: args.smoke,
+            },
+            format,
+        )
+        .await;
+    }
+    if args.skip_deps {
+        anyhow::bail!("--skip-deps is only valid with --provision");
+    }
 
+    let incus_args = IncusBootstrapArgs {
+        dry_run: args.dry_run,
+        yes: args.yes,
+        ..IncusBootstrapArgs::default()
+    };
+    run_incus_bootstrap_command(incus_args, format).await?;
+    Ok(ExitCode::SUCCESS)
+}
+
+async fn run_wizard(args: WizardArgs, format: OutputFormat) -> Result<ExitCode> {
     let theme = CliTheme::from_context(format.render_context());
 
-    if std::env::var("LAB_SKIP_SETUP").as_deref() == Ok("1") || args.no_setup {
+    if setup_skip_requested() || args.no_setup {
         eprintln!(
             "{}",
             theme.muted(
-                "setup skipped (LAB_SKIP_SETUP=1 or --no-setup); run `labby setup` manually when ready"
+                "setup skipped (LAB_SKIP_SETUP=1 or --no-setup); run `labby setup wizard` manually when ready"
             )
         );
         return Ok(ExitCode::SUCCESS);
@@ -400,6 +529,9 @@ async fn run_provision(args: SetupArgs, format: OutputFormat) -> Result<ExitCode
 
 async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<ExitCode> {
     match command {
+        SetupCommand::Wizard(args) => {
+            return run_wizard(args, format).await;
+        }
         SetupCommand::Draft(args) => {
             run_draft_command(args, format).await?;
         }
@@ -469,8 +601,11 @@ async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<Exit
             let value = crate::dispatch::setup::dispatch("repair", json!({})).await?;
             print(&value, format)?;
         }
-        SetupCommand::IncusBackup(args) => {
+        SetupCommand::Incusbackup(args) => {
             run_incus_backup_command(args, format).await?;
+        }
+        SetupCommand::Incus(args) => {
+            run_incus_bootstrap_command(args, format).await?;
         }
         SetupCommand::Install => {
             let dest = install_self()?;
@@ -500,7 +635,11 @@ async fn run_incus_backup_command(args: IncusBackupArgs, format: OutputFormat) -
             name,
             config,
             dry_run,
+            yes,
         } => {
+            if !dry_run {
+                require_incus_backup_confirmation(&name, yes)?;
+            }
             let outcome =
                 crate::dispatch::setup::incus::apply_backup_config(&name, &config, dry_run)?;
             if format.is_json() {
@@ -521,6 +660,80 @@ async fn run_incus_backup_command(args: IncusBackupArgs, format: OutputFormat) -
         }
     }
     Ok(())
+}
+
+async fn run_incus_bootstrap_command(args: IncusBootstrapArgs, format: OutputFormat) -> Result<()> {
+    if format.is_json() {
+        anyhow::bail!(
+            "setup incus does not support --json yet because it streams an imperative Incus bootstrap script"
+        );
+    }
+    confirm_incus_bootstrap(args.dry_run, args.yes)?;
+    let options = crate::dispatch::setup::incus::IncusBootstrapOptions {
+        name: args.name,
+        image: args.image,
+        profile_name: args.profile_name,
+        backup_config: args.backup_config,
+        no_backup_config: args.no_backup_config,
+        runtime_profile_name: args.runtime_profile_name,
+        storage_driver: args.storage_driver,
+        storage_pool: args.storage_pool,
+        storage_source: args.storage_source,
+        version: args.version,
+        local_binary: args.local_binary,
+        skip_install: args.skip_install,
+        dry_run: args.dry_run,
+        tailscale_ssh: args.tailscale_ssh,
+        allow_source_fallback: args.allow_source_fallback,
+    };
+    crate::dispatch::setup::incus::run_incus_bootstrap(options)?;
+    Ok(())
+}
+
+fn setup_skip_requested() -> bool {
+    std::env::var("LAB_SKIP_SETUP").as_deref() == Ok("1")
+}
+
+fn confirm_incus_bootstrap(dry_run: bool, mut yes: bool) -> Result<()> {
+    if dry_run {
+        return Ok(());
+    }
+    if !yes {
+        if !io::stdin().is_terminal() {
+            anyhow::bail!("setup incus requires --yes when stdin is not a TTY");
+        }
+        eprintln!(
+            "This will create or update the Labby Incus container, storage/profile config, in-container labby binary, service state, backup policy, and Tailscale join when TS_AUTHKEY is set."
+        );
+        eprint!("Proceed? [y/N] ");
+        io::stderr().flush()?;
+        let mut answer = String::new();
+        io::stdin().read_line(&mut answer)?;
+        yes = matches!(answer.trim(), "y" | "Y" | "yes" | "YES");
+    }
+    if !yes {
+        anyhow::bail!("setup incus cancelled");
+    }
+    Ok(())
+}
+
+fn require_incus_backup_confirmation(container: &str, yes: bool) -> Result<()> {
+    if yes {
+        return Ok(());
+    }
+    if !io::stdin().is_terminal() {
+        anyhow::bail!("setup incusbackup apply requires --yes when stdin is not a TTY");
+    }
+    eprintln!("This will apply Incus snapshot policy config to container `{container}`.");
+    eprint!("Proceed? [y/N] ");
+    io::stderr().flush()?;
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer)?;
+    if matches!(answer.trim(), "y" | "Y" | "yes" | "YES") {
+        Ok(())
+    } else {
+        anyhow::bail!("setup incusbackup apply cancelled");
+    }
 }
 
 async fn run_host_service_command(args: HostServiceArgs, format: OutputFormat) -> Result<()> {
@@ -702,6 +915,36 @@ mod tests {
     }
 
     #[test]
+    fn bare_setup_parses_as_default_incus_bootstrap() {
+        let cli = crate::cli::Cli::try_parse_from(["labby", "setup", "-y"]).unwrap();
+        let crate::cli::Command::Setup(args) = cli.command else {
+            panic!("expected setup command");
+        };
+
+        assert!(args.command.is_none());
+        assert!(!args.provision);
+        assert!(!args.dry_run);
+        assert!(args.yes);
+    }
+
+    #[test]
+    fn parses_setup_wizard_subcommand() {
+        let cli = crate::cli::Cli::try_parse_from([
+            "labby", "setup", "wizard", "--mode", "plugin", "--smoke",
+        ])
+        .unwrap();
+        let crate::cli::Command::Setup(args) = cli.command else {
+            panic!("expected setup command");
+        };
+        let Some(SetupCommand::Wizard(args)) = args.command else {
+            panic!("expected setup wizard subcommand");
+        };
+
+        assert!(matches!(args.mode, SetupModeArg::Plugin));
+        assert!(args.smoke);
+    }
+
+    #[test]
     fn parses_plugin_hook_no_repair_subcommand() {
         let cli = crate::cli::Cli::try_parse_from(["labby", "setup", "plugin-hook", "--no-repair"])
             .unwrap();
@@ -784,11 +1027,11 @@ mod tests {
     }
 
     #[test]
-    fn parses_incus_backup_apply_subcommand() {
+    fn parses_incusbackup_apply_subcommand() {
         let cli = crate::cli::Cli::try_parse_from([
             "labby",
             "setup",
-            "incus-backup",
+            "incusbackup",
             "apply",
             "--name",
             "labby",
@@ -800,20 +1043,86 @@ mod tests {
         let crate::cli::Command::Setup(args) = cli.command else {
             panic!("expected setup command");
         };
-        let Some(SetupCommand::IncusBackup(IncusBackupArgs {
+        let Some(SetupCommand::Incusbackup(IncusBackupArgs {
             command:
                 IncusBackupCommand::Apply {
                     name,
                     config,
                     dry_run,
+                    yes,
                 },
         })) = args.command
         else {
-            panic!("expected setup incus-backup apply subcommand");
+            panic!("expected setup incusbackup apply subcommand");
         };
         assert_eq!(name, "labby");
         assert_eq!(config, PathBuf::from("config/incus/labby-backup.yaml"));
         assert!(dry_run);
+        assert!(!yes);
+    }
+
+    #[test]
+    fn accepts_hidden_hyphenated_incus_backup_alias() {
+        let cli = crate::cli::Cli::try_parse_from(["labby", "setup", "incus-backup", "validate"])
+            .unwrap();
+        let crate::cli::Command::Setup(args) = cli.command else {
+            panic!("expected setup command");
+        };
+        assert!(matches!(
+            args.command,
+            Some(SetupCommand::Incusbackup(IncusBackupArgs {
+                command: IncusBackupCommand::Validate { .. }
+            }))
+        ));
+    }
+
+    #[test]
+    fn parses_incus_subcommand() {
+        let cli = crate::cli::Cli::try_parse_from([
+            "labby",
+            "setup",
+            "incus",
+            "--version",
+            "v1.2.3",
+            "--storage-driver",
+            "dir",
+            "--name",
+            "labby-test",
+            "--dry-run",
+            "-y",
+        ])
+        .unwrap();
+        let crate::cli::Command::Setup(args) = cli.command else {
+            panic!("expected setup command");
+        };
+        let Some(SetupCommand::Incus(args)) = args.command else {
+            panic!("expected setup incus subcommand");
+        };
+        assert_eq!(args.version.as_deref(), Some("v1.2.3"));
+        assert_eq!(args.storage_driver.as_deref(), Some("dir"));
+        assert_eq!(args.name.as_deref(), Some("labby-test"));
+        assert!(args.dry_run);
+        assert!(args.yes);
+    }
+
+    #[test]
+    fn setup_incus_defaults_to_latest_release() {
+        let cli =
+            crate::cli::Cli::try_parse_from(["labby", "setup", "incus", "--dry-run"]).unwrap();
+        let crate::cli::Command::Setup(args) = cli.command else {
+            panic!("expected setup command");
+        };
+        let Some(SetupCommand::Incus(args)) = args.command else {
+            panic!("expected setup incus subcommand");
+        };
+        assert_eq!(args.version.as_deref(), Some("latest"));
+    }
+
+    #[test]
+    fn rejects_hyphenated_incus_bootstrap_subcommand() {
+        let err =
+            crate::cli::Cli::try_parse_from(["labby", "setup", "incus-bootstrap"]).unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidSubcommand);
     }
 
     #[test]

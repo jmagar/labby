@@ -48,12 +48,16 @@ fn embedded_lookup_key(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+fn should_spa_fallback(path: &Path) -> bool {
+    path.extension().is_none()
+}
+
 /// Resolve `request_path` against the embedded bundle, returning the asset bytes
 /// and the resolved relative path (used by the caller to derive headers).
 ///
-/// Lookup order matches the previous Labby handler: the exact sanitized path,
-/// then `<path>/index.html`, then the root `index.html` SPA fallback. Returns
-/// `None` when nothing matches (including an empty embedded bundle).
+/// Lookup order is the exact sanitized path, then `<path>/index.html`, then the
+/// root `index.html` SPA fallback for extensionless paths. Returns `None` when
+/// nothing matches (including an empty embedded bundle).
 #[must_use]
 pub fn resolve_embedded_asset(request_path: &str) -> Option<(&'static [u8], PathBuf)> {
     let relative = embedded_asset_path(request_path);
@@ -66,5 +70,7 @@ pub fn resolve_embedded_asset(request_path: &str) -> Option<(&'static [u8], Path
         return Some((bytes, index_path));
     }
 
-    embedded_asset("index.html").map(|bytes| (bytes, PathBuf::from("index.html")))
+    should_spa_fallback(&relative)
+        .then(|| embedded_asset("index.html").map(|bytes| (bytes, PathBuf::from("index.html"))))
+        .flatten()
 }
