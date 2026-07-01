@@ -23,10 +23,10 @@ runs:
       working-directory: apps/gateway-admin
       run: pnpm install --frozen-lockfile
 
-    - name: Test gateway-admin
+    - name: Test installer sync
       shell: bash
       working-directory: apps/gateway-admin
-      run: pnpm test
+      run: pnpm run test:install-script
 
     - name: Build gateway-admin
       shell: bash
