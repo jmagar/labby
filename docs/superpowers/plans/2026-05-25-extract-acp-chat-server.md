@@ -125,10 +125,10 @@ pnpm --dir apps/web build
 
 ## Task 6: Import Existing Lab ACP Chat State
 
-- [ ] Add `acp-chat import lab --lab-home ~/.lab --dry-run`.
+- [ ] Add `acp-chat import lab --lab-home ~/.labby --dry-run`.
 - [ ] Import ACP sessions, provider settings, persisted events, permission decisions, and page-context records into `~/.acp-chat`.
 - [ ] Make import idempotent and safe to run repeatedly.
-- [ ] Verify no post-import code path writes to `~/.lab`.
+- [ ] Verify no post-import code path writes to `~/.labby`.
 
 ## Task 7: Standalone Runtime Smoke
 

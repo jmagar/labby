@@ -139,7 +139,7 @@ impl GatewayManager {
     /// Override the `.env` path used by config persistence helpers (test only).
     ///
     /// Rebuilds the default filesystem store so writes land beside the temp
-    /// `config.toml` instead of `~/.lab/.env`.
+    /// `config.toml` instead of `~/.labby/.env`.
     #[cfg(any(test, feature = "testkit"))]
     #[must_use]
     pub fn with_env_path(mut self, path: PathBuf) -> Self {

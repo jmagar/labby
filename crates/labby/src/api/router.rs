@@ -1302,7 +1302,7 @@ async fn dev_mockup_named(
 }
 
 // GET /dev/api/nodeinfo — unauthenticated, read-only.
-// Returns config.toml values + ~/.lab/.env contents (secrets masked) so the
+// Returns config.toml values + ~/.labby/.env contents (secrets masked) so the
 // setup wizard can pre-populate all fields without requiring a bearer token.
 async fn dev_nodeinfo(State(state): State<AppState>) -> axum::response::Response {
     use axum::Json;
@@ -1323,7 +1323,7 @@ async fn dev_nodeinfo(State(state): State<AppState>) -> axum::response::Response
         .and_then(|n| n.controller.clone())
         .unwrap_or_else(|| local_host.clone());
 
-    // dotenvy already loaded ~/.lab/.env at startup, so everything is in std::env.
+    // dotenvy already loaded ~/.labby/.env at startup, so everything is in std::env.
     // The UI treats MASKED_SECRET as "value already set — leave blank to keep current value".
     const MASKED_SECRET: &str = "***";
     let secret_suffixes = [

@@ -161,7 +161,7 @@ export default function ServicePage({
             />
             {saved ? (
               <p className="mt-3 text-xs text-emerald-600">
-                ✓ Saved to ~/.lab/.env
+                ✓ Saved to ~/.labby/.env
               </p>
             ) : null}
           </>

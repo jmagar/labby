@@ -4,7 +4,7 @@
 # Usage:
 #   ./scripts/check-oauth.sh [BASE_URL]
 #
-# Environment variables (override auto-detection from ~/.lab/.env):
+# Environment variables (override auto-detection from ~/.labby/.env):
 #   LAB_BASE_URL          — server base URL (default: http://localhost:8080)
 #   LAB_MCP_HTTP_TOKEN    — static bearer token (tested when present)
 #   LAB_PUBLIC_URL        — expected public URL for OAuth issuer/audience
@@ -71,8 +71,8 @@ printf "${BOLD}lab auth/OAuth verification${RESET}  %s\n" "$BASE_URL"
 # ── 1. Config checks ──────────────────────────────────────────────────────────
 header "Configuration"
 
-# Load ~/.lab/.env if it exists and vars aren't already set
-LAB_ENV="${HOME}/.lab/.env"
+# Load ~/.labby/.env if it exists and vars aren't already set
+LAB_ENV="${HOME}/.labby/.env"
 if [ -f "$LAB_ENV" ]; then
     # shellcheck disable=SC1090
     set -a; source "$LAB_ENV" 2>/dev/null || true; set +a

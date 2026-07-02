@@ -80,7 +80,7 @@ export default function FinalizePage(): React.ReactElement {
         <p className="text-sm text-muted-foreground">
           PreFlight Round 2 runs <code>doctor.audit.full</code> against
           every selected service. The Commit button below atomically merges
-          your draft into <code>~/.lab/.env</code> and creates a backup.
+          your draft into <code>~/.labby/.env</code> and creates a backup.
         </p>
       </section>
 
@@ -129,7 +129,7 @@ export default function FinalizePage(): React.ReactElement {
       {commitOutcome ? (
         <div className="rounded-md border border-emerald-600/50 bg-emerald-50 p-3 text-sm">
           <p className="font-medium text-emerald-700">
-            ✓ Wrote {commitOutcome.written} entries to ~/.lab/.env
+            ✓ Wrote {commitOutcome.written} entries to ~/.labby/.env
           </p>
           {commitOutcome.backup_path ? (
             <p className="text-xs text-muted-foreground mt-1">

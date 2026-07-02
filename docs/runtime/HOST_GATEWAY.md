@@ -80,10 +80,10 @@ and restarts the service.
 The unit runs:
 
 ```text
-User=lab
-Group=lab
+User=labby
+Group=labby
 ExecStart=/usr/local/bin/labby serve
-WorkingDirectory=/home/lab
+WorkingDirectory=/home/labby
 WantedBy=multi-user.target
 ```
 

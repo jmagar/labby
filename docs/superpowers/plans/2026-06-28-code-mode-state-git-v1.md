@@ -4,7 +4,7 @@
 
 **Goal:** Add a narrow V1 Code Mode `state.*` and local-only `git.*` runtime backed by a durable jailed workspace.
 
-**Architecture:** Keep `labby-codemode` host-neutral. Add local provider routing before upstream `CodeModeHost::call_tool`, store workspace state under `$LAB_HOME/code-mode-workspaces/`, enforce method caps before `ToolResult`, and run local git commands through a dedicated guarded runner.
+**Architecture:** Keep `labby-codemode` host-neutral. Add local provider routing before upstream `CodeModeHost::call_tool`, store workspace state under `$LABBY_HOME/code-mode-workspaces/`, enforce method caps before `ToolResult`, and run local git commands through a dedicated guarded runner.
 
 **Tech Stack:** Rust 2024, Tokio, Javy/QuickJS runner subprocess, serde/serde_json, existing `ToolError`, existing Code Mode `ToolCall` protocol, tempdir-based tests.
 
@@ -33,7 +33,7 @@
 - Modify `crates/labby-codemode/src/host.rs`: add workspace root/config access only if the local provider implementation cannot derive it from `CodeModeConfig`.
 - Modify `crates/labby-codemode/Cargo.toml`: add minimal dependencies only if needed, such as `tempfile` dev-dependency.
 - Modify `docs/dev/CODE_MODE.md`: document narrowed V1 only.
-- Create `tests/smoke-code-mode-state-git.sh`: isolated `LAB_HOME` smoke test.
+- Create `tests/smoke-code-mode-state-git.sh`: isolated `LABBY_HOME` smoke test.
 
 ---
 
@@ -1068,8 +1068,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-export LAB_HOME="$TMP/lab-home"
-mkdir -p "$LAB_HOME"
+export LABBY_HOME="$TMP/lab-home"
+mkdir -p "$LABBY_HOME"
 
 cd "$ROOT"
 cargo run --all-features -- codemode --json --code '
@@ -1085,7 +1085,7 @@ return { read: read.content, matches: matches.matches.length, status, log };
 '
 ```
 
-Adjust the CLI invocation to the repo's actual Code Mode command if it differs. Keep `LAB_HOME` isolated.
+Adjust the CLI invocation to the repo's actual Code Mode command if it differs. Keep `LABBY_HOME` isolated.
 
 - [x] **Step 3: Add negative smoke or integration checks**
 

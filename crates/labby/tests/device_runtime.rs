@@ -76,7 +76,7 @@ async fn non_master_runtime_uploads_discovered_ai_cli_inventory() {
     .unwrap();
     runtime.upload_initial_metadata().await.unwrap();
 
-    let queue = NodeOutboundQueue::open(temp.path().join(".lab/node-runtime-queue.jsonl"))
+    let queue = NodeOutboundQueue::open(temp.path().join(".labby/node-runtime-queue.jsonl"))
         .await
         .unwrap();
     let drained = queue.drain_batch(10).await.unwrap();
@@ -148,7 +148,7 @@ async fn queue_syslog_batch_appends_entries_for_websocket_delivery() {
         .await
         .unwrap();
 
-    let queue = NodeOutboundQueue::open(temp.path().join(".lab/node-runtime-queue.jsonl"))
+    let queue = NodeOutboundQueue::open(temp.path().join(".labby/node-runtime-queue.jsonl"))
         .await
         .unwrap();
     let drained = queue.drain_batch(10).await.unwrap();

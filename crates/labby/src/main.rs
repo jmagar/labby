@@ -94,7 +94,7 @@ fn init_tracing(
     // ── Rolling file appender (survives OOM — guard must live as long as main) ──
     let log_dir = std::env::var("LAB_LOG_DIR").unwrap_or_else(|_| {
         format!(
-            "{}/.local/share/lab/logs",
+            "{}/.local/share/labby/logs",
             std::env::var("HOME").unwrap_or_default()
         )
     });

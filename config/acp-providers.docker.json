@@ -10,7 +10,7 @@
       "sandbox_mode=\"danger-full-access\""
     ],
     "env": {
-      "CODEX_HOME": "/home/lab/.lab/acp/codex-home"
+      "CODEX_HOME": "/home/labby/.labby/acp/codex-home"
     },
     "installed_at": "2026-05-01T16:56:38-04:00"
   },
@@ -22,7 +22,7 @@
     "command": "claude-agent-acp",
     "args": [],
     "env": {
-      "CLAUDE_CONFIG_DIR": "/home/lab/.lab/acp/claude-home",
+      "CLAUDE_CONFIG_DIR": "/home/labby/.labby/acp/claude-home",
       "LAB_SPAWN_DEPTH": "1"
     },
     "installed_at": "2026-05-01T16:56:38-04:00"
@@ -37,7 +37,7 @@
       "--acp"
     ],
     "env": {
-      "GEMINI_CONFIG_DIR": "/home/lab/.gemini"
+      "GEMINI_CONFIG_DIR": "/home/labby/.gemini"
     },
     "installed_at": "2026-05-01T16:56:38-04:00"
   },
@@ -46,7 +46,7 @@
     "name": "OpenCode",
     "version": "1.14.41",
     "distribution": "binary",
-    "command": "/home/lab/.lab/bin/opencode/opencode",
+    "command": "/home/labby/.labby/bin/opencode/opencode",
     "args": [
       "acp"
     ],

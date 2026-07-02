@@ -34,7 +34,7 @@
 //! HMAC-SHA256 before storage. The key is read from `LAB_ACP_HMAC_SECRET`
 //! when set. If the env var is absent, Lab generates an ephemeral per-process
 //! fallback key that is not persisted and therefore rotates on restart. Set
-//! `LAB_ACP_HMAC_SECRET` in `~/.lab/.env` when permission-outcome signatures
+//! `LAB_ACP_HMAC_SECRET` in `~/.labby/.env` when permission-outcome signatures
 //! must verify across process restarts. This prevents DB-write bypass attacks
 //! where an attacker could flip a `false` grant to `true` in the raw SQLite
 //! file for events signed by the active key.
@@ -201,7 +201,7 @@ impl SqliteAcpPersistence {
         })
     }
 
-    /// Open using the path from `LAB_ACP_DB` (or a default under `~/.lab/`).
+    /// Open using the path from `LAB_ACP_DB` (or a default under `~/.labby/`).
     pub async fn from_env() -> Result<Self, AcpError> {
         let path = resolve_db_path()?;
         Self::open(path).await
@@ -965,7 +965,7 @@ pub(crate) fn acp_hmac_key() -> &'static [u8] {
             action = "hmac_key_init",
             kind = "ephemeral_key",
             "LAB_ACP_HMAC_SECRET is not set; using an ephemeral HMAC key. \
-             Set LAB_ACP_HMAC_SECRET in ~/.lab/.env for cross-restart protection."
+             Set LAB_ACP_HMAC_SECRET in ~/.labby/.env for cross-restart protection."
         );
         let pid = std::process::id();
         let now = std::time::SystemTime::now()
@@ -1197,7 +1197,7 @@ fn resolve_db_path() -> Result<PathBuf, AcpError> {
         return Ok(PathBuf::from(path));
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    Ok(PathBuf::from(home).join(".lab").join("acp.db"))
+    Ok(PathBuf::from(home).join(".labby").join("acp.db"))
 }
 
 // ── Unix file creation with 0600 perms ────────────────────────────────────────

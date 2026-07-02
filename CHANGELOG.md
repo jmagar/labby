@@ -6,13 +6,30 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.30.0] - 2026-07-02
+
+### Added
+
+- **Incus primary deployment hardening** — added top-level `labby incus setup`, `labby incus sync`, and `labby update` flows, CI image build support, baked gateway runtime dependencies, and a supported AppArmor signal rule so systemd service stops no longer require routine force-restart fallback.
+
+### Changed
+
+- **Labby runtime clean break** — the supported runtime now uses `~/.labby`, `~/.config/labby`, the `labby` container user, and `/home/labby` only; legacy `~/.lab`, `/home/lab`, and old registry namespace compatibility are intentionally removed.
+
+### Fixed
+
+- **Code Mode and dashboard telemetry** — Code Mode usage surfaces now report named child tool calls instead of counting internal `gateway`, `logs`, or `code_mode` dispatch wrappers as top tools.
+- **MCP UI widget clipping** — the embedded Code Mode MCP UI no longer clamps its content height or hides overflow inside Claude Desktop.
+
+---
+
 ## [0.29.0] - 2026-07-01
 
 ### Added
 
 - **Code Mode local state and git providers** — added V1 `state.*` workspace
   APIs and local-only `git.*` commands inside the Code Mode sandbox, backed by a
-  jailed `$LAB_HOME/code-mode-workspaces/` workspace with path, quota, output,
+  jailed `$LABBY_HOME/code-mode-workspaces/` workspace with path, quota, output,
   and git process guards.
 - **Code Mode state/git V2** — expanded local Code Mode workspace APIs with
   safe filesystem mutation helpers, JSON/hash/detect/archive helpers, guarded
@@ -66,9 +83,9 @@ All notable changes to this project will be documented in this file.
 - **Gateway admin protected routes** — the UI no longer falls back to
   `mcp.example.com`; protected-route saves now fail closed until
   `NEXT_PUBLIC_PROTECTED_MCP_HOST` is configured.
-- **MCP registry metadata compatibility** — locally curated registry metadata
-  written under the legacy `tv.tootie.lab/registry` namespace is still read and
-  filtered while new writes use `dev.labby/registry`.
+- **Labby runtime path hard break** — runtime state now uses `~/.labby`,
+  `~/.config/labby`, and the `labby` Incus user/home only; old Lab path and
+  metadata namespace compatibility is intentionally removed.
 
 ---
 
@@ -159,7 +176,7 @@ All notable changes to this project will be documented in this file.
 
 - **First-run `labby serve` self-bootstrap** — when no MCP token is configured
   (`LAB_MCP_HTTP_TOKEN` unset and `LAB_AUTH_MODE` != `oauth`), `labby serve`
-  generates a 64-char hex bearer token and writes a minimal `~/.lab/.env`
+  generates a 64-char hex bearer token and writes a minimal `~/.labby/.env`
   (token + loopback MCP defaults via the atomic `env_merge` path), then prints
   the token and the `http://<host>:<port>/setup` URL once, so a fresh headless
   install is reachable without hand-editing config. A new non-destructive
@@ -845,7 +862,7 @@ All notable changes to this project will be documented in this file.
 | `68a35a37` | chore: trigger CI after history rewrite |
 | `11199215` | fix: CI failures |
 | `60568674` | chore: set up CI release smoke and generated docs |
-| `da3a8d10` | docs: say copy config.example.toml to ~/.lab/config.toml |
+| `da3a8d10` | docs: say copy config.example.toml to ~/.labby/config.toml |
 | `0db193bf` | fix: config.toml is gitignored; update docs |
 | `3a226869` | feat: fleet scan wizard step, config consolidation, and TS fixes |
 | `8b1b9967` | chore: document cargo-deny advisory exceptions |

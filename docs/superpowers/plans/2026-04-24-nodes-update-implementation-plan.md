@@ -39,14 +39,14 @@
 - Test: existing runtime/config tests
 
 - [ ] Remove remaining runtime/bootstrap reads of legacy `config.device.master`.
-- [ ] Remove remaining runtime/bootstrap reads of `.lab/device-enrollments.json`.
+- [ ] Remove remaining runtime/bootstrap reads of `.labby/device-enrollments.json`.
 - [ ] Keep runtime/bootstrap on canonical node paths only.
-- [ ] Add or update tests proving serve/bootstrap uses `[node].controller` and `.lab/node-enrollments.json`.
+- [ ] Add or update tests proving serve/bootstrap uses `[node].controller` and `.labby/node-enrollments.json`.
 - [ ] Meet all Task 1 acceptance gates before any rollout cleanup work begins:
   - no `config.device` reads in runtime/bootstrap path
-  - no `.lab/device-enrollments.json` reads in runtime/bootstrap path
+  - no `.labby/device-enrollments.json` reads in runtime/bootstrap path
   - runtime startup tests pass using only `[node].controller`
-  - runtime startup tests pass using only `.lab/node-enrollments.json`
+  - runtime startup tests pass using only `.labby/node-enrollments.json`
 
 ## Task 2: Map existing rollout primitives and lock the reuse boundary
 

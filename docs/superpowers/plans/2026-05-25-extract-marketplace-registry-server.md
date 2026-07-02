@@ -123,11 +123,11 @@ pnpm --dir apps/web build
 
 ## Task 5: Import Existing Lab Marketplace State
 
-- [ ] Add `marketplace-registry import lab --lab-home ~/.lab --dry-run`.
+- [ ] Add `marketplace-registry import lab --lab-home ~/.labby --dry-run`.
 - [ ] Import marketplace sources, MCP Registry cache, ACP Registry cache, managed marketplace files, forks, patches, and update metadata into `~/.marketplace-registry`.
 - [ ] Preserve raw source entries and version-source metadata.
 - [ ] Make import idempotent and safe to run repeatedly.
-- [ ] Verify no post-import code path writes to `~/.lab`.
+- [ ] Verify no post-import code path writes to `~/.labby`.
 
 ## Task 6: Provide ACP Chat Catalog Contract
 

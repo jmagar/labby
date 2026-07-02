@@ -137,7 +137,7 @@ pub struct InstallSpec {
     /// Post-extraction command path (e.g. `"./my-agent"` or `"my-agent"`); the
     /// installer locates the matching file name in the extracted tree.
     pub cmd: String,
-    /// Directory to install the binary into (e.g. `~/.lab/bin/<agent_id>/`).
+    /// Directory to install the binary into (e.g. `~/.labby/bin/<agent_id>/`).
     /// Created if absent. Must already be validated by the caller.
     pub install_dir: PathBuf,
 }

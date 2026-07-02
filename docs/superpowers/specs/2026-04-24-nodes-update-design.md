@@ -42,7 +42,7 @@ longer consumes it.
 
 Current code reality:
 - `serve` still resolves runtime role from `config.device.master`
-- `serve` still opens `.lab/device-enrollments.json`
+- `serve` still opens `.labby/device-enrollments.json`
 
 That means the implementation must either:
 1. first migrate runtime/bootstrap to the canonical node paths, then enable

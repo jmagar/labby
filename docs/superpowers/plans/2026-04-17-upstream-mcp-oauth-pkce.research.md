@@ -26,7 +26,7 @@
 - **Schema gaps**: Add `PRIMARY KEY (upstream_name, subject)` on credentials, `PRIMARY KEY (upstream_name, subject, csrf_token)` on state. Mirror existing `NOT NULL` discipline. Plan only lists row fields, not DDL.
 - **Take-once must be `DELETE ... RETURNING` in single statement**: Existing `take_authorization_request` is the model. SELECT-then-DELETE creates a replay window even within one connection because the 4-conn pool serializes per-connection only.
 - **Missing field**: Credentials row needs `access_token_expires_at: i64` so `cleanup_expired` can prune without re-parsing JSON.
-- **Refresh tokens stored plaintext**: Encrypt `token_response_json` at rest (chacha20poly1305 keyed from `~/.lab/.env`) or at minimum add `TODO(sec)` and document file-permission threat.
+- **Refresh tokens stored plaintext**: Encrypt `token_response_json` at rest (chacha20poly1305 keyed from `~/.labby/.env`) or at minimum add `TODO(sec)` and document file-permission threat.
 
 **MEDIUM**
 - **Mutual exclusion**: `oauth: Option<...>` vs existing `bearer_token_env: Option<String>` — plan does not require validation that both cannot be set. Add `validate()` or `serde(try_from)`.

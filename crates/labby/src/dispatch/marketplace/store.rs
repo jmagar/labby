@@ -482,21 +482,16 @@ fn list_servers_sync(
 
     let mut sql = format!(
         "SELECT s.server_name, s.version, s.server_json, s.response_meta_json, \
-                COALESCE(lm.meta_json, legacy_lm.meta_json), \
-                COALESCE(lm.updated_at, legacy_lm.updated_at), \
-                COALESCE(lm.updated_by, legacy_lm.updated_by) \
+                lm.meta_json, \
+                lm.updated_at, \
+                lm.updated_by \
          FROM registry_servers s \
          LEFT JOIN registry_server_meta lm \
            ON lm.server_name = s.server_name \
           AND lm.version = s.version \
           AND lm.namespace = '{}' \
-         LEFT JOIN registry_server_meta legacy_lm \
-           ON legacy_lm.server_name = s.server_name \
-          AND legacy_lm.version = s.version \
-          AND legacy_lm.namespace = '{}' \
          WHERE 1=1",
-        super::LAB_REGISTRY_META_NAMESPACE,
-        super::LEGACY_LAB_REGISTRY_META_NAMESPACE
+        super::LAB_REGISTRY_META_NAMESPACE
     );
     let mut args: Vec<rusqlite::types::Value> = Vec::new();
 
@@ -515,25 +510,25 @@ fn list_servers_sync(
         args.push(escaped.into());
     }
     if let Some(featured) = params.featured {
-        sql.push_str(" AND COALESCE(json_extract(COALESCE(lm.meta_json, legacy_lm.meta_json), '$.curation.featured'), 0) = ?");
+        sql.push_str(" AND COALESCE(json_extract(lm.meta_json, '$.curation.featured'), 0) = ?");
         args.push((featured as i64).into());
     }
     if let Some(reviewed) = params.reviewed {
-        sql.push_str(" AND COALESCE(json_extract(COALESCE(lm.meta_json, legacy_lm.meta_json), '$.trust.reviewed'), 0) = ?");
+        sql.push_str(" AND COALESCE(json_extract(lm.meta_json, '$.trust.reviewed'), 0) = ?");
         args.push((reviewed as i64).into());
     }
     if let Some(recommended) = params.recommended {
         sql.push_str(
-            " AND COALESCE(json_extract(COALESCE(lm.meta_json, legacy_lm.meta_json), '$.ux.recommended_for_homelab'), 0) = ?",
+            " AND COALESCE(json_extract(lm.meta_json, '$.ux.recommended_for_homelab'), 0) = ?",
         );
         args.push((recommended as i64).into());
     }
     if let Some(hidden) = params.hidden {
-        sql.push_str(" AND COALESCE(json_extract(COALESCE(lm.meta_json, legacy_lm.meta_json), '$.curation.hidden'), 0) = ?");
+        sql.push_str(" AND COALESCE(json_extract(lm.meta_json, '$.curation.hidden'), 0) = ?");
         args.push((hidden as i64).into());
     }
     if let Some(tag) = &params.tag {
-        sql.push_str(" AND EXISTS (SELECT 1 FROM json_each(COALESCE(lm.meta_json, legacy_lm.meta_json), '$.curation.tags') WHERE value = ?)");
+        sql.push_str(" AND EXISTS (SELECT 1 FROM json_each(lm.meta_json, '$.curation.tags') WHERE value = ?)");
         args.push(tag.clone().into());
     }
 
@@ -661,21 +656,16 @@ fn get_server_sync(
         conn.query_row(
             &format!(
                 "SELECT s.server_json, s.response_meta_json, \
-                        COALESCE(lm.meta_json, legacy_lm.meta_json), \
-                        COALESCE(lm.updated_at, legacy_lm.updated_at), \
-                        COALESCE(lm.updated_by, legacy_lm.updated_by) \
+                        lm.meta_json, \
+                        lm.updated_at, \
+                        lm.updated_by \
                  FROM registry_servers s \
                  LEFT JOIN registry_server_meta lm \
                    ON lm.server_name = s.server_name \
                   AND lm.version = s.version \
                   AND lm.namespace = '{}' \
-                 LEFT JOIN registry_server_meta legacy_lm \
-                   ON legacy_lm.server_name = s.server_name \
-                  AND legacy_lm.version = s.version \
-                  AND legacy_lm.namespace = '{}' \
                  WHERE s.server_name = ?1 AND s.is_latest = 1 LIMIT 1",
-                super::LAB_REGISTRY_META_NAMESPACE,
-                super::LEGACY_LAB_REGISTRY_META_NAMESPACE
+                super::LAB_REGISTRY_META_NAMESPACE
             ),
             rusqlite::params![name],
             |row| {
@@ -692,21 +682,16 @@ fn get_server_sync(
         conn.query_row(
             &format!(
                 "SELECT s.server_json, s.response_meta_json, \
-                        COALESCE(lm.meta_json, legacy_lm.meta_json), \
-                        COALESCE(lm.updated_at, legacy_lm.updated_at), \
-                        COALESCE(lm.updated_by, legacy_lm.updated_by) \
+                        lm.meta_json, \
+                        lm.updated_at, \
+                        lm.updated_by \
                  FROM registry_servers s \
                  LEFT JOIN registry_server_meta lm \
                    ON lm.server_name = s.server_name \
                   AND lm.version = s.version \
                   AND lm.namespace = '{}' \
-                 LEFT JOIN registry_server_meta legacy_lm \
-                   ON legacy_lm.server_name = s.server_name \
-                  AND legacy_lm.version = s.version \
-                  AND legacy_lm.namespace = '{}' \
                  WHERE s.server_name = ?1 AND s.version = ?2 LIMIT 1",
-                super::LAB_REGISTRY_META_NAMESPACE,
-                super::LEGACY_LAB_REGISTRY_META_NAMESPACE
+                super::LAB_REGISTRY_META_NAMESPACE
             ),
             rusqlite::params![name, version],
             |row| {
@@ -755,21 +740,16 @@ fn list_versions_sync(
 ) -> Result<Vec<ServerResponse>, RegistryStoreError> {
     let mut stmt = conn.prepare(&format!(
         "SELECT s.server_json, s.response_meta_json, \
-                COALESCE(lm.meta_json, legacy_lm.meta_json), \
-                COALESCE(lm.updated_at, legacy_lm.updated_at), \
-                COALESCE(lm.updated_by, legacy_lm.updated_by) \
+                lm.meta_json, \
+                lm.updated_at, \
+                lm.updated_by \
          FROM registry_servers s \
          LEFT JOIN registry_server_meta lm \
            ON lm.server_name = s.server_name \
           AND lm.version = s.version \
           AND lm.namespace = '{}' \
-         LEFT JOIN registry_server_meta legacy_lm \
-           ON legacy_lm.server_name = s.server_name \
-          AND legacy_lm.version = s.version \
-          AND legacy_lm.namespace = '{}' \
          WHERE s.server_name = ?1 ORDER BY s.version ASC",
-        super::LAB_REGISTRY_META_NAMESPACE,
-        super::LEGACY_LAB_REGISTRY_META_NAMESPACE
+        super::LAB_REGISTRY_META_NAMESPACE
     ))?;
 
     let rows = stmt
@@ -1061,15 +1041,9 @@ fn get_local_metadata_sync(
          FROM registry_server_meta
          WHERE server_name = ?1
            AND version = ?2
-           AND namespace IN (?3, ?4)
-         ORDER BY CASE namespace WHEN ?3 THEN 0 ELSE 1 END
+           AND namespace = ?3
          LIMIT 1",
-        rusqlite::params![
-            name,
-            version,
-            super::LAB_REGISTRY_META_NAMESPACE,
-            super::LEGACY_LAB_REGISTRY_META_NAMESPACE,
-        ],
+        rusqlite::params![name, version, super::LAB_REGISTRY_META_NAMESPACE,],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -1127,13 +1101,8 @@ fn delete_local_metadata_sync(
         "DELETE FROM registry_server_meta
          WHERE server_name = ?1
            AND version = ?2
-           AND namespace IN (?3, ?4)",
-        rusqlite::params![
-            name,
-            version,
-            super::LAB_REGISTRY_META_NAMESPACE,
-            super::LEGACY_LAB_REGISTRY_META_NAMESPACE,
-        ],
+           AND namespace = ?3",
+        rusqlite::params![name, version, super::LAB_REGISTRY_META_NAMESPACE,],
     )?;
     tx.commit()?;
     Ok(deleted > 0)
@@ -1344,74 +1313,6 @@ mod tests {
             .await
             .unwrap();
         assert!(result.is_some());
-    }
-
-    #[tokio::test]
-    async fn get_server_reads_legacy_local_metadata_namespace() {
-        let store = temp_store().await;
-
-        let resp = make_server_response("io.github.user/weather", "2.0.0", true);
-        store.upsert_page(&[resp]).await.unwrap();
-        store
-            .set_local_metadata(
-                "io.github.user/weather",
-                "2.0.0",
-                &serde_json::json!({
-                    "curation": {
-                        "featured": true,
-                        "tags": ["weather"]
-                    },
-                    "trust": {
-                        "reviewed": true
-                    },
-                    "ux": {
-                        "recommended_for_homelab": true
-                    }
-                }),
-                Some("test"),
-            )
-            .await
-            .unwrap();
-
-        {
-            let conn = store.pool().get().unwrap();
-            conn.execute(
-                "UPDATE registry_server_meta SET namespace = ?1 WHERE namespace = ?2",
-                rusqlite::params![
-                    super::super::LEGACY_LAB_REGISTRY_META_NAMESPACE,
-                    super::super::LAB_REGISTRY_META_NAMESPACE,
-                ],
-            )
-            .unwrap();
-        }
-
-        let result = store
-            .get_server("io.github.user/weather", "2.0.0")
-            .await
-            .unwrap()
-            .expect("server should exist");
-        let metadata = result
-            .meta
-            .and_then(|meta| {
-                meta.extensions
-                    .get(super::super::LAB_REGISTRY_META_NAMESPACE)
-                    .cloned()
-            })
-            .expect("legacy metadata should be exposed under the current namespace");
-
-        assert_eq!(metadata["curation"]["featured"], true);
-        assert_eq!(metadata["audit"]["updated_by"], "test");
-
-        let filtered = store
-            .list_servers(StoreListParams {
-                featured: Some(true),
-                tag: Some("weather".to_string()),
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-        assert_eq!(filtered.servers.len(), 1);
-        assert_eq!(filtered.servers[0].server.name, "io.github.user/weather");
     }
 
     #[tokio::test]

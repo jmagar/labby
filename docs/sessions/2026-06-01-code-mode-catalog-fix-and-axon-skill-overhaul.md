@@ -27,7 +27,7 @@ cortex was connected and callable but invisible to discovery. Root cause: lab's 
 3. Removed truncation + all `scout` references (code + live docs), bumped 0.21.2, built release, committed `a6fdae2d`, pushed, redeployed; verified cortex discoverable + no truncation sentinel.
 4. Wrote a grounded lab-vs-Cloudflare comparison (Boa for `search`; Javy/Wasmtime subprocess for `execute`; self-hosted vs Workers/V8 isolates).
 5. Demonstrated Code Mode read-only: schema introspection over the whole catalog, concurrent multi-service fan-out, dependent pipeline — which hit `max_tool_calls`.
-6. Found the cap was a stale `~/.lab/config.toml` override (`12`) vs the code default (`1000`); fixed config to `1000`, restarted, proved 13 calls run.
+6. Found the cap was a stale `~/.labby/config.toml` override (`12`) vs the code default (`1000`); fixed config to `1000`, restarted, proved 13 calls run.
 7. Deep-dived axon: fan-out of search/map/scrape/extract; discovered per-action param quirks and the `artifacts` grep/head/read API (the user corrected my `retrieve`/inline fumbles); clarified artifacts (output cache, ~114 deduped files) vs the index (~3.9M points).
 8. Dispatched a background agent to fix two gateway log issues; verified its work (1225 tests pass), bumped 0.21.3, built, committed `aa6b4105`, pushed, redeployed, verified.
 9. Overhauled the axon skill for triggering + removed 15 redundant per-action skills; committed `4ea0c067` in the axon repo; declined to touch cortex skills (not redundant).
@@ -38,7 +38,7 @@ cortex was connected and callable but invisible to discovery. Root cause: lab's 
 - The classic `tool_search`/`scout` MCP tools are hidden in Code Mode; the truncation sentinel pointed at `scout` for "full RRF discovery", but `scout` is not exposed in Code Mode — a dead-end hint.
 - All `scout` references were non-load-bearing: `gateway.scout.*` were exact aliases of `gateway.tool_search.*`; `"scout"` in `KNOWN_LAB_CONFIG_KEYS` was a stale allowlist entry; no `cfg.scout` field exists.
 - Code Mode engines: `search` runs Boa in-process; `execute` spawns a subprocess (`labby internal code-mode-runner`) running Javy (QuickJS-on-Wasmtime, fuel-metered) under `code_mode_wasm` (in `all`), or Boa when that feature is off (`code_mode.rs:2289` wasm / `:2395` Boa).
-- `max_tool_calls` code default is `1000` (`config.rs:467`, "timeout + fuel are the real bounds"); the deployed `~/.lab/config.toml` had a stale `12` override.
+- `max_tool_calls` code default is `1000` (`config.rs:467`, "timeout + fuel are the real bounds"); the deployed `~/.labby/config.toml` had a stale `12` override.
 - axon: `artifacts` subactions are `head/grep/wc/read/list` (+ destructive `delete/clean`); `retrieve` is for indexed chunks (returns `-32603` on an artifact path); per-action params are inconsistent (`map`/`scrape` use `url`, `extract` uses `urls`); inline rows live at `data.inline.results`. Artifacts are deterministically named (op + target slug) so they overwrite, not accumulate; ~114 artifact files vs ~3.9M index points.
 - axon `IngestSourceType` (`src/mcp/schema/requests.rs:144`) = github, gitlab, gitea, git, reddit, youtube, sessions.
 
@@ -84,7 +84,7 @@ Axon repo (`~/workspace/axon`) — commit `4ea0c067`:
 | modified | plugins/axon/.claude-plugin/plugin.json | "16 skills" → "unified axon skill" |
 | deleted | plugins/axon/skills/{ask,crawl,domains,dr,embed,extract,ingest,map,query,retrieve,scrape,search,sources,stats,status}/SKILL.md | remove 15 redundant per-action skills |
 
-Host config (not in repo): `~/.lab/config.toml` — `[code_mode] max_tool_calls 12 → 1000`.
+Host config (not in repo): `~/.labby/config.toml` — `[code_mode] max_tool_calls 12 → 1000`.
 
 ## Beads Activity
 
@@ -150,7 +150,7 @@ No bead activity observed. No beads were created, claimed, edited, commented on,
 
 - Removing the catalog cap means very large catalogs serialize fully into the Boa sandbox each `search`; acceptable (in-sandbox, sub-ms parse) and matches Cloudflare. Rollback: revert `a6fdae2d`.
 - Prompt namespacing is a client-facing contract change (`name` → `{upstream}/{name}`); symmetric strip on `prompts/get` preserves function. Rollback: revert `aa6b4105`.
-- `max_tool_calls` change is host-config only (`~/.lab/config.toml`); revert to `12` if a runaway is observed.
+- `max_tool_calls` change is host-config only (`~/.labby/config.toml`); revert to `12` if a runaway is observed.
 
 ## Decisions Not Taken
 

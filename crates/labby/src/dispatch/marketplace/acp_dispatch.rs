@@ -2,12 +2,12 @@
 //!
 //! Routes ACP agent discovery and install/uninstall operations to the
 //! `lab-apis::acp_registry` SDK and the local provider config at
-//! `~/.lab/acp-providers.json`.
+//! `~/.labby/acp-providers.json`.
 //!
 //! Distribution support:
 //! - `npx` and `uvx`: write a provider config entry locally; remote via fleet WS.
 //! - `binary`: download archive (HTTPS only, SSRF-guarded), compute SHA-256,
-//!   extract with system tar/unzip, install to `~/.lab/bin/<agent_id>/`.
+//!   extract with system tar/unzip, install to `~/.labby/bin/<agent_id>/`.
 //!
 //! Remote install via fleet WS supports `npx` only — the device-side `DistType`
 //! has no `Uvx` or `Binary` variant.
@@ -455,7 +455,7 @@ fn validate_install_result(result: &Value) -> Result<(), &'static str> {
 // Binary distribution local install
 // ---------------------------------------------------------------------------
 
-/// Orchestrate a binary agent install to `~/.lab/bin/<agent_id>/`.
+/// Orchestrate a binary agent install to `~/.labby/bin/<agent_id>/`.
 ///
 /// All download/verify/extract/install primitives (and the security guards
 /// kept next to them — SSRF pinning, size cap, mandatory SHA-256, zip-slip
@@ -523,12 +523,12 @@ fn expected_archive_sha256(asset: &BinaryAsset) -> Result<String, ToolError> {
     })
 }
 
-/// Resolve `~/.lab/bin/<agent_id>/`.
+/// Resolve `~/.labby/bin/<agent_id>/`.
 fn agent_bin_dir(agent_id: &str) -> Result<PathBuf, ToolError> {
     validate_agent_id_for_path(agent_id)?;
     let env_path = crate::config::dotenv_path().ok_or_else(|| ToolError::Sdk {
         sdk_kind: "internal_error".to_string(),
-        message: "cannot determine ~/.lab path".to_string(),
+        message: "cannot determine ~/.labby path".to_string(),
     })?;
     let lab_dir = env_path
         .parent()

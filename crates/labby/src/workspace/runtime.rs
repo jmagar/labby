@@ -60,7 +60,7 @@ fn resolve_workspace_root(config: &WorkspaceRuntimeConfig) -> std::io::Result<Pa
                     "HOME is not set and workspace.root is not configured",
                 )
             })?;
-            home.join(".lab").join("stash")
+            home.join(".labby").join("stash")
         }
     };
     canonicalize_workspace_dir(root)
@@ -161,7 +161,7 @@ mod tests {
 
         assert_eq!(
             runtime.workspace_root().expect("workspace root"),
-            std::fs::canonicalize(temp.path().join(".lab").join("stash")).expect("canonical")
+            std::fs::canonicalize(temp.path().join(".labby").join("stash")).expect("canonical")
         );
     }
 

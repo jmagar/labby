@@ -177,7 +177,7 @@ docker compose -f docker-compose.yml exec -T labby-master sh -lc 'getent hosts a
 - `docker-compose.prod.yml`
 - `docker-compose.yml`
 - `/home/jmagar/workspace/axon_rust/docker-compose.prod.yaml` for Axon service names and ports.
-- `.env` / `~/.lab/.env` Qdrant and TEI URL lines.
+- `.env` / `~/.labby/.env` Qdrant and TEI URL lines.
 
 ## Open Questions
 

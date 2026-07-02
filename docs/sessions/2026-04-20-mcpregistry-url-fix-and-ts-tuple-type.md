@@ -16,16 +16,16 @@ Debug two failures encountered when running `lab serve`: (1) repeated 502 errors
 
 ## Session Overview
 
-Fixed both blockers in sequence. First traced the `mcpregistry` network error to a misconfigured `MCPREGISTRY_URL=http://localhost` (no port) in `~/.lab/.env` and commented it out so the client falls back to the public registry default. Then fixed a TypeScript tuple-arity error in the SWR fetcher where `RegistryServersKey`'s trailing `string | undefined` elements were not recognized as optional by TypeScript's inference, causing a "3 vs 5 element" type mismatch.
+Fixed both blockers in sequence. First traced the `mcpregistry` network error to a misconfigured `MCPREGISTRY_URL=http://localhost` (no port) in `~/.labby/.env` and commented it out so the client falls back to the public registry default. Then fixed a TypeScript tuple-arity error in the SWR fetcher where `RegistryServersKey`'s trailing `string | undefined` elements were not recognized as optional by TypeScript's inference, causing a "3 vs 5 element" type mismatch.
 
 ## Sequence of Events
 
 1. User invoked `/superpowers:systematic-debugging` with server log output showing repeated `network_error` for `mcpregistry server.list`.
 2. Traced the URL in the logs: `http://localhost/v0.1/servers` — no port, meaning `MCPREGISTRY_URL` was set to a bare `http://localhost`.
-3. Confirmed via `grep MCPREGISTRY ~/.lab/.env`: value was `MCPREGISTRY_URL=http://localhost`.
+3. Confirmed via `grep MCPREGISTRY ~/.labby/.env`: value was `MCPREGISTRY_URL=http://localhost`.
 4. Checked for a local MCP registry: found `swag-mcp` container on port 8012 (uvicorn), which did not serve `/v0.1/servers` — not a registry.
 5. Verified public registry reachable at `https://registry.modelcontextprotocol.io/v0.1/health` — responded with health JSON.
-6. Commented out `MCPREGISTRY_URL=http://localhost` in `~/.lab/.env`.
+6. Commented out `MCPREGISTRY_URL=http://localhost` in `~/.labby/.env`.
 7. User ran `lab serve` — Next.js build failed on TypeScript error in `registry-list-content.tsx:57`.
 8. Read the error: `Argument of type '[string, string, string | null]' is not assignable to parameter of type 'RegistryServersKey'. Source has 3 element(s) but target requires 5.`
 9. Read `use-registry.ts`: `RegistryServersKey` was `[string, string, string | null, string | undefined, string | undefined]` — trailing positions typed as `string | undefined` (required but nullable), not optional.
@@ -35,7 +35,7 @@ Fixed both blockers in sequence. First traced the `mcpregistry` network error to
 
 ## Key Findings
 
-- `~/.lab/.env:108`: `MCPREGISTRY_URL=http://localhost` — bare host, no port. No local registry was running on port 80.
+- `~/.labby/.env:108`: `MCPREGISTRY_URL=http://localhost` — bare host, no port. No local registry was running on port 80.
 - `crates/lab-apis/src/mcpregistry/client.rs:16`: `REGISTRY_DEFAULT_URL = "https://registry.modelcontextprotocol.io"` — correct public fallback, used when env var is absent.
 - `apps/gateway-admin/lib/hooks/use-registry.ts:28`: Original type `[string, string, string | null, string | undefined, string | undefined]` — TypeScript does not treat `T | undefined` as optional in tuple position; SWR's key inference collapses trailing `| undefined` elements to a shorter tuple.
 - `apps/gateway-admin/components/registry/registry-list-content.tsx:60`: Explicit parameter annotation on the SWR fetcher was overridden by SWR's contextual typing, making `k` infer as a 3-element tuple inside the function body.
@@ -51,14 +51,14 @@ Fixed both blockers in sequence. First traced the `mcpregistry` network error to
 
 | File | Change |
 |------|--------|
-| `~/.lab/.env` | Commented out `MCPREGISTRY_URL=http://localhost` |
+| `~/.labby/.env` | Commented out `MCPREGISTRY_URL=http://localhost` |
 | `apps/gateway-admin/lib/hooks/use-registry.ts` | Exported `RegistryServersKey`; changed trailing tuple elements to `string?`; updated `registryServersKey` return type annotation; simplified `useRegistryServers` inline fetcher |
 | `apps/gateway-admin/components/registry/registry-list-content.tsx` | Imported `RegistryServersKey`; changed fetcher parameter from inline 5-element tuple annotation to `RegistryServersKey` |
 
 ## Commands Executed
 
 ```bash
-grep -i mcpregistry ~/.lab/.env
+grep -i mcpregistry ~/.labby/.env
 # → MCPREGISTRY_URL=http://localhost
 
 docker inspect swag-mcp | ... PortBindings
@@ -74,7 +74,7 @@ cd apps/gateway-admin && tsc --noEmit
 ## Errors Encountered
 
 **502 Bad Gateway — mcpregistry server.list**
-- Root cause: `MCPREGISTRY_URL=http://localhost` in `~/.lab/.env` — no port, no local registry on port 80.
+- Root cause: `MCPREGISTRY_URL=http://localhost` in `~/.labby/.env` — no port, no local registry on port 80.
 - Resolution: Commented out the env var; client falls back to `REGISTRY_DEFAULT_URL`.
 
 **TypeScript build failure — `registry-list-content.tsx`**
@@ -104,4 +104,4 @@ cd apps/gateway-admin && tsc --noEmit
 ## Next Steps
 
 - Run `lab serve` again to confirm the build completes and the registry UI loads data from the public registry.
-- If a local MCP registry is desired in future, set `MCPREGISTRY_URL=http://localhost:<port>` in `~/.lab/.env`.
+- If a local MCP registry is desired in future, set `MCPREGISTRY_URL=http://localhost:<port>` in `~/.labby/.env`.

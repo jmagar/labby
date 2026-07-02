@@ -45,7 +45,7 @@ The session started with `just dev-debug` failing because the Justfile invoked a
 ## Technical Decisions
 
 - Kept `lab-apis` unchanged because it is the SDK crate name and not the CLI/binary crate.
-- Kept `LAB_*`, `~/.lab`, `/home/lab`, `.config/lab`, and `/workspace/lab` namespaces because they are config, environment, state, or workspace path names rather than the executable/package name.
+- Kept `LAB_*`, `~/.labby`, `/home/labby`, `.config/labby`, and `/workspace/lab` namespaces because they are config, environment, state, or workspace path names rather than the executable/package name.
 - Left the external crates.io dependency `lab v0.11.0` in `Cargo.lock` unchanged because it is a registry package dependency, not this workspace crate.
 - Renamed the Docker Compose named volume to `labby-data` to align active Docker naming with the binary rename.
 - Added the `extract` feature under the `controller` feature group so regenerated docs matched the actual all-features service matrix invariant.
@@ -104,7 +104,7 @@ The session started with `just dev-debug` failing because the Justfile invoked a
 ## Decisions Not Taken
 
 - Did not rename `lab-apis`, because it is a separate SDK crate and remains correct.
-- Did not rename `LAB_*` environment variables or `~/.lab` state paths, because those are stable config/state namespaces.
+- Did not rename `LAB_*` environment variables or `~/.labby` state paths, because those are stable config/state namespaces.
 - Did not remove the external crates.io `lab v0.11.0` dependency from `Cargo.lock`, because it is not the workspace binary package.
 - Did not run the full nextest suite; the verification used all-features check plus all test binary compilation.
 

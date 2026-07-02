@@ -89,7 +89,9 @@ host bootstrap logic from there. The bootstrap creates or updates the profile,
 launches `images:ubuntu/24.04` with it, then applies the snapshot policy with
 Incus instance config. The profile owns
 `security.privileged=false`, `security.nesting=false`, a root disk on the
-selected storage pool, and `/dev/net/tun` access through a raw LXC bind mount.
+selected storage pool, `/dev/net/tun` access through a raw LXC bind mount, and
+an AppArmor signal peer rule required by newer Ubuntu hosts so systemd can stop
+services inside the unprivileged container cleanly.
 
 Existing containers are idempotently converged too. If an existing container's
 root disk already comes from a different Incus storage pool, the bootstrap
@@ -117,8 +119,8 @@ shell parser only for older hosts.
 Bootstrap does not migrate host Labby config, copy arbitrary local MCP
 artifacts, bind-mount host workspaces, or rewrite `config.toml`. Incus is the
 primary deployment boundary, so the supported runtime shape is a durable system
-container that owns its own `/home/lab/.lab` state. For an existing single-user
-host setup, seed `/home/lab/.lab` once, fix any host-specific paths once, then
+container that owns its own `/home/labby/.labby` state. For an existing single-user
+host setup, seed `/home/labby/.labby` once, fix any host-specific paths once, then
 preserve that container with Incus snapshots/backups.
 
 The web app also serves the installer at `https://labby.tootie.tv/install.sh`
@@ -130,18 +132,19 @@ For PR validation before a release exists, push a local binary instead:
 
 ```bash
 cargo build --workspace --all-features --bin labby
-target/debug/labby setup incus --local-binary target/debug/labby
+target/debug/labby incus setup --local-binary target/debug/labby
 ```
 
 By default, `labby setup` installs the latest Labby release. Use the explicit
-`labby setup incus --version vX.Y.Z` form when you need reproducibility, or set
+`labby incus setup --version vX.Y.Z` form when you need reproducibility, or set
 `LAB_INSTALL_VERSION` for the checkout-local bootstrap script.
 
 The checkout-local `scripts/incus-bootstrap.sh` remains available for
 contributor debugging and CI image smoke tests, but the supported operator entry
 point is the binary-owned `labby setup` command. The explicit
-`labby setup incus` subcommand remains available for advanced flags such as
-`--local-binary`, `--skip-install`, and storage overrides.
+`labby incus setup` subcommand owns advanced bootstrap flags such as
+`--local-binary`, `--skip-install`, and storage overrides. For day-to-day local
+binary deploys into an existing container, use `labby incus sync`.
 
 The distrobuilder image definition lives at `config/incus/labby-image.yaml`.
 Release CI builds it as a prebuilt Incus container image:
@@ -279,10 +282,10 @@ systemctl status labby --no-pager
 The unit runs:
 
 ```text
-User=lab
-Group=lab
+User=labby
+Group=labby
 ExecStart=/usr/local/bin/labby serve
-WorkingDirectory=/home/lab
+WorkingDirectory=/home/labby
 WantedBy=multi-user.target
 ```
 
@@ -308,11 +311,11 @@ For the first cutover from an existing host-native setup, copy the current
 Labby state into the container manually:
 
 ```bash
-incus exec labby -- install -d -m 0700 -o lab -g lab /home/lab/.lab
-incus file push ~/.lab/.env labby/home/lab/.lab/.env
-incus file push ~/.lab/config.toml labby/home/lab/.lab/config.toml
-incus exec labby -- chown lab:lab /home/lab/.lab/.env /home/lab/.lab/config.toml
-incus exec labby -- chmod 600 /home/lab/.lab/.env /home/lab/.lab/config.toml
+incus exec labby -- install -d -m 0700 -o labby -g labby /home/labby/.labby
+incus file push ~/.labby/.env labby/home/labby/.labby/.env
+incus file push ~/.labby/config.toml labby/home/labby/.labby/config.toml
+incus exec labby -- chown labby:labby /home/labby/.labby/.env /home/labby/.labby/config.toml
+incus exec labby -- chmod 600 /home/labby/.labby/.env /home/labby/.labby/config.toml
 incus exec labby -- systemctl restart labby
 incus exec labby -- curl -fsS http://127.0.0.1:8765/ready
 ```

@@ -39,7 +39,7 @@ pub const META: PluginMeta = PluginMeta {
         EnvVar {
             name: "LAB_ACP_DB",
             description: "Path to ACP SQLite database",
-            example: "~/.lab/acp.db",
+            example: "~/.labby/acp.db",
             secret: false,
             ui: Some(&TEXT_OPTIONAL_FIELD),
         },

@@ -106,9 +106,9 @@ pub enum SetupCommand {
         #[arg(long)]
         no_repair: bool,
     },
-    /// Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.lab/.env as LAB_* vars.
+    /// Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.labby/.env as LAB_* vars.
     PluginSync(PluginSyncArgs),
-    /// Read ~/.lab/.env and print current values keyed by userConfig field name.
+    /// Read ~/.labby/.env and print current values keyed by userConfig field name.
     PluginExport,
     /// Validate connectivity to the lab MCP server.
     PluginConnectivity {
@@ -123,8 +123,6 @@ pub enum SetupCommand {
     /// Validate or apply local Incus backup policy.
     #[command(alias = "incus-backup")]
     Incusbackup(IncusBackupArgs),
-    /// Bootstrap or converge the supported Incus Labby gateway container.
-    Incus(Box<IncusBootstrapArgs>),
     /// Copy the labby binary into ~/.local/bin so it is callable in your own terminal.
     Install,
     /// Install the Claude Code plugin for a configured service.
@@ -195,7 +193,7 @@ pub enum HostServiceCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum DraftCommand {
-    /// Delete ~/.lab/.env.draft without modifying ~/.lab/.env.
+    /// Delete ~/.labby/.env.draft without modifying ~/.labby/.env.
     Discard(DraftDiscardArgs),
 }
 
@@ -260,85 +258,6 @@ pub enum IncusBackupCommand {
         #[arg(short = 'y', long, alias = "no-confirm")]
         yes: bool,
     },
-}
-
-#[derive(Debug, Args)]
-pub struct IncusBootstrapArgs {
-    /// Container name (default: labby).
-    #[arg(long)]
-    pub name: Option<String>,
-    /// Incus image alias (default: images:ubuntu/24.04).
-    #[arg(long)]
-    pub image: Option<String>,
-    /// Incus profile name (default: labby-gateway).
-    #[arg(long)]
-    pub profile_name: Option<String>,
-    /// Incus snapshot policy YAML path; defaults to the embedded policy.
-    #[arg(long)]
-    pub backup_config: Option<PathBuf>,
-    /// Do not apply an Incus snapshot policy.
-    #[arg(long)]
-    pub no_backup_config: bool,
-    /// Rootless profile for existing containers with a different root pool.
-    #[arg(long)]
-    pub runtime_profile_name: Option<String>,
-    /// Incus storage driver: zfs, btrfs, or dir.
-    #[arg(long)]
-    pub storage_driver: Option<String>,
-    /// Incus storage pool used by the profile root disk.
-    #[arg(long)]
-    pub storage_pool: Option<String>,
-    /// Incus storage source path/dataset for the pool.
-    #[arg(long)]
-    pub storage_source: Option<String>,
-    /// Labby release tag to install, e.g. v0.28.0.
-    #[arg(long, default_value = "latest")]
-    pub version: Option<String>,
-    /// Push a locally built labby binary instead of downloading a release.
-    #[arg(long)]
-    pub local_binary: Option<PathBuf>,
-    /// Use the labby binary already baked into the selected image.
-    #[arg(long)]
-    pub skip_install: bool,
-    /// Print bootstrap commands only.
-    #[arg(long)]
-    pub dry_run: bool,
-    /// Run tailscale up with --ssh when TS_AUTHKEY is set.
-    #[arg(long)]
-    pub tailscale_ssh: bool,
-    /// Hostname to register with Tailscale; defaults to the Incus container name.
-    #[arg(long)]
-    pub tailscale_hostname: Option<String>,
-    /// Allow install.sh cargo fallback if the release asset is unavailable.
-    #[arg(long)]
-    pub allow_source_fallback: bool,
-    /// Confirm bootstrap without prompting.
-    #[arg(short = 'y', long, alias = "no-confirm")]
-    pub yes: bool,
-}
-
-impl Default for IncusBootstrapArgs {
-    fn default() -> Self {
-        Self {
-            name: None,
-            image: None,
-            profile_name: None,
-            backup_config: None,
-            no_backup_config: false,
-            runtime_profile_name: None,
-            storage_driver: None,
-            storage_pool: None,
-            storage_source: None,
-            version: Some("latest".to_string()),
-            local_binary: None,
-            skip_install: false,
-            dry_run: false,
-            tailscale_ssh: false,
-            tailscale_hostname: None,
-            allow_source_fallback: false,
-            yes: false,
-        }
-    }
 }
 
 /// Default URL for the embedded web UI (per Q1: 127.0.0.1:8765).
@@ -423,12 +342,12 @@ pub async fn run(args: SetupArgs, format: OutputFormat) -> Result<ExitCode> {
         anyhow::bail!("--skip-deps is only valid with --provision");
     }
 
-    let incus_args = IncusBootstrapArgs {
+    let incus_args = crate::cli::incus::IncusSetupArgs {
         dry_run: args.dry_run,
         yes: args.yes,
-        ..IncusBootstrapArgs::default()
+        ..crate::cli::incus::IncusSetupArgs::default()
     };
-    run_incus_bootstrap_command(incus_args, format).await?;
+    crate::cli::incus::run_setup(incus_args, format).await?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -608,9 +527,6 @@ async fn run_command(command: SetupCommand, format: OutputFormat) -> Result<Exit
         SetupCommand::Incusbackup(args) => {
             run_incus_backup_command(args, format).await?;
         }
-        SetupCommand::Incus(args) => {
-            run_incus_bootstrap_command(*args, format).await?;
-        }
         SetupCommand::Install => {
             let dest = install_self()?;
             println!("installed -> {}", dest.display());
@@ -666,60 +582,8 @@ async fn run_incus_backup_command(args: IncusBackupArgs, format: OutputFormat) -
     Ok(())
 }
 
-async fn run_incus_bootstrap_command(args: IncusBootstrapArgs, format: OutputFormat) -> Result<()> {
-    if format.is_json() {
-        anyhow::bail!(
-            "setup incus does not support --json yet because it streams an imperative Incus bootstrap script"
-        );
-    }
-    confirm_incus_bootstrap(args.dry_run, args.yes)?;
-    let options = crate::dispatch::setup::incus::IncusBootstrapOptions {
-        name: args.name,
-        image: args.image,
-        profile_name: args.profile_name,
-        backup_config: args.backup_config,
-        no_backup_config: args.no_backup_config,
-        runtime_profile_name: args.runtime_profile_name,
-        storage_driver: args.storage_driver,
-        storage_pool: args.storage_pool,
-        storage_source: args.storage_source,
-        version: args.version,
-        local_binary: args.local_binary,
-        skip_install: args.skip_install,
-        dry_run: args.dry_run,
-        tailscale_ssh: args.tailscale_ssh,
-        tailscale_hostname: args.tailscale_hostname,
-        allow_source_fallback: args.allow_source_fallback,
-    };
-    crate::dispatch::setup::incus::run_incus_bootstrap(options)?;
-    Ok(())
-}
-
 fn setup_skip_requested() -> bool {
     std::env::var("LAB_SKIP_SETUP").as_deref() == Ok("1")
-}
-
-fn confirm_incus_bootstrap(dry_run: bool, mut yes: bool) -> Result<()> {
-    if dry_run {
-        return Ok(());
-    }
-    if !yes {
-        if !io::stdin().is_terminal() {
-            anyhow::bail!("setup incus requires --yes when stdin is not a TTY");
-        }
-        eprintln!(
-            "This will create or update the Labby Incus container, storage/profile config, in-container labby binary, service state, backup policy, and Tailscale join when TS_AUTHKEY is set."
-        );
-        eprint!("Proceed? [y/N] ");
-        io::stderr().flush()?;
-        let mut answer = String::new();
-        io::stdin().read_line(&mut answer)?;
-        yes = matches!(answer.trim(), "y" | "Y" | "yes" | "YES");
-    }
-    if !yes {
-        anyhow::bail!("setup incus cancelled");
-    }
-    Ok(())
 }
 
 fn require_incus_backup_confirmation(container: &str, yes: bool) -> Result<()> {
@@ -1082,11 +946,17 @@ mod tests {
     }
 
     #[test]
-    fn parses_incus_subcommand() {
+    fn rejects_setup_incus_subcommand() {
+        let err = crate::cli::Cli::try_parse_from(["labby", "setup", "incus"]).unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidSubcommand);
+    }
+
+    #[test]
+    fn parses_top_level_incus_setup_subcommand() {
         let cli = crate::cli::Cli::try_parse_from([
             "labby",
-            "setup",
             "incus",
+            "setup",
             "--version",
             "v1.2.3",
             "--storage-driver",
@@ -1097,11 +967,11 @@ mod tests {
             "-y",
         ])
         .unwrap();
-        let crate::cli::Command::Setup(args) = cli.command else {
-            panic!("expected setup command");
+        let crate::cli::Command::Incus(args) = cli.command else {
+            panic!("expected incus command");
         };
-        let Some(SetupCommand::Incus(args)) = args.command else {
-            panic!("expected setup incus subcommand");
+        let crate::cli::incus::IncusCommand::Setup(args) = args.command else {
+            panic!("expected incus setup subcommand");
         };
         assert_eq!(args.version.as_deref(), Some("v1.2.3"));
         assert_eq!(args.storage_driver.as_deref(), Some("dir"));
@@ -1111,14 +981,14 @@ mod tests {
     }
 
     #[test]
-    fn setup_incus_defaults_to_latest_release() {
+    fn incus_setup_defaults_to_latest_release() {
         let cli =
-            crate::cli::Cli::try_parse_from(["labby", "setup", "incus", "--dry-run"]).unwrap();
-        let crate::cli::Command::Setup(args) = cli.command else {
-            panic!("expected setup command");
+            crate::cli::Cli::try_parse_from(["labby", "incus", "setup", "--dry-run"]).unwrap();
+        let crate::cli::Command::Incus(args) = cli.command else {
+            panic!("expected incus command");
         };
-        let Some(SetupCommand::Incus(args)) = args.command else {
-            panic!("expected setup incus subcommand");
+        let crate::cli::incus::IncusCommand::Setup(args) = args.command else {
+            panic!("expected incus setup subcommand");
         };
         assert_eq!(args.version.as_deref(), Some("latest"));
     }

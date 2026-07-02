@@ -1,4 +1,4 @@
-//! First-run self-bootstrap: create a minimal `~/.lab/.env` so the server can
+//! First-run self-bootstrap: create a minimal `~/.labby/.env` so the server can
 //! start and the operator can reach `/setup`. Non-destructive — a no-op when
 //! the file already exists, so it is safe to call unconditionally at startup.
 
@@ -17,7 +17,7 @@ use super::token::generate_mcp_token;
 ///
 /// `Created` carries the freshly generated token so callers (serve) can make
 /// it authoritative in-process without depending on a successful env reload.
-/// `AlreadyPresent` means the operator already has a `~/.lab/.env` — it is left
+/// `AlreadyPresent` means the operator already has a `~/.labby/.env` — it is left
 /// byte-for-byte untouched (the don't-clobber-operator-creds safety property).
 pub enum BootstrapOutcome {
     Created { env_path: PathBuf, token: String },
@@ -32,7 +32,7 @@ pub fn should_bootstrap(token_configured: bool, oauth_mode: bool) -> bool {
     !token_configured && !oauth_mode
 }
 
-/// Create `~/.lab/.env` with a generated bearer token + loopback MCP defaults
+/// Create `~/.labby/.env` with a generated bearer token + loopback MCP defaults
 /// when it does not exist. Non-destructive — returns
 /// [`BootstrapOutcome::AlreadyPresent`] when the file is already there.
 pub fn bootstrap() -> Result<BootstrapOutcome, ToolError> {
@@ -57,7 +57,7 @@ pub fn bootstrap_action() -> Result<Value, ToolError> {
 }
 
 /// Path-parameterized core of [`bootstrap`]. Kept separate so unit tests can
-/// drive it against a temp path without mutating `LAB_HOME` — the crate forbids
+/// drive it against a temp path without mutating `LABBY_HOME` — the crate forbids
 /// `unsafe_code`, so env mutation inside tests is unavailable (see `state.rs`).
 fn bootstrap_at(env: &Path) -> Result<BootstrapOutcome, ToolError> {
     if env.exists() {

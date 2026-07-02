@@ -36,14 +36,14 @@ Explored the auth middleware stack in the lab HTTP router, clarified the OAuth v
 - `authenticate_request` in `router.rs:172` tries three credential paths in order: static bearer token → OAuth JWT → browser session cookie (v1 only).
 - MCP is mounted with `allow_session_cookie = false` (`router.rs:576`), so session cookies are rejected there by design.
 - `browser_routes` (containing `/auth/upstream/callback`) is merged on the outer router outside the auth middleware (`router.rs:623`), so it IS public — but the callback handler itself returns `kind:auth_failed` when the OAuth state token isn't found in SQLite (`upstream_oauth.rs:447`).
-- `LAB_WEB_ASSETS_DIR` is set to `/home/jmagar/workspace/lab/apps/gateway-admin/out` in `~/.lab/.env`, meaning the SPA fallback is active on the live server.
+- `LAB_WEB_ASSETS_DIR` is set to `/home/jmagar/workspace/lab/apps/gateway-admin/out` in `~/.labby/.env`, meaning the SPA fallback is active on the live server.
 - Static bearer token (`LAB_MCP_HTTP_TOKEN`) grants hardcoded `lab:read + lab:admin` scopes unconditionally (`router.rs:195`); OAuth JWTs carry scopes from token claims.
 - The MCP GET → 400 warning is expected: MCP uses POST + SSE framing, not GET.
 
 ## Technical Decisions
 
 - **Probe `/auth/upstream/callback` with no params, not with fake OAuth state**: sending forged `state=` triggers real SQLite lookup and returns `auth_failed`, which is indistinguishable from an auth gate rejection. Missing required params produces 400/422, which unambiguously confirms the route is mounted and public.
-- **Load `~/.lab/.env` inside the script**: allows the script to run without manually exporting vars, matching how the server itself loads config.
+- **Load `~/.labby/.env` inside the script**: allows the script to run without manually exporting vars, matching how the server itself loads config.
 - **Shell script over Rust test**: operator-runnable against a live server without building; no compile step, works with just `curl`.
 - **Color output gated on `[ -t 1 ]`**: safe for CI pipelines and terminal alike.
 

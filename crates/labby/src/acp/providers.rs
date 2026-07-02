@@ -43,7 +43,7 @@ pub struct AcpProviderEntry {
 pub fn providers_path() -> Result<PathBuf, ToolError> {
     let env_path = crate::config::dotenv_path().ok_or_else(|| ToolError::Sdk {
         sdk_kind: "internal_error".to_string(),
-        message: "cannot determine ~/.lab path".to_string(),
+        message: "cannot determine ~/.labby path".to_string(),
     })?;
     let dir = env_path
         .parent()

@@ -26,7 +26,7 @@ The user asked where MCP registry data is stored, whether startup registry-sync 
 ## Sequence of Events
 
 1. Inspected registry store, sync code, config path helpers, and the shared HTTP transport logging path.
-2. Confirmed registry data is stored in a local SQLite DB under `~/.lab/registry.db`.
+2. Confirmed registry data is stored in a local SQLite DB under `~/.labby/registry.db`.
 3. Patched the shared HTTP client so `GET /v0.1/servers` request start/finish events log at `DEBUG` instead of `INFO`.
 4. Reproduced the resulting `lab serve` failure and traced it to invalid runtime log-level usage inside `tracing::event!`.
 5. Fixed the compile failure by branching between concrete `INFO` and `DEBUG` event calls.
@@ -37,7 +37,7 @@ The user asked where MCP registry data is stored, whether startup registry-sync 
 
 ## Key Findings
 
-- Registry data is stored at `~/.lab/registry.db` via [config.rs:684](/home/jmagar/workspace/lab/crates/lab/src/config.rs:684).
+- Registry data is stored at `~/.labby/registry.db` via [config.rs:684](/home/jmagar/workspace/lab/crates/lab/src/config.rs:684).
 - The backing implementation is [store.rs](/home/jmagar/workspace/lab/crates/lab/src/dispatch/mcpregistry/store.rs), which persists upstream server rows and local Lab metadata.
 - Startup spam was not coming from the sync loop itself; the loop already emitted summary logs in [store.rs:377](/home/jmagar/workspace/lab/crates/lab/src/dispatch/mcpregistry/store.rs:377) and [store.rs:429](/home/jmagar/workspace/lab/crates/lab/src/dispatch/mcpregistry/store.rs:429). The noise came from shared transport logs in [http.rs:679](/home/jmagar/workspace/lab/crates/lab-apis/src/core/http.rs:679) and [http.rs:707](/home/jmagar/workspace/lab/crates/lab-apis/src/core/http.rs:707).
 - The first attempt to reduce that noise broke compilation because `tracing::event!` requires a compile-time log level, not a runtime variable.

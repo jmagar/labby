@@ -27,7 +27,7 @@
 - Modify: `crates/lab/src/dispatch/setup/dispatch.rs`
   - Route new actions and redact secret-bearing config action params in logs.
 - Modify: `crates/lab/src/dispatch/setup/client.rs`
-  - Add `config_toml_path()` helper that mirrors `crate::config::config_toml_path()` but honors `LAB_HOME` for tests.
+  - Add `config_toml_path()` helper that mirrors `crate::config::config_toml_path()` but honors `LABBY_HOME` for tests.
 - Create: `crates/lab/src/dispatch/setup/config_inventory.rs`
   - Build the Web UI inventory for `.env`, `.env.draft`, known `PluginMeta` env vars, core fields, and editable `config.toml` paths.
 - Create: `crates/lab/src/dispatch/setup/toml_edit.rs`
@@ -1013,9 +1013,9 @@ configList(signal?: AbortSignal): Promise<ConfigInventoryResponse> {
   if (USE_MOCK_DATA) {
     signal?.throwIfAborted?.()
     return Promise.resolve({
-      env_path: '~/.lab/.env',
-      draft_path: '~/.lab/.env.draft',
-      toml_path: '~/.lab/config.toml',
+      env_path: '~/.labby/.env',
+      draft_path: '~/.labby/.env.draft',
+      toml_path: '~/.labby/config.toml',
       draft_stale: false,
       entries: [
         {
@@ -1033,7 +1033,7 @@ configList(signal?: AbortSignal): Promise<ConfigInventoryResponse> {
           required: false,
           editable: true,
           deletable: false,
-          file_path: '~/.lab/.env',
+          file_path: '~/.labby/.env',
         },
       ],
     })
@@ -1112,7 +1112,7 @@ function entry(partial: Partial<ConfigEntryView>): ConfigEntryView {
     required: partial.required ?? false,
     editable: partial.editable ?? true,
     deletable: partial.deletable ?? true,
-    file_path: partial.file_path ?? '~/.lab/.env',
+    file_path: partial.file_path ?? '~/.labby/.env',
   }
 }
 
@@ -1385,7 +1385,7 @@ const entry: ConfigEntryView = {
   required: false,
   editable: true,
   deletable: false,
-  file_path: '~/.lab/.env',
+  file_path: '~/.labby/.env',
 }
 
 test('ConfigKeyValueTable saves edited values', async () => {
@@ -1617,7 +1617,7 @@ export default function AllConfigPage(): React.ReactElement {
           <div>
             <CardTitle>All Config</CardTitle>
             <CardDescription>
-              Structured key/value settings from <code>~/.lab/.env</code> and <code>~/.lab/config.toml</code>.
+              Structured key/value settings from <code>~/.labby/.env</code> and <code>~/.labby/config.toml</code>.
             </CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
@@ -1712,7 +1712,7 @@ bd create "Settings: structured all config key/value editor" \
   --label setup \
   --label webui \
   --label config \
-  --description "Extend the existing Settings rail to edit all ~/.lab/.env keys and structured ~/.lab/config.toml values through setup dispatch. No raw editor. Preserve current setup.draft/env_merge patterns, secret masking, stale detection, and inline save errors." \
+  --description "Extend the existing Settings rail to edit all ~/.labby/.env keys and structured ~/.labby/config.toml values through setup dispatch. No raw editor. Preserve current setup.draft/env_merge patterns, secret masking, stale detection, and inline save errors." \
   --acceptance "All Config page lists known and custom .env keys plus structured config.toml leaf values; edits go through /v1/setup config actions; .env writes use env_merge; config.toml writes use structured TOML parsing; secrets are masked; stale/save failures are visible; targeted backend/frontend tests pass."
 ```
 

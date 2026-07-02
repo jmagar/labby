@@ -730,7 +730,7 @@ async fn install_http(
 }
 
 /// Build a gateway spec for a stdio-transport server, validate security constraints,
-/// and write any user-supplied env vars into `~/.lab/.env`.
+/// and write any user-supplied env vars into `~/.labby/.env`.
 fn install_stdio(
     pkg: &labby_apis::mcpregistry::types::Package,
     gateway_name: &str,
@@ -741,12 +741,12 @@ fn install_stdio(
     let (hint, argv) = build_stdio_command(pkg, server_name, prefs)?;
     let resolved_env = resolve_mcp_env_values(pkg, params_value, server_name)?;
 
-    // Write resolved env vars to ~/.lab/.env if there are any.
+    // Write resolved env vars to ~/.labby/.env if there are any.
     if !resolved_env.is_empty() {
         use crate::config;
         let env_path = config::dotenv_path().ok_or_else(|| ToolError::Sdk {
             sdk_kind: "internal_error".to_string(),
-            message: "cannot determine ~/.lab/.env path".to_string(),
+            message: "cannot determine ~/.labby/.env path".to_string(),
         })?;
         config::backup_env(&env_path).map_err(|e| ToolError::Sdk {
             sdk_kind: "internal_error".to_string(),

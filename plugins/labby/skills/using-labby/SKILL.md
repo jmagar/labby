@@ -1,6 +1,6 @@
 ---
 name: using-labby
-description: "This skill should be used when the user mentions labby, the labby CLI, the Lab gateway, or any Lab operator surface. Triggers include: \"run labby doctor\", \"check labby health\", \"start the labby MCP server\", \"configure ~/.lab/.env\", \"search upstream MCP tools with Code Mode\", \"use labby gateway to import servers\", \"manage the Labby marketplace\", \"reload the gateway\", or any request to run labby CLI commands, inspect gateway upstreams, or dispatch an action against a Lab service."
+description: "This skill should be used when the user mentions labby, the labby CLI, the Lab gateway, or any Lab operator surface. Triggers include: \"run labby doctor\", \"check labby health\", \"start the labby MCP server\", \"configure ~/.labby/.env\", \"search upstream MCP tools with Code Mode\", \"use labby gateway to import servers\", \"manage the Labby marketplace\", \"reload the gateway\", or any request to run labby CLI commands, inspect gateway upstreams, or dispatch an action against a Lab service."
 ---
 
 # Using the `labby` CLI
@@ -49,7 +49,7 @@ For command details and workflows, read:
 - `references/operator-cli.md` for top-level CLI, setup, docs, doctor, logs, deploy, and marketplace workflows.
 - `references/gateway-operations.md` for gateway add/update/import/OAuth/protected routes/runtime operations.
 - `references/code-mode.md` for `codemode`, schemas, confirmations, limits, and error recovery.
-- `references/config-reference.md` for `~/.lab/.env`, `config.toml`, and mutable gateway settings.
+- `references/config-reference.md` for `~/.labby/.env`, `config.toml`, and mutable gateway settings.
 - `references/service-catalog.md` for generated catalog sources and action-dispatch discovery.
 
 ## CLI vs MCP
@@ -177,7 +177,7 @@ For deeper Code Mode details, read `references/code-mode.md`.
 
 ## Configuration
 
-Config lives in `~/.lab/.env` and `config.toml` using Lab's documented load order. Common env keys:
+Config lives in `~/.labby/.env` and `config.toml` using Lab's documented load order. Common env keys:
 
 ```bash
 LAB_MCP_HTTP_TOKEN=...

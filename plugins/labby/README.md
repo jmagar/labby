@@ -32,5 +32,5 @@ for convenience, but GitHub is the canonical installer source.
 ## Configuration
 
 Plugin settings (server URL, auth mode, token, …) are declared in
-`.claude-plugin/plugin.json` `userConfig` and synced into `~/.lab/.env` as
+`.claude-plugin/plugin.json` `userConfig` and synced into `~/.labby/.env` as
 `LAB_*` variables by `labby setup plugin-hook` when settings change.

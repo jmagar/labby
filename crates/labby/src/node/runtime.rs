@@ -234,11 +234,11 @@ fn current_home_dir() -> PathBuf {
 
 impl NodeRuntime {
     fn queue_path(&self) -> PathBuf {
-        self.home_dir.join(".lab/node-runtime-queue.jsonl")
+        self.home_dir.join(".labby/node-runtime-queue.jsonl")
     }
 
     fn token_path(&self) -> PathBuf {
-        self.home_dir.join(".lab/node-token")
+        self.home_dir.join(".labby/node-token")
     }
 
     async fn outbound_queue(&self) -> Result<&NodeOutboundQueue> {

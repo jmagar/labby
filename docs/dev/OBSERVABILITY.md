@@ -129,7 +129,7 @@ actor key is:
 - stable for one installation as long as `LAB_ACTOR_KEY_SECRET` is preserved
 - intentionally not portable across installations with different secrets
 
-`LAB_ACTOR_KEY_SECRET` is a secret value stored in `~/.lab/.env`. If absent,
+`LAB_ACTOR_KEY_SECRET` is a secret value stored in `~/.labby/.env`. If absent,
 `lab` generates it on first use. Empty or anonymous subjects have no
 `actor_key`; `mine_only` style activity queries must exclude those rows rather
 than inventing a sentinel actor.

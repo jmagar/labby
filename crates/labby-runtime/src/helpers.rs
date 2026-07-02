@@ -3,27 +3,27 @@
 //!
 //! These mirror the small leaf helpers in the `lab` binary's
 //! `dispatch::helpers` module, but without the binary-only test override hooks
-//! (`TEST_LAB_HOME` / thread-local `ENV_OVERRIDE`). `lab-gateway` and friends
+//! (`TEST_LABBY_HOME` / thread-local `ENV_OVERRIDE`). `lab-gateway` and friends
 //! use these production-path versions; the `lab` binary keeps its own copies
 //! with the test seams its unit tests rely on.
 
 use std::path::PathBuf;
 
-/// Resolve the lab home directory: `$LAB_HOME` if set and non-empty, else
-/// `$HOME/.lab/`.
+/// Resolve the lab home directory: `$LABBY_HOME` if set and non-empty, else
+/// `$HOME/.labby/`.
 ///
 /// Falls back to a relative `.lab` only when neither variable is set — callers
 /// that store secrets/state should ensure `HOME` is present.
 #[must_use]
 pub fn lab_home() -> PathBuf {
-    if let Ok(home) = std::env::var("LAB_HOME")
+    if let Ok(home) = std::env::var("LABBY_HOME")
         && !home.is_empty()
     {
         return PathBuf::from(home);
     }
     match std::env::var("HOME") {
-        Ok(home) if !home.is_empty() => PathBuf::from(home).join(".lab"),
-        _ => PathBuf::from(".lab"),
+        Ok(home) if !home.is_empty() => PathBuf::from(home).join(".labby"),
+        _ => PathBuf::from(".labby"),
     }
 }
 

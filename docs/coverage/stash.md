@@ -22,7 +22,7 @@ No env vars required. The stash root is configured via `config.toml`:
 
 ```toml
 [workspace]
-root = "~/.lab/stash"   # default if not set
+root = "~/.labby/stash"   # default if not set
 ```
 
 ## SDK Surface

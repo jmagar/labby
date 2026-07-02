@@ -68,6 +68,9 @@ impl MetricsWindow {
 
 /// Tool → upstream server, mirroring the frontend mock map.
 fn tool_upstream(tool: &str) -> &str {
+    if let Some((namespace, _)) = tool.split_once("::") {
+        return namespace;
+    }
     match tool {
         "radarr" | "sonarr" => "media-stack",
         "qbittorrent" => "downloads",
@@ -279,6 +282,14 @@ fn str_field(v: Option<&Value>) -> Option<String> {
     v.and_then(Value::as_str).map(ToOwned::to_owned)
 }
 
+fn is_code_mode_service(service: &str) -> bool {
+    matches!(service, "code_mode" | "codemode")
+}
+
+fn is_usage_wrapper_service(service: &str) -> bool {
+    matches!(service, "gateway" | "logs") || is_code_mode_service(service)
+}
+
 fn looks_sensitive_actor_label(value: &str) -> bool {
     value.contains('@')
 }
@@ -356,6 +367,91 @@ fn extract_call(event: &LogEvent) -> Option<Call> {
     })
 }
 
+fn parsed_code_mode_calls(event: &LogEvent) -> Vec<Value> {
+    let Some(raw) = field(event, "code_mode_calls").or_else(|| field(event, "calls")) else {
+        return Vec::new();
+    };
+    match raw {
+        Value::Array(calls) => calls.clone(),
+        Value::String(s) => serde_json::from_str::<Vec<Value>>(s).unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+fn split_evenly(total: u64, count: usize, index: usize) -> u64 {
+    if count == 0 {
+        return 0;
+    }
+    let base = total / count as u64;
+    let remainder = total % count as u64;
+    base + u64::from((index as u64) < remainder)
+}
+
+fn code_mode_child_service(call: &Value) -> Option<String> {
+    if let Some(id) = call.get("id").and_then(Value::as_str)
+        && id.contains("::")
+    {
+        return Some(id.to_string());
+    }
+    let namespace = call.get("namespace").and_then(Value::as_str).unwrap_or("");
+    let tool = call.get("tool").and_then(Value::as_str)?;
+    if namespace.is_empty() {
+        Some(tool.to_string())
+    } else {
+        Some(format!("{namespace}::{tool}"))
+    }
+}
+
+/// Usage calls are the semantic tools the dashboard should rank.
+///
+/// Code Mode completion events are wrapper rows; their `code_mode_calls` field
+/// carries the actual upstream calls made inside the run. Built-in Lab wrapper
+/// services such as `gateway` and `logs` are intentionally excluded from tool
+/// usage rankings.
+fn extract_usage_calls(event: &LogEvent) -> Vec<Call> {
+    let Some(parent) = extract_call(event) else {
+        return Vec::new();
+    };
+    if is_code_mode_service(&parent.service) {
+        let children = parsed_code_mode_calls(event);
+        let count = children.len();
+        return children
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, child)| {
+                let service = code_mode_child_service(&child)?;
+                let ok = child.get("ok").and_then(Value::as_bool).unwrap_or(true);
+                Some(Call {
+                    ts: parent.ts,
+                    service,
+                    ok,
+                    error_kind: if ok {
+                        None
+                    } else {
+                        str_field(child.get("error_kind"))
+                    },
+                    input_tokens: split_evenly(parent.input_tokens, count, index),
+                    output_tokens: split_evenly(parent.output_tokens, count, index),
+                    elapsed_ms: num_f64(child.get("elapsed_ms")),
+                    surface: parent.surface.clone(),
+                    actor: parent.actor.clone(),
+                    actor_label: parent.actor_label.clone(),
+                    agent_kind: parent.agent_kind.clone(),
+                    ip: parent.ip.clone(),
+                    call_count: None,
+                    truncated: false,
+                    artifact_writes: 0,
+                })
+            })
+            .collect();
+    }
+    if is_usage_wrapper_service(&parent.service) {
+        Vec::new()
+    } else {
+        vec![parent]
+    }
+}
+
 fn percentile(sorted: &[u64], p: f64) -> u64 {
     if sorted.is_empty() {
         return 0;
@@ -389,7 +485,8 @@ pub fn aggregate_with_previous(
     now_ms: i64,
     previous_actors: &BTreeSet<String>,
 ) -> DashboardMetrics {
-    let calls: Vec<Call> = events.iter().filter_map(extract_call).collect();
+    let completion_calls: Vec<Call> = events.iter().filter_map(extract_call).collect();
+    let calls: Vec<Call> = events.iter().flat_map(extract_usage_calls).collect();
     let total = calls.len() as u64;
     let failed = calls.iter().filter(|c| !c.ok).count() as u64;
     let since = now_ms - window.ms();
@@ -531,7 +628,10 @@ pub fn aggregate_with_previous(
     }
 
     // Code Mode fan-out (events with service == codemode carry call_count).
-    let code_runs: Vec<&Call> = calls.iter().filter(|c| c.service == "codemode").collect();
+    let code_runs: Vec<&Call> = completion_calls
+        .iter()
+        .filter(|c| is_code_mode_service(&c.service))
+        .collect();
     let runs = code_runs.len() as u64;
     let fan_total: u64 = code_runs.iter().filter_map(|c| c.call_count).sum();
     let timeouts = code_runs
@@ -781,51 +881,48 @@ pub struct ToolCallAgentFacet {
     pub label: String,
 }
 
-/// Distill a completion `LogEvent` into a serializable call record.
-fn extract_record(event: &LogEvent) -> Option<ToolCallRecord> {
-    field(event, "input_tokens")?;
-    field(event, "output_tokens")?;
-    let tool = str_field(field(event, "service")).or_else(|| str_field(field(event, "tool")))?;
-    let ok = event.message.ends_with(" ok");
-    let actor = actor_identity(event).unwrap_or_else(|| "unknown".to_string());
-    let agent_kind = str_field(field(event, "agent_kind"))
-        .or_else(|| {
-            event
-                .source_device_id
-                .as_ref()
-                .map(|_| "device".to_string())
-        })
-        .unwrap_or_else(|| "agent".to_string());
-    let agent_kind = if agent_kind == "device" {
+fn record_from_call(event: &LogEvent, call: &Call, id: String) -> ToolCallRecord {
+    let actor = call.actor.clone().unwrap_or_else(|| "unknown".to_string());
+    let agent_kind = if call.agent_kind == "device" {
         "device"
     } else {
         "agent"
     };
-    let actor_label = safe_actor_label(
-        &actor,
-        str_field(field(event, "actor_label")),
-        str_field(field(event, "subject")),
-    );
-    Some(ToolCallRecord {
-        id: event.event_id.clone(),
+    ToolCallRecord {
+        id,
         ts: event.ts,
-        tool,
+        tool: call.service.clone(),
         action: event.action.clone(),
         agent_id: actor.clone(),
-        agent_label: actor_label,
+        agent_label: call
+            .actor_label
+            .clone()
+            .unwrap_or_else(|| safe_actor_label(&actor, None, str_field(field(event, "subject")))),
         agent_kind,
-        ip: str_field(field(event, "ip")).unwrap_or_default(),
-        surface: event.surface.as_str().to_string(),
-        outcome: if ok { "ok" } else { "failed" },
-        error_kind: if ok {
-            None
-        } else {
-            str_field(field(event, "kind"))
-        },
-        input_tokens: num_u64(field(event, "input_tokens")),
-        output_tokens: num_u64(field(event, "output_tokens")),
-        elapsed_ms: num_f64(field(event, "elapsed_ms")).round() as u64,
-    })
+        ip: call.ip.clone().unwrap_or_default(),
+        surface: call.surface.clone(),
+        outcome: if call.ok { "ok" } else { "failed" },
+        error_kind: call.error_kind.clone(),
+        input_tokens: call.input_tokens,
+        output_tokens: call.output_tokens,
+        elapsed_ms: call.elapsed_ms.round() as u64,
+    }
+}
+
+fn extract_usage_records(event: &LogEvent) -> Vec<ToolCallRecord> {
+    let calls = extract_usage_calls(event);
+    if calls.len() == 1 {
+        return calls
+            .first()
+            .map(|call| record_from_call(event, call, event.event_id.clone()))
+            .into_iter()
+            .collect();
+    }
+    calls
+        .iter()
+        .enumerate()
+        .map(|(index, call)| record_from_call(event, call, format!("{}:{index}", event.event_id)))
+        .collect()
 }
 
 /// Bucket records into the window's call-volume series (oldest first).
@@ -860,7 +957,7 @@ fn recent_sorted(mut records: Vec<ToolCallRecord>, limit: usize) -> Vec<ToolCall
 pub fn tool_detail(events: &[LogEvent], name: &str, window: MetricsWindow, now: i64) -> ToolDetail {
     let records: Vec<ToolCallRecord> = events
         .iter()
-        .filter_map(extract_record)
+        .flat_map(extract_usage_records)
         .filter(|r| r.tool == name)
         .collect();
     let calls = records.len() as u64;
@@ -913,7 +1010,7 @@ pub fn tool_detail(events: &[LogEvent], name: &str, window: MetricsWindow, now: 
 pub fn agent_detail(events: &[LogEvent], id: &str, window: MetricsWindow, now: i64) -> AgentDetail {
     let records: Vec<ToolCallRecord> = events
         .iter()
-        .filter_map(extract_record)
+        .flat_map(extract_usage_records)
         .filter(|r| r.agent_id == id)
         .collect();
     let calls = records.len() as u64;
@@ -960,7 +1057,7 @@ pub fn agent_detail(events: &[LogEvent], id: &str, window: MetricsWindow, now: i
 
 /// Filterable, paginated tool-call log for the explorer.
 pub fn tool_calls(events: &[LogEvent], query: &ToolCallQuery) -> ToolCallPage {
-    let all: Vec<ToolCallRecord> = events.iter().filter_map(extract_record).collect();
+    let all: Vec<ToolCallRecord> = events.iter().flat_map(extract_usage_records).collect();
     let total = all.len();
     let facets = build_facets(&all);
     let search = query.search.as_deref().map(str::to_lowercase);

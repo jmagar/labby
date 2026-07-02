@@ -47,7 +47,7 @@ The existing `shadcn` gateway upstream was updated to launch from `/home/jmagar/
 
 | status | path | previous path | purpose | evidence |
 |---|---|---|---|---|
-| modified | `/home/jmagar/.lab/config.toml` | — | Updated the existing `shadcn` upstream to run from the Aurora project directory. | `sed -n '120,129p' /home/jmagar/.lab/config.toml` showed `command = "bash"` and the `cd /home/jmagar/workspace/aurora-design-system && exec npx shadcn@latest mcp` wrapper. |
+| modified | `/home/jmagar/.labby/config.toml` | — | Updated the existing `shadcn` upstream to run from the Aurora project directory. | `sed -n '120,129p' /home/jmagar/.labby/config.toml` showed `command = "bash"` and the `cd /home/jmagar/workspace/aurora-design-system && exec npx shadcn@latest mcp` wrapper. |
 | created | `docs/sessions/2026-06-08-shadcn-aurora-registry-gateway.md` | — | Captured the session, maintenance pass, verification, and follow-up work. | This session artifact. |
 
 ## Beads Activity
@@ -74,7 +74,7 @@ Inspected `git worktree list --porcelain`, local branches, and remote branches. 
 
 ### Stale docs
 
-No in-repo documentation was updated. The primary changed artifact is operator config in `/home/jmagar/.lab/config.toml`; broader Lab docs for the runtime-count mismatch should wait for investigation under `lab-efwj2`.
+No in-repo documentation was updated. The primary changed artifact is operator config in `/home/jmagar/.labby/config.toml`; broader Lab docs for the runtime-count mismatch should wait for investigation under `lab-efwj2`.
 
 ### Dirty state
 
@@ -129,7 +129,7 @@ Observed unrelated dirty files before writing the session note: `docs/snippets/a
 
 ## Risks and Rollback
 
-The working configuration depends on `/home/jmagar/workspace/aurora-design-system` existing on this host. Roll back by changing `/home/jmagar/.lab/config.toml` for `shadcn` back to `command = "npx"` and `args = ["shadcn@latest", "mcp"]`, then running `labby gateway reload`.
+The working configuration depends on `/home/jmagar/workspace/aurora-design-system` existing on this host. Roll back by changing `/home/jmagar/.labby/config.toml` for `shadcn` back to `command = "npx"` and `args = ["shadcn@latest", "mcp"]`, then running `labby gateway reload`.
 
 ## Decisions Not Taken
 

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `labby serve` self-bootstrap on first run (generate an MCP bearer token + a minimal `~/.lab/.env`, then print the `/setup` URL) and add first-class token generation to the `setup` service, so the web `/setup` wizard becomes a complete, reachable, single configuration surface — closing the headless bootstrap circularity.
+**Goal:** Make `labby serve` self-bootstrap on first run (generate an MCP bearer token + a minimal `~/.labby/.env`, then print the `/setup` URL) and add first-class token generation to the `setup` service, so the web `/setup` wizard becomes a complete, reachable, single configuration surface — closing the headless bootstrap circularity.
 
-**Architecture:** The `setup` dispatch service already owns config writes (`draft.set` → `draft.commit` → `config::env_merge::merge`, atomic + backup + audit-gated) and first-run detection (`setup.state`). Two primitives are missing: (1) token generation in Rust (today only the `just mcp-token` openssl recipe exists), and (2) a serve-time first-run bootstrap. This plan adds a pure `generate_mcp_token()` helper, a non-destructive `setup.bootstrap` action that creates `~/.lab/.env` only when absent, a `setup.token.generate` convenience action, and wires `labby serve` to bootstrap-then-surface-the-URL on first run.
+**Architecture:** The `setup` dispatch service already owns config writes (`draft.set` → `draft.commit` → `config::env_merge::merge`, atomic + backup + audit-gated) and first-run detection (`setup.state`). Two primitives are missing: (1) token generation in Rust (today only the `just mcp-token` openssl recipe exists), and (2) a serve-time first-run bootstrap. This plan adds a pure `generate_mcp_token()` helper, a non-destructive `setup.bootstrap` action that creates `~/.labby/.env` only when absent, a `setup.token.generate` convenience action, and wires `labby serve` to bootstrap-then-surface-the-URL on first run.
 
 **Tech Stack:** Rust 2024, `getrandom 0.4` + `hex 0.4` (token), `config::env_merge` (atomic .env writes), `tokio`, clap (serve CLI), `tempfile` (tests). No frontend changes in this plan.
 
@@ -26,7 +26,7 @@ This plan is **backend only** and produces working, testable software on its own
 ## File Structure
 
 - **Create** `crates/lab/src/dispatch/setup/token.rs` — pure `generate_mcp_token()` + unit tests. One responsibility: token generation.
-- **Create** `crates/lab/src/dispatch/setup/bootstrap.rs` — `bootstrap()` (create `~/.lab/.env` when absent) + `should_bootstrap()` decision helper + tests.
+- **Create** `crates/lab/src/dispatch/setup/bootstrap.rs` — `bootstrap()` (create `~/.labby/.env` when absent) + `should_bootstrap()` decision helper + tests.
 - **Modify** `crates/lab/Cargo.toml` — add `getrandom = "0.4"` (workspace `lab` crate; `hex = "0.4"` already present).
 - **Modify** `crates/lab/src/dispatch/setup/setup.rs` — declare `pub mod token; pub mod bootstrap;` and re-export `bootstrap::bootstrap`.
 - **Modify** `crates/lab/src/dispatch/setup/catalog.rs` — add `bootstrap` and `token.generate` `ActionSpec`s.
@@ -113,7 +113,7 @@ git commit -m "feat(setup): add generate_mcp_token() hex token helper"
 
 ---
 
-### Task 2: `setup.bootstrap` action — create ~/.lab/.env when absent
+### Task 2: `setup.bootstrap` action — create ~/.labby/.env when absent
 
 **Files:**
 - Create: `crates/lab/src/dispatch/setup/bootstrap.rs`
@@ -126,7 +126,7 @@ git commit -m "feat(setup): add generate_mcp_token() hex token helper"
 Create `crates/lab/src/dispatch/setup/bootstrap.rs`:
 
 ```rust
-//! First-run self-bootstrap: create a minimal `~/.lab/.env` so the server can
+//! First-run self-bootstrap: create a minimal `~/.labby/.env` so the server can
 //! start and the operator can reach `/setup`. Non-destructive — a no-op when
 //! the file already exists, so it is safe to call unconditionally at startup.
 
@@ -147,7 +147,7 @@ pub fn should_bootstrap(token_configured: bool, oauth_mode: bool) -> bool {
     !token_configured && !oauth_mode
 }
 
-/// Create `~/.lab/.env` with a generated bearer token + loopback MCP defaults
+/// Create `~/.labby/.env` with a generated bearer token + loopback MCP defaults
 /// when it does not exist. Returns `{ created, env_path, token }` — `token` is
 /// the generated value on creation, or `null` when the file already existed.
 pub fn bootstrap() -> Result<Value, ToolError> {
@@ -211,9 +211,9 @@ mod tests {
     #[test]
     fn bootstrap_creates_env_with_token_then_is_idempotent() {
         let dir = tempfile::tempdir().expect("tempdir");
-        // SAFETY: single-threaded test; LAB_HOME redirects env_path() to temp.
+        // SAFETY: single-threaded test; LABBY_HOME redirects env_path() to temp.
         unsafe {
-            std::env::set_var("LAB_HOME", dir.path());
+            std::env::set_var("LABBY_HOME", dir.path());
         }
 
         let first = bootstrap().expect("first bootstrap");
@@ -232,7 +232,7 @@ mod tests {
         assert_eq!(second["token"], serde_json::Value::Null);
 
         unsafe {
-            std::env::remove_var("LAB_HOME");
+            std::env::remove_var("LABBY_HOME");
         }
     }
 }
@@ -259,7 +259,7 @@ pub(super) fn map_merge_err(err: env_merge::MergeError) -> ToolError {
 - [ ] **Step 3: Run the tests — verify they pass**
 
 Run: `cargo nextest run -p labby --all-features -E 'test(/should_bootstrap_only|bootstrap_creates_env/)'`
-Expected: 2 passed. (If `bootstrap_creates_env...` is flaky under parallel `LAB_HOME` mutation, it is the only test touching `LAB_HOME` here; nextest runs each test in its own process, so the `set_var` is process-isolated.)
+Expected: 2 passed. (If `bootstrap_creates_env...` is flaky under parallel `LABBY_HOME` mutation, it is the only test touching `LABBY_HOME` here; nextest runs each test in its own process, so the `set_var` is process-isolated.)
 
 - [ ] **Step 4: Add the catalog entry**
 
@@ -268,7 +268,7 @@ In `crates/lab/src/dispatch/setup/catalog.rs`, add ONE `ActionSpec` to the `ACTI
 ```rust
     ActionSpec {
         name: "bootstrap",
-        description: "Create ~/.lab/.env with a generated token + loopback defaults when absent (first-run)",
+        description: "Create ~/.labby/.env with a generated token + loopback defaults when absent (first-run)",
         destructive: false,
         requires_admin: false,
         returns: "BootstrapOutcome",
@@ -337,14 +337,14 @@ Immediately BEFORE that line, insert (PR #112 review wave — loopback-gated + t
                         surface = "cli",
                         service = "serve",
                         error = %error,
-                        "failed to reload generated ~/.lab/.env into process env; \
+                        "failed to reload generated ~/.labby/.env into process env; \
                          in-process token is authoritative, downstream env readers may not see it"
                     );
                 }
                 tracing::warn!(
                     surface = "cli",
                     service = "serve",
-                    "first run: generated LAB_MCP_HTTP_TOKEN and wrote ~/.lab/.env"
+                    "first run: generated LAB_MCP_HTTP_TOKEN and wrote ~/.labby/.env"
                 );
                 eprintln!("\n  Lab first-run setup");
                 eprintln!("  MCP bearer token: {token}");
@@ -394,7 +394,7 @@ No serve-level decision test is added. `bootstrap.rs::should_bootstrap_only_with
 
 ```bash
 git add crates/lab/src/cli/serve.rs crates/lab/tests/architecture_orchestrator.rs
-git commit -m "feat(serve): self-bootstrap MCP token + ~/.lab/.env on first run, print /setup URL"
+git commit -m "feat(serve): self-bootstrap MCP token + ~/.labby/.env on first run, print /setup URL"
 ```
 
 ---
@@ -415,18 +415,18 @@ Expected: `checked N docs artifacts: fresh`. Stage the changed `docs/generated/*
 
 - [ ] **Step 2: Document the first-run flow in CONFIG.md**
 
-In `docs/runtime/CONFIG.md`, add a short subsection near the `~/.lab/.env` description:
+In `docs/runtime/CONFIG.md`, add a short subsection near the `~/.labby/.env` description:
 
 ```markdown
 ### First-run bootstrap
 
 On first run, `labby serve` detects a missing MCP token (no `LAB_MCP_HTTP_TOKEN`
 and `LAB_AUTH_MODE` != `oauth`) and self-bootstraps: it generates a 64-char hex
-bearer token, writes a minimal `~/.lab/.env` (token + loopback MCP defaults via
+bearer token, writes a minimal `~/.labby/.env` (token + loopback MCP defaults via
 the atomic `env_merge` path), prints the token and the `http://<host>:<port>/setup`
 URL once, and continues startup. The web `/setup` wizard then owns all further
 configuration. Set `LAB_MCP_HTTP_TOKEN` or `LAB_AUTH_MODE=oauth` beforehand to
-opt out. The generated `~/.lab/.env` is written `0600` on Unix; **Windows ACL
+opt out. The generated `~/.labby/.env` is written `0600` on Unix; **Windows ACL
 hardening is still pending** (`env_merge::set_secure_perms` is a no-op on
 non-unix), so on Windows the token file sits at default ACLs. The
 `setup.bootstrap` action exposes this primitive to the wizard and CLI.
@@ -438,7 +438,7 @@ In `CHANGELOG.md` under `## [Unreleased]` (or a new patch heading per the repo's
 
 ```markdown
 - **First-run `labby serve` self-bootstrap** — generates an MCP bearer token and
-  a minimal `~/.lab/.env`, then prints the `/setup` URL, so a fresh headless
+  a minimal `~/.labby/.env`, then prints the `/setup` URL, so a fresh headless
   install is reachable without hand-editing config. New `setup.bootstrap` and
   `setup.token.generate` dispatch actions back it.
 ```

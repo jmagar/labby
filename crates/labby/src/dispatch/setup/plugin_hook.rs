@@ -3,7 +3,7 @@
 //! Hooks should call into `labby setup plugin-hook` instead of carrying their
 //! own per-plugin shell bootstrap. This module inspects and repairs local
 //! filesystem prerequisites, syncs CLAUDE_PLUGIN_OPTION_* env vars into
-//! ~/.lab/.env, exports current .env values as plugin field names, and
+//! ~/.labby/.env, exports current .env values as plugin field names, and
 //! validates connectivity to the lab MCP server.
 
 use std::collections::HashMap;
@@ -153,7 +153,7 @@ pub fn run(mode: Mode) -> Result<SetupReport, ToolError> {
     run_for_paths(mode, lab_home(), env_path())
 }
 
-/// Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.lab/.env.
+/// Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.labby/.env.
 ///
 /// Only non-empty options are written; existing .env values are preserved
 /// when the corresponding option var is absent or empty.
@@ -180,7 +180,7 @@ pub fn sync_plugin_env_to(env: PathBuf) -> Result<PluginSyncOutcome, ToolError> 
         });
     }
 
-    // Ensure ~/.lab/ and ~/.lab/.env exist before merging.
+    // Ensure ~/.labby/ and ~/.labby/.env exist before merging.
     if let Some(parent) = env.parent() {
         fs::create_dir_all(parent).map_err(|e| ToolError::Sdk {
             sdk_kind: "setup_repair_failed".into(),
@@ -219,7 +219,7 @@ pub fn sync_plugin_env_to(env: PathBuf) -> Result<PluginSyncOutcome, ToolError> 
     })
 }
 
-/// Read ~/.lab/.env and return current values keyed by userConfig field name.
+/// Read ~/.labby/.env and return current values keyed by userConfig field name.
 /// Sensitive values are redacted to `"***"`.
 pub fn export_plugin_env() -> Result<PluginExportOutcome, ToolError> {
     export_plugin_env_from(env_path())

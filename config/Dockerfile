@@ -153,20 +153,20 @@ RUN curl -LsSf https://astral.sh/uv/install.sh \
  && uvx --version
 
 # Pre-create XDG directories so the binary never needs mkdir at runtime.
-#   ~/.local/state/lab  — master.lock and runtime state
-#   ~/.local/share/lab  — SQLite databases (node log, registry, auth)
-#   ~/.config/lab       — config.toml (mounted read-only from host)
+#   ~/.local/state/labby  — master.lock and runtime state
+#   ~/.local/share/labby  — SQLite databases (node log, registry, auth)
+#   ~/.config/labby       — config.toml (mounted read-only from host)
 RUN mkdir -p \
-      /home/lab/.config/lab \
-      /home/lab/.local/state/lab \
-      /home/lab/.local/share/lab \
- && chown -R 1000:1000 /home/lab
+      /home/labby/.config/labby \
+      /home/labby/.local/state/labby \
+      /home/labby/.local/share/labby \
+ && chown -R 1000:1000 /home/labby
 
 COPY --from=builder /build/target/release/labby /usr/local/bin/labby
 
-ENV HOME=/home/lab
+ENV HOME=/home/labby
 USER 1000:1000
-WORKDIR /home/lab
+WORKDIR /home/labby
 
 # Default HTTP port.  Override with LAB_MCP_HTTP_PORT env var or config.toml.
 EXPOSE 8765

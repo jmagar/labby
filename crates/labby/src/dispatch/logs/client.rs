@@ -156,7 +156,7 @@ fn unique_test_store_path() -> PathBuf {
 
 // ── Config resolvers ──────────────────────────────────────────────────────────
 
-const DEFAULT_DB_PATH_REL: &str = ".lab/logs.db";
+const DEFAULT_DB_PATH_REL: &str = ".labby/logs.db";
 
 pub fn resolve_store_path(config: Option<&LabConfig>) -> PathBuf {
     if let Some(env) = env_non_empty("LAB_LOCAL_LOGS_STORE_PATH") {

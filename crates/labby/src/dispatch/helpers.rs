@@ -19,15 +19,15 @@ use crate::dispatch::error::ToolError;
 pub use labby_runtime::path_safety::reject_path_traversal;
 
 #[cfg(test)]
-static TEST_LAB_HOME: OnceLock<Mutex<Option<std::path::PathBuf>>> = OnceLock::new();
+static TEST_LABBY_HOME: OnceLock<Mutex<Option<std::path::PathBuf>>> = OnceLock::new();
 
 #[cfg(test)]
 pub(crate) fn set_test_lab_home(path: Option<std::path::PathBuf>) {
-    let slot = TEST_LAB_HOME.get_or_init(|| Mutex::new(None));
+    let slot = TEST_LABBY_HOME.get_or_init(|| Mutex::new(None));
     *slot.lock().expect("test lab home lock") = path;
 }
 
-/// Resolve the lab home directory: `$LAB_HOME` if set, else `$HOME/.lab/`.
+/// Resolve the lab home directory: `$LABBY_HOME` if set, else `$HOME/.labby/`.
 ///
 /// Lives in `helpers` (a leaf module) rather than `setup` so peer services
 /// can resolve the path without importing the `setup` orchestrator — see
@@ -35,7 +35,7 @@ pub(crate) fn set_test_lab_home(path: Option<std::path::PathBuf>) {
 #[must_use]
 pub fn lab_home() -> std::path::PathBuf {
     #[cfg(test)]
-    if let Some(path) = TEST_LAB_HOME
+    if let Some(path) = TEST_LABBY_HOME
         .get_or_init(|| Mutex::new(None))
         .lock()
         .expect("test lab home lock")
@@ -43,22 +43,22 @@ pub fn lab_home() -> std::path::PathBuf {
     {
         return path;
     }
-    if let Ok(home) = std::env::var("LAB_HOME")
+    if let Ok(home) = std::env::var("LABBY_HOME")
         && !home.is_empty()
     {
         return std::path::PathBuf::from(home);
     }
     match std::env::var("HOME") {
-        Ok(home) if !home.is_empty() => std::path::PathBuf::from(home).join(".lab"),
+        Ok(home) if !home.is_empty() => std::path::PathBuf::from(home).join(".labby"),
         // Fail closed: never anchor token/secret/artifact/DB storage to the
         // process CWD (CWE-426/377). For a daemon the CWD is attacker-influenced
         // and non-durable, so derive a fixed absolute location under the system
         // temp dir instead and WARN so the misconfiguration is visible.
         _ => {
-            let fallback = std::env::temp_dir().join("lab");
+            let fallback = std::env::temp_dir().join("labby");
             tracing::warn!(
                 fallback = %fallback.display(),
-                "neither LAB_HOME nor HOME is set; using a temp-dir fallback for lab home instead of the process CWD"
+                "neither LABBY_HOME nor HOME is set; using a temp-dir fallback for lab home instead of the process CWD"
             );
             fallback
         }
@@ -70,7 +70,7 @@ pub fn lab_home() -> std::path::PathBuf {
 /// the OS username.
 ///
 /// Preserves per-runtime subdirs (`~/.claude/plugins/` vs `~/.codex/plugins/`
-/// vs `~/.lab/bin/<agent_id>/` remain distinguishable). Safe on any input:
+/// vs `~/.labby/bin/<agent_id>/` remain distinguishable). Safe on any input:
 /// if `HOME` is unset or the path doesn't sit under it, the input is
 /// returned unchanged.
 ///

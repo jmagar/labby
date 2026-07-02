@@ -84,7 +84,7 @@ Returned receipt:
 ```json
 {
   "path": "axon/axum-timeout.md",
-  "absolute_path": "~/.lab/code-mode-artifacts/01J.../axon/axum-timeout.md",
+  "absolute_path": "~/.labby/code-mode-artifacts/01J.../axon/axum-timeout.md",
   "content_type": "text/markdown",
   "bytes": 18342,
   "sha256": "8b4f..."
@@ -97,7 +97,7 @@ only in `absolute_path`.)
 Rules:
 
 - Artifact writes are host-brokered through the runner protocol; JavaScript does not get raw filesystem access.
-- Root is `$LAB_HOME/code-mode-artifacts/<run_id>/` or `$HOME/.lab/code-mode-artifacts/<run_id>/`.
+- Root is `$LABBY_HOME/code-mode-artifacts/<run_id>/` or `$HOME/.labby/code-mode-artifacts/<run_id>/`.
 - `path` must be a non-empty relative path: it cannot be absolute and cannot contain `..` (both checked after `\`→`/` normalization), and the joined destination must resolve within the per-run root (no symlinked-ancestor escape).
 - `content` must be a string.
 - `options.contentType` is optional and defaults to `text/plain`.
@@ -389,7 +389,7 @@ fn truncation_preserves_artifact_receipts() {
         logs: vec![],
         artifacts: vec![CodeModeArtifactReceipt {
             path: "brief.md".to_string(),
-            absolute_path: "~/.lab/code-mode-artifacts/run/brief.md".to_string(),
+            absolute_path: "~/.labby/code-mode-artifacts/run/brief.md".to_string(),
             content_type: "text/markdown".to_string(),
             bytes: 10_000,
             sha256: "a".repeat(64),
@@ -810,7 +810,7 @@ fn code_mode_artifact_root_uses_run_id_under_lab_home() {
     let root = code_mode_artifact_root("01JTEST");
     let text = root.display().to_string();
 
-    assert!(text.ends_with(".lab/code-mode-artifacts/01JTEST") || text.ends_with("lab/code-mode-artifacts/01JTEST"));
+    assert!(text.ends_with(".labby/code-mode-artifacts/01JTEST") || text.ends_with("lab/code-mode-artifacts/01JTEST"));
 }
 ```
 
@@ -983,7 +983,7 @@ Expected shape:
   "ok": true,
   "artifact": {
     "path": "smoke/hello.md",
-    "absolute_path": "~/.lab/code-mode-artifacts/...",
+    "absolute_path": "~/.labby/code-mode-artifacts/...",
     "content_type": "text/markdown",
     "bytes": 26,
     "sha256": "..."
@@ -1083,7 +1083,7 @@ async () => {
 }
 ```
 
-The final return value is still subject to `[code_mode].max_response_bytes` and `[code_mode].max_response_tokens`. Artifacts are written under `$LAB_HOME/code-mode-artifacts/<run_id>/` and the receipt includes the path, byte count, content type, and SHA-256 digest.
+The final return value is still subject to `[code_mode].max_response_bytes` and `[code_mode].max_response_tokens`. Artifacts are written under `$LABBY_HOME/code-mode-artifacts/<run_id>/` and the receipt includes the path, byte count, content type, and SHA-256 digest.
 ```
 
 - [ ] **Step 2: Update the Axon fanout snippet return**
@@ -1171,12 +1171,12 @@ const artifact = await writeArtifact("reports/brief.md", markdown, {
 return { artifact, summary: "Brief generated" };
 ```
 
-Artifacts are host-brokered writes, not direct sandbox filesystem access. The runner emits an artifact request, Labby validates the relative path, writes the content under `$LAB_HOME/code-mode-artifacts/<run_id>/`, and returns a receipt:
+Artifacts are host-brokered writes, not direct sandbox filesystem access. The runner emits an artifact request, Labby validates the relative path, writes the content under `$LABBY_HOME/code-mode-artifacts/<run_id>/`, and returns a receipt:
 
 ```json
 {
   "path": "reports/brief.md",
-  "absolute_path": "~/.lab/code-mode-artifacts/01J.../reports/brief.md",
+  "absolute_path": "~/.labby/code-mode-artifacts/01J.../reports/brief.md",
   "content_type": "text/markdown",
   "bytes": 18342,
   "sha256": "..."
@@ -1199,7 +1199,7 @@ Expected:
 ```text
 docs/runtime/CONFIG.md:...:#### Code Mode Artifacts
 docs/runtime/CONFIG.md:...:const artifact = await writeArtifact
-docs/runtime/CONFIG.md:...:$LAB_HOME/code-mode-artifacts
+docs/runtime/CONFIG.md:...:$LABBY_HOME/code-mode-artifacts
 ```
 
 - [ ] **Step 3: Commit**
@@ -1287,7 +1287,7 @@ Expected:
   "topic": "Axum request timeout middleware",
   "artifact": {
     "path": "axon/axum-timeout-smoke.md",
-    "absolute_path": "~/.lab/code-mode-artifacts/...",
+    "absolute_path": "~/.labby/code-mode-artifacts/...",
     "content_type": "text/markdown",
     "bytes": 1000,
     "sha256": "..."

@@ -67,6 +67,15 @@ fn start_event(ts: i64) -> LogEvent {
     .expect("valid LogEvent fixture")
 }
 
+fn code_mode_event(ts: i64, calls: serde_json::Value) -> LogEvent {
+    let mut event = call_event(ts, "mcp", "code_mode", true, 900, 90, 300);
+    event.fields_json["call_count"] = calls
+        .as_array()
+        .map_or(json!(0), |items| json!(items.len()));
+    event.fields_json["code_mode_calls"] = calls;
+    event
+}
+
 fn sample(now: i64) -> Vec<LogEvent> {
     vec![
         call_event(now - 1000, "mcp", "radarr", true, 120, 80, 400),
@@ -353,6 +362,29 @@ fn tier_two_fields_populate_actor_ip_and_code_mode_metrics() {
     device_call.fields_json["agent_kind"] = json!("device");
     device_call.fields_json["ip"] = json!("10.0.0.8");
     device_call.fields_json["call_count"] = json!(3);
+    device_call.fields_json["code_mode_calls"] = json!([
+        {
+            "id": "github::get_me",
+            "namespace": "github",
+            "tool": "get_me",
+            "ok": true,
+            "elapsed_ms": 30
+        },
+        {
+            "id": "cortex::cortex",
+            "namespace": "cortex",
+            "tool": "cortex",
+            "ok": true,
+            "elapsed_ms": 40
+        },
+        {
+            "id": "cortex::cortex",
+            "namespace": "cortex",
+            "tool": "cortex",
+            "ok": true,
+            "elapsed_ms": 50
+        }
+    ]);
     device_call.fields_json["artifact_writes"] = json!(2);
     device_call.fields_json["truncated"] = json!(true);
 
@@ -381,4 +413,100 @@ fn tier_two_fields_populate_actor_ip_and_code_mode_metrics() {
     assert_eq!(m.fan_out.artifact_writes, 2);
     assert_eq!(m.agents_seen.new, 1);
     assert_eq!(m.agents_seen.returning, 1);
+}
+
+#[test]
+fn dashboard_tool_usage_expands_code_mode_children_and_excludes_wrappers() {
+    let now = 1_000_000_000_000;
+    let code_mode = code_mode_event(
+        now - 1000,
+        json!([
+            {
+                "id": "github::get_me",
+                "namespace": "github",
+                "tool": "get_me",
+                "ok": true,
+                "elapsed_ms": 20
+            },
+            {
+                "id": "cortex::cortex",
+                "namespace": "cortex",
+                "tool": "cortex",
+                "ok": false,
+                "elapsed_ms": 50,
+                "error_kind": "upstream_error"
+            },
+            {
+                "id": "cortex::cortex",
+                "namespace": "cortex",
+                "tool": "cortex",
+                "ok": true,
+                "elapsed_ms": 30
+            }
+        ]),
+    );
+    let gateway = call_event(now - 2000, "api", "gateway", true, 5, 10, 20);
+    let logs = call_event(now - 3000, "api", "logs", true, 5, 10, 20);
+
+    let m = aggregate(&[code_mode, gateway, logs], MetricsWindow::H24, now);
+
+    assert_eq!(m.tool_calls.total, 3);
+    assert_eq!(m.tool_calls.failed, 1);
+    assert_eq!(m.fan_out.runs, 1);
+    assert_eq!(m.fan_out.total_calls, 3);
+    assert_eq!(m.tools.distinct, 2);
+    assert_eq!(
+        m.tools
+            .top
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["cortex::cortex", "github::get_me"]
+    );
+    assert!(
+        m.tools
+            .top
+            .iter()
+            .chain(m.tools.least.iter())
+            .all(|tool| !matches!(
+                tool.name.as_str(),
+                "code_mode" | "codemode" | "gateway" | "logs"
+            ))
+    );
+    assert_eq!(m.upstreams[0].name, "cortex");
+}
+
+#[test]
+fn tool_call_explorer_lists_code_mode_child_calls() {
+    let now = 1_000_000_000_000;
+    let code_mode = code_mode_event(
+        now - 1000,
+        json!([
+            {
+                "id": "github::get_me",
+                "namespace": "github",
+                "tool": "get_me",
+                "ok": true,
+                "elapsed_ms": 20
+            },
+            {
+                "id": "cortex::cortex",
+                "namespace": "cortex",
+                "tool": "cortex",
+                "ok": true,
+                "elapsed_ms": 30
+            }
+        ]),
+    );
+    let logs = call_event(now - 3000, "api", "logs", true, 5, 10, 20);
+
+    let page = tool_calls(&[code_mode, logs], &query(None, None, None));
+
+    assert_eq!(page.total, 2);
+    assert_eq!(page.filtered, 2);
+    assert_eq!(
+        page.facets.tools,
+        vec!["cortex::cortex".to_string(), "github::get_me".to_string()]
+    );
+    assert!(page.calls.iter().all(|call| call.tool != "logs"));
 }

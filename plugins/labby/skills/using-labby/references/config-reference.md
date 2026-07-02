@@ -1,6 +1,6 @@
 # Configuration Reference
 
-Config lives in `~/.lab/.env`. Loaded at startup by `crates/lab/src/config.rs`.
+Config lives in `~/.labby/.env`. Loaded at startup by `crates/lab/src/config.rs`.
 
 Runtime gateway settings live in `config.toml`; verify exact fields against
 `crates/lab/src/config.rs` before editing.

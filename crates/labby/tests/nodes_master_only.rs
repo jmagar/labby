@@ -190,7 +190,7 @@ fn role_resolution_no_controller_defaults_to_master() {
 fn config_with_controller_makes_different_host_a_node() {
     let config = LabConfig {
         node: Some(NodePreferences {
-            controller: Some("controller.lab".to_string()),
+            controller: Some("controller.labby".to_string()),
             log_retention_days: None,
             role: None,
         }),
@@ -208,13 +208,13 @@ fn config_with_controller_makes_different_host_a_node() {
 fn config_with_controller_makes_same_host_the_master() {
     let config = LabConfig {
         node: Some(NodePreferences {
-            controller: Some("controller.lab".to_string()),
+            controller: Some("controller.labby".to_string()),
             log_retention_days: None,
             role: None,
         }),
         ..LabConfig::default()
     };
-    let resolved = resolve_runtime_role_from_config("controller.lab", &config, None).unwrap();
+    let resolved = resolve_runtime_role_from_config("controller.labby", &config, None).unwrap();
     assert!(
         matches!(resolved.role, NodeRole::Master),
         "host matching configured controller should be Master, got {:?}",
@@ -226,7 +226,7 @@ fn config_with_controller_makes_same_host_the_master() {
 fn explicit_role_node_override_with_different_controller_is_non_master() {
     let config = LabConfig {
         node: Some(NodePreferences {
-            controller: Some("controller.lab".to_string()),
+            controller: Some("controller.labby".to_string()),
             log_retention_days: None,
             role: None,
         }),
@@ -247,7 +247,7 @@ fn explicit_role_node_override_with_different_controller_is_non_master() {
 fn explicit_role_controller_override_forces_master() {
     let config = LabConfig {
         node: Some(NodePreferences {
-            controller: Some("controller.lab".to_string()),
+            controller: Some("controller.labby".to_string()),
             log_retention_days: None,
             role: None,
         }),

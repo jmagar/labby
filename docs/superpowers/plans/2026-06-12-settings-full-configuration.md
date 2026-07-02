@@ -402,7 +402,7 @@ pub fn settings_fields() -> Vec<SettingsFieldSpec> {
         editable("core", "LAB_LOG", "Log filter", "Tracing filter directive.", SettingsBackend::Env, SettingsControl::Text, SettingsApplyMode::Restart, None, Some("labby=info,lab_apis=warn")),
         editable("core", "LAB_LOG_FORMAT", "Log format", "Set json for structured logs.", SettingsBackend::Env, SettingsControl::Enum, SettingsApplyMode::Restart, None, Some("json")),
         editable("core", "output.format", "CLI output format", "Default CLI output format when --json is not supplied.", SettingsBackend::ConfigToml, SettingsControl::Text, SettingsApplyMode::Restart, None, Some("human")),
-        editable("core", "workspace.root", "Workspace root", "Root directory used by fs browsing and stash workspaces.", SettingsBackend::ConfigToml, SettingsControl::Text, SettingsApplyMode::Restart, None, Some("~/.lab/stash")),
+        editable("core", "workspace.root", "Workspace root", "Root directory used by fs browsing and stash workspaces.", SettingsBackend::ConfigToml, SettingsControl::Text, SettingsApplyMode::Restart, None, Some("~/.labby/stash")),
         editable("core", "mcpregistry.url", "MCP Registry URL", "Upstream MCP Registry base URL.", SettingsBackend::ConfigToml, SettingsControl::Url, SettingsApplyMode::Restart, None, Some("https://registry.modelcontextprotocol.io")),
         enum_editable("surfaces", "mcp.transport", "MCP transport", "Default MCP transport.", SettingsApplyMode::Restart, vec![SettingsOption { value: "http", label: "HTTP" }, SettingsOption { value: "stdio", label: "stdio" }], Some("http")),
         editable("surfaces", "mcp.host", "MCP HTTP host", "TOML default for HTTP MCP host; LAB_MCP_HTTP_HOST overrides it.", SettingsBackend::ConfigToml, SettingsControl::Text, SettingsApplyMode::Restart, Some("LAB_MCP_HTTP_HOST"), Some("127.0.0.1")),
@@ -1513,7 +1513,7 @@ settingsState(section = 'core', signal?: AbortSignal): Promise<SettingsState> {
 settingsConfigUpdate(section: string, entries: SettingsUpdateEntry[], signal?: AbortSignal): Promise<SettingsMutationOutcome> {
   if (USE_MOCK_DATA) {
     signal?.throwIfAborted?.()
-    return Promise.resolve({ state: mockSettingsState(section, entries), backup_path: '~/.config/lab/config.toml.bak.mock' })
+    return Promise.resolve({ state: mockSettingsState(section, entries), backup_path: '~/.config/labby/config.toml.bak.mock' })
   }
   return setupAction<SettingsMutationOutcome>('settings.config.update', { section, entries }, signal)
 },
@@ -1565,8 +1565,8 @@ function mockSettingsState(section: string, updates: SettingsUpdateEntry[] = [])
   for (const update of updates) values[update.key] = update.value
   return {
     schema_version: 1,
-    config_path: '~/.config/lab/config.toml',
-    env_path: '~/.lab/.env',
+    config_path: '~/.config/labby/config.toml',
+    env_path: '~/.labby/.env',
     section,
     values,
     sources: {
@@ -2184,8 +2184,8 @@ Create or update `docs/runtime/CONFIG.md`:
 Lab reads configuration from three layers, highest precedence first:
 
 1. CLI flags and process environment variables.
-2. `~/.lab/.env`.
-3. `config.toml`, searched from current directory, `~/.lab/config.toml`, then `~/.config/lab/config.toml`.
+2. `~/.labby/.env`.
+3. `config.toml`, searched from current directory, `~/.labby/config.toml`, then `~/.config/labby/config.toml`.
 
 `/settings` exposes this precedence explicitly. When an environment variable overrides a `config.toml` field, the UI warns that changing the TOML value will not affect the current runtime until the env override is removed.
 
@@ -2244,13 +2244,13 @@ Run:
 
 ```bash
 TMP_HOME=$(mktemp -d)
-mkdir -p "$TMP_HOME/.lab"
+mkdir -p "$TMP_HOME/.labby"
 HOME="$TMP_HOME" cargo run --all-features -- --json setup --smoke >/tmp/settings-state-smoke.json
 ```
 
 Expected:
 - Existing setup state smoke returns JSON with `first_run`.
-- No real `~/.lab` files are modified.
+- No real `~/.labby` files are modified.
 
 - [ ] **Step 6: Run mandatory HTTP settings smoke if dev server is available**
 

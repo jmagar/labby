@@ -12,6 +12,7 @@ pub mod gateway;
 pub mod health;
 pub mod help;
 pub mod helpers;
+pub mod incus;
 #[cfg(feature = "gateway")]
 pub mod internal;
 pub mod logs;
@@ -26,6 +27,7 @@ pub mod setup;
 pub mod snippets;
 pub mod stash;
 pub mod style;
+pub mod update;
 
 #[cfg(feature = "deploy")]
 pub mod deploy;
@@ -82,6 +84,10 @@ pub enum Command {
     Health,
     /// Bootstrap the supported Incus Labby gateway container.
     Setup(setup::SetupArgs),
+    /// Manage the supported Incus Labby gateway container.
+    Incus(incus::IncusArgs),
+    /// Update labby from the latest GitHub release.
+    Update(update::UpdateArgs),
     /// Generate shell completions.
     Completions(completions::CompletionsArgs),
     /// Manage proxied upstream MCP gateways.
@@ -120,6 +126,8 @@ pub async fn dispatch(cli: Cli, config: LabConfig) -> Result<ExitCode> {
         Command::Nodes(args) => nodes::run(args, format, &config).await,
         Command::Health => health::run(format).await,
         Command::Setup(args) => setup::run(args, format).await,
+        Command::Incus(args) => incus::run(args, format).await,
+        Command::Update(args) => update::run(args, format).await,
         Command::Completions(args) => completions::run(&args),
         #[cfg(feature = "gateway")]
         Command::Gateway(args) => gateway::run(args, format, &config).await,
@@ -178,6 +186,26 @@ mod tests {
             Command::Doctor(doctor::DoctorArgs {
                 check: Some(doctor::DoctorCheck::System)
             })
+        ));
+    }
+
+    #[test]
+    fn cli_accepts_top_level_incus_sync() {
+        let cli = Cli::parse_from(["labby", "incus", "sync"]);
+        assert!(matches!(
+            cli.command,
+            Command::Incus(incus::IncusArgs {
+                command: incus::IncusCommand::Sync(_)
+            })
+        ));
+    }
+
+    #[test]
+    fn cli_accepts_update_default() {
+        let cli = Cli::parse_from(["labby", "update"]);
+        assert!(matches!(
+            cli.command,
+            Command::Update(update::UpdateArgs { .. })
         ));
     }
 

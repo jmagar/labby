@@ -62,7 +62,7 @@ Investigate why Codex could not keep `axon` and `syslog` MCP servers connected t
 
 - `codex mcp login axon` / `codex mcp login syslog`: completed browser login, then exposed route/audience drift during startup.
 - `curl https://mcp.example.com/.well-known/oauth-protected-resource/{axon,syslog}`: confirmed route resources and scopes.
-- `sqlite3 /home/jmagar/.lab/auth.db ... refresh_tokens ...`: confirmed stored refresh-token resources were route-specific.
+- `sqlite3 /home/jmagar/.labby/auth.db ... refresh_tokens ...`: confirmed stored refresh-token resources were route-specific.
 - `docker inspect axon ...`: confirmed running Axon env had the wrong Google OAuth client before correction.
 - `docker compose --env-file /home/jmagar/.axon/.env -f docker-compose.yaml up -d --no-deps --force-recreate axon`: recreated Axon with corrected env.
 - `cargo test -p lab-auth token_endpoint_refresh_grant --all-features`: ran focused regression coverage.

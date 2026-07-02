@@ -23,7 +23,7 @@ Fix a misleading probe error message shown for the qdrant virtual server, then e
 - Polished gateway list view: removed status text labels, simplified warning badge, updated lab server endpoint display
 - Documented a comprehensive gateway detail page redesign spec and created 9 tracking beads
 - Identified and analyzed the virtual server architecture as fundamentally broken; designed the replacement (in-process MCP peers)
-- Fixed `~/.lab/config.toml`: removed recursive plex upstream, fixed github-chat missing args
+- Fixed `~/.labby/config.toml`: removed recursive plex upstream, fixed github-chat missing args
 - Killed 26 orphaned lab processes left from the infinite recursion bug
 
 ---
@@ -43,7 +43,7 @@ Fix a misleading probe error message shown for the qdrant virtual server, then e
 11. Created 9 beads covering all UI changes and the architecture refactor
 12. User shared server logs showing infinite recursion (lab spawning itself for plex gateway) and 20+ orphaned processes
 13. Identified two bugs in logs: infinite recursion (plex upstream), github-chat empty args, discovery running 3-4x
-14. Removed plex upstream from `~/.lab/config.toml`, fixed github-chat args to `["github-chat-mcp"]`
+14. Removed plex upstream from `~/.labby/config.toml`, fixed github-chat args to `["github-chat-mcp"]`
 15. Force-killed all 26 orphaned `target/debug/lab` processes
 
 ---
@@ -53,8 +53,8 @@ Fix a misleading probe error message shown for the qdrant virtual server, then e
 - `gateway-adapter.ts:297` — `humanizeProbeError` was called on ALL `view.warnings` in `normalizeServerView`, including `lab_service` warnings whose raw error strings contain `url (...)` from reqwest, triggering the wrong MCP-specific message
 - `manager.rs:1744-1747` — `discovered_resource_count`, `exposed_resource_count`, `discovered_prompt_count`, `exposed_prompt_count` are hardcoded to `0` for all virtual servers
 - `manager.rs:1718-1719` — virtual server tool counts read from `virtual_server_tool_registry()` (local ToolRegistry), not via MCP discovery
-- `~/.lab/config.toml:68-71` — plex upstream was configured as `command = "lab" args = ["serve", "--services", "radarr", "mcp", "--stdio"]`, causing lab to spawn itself recursively; 20 generations spawned before detection
-- `~/.lab/config.toml:62-64` — github-chat had `args = []`, meaning `uvx` ran with no arguments, printed help text to stdout, causing serde parse failure on the MCP initialize response
+- `~/.labby/config.toml:68-71` — plex upstream was configured as `command = "lab" args = ["serve", "--services", "radarr", "mcp", "--stdio"]`, causing lab to spawn itself recursively; 20 generations spawned before detection
+- `~/.labby/config.toml:62-64` — github-chat had `args = []`, meaning `uvx` ran with no arguments, printed help text to stdout, causing serde parse failure on the MCP initialize response
 - `pool.rs` — custom upstreams run full MCP handshake (initialize + list_tools + list_resources + list_prompts); virtual servers do not
 - Discovery running 3-4x per server in logs — likely a reprobe timer stacking bug, not investigated this session
 
@@ -79,7 +79,7 @@ Fix a misleading probe error message shown for the qdrant virtual server, then e
 | `apps/gateway-admin/components/gateway/warnings-pill.tsx` | Changed `{N} issue(s)` to `{N}` |
 | `apps/gateway-admin/lib/api/gateway-mobile.ts` | Changed lab service endpoint preview from `"<name> virtual server"` to `` `lab serve mcp --stdio --services ${gateway.name}` `` |
 | `apps/gateway-admin/docs/gateway-detail-redesign.md` | New file — comprehensive redesign spec for the gateway detail page |
-| `~/.lab/config.toml` | Removed plex upstream block; fixed github-chat `args: [] → ["github-chat-mcp"]` |
+| `~/.labby/config.toml` | Removed plex upstream block; fixed github-chat `args: [] → ["github-chat-mcp"]` |
 
 ---
 

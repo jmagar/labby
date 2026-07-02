@@ -1,7 +1,7 @@
 //! Path resolution helpers + cached registry views for the `setup`
 //! dispatch service.
 //!
-//! Honors `LAB_HOME` for tests; defaults to `~/.lab/` in production. The
+//! Honors `LABBY_HOME` for tests; defaults to `~/.labby/` in production. The
 //! registry-derived caches live here so dispatch and secret_mask don't
 //! rebuild them on every call.
 

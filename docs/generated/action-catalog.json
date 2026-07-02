@@ -3160,7 +3160,7 @@
   {
     "service": "marketplace",
     "action": "agent.install",
-    "description": "Install an ACP agent on one or more devices. Local installs write a provider entry to `~/.lab/acp-providers.json`; binary archives are downloaded only over HTTPS, SHA-256 verified, size-limited, and installed atomically.",
+    "description": "Install an ACP agent on one or more devices. Local installs write a provider entry to `~/.labby/acp-providers.json`; binary archives are downloaded only over HTTPS, SHA-256 verified, size-limited, and installed atomically.",
     "destructive": true,
     "params": [
       {
@@ -3221,7 +3221,7 @@
   {
     "service": "marketplace",
     "action": "agent.uninstall",
-    "description": "Remove an installed ACP agent entry from `~/.lab/acp-providers.json`",
+    "description": "Remove an installed ACP agent entry from `~/.labby/acp-providers.json`",
     "destructive": true,
     "params": [
       {
@@ -3702,7 +3702,7 @@
   {
     "service": "marketplace",
     "action": "mcp.install",
-    "description": "Install an MCP server from the registry to Lab gateway upstreams and/or Claude/Codex MCP clients on fleet devices. HTTP servers are added as remote URLs; stdio servers are added as command configs. Required env vars are written to ~/.lab/.env for gateway installs and embedded in the MCP client config for client installs.",
+    "description": "Install an MCP server from the registry to Lab gateway upstreams and/or Claude/Codex MCP clients on fleet devices. HTTP servers are added as remote URLs; stdio servers are added as command configs. Required env vars are written to ~/.labby/.env for gateway installs and embedded in the MCP client config for client installs.",
     "destructive": true,
     "params": [
       {
@@ -4442,7 +4442,7 @@
   {
     "service": "setup",
     "action": "bootstrap",
-    "description": "Create ~/.lab/.env with a generated token + loopback defaults when absent (first-run)",
+    "description": "Create ~/.labby/.env with a generated token + loopback defaults when absent (first-run)",
     "destructive": false,
     "params": [],
     "returns": "BootstrapOutcome",
@@ -4738,7 +4738,7 @@
   {
     "service": "setup",
     "action": "plugin_export",
-    "description": "Read ~/.lab/.env and return current values keyed by userConfig field name",
+    "description": "Read ~/.labby/.env and return current values keyed by userConfig field name",
     "destructive": false,
     "params": [],
     "returns": "PluginExportOutcome",
@@ -4781,7 +4781,7 @@
   {
     "service": "setup",
     "action": "plugin_sync",
-    "description": "Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.lab/.env as LAB_* vars",
+    "description": "Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.labby/.env as LAB_* vars",
     "destructive": true,
     "params": [],
     "returns": "PluginSyncOutcome",
@@ -5168,7 +5168,7 @@
   {
     "service": "snippets",
     "action": "snippets.create",
-    "description": "Create a user snippet under LAB_HOME/snippets",
+    "description": "Create a user snippet under LABBY_HOME/snippets",
     "destructive": false,
     "params": [
       {

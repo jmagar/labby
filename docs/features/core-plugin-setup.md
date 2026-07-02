@@ -52,7 +52,7 @@ The first acceptance criterion below is to reopen the three premature closures a
 - [ ] `lab-bg3e.3`, `.4`, `.5` reopened with comments noting close-without-land. Spec's "Implementation Notes" updated to read "Phases 1+2 shipped; phases 3–5 in progress."
 
 ### Wizard modes
-- [ ] `setup.state` (already specced in bg3e.3) gains a `mode: "plugin" | "full"` field. Mode is set by the wizard URL (`?mode=plugin` or `?mode=full`) and persisted to `~/.lab/.setup-state.json` so re-runs remember the user's choice.
+- [ ] `setup.state` (already specced in bg3e.3) gains a `mode: "plugin" | "full"` field. Mode is set by the wizard URL (`?mode=plugin` or `?mode=full`) and persisted to `~/.labby/.setup-state.json` so re-runs remember the user's choice.
 - [ ] **`plugin` mode** renders only:
   - Step 1 (Welcome) — one-line copy: "Configure the services you've installed plugins for."
   - Step 4 (Services) — only the services for which a plugin is installed (queried via `setup.installed_plugins`). Other services are hidden, not just collapsed.
@@ -60,7 +60,7 @@ The first acceptance criterion below is to reopen the three premature closures a
   - Steps 2 (Core Config), 3 (PreFlight 1), 5 (Surfaces), 6 (PreFlight 2) are skipped in plugin mode. The stepper compresses to a 3-dot strip.
 - [ ] **`full` mode** renders the complete 7-step flow per the locked bg3e spec. No change to existing behavior.
 - [ ] Both modes share the same components, hooks, and API. Mode is checked in the parent wizard shell; individual step components do not branch on mode.
-- [ ] Plugin mode shows a **"Show advanced setup"** affordance in the topbar. Clicking it switches to full mode in place (no reload), unlocks the hidden steps, and persists the new mode. There is no demote-to-plugin affordance — once a user has explicitly opted into operator complexity, they keep it. (They can edit `~/.lab/.setup-state.json` to undo this; intentional friction.)
+- [ ] Plugin mode shows a **"Show advanced setup"** affordance in the topbar. Clicking it switches to full mode in place (no reload), unlocks the hidden steps, and persists the new mode. There is no demote-to-plugin affordance — once a user has explicitly opted into operator complexity, they keep it. (They can edit `~/.labby/.setup-state.json` to undo this; intentional friction.)
 - [ ] `labby setup --mode plugin` and `labby setup --mode full` are CLI flags. The slash command `/setup-core` (shipped by the core plugin) invokes `labby setup --mode plugin`. Standalone `labby setup` defaults to `full`.
 - [ ] The `/settings` rail follows the same gate: in plugin mode, only the Services panel is visible; Core/Doctor/Extract/v2-stubs are hidden behind the same advanced affordance.
 
@@ -322,9 +322,9 @@ CLI shims honor `-y` / `--no-confirm` / `--dry-run` per `crates/lab/src/cli/CLAU
 4. `labby marketplace generate` ergonomics. Should it default to writing into a sibling repo (e.g. `../lab-marketplace/`) when run from the workspace? Proposal: no — explicit `--out` only. CI ergonomics live in the release workflow.
 5. Whether the env-aware `lab help` filter should also be the default for the MCP catalog when no `--services` is passed. Proposal: yes — same filter, same env vars, same `LAB_SHOW_ALL` escape hatch. Documented behavior change in `docs/CONVENTIONS.md`.
 6. SessionStart hook in the core plugin. The earlier draft had one; we explicitly removed it because hook-driven webserver spawning is brittle. Confirm we ship core with **no** SessionStart hook — `/setup-core` is the only entry point.
-7. Plugin-mode service filtering. Step 4 in plugin mode shows only services with installed plugins. What if the user has Plex creds in `~/.lab/.env` but never installed `lab-plex`? Proposal: still show the service in plugin mode if it's already configured, with the toggle off, so the user can choose to install the plugin or clear the leftover env. Hide it only if it's neither installed nor configured.
-8. Mode for re-runs. If a user ran `/setup-core` (plugin mode) once, then later runs standalone `labby setup`, do they get plugin or full mode? Proposal: the CLI flag wins. `labby setup` with no flag picks up the persisted mode from `~/.lab/.setup-state.json`, defaulting to `full` if the state file says nothing. Users who want full from a plugin install always have `/setup-core-advanced`.
-9. Whether `setup.state.set_mode` should be available over stdio MCP at all. Proposal: yes — it's not destructive (no fs write outside `~/.lab/.setup-state.json`), and stdio MCP callers (i.e. Claude Code itself) may legitimately need to flip the wizard mode programmatically. Loopback gate stays only on the actual plugin lifecycle actions.
+7. Plugin-mode service filtering. Step 4 in plugin mode shows only services with installed plugins. What if the user has Plex creds in `~/.labby/.env` but never installed `lab-plex`? Proposal: still show the service in plugin mode if it's already configured, with the toggle off, so the user can choose to install the plugin or clear the leftover env. Hide it only if it's neither installed nor configured.
+8. Mode for re-runs. If a user ran `/setup-core` (plugin mode) once, then later runs standalone `labby setup`, do they get plugin or full mode? Proposal: the CLI flag wins. `labby setup` with no flag picks up the persisted mode from `~/.labby/.setup-state.json`, defaulting to `full` if the state file says nothing. Users who want full from a plugin install always have `/setup-core-advanced`.
+9. Whether `setup.state.set_mode` should be available over stdio MCP at all. Proposal: yes — it's not destructive (no fs write outside `~/.labby/.setup-state.json`), and stdio MCP callers (i.e. Claude Code itself) may legitimately need to flip the wizard mode programmatically. Loopback gate stays only on the actual plugin lifecycle actions.
 
 ---
 

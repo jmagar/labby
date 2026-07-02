@@ -40,7 +40,7 @@ Clarified the two-system architecture (ACP local Codex sessions vs. remote fleet
 - **`LIKE '%query%'` skips index** — Leading wildcard forces full table scan. Fixed by requiring `node_id` predicate first (uses `idx_node_logs_node_ts`) before applying LIKE.
 - **`tokio::broadcast` drops frames** — Silently drops `command.output` frames for slow consumers. Replaced with `mpsc(512)`.
 - **`auto_vacuum` is creation-time only** — Setting `PRAGMA auto_vacuum=INCREMENTAL` in the pragma-init hook (runs on every connection open) is a silent no-op after the first write. Must be in the `version < 1` migration branch of `rusqlite_migration`.
-- **MCP demux security** — An open passthrough to `UpstreamPool` would let any enrolled node call `extract.apply` (overwrites `~/.lab/.env`), `radarr.movie.delete`, etc. with master credentials. Implemented as static allowlist (`["lab.help", "lab.catalog", "lab.status"]`) only.
+- **MCP demux security** — An open passthrough to `UpstreamPool` would let any enrolled node call `extract.apply` (overwrites `~/.labby/.env`), `radarr.movie.delete`, etc. with master credentials. Implemented as static allowlist (`["lab.help", "lab.catalog", "lab.status"]`) only.
 
 ## Technical Decisions
 
@@ -115,7 +115,7 @@ bd close lab-e2tu lab-ccc9
 
 | Area | Before | After |
 |------|--------|-------|
-| Node logs | In-memory `Vec` (10k events/node, lost on restart) | Durable SQLite at `~/.lab/node-logs.db`, 30-day TTL, survives restart |
+| Node logs | In-memory `Vec` (10k events/node, lost on restart) | Durable SQLite at `~/.labby/node-logs.db`, 30-day TTL, survives restart |
 | Log search | Full Vec scan under global write lock | SQLite indexed query with node_id predicate; LIKE wildcards escaped |
 | WS `nodes/ping` | Not handled | Bidirectional handler; responds via `tx.send()` |
 | WS `nodes/device.enroll` | Not handled | Stub: validate + idempotent upsert; `enroll_conflict` on mismatch |
@@ -145,7 +145,7 @@ bd close lab-e2tu lab-ccc9
 
 ## Risks and Rollback
 
-- **SQLite file created on first `lab serve`** — `~/.lab/node-logs.db` is created on first start. If the schema migration fails (e.g., disk full), the server logs an error and continues without the log store. Rollback: delete `~/.lab/node-logs.db` and restart.
+- **SQLite file created on first `lab serve`** — `~/.labby/node-logs.db` is created on first start. If the schema migration fails (e.g., disk full), the server logs an error and continues without the log store. Rollback: delete `~/.labby/node-logs.db` and restart.
 - **Pre-existing test failures** — `device_cli.rs` and `device_master_only.rs` tests reference deleted modules; they were failing before this session and remain failing. These tests are gated behind `#[ignore]` or integration-only; CI green is not affected.
 - **MCP demux allowlist is static** — `DEMUX_ALLOWLIST` is a `const` in `fleet.rs`. Expanding it requires a code change + deploy. This is intentional for P3; P4 adds per-node policy.
 
@@ -154,7 +154,7 @@ bd close lab-e2tu lab-ccc9
 - **512 MB space cap for log retention** — Deferred; ship TTL-only first and measure real volume before adding complexity. Removed ~30-40 LOC from lab-e2tu scope.
 - **DashMap swap in NodeStore** — Architecture and simplicity agents flagged as premature; performance agent confirmed O(n) issue was `Vec::drain`, not the map lock. `VecDeque` fix was sufficient.
 - **Session UUID per WS connection** — Existing `AtomicU64` `next_session_token()` serves stale-sender detection. UUID adds allocation overhead per connection with no stated benefit at P3.
-- **Open MCP demux passthrough** — Rejected as security-critical; enrolled nodes would have full access to all catalog actions with master credentials (including `extract.apply` which writes `~/.lab/.env`).
+- **Open MCP demux passthrough** — Rejected as security-critical; enrolled nodes would have full access to all catalog actions with master credentials (including `extract.apply` which writes `~/.labby/.env`).
 - **Two SQLite writer tasks** — ACP template uses one. Two writers risk `busy_timeout` collisions when retention DELETE and ingestion INSERT both hold write connections simultaneously.
 - **Incremental vacuum in retention cycle** — Removed; SQLite page reuse from normal insert/delete churn is sufficient without explicit vacuum at homelab scale.
 

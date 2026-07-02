@@ -23,7 +23,7 @@ The UI save flow was changed so create/update failures reject back to the dialog
 ## Sequence
 
 1. Inspected the live gateway config, API responses, and Docker logs.
-2. Confirmed `~/.lab/config.toml` contained a `[[protected_mcp_routes]]` entry for `mem0` but no matching `[[upstream]] name = "mem0"`.
+2. Confirmed `~/.labby/config.toml` contained a `[[protected_mcp_routes]]` entry for `mem0` but no matching `[[upstream]] name = "mem0"`.
 3. Confirmed live API behavior:
    - `gateway.protected_route.list` included `mem0`.
    - `gateway.get mem0` returned a `not_found` envelope.
@@ -71,7 +71,7 @@ Those dirty files were present at session-save time and were not edited by this 
 Live API cleanup command:
 
 ```bash
-TOKEN=$(grep '^LAB_MCP_HTTP_TOKEN=' .env ~/.lab/.env 2>/dev/null | tail -1 | cut -d= -f2-)
+TOKEN=$(grep '^LAB_MCP_HTTP_TOKEN=' .env ~/.labby/.env 2>/dev/null | tail -1 | cut -d= -f2-)
 curl -sS \
   -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \

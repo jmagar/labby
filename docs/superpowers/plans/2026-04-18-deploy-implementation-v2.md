@@ -240,7 +240,7 @@ impl SshOptions {
             forward_agent: false,
             strict_host_key_checking: StrictHostKeyChecking::Yes,
             control_persist: Some(std::time::Duration::from_secs(60)),
-            control_path_template: Some("~/.lab/ssh/cm-%r@%h:%p".to_string()),
+            control_path_template: Some("~/.labby/ssh/cm-%r@%h:%p".to_string()),
         }
     }
 
@@ -2186,7 +2186,7 @@ Expected: PASS on all.
 
 - [ ] **Step 3: Live smoke tests against a safe target**
 
-Pick one non-critical host (e.g., `mini-test`). Populate `~/.lab/.env` with `LAB_DEPLOY_TOKEN=...` and ensure `~/.ssh/config` has `mini-test`. Add `[deploy.hosts.mini-test]` in `config.toml`. Then:
+Pick one non-critical host (e.g., `mini-test`). Populate `~/.labby/.env` with `LAB_DEPLOY_TOKEN=...` and ensure `~/.ssh/config` has `mini-test`. Add `[deploy.hosts.mini-test]` in `config.toml`. Then:
 
 ```bash
 lab deploy config-list

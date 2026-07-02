@@ -13,7 +13,7 @@ pub const SECRET_SENTINEL: &str = "***";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SetupState {
-    /// `~/.lab/.env` does not exist at all.
+    /// `~/.labby/.env` does not exist at all.
     Uninitialized,
     /// `.env` exists but is missing one or more required core env vars.
     ConfigMissing { envars: Vec<String> },
@@ -28,7 +28,7 @@ pub enum SetupState {
 /// Snapshot returned by `setup.state` to the wizard / settings UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetupSnapshot {
-    /// True when no `~/.lab/.env` exists or it lacks required keys.
+    /// True when no `~/.labby/.env` exists or it lacks required keys.
     pub first_run: bool,
     pub env_path: PathBuf,
     pub draft_path: PathBuf,

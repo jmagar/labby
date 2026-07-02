@@ -11,7 +11,7 @@ The user reported that adding a Gateway server named `swag` failed with a missin
 
 ## Investigation
 
-- Checked `~/.lab/config.toml`: no persisted `[[upstream]]` named `swag`.
+- Checked `~/.labby/config.toml`: no persisted `[[upstream]]` named `swag`.
 - Checked the live API on `http://127.0.0.1:8765` with `LAB_MCP_HTTP_TOKEN`:
   - `gateway.get` for `swag` returned `404`.
   - `gateway.status` for `swag` returned an empty list.

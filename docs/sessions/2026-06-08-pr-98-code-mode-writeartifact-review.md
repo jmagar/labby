@@ -31,7 +31,7 @@ Reviewed PR #98 (Code Mode artifact-first `writeArtifact`), found and empiricall
 
 ## Key Findings
 
-- **Critical escape** — `crates/lab/src/dispatch/gateway/code_mode/artifacts.rs` `normalize_artifact_path` checked `is_absolute()`/`reject_path_traversal()` on the raw string, then did `trimmed.replace('\\','/')`. On Linux a backslash is an ordinary byte, so `a\..\..\etc\evil` passed as one "normal" component and became real `../` separators; `\etc\x` became absolute `/etc/x`, where `root.join("/etc/x")` discards the base. Both proven to write outside `$LAB_HOME` with standalone harnesses.
+- **Critical escape** — `crates/lab/src/dispatch/gateway/code_mode/artifacts.rs` `normalize_artifact_path` checked `is_absolute()`/`reject_path_traversal()` on the raw string, then did `trimmed.replace('\\','/')`. On Linux a backslash is an ordinary byte, so `a\..\..\etc\evil` passed as one "normal" component and became real `../` separators; `\etc\x` became absolute `/etc/x`, where `root.join("/etc/x")` discards the base. Both proven to write outside `$LABBY_HOME` with standalone harnesses.
 - **No second gate** — `handle_artifact_write` (`runner_drive.rs`) applies no caller/capability/destructive gate, so the path validator was the only barrier protecting the host filesystem.
 - **The fix relied on existing primitives** — `reject_existing_symlink_ancestors` / `canonicalize_and_reject_write_path` already existed in `crates/lab/src/dispatch/path_safety.rs`; the original code simply didn't call them despite `reject_path_traversal`'s own docstring mandating it.
 - **Pre-existing status bug** — bare `path_traversal` was unmapped in `crates/lab/src/api/error.rs`, falling through to 500 despite `docs/dev/ERRORS.md` documenting 422.
@@ -41,7 +41,7 @@ Reviewed PR #98 (Code Mode artifact-first `writeArtifact`), found and empiricall
 
 - **Normalize `\`→`/` before the guards** (rather than rejecting backslashes outright) — preserves the intended Windows-path acceptance while closing the hole; add a post-join containment check as defense-in-depth.
 - **Reuse `internal_error` for I/O write failures** instead of the undocumented `artifact_write_failed` — resolves the spec-sync violation with zero new error-kind surface; containment uses the already-documented `path_traversal`/`symlink_rejected`.
-- **Lazy prune on first write only** — keeps search/no-write runs from touching `$LAB_HOME` (also makes the test suite hermetic) and decouples retention from the search path.
+- **Lazy prune on first write only** — keeps search/no-write runs from touching `$LABBY_HOME` (also makes the test suite hermetic) and decouples retention from the search path.
 - **ULID-only deletion in the prune** — guarantees an operator's stray file under the store can never be collected; `git worktree remove` (no `--force`) used as the safety net when removing the stale codex worktree.
 - **Squash merge** — the branch contained review-iteration commits plus a mid-flight `Merge branch 'main'`; squash gives `main` one atomic, bisectable commit and avoids a merge-of-a-merge.
 

@@ -38,7 +38,7 @@ The pushed change makes upstream MCP App tools visible and callable as top-level
 ## Sequence of Events
 
 1. **Spawn guard failure**
-   - Confirmed `/home/jmagar/.lab/config.toml` already had:
+   - Confirmed `/home/jmagar/.labby/config.toml` already had:
      - `disable_spawn_guard = true`
      - `extra_stdio_commands = ["synapse", "ytdl-mcp", "claude", "axon"]`
    - Root cause was stale gateway runtime prefs.
@@ -46,7 +46,7 @@ The pushed change makes upstream MCP App tools visible and callable as top-level
 
 2. **MCP App load failure**
    - Public MCP endpoint `mcp.example.com` failed with `Forbidden: Host header is not allowed`.
-   - Added `mcp.example.com` and `lab.example.com` to `[mcp].allowed_hosts` in `/home/jmagar/.lab/config.toml`.
+   - Added `mcp.example.com` and `lab.example.com` to `[mcp].allowed_hosts` in `/home/jmagar/.labby/config.toml`.
    - Restarted the `labby` container.
    - Verified public `resources/read ui://lab/code-mode/search` returned `text/html;profile=mcp-app`.
 

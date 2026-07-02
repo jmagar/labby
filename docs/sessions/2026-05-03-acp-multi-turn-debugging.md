@@ -87,7 +87,7 @@ just dev-debug
 # Nightly + Cranelift + mold: ~80-100s compile time
 
 # Live 5-turn verification
-TOKEN=$(grep LAB_MCP_HTTP_TOKEN ~/.lab/.env | cut -d= -f2-)
+TOKEN=$(grep LAB_MCP_HTTP_TOKEN ~/.labby/.env | cut -d= -f2-)
 curl -s -X POST http://localhost:8765/v1/acp/sessions ...
 # (5-turn session, session ID: 29ce2bb5-6de7-4be2-9d00-1f9f5bdad136)
 

@@ -767,7 +767,7 @@ fn resolve_db_path() -> Result<PathBuf, String> {
         return Ok(path);
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    Ok(PathBuf::from(home).join(".lab").join("node-logs.db"))
+    Ok(PathBuf::from(home).join(".labby").join("node-logs.db"))
 }
 
 fn reject_db_path_traversal(path: &Path) -> Result<(), String> {

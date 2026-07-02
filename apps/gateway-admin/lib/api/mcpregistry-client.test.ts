@@ -14,7 +14,7 @@ import {
 } from './mcpregistry-client.ts'
 import type { LabRegistryMetadata, ServerJSON } from '@/lib/types/registry'
 
-const SERVER_NAME = 'io.github.lab/example-server'
+const SERVER_NAME = 'io.github.labby/example-server'
 
 const SERVER_JSON: ServerJSON = {
   name: SERVER_NAME,

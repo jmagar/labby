@@ -12,6 +12,7 @@
 use std::collections::BTreeSet;
 use std::time::Instant;
 
+use labby_codemode::CodeModeExecutedCall;
 use labby_codemode::{MAX_SOURCE_BYTES, SERVICE as CODE_MODE_SERVICE};
 use rmcp::ErrorData;
 use rmcp::RoleServer;
@@ -126,6 +127,24 @@ Lab actions (`lab::*` tool IDs) are not available in Code Mode. For Lab built-in
 actions, use the native Lab service tools instead of Code Mode.";
 
 pub(crate) const CODE_MODE_DESCRIPTION_MAX_BYTES: usize = 8192;
+
+fn code_mode_call_metrics_json(calls: &[CodeModeExecutedCall]) -> String {
+    let calls = calls
+        .iter()
+        .map(|call| {
+            let (namespace, tool) = call.id.split_once("::").unwrap_or(("", call.id.as_str()));
+            serde_json::json!({
+                "id": call.id,
+                "namespace": namespace,
+                "tool": tool,
+                "ok": call.ok,
+                "elapsed_ms": call.elapsed_ms,
+                "error_kind": call.error_kind,
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::to_string(&calls).unwrap_or_else(|_| "[]".to_string())
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CodeModeUpstreamDescription {
@@ -362,6 +381,7 @@ impl LabMcpServer {
                 let after = self.snapshot_catalog().await;
                 self.notify_catalog_changes(&before, &after).await;
                 let calls = err.calls().to_vec();
+                let code_mode_calls = code_mode_call_metrics_json(&calls);
                 let error_kind = err.kind().to_string();
                 let elapsed_ms = started.elapsed().as_millis();
                 tracing::warn!(
@@ -375,6 +395,7 @@ impl LabMcpServer {
                     agent_kind = "agent",
                     code_hash = %code_hash,
                     call_count = calls.len(),
+                    code_mode_calls = %code_mode_calls,
                     elapsed_ms,
                     input_tokens,
                     output_tokens = 0,
@@ -512,6 +533,7 @@ impl LabMcpServer {
             agent_kind = "agent",
             code_hash = %code_hash,
             call_count = response.calls.len(),
+            code_mode_calls = %code_mode_call_metrics_json(&response.calls),
             artifact_writes = response.artifacts.len(),
             truncated,
             result_shape_policy,

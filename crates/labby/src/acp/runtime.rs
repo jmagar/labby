@@ -3354,7 +3354,7 @@ mod tests {
 
     #[test]
     fn sanitize_provider_error_strips_ip_jwt_and_home_paths() {
-        let raw = "failed to auth to 10.0.0.5:8000 with eyJabc.def.ghi at /home/user/.lab/creds";
+        let raw = "failed to auth to 10.0.0.5:8000 with eyJabc.def.ghi at /home/user/.labby/creds";
         let clean = sanitize_provider_error(raw);
         assert!(
             !clean.contains("10.0.0.5"),

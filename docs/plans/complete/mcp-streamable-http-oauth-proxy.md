@@ -510,7 +510,7 @@ command = "npx"
 args = ["-y", "@modelcontextprotocol/server-memory"]
 ```
 
-**Credential convention:** `bearer_token_env` is the *name* of the env var, not the token itself. The actual secret lives in `~/.lab/.env` as `FILESYSTEM_MCP_TOKEN=abc123`. This preserves lab's config/secret split.
+**Credential convention:** `bearer_token_env` is the *name* of the env var, not the token itself. The actual secret lives in `~/.labby/.env` as `FILESYSTEM_MCP_TOKEN=abc123`. This preserves lab's config/secret split.
 
 ### URL validation for upstream servers
 
@@ -767,7 +767,7 @@ Built-in services stay in the immutable `Arc<ToolRegistry>`. Upstream services l
 
 ### Credentials in env vars, not config.toml
 
-Lab's convention: secrets in `~/.lab/.env`, preferences in `config.toml`. Upstream `bearer_token_env` names the env var holding the secret — the actual token never appears in config.toml.
+Lab's convention: secrets in `~/.labby/.env`, preferences in `config.toml`. Upstream `bearer_token_env` names the env var holding the secret — the actual token never appears in config.toml.
 
 ## Dependencies
 

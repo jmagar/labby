@@ -42,7 +42,7 @@ Backend ACP/session persistence:
 - `crates/lab/src/dispatch/acp/persistence.rs`: SQLite ACP persistence, schema, `LAB_ACP_DB`, `LAB_ACP_HMAC_SECRET`, event batching, and event replay reads.
 - `crates/lab-apis/src/acp/persistence.rs`: persistence trait contract.
 - `crates/lab/src/cli/serve.rs`: startup path that installs the registry and calls `restore_from_db()`.
-- `docker-compose.yml`: bind-mounts host `~/.lab` to `/home/lab/.lab`, so default `acp.db` should survive container restarts.
+- `docker-compose.yml`: bind-mounts host `~/.labby` to `/home/labby/.lab`, so default `acp.db` should survive container restarts.
 
 Docs:
 - `docs/acp/README.md`: current ACP boundary, HTTP/SSE routes, security/runtime posture.
@@ -57,11 +57,11 @@ Docs:
 - `refreshSessions()` calls `GET /v1/acp/sessions`, maps returned sessions to runs, and keeps the current selected id only if the backend list still contains it.
 - `sessionEventCache` and `sessionLastSeqCache` are module-level `Map`s capped to 10 sessions; they are not localStorage, IndexedDB, or backend storage.
 - The provider's internal SSE reader backfills from `/sessions/{id}/events?since=<lastSeq>&ticket=...` and writes event cache entries in memory.
-- `SqliteAcpPersistence` defaults to `~/.lab/acp.db` unless `LAB_ACP_DB` overrides it.
+- `SqliteAcpPersistence` defaults to `~/.labby/acp.db` unless `LAB_ACP_DB` overrides it.
 - SQLite schema includes `acp_sessions`, `acp_session_events`, and `acp_permission_requests`.
 - `AcpSessionRegistry::restore_from_db()` reloads persisted sessions into the in-memory registry and marks previously running/waiting sessions as failed with synthetic restart events.
 - `labby serve` calls `restore_from_db().await` before constructing API state.
-- Docker binds host `${HOME}/.lab` into `/home/lab/.lab`; all default ACP SQLite data should persist across `docker compose restart labby-master`.
+- Docker binds host `${HOME}/.labby` into `/home/labby/.lab`; all default ACP SQLite data should persist across `docker compose restart labby-master`.
 
 ## Restart Matrix
 
@@ -70,9 +70,9 @@ Docs:
 | Frontend route navigation away/back | React provider remains mounted in admin layout | Browser screenshot or DOM state before/after route change; network trace showing no session loss | Same selected session and transcript visible; no duplicate session created | Bead: prevent route-change session reset |
 | Browser refresh on `/chat` | `localStorage` selected id + backend session list + SSE backfill | Before/after `localStorage['lab.chat.last-session-id']`; `/v1/acp/sessions` response; `/events?since=0` or selected seq replay | Same selected session id is restored and messages replay from backend, not only memory | Bead: persist selected id or reload transcript correctly |
 | Backend process restart without browser reload | Backend SQLite restore + frontend SSE reconnect/backfill | Process restart command; server logs containing restore count; browser network retry/open; transcript after reconnect | Existing session remains in sidebar and old messages replay; active session becomes explicit Failed/interrupted if process died mid-turn | Bead: SSE restart reconnection/backfill defect |
-| Docker container restart | Host bind-mounted `~/.lab/acp.db` + registry restore | `docker compose restart labby-master`; `sqlite3 ~/.lab/acp.db` row counts before/after; `/v1/acp/sessions` response after restart | Sessions/events still in SQLite and visible in UI after restart | Bead: Docker persistence mount/config gap |
+| Docker container restart | Host bind-mounted `~/.labby/acp.db` + registry restore | `docker compose restart labby-master`; `sqlite3 ~/.labby/acp.db` row counts before/after; `/v1/acp/sessions` response after restart | Sessions/events still in SQLite and visible in UI after restart | Bead: Docker persistence mount/config gap |
 | Full browser close/open after backend restart | Browser localStorage + backend SQLite restore | Fresh browser session or new tab; selected id in localStorage; `/sessions` and `/events` responses | Selected session reappears if id exists; if not selected, session list still contains it and selecting it replays messages | Bead: cold-start selection/transcript gap |
-| `LAB_ACP_HMAC_SECRET` absent | SQLite rows survive, but signed permission outcomes may fail verification | `grep LAB_ACP_HMAC_SECRET ~/.lab/.env` result without printing secret; logs for ephemeral-key warning; replay of permission outcome event | Investigation reports degraded cross-restart permission-outcome verification truthfully | Bead: require or auto-provision persistent ACP HMAC secret |
+| `LAB_ACP_HMAC_SECRET` absent | SQLite rows survive, but signed permission outcomes may fail verification | `grep LAB_ACP_HMAC_SECRET ~/.labby/.env` result without printing secret; logs for ephemeral-key warning; replay of permission outcome event | Investigation reports degraded cross-restart permission-outcome verification truthfully | Bead: require or auto-provision persistent ACP HMAC secret |
 | Closed session after restart | SQLite state plus registry restore policy | Close a session, restart, inspect `/sessions` and DB state | Closed sessions remain queryable only if current product contract says they should; otherwise documented discrepancy with `design.md` | Bead: align closed-session retention/list behavior |
 
 ## Research Findings
@@ -160,7 +160,7 @@ Record exact line references for:
 - frontend transcript cache: module-level `Map`s in `session-event-cache.ts`
 - session list load: `GET /sessions`
 - SSE backfill: `/sessions/{id}/events?since=...`
-- SQLite path: `LAB_ACP_DB` or `~/.lab/acp.db`
+- SQLite path: `LAB_ACP_DB` or `~/.labby/acp.db`
 - tables: `acp_sessions`, `acp_session_events`, `acp_permission_requests`
 - startup restore: `restore_from_db()`
 
@@ -191,8 +191,8 @@ Expected:
 ## Task 2: Runtime Preconditions
 
 **Files:**
-- Read only: `~/.lab/.env`
-- Read only: `~/.lab/acp.db`
+- Read only: `~/.labby/.env`
+- Read only: `~/.labby/acp.db`
 - Read only: `docker-compose.yml`
 
 - [ ] **Step 1: Record clean working context**
@@ -213,9 +213,9 @@ Expected:
 Run:
 
 ```bash
-printf 'LAB_ACP_DB=%s\n' "${LAB_ACP_DB:-$HOME/.lab/acp.db}"
-test -f "${LAB_ACP_DB:-$HOME/.lab/acp.db}" && ls -l "${LAB_ACP_DB:-$HOME/.lab/acp.db}" || true
-grep -E '^LAB_ACP_HMAC_SECRET=' "$HOME/.lab/.env" | sed -E 's/=(.).*/=<present redacted>/' || true
+printf 'LAB_ACP_DB=%s\n' "${LAB_ACP_DB:-$HOME/.labby/acp.db}"
+test -f "${LAB_ACP_DB:-$HOME/.labby/acp.db}" && ls -l "${LAB_ACP_DB:-$HOME/.labby/acp.db}" || true
+grep -E '^LAB_ACP_HMAC_SECRET=' "$HOME/.labby/.env" | sed -E 's/=(.).*/=<present redacted>/' || true
 ```
 
 Expected:
@@ -227,9 +227,9 @@ Expected:
 Run:
 
 ```bash
-sqlite3 "${LAB_ACP_DB:-$HOME/.lab/acp.db}" \
+sqlite3 "${LAB_ACP_DB:-$HOME/.labby/acp.db}" \
   "select 'sessions', count(*) from acp_sessions union all select 'events', count(*) from acp_session_events;"
-sqlite3 "${LAB_ACP_DB:-$HOME/.lab/acp.db}" \
+sqlite3 "${LAB_ACP_DB:-$HOME/.labby/acp.db}" \
   "select id, state, principal, provider, updated_at from acp_sessions order by updated_at desc limit 5;"
 ```
 
@@ -305,7 +305,7 @@ Run:
 ```bash
 curl -fsS http://127.0.0.1:8765/v1/acp/provider >/tmp/lab-acp-provider.json
 curl -fsS http://127.0.0.1:8765/v1/acp/sessions >/tmp/lab-acp-sessions.json
-sqlite3 "${LAB_ACP_DB:-$HOME/.lab/acp.db}" \
+sqlite3 "${LAB_ACP_DB:-$HOME/.labby/acp.db}" \
   "select 'sessions', count(*) from acp_sessions union all select 'events', count(*) from acp_session_events;"
 ```
 

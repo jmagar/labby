@@ -53,13 +53,13 @@ RUN curl -LsSf https://astral.sh/uv/install.sh \
  && uv --version \
  && uvx --version
 
-RUN mkdir -p /home/lab/.lab /home/lab/.config/lab /home/lab/.local/state/lab /home/lab/.local/share/lab /home/lab/.npm /home/lab/.cache \
- && chown -R 1000:1000 /home/lab
+RUN mkdir -p /home/labby/.labby /home/labby/.config/labby /home/labby/.local/state/labby /home/labby/.local/share/labby /home/labby/.npm /home/labby/.cache \
+ && chown -R 1000:1000 /home/labby
 COPY bin/labby /usr/local/bin/labby
 RUN chmod +x /usr/local/bin/labby
-ENV HOME=/home/lab
+ENV HOME=/home/labby
 USER 1000:1000
-WORKDIR /home/lab
+WORKDIR /home/labby
 EXPOSE 8765
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \

@@ -379,7 +379,7 @@ pub fn default_store_path() -> PathBuf {
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
-    home.join(".lab/node-enrollments.json")
+    home.join(".labby/node-enrollments.json")
 }
 
 #[cfg(test)]

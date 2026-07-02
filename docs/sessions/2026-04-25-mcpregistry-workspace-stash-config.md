@@ -22,33 +22,33 @@ WARN  LAB_WORKSPACE_ROOT not set; fs service registered but every fs.* call will
 
 The user asked to systematically debug why `MCPREGISTRY_URL` was not configured, what `LAB_WORKSPACE_ROOT` persisted, why workspace root was read-only, and whether it was the same root used for stash files. Follow-up requirements changed the design:
 
-- Do not put `MCPREGISTRY_URL` in `~/.lab/.env`.
+- Do not put `MCPREGISTRY_URL` in `~/.labby/.env`.
 - Use the official MCP Registry URL by default.
-- Load registry URL override from `~/.lab/config.toml`.
+- Load registry URL override from `~/.labby/config.toml`.
 - Combine workspace root and stash root into one TOML config option.
 - Use that shared root for the attachment picker and marketplace editable plugin stash.
-- Move editable plugin mirrors from `~/.claude/plugins/workspaces/<plugin-id>/` to `~/.lab/stash/plugins/<plugin-id>/`.
+- Move editable plugin mirrors from `~/.claude/plugins/workspaces/<plugin-id>/` to `~/.labby/stash/plugins/<plugin-id>/`.
 - Migrate existing workspace mirrors if present.
 - Verify the fixes, including live CLI/API/MCP behavior and tests.
 - Save this session as a markdown document with concrete repo and git context.
 
 ## Session Overview
 
-Implemented config-driven MCP Registry and workspace/stash behavior in the `lab` binary. `mcpregistry` now defaults to `https://registry.modelcontextprotocol.io` and can be overridden by `[mcpregistry].url` in `config.toml`. The fs workspace browser and marketplace editable plugin mirrors now use `[workspace].root`, defaulting to `~/.lab/stash`; marketplace plugin mirrors live under `<workspace.root>/plugins`.
+Implemented config-driven MCP Registry and workspace/stash behavior in the `lab` binary. `mcpregistry` now defaults to `https://registry.modelcontextprotocol.io` and can be overridden by `[mcpregistry].url` in `config.toml`. The fs workspace browser and marketplace editable plugin mirrors now use `[workspace].root`, defaulting to `~/.labby/stash`; marketplace plugin mirrors live under `<workspace.root>/plugins`.
 
 During verification, the live `marketplace mcp.config` dispatch initially failed because `mcp.*` actions were implemented but missing from the marketplace action catalog used by CLI/API/MCP gates. That was fixed by combining marketplace plugin actions with `MCP_ACTIONS`. A second MCP live failure showed synthetic services without gateway metadata were blocked by gateway MCP action policy; that was fixed with a regression test. A full lib test run later exposed an fs validation regression for file targets, which was fixed by checking existing non-directory targets before `create_dir_all`.
 
 ## Sequence of Events
 
 1. Confirmed the registry warning came from code requiring `MCPREGISTRY_URL`.
-2. Changed the registry client construction to read `~/.lab/config.toml` and use the official MCP Registry URL as a default.
-3. Removed the need for `MCPREGISTRY_URL` in `~/.lab/.env`.
-4. Added `[workspace].root` config with default `~/.lab/stash`.
+2. Changed the registry client construction to read `~/.labby/config.toml` and use the official MCP Registry URL as a default.
+3. Removed the need for `MCPREGISTRY_URL` in `~/.labby/.env`.
+4. Added `[workspace].root` config with default `~/.labby/stash`.
 5. Changed fs workspace root resolution from `LAB_WORKSPACE_ROOT` to config-driven `workspace.root`.
 6. Changed marketplace editable plugin mirrors to `<workspace.root>/plugins`.
 7. Added migration from legacy `~/.claude/plugins/workspaces/<plugin-id>` to the new stash-backed location.
-8. Updated local `/home/jmagar/.lab/config.toml` with `[workspace]` and `[mcpregistry]`.
-9. Removed `MCPREGISTRY_URL=https://registry.modelcontextprotocol.io` from `/home/jmagar/.lab/.env`.
+8. Updated local `/home/jmagar/.labby/config.toml` with `[workspace]` and `[mcpregistry]`.
+9. Removed `MCPREGISTRY_URL=https://registry.modelcontextprotocol.io` from `/home/jmagar/.labby/.env`.
 10. Ran targeted builds/tests and live CLI/API/MCP checks.
 11. Found and fixed the missing marketplace `mcp.*` catalog exposure.
 12. Found and fixed synthetic service MCP policy blocking `marketplace mcp.config`.
@@ -61,7 +61,7 @@ During verification, the live `marketplace mcp.config` dispatch initially failed
 - Registry default is now defined in code as `DEFAULT_MCPREGISTRY_URL` at `crates/lab/src/config.rs:29`.
 - TOML config now includes workspace and registry preference structs at `crates/lab/src/config.rs:645` and `crates/lab/src/config.rs:654`.
 - Registry URL resolution falls back to the official default at `crates/lab/src/config.rs:810`.
-- Workspace root resolution defaults to `~/.lab/stash` through `workspace_root_path` at `crates/lab/src/config.rs:830`.
+- Workspace root resolution defaults to `~/.labby/stash` through `workspace_root_path` at `crates/lab/src/config.rs:830`.
 - MCP Registry client construction now uses `configured_registry_url()` at `crates/lab/src/dispatch/marketplace/mcp_client.rs:25`.
 - fs workspace root startup wiring now resolves config and logs `fs.workspace_root` at `crates/lab/src/cli/serve.rs:388`.
 - fs root validation creates missing directories but rejects existing files with `InvalidInput` at `crates/lab/src/dispatch/fs/client.rs:43`.
@@ -81,7 +81,7 @@ During verification, the live `marketplace mcp.config` dispatch initially failed
 - The official registry URL is a built-in default so a normal install does not require nonessential environment setup.
 - Workspace root and stash root are one config option because the attachment picker and editable plugin stash are both local Lab-managed file surfaces.
 - Marketplace editable plugin mirrors use a `plugins/` child directory under the shared workspace root to keep the root useful for other future stash/workspace content.
-- fs startup creates the configured workspace root when missing. This allows the default `~/.lab/stash` to work on first run.
+- fs startup creates the configured workspace root when missing. This allows the default `~/.labby/stash` to work on first run.
 - Existing non-directory workspace root targets are rejected before `create_dir_all` so callers get the stable validation error shape expected by tests.
 - Legacy marketplace mirrors are migrated on first access only when the new mirror does not already exist, avoiding overwriting newer stash content.
 - `mcp.*` registry actions remain under the `marketplace` service surface, so the marketplace catalog must include those actions for CLI/API/MCP gates.
@@ -111,8 +111,8 @@ Session-relevant files modified:
 - `docs/CONFIG.md` — documented `[workspace]` and `[mcpregistry]`.
 - `docs/MARKETPLACE.md` — documented `<workspace.root>/plugins` and legacy mirror migration.
 - `docs/coverage/mcpregistry.md` — updated coverage docs from standalone `mcpregistry` surface to current `marketplace mcp.*` surface.
-- `/home/jmagar/.lab/config.toml` — added `[workspace] root = "~/.lab/stash"` and `[mcpregistry] url = "https://registry.modelcontextprotocol.io"`.
-- `/home/jmagar/.lab/.env` — removed the `MCPREGISTRY_URL` line.
+- `/home/jmagar/.labby/config.toml` — added `[workspace] root = "~/.labby/stash"` and `[mcpregistry] url = "https://registry.modelcontextprotocol.io"`.
+- `/home/jmagar/.labby/.env` — removed the `MCPREGISTRY_URL` line.
 
 Observed dirty worktree context:
 
@@ -183,7 +183,7 @@ target/debug/lab marketplace mcp.config --json
 # {"url":"https://registry.modelcontextprotocol.io"}
 
 LAB_LOG='labby=info,lab_apis=warn' target/debug/lab serve --services fs,marketplace --host 127.0.0.1 --port 18770
-# startup log included: workspace filesystem browser enabled path=/home/jmagar/.lab/stash
+# startup log included: workspace filesystem browser enabled path=/home/jmagar/.labby/stash
 # startup log included: registry sync complete
 # startup log included: lab serve ready
 
@@ -206,7 +206,7 @@ curl -fsS -H "Authorization: Bearer <redacted>" -H 'content-type: application/js
   -d '{"action":"plugin.save","params":{"id":"plugin-lab@claude-homelab","path":".lab-verification","content":"workspace root verification\n"}}'
 # {"savedAt":"2026-04-25T04:47:10.020794011Z"}
 
-test -f /home/jmagar/.lab/stash/plugins/plugin-lab@claude-homelab/.lab-verification
+test -f /home/jmagar/.labby/stash/plugins/plugin-lab@claude-homelab/.lab-verification
 # yes
 
 test -f /home/jmagar/.claude/plugins/workspaces/plugin-lab@claude-homelab/.lab-verification
@@ -216,12 +216,12 @@ test -f /home/jmagar/.claude/plugins/workspaces/plugin-lab@claude-homelab/.lab-v
 Config/env verification:
 
 ```bash
-rg -n '^MCPREGISTRY_URL=' /home/jmagar/.lab/.env || true
+rg -n '^MCPREGISTRY_URL=' /home/jmagar/.labby/.env || true
 # no output
 
-sed -n '1,45p' /home/jmagar/.lab/config.toml | rg -n '\[workspace\]|root =|\[mcpregistry\]|url ='
+sed -n '1,45p' /home/jmagar/.labby/config.toml | rg -n '\[workspace\]|root =|\[mcpregistry\]|url ='
 # [workspace]
-# root = "~/.lab/stash"
+# root = "~/.labby/stash"
 # [mcpregistry]
 # url = "https://registry.modelcontextprotocol.io"
 ```
@@ -229,7 +229,7 @@ sed -n '1,45p' /home/jmagar/.lab/config.toml | rg -n '\[workspace\]|root =|\[mcp
 ## Errors Encountered
 
 - Initial startup warning: `MCPREGISTRY_URL not set`. Root cause: registry client construction required an env var for a nonessential public URL. Resolution: use `[mcpregistry].url` from TOML and default to `https://registry.modelcontextprotocol.io`.
-- Initial startup warning: `LAB_WORKSPACE_ROOT not set`. Root cause: fs service used a separate env var for workspace root while marketplace stash wanted a separate path. Resolution: use `[workspace].root`, defaulting to `~/.lab/stash`.
+- Initial startup warning: `LAB_WORKSPACE_ROOT not set`. Root cause: fs service used a separate env var for workspace root while marketplace stash wanted a separate path. Resolution: use `[workspace].root`, defaulting to `~/.labby/stash`.
 - Live `mcp.config` initially failed through API/MCP as `unknown_action`. Root cause: `mcp.*` dispatch existed, but `MCP_ACTIONS` were not included in the marketplace action catalog used by validation gates. Resolution: combine marketplace plugin actions with `MCP_ACTIONS`.
 - Live MCP `tools/call` for `marketplace mcp.config` initially failed as `action not exposed`. Root cause: gateway MCP policy blocked services without gateway metadata, including synthetic `marketplace`. Resolution: allow services without gateway metadata unless explicitly governed and add a regression test.
 - Full lib test initially failed at `dispatch::fs::client::tests::canonicalize_existing_dir_rejects_file_target`. Root cause: `create_dir_all` on an existing file returned `AlreadyExists` before the explicit `InvalidInput` validation. Resolution: check existing non-directory targets before `create_dir_all`.
@@ -241,8 +241,8 @@ sed -n '1,45p' /home/jmagar/.lab/config.toml | rg -n '\[workspace\]|root =|\[mcp
 |------|--------|-------|
 | MCP Registry URL | Required `MCPREGISTRY_URL` env var. Missing env disabled registry sync. | Defaults to official MCP Registry URL and optionally reads `[mcpregistry].url`. |
 | `.env` | Contained or was expected to contain `MCPREGISTRY_URL`. | No registry URL needed in `.env`. |
-| fs workspace root | Required `LAB_WORKSPACE_ROOT`. Missing env caused `workspace_not_configured`. | Uses `[workspace].root`, defaulting to `~/.lab/stash`, and creates the missing directory. |
-| Marketplace edit mirrors | Used `~/.claude/plugins/workspaces/<plugin-id>/`. | Uses `<workspace.root>/plugins/<plugin-id>/`, defaulting to `~/.lab/stash/plugins/<plugin-id>/`. |
+| fs workspace root | Required `LAB_WORKSPACE_ROOT`. Missing env caused `workspace_not_configured`. | Uses `[workspace].root`, defaulting to `~/.labby/stash`, and creates the missing directory. |
+| Marketplace edit mirrors | Used `~/.claude/plugins/workspaces/<plugin-id>/`. | Uses `<workspace.root>/plugins/<plugin-id>/`, defaulting to `~/.labby/stash/plugins/<plugin-id>/`. |
 | Legacy mirrors | Remained under `~/.claude/plugins/workspaces`. | Migrated on first access if the new mirror does not already exist. |
 | Marketplace `mcp.*` actions | Dispatch existed but validation gates rejected them. | CLI/API/MCP action gates accept `mcp.*` actions. |
 | Synthetic service MCP policy | `marketplace mcp.config` could be rejected by gateway action policy. | Synthetic services without gateway metadata are allowed unless explicitly governed. |
@@ -261,12 +261,12 @@ sed -n '1,45p' /home/jmagar/.lab/config.toml | rg -n '\[workspace\]|root =|\[mcp
 | HTTP `/v1/fs/list` | Lists stash root content | Returned `plugins` dir | Pass |
 | HTTP `/v1/marketplace` `mcp.config` | Official registry URL | `{"url":"https://registry.modelcontextprotocol.io"}` | Pass |
 | MCP `tools/call` `marketplace` with `action=mcp.config` | Success envelope with URL | `ok:true`, URL `https://registry.modelcontextprotocol.io` | Pass |
-| `plugin.save` verification | Writes under `~/.lab/stash/plugins` | File existed at new stash path and not at legacy path | Pass |
+| `plugin.save` verification | Writes under `~/.labby/stash/plugins` | File existed at new stash path and not at legacy path | Pass |
 | `git diff --check -- <touched files>` | No whitespace errors | exit 0 | Pass |
 
 ## Risks and Rollback
 
-- Risk: changing the workspace root default means first-run behavior creates `~/.lab/stash`; rollback would restore env-based `LAB_WORKSPACE_ROOT` resolution in `crates/lab/src/dispatch/fs/client.rs` and `crates/lab/src/cli/serve.rs`.
+- Risk: changing the workspace root default means first-run behavior creates `~/.labby/stash`; rollback would restore env-based `LAB_WORKSPACE_ROOT` resolution in `crates/lab/src/dispatch/fs/client.rs` and `crates/lab/src/cli/serve.rs`.
 - Risk: marketplace edit mirrors now use `<workspace.root>/plugins`; rollback would restore the previous `~/.claude/plugins/workspaces` root in `crates/lab/src/dispatch/marketplace/dispatch.rs`.
 - Risk: synthetic-service MCP policy now allows services without gateway metadata. Rollback would remove the early allow branch in `GatewayManager::mcp_action_allowed_for_service`, but that would re-break `marketplace mcp.config`.
 - Operational rollback: restore `MCPREGISTRY_URL` env reading in `mcp_client.rs` only if the product decision changes back to env-based registry configuration.

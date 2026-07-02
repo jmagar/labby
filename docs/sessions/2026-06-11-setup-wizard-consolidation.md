@@ -18,7 +18,7 @@ beads: No bead activity observed
 
 ## Session Overview
 
-Implemented first-run self-bootstrap for `labby serve`: when no MCP token is configured, OAuth is inactive, and the bind is loopback, the server now generates a 64-char hex bearer token, writes a minimal `~/.lab/.env` (mode 0600), reloads it into the process env, and prints the `/setup` URL — closing the headless "bootstrap circularity" so the web `/setup` wizard is reachable as a single config surface. Work was done by a dispatched implementation agent in the worktree, a PR was opened, review waves ran, and the two CodeRabbit findings (token-to-stderr leak; success log level) were fixed and the review thread resolved. Worktree is green (clippy 0 warnings; 46 targeted bootstrap/token/auth tests pass).
+Implemented first-run self-bootstrap for `labby serve`: when no MCP token is configured, OAuth is inactive, and the bind is loopback, the server now generates a 64-char hex bearer token, writes a minimal `~/.labby/.env` (mode 0600), reloads it into the process env, and prints the `/setup` URL — closing the headless "bootstrap circularity" so the web `/setup` wizard is reachable as a single config surface. Work was done by a dispatched implementation agent in the worktree, a PR was opened, review waves ran, and the two CodeRabbit findings (token-to-stderr leak; success log level) were fixed and the review thread resolved. Worktree is green (clippy 0 warnings; 46 targeted bootstrap/token/auth tests pass).
 
 ## Sequence of Events
 
@@ -94,7 +94,7 @@ No bead activity observed. `bd list --status=open` showed no open issues matchin
 
 | area | before | after |
 |---|---|---|
-| `labby serve` first run (loopback, no token, no OAuth) | refused/required manual `~/.lab/.env` + token | generates token, writes 0600 `~/.lab/.env`, reloads it, prints `/setup` URL |
+| `labby serve` first run (loopback, no token, no OAuth) | refused/required manual `~/.labby/.env` + token | generates token, writes 0600 `~/.labby/.env`, reloads it, prints `/setup` URL |
 | first-run stderr | (n/a) | prints `.env` path + `grep` hint, never the raw token |
 | non-loopback bind, no auth | bails (lab-319g) | unchanged — bails; bootstrap does not fire off-loopback |
 

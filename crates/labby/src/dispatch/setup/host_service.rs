@@ -12,7 +12,7 @@ use tokio::process::Command;
 use crate::dispatch::error::ToolError;
 
 const SERVICE_NAME: &str = "labby.service";
-const LAB_HOME: &str = "/home/lab";
+const LABBY_HOME: &str = "/home/labby";
 const SYSTEM_UNIT_DIR: &str = "/etc/systemd/system";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
@@ -276,19 +276,19 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-User=lab
-Group=lab
+User=labby
+Group=labby
 ExecStart=/usr/local/bin/labby serve
-WorkingDirectory=/home/lab
-Environment=HOME=/home/lab
-Environment=XDG_CACHE_HOME=/home/lab/.cache
-Environment=XDG_CONFIG_HOME=/home/lab/.config
-Environment=XDG_DATA_HOME=/home/lab/.local/share
-Environment=PATH=/home/lab/.local/bin:/usr/local/bin:/usr/bin:/bin
-EnvironmentFile=-/home/lab/.lab/.env
+WorkingDirectory=/home/labby
+Environment=HOME=/home/labby
+Environment=XDG_CACHE_HOME=/home/labby/.cache
+Environment=XDG_CONFIG_HOME=/home/labby/.config
+Environment=XDG_DATA_HOME=/home/labby/.local/share
+Environment=PATH=/home/labby/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/home/labby/.labby/.env
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/home/lab/.lab /home/lab/.local /home/lab/.cache /home/lab/.config /home/lab/.npm /home/lab/.codex /home/lab/.claude /home/lab/.gemini /home/lab/downloads
+ReadWritePaths=/home/labby/.labby /home/labby/.local /home/labby/.cache /home/labby/.config /home/labby/.npm /home/labby/.codex /home/labby/.claude /home/labby/.gemini /home/labby/downloads
 ProtectHome=read-only
 PrivateTmp=true
 RestrictNamespaces=true
@@ -439,7 +439,7 @@ fn configured_local_port_from(
 }
 
 fn env_file_value(key: &str) -> Option<String> {
-    let path = Path::new(LAB_HOME).join(".lab/.env");
+    let path = Path::new(LABBY_HOME).join(".labby/.env");
     let text = std::fs::read_to_string(path).ok()?;
     for line in text.lines() {
         let line = line.trim();
@@ -888,15 +888,15 @@ mod tests {
         let unit = unit_text();
 
         assert!(unit.contains("Description=Labby host gateway"));
-        assert!(unit.contains("User=lab"));
-        assert!(unit.contains("Group=lab"));
+        assert!(unit.contains("User=labby"));
+        assert!(unit.contains("Group=labby"));
         assert!(unit.contains("ExecStart=/usr/local/bin/labby serve"));
-        assert!(unit.contains("WorkingDirectory=/home/lab"));
-        assert!(unit.contains("Environment=HOME=/home/lab"));
+        assert!(unit.contains("WorkingDirectory=/home/labby"));
+        assert!(unit.contains("Environment=HOME=/home/labby"));
         assert!(
-            unit.contains("Environment=PATH=/home/lab/.local/bin:/usr/local/bin:/usr/bin:/bin")
+            unit.contains("Environment=PATH=/home/labby/.local/bin:/usr/local/bin:/usr/bin:/bin")
         );
-        assert!(unit.contains("EnvironmentFile=-/home/lab/.lab/.env"));
+        assert!(unit.contains("EnvironmentFile=-/home/labby/.labby/.env"));
         assert!(unit.contains("WantedBy=multi-user.target"));
         assert!(!unit.contains("%h"));
     }

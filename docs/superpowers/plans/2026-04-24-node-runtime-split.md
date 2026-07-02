@@ -1022,7 +1022,7 @@ Check:
 target/debug/lab --json config show
 ```
 
-If no config command exists, inspect `~/.lab/config.toml` directly.
+If no config command exists, inspect `~/.labby/config.toml` directly.
 
 Required:
 

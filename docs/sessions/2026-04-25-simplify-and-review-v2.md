@@ -90,7 +90,7 @@ Net effect: 11 files touched in `crates/lab/` + `apps/gateway-admin/`, all revie
 | `lab doctor` truncated service-error messages | Could panic on non-ASCII byte boundary | Truncates to 120 chars cleanly via `chars().take(120)` |
 | `mcp.install` Codex with `null` field | Silently wrote empty string into TOML | Returns `ERR_VALIDATION` with actionable message |
 | `mcp.install` `client_targets[].node_id` containing `:` | Frontend would have miscoded the Set key, server would have parsed the bad key as separate target | Frontend uses typed object; server rejects non-`[A-Za-z0-9_\-.]` chars |
-| `~/.lab/.env` write order from `mcp.install` | Reverted briefly to alphabetical (during my BTreeMap detour); fixed back to package declaration order | Package declaration order preserved (matches pre-session behavior) |
+| `~/.labby/.env` write order from `mcp.install` | Reverted briefly to alphabetical (during my BTreeMap detour); fixed back to package declaration order | Package declaration order preserved (matches pre-session behavior) |
 | Embedded web asset response | Cloned `&'static [u8]` to `Vec<u8>` per request | Zero-copy via `Bytes::from_static` |
 | Marketplace catalog facet-map computation | 3 separate scans of `items` plus an unmemoized `activeLabels` rebuild every render | Single-pass `useMemo` over `items`; `activeLabels` memoized |
 | Marketplace active-filters pill row | Always rendered the default sort as an "active filter" | Hides the default sort (correct behavior) |

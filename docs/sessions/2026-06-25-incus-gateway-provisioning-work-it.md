@@ -30,7 +30,7 @@ Implemented PR #158 for the Incus-primary Labby gateway deployment path. The PR 
 
 ## Key Findings
 
-- `systemd --user` is not the right default for a headless Incus gateway; the supported runtime now uses a system unit with `User=lab`.
+- `systemd --user` is not the right default for a headless Incus gateway; the supported runtime now uses a system unit with `User=labby`.
 - Provisioning must be explicit and local-only; the long-running gateway path should not run package or runtime installation.
 - Node must be systemd-safe and amd64-bounded for the current substrate, so provisioning uses a static Node 24 tarball with an architecture guard.
 - Missing upstream leaf dependencies should be surfaced as diagnostics instead of silently running apt.
@@ -117,7 +117,7 @@ Implemented PR #158 for the Incus-primary Labby gateway deployment path. The PR 
 - Live Incus validation found additional setup bugs that dry-runs missed:
   - Fresh Ubuntu 24.04 containers needed `xz-utils` for the Node `.tar.xz` install.
   - `dpkg-query -W` was too weak for idempotency because known-but-not-installed packages still returned success; the check now requires installed `ii` status.
-  - `runuser` inherited `/root` as cwd, causing `uv` to look for `/root/uv.toml`; lab user commands now `cd /home/lab` and set lab-owned XDG paths.
+  - `runuser` inherited `/root` as cwd, causing `uv` to look for `/root/uv.toml`; lab user commands now `cd /home/labby` and set lab-owned XDG paths.
   - First-run downloads can exceed two minutes, so provisioning command timeout increased to 10 minutes.
   - Unprivileged Incus containers on this host denied signal delivery even for same-UID child processes; the bootstrap now uses a privileged system container while the service still runs as `lab`.
   - `ss -ltnp` in Incus may omit process ownership; service readiness verification now has `/proc` socket fallback and also requires `labby.service` to be active.
@@ -142,7 +142,7 @@ Implemented PR #158 for the Incus-primary Labby gateway deployment path. The PR 
 | `scripts/incus-bootstrap.sh --local-binary target/debug/labby` | Clean Incus bootstrap from no container to ready service. | `provision complete: executed=6, skipped=0` in privileged `images:ubuntu/24.04` container. | pass |
 | `incus exec labby-e2e -- systemctl is-active labby.service` | Service active after bootstrap. | `active`. | pass |
 | `incus exec labby-e2e -- curl -fsS http://127.0.0.1:8765/ready` | Readiness endpoint reports ready. | `{"status":"ready"}`. | pass |
-| `incus exec labby-e2e -- runuser -u lab -- sh -lc 'node --version && npm --version && uv --version && python3 --version && claude --version && codex --version && gemini --version'` | Provisioned runtime and agent CLIs available as `lab`. | Node v24.18.0, npm 11.16.0, uv 0.11.24, Python 3.12.3, Claude Code 2.1.193, codex-cli 0.142.2, Gemini 0.49.0. | pass |
+| `incus exec labby-e2e -- runuser -u labby -- sh -lc 'node --version && npm --version && uv --version && python3 --version && claude --version && codex --version && gemini --version'` | Provisioned runtime and agent CLIs available as `lab`. | Node v24.18.0, npm 11.16.0, uv 0.11.24, Python 3.12.3, Claude Code 2.1.193, codex-cli 0.142.2, Gemini 0.49.0. | pass |
 | `incus exec labby-e2e -- systemctl restart labby.service` plus ready check | Restart keeps service active and ready. | `active`, `{"status":"ready"}`, `ExecMainStatus=0`. | pass |
 | Re-run `scripts/incus-bootstrap.sh --local-binary target/debug/labby` | Idempotent rerun skips completed provision steps. | `provision complete: executed=0, skipped=6`. | pass |
 | `just check` | Workspace all-features check passes. | Finished successfully. | pass |

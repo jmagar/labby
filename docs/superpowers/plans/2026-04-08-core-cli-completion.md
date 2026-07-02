@@ -164,7 +164,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "apply",
-        description: "Scan and write discovered credentials into ~/.lab/.env (with backup)",
+        description: "Scan and write discovered credentials into ~/.labby/.env (with backup)",
         destructive: true,
         returns: "WritePlan",
         params: &[
