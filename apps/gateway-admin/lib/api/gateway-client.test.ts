@@ -676,7 +676,7 @@ test('gatewayApi.hydrateRuntime treats gateway.mcp.list as authoritative runtime
           exposed_resource_count: 0,
           discovered_prompt_count: 0,
           exposed_prompt_count: 0,
-          runtime_state_path: '/home/lab/.lab/config.runtime.json',
+          runtime_state_path: '/home/labby/.labby/config.runtime.json',
         },
       ],
     },
@@ -716,7 +716,7 @@ test('gatewayApi.hydrateRuntime treats gateway.mcp.list as authoritative runtime
       assert.equal(gateway?.status.healthy, false)
       assert.equal(gateway?.status.discovered_tool_count, 0)
       assert.equal(gateway?.status.exposed_tool_count, 0)
-      assert.equal(gateway?.status.runtime_state_path, '/home/lab/.lab/config.runtime.json')
+      assert.equal(gateway?.status.runtime_state_path, '/home/labby/.labby/config.runtime.json')
     },
   )
 })

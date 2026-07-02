@@ -33,8 +33,24 @@ pub(crate) use labby_codemode::split_namespaced_id;
 ///
 /// Keyed by a fingerprint string (sorted `upstream::tool` ids joined with `\n`
 /// plus the snippet fingerprint). When the pool's healthy tool set has not
-/// changed between lookups, this avoids re-running `generate_tool_types`,
-/// re-serializing the catalog JSON, and re-generating the JS proxy.
+/// changed between lookups, this avoids re-running `generate_tool_types` and
+/// re-serializing the catalog JSON. It does NOT avoid re-generating the
+/// discovery/proxy JS strings themselves (`generate_discovery_js` /
+/// `generate_js_proxy_from_catalog`) — those are rebuilt from `entries` on
+/// every `codemode` execution regardless of cache hit/miss (see
+/// `crates/labby-codemode/src/execute.rs`'s `build_code_mode_proxy`). See bead
+/// `lab-5cgrz` for the investigation that confirmed this and evaluated (then
+/// rejected, at current scale) converting `search`/`describe` to host-RPC to
+/// close that gap.
+///
+/// This cache is a single slot (`Mutex<Option<CatalogRenderCache>>` on
+/// `GatewayManager`) with NO caller/scope component in its fingerprint. It is
+/// safe today only because it is reached exclusively through the unscoped CLI
+/// path (`code_mode_catalog_tools_cached`, gated by
+/// `surface == CodeModeSurface::Cli && scope.allowed_namespaces().is_none()` in
+/// `execute.rs`). Do not widen its call sites to scoped callers without adding
+/// a scope/`allowed_upstreams` component to the fingerprint first — otherwise a
+/// scoped caller could receive a different scope's cached catalog.
 pub(crate) struct CatalogRenderCache {
     /// Fingerprint of the healthy tool list when this cache was built.
     pub fingerprint: String,

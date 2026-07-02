@@ -192,8 +192,8 @@ const MOCK_DRAFT_ENTRIES: DraftEntry[] = [
 function mockSetupSnapshot(): SetupSnapshot {
   return {
     first_run: false,
-    env_path: '~/.lab/.env',
-    draft_path: '~/.lab/.env.draft',
+    env_path: '~/.labby/.env',
+    draft_path: '~/.labby/.env.draft',
     last_completed_step: 3,
     draft_stale: false,
     has_draft: true,
@@ -377,8 +377,8 @@ function mockSettingsState(section: string, updates: SettingsUpdateEntry[] = [])
   for (const update of updates) values[update.key] = update.value
   return {
     schema_version: 1,
-    config_path: '~/.config/lab/config.toml',
-    env_path: '~/.lab/.env',
+    config_path: '~/.config/labby/config.toml',
+    env_path: '~/.labby/.env',
     section,
     values,
     sources: {
@@ -434,7 +434,7 @@ export const setupApi = {
   settingsConfigUpdate(section: string, entries: SettingsUpdateEntry[], confirm: boolean, signal?: AbortSignal): Promise<SettingsMutationOutcome> {
     if (USE_MOCK_DATA) {
       signal?.throwIfAborted?.()
-      return Promise.resolve({ state: mockSettingsState(section, entries), backup_path: '~/.config/lab/config.toml.bak.mock' })
+      return Promise.resolve({ state: mockSettingsState(section, entries), backup_path: '~/.config/labby/config.toml.bak.mock' })
     }
     return setupAction<SettingsMutationOutcome>('settings.config.update', { section, entries, confirm }, signal)
   },

@@ -57,7 +57,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "bootstrap",
-        description: "Create ~/.lab/.env with a generated token + loopback defaults when absent (first-run)",
+        description: "Create ~/.labby/.env with a generated token + loopback defaults when absent (first-run)",
         destructive: false,
         requires_admin: false,
         returns: "BootstrapOutcome",
@@ -219,7 +219,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "plugin_sync",
-        description: "Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.lab/.env as LAB_* vars",
+        description: "Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.labby/.env as LAB_* vars",
         destructive: true,
         requires_admin: false,
         returns: "PluginSyncOutcome",
@@ -227,7 +227,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "plugin_export",
-        description: "Read ~/.lab/.env and return current values keyed by userConfig field name",
+        description: "Read ~/.labby/.env and return current values keyed by userConfig field name",
         destructive: false,
         requires_admin: false,
         returns: "PluginExportOutcome",

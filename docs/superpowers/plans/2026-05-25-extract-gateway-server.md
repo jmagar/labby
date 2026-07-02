@@ -24,7 +24,7 @@
 - Proposed env prefix: `LAB_GATEWAY`
 - Proposed default port: `40110`
 - Proposed service scopes: `gateway:read`, `gateway:write`, `gateway:admin`
-- Appdata root: `~/.lab-gateway`
+- Appdata root: `~/.labby-gateway`
 
 ## Source Inventory
 
@@ -124,10 +124,10 @@ pnpm --dir apps/web build
 
 ## Task 6: Import Existing Lab Gateway State
 
-- [ ] Add `lab-gateway import lab --lab-home ~/.lab --dry-run`.
-- [ ] Import Gateway config, runtime catalog entries, protected routes, tombstones, and OAuth metadata into `~/.lab-gateway`.
+- [ ] Add `lab-gateway import lab --lab-home ~/.labby --dry-run`.
+- [ ] Import Gateway config, runtime catalog entries, protected routes, tombstones, and OAuth metadata into `~/.labby-gateway`.
 - [ ] Make import idempotent and safe to run repeatedly.
-- [ ] Verify no post-import code path writes to `~/.lab`.
+- [ ] Verify no post-import code path writes to `~/.labby`.
 
 ## Task 7: Standalone Runtime Smoke
 
@@ -135,7 +135,7 @@ pnpm --dir apps/web build
 - [ ] Verify `/health` responds from the standalone service.
 - [ ] Call one read-only Gateway action through CLI, MCP stdio, MCP HTTP, API, and the web UI.
 - [ ] Read `lab://gateway/servers` through MCP and call `scout` plus `invoke` against a known configured upstream.
-- [ ] Confirm the standalone service reads and writes only `~/.lab-gateway` and `LAB_GATEWAY_*` configuration.
+- [ ] Confirm the standalone service reads and writes only `~/.labby-gateway` and `LAB_GATEWAY_*` configuration.
 
 ## Verification
 
@@ -164,5 +164,5 @@ curl -sf http://127.0.0.1:40110/health
 - Fresh `lab-gateway` clone builds and serves an embedded Gateway web UI.
 - CLI, MCP, API, and web UI expose equivalent Gateway actions.
 - Gateway protected routes remain auth-required outside loopback.
-- Gateway uses separate `LAB_GATEWAY_*` env vars and `~/.lab-gateway` state.
+- Gateway uses separate `LAB_GATEWAY_*` env vars and `~/.labby-gateway` state.
 - Lab remains unchanged; the new repo contains only the Gateway code copied for standalone operation.

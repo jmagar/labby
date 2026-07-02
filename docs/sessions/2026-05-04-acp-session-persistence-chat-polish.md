@@ -22,7 +22,7 @@ Three major work streams: (1) root-cause investigation and fix for ACP session p
 ## Sequence of Events
 
 1. Systematic debugging of ACP session persistence — traced the data flow from write path (SQLite) through `AcpSessionRegistry` and confirmed the read path (in-memory map) is never rehydrated on startup
-2. Confirmed `LAB_ACP_HMAC_SECRET` was already set in `~/.lab/.env` — secondary root cause pre-fixed
+2. Confirmed `LAB_ACP_HMAC_SECRET` was already set in `~/.labby/.env` — secondary root cause pre-fixed
 3. Implemented `restore_from_db()` on `AcpSessionRegistry`: added `Session::new_with_seq`, `SqliteAcpPersistence::load_max_seqs()`, and wired the restore call in `cli/serve.rs`
 4. Identified three additional gaps and fixed them: SSE no-reconnect, `registry.rs.bak` cleanup, `idle_completion` UI invisibility
 5. Investigated chat session stopping mid-work via screenshot; traced to 5-second `PROMPT_IDLE_TIMEOUT` firing during codex-acp's internal tool execution
@@ -35,7 +35,7 @@ Three major work streams: (1) root-cause investigation and fix for ACP session p
 - `AcpSessionRegistry::new()` at `crates/lab/src/acp/registry.rs:139` always starts with `HashMap::new()` and has no restore path — sessions written to SQLite are never loaded back
 - `SqliteAcpPersistence::load_sessions()` existed and worked correctly at `crates/lab/src/dispatch/acp/persistence.rs:251` but was never called at startup
 - `next_seq` is initialized to 1 in `Session::new` — without seeding to `MAX(seq)+1` from the DB, new events after restore would collide with the existing `UNIQUE(session_id, seq)` index
-- The Docker bind mount `${HOME}/.lab:/home/lab/.lab` covers `acp.db` — the database physically survives restarts but the in-memory map doesn't
+- The Docker bind mount `${HOME}/.labby:/home/labby/.lab` covers `acp.db` — the database physically survives restarts but the in-memory map doesn't
 - `DEFAULT_PROMPT_IDLE_TIMEOUT = 5s` at `crates/lab/src/acp/runtime.rs:49` fires during codex-acp's internal shell execution (`find`, `cat` etc.) which produces no ACP protocol events for the idle timer to reset against
 - `DEFAULT_TURN_DRAIN_TIMEOUT = 300s` at `runtime.rs:70` causes the next prompt after an idle-completion to stall silently for up to 5 minutes
 - `use-session-events.ts` SSE loop has no reconnect: after `done` or error it just stops — server restarts leave the UI silently stale
@@ -96,7 +96,7 @@ rtk cargo check --all-features
 cd apps/gateway-admin && rtk tsc --noEmit
 
 # HMAC key verification
-grep -i "LAB_ACP_HMAC_SECRET" ~/.lab/.env
+grep -i "LAB_ACP_HMAC_SECRET" ~/.labby/.env
 # → LAB_ACP_HMAC_SECRET=2e5bc11c3e0a9cf8c4082c50340eca66b20d19a37ffa600ad084d663badaf3e0
 
 # Non-Aurora color audit
@@ -134,7 +134,7 @@ rm crates/lab/src/acp/registry.rs.bak
 |---|---|---|---|
 | `rtk cargo check --all-features` | 0 errors, 0 warnings | 0 errors, 0 warnings | ✅ |
 | `cd apps/gateway-admin && rtk tsc --noEmit` | Clean | `TypeScript compilation completed` | ✅ |
-| `grep LAB_ACP_HMAC_SECRET ~/.lab/.env` | Secret present | 64-char hex key found | ✅ |
+| `grep LAB_ACP_HMAC_SECRET ~/.labby/.env` | Secret present | 64-char hex key found | ✅ |
 | Non-Aurora color grep on chat components | No matches | No matches | ✅ |
 | `registry.rs.bak` existence check | Deleted | File absent | ✅ |
 
@@ -168,7 +168,7 @@ rm crates/lab/src/acp/registry.rs.bak
 - Broader `aurora-scrollbar` sweep across `components/registry/`, `components/nodes/`, `components/ai/`, `components/marketplace/`
 - `plugin-info-panel.tsx` inline scrollbar style → migrate to `aurora-scrollbar`
 - Broader opacity tint migration to `color-mix()` per contract's stated direction
-- Container tests: verify `restore_from_db` correctness with a real `docker compose restart` cycle against the bind-mounted `~/.lab/acp.db`
+- Container tests: verify `restore_from_db` correctness with a real `docker compose restart` cycle against the bind-mounted `~/.labby/acp.db`
 
 ## References
 

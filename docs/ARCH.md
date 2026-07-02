@@ -248,8 +248,8 @@ Normal request flow:
 
 `labby-apis` never reads config files or ambient env on its own. Config loading lives in `labby`.
 
-- secrets: `~/.lab/.env`
-- preferences: `config.toml` (`./` → `~/.lab/` → `~/.config/lab/`)
+- secrets: `~/.labby/.env`
+- preferences: `config.toml` (`./` → `~/.labby/` → `~/.config/labby/`)
 
 The binary resolves those inputs, then constructs clients explicitly.
 

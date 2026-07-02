@@ -49,7 +49,7 @@ impl SshOptions {
             forward_agent: false,
             strict_host_key_checking: StrictHostKeyChecking::Yes,
             control_persist: Some(std::time::Duration::from_secs(60)),
-            control_path_template: Some("~/.lab/ssh/cm-%r@%h:%p".to_string()),
+            control_path_template: Some("~/.labby/ssh/cm-%r@%h:%p".to_string()),
         }
     }
 

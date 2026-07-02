@@ -1,6 +1,6 @@
 # Stash
 
-Stash is a local versioning service built into `lab`, feature-gated behind the `stash` cargo feature (a member of `all`, excluded from gateway-only builds). It tracks versioned snapshots of homelab components — skills, agents, commands, hooks, scripts, configs, and more — stored under `~/.lab/stash/` on the local machine. No external service or database is required.
+Stash is a local versioning service built into `lab`, feature-gated behind the `stash` cargo feature (a member of `all`, excluded from gateway-only builds). It tracks versioned snapshots of homelab components — skills, agents, commands, hooks, scripts, configs, and more — stored under `~/.labby/stash/` on the local machine. No external service or database is required.
 
 ## Overview
 
@@ -14,10 +14,10 @@ Stash is always compiled in — it is not feature-gated.
 
 ## Storage Model
 
-All data lives under a configurable stash root, defaulting to `~/.lab/stash/`.
+All data lives under a configurable stash root, defaulting to `~/.labby/stash/`.
 
 ```
-~/.lab/stash/
+~/.labby/stash/
 ├── components/        # Component records (one .json per component)
 │   ├── <id>.json      # StashComponent record
 │   ├── <id>.lock      # Advisory lock file (created during write ops)
@@ -40,7 +40,7 @@ Key properties:
 
 ### Configuring the stash root
 
-The stash root is read from `[workspace].root` in `config.toml`, falling back to `~/.lab/stash`. Set it in `~/.lab/config.toml`:
+The stash root is read from `[workspace].root` in `config.toml`, falling back to `~/.labby/stash`. Set it in `~/.labby/config.toml`:
 
 ```toml
 [workspace]
@@ -233,15 +233,15 @@ Write operations (`component.import`, `component.save`, `component.export`, `com
 
 ### Credential guard
 
-Provider config objects must not contain secret values — use them for non-secret configuration only (e.g. `root` path for filesystem providers, bucket name for S3). Credentials are stored separately in `~/.lab/.env` and accessed by the provider at runtime.
+Provider config objects must not contain secret values — use them for non-secret configuration only (e.g. `root` path for filesystem providers, bucket name for S3). Credentials are stored separately in `~/.labby/.env` and accessed by the provider at runtime.
 
-Provider config is stored as JSON in `~/.lab/stash/providers/<id>.json`. These files are visible to any process with filesystem access to the stash root.
+Provider config is stored as JSON in `~/.labby/stash/providers/<id>.json`. These files are visible to any process with filesystem access to the stash root.
 
 ## Token and Config Storage
 
-Provider link records are stored under `~/.lab/stash/providers/<id>.json`. No secrets are stored in provider config — only non-sensitive configuration like paths, bucket names, or provider labels.
+Provider link records are stored under `~/.labby/stash/providers/<id>.json`. No secrets are stored in provider config — only non-sensitive configuration like paths, bucket names, or provider labels.
 
-Deploy target records are stored under `~/.lab/stash/targets/<id>.json`.
+Deploy target records are stored under `~/.labby/stash/targets/<id>.json`.
 
 Both are plain JSON files written atomically via temp+rename.
 

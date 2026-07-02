@@ -899,7 +899,7 @@ Requirements:
   - All provider credential-holding types implement `Debug` manually with redacted secret fields (same pattern as `lab_apis::core::Auth`)
   - All outbound provider URLs must pass through `redact_url` from `crates/lab/src/dispatch/redact.rs` before being included in log events
   - Token values must never appear in log events, error messages, or structured error envelopes
-- **Provider token storage:** Document in `docs/STASH.md` where provider link records are persisted. For v1 filesystem provider this is `stash/providers/`, a local file readable only by the process user. When a token-bearing provider is added, evaluate encryption-at-rest against the `~/.lab/.env` precedent before storing credentials there.
+- **Provider token storage:** Document in `docs/STASH.md` where provider link records are persisted. For v1 filesystem provider this is `stash/providers/`, a local file readable only by the process user. When a token-bearing provider is added, evaluate encryption-at-rest against the `~/.labby/.env` precedent before storing credentials there.
 
 - [ ] **Step 4: Run the focused error tests again**
 

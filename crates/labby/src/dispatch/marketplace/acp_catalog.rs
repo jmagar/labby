@@ -29,7 +29,7 @@ pub const ACP_ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "agent.install",
-        description: "Install an ACP agent on one or more devices. Local installs write a provider entry to `~/.lab/acp-providers.json`; binary archives are downloaded only over HTTPS, SHA-256 verified, size-limited, and installed atomically.",
+        description: "Install an ACP agent on one or more devices. Local installs write a provider entry to `~/.labby/acp-providers.json`; binary archives are downloaded only over HTTPS, SHA-256 verified, size-limited, and installed atomically.",
         destructive: true,
         requires_admin: false,
         returns: "InstallResults",
@@ -62,7 +62,7 @@ pub const ACP_ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "agent.uninstall",
-        description: "Remove an installed ACP agent entry from `~/.lab/acp-providers.json`",
+        description: "Remove an installed ACP agent entry from `~/.labby/acp-providers.json`",
         destructive: true,
         requires_admin: false,
         returns: "UninstallResult",

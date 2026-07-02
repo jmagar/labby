@@ -4,11 +4,11 @@
 
 This is separate from the device runtime `master` model. `gateway` remains the upstream MCP control plane and must not be overloaded for fleet device identity, device ingest, or fleet log handling.
 
-Use it when you want to inspect, test, add, update, remove, or reload `[[upstream]]` entries without editing `~/.config/lab/config.toml` by hand.
+Use it when you want to inspect, test, add, update, remove, or reload `[[upstream]]` entries without editing `~/.config/labby/config.toml` by hand.
 
 ## Scope
 
-- `[[upstream]]` in `~/.config/lab/config.toml` remains the persisted source of truth.
+- `[[upstream]]` in `~/.config/labby/config.toml` remains the persisted source of truth.
 - `gateway.*` actions mutate that config, reconcile runtime state, and trigger MCP list-changed notifications when the merged catalog changes.
 - In-flight MCP requests keep using the pool they already captured. New requests observe the swapped pool after reconcile completes.
 - gateway management is exposed on the `master` only; non-master devices do not mount `/v1/gateway` or the `/mcp` transport
@@ -252,7 +252,7 @@ Tool-search observability:
 Every mutating action follows the same sequence:
 
 1. read and validate config
-2. write `~/.config/lab/config.toml` with temp-file-in-same-dir plus rename
+2. write `~/.config/labby/config.toml` with temp-file-in-same-dir plus rename
 3. build and lazy-seed a fresh upstream pool outside the config mutation lock
 4. atomically swap the runtime handle
 5. leave Code Mode catalog refresh to the next `codemode` call, which
@@ -353,7 +353,7 @@ http://node.internal.example:3100/mcp
 ```
 
 Persisted config lives in `[[protected_mcp_routes]]` entries in
-`~/.config/lab/config.toml`:
+`~/.config/labby/config.toml`:
 
 ```toml
 [[protected_mcp_routes]]

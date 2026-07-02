@@ -44,7 +44,7 @@ When `labby serve` starts, it resolves the local hostname and node role, creates
 
 - on the controller:
   - creates the shared fleet state store
-  - creates the durable enrollment store at `~/.lab/device-enrollments.json` (legacy path; controller-owned)
+  - creates the durable enrollment store at `~/.labby/device-enrollments.json` (legacy path; controller-owned)
   - mounts the full operator control plane plus `/v1/nodes/*`
   - exposes the node websocket endpoint at `GET /v1/nodes/ws`
 - on a non-controller node:
@@ -114,7 +114,7 @@ This is inventory only. The controller stores the uploaded metadata in memory fo
 Node outbound delivery uses a durable local queue rooted at:
 
 ```text
-~/.lab/node-runtime-queue.jsonl
+~/.labby/node-runtime-queue.jsonl
 ```
 
 Rules:
@@ -122,7 +122,7 @@ Rules:
 - non-controller nodes append metadata, status, and log envelopes locally first
 - the queue is acknowledged only after the controller accepts each websocket request
 - failed uploads remain on disk for the next flush attempt
-- the controller stores ingested normalized log events in `~/.lab/node-logs.sqlite`
+- the controller stores ingested normalized log events in `~/.labby/node-logs.sqlite`
 
 The current bootstrap collector is intentionally minimal. It normalizes into the shared `DeviceLogEvent` shape (Rust type name — do not rename) and is expected to grow without changing the node API contract.
 
@@ -130,7 +130,7 @@ The current bootstrap collector is intentionally minimal. It normalizes into the
 
 Enrollment is controller-owned and durable.
 
-- pending, approved, and denied enrollment records are stored in `~/.lab/device-enrollments.json` (legacy path name; controller-owned)
+- pending, approved, and denied enrollment records are stored in `~/.labby/device-enrollments.json` (legacy path name; controller-owned)
 - approval pins an exact `(device_id, device_token)` pair (wire field names — do not rename)
 - denied nodes remain blocked until explicitly re-approved with a new pending record
 

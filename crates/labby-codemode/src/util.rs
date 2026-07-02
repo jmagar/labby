@@ -10,7 +10,7 @@ use crate::lab_action_unknown_tool_hint;
 
 use super::types::ToolDescriptor;
 
-/// Resolve the Lab home directory (`$LAB_HOME`, else `$HOME/.lab`, else a fixed
+/// Resolve the Lab home directory (`$LABBY_HOME`, else `$HOME/.labby`, else a fixed
 /// temp-dir fallback). Self-contained copy of the host helper so the kernel can
 /// locate its artifact root and user snippet dir without depending on `lab`.
 ///
@@ -18,18 +18,18 @@ use super::types::ToolDescriptor;
 /// (CWE-426/377).
 #[must_use]
 pub(crate) fn lab_home() -> PathBuf {
-    if let Ok(home) = std::env::var("LAB_HOME")
+    if let Ok(home) = std::env::var("LABBY_HOME")
         && !home.is_empty()
     {
         return PathBuf::from(home);
     }
     match std::env::var("HOME") {
-        Ok(home) if !home.is_empty() => PathBuf::from(home).join(".lab"),
+        Ok(home) if !home.is_empty() => PathBuf::from(home).join(".labby"),
         _ => {
-            let fallback = std::env::temp_dir().join("lab");
+            let fallback = std::env::temp_dir().join("labby");
             tracing::warn!(
                 fallback = %fallback.display(),
-                "neither LAB_HOME nor HOME is set; using a temp-dir fallback for lab home"
+                "neither LABBY_HOME nor HOME is set; using a temp-dir fallback for lab home"
             );
             fallback
         }

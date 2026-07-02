@@ -81,7 +81,7 @@ function SetupHeader(): React.ReactElement {
           <p className="text-sm text-muted-foreground">
             {mode === 'plugin'
               ? 'Configure the services you have installed plugins for.'
-              : 'One-time wizard to configure ~/.lab/.env via the browser.'}
+              : 'One-time wizard to configure ~/.labby/.env via the browser.'}
           </p>
       </div>
       {mode === 'plugin' ? (

@@ -106,7 +106,7 @@ Full round-trip proven:
 5. **`--internal` network is INCOMPATIBLE with `-p` port mapping.** Docker internal networks block host port binding entirely — containers get no `Ports` entries. **Fix:** Use a regular bridge network (`docker network create lab-live-$RUN_ID` without `--internal`). Loopback binding (`127.0.0.1:0:<port>`) already prevents LAN exposure. Tested and confirmed.
 6. **No `tank` pool** means `bin/live-host` ZFS paths must all use `backup/lab/live/...` prefix.
 7. **`docker port` for port extraction.** `docker inspect --format` with Go templates fails when ports aren't mapped. Use `docker port <name> <port>/tcp | cut -d: -f2` instead — simpler and reliable.
-8. **SSH automation:** backup-node is already in `~/.ssh/known_hosts` (ed25519 + rsa). SSH config maps `backup-node` → `User root, HostName backup-node`. BatchMode works. The plan's `~/.lab/known_hosts` approach is unnecessary — standard known_hosts is fine.
+8. **SSH automation:** backup-node is already in `~/.ssh/known_hosts` (ed25519 + rsa). SSH config maps `backup-node` → `User root, HostName backup-node`. BatchMode works. The plan's `~/.labby/known_hosts` approach is unnecessary — standard known_hosts is fine.
 9. **Bash on backup-node:** 5.3.3, supports arrays, `timeout` (coreutils 9.8), `grep -E` regex — all script features work.
 10. **Dynamic ports start at 32768** (kernel ephemeral range). Confirmed `127.0.0.1:0:<port>` allocates correctly.
 11. **Startup latency:** All 3 services ready in ~6s from `docker run` (one failed poll, second succeeds). Readiness timeout of 120s is very conservative.
@@ -648,9 +648,9 @@ declare -A SERVICE_SIDECARS=(
 
 **SSH one-time setup requirement:** The SSH calls in this script require `backup-node`'s host key to be in a known-hosts file. One-time setup (add to `docs/LIVE_TESTING.md`):
 ```bash
-ssh-keyscan backup-node >> ~/.lab/known_hosts
+ssh-keyscan backup-node >> ~/.labby/known_hosts
 ```
-All SSH calls must include `-o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.lab/known_hosts`.
+All SSH calls must include `-o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.labby/known_hosts`.
 
 Contract:
 - `up <profile> <run-id>` validates inputs first, then emits JSON manifest to stdout (stdout must be **only** the JSON manifest — redirect all other output to stderr)
@@ -725,12 +725,12 @@ Add SSH timeout and host key options on every invocation:
 ```just
 live-env-up PROFILE RUN_ID:
     ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 \
-        -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.lab/known_hosts \
+        -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.labby/known_hosts \
         -o ServerAliveCountMax=3 backup-node live-host up {{PROFILE}} {{RUN_ID}}
 
 live-env-down RUN_ID:
     ssh -o BatchMode=yes -o ConnectTimeout=10 \
-        -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.lab/known_hosts \
+        -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.labby/known_hosts \
         backup-node live-host down {{RUN_ID}}
 
 # One-time setup: stage bin/live-host onto backup-node (no CLI subcommand needed)
@@ -905,7 +905,7 @@ impl Drop for RunGuard {
         let _ = std::process::Command::new("ssh")
             .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
                    "-o", "StrictHostKeyChecking=yes",
-                   "-o", "UserKnownHostsFile=~/.lab/known_hosts",
+                   "-o", "UserKnownHostsFile=~/.labby/known_hosts",
                    &self.host, "live-host", "down", &self.run_id])
             .output();
     }
@@ -1497,14 +1497,14 @@ Document:
 - artifacts live under `artifacts/live/<run_id>/` (gitignored since Task 1)
 - destructive live tests require `--allow-destructive` flag; MCP destructive cases are always `SkipNoElicitation` until elicitation is implemented
 - golden snapshots must use clean-seed test-only credentials — never snapshot a production service
-- one-time setup: `just install-live-host` (stages `bin/live-host` onto backup-node) and `ssh-keyscan backup-node >> ~/.lab/known_hosts` (adds backup-node host key)
+- one-time setup: `just install-live-host` (stages `bin/live-host` onto backup-node) and `ssh-keyscan backup-node >> ~/.labby/known_hosts` (adds backup-node host key)
 
 - [ ] **Step 3: Update the docs**
 
 Touch:
 - docs index
 - testing contract
-- operations workflow (one-time setup: `just install-live-host`, `ssh-keyscan backup-node >> ~/.lab/known_hosts`)
+- operations workflow (one-time setup: `just install-live-host`, `ssh-keyscan backup-node >> ~/.labby/known_hosts`)
 - observability contract if artifact fields are now part of verification
 - new live coverage doc with current fixture/gap status
 
@@ -1592,7 +1592,7 @@ git commit -m “feat: add backup-node-backed live end-to-end test infrastructur
 - Do not push `backup-node` orchestration logic into `lab-apis`.
 - Prefer small, typed Rust modules for in-repo logic and thin shell for host-side orchestration.
 - Treat fixture manifests and service fixture files as product contracts for the test system.
-- Use `ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.lab/known_hosts` for all automation — never bare `ssh`.
+- Use `ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.labby/known_hosts` for all automation — never bare `ssh`.
 - Use `tokio::process::Command` with `kill_on_drop(true)` for every SSH subprocess. See `crates/lab/src/live/CLAUDE.md` for the full rules.
 - Validate `run_id` and `profile` against `^[a-z0-9][a-z0-9_-]{0,63}$` before any SSH or ZFS operation. The Rust validator in `validation.rs` and the bash `validate_id()` must match exactly — add `# SYNC:` comments cross-referencing both.
 - Docker port binding MUST use `127.0.0.1:0:<port>` — never `0:<port>`. Using `0.0.0.0` exposes live test services to the LAN.

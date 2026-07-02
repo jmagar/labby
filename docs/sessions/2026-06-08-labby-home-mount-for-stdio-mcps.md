@@ -138,7 +138,7 @@ Pre-existing Lab dirty files were observed in `crates/lab/src/cli/gateway.rs`, `
 
 ## Decisions Not Taken
 
-- Did not solve this by changing `~/.lab/config.toml` paths to container-only aliases because each new local stdio MCP would still need a bespoke path rewrite.
+- Did not solve this by changing `~/.labby/config.toml` paths to container-only aliases because each new local stdio MCP would still need a bespoke path rewrite.
 - Did not leave the fix at `/home/jmagar/workspace` because the final user request explicitly changed the desired mount boundary to `/home/jmagar`.
 - Did not commit Synapse plugin cleanup from the Lab repo because it belongs to `/home/jmagar/workspace/synapse2`, a separate repository.
 

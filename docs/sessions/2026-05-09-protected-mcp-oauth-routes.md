@@ -28,7 +28,7 @@ Implement and debug Lab's inline protected MCP route flow so OAuth-enabled upstr
 
 - Audited the existing SWAG/nginx OAuth-proxy pattern and Lab gateway implementation.
 - Implemented protected MCP route configuration, API, dispatch, CLI, UI, and docs for named upstream routes.
-- Configured live `syslog` and `axon-controller-tv` upstreams and protected routes in `/home/jmagar/.lab/config.toml`.
+- Configured live `syslog` and `axon-controller-tv` upstreams and protected routes in `/home/jmagar/.labby/config.toml`.
 - Fixed upstream OAuth callback allowlists for syslog and Axon so Lab can complete dynamic client registration with `https://lab.example.com/auth/upstream/callback`.
 - Debugged the "No capabilities were discovered" UI failure after direct protected-route proxying already worked.
 - Patched startup, reload, and test discovery paths to use subject-scoped gateway discovery for OAuth upstreams.

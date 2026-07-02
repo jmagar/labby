@@ -33,7 +33,7 @@ Unscoped admin/trusted-local Code Mode also exposes two local sandbox globals:
 filesystem or shell access. Route-scoped Code Mode runs do not receive these
 globals, and hand-written `callTool("state::...")` / `callTool("git::...")`
 calls are denied at dispatch time. All paths are virtual workspace paths rooted
-inside `$LAB_HOME/code-mode-workspaces/`. Parameters use the documented
+inside `$LABBY_HOME/code-mode-workspaces/`. Parameters use the documented
 JavaScript names; result payloads preserve the existing serialized Rust field
 names where those names are already part of the Code Mode contract.
 
@@ -169,7 +169,7 @@ source is written as plaintext executable snippet content under the user snippet
 directory and may contain anything the original Code Mode source contained.
 
 > **Persistence caveat.** Promotion writes the source **verbatim and unredacted**
-> as a plaintext file on disk (`$LAB_HOME/snippets/<name>.md`, subject to the
+> as a plaintext file on disk (`$LABBY_HOME/snippets/<name>.md`, subject to the
 > process umask). If the original Code Mode source embedded a literal secret,
 > token, or captured credential, that value is now persisted in cleartext and
 > survives restarts until the snippet is removed. Promotion is `destructive: true`
@@ -463,7 +463,7 @@ run, so isolation holds by construction.
   creates a fresh, empty per-execution QuickJS working-directory jail (removing
   the prior one), so a long-lived process never accumulates JS runtime state
   across callers. Code Mode's `state.*` and `git.*` local providers deliberately
-  use a separate persistent workspace under `LAB_HOME/code-mode-workspaces/`;
+  use a separate persistent workspace under `LABBY_HOME/code-mode-workspaces/`;
   persistence is scoped to that workspace and guarded by virtual path, symlink,
   quota, archive, and git remote restrictions. The 64 MiB heap, 30 s wall-clock
   timeout, and stack limit are enforced per execution.

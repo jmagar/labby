@@ -292,7 +292,7 @@ async () => {
 }
 ```
 
-The final return value is still subject to `[code_mode].max_response_bytes` and `[code_mode].max_response_tokens`. Each `writeArtifact` path is validated (non-empty, relative, no `..`, no symlinked-ancestor escape) and the content — capped at 8 MiB by default — is written into a per-run directory under `$LAB_HOME/code-mode-artifacts/<run_id>/`. The receipt includes the path, byte count, content type, and SHA-256 digest. `contentType` defaults to `text/plain` when omitted or blank; when provided, it must be a simple ASCII `type/subtype` media type, up to 256 bytes after trimming surrounding ASCII spaces.
+The final return value is still subject to `[code_mode].max_response_bytes` and `[code_mode].max_response_tokens`. Each `writeArtifact` path is validated (non-empty, relative, no `..`, no symlinked-ancestor escape) and the content — capped at 8 MiB by default — is written into a per-run directory under `$LABBY_HOME/code-mode-artifacts/<run_id>/`. The receipt includes the path, byte count, content type, and SHA-256 digest. `contentType` defaults to `text/plain` when omitted or blank; when provided, it must be a simple ASCII `type/subtype` media type, up to 256 bytes after trimming surrounding ASCII spaces.
 
 ## Basic Pattern
 

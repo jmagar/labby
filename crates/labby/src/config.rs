@@ -2,8 +2,8 @@
 //!
 //! Order of precedence (highest wins):
 //!   1. CLI flags / process environment variables
-//!   2. `~/.lab/.env` (loaded via `dotenvy`)
-//!   3. `config.toml` (searched: `./` → `~/.lab/` → `~/.config/lab/`)
+//!   2. `~/.labby/.env` (loaded via `dotenvy`)
+//!   3. `config.toml` (searched: `./` → `~/.labby/` → `~/.config/labby/`)
 //!   4. Built-in defaults
 //!
 //! Service credentials and instance endpoints belong in `.env`. Non-secret
@@ -794,7 +794,7 @@ pub struct McpPreferences {
 ///
 /// Values are read from config.toml; env vars `LAB_PUBLIC_URL` (app) and
 /// `LAB_MCP_GATEWAY_URL` (mcp_gateway) take precedence and may be set in
-/// `~/.lab/.env`.
+/// `~/.labby/.env`.
 ///
 /// Accessor: [`LabConfig::public_urls()`] returns a resolved [`ResolvedPublicUrls`].
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1079,7 +1079,7 @@ fn parse_web_ui_auth_disabled_bool(name: &str, value: &str) -> Result<bool> {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WorkspacePreferences {
     /// Root directory used by fs browsing and stash-backed writable workspaces.
-    /// Defaults to `~/.lab/stash`.
+    /// Defaults to `~/.labby/stash`.
     #[serde(default)]
     pub root: Option<PathBuf>,
 }
@@ -1174,8 +1174,8 @@ pub struct TailscalePreferences {
 ///
 /// Config TOML resolution (first found wins):
 ///   1. `./config.toml` (repo/CWD override)
-///   2. `~/.lab/config.toml` (user-level, colocated with `.env`)
-///   3. `~/.config/lab/config.toml` (XDG-style fallback)
+///   2. `~/.labby/config.toml` (user-level, colocated with `.env`)
+///   3. `~/.config/labby/config.toml` (XDG-style fallback)
 pub fn load_toml(candidates: &[PathBuf]) -> Result<LabConfig> {
     for path in candidates {
         match std::fs::read_to_string(path) {
@@ -1272,20 +1272,27 @@ fn set_toml_scalar_path(
     let (leaf, parents) = parts.split_last().expect("non-empty parts");
     let mut item = document.as_item_mut();
     for part in parents {
-        if item[*part].is_none() {
-            item[*part] = toml_edit::Item::Table(toml_edit::Table::new());
-        } else if !item[*part].is_table() {
-            let converted = item[*part]
+        let table = item
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("config parent `{part}` is not a table"))?;
+        if !table.contains_key(part) {
+            table.insert(part, toml_edit::Item::Table(toml_edit::Table::new()));
+        }
+        let child = table
+            .get_mut(part)
+            .ok_or_else(|| anyhow::anyhow!("config parent `{part}` was not created"))?;
+        if !child.is_table() {
+            let converted = child
                 .as_value()
                 .and_then(toml_edit::Value::as_inline_table)
                 .map(inline_table_to_table);
             if let Some(table) = converted {
-                item[*part] = toml_edit::Item::Table(table);
+                *child = toml_edit::Item::Table(table);
             } else {
                 anyhow::bail!("config parent `{part}` is not a table");
             }
         }
-        item = &mut item[*part];
+        item = child;
     }
     if matches!(value, ConfigScalarValue::UnsetOptional) {
         if let Some(table) = item.as_table_mut() {
@@ -1608,7 +1615,7 @@ fn config_lock_path(path: &Path) -> PathBuf {
 /// override config.toml values at the point of use (each consumer checks
 /// env first, then falls back to config).
 pub fn load_dotenv() -> Result<()> {
-    // Load ~/.lab/.env first (user-level secrets).
+    // Load ~/.labby/.env first (user-level secrets).
     if let Some(env_path) = dotenv_path()
         && env_path.exists()
     {
@@ -1640,8 +1647,8 @@ pub fn load() -> Result<LabConfig> {
 pub fn toml_candidates() -> Vec<PathBuf> {
     let mut paths = vec![PathBuf::from("config.toml")];
     if let Some(home) = home_dir() {
-        paths.push(home.join(".lab").join("config.toml"));
-        paths.push(home.join(".config").join("lab").join("config.toml"));
+        paths.push(home.join(".labby").join("config.toml"));
+        paths.push(home.join(".config").join("labby").join("config.toml"));
     }
     paths
 }
@@ -1670,7 +1677,7 @@ pub fn workspace_root_for_home(config: &LabConfig, home: &Path) -> PathBuf {
         .root
         .as_deref()
         .map(|root| expand_home_path(root, home))
-        .unwrap_or_else(|| home.join(".lab").join("stash"))
+        .unwrap_or_else(|| home.join(".labby").join("stash"))
 }
 
 pub fn workspace_root_path(config: &LabConfig) -> Result<PathBuf> {
@@ -1689,9 +1696,9 @@ fn expand_home_path(path: &Path, home: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
-/// Standard location for the `.env` file: `~/.lab/.env`.
+/// Standard location for the `.env` file: `~/.labby/.env`.
 pub fn dotenv_path() -> Option<PathBuf> {
-    home_dir().map(|home| home.join(".lab").join(".env"))
+    home_dir().map(|home| home.join(".labby").join(".env"))
 }
 
 pub fn config_toml_path() -> Option<PathBuf> {
@@ -1708,16 +1715,16 @@ pub fn config_toml_path() -> Option<PathBuf> {
     toml_candidates()
         .into_iter()
         .find(|path| path.exists())
-        .or_else(|| home_dir().map(|home| home.join(".config").join("lab").join("config.toml")))
+        .or_else(|| home_dir().map(|home| home.join(".config").join("labby").join("config.toml")))
 }
 
-/// Path to the SQLite registry database: `~/.lab/registry.db`.
+/// Path to the SQLite registry database: `~/.labby/registry.db`.
 ///
 /// Creates no files — callers are responsible for opening/creating the store.
 pub fn registry_db_path() -> PathBuf {
     home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".lab")
+        .join(".labby")
         .join("registry.db")
 }
 
@@ -2672,7 +2679,7 @@ mcp = true
 
         assert_eq!(
             workspace_root_for_home(&cfg, home),
-            home.join(".lab").join("stash")
+            home.join(".labby").join("stash")
         );
     }
 

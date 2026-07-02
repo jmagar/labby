@@ -30,7 +30,7 @@ Purpose:
 Usage:
 
 ```bash
-./scripts/check-oauth.sh                          # auto-loads ~/.lab/.env, defaults to localhost:8080
+./scripts/check-oauth.sh                          # auto-loads ~/.labby/.env, defaults to localhost:8080
 ./scripts/check-oauth.sh https://lab.example.com  # explicit URL
 LAB_BASE_URL=https://lab.example.com ./scripts/check-oauth.sh
 ```
@@ -50,8 +50,8 @@ Purpose:
 
 When `LAB_AUTH_MODE=oauth`, `lab` persists local auth state on disk:
 
-- SQLite database: `~/.lab/auth.db` by default
-- JWT signing key: `~/.lab/auth-jwt.pem` by default
+- SQLite database: `~/.labby/auth.db` by default
+- JWT signing key: `~/.labby/auth-jwt.pem` by default
 
 Rules:
 
@@ -99,7 +99,7 @@ Operational rules:
 
 Recommended setup checklist:
 
-1. Configure the browser-side machine target in `~/.lab/config.toml`:
+1. Configure the browser-side machine target in `~/.labby/config.toml`:
 
 ```toml
 [oauth.machines.node-a]
@@ -209,7 +209,7 @@ Setup order:
 
 1. Pick one machine as the master and start it first with `labby serve`.
 2. If you use bearer auth, set `LAB_MCP_HTTP_TOKEN` on the master before starting it and reuse that same token on every non-master device that reports to it.
-3. On each non-master, set the master machine name in `~/.lab/config.toml`:
+3. On each non-master, set the master machine name in `~/.labby/config.toml`:
 
 ```toml
 [node]

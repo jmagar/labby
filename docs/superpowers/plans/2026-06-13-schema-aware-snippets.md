@@ -532,7 +532,7 @@ async fn test_manager_with_code_mode_tool(
 #[tokio::test]
 async fn validate_existing_snippet_reports_declared_tool_schemas() {
     let temp = tempfile::tempdir().unwrap();
-    std::env::set_var("LAB_HOME", temp.path().join("lab-home"));
+    std::env::set_var("LABBY_HOME", temp.path().join("lab-home"));
     let body = r#"---
 name: schema-demo
 description: Schema demo
@@ -566,7 +566,7 @@ async () => ({ ok: true })
 #[tokio::test]
 async fn exec_fails_before_code_mode_when_declared_tool_is_missing() {
     let temp = tempfile::tempdir().unwrap();
-    std::env::set_var("LAB_HOME", temp.path().join("lab-home"));
+    std::env::set_var("LABBY_HOME", temp.path().join("lab-home"));
     let body = r#"---
 name: missing-tool
 description: Missing tool

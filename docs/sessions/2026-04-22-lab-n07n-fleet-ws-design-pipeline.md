@@ -22,7 +22,7 @@ No code changes. Planning + review only.
 - Multi-agent review converged independently on two critical issues: DashMap swap for `UpstreamPool` (arch + perf) and fsync-blocking on tokio runtime (perf + simplicity).
 - Simplicity-reviewer's YAGNI cuts (defer segment queue, per-sub mpsc, audit viewer, subscriptions, compression) conflicted with research-driven production requirements; research and perf-oracle findings took precedence.
 - Existing SSRF blocklist at `crates/lab/src/dispatch/mcpregistry::ssrf::is_blocked()` (CGNAT 100.64/10 + RFC1918) is reusable for `peer.invoke` params.
-- Existing queue at `~/.lab/device-runtime-queue.jsonl` has O(N) rewrite-on-ack — replaced by segment-based design (1 MiB immutable segments).
+- Existing queue at `~/.labby/device-runtime-queue.jsonl` has O(N) rewrite-on-ack — replaced by segment-based design (1 MiB immutable segments).
 
 ## Technical Decisions
 
@@ -31,7 +31,7 @@ No code changes. Planning + review only.
 - **DashMap for `UpstreamPool` in P1** (moved from deferred P4) — lock contention is a P1 blocker, not a scale optimization.
 - **SIGHUP-triggered policy reload** instead of file-watcher — simpler, matches operator mental model.
 - **PolicySnapshot struct** with `policy_version: u64` — avoids TOCTOU on hot-reload.
-- **Audit HMAC chain moved into P4** (from deferred) — SHA-256 prev_hash + HMAC-SHA256 per line, `~/.lab/fleet-audit.jsonl`, `lab audit verify` tool.
+- **Audit HMAC chain moved into P4** (from deferred) — SHA-256 prev_hash + HMAC-SHA256 per line, `~/.labby/fleet-audit.jsonl`, `lab audit verify` tool.
 - **Semaphore(16) on reprobes + per-device `hash(device_id) mod 5000ms` jitter** — thundering-herd mitigation.
 - **Backpressure policy** — 1s `send_timeout` then disconnect (not unbounded).
 - **Token redaction at tracing layer** for `Sec-WebSocket-Protocol` header — prevents leakage in structured logs.

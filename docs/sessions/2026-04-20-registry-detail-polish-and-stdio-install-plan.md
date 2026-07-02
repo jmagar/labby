@@ -16,7 +16,7 @@ Polish the MCP Registry browser UI to surface *every* field from the registry se
 
 ## Session Overview
 
-Polished the MCP Registry server detail dialog to render the full server.json schema (icons, repository.subfolder, $schema link, registry metadata, all counts, copy buttons), extracted a shared local-time formatter, fixed the truncated registry URL in the page header, and scoped — but did not implement — a follow-on plan for stdio-install + env-var extraction into `~/.lab/.env`. User pushback corrected a false claim about stdio-install being unsupported at the gateway runtime level.
+Polished the MCP Registry server detail dialog to render the full server.json schema (icons, repository.subfolder, $schema link, registry metadata, all counts, copy buttons), extracted a shared local-time formatter, fixed the truncated registry URL in the page header, and scoped — but did not implement — a follow-on plan for stdio-install + env-var extraction into `~/.labby/.env`. User pushback corrected a false claim about stdio-install being unsupported at the gateway runtime level.
 
 ## Sequence of Events
 
@@ -89,7 +89,7 @@ Polished the MCP Registry server detail dialog to render the full server.json sc
 
 ## Open Questions
 
-- Should the new `secrets` install param write to `~/.lab/.env` directly (reusing `extract.apply`) or stage values in a separate secret store?
+- Should the new `secrets` install param write to `~/.labby/.env` directly (reusing `extract.apply`) or stage values in a separate secret store?
 - For stdio servers, should the gateway own package installation (npx/uvx/docker) or require the user to pre-install?
 
 ## Next Steps
@@ -100,4 +100,4 @@ Polished the MCP Registry server detail dialog to render the full server.json sc
 1. Extend Rust `server.install` to build stdio specs when `server.remotes` is empty: `command` ← `package.runtimeHint`, `args` ← `runtimeArguments ++ identifier ++ packageArguments`.
 2. Extend TS types for full `Input`/`KeyValueInput` schema coverage (`isRequired`, `isSecret`, `default`, `choices`, `placeholder`, `format`, `variables`).
 3. Install dialog form rendering headers / transport variables (HTTP) or `environmentVariables` (stdio) with secret masking, `choices` dropdowns, `default` prefill.
-4. Backend `secrets` param that merges values into `~/.lab/.env` via `extract.apply`'s atomic-merge algorithm and references them from the gateway spec.
+4. Backend `secrets` param that merges values into `~/.labby/.env` via `extract.apply`'s atomic-merge algorithm and references them from the gateway spec.

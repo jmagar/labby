@@ -37,7 +37,7 @@ const MAX_CONTENT_TYPE_BYTES: usize = 256;
 const DEFAULT_ARTIFACT_MAX_MIB: usize = 8;
 
 /// Default number of per-run artifact directories retained under
-/// `$LAB_HOME/code-mode-artifacts/`. Old run directories are pruned on the first
+/// `$LABBY_HOME/code-mode-artifacts/`. Old run directories are pruned on the first
 /// artifact write of a run (never on search / no-write runs) so the on-disk
 /// store stays bounded. Override with `LAB_CODE_MODE_ARTIFACT_RETENTION_RUNS`;
 /// set it to `0` to disable *count* pruning.
@@ -252,7 +252,7 @@ pub(crate) async fn prune_artifact_runs(retain: usize) {
     .await;
 }
 
-/// Core prune over an explicit store root (so tests need no `$LAB_HOME`).
+/// Core prune over an explicit store root (so tests need no `$LABBY_HOME`).
 ///
 /// Removes the oldest run directories that fall outside *either* the run-count
 /// cap (`retain`, newest-N) *or* the total-byte budget (`max_store_bytes`,

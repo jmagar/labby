@@ -26,7 +26,7 @@ We diagnosed and fixed Labby's stdio MCP lifecycle leak, diagnosed Cortex's stdi
 2. Killed runaway MCP-related processes, shut down Labby and the llama server when memory pressure became urgent, then restarted controlled debugging.
 3. Implemented Lab gateway lifecycle fixes for stdio discovery, probe task registration, and ephemeral test pools.
 4. Built and installed the Lab release binary to the repo, plugin path, user PATH, and container-mounted runtime path; committed and pushed the Lab stdio lifecycle fix earlier in the session.
-5. Investigated Cortex's failed Labby connection test and found the plain `/home/jmagar/.local/bin/cortex mcp` command was looking at `/home/lab/.cortex` inside the container.
+5. Investigated Cortex's failed Labby connection test and found the plain `/home/jmagar/.local/bin/cortex mcp` command was looking at `/home/labby/.cortex` inside the container.
 6. Fixed Cortex to infer `/home/<user>/.cortex` from a user-home binary path when `$HOME/.cortex` is absent, then verified the gateway test succeeds with the plain command.
 7. Compared Axon, Lab, Cortex, and rmcp-template build/install flows and copied Axon's Cargo wrapper pattern into Lab, Cortex, and rmcp-template.
 8. Tightened the wrapper implementation after discovering a dependency-local `rust-toolchain.toml` could make `rustup which rustc` resolve Rust 1.56.0 from inside a dependency directory.
@@ -36,7 +36,7 @@ We diagnosed and fixed Labby's stdio MCP lifecycle leak, diagnosed Cortex's stdi
 ## Key Findings
 
 - Labby's stdio test path needed an ephemeral discovery lifecycle so connection tests do not leave long-lived stdio children behind.
-- Cortex's config loading was not deterministic under Labby's container because the container user had `HOME=/home/lab`, while the mounted runtime config lived under `/home/jmagar/.cortex`.
+- Cortex's config loading was not deterministic under Labby's container because the container user had `HOME=/home/labby`, while the mounted runtime config lived under `/home/jmagar/.cortex`.
 - The failed Cortex connection was not fixed by a gateway restart alone; `/home/jmagar/.local/bin/cortex` was still an old `cortex 1.8.0` binary until it was replaced with the newly built `1.15.0` binary.
 - Axon's closest automatic binary sync pattern lives in `scripts/cargo-rustc-wrapper`, `.cargo/config.toml`, and `Justfile` recipes such as `link-bin`, `build-plugin`, and `sync-container`.
 - A dependency crate (`ff-0.13.1`) includes its own `rust-toolchain.toml` pinned to `1.56.0`; wrappers must resolve rustc from the workspace root, not the dependency working directory.
@@ -130,7 +130,7 @@ No completed plans were moved. No beads, worktrees, or branches were modified. N
 ## Errors Encountered
 
 - Labby stdio MCP tests could leave extra stdio server processes; fixed with explicit ephemeral discovery/test lifecycle handling.
-- Cortex stdio failed in Labby with `Permission denied (os error 13)` because the process looked under `/home/lab/.cortex` instead of the mounted operator config under `/home/jmagar/.cortex`; fixed by portable home inference and replacing the stale PATH binary.
+- Cortex stdio failed in Labby with `Permission denied (os error 13)` because the process looked under `/home/labby/.cortex` instead of the mounted operator config under `/home/jmagar/.cortex`; fixed by portable home inference and replacing the stale PATH binary.
 - A fresh verification initially still showed `cortex 1.8.0`; root cause was the live `/home/jmagar/.local/bin/cortex` had not been replaced even though the repo release artifact had been built.
 - `strace` was not installed in the Labby container, so direct file tracing was unavailable.
 - Lumen semantic search returned `Transport closed`; exact repo search was used instead.

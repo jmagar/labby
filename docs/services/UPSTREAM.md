@@ -20,7 +20,7 @@ The upstream pool lives in `crates/lab/src/dispatch/upstream/` because it is sha
 
 ## What Operators Configure
 
-To proxy an upstream server through `lab`, you configure one or more `[[upstream]]` entries in `~/.config/lab/config.toml`, optionally provide bearer-token env vars in `~/.lab/.env`, then start `labby serve` normally.
+To proxy an upstream server through `lab`, you configure one or more `[[upstream]]` entries in `~/.config/labby/config.toml`, optionally provide bearer-token env vars in `~/.labby/.env`, then start `labby serve` normally.
 
 `lab` will:
 
@@ -91,12 +91,12 @@ Exactly one of `url` or `command` must be set.
 `lab` loads configuration from:
 
 1. process environment
-2. `~/.lab/.env`
-3. `~/.config/lab/config.toml`
+2. `~/.labby/.env`
+3. `~/.config/labby/config.toml`
 
 So a typical gateway setup looks like:
 
-`~/.config/lab/config.toml`
+`~/.config/labby/config.toml`
 
 ```toml
 [mcp]
@@ -118,7 +118,7 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/srv/data"]
 proxy_resources = false
 ```
 
-`~/.lab/.env`
+`~/.labby/.env`
 
 ```bash
 REMOTE_LAB_TOKEN=replace-me
@@ -455,11 +455,11 @@ Keep this distinction explicit in operator docs:
 
 ### 1. Configure upstreams
 
-Add one or more `[[upstream]]` entries to `~/.config/lab/config.toml`.
+Add one or more `[[upstream]]` entries to `~/.config/labby/config.toml`.
 
 ### 2. Provide any required secrets
 
-Set bearer-token env vars named by `bearer_token_env` in `~/.lab/.env` or the process environment.
+Set bearer-token env vars named by `bearer_token_env` in `~/.labby/.env` or the process environment.
 
 ### 3. Start `lab`
 

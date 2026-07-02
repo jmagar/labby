@@ -6,7 +6,7 @@
 //! line for every host on startup.
 //!
 //! Single-instance: refuses to start if another `labby deploy monitor` is already
-//! running, using a pidfile at `~/.lab/run/deploy-monitor.lock`. Stale pidfiles
+//! running, using a pidfile at `~/.labby/run/deploy-monitor.lock`. Stale pidfiles
 //! (process no longer alive) are silently overwritten.
 //!
 //! Suitable as input for Claude Code's Monitor tool (reads stdout line by line).
@@ -62,7 +62,7 @@ fn lock_path() -> PathBuf {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
-    home.join(".lab/run/deploy-monitor.lock")
+    home.join(".labby/run/deploy-monitor.lock")
 }
 
 /// Returns true if a process with the given PID is alive.

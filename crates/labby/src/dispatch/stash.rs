@@ -2,7 +2,7 @@
 //!
 //! Stash manages versioned, provider-synced component snapshots stored under
 //! the configured workspace root (`[workspace].root` in `config.toml`, falling
-//! back to `~/.lab/stash`).
+//! back to `~/.labby/stash`).
 //!
 //! Surfaces (MCP, CLI, API) are thin adapters over the modules here.
 

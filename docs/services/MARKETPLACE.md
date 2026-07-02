@@ -37,7 +37,7 @@ must flow through the shared dispatch error envelope.
 | `<installPath>/**` | Installed plugin artifacts returned by `plugin.artifacts`. |
 | `[mcpregistry].url` | Optional MCP Registry base URL, defaulting to `https://registry.modelcontextprotocol.io`. |
 | `LAB_ACP_REGISTRY_URL` | Optional ACP Agent Registry CDN base URL, defaulting to `https://cdn.agentclientprotocol.com`. |
-| `~/.lab/acp-providers.json` | Local ACP provider entries written by `agent.install` and removed by `agent.uninstall`. |
+| `~/.labby/acp-providers.json` | Local ACP provider entries written by `agent.install` and removed by `agent.uninstall`. |
 
 Missing Claude/Codex marketplace files are treated as empty so a fresh machine
 returns zero plugin sources without error.
@@ -169,9 +169,9 @@ Marketplace install paths are intentionally narrow:
 - observational plugin actions read from `~/.claude/plugins/` and installed
   plugin paths recorded by Claude/Codex
 - workspace mirrors live under the configured Lab stash root, defaulting to
-  `~/.lab/stash/plugins/`
-- ACP binaries install under `~/.lab/bin/<agent_id>/`
-- ACP provider config writes go to `~/.lab/acp-providers.json`
+  `~/.labby/stash/plugins/`
+- ACP binaries install under `~/.labby/bin/<agent_id>/`
+- ACP provider config writes go to `~/.labby/acp-providers.json`
 
 Binary and package integrity policy:
 
@@ -223,4 +223,4 @@ curl -s -X POST http://127.0.0.1:8765/v1/marketplace \
 ```
 
 The web UI consumes `/v1/marketplace`; it must not read or write `~/.claude/`,
-`~/.lab/bin/`, or `~/.lab/acp-providers.json` directly.
+`~/.labby/bin/`, or `~/.labby/acp-providers.json` directly.

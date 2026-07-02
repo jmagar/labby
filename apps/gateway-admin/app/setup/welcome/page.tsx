@@ -8,7 +8,7 @@ export default function WelcomePage(): React.ReactElement {
       <section className="space-y-3">
         <h2 className="text-xl font-semibold">Welcome</h2>
         <p>
-          This wizard configures <code>~/.lab/.env</code> by walking through
+          This wizard configures <code>~/.labby/.env</code> by walking through
           eight short steps. You can leave at any time — your progress is
           persisted as a draft and resumed on the next visit.
         </p>

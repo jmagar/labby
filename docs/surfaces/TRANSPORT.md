@@ -210,7 +210,7 @@ open http://localhost:8765/
 ## Example: Network Deployment
 
 ```bash
-# In ~/.lab/.env
+# In ~/.labby/.env
 LAB_MCP_TRANSPORT=http
 LAB_MCP_HTTP_HOST=0.0.0.0
 LAB_MCP_HTTP_PORT=8765
@@ -253,7 +253,7 @@ environment.**  The implications are non-negotiable:
    extensions.  The gateway handler treats this as "no admin scope" and returns `403 Forbidden`.
    (`is_none_or(...)` would have allowed unauthenticated requests — it is NOT used here.)
 
-4. **`~/.lab/.env` permissions are tightened at startup.**
+4. **`~/.labby/.env` permissions are tightened at startup.**
    `cli/serve.rs` calls `heal_env_file_permissions(&env_path)` during gateway manager
    initialization to chmod `.env` and any `.env.bak.*` sibling files to `0600`, correcting
    any file that was created without strict permissions.

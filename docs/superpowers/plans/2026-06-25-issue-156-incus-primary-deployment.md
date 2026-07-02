@@ -76,7 +76,7 @@ The long-running `labby serve` process stays small, unprivileged, and responsibl
 - Docker remains only an explicit compatibility/dev-container/prod-like smoke path until deprecation docs and checks are updated.
 - Long-running `labby serve` stays unprivileged.
 - Privileged setup is explicit, bounded, and consent-gated.
-- The system service runs as `User=lab` / `Group=lab`, not `systemd --user`.
+- The system service runs as `User=labby` / `Group=labby`, not `systemd --user`.
 - Tailscale runs inside the container and requires `/dev/net/tun` passthrough.
 - Adding upstreams must not silently run apt. Missing leaf dependencies are diagnosed or declared and require explicit operator consent.
 - Mutating `setup --provision` execution is local CLI-only. Do not expose root apt/useradd/systemctl execution through MCP, HTTP, Code Mode, or remote admin actions.
@@ -121,7 +121,7 @@ Security review:
 - Provisioning must stay local CLI-only.
 - Dependency diagnostics can leak secrets; add a final operator-visible sanitizer.
 - Incus production bootstrap install path must fail closed: require checksum, pin release/version, ignore unsafe inherited `LAB_INSTALL_REPO`, and make source-build fallback explicit.
-- Avoid writable PATH persistence risk under `User=lab`: no writable directories before trusted binaries.
+- Avoid writable PATH persistence risk under `User=labby`: no writable directories before trusted binaries.
 - `TS_AUTHKEY` must never be printed, persisted to systemd env files, captured in traces, or left in process args longer than necessary.
 - Incus isolation requirements are acceptance criteria, not docs-only.
 
@@ -164,7 +164,7 @@ Convert the existing `labby setup host-service` implementation from a `systemd -
 
 - `unit_dir` / `unit_path` -> `/etc/systemd/system/labby.service`.
 - `run_systemctl` drops the `--user` flag for default system mode.
-- Unit gains `User=lab`, `Group=lab`, and `WantedBy=multi-user.target`.
+- Unit gains `User=labby`, `Group=labby`, and `WantedBy=multi-user.target`.
 - Drop `%h` user-manager path tricks; use absolute paths.
 - `ExecStart=/usr/local/bin/labby serve`.
 - Install binary to `/usr/local/bin/labby`, root-owned and executable by `lab`.
@@ -176,17 +176,17 @@ Start from this, then relax only if required by smoke tests:
 
 ```ini
 [Service]
-User=lab
-Group=lab
+User=labby
+Group=labby
 ExecStart=/usr/local/bin/labby serve
-WorkingDirectory=/home/lab
-Environment=HOME=/home/lab
-Environment=XDG_CACHE_HOME=/home/lab/.cache
-Environment=XDG_CONFIG_HOME=/home/lab/.config
-Environment=XDG_DATA_HOME=/home/lab/.local/share
+WorkingDirectory=/home/labby
+Environment=HOME=/home/labby
+Environment=XDG_CACHE_HOME=/home/labby/.cache
+Environment=XDG_CONFIG_HOME=/home/labby/.config
+Environment=XDG_DATA_HOME=/home/labby/.local/share
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/home/lab/.lab /home/lab/.local /home/lab/.cache /home/lab/.config /home/lab/.npm /home/lab/.codex /home/lab/.claude /home/lab/.gemini /home/lab/downloads
+ReadWritePaths=/home/labby/.lab /home/labby/.local /home/labby/.cache /home/labby/.config /home/labby/.npm /home/labby/.codex /home/labby/.claude /home/labby/.gemini /home/labby/downloads
 ProtectHome=read-only
 PrivateTmp=true
 RestrictNamespaces=true
@@ -206,7 +206,7 @@ RestartSec=3
 ### Locked Decisions
 
 - Default target is `/etc/systemd/system/labby.service` using normal `systemctl`, not `systemctl --user`.
-- Unit runs `ExecStart=/usr/local/bin/labby serve` with `User=lab` and `Group=lab`.
+- Unit runs `ExecStart=/usr/local/bin/labby serve` with `User=labby` and `Group=labby`.
 - Unit is wanted by `multi-user.target`.
 - Keep the gateway runtime unprivileged; root is only for unit write/install and package provisioning.
 - Add hardening directives from this issue, but test against real stdio upstream behavior before shipping.
@@ -219,7 +219,7 @@ RestartSec=3
 
 ### Testing
 
-- [ ] Unit-rendering tests assert `User=lab`, `Group=lab`, `/usr/local/bin/labby serve`, `WantedBy=multi-user.target`, and no `%h` user-manager paths in default system mode.
+- [ ] Unit-rendering tests assert `User=labby`, `Group=labby`, `/usr/local/bin/labby serve`, `WantedBy=multi-user.target`, and no `%h` user-manager paths in default system mode.
 - [ ] Command-construction tests prove default calls omit `--user`.
 - [ ] Existing preflight/readiness/status parsing tests still pass.
 - [ ] Hardened unit is verified with `systemd-analyze verify` where available.
@@ -246,8 +246,8 @@ RestartSec=3
 
 ### Notes from Research and Review
 
-- Add a rendered-unit test that asserts every writable runtime/cache/home path needed by spawned stdio upstreams is either inside allowed lab-user paths or explicitly listed in `ReadWritePaths`; over-hardening should fail in smoke, not production.
-- Acceptance must include `npx` and `uvx` stdio upstream smoke under the unit, explicit `HOME`/`XDG_*`/`PATH`/`WorkingDirectory` for `/home/lab`, and writable cache/config paths needed by spawned agent and MCP processes.
+- Add a rendered-unit test that asserts every writable runtime/cache/home path needed by spawned stdio upstreams is either inside allowed labby-user paths or explicitly listed in `ReadWritePaths`; over-hardening should fail in smoke, not production.
+- Acceptance must include `npx` and `uvx` stdio upstream smoke under the unit, explicit `HOME`/`XDG_*`/`PATH`/`WorkingDirectory` for `/home/labby`, and writable cache/config paths needed by spawned agent and MCP processes.
 - Avoid writable directories ahead of trusted binaries in PATH.
 
 ## Work Item 2 / `lab-fh1wv.2` — Add `labby setup --provision`
@@ -278,7 +278,7 @@ labby setup --provision will:
   [lab ] install uv + python (user-space)
   [lab ] install claude + codex (npm, user-space)
   [root] write /etc/systemd/system/labby.service
-  [root] useradd lab (if absent)
+  [root] useradd labby (if absent)
   [root] systemctl enable --now labby
 
 It will NOT:
@@ -710,7 +710,7 @@ The universal path is install script plus `labby setup --provision` inside a Deb
 
 ## Build Order
 
-1. Harden `unit_text()` and convert host service to default system unit with `User=lab` in `host_service.rs`.
+1. Harden `unit_text()` and convert host service to default system unit with `User=labby` in `host_service.rs`.
 2. Add `labby setup --provision` with bounded floor install, consent, dry-run, `--yes`, and `--skip-deps`.
 3. Add `scripts/incus-bootstrap.sh` with Incus launch, TUN passthrough, in-box install/provision, and post-provision login output.
 4. Update docs around amd64 Debian 13 Incus primary substrate, TUN, and manual agent CLI login steps.

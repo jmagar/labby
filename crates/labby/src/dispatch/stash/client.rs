@@ -1,9 +1,9 @@
 //! Stash root resolution for dispatch.
 //!
 //! Stash stores component directories under a root path derived as follows:
-//! 1. Read `[workspace].root` from `config.toml` (CWD → `~/.lab/` → `~/.config/lab/`).
+//! 1. Read `[workspace].root` from `config.toml` (CWD → `~/.labby/` → `~/.config/labby/`).
 //! 2. Append `"stash"` to get the stash root.
-//! 3. Fall back to `~/.lab/stash` if no workspace root is configured.
+//! 3. Fall back to `~/.labby/stash` if no workspace root is configured.
 //!
 //! The resolved root is cached in a process-global `OnceLock` — resolution
 //! happens on first call and is never re-read from disk.
@@ -17,7 +17,7 @@ use crate::dispatch::error::ToolError;
 pub fn not_configured_error() -> ToolError {
     ToolError::Sdk {
         sdk_kind: "workspace_not_configured".to_string(),
-        message: "stash root could not be resolved — set [workspace].root in config.toml or ensure ~/.lab/stash is writable".to_string(),
+        message: "stash root could not be resolved — set [workspace].root in config.toml or ensure ~/.labby/stash is writable".to_string(),
     }
 }
 
@@ -32,10 +32,10 @@ pub fn resolve_stash_root() -> Option<PathBuf> {
             return Some(root.join("stash"));
         }
     }
-    // Fall back to ~/.lab/stash using HOME env var.
+    // Fall back to ~/.labby/stash using HOME env var.
     std::env::var_os("HOME")
         .map(PathBuf::from)
-        .map(|h| h.join(".lab").join("stash"))
+        .map(|h| h.join(".labby").join("stash"))
 }
 
 static STASH_ROOT: OnceLock<Option<PathBuf>> = OnceLock::new();

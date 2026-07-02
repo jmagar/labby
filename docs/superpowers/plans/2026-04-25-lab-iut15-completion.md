@@ -4,7 +4,7 @@
 
 **Goal:** Implement `artifact.update.check` and `artifact.update.preview` for forked marketplace artifacts so bead `lab-iut1.5` can close.
 
-**Architecture:** Extend the settled `crates/lab/src/dispatch/marketplace/update.rs` marketplace domain module, preserving the apply/merge/config behavior added by `lab-iut1.6`. The module reads `.stash.json` metadata from `~/.lab/stash/plugins/<plugin_id>`, hardens git fetches, compares upstream versions from fetched refs, computes diff3 preview state with `diffy-imara`, and writes pending preview state to `.pending-update.json`.
+**Architecture:** Extend the settled `crates/lab/src/dispatch/marketplace/update.rs` marketplace domain module, preserving the apply/merge/config behavior added by `lab-iut1.6`. The module reads `.stash.json` metadata from `~/.labby/stash/plugins/<plugin_id>`, hardens git fetches, compares upstream versions from fetched refs, computes diff3 preview state with `diffy-imara`, and writes pending preview state to `.pending-update.json`.
 
 **Tech Stack:** Rust 2024, Tokio process/timeouts, serde/serde_json, dashmap fetch guards, diffy-imara 0.3 for patches and 3-way merge, existing `ToolError` envelopes.
 

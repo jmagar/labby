@@ -84,7 +84,7 @@ Single commit `3e8db769` covers 264 files. Agent-introduced changes by group:
 
 | Area | Before | After |
 |------|--------|-------|
-| `cli/serve.rs` NodeStore init | In-memory only | Opens `~/.lab/node-logs.sqlite` with retention from `config.node.log_retention_days` (default 30d); falls back to in-memory on open failure |
+| `cli/serve.rs` NodeStore init | In-memory only | Opens `~/.labby/node-logs.sqlite` with retention from `config.node.log_retention_days` (default 30d); falls back to in-memory on open failure |
 | `nodes/device.enroll` (WS) | Reachable pre-initialize → unauthenticated upsert possible | Gated behind `require_initialized_node_id`; rejected before init |
 | `dispatch/helpers.rs::create_db_file_0600` | All file errors swallowed via `.ok()` | Only `AlreadyExists` ignored; others log structured WARN |
 | `reject_path_traversal` | Allowed absolute/prefix paths | Rejects `Component::RootDir` and `Component::Prefix` |
@@ -131,7 +131,7 @@ Note: No `cargo build` or `cargo test` was run this session. The user did not re
 ## Open Questions
 
 - Will `cargo build --all-features` pass after this commit? Not verified locally; CI is authoritative.
-- Should the `node-logs.sqlite` path be configurable rather than hardcoded to `home_dir().join(".lab/node-logs.sqlite")`?
+- Should the `node-logs.sqlite` path be configurable rather than hardcoded to `home_dir().join(".labby/node-logs.sqlite")`?
 - Should `SqliteNodeLogStore::open` failure abort startup in production rather than silently fall back to in-memory?
 
 ## Next Steps

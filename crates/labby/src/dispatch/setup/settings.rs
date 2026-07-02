@@ -509,7 +509,7 @@ pub fn settings_fields() -> Vec<SettingsFieldSpec> {
             SettingsControl::Text,
             SettingsApplyMode::Restart,
             None,
-            Some("~/.lab/stash"),
+            Some("~/.labby/stash"),
         ),
         editable(
             "core",

@@ -384,7 +384,7 @@ Loopback hosts exempt from this check: `127.0.0.1`, `::1`, `[::1]`, `localhost`.
 ## Example: Deploying with OAuth
 
 ```bash
-# In ~/.lab/.env
+# In ~/.labby/.env
 LAB_MCP_TRANSPORT=http
 LAB_MCP_HTTP_HOST=0.0.0.0
 LAB_MCP_HTTP_PORT=8765
@@ -420,7 +420,7 @@ Two complementary verification surfaces exist:
 An operator shell script that tests a **running server** from outside, using only `curl`. Useful after deploy, in CI pipelines, or from a remote machine.
 
 ```bash
-# Auto-loads ~/.lab/.env; defaults to http://localhost:8080
+# Auto-loads ~/.labby/.env; defaults to http://localhost:8080
 ./scripts/check-oauth.sh
 
 # Point at a specific server

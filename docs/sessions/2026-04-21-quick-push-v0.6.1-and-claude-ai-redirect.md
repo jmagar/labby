@@ -15,7 +15,7 @@ Three distinct asks over the session: (1) `/quick-push` the staged CLI dispatch 
 
 ## Session Overview
 - Pushed `9d1d355` (v0.6.1 CLI dispatch refactor) to `origin/main` after bumping workspace version `0.6.0 → 0.6.1` and plugin manifest `0.5.2 → 0.5.3`.
-- Added `https://claude.ai/api/mcp/auth_callback` to the OAuth client-registration allowlist in both `~/.lab/.env` (`LAB_AUTH_ALLOWED_REDIRECT_URIS`) and `~/.lab/config.toml` (`[auth].allowed_client_redirect_uris`).
+- Added `https://claude.ai/api/mcp/auth_callback` to the OAuth client-registration allowlist in both `~/.labby/.env` (`LAB_AUTH_ALLOWED_REDIRECT_URIS`) and `~/.labby/config.toml` (`[auth].allowed_client_redirect_uris`).
 - Advised against in-process hot-reload and against a bespoke `lab restart` subcommand; recommended a systemd user unit as the real "restart primitive".
 
 ## Sequence of Events
@@ -46,8 +46,8 @@ Three distinct asks over the session: (1) `/quick-push` the staged CLI dispatch 
 - `plugins/.claude-plugin/plugin.json` — plugin version `0.5.2 → 0.5.3`.
 - `crates/lab/src/cli/helpers.rs` — one-line helper wiring change (staged before session).
 - `crates/lab/src/cli/{apprise,arcane,linkding,memos,overseerr,paperless,plex,prowlarr,qbittorrent,qdrant,sabnzbd,sonarr,tailscale,tautulli,unraid}.rs` — 16 shims rewired to `crate::dispatch::<svc>::dispatch` + `-y/--yes`/`--dry-run` flags.
-- `/home/jmagar/.lab/.env` — appended `https://claude.ai/api/mcp/auth_callback` to `LAB_AUTH_ALLOWED_REDIRECT_URIS` (outside repo; live deployment config).
-- `/home/jmagar/.lab/config.toml` — appended same entry to `[auth].allowed_client_redirect_uris` (outside repo; live deployment config).
+- `/home/jmagar/.labby/.env` — appended `https://claude.ai/api/mcp/auth_callback` to `LAB_AUTH_ALLOWED_REDIRECT_URIS` (outside repo; live deployment config).
+- `/home/jmagar/.labby/config.toml` — appended same entry to `[auth].allowed_client_redirect_uris` (outside repo; live deployment config).
 - `docs/sessions/2026-04-21-cli-dispatch-shim-v0.6.1.md` — initial session doc from `/quick-push`.
 
 ## Commands Executed
@@ -68,12 +68,12 @@ Three distinct asks over the session: (1) `/quick-push` the staged CLI dispatch 
 | `cargo check --all-features` | no errors | warnings only, 0 `^error` lines | PASS |
 | `git push` | fast-forward to origin/main | `ok main` | PASS |
 | `git log --oneline -1` (post-push) | v0.6.1 commit at HEAD | `9d1d355 refactor(cli): ... v0.6.1` | PASS |
-| `rg 'claude.ai/api/mcp/auth_callback' ~/.lab/.env ~/.lab/config.toml` | entry present in both | confirmed in both files after edit | PASS |
+| `rg 'claude.ai/api/mcp/auth_callback' ~/.labby/.env ~/.labby/config.toml` | entry present in both | confirmed in both files after edit | PASS |
 | `lab serve` picks up new allowlist | env re-read on process start | not yet — running pid 1614335 still has old env | PENDING RESTART |
 
 ## Risks and Rollback
 - CLI shim rewire risk: `dispatch::<svc>::ACTIONS` may omit an action still exposed through the old `mcp::services` path; clap now rejects unknown actions. Not verified action-by-action this session. Rollback: `git revert 9d1d355 && git push`.
-- Allowlist risk: widening client registration to an additional HTTPS host is an auth boundary change. Rollback: remove the entry from both `~/.lab/.env` and `~/.lab/config.toml`, restart `lab serve`. If a malicious client has already registered using the entry, also `DELETE FROM registered_clients WHERE client_id = ...` in `~/.lab/auth.db`.
+- Allowlist risk: widening client registration to an additional HTTPS host is an auth boundary change. Rollback: remove the entry from both `~/.labby/.env` and `~/.labby/config.toml`, restart `lab serve`. If a malicious client has already registered using the entry, also `DELETE FROM registered_clients WHERE client_id = ...` in `~/.labby/auth.db`.
 
 ## Decisions Not Taken
 - Did not remove the now-dead `crate::mcp::services::<svc>::dispatch` functions / `ACTIONS` re-exports flagged by `cargo check` (e.g. `mcp/services/tailscale.rs:9`, `mcp/services/tautulli.rs:9`). Out of scope for a quick-push; follow-up cleanup. Note: post-session `git status` shows `D crates/lab/src/mcp/services/{tailscale,tautulli}.rs` — the user has since started this cleanup in a new uncommitted change.

@@ -111,7 +111,7 @@ bd comments add lab-4sd2 "MUST-CHECK: Any code that reads a JSON array index wit
 
 ## Decisions Not Taken
 
-- **Positive allowlist instead of denylist for import/deploy**: Security agent recommended replacing the denylist with a configurable positive allowlist (e.g. `~/.claude`, `~/.config/lab`). Deferred — denylist is the minimal intervention that fixes the P1; allowlist is a P2 improvement filed as part of lab-gxhk scope.
+- **Positive allowlist instead of denylist for import/deploy**: Security agent recommended replacing the denylist with a configurable positive allowlist (e.g. `~/.claude`, `~/.config/labby`). Deferred — denylist is the minimal intervention that fixes the P1; allowlist is a P2 improvement filed as part of lab-gxhk scope.
 - **Async trait for StashProvider**: Architecture agent flagged `Box<dyn StashProvider>` as violating the project's concrete-types preference. Not addressed — it's a P3 and changing it in the middle of P1 fixes would increase merge conflict risk.
 - **Propagate decode error on read path instead of fallback scan**: Could return a hard error when index is corrupt rather than doing the recovery scan. Rejected — automatic recovery (scan + warn) is better UX and preserves data access without operator intervention.
 

@@ -49,7 +49,7 @@ Net: 9 commits on `main`, 4 doc updates, 1 vendored upstream crate fork, 1 image
 - `crates/lab/src/api/router.rs:910-915` mounts `/auth/session` at the top-level router, outside `authenticate_request`. The handler at `crates/lab/src/api/browser_session.rs:113` only checked the session cookie. Bearer-driven automation got `authenticated: false` even though `/v1/*` accepted the same bearer token at the middleware layer.
 - `claude-agent-acp@0.32.0` pins `@anthropic-ai/claude-agent-sdk` to exactly `0.2.126` in package.json, so a global install of `claude-agent-sdk@latest` does not override the nested copy that ships with `claude-agent-acp`. An npm `overrides` block on a wrapper `package.json` is required to float the SDK forward.
 - The bundled Claude Code binary version is locked to whatever `@anthropic-ai/claude-agent-sdk` version ships, and that binary `SIGILL`s when handed credentials issued by a meaningfully-newer host `claude` CLI install (host 2.1.129 + bundled 2.1.126 → SIGILL on `session/new`).
-- Lab-stored Claude credentials at `~/.lab/acp/claude-home/.credentials.json` had `expiresAt: 1777692882995` (2026-05-01 23:34 UTC, already past) AND empty `refreshToken: ""`, so the runtime could not auto-renew. Anthropic returned 401 on every prompt → `state: failed`.
+- Lab-stored Claude credentials at `~/.labby/acp/claude-home/.credentials.json` had `expiresAt: 1777692882995` (2026-05-01 23:34 UTC, already past) AND empty `refreshToken: ""`, so the runtime could not auto-renew. Anthropic returned 401 on every prompt → `state: failed`.
 
 ## Technical Decisions
 
@@ -78,7 +78,7 @@ Net: 9 commits on `main`, 4 doc updates, 1 vendored upstream crate fork, 1 image
 | `apps/gateway-admin/components/chat/chat-input.tsx` | `handleSend` snapshot + try/catch; combined attach buttons into single paperclip → DropdownMenu trigger |
 | `config/Dockerfile.fast` | Pre-install ACP adapters into `/opt/acp-adapters/` with `overrides` block bumping `claude-agent-sdk` to `^0.2.131`; symlink binaries into `/usr/local/bin/` |
 | `config/acp-providers.docker.json` | Switch `command` from `npx` to direct binary names; drop `-y` and `@version` args |
-| `docker-compose.yml` | Bind-mount `${HOME}/.claude/.credentials.json` over `/home/lab/.lab/acp/claude-home/.credentials.json` so token refreshes flow through automatically |
+| `docker-compose.yml` | Bind-mount `${HOME}/.claude/.credentials.json` over `/home/labby/.labby/acp/claude-home/.credentials.json` so token refreshes flow through automatically |
 | `CLAUDE.md` | New "Vendored ACP SDK", "Docker dev container", "Bearer auth in dev" sections |
 | `README.md` | Added `/auth/session` row to protected-route table; new Development paragraph on pre-installed adapters and the agent-browser bearer-header pattern; surfaced `dev-up`/`dev`/`dev-debug` just targets |
 | `docs/runtime/OAUTH.md` | Browser-session introspection rules cover the bearer path returning `sub: "static-bearer"` |
@@ -92,7 +92,7 @@ Net: 9 commits on `main`, 4 doc updates, 1 vendored upstream crate fork, 1 image
 - `curl -sH "Authorization: Bearer $TOKEN" http://localhost:8765/v1/acp/provider` — verified 200 + populated `models[]` per provider after SDK patch.
 - `curl -sN -H "Authorization: Bearer $TOKEN" "http://localhost:8765/v1/acp/sessions/$SID/events?ticket=$TICKET"` — SSE subscription that captured the `provider_error: 401 authentication_error` revealing the credential issue, and later captured streamed `h`/`ello` chunks proving Claude works.
 - `agent-browser --session test open http://localhost:8765/chat --headers '{"Authorization":"Bearer $TOKEN"}'` — drove the chat UI as the synthetic `static-bearer` admin while OAuth stayed enabled, used for all visual verification.
-- `md5sum ~/.claude/.credentials.json && docker exec lab-labby-master-1 md5sum /home/lab/.lab/acp/claude-home/.credentials.json` — confirmed bind mount; both `b28a94d3544cbf426a27d2c2a7552de9`.
+- `md5sum ~/.claude/.credentials.json && docker exec lab-labby-master-1 md5sum /home/labby/.labby/acp/claude-home/.credentials.json` — confirmed bind mount; both `b28a94d3544cbf426a27d2c2a7552de9`.
 
 ## Errors Encountered
 
@@ -100,7 +100,7 @@ Net: 9 commits on `main`, 4 doc updates, 1 vendored upstream crate fork, 1 image
 - **`-Z codegen-backend=cranelift` rejected by stable rustc**. Cause: even after switching to `rustup run nightly cargo`, sccache (set as `RUSTC_WRAPPER`) was invoking the stable `rustc` from PATH. Fix: clear `RUSTC_WRAPPER=""` for the recipe and pin `RUSTC` explicitly to the nightly absolute path.
 - **`refusing to bind HTTP on 0.0.0.0:8765 without authentication`**. Cause: dev override I'd added was clearing OAuth env vars without setting a bearer, tripping the safety gate. Fix: kept OAuth configured, only set `LAB_WEB_UI_AUTH_DISABLED=true` for the testing window, then reverted entirely once bearer-via-`/auth/session` was implemented.
 - **Workspace picker "Unexpected token '<' ... is not valid JSON"** reported by user. Cause was a stale-env container — `LAB_WEB_UI_AUTH_DISABLED=true` from a previous compose iteration was sticky because `docker compose restart` does not re-read environment changes. Fix: `docker compose up -d` (full recreate) and the picker started returning JSON correctly. Underlying fetch flow was already correct (`Accept: */*`, no redirect path triggered).
-- **Claude session immediately transitions to `failed` state**. SSE events revealed `Failed to authenticate. API Error: 401 authentication_error`. Cause: lab-stored `~/.lab/acp/claude-home/.credentials.json` had an expired access token and empty refresh token. Fix: tested with host's fresh creds → triggered next error.
+- **Claude session immediately transitions to `failed` state**. SSE events revealed `Failed to authenticate. API Error: 401 authentication_error`. Cause: lab-stored `~/.labby/acp/claude-home/.credentials.json` had an expired access token and empty refresh token. Fix: tested with host's fresh creds → triggered next error.
 - **Claude Code binary `SIGILL` / `SIGTRAP` on `session/new` after credential refresh**. Cause: `@anthropic-ai/claude-agent-sdk@0.2.126` (Claude Code 2.1.126) bundled with `claude-agent-acp@0.32.0` was incompatible with credentials issued by a newer host `claude` CLI install (2.1.129+). Fix: npm `overrides` block in `/opt/acp-adapters/package.json` floats the SDK to `^0.2.131` (Claude Code 2.1.131); confirmed end-to-end Claude streaming.
 
 ## Behavior Changes (Before/After)
@@ -117,7 +117,7 @@ Net: 9 commits on `main`, 4 doc updates, 1 vendored upstream crate fork, 1 image
 | `agent-browser --headers` | Renders sign-in screen (UI cookie-gated) | Renders full UI as admin |
 | Claude session | `state: failed` within seconds (auth 401 or SIGILL) | Streams replies, `state: completed` |
 | ACP adapter spawn | `npx -y @package/name` per spawn (registry round-trip) | Direct binary call to `/usr/local/bin/{claude-agent-acp,codex-acp,gemini}` |
-| Claude credential refresh | Manual copy from `~/.claude/.credentials.json` to `~/.lab/acp/claude-home/.credentials.json` | Bind-mounted live; host CLI refresh is automatically picked up |
+| Claude credential refresh | Manual copy from `~/.claude/.credentials.json` to `~/.labby/acp/claude-home/.credentials.json` | Bind-mounted live; host CLI refresh is automatically picked up |
 
 ## Verification Evidence
 
@@ -141,7 +141,7 @@ Net: 9 commits on `main`, 4 doc updates, 1 vendored upstream crate fork, 1 image
 - **Vendored `agent-client-protocol`** drift risk: if upstream lands a behaviorally-different `attach_session()` we may not pick it up automatically. Mitigation: CLAUDE.md documents the patch shape and re-application steps. Rollback: remove `[patch.crates-io]` from `Cargo.toml`, delete `crates/vendor/`, accept that the model picker will be empty again.
 - **Bearer-driven `/auth/session`**: returns `csrf_token: ""` for static-bearer admins. CSRF protection is unaffected because bearer auth bypasses cookie-based CSRF checks anyway, but anyone evaluating the auth surface should know that the empty CSRF token in the response is intentional, not a bug. Rollback: revert `crates/lab/src/api/browser_session.rs` and `crates/lab/src/api/state.rs` bearer_token plumbing.
 - **`@anthropic-ai/claude-agent-sdk@^0.2.131` override**: floats the bundled Claude Code binary forward of whatever `claude-agent-acp` was tested against. If a future SDK release breaks the ACP protocol surface, every Claude session in the lab fails. Mitigation: pin tighter (`~0.2.131`) once known-good. Rollback: remove the `overrides` block in `config/Dockerfile.fast`, rebuild image, accept that newer host `claude` CLIs will SIGILL again.
-- **Bind mount of `~/.claude/.credentials.json`**: if the host file disappears, `docker compose up` fails. Mitigation: documented prerequisite in the inline comment. Rollback: remove the line; the lab-stored copy at `~/.lab/acp/claude-home/.credentials.json` becomes the source of truth again, with manual sync overhead.
+- **Bind mount of `~/.claude/.credentials.json`**: if the host file disappears, `docker compose up` fails. Mitigation: documented prerequisite in the inline comment. Rollback: remove the line; the lab-stored copy at `~/.labby/acp/claude-home/.credentials.json` becomes the source of truth again, with manual sync overhead.
 
 ## Decisions Not Taken
 

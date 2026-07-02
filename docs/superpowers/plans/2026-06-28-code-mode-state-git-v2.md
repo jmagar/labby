@@ -30,7 +30,7 @@
 - Modify `crates/labby-codemode/src/git/provider.rs`: add remote URL validation and per-method guard behavior while preserving the existing process wrapper.
 - Modify `crates/labby-codemode/Cargo.toml`: add minimal archive/detect dependencies only if the implementation cannot use the standard library.
 - Modify `docs/dev/CODE_MODE.md` and `CHANGELOG.md`: document the exact V2 surface and boundaries.
-- Create `tests/smoke-code-mode-state-git-v2.sh`: isolated `LAB_HOME` smoke for V2 state and local git behavior.
+- Create `tests/smoke-code-mode-state-git-v2.sh`: isolated `LABBY_HOME` smoke for V2 state and local git behavior.
 
 ---
 
@@ -664,8 +664,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-export LAB_HOME="$TMP/lab-home"
-mkdir -p "$LAB_HOME"
+export LABBY_HOME="$TMP/lab-home"
+mkdir -p "$LABBY_HOME"
 
 cd "$ROOT"
 cargo run --all-features -- --json gateway code exec --code 'async () => {

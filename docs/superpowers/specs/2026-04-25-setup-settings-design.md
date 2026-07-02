@@ -11,7 +11,7 @@
 
 ## Problem and Scope
 
-Labby has no first-run configuration experience. New users must manually edit `~/.lab/.env` and `~/.lab/config.toml`. The Setup wizard replaces that with a guided 7-step flow. The Settings page replaces the current gateway-focused stub with a full configuration rail for all 23 services and surfaces.
+Labby has no first-run configuration experience. New users must manually edit `~/.labby/.env` and `~/.labby/config.toml`. The Setup wizard replaces that with a guided 7-step flow. The Settings page replaces the current gateway-focused stub with a full configuration rail for all 23 services and surfaces.
 
 Both surfaces are **re-runnable** — Setup detects existing config and pre-populates all fields from the live environment.
 
@@ -23,15 +23,15 @@ Both surfaces are **re-runnable** — Setup detects existing config and pre-popu
 
 | Source | What it provides | Endpoint |
 |--------|-----------------|----------|
-| `~/.lab/.env` | Service URLs, API keys, tokens (masked) | `GET /dev/api/nodeinfo` → `env` map |
-| `~/.lab/config.toml` | Bind host, master URL, node controller | `GET /dev/api/nodeinfo` → `local_host`, `controller`, `master_url` |
+| `~/.labby/.env` | Service URLs, API keys, tokens (masked) | `GET /dev/api/nodeinfo` → `env` map |
+| `~/.labby/config.toml` | Bind host, master URL, node controller | `GET /dev/api/nodeinfo` → `local_host`, `controller`, `master_url` |
 | `/v1/nodes` | Live node connectivity (requires token) | `GET /v1/nodes` |
 
 `/dev/api/nodeinfo` is unauthenticated and reads env vars from the running process (dotenvy loads `.env` at startup). Secrets are masked as `***` — the UI treats `***` as "value already set; leave blank to keep."
 
 ### Write Path
 
-All writes go through `setup.draft.set` + `setup.draft.commit` to `~/.lab/.env.draft`. Nothing touches `~/.lab/.env` until Finalize & Commit. A timestamped backup is created before every write.
+All writes go through `setup.draft.set` + `setup.draft.commit` to `~/.labby/.env.draft`. Nothing touches `~/.labby/.env` until Finalize & Commit. A timestamped backup is created before every write.
 
 ---
 
@@ -195,7 +195,7 @@ OAuth-specific checks (5–8) only run when `LAB_AUTH_MODE=oauth` or Google cred
 
 ### Step 7: Finalize
 
-Confirmation modal: warns write is irreversible, shows backup path (`~/.lab/.env.bak.<ts>`). On confirm → success screen with 🎉, "Go to Overview" + "Open Settings" buttons.
+Confirmation modal: warns write is irreversible, shows backup path (`~/.labby/.env.bak.<ts>`). On confirm → success screen with 🎉, "Go to Overview" + "Open Settings" buttons.
 
 ---
 
@@ -214,7 +214,7 @@ Three-column: 180px app nav sidebar + 160px settings rail + content area.
 
 ### Core Panel
 
-Same fields as Setup step 2 with optimistic save (each Save writes immediately to `~/.lab/.env`, no draft). Auth mode badge (Bearer / OAuth) shown read-only with link to reconfigure.
+Same fields as Setup step 2 with optimistic save (each Save writes immediately to `~/.labby/.env`, no draft). Auth mode badge (Bearer / OAuth) shown read-only with link to reconfigure.
 
 ### Services Panel
 
@@ -230,7 +230,7 @@ Per-service audit list with icon, name, version string, auth status, pass/fail b
 ### Extract Panel
 
 - Scan for Credentials button → animated → results table (Key / Value / Source / Include checkbox)
-- Apply to ~/.lab/.env button (shows diff first, then applies with backup)
+- Apply to ~/.labby/.env button (shows diff first, then applies with backup)
 - Preview Diff button
 
 ### v2 Stub Panels

@@ -3,7 +3,7 @@
 // Service catalog overview — lists every service from setup.schema.get
 // with a click-through to its dedicated /settings/services/[slug]/ page.
 // The "Configured" indicator reflects whether all required env vars are
-// present in the live ~/.lab/.env (via setup.state's missing array).
+// present in the live ~/.labby/.env (via setup.state's missing array).
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
@@ -84,7 +84,7 @@ export default function ServicesIndex(): React.ReactElement {
           <CardDescription>
             Configure connection details for every Bootstrap service. Click a
             row to edit its env vars; saves commit immediately to{' '}
-            <code>~/.lab/.env</code>.
+            <code>~/.labby/.env</code>.
           </CardDescription>
         </CardHeader>
         <CardContent>

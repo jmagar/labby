@@ -1018,7 +1018,7 @@ mod tests {
 
         let saved = dir
             .path()
-            .join(".lab")
+            .join(".labby")
             .join("stash")
             .join("plugins")
             .join("demo-plugin@demo-market")
@@ -1057,7 +1057,7 @@ mod tests {
 
         let migrated = dir
             .path()
-            .join(".lab")
+            .join(".labby")
             .join("stash")
             .join("plugins")
             .join("demo-plugin@demo-market")

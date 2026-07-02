@@ -17,6 +17,8 @@ Commands:
   nodes        Query nodes from the configured controller
   health       Quick reachability check for configured services
   setup        Bootstrap the supported Incus Labby gateway container
+  incus        Manage the supported Incus Labby gateway container
+  update       Update labby from the latest GitHub release
   completions  Generate shell completions
   gateway      Manage proxied upstream MCP gateways
   snippets     Manage executable Code Mode snippets
@@ -656,13 +658,12 @@ Commands:
   installed-plugins    List installed Claude Code lab plugins
   services-status      Join service configuration, draft, and Claude plugin state
   plugin-hook          Run binary-owned local setup checks for Claude plugin hooks
-  plugin-sync          Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.lab/.env as LAB_* vars
-  plugin-export        Read ~/.lab/.env and print current values keyed by userConfig field name
+  plugin-sync          Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.labby/.env as LAB_* vars
+  plugin-export        Read ~/.labby/.env and print current values keyed by userConfig field name
   plugin-connectivity  Validate connectivity to the lab MCP server
   check                Check local setup prerequisites without mutating the filesystem
   repair               Repair missing local setup prerequisites without contacting external services
   incusbackup          Validate or apply local Incus backup policy
-  incus                Bootstrap or converge the supported Incus Labby gateway container
   install              Copy the labby binary into ~/.local/bin so it is callable in your own terminal
   install-plugin       Install the Claude Code plugin for a configured service
   uninstall-plugin     Uninstall the Claude Code plugin for a service
@@ -738,7 +739,7 @@ Manage the local setup draft
 Usage: draft [OPTIONS] <COMMAND>
 
 Commands:
-  discard  Delete ~/.lab/.env.draft without modifying ~/.lab/.env
+  discard  Delete ~/.labby/.env.draft without modifying ~/.labby/.env
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -758,7 +759,7 @@ Options:
 ## `labby setup draft discard`
 
 ```text
-Delete ~/.lab/.env.draft without modifying ~/.lab/.env
+Delete ~/.labby/.env.draft without modifying ~/.labby/.env
 
 Usage: discard [OPTIONS]
 
@@ -1027,7 +1028,7 @@ Options:
 ## `labby setup plugin-sync`
 
 ```text
-Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.lab/.env as LAB_* vars
+Sync CLAUDE_PLUGIN_OPTION_* env vars into ~/.labby/.env as LAB_* vars
 
 Usage: plugin-sync [OPTIONS]
 
@@ -1054,7 +1055,7 @@ Options:
 ## `labby setup plugin-export`
 
 ```text
-Read ~/.lab/.env and print current values keyed by userConfig field name
+Read ~/.labby/.env and print current values keyed by userConfig field name
 
 Usage: plugin-export [OPTIONS]
 
@@ -1237,80 +1238,6 @@ Arguments:
           Print help for the subcommand(s)
 ```
 
-## `labby setup incus`
-
-```text
-Bootstrap or converge the supported Incus Labby gateway container
-
-Usage: incus [OPTIONS]
-
-Options:
-      --json
-          Emit JSON instead of human-readable tables
-
-      --name <NAME>
-          Container name (default: labby)
-
-      --color <COLOR>
-          Control human-readable CLI styling
-
-          [default: auto]
-          [possible values: auto, plain, color]
-
-      --image <IMAGE>
-          Incus image alias (default: images:ubuntu/24.04)
-
-      --profile-name <PROFILE_NAME>
-          Incus profile name (default: labby-gateway)
-
-      --backup-config <BACKUP_CONFIG>
-          Incus snapshot policy YAML path; defaults to the embedded policy
-
-      --no-backup-config
-          Do not apply an Incus snapshot policy
-
-      --runtime-profile-name <RUNTIME_PROFILE_NAME>
-          Rootless profile for existing containers with a different root pool
-
-      --storage-driver <STORAGE_DRIVER>
-          Incus storage driver: zfs, btrfs, or dir
-
-      --storage-pool <STORAGE_POOL>
-          Incus storage pool used by the profile root disk
-
-      --storage-source <STORAGE_SOURCE>
-          Incus storage source path/dataset for the pool
-
-      --version <VERSION>
-          Labby release tag to install, e.g. v0.28.0
-
-          [default: latest]
-
-      --local-binary <LOCAL_BINARY>
-          Push a locally built labby binary instead of downloading a release
-
-      --skip-install
-          Use the labby binary already baked into the selected image
-
-      --dry-run
-          Print bootstrap commands only
-
-      --tailscale-ssh
-          Run tailscale up with --ssh when TS_AUTHKEY is set
-
-      --tailscale-hostname <TAILSCALE_HOSTNAME>
-          Hostname to register with Tailscale; defaults to the Incus container name
-
-      --allow-source-fallback
-          Allow install.sh cargo fallback if the release asset is unavailable
-
-  -y, --yes
-          Confirm bootstrap without prompting
-
-  -h, --help
-          Print help
-```
-
 ## `labby setup install`
 
 ```text
@@ -1404,6 +1331,204 @@ Usage: help [COMMAND]...
 Arguments:
   [COMMAND]...
           Print help for the subcommand(s)
+```
+
+## `labby incus`
+
+```text
+Manage the supported Incus Labby gateway container
+
+Usage: incus [OPTIONS] <COMMAND>
+
+Commands:
+  setup  Bootstrap or converge the supported Incus Labby gateway container
+  sync   Sync a local labby binary into the Labby Incus container
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+  -h, --help
+          Print help
+```
+
+## `labby incus setup`
+
+```text
+Bootstrap or converge the supported Incus Labby gateway container
+
+Usage: setup [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --name <NAME>
+          Container name (default: labby)
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --image <IMAGE>
+          Incus image alias (default: images:ubuntu/24.04)
+
+      --profile-name <PROFILE_NAME>
+          Incus profile name (default: labby-gateway)
+
+      --backup-config <BACKUP_CONFIG>
+          Incus snapshot policy YAML path; defaults to the embedded policy
+
+      --no-backup-config
+          Do not apply an Incus snapshot policy
+
+      --runtime-profile-name <RUNTIME_PROFILE_NAME>
+          Rootless profile for existing containers with a different root pool
+
+      --storage-driver <STORAGE_DRIVER>
+          Incus storage driver: zfs, btrfs, or dir
+
+      --storage-pool <STORAGE_POOL>
+          Incus storage pool used by the profile root disk
+
+      --storage-source <STORAGE_SOURCE>
+          Incus storage source path/dataset for the pool
+
+      --version <VERSION>
+          Labby release tag to install. Defaults to latest
+
+          [default: latest]
+
+      --local-binary <LOCAL_BINARY>
+          Push a locally built labby binary instead of downloading a release
+
+      --skip-install
+          Use the labby binary already baked into the selected image
+
+      --dry-run
+          Print bootstrap commands only
+
+      --tailscale-ssh
+          Run tailscale up with --ssh when TS_AUTHKEY is set
+
+      --tailscale-hostname <TAILSCALE_HOSTNAME>
+          Hostname to register with Tailscale; defaults to the Incus container name
+
+      --allow-source-fallback
+          Allow install.sh cargo fallback if the release asset is unavailable
+
+  -y, --yes
+          Confirm bootstrap without prompting
+
+  -h, --help
+          Print help
+```
+
+## `labby incus sync`
+
+```text
+Sync a local labby binary into the Labby Incus container
+
+Usage: sync [OPTIONS]
+
+Options:
+      --container <CONTAINER>
+          Incus container name. Defaults to LABBY_INCUS_CONTAINER, then labby, then a single running labby-* container
+
+      --json
+          Emit JSON instead of human-readable tables
+
+      --binary <BINARY>
+          Local labby binary to install. Defaults to LABBY_INCUS_BINARY, target/debug/labby, then the current executable
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --check-url <CHECK_URL>
+          Optional public or host-bound URL to verify after the service is ready
+
+      --force-fallback
+          Fall back to `incus stop --force && incus start` if the service restart path fails
+
+      --no-force-fallback
+          Disable the default Incus force-restart fallback
+
+      --dry-run
+          Print the resolved operation without mutating the container
+
+  -h, --help
+          Print help
+```
+
+## `labby incus help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: help [COMMAND]...
+
+Arguments:
+  [COMMAND]...
+          Print help for the subcommand(s)
+```
+
+## `labby update`
+
+```text
+Update labby from the latest GitHub release
+
+Usage: update [OPTIONS]
+
+Options:
+      --json
+          Emit JSON instead of human-readable tables
+
+      --version <VERSION>
+          Release tag to install. Defaults to the latest GitHub release with a Labby binary asset
+
+          [default: latest]
+
+      --color <COLOR>
+          Control human-readable CLI styling
+
+          [default: auto]
+          [possible values: auto, plain, color]
+
+      --install-dir <INSTALL_DIR>
+          Install directory for the host binary
+
+      --no-incus-sync
+          Do not sync the updated binary into an Incus container
+
+      --container <CONTAINER>
+          Incus container name for the post-update sync
+
+      --check-url <CHECK_URL>
+          Optional public or host-bound URL to verify after the Incus sync
+
+      --force-fallback
+          Fall back to `incus stop --force && incus start` if the service restart path fails
+
+      --no-force-fallback
+          Disable the default Incus force-restart fallback after installing the release
+
+      --dry-run
+          Print what would happen without installing or syncing
+
+  -h, --help
+          Print help
 ```
 
 ## `labby completions`

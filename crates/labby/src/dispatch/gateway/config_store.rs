@@ -60,7 +60,7 @@ impl LabConfigStore {
 
     fn resolved_env_path(&self) -> PathBuf {
         home_dir()
-            .map(|h| h.join(".lab").join(".env"))
+            .map(|h| h.join(".labby").join(".env"))
             .unwrap_or_else(|| PathBuf::from(".env"))
     }
 

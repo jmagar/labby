@@ -328,7 +328,7 @@ export async function getPluginWorkspace(pluginId: string, signal?: AbortSignal)
     const artifacts = MOCK_ARTIFACTS[pluginId] ?? []
     return {
       pluginId,
-      deployTarget: '~/.lab/plugins',
+      deployTarget: '~/.labby/plugins',
       files: artifacts.map((artifact) => ({
         path: artifact.path,
         lang: artifact.lang === 'text' ? 'markdown' : artifact.lang,
@@ -366,7 +366,7 @@ export async function deployPluginWorkspace(
       skipped: [],
       removed: [],
       failed: [],
-      target: '~/.lab/plugins',
+      target: '~/.labby/plugins',
     }
   }
   return marketplaceAction<DeployPluginWorkspaceResult>(
@@ -386,7 +386,7 @@ export async function previewPluginWorkspaceDeploy(
       changed: [`${pluginId}/README.md`],
       skipped: [],
       removed: [],
-      target: '~/.lab/plugins',
+      target: '~/.labby/plugins',
     }
   }
   return marketplaceAction<DeployPluginWorkspacePreviewResult>(

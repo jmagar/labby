@@ -968,8 +968,8 @@ export function StepWelcome({ isRerun }: Props) {
           <p className="text-[12px] font-bold text-aurora-accent-strong mb-1">Re-running setup</p>
           <p className="text-[12px] text-aurora-text-muted leading-relaxed">
             Existing configuration detected — all fields pre-populated from{' '}
-            <code className="text-[11px]">~/.lab/.env</code> and{' '}
-            <code className="text-[11px]">~/.lab/config.toml</code>. Secret values are masked;
+            <code className="text-[11px]">~/.labby/.env</code> and{' '}
+            <code className="text-[11px]">~/.labby/config.toml</code>. Secret values are masked;
             leave them blank to keep the current value.
           </p>
         </div>
@@ -1707,7 +1707,7 @@ export function StepServices({ serviceId, values, onFieldChange, onSkip }: Props
 
       <div className="flex items-center justify-between text-[12px] text-aurora-text-muted">
         <span>
-          Saving to <code className="text-[11px]">~/.lab/.env.draft</code> — nothing commits until Finalize.
+          Saving to <code className="text-[11px]">~/.labby/.env.draft</code> — nothing commits until Finalize.
         </span>
         <Button variant="ghost" size="sm" onClick={onSkip} className="text-aurora-text-muted">
           Skip {svc.name}
@@ -1985,7 +1985,7 @@ export function StepFinalize({ draft, onConfirm }: Props) {
         <div className="text-6xl">🎉</div>
         <h1 className={cn(AURORA_DISPLAY_1, 'text-aurora-text-primary')}>Lab is configured!</h1>
         <p className="text-[14px] text-aurora-text-muted max-w-[420px] leading-[1.7]">
-          Your configuration has been written to <code className="text-[13px]">~/.lab/.env</code>.
+          Your configuration has been written to <code className="text-[13px]">~/.labby/.env</code>.
           All selected services are ready.
         </p>
         <div className="flex gap-3">
@@ -2005,7 +2005,7 @@ export function StepFinalize({ draft, onConfirm }: Props) {
       <div>
         <h2 className={cn(AURORA_DISPLAY_2, 'text-aurora-text-primary')}>Finalize</h2>
         <p className="mt-1 text-[13px] text-aurora-text-muted">
-          Review your configuration and commit it to <code>~/.lab/.env</code>.
+          Review your configuration and commit it to <code>~/.labby/.env</code>.
         </p>
       </div>
 
@@ -2024,7 +2024,7 @@ export function StepFinalize({ draft, onConfirm }: Props) {
       </div>
 
       <div className="rounded-[8px] border border-aurora-warn/30 bg-aurora-warn/10 px-4 py-3 text-[12px] text-aurora-warn">
-        ⚠ This write operation creates a backup at <code>~/.lab/.env.bak.&lt;timestamp&gt;</code> before writing.
+        ⚠ This write operation creates a backup at <code>~/.labby/.env.bak.&lt;timestamp&gt;</code> before writing.
       </div>
 
       <div className="flex gap-3">

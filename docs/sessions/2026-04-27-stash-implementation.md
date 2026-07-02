@@ -36,7 +36,7 @@ Full end-to-end implementation and hardening of the `stash` service — a new al
 
 ## Key Findings
 
-- `dispatch/marketplace/stash_meta.rs` and `update.rs` already existed as marketplace fork/update infrastructure — unrelated to the stash service, just share `~/.lab/stash` as a storage root path
+- `dispatch/marketplace/stash_meta.rs` and `update.rs` already existed as marketplace fork/update infrastructure — unrelated to the stash service, just share `~/.labby/stash` as a storage root path
 - `store.rs:441` — fd-lock write guard was bound to `_guard` in a match arm, dropping it before `f()` ran. Zero mutual exclusion during deploy. Fixed by binding to named variable and dropping explicitly after `f()`.
 - `revision.rs:90` — SHA-256 digest concatenated raw file bytes with no path/length prefix. `{a:"foo",b:"bar"}` and `{a:"foob",b:"ar"}` produced identical digests. Fixed with length-prefixed records.
 - `revision.rs:172` + `import.rs:422` — `import_blocking` sets `workspace_root = dst.parent()` (the workspace dir), so `workspace_root.file_name()` returns the ULID component ID, not `settings.json`. File-shaped revision save silently produced empty snapshots in production.
@@ -142,7 +142,7 @@ git push -u origin feat/stash-implementation
 
 - **Deploy path denylist is a blocklist, not an allowlist.** New system path prefixes not in the list could be targeted. Acceptable at homelab scale; a future hardening pass should switch to a positive allowlist of permitted roots.
 - **fd-lock advisory locking is per-process.** Multiple `lab serve` instances on the same host would not coordinate via the lock. Not a current concern (single-instance homelab), but worth noting.
-- **Rollback:** `git revert` the 20 commits on `feat/stash-implementation`, or simply don't merge PR #35. The stash service is always-on but writes only to `~/.lab/stash/` — no migrations, no schema changes, no impact on other services.
+- **Rollback:** `git revert` the 20 commits on `feat/stash-implementation`, or simply don't merge PR #35. The stash service is always-on but writes only to `~/.labby/stash/` — no migrations, no schema changes, no impact on other services.
 
 ## Decisions Not Taken
 
@@ -154,7 +154,7 @@ git push -u origin feat/stash-implementation
 ## References
 
 - `docs/features/artifact-diffs.md` — original stash feature spec (Fork Artifact + Patch Artifact)
-- `docs/MARKETPLACE.md` — stash storage root (`~/.lab/stash`) and workspace mirror context
+- `docs/MARKETPLACE.md` — stash storage root (`~/.labby/stash`) and workspace mirror context
 - `docs/ERRORS.md` — stable error kind vocabulary (10 new stash kinds added)
 - `docs/DISPATCH.md` — shared dispatch layer ownership rules
 - `crates/lab/src/dispatch/marketplace/` — reference implementation for complex dispatch service

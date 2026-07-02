@@ -69,7 +69,7 @@ Repo context captured at save time:
 2. Patched the gateway-admin chat controller to accept both provider payload shapes and both session-create payload shapes.
 3. Found that clicking `New session` still crashed the page due to unhandled error paths; added safe JSON parsing and provider-health degradation instead of allowing the page to blow up.
 4. Investigated backend ACP runtime startup and found service-path fragility around default `npx` usage in the running backend environment.
-5. Created `/home/jmagar/.local/bin/codex-acp-lab` and updated `/home/jmagar/.lab/.env` to use `ACP_CODEX_COMMAND=/home/jmagar/.local/bin/codex-acp-lab` with `ACP_CODEX_ARGS=` so the service could launch `codex-acp` without relying on `OPENAI_API_KEY`.
+5. Created `/home/jmagar/.local/bin/codex-acp-lab` and updated `/home/jmagar/.labby/.env` to use `ACP_CODEX_COMMAND=/home/jmagar/.local/bin/codex-acp-lab` with `ACP_CODEX_ARGS=` so the service could launch `codex-acp` without relying on `OPENAI_API_KEY`.
 6. Verified ACP startup under a backend-like environment and confirmed session creation succeeded with the wrapper.
 7. Switched to Chrome DevTools and the local no-auth server path (`just chat-local` / `:8766`) to reproduce the UI path without browser auth friction.
 8. Found an additional frontend crash: `Invalid time value` triggered by snake_case session timestamps being parsed into invalid `Date` objects in the chat controller.
@@ -135,7 +135,7 @@ Session-attributable repo changes observed during the session:
 
 Session-attributable non-repo changes observed during the session:
 - `/home/jmagar/.local/bin/codex-acp-lab`: dedicated `codex-acp` wrapper that unsets `OPENAI_API_KEY` and `CODEX_API_KEY` and launches the ACP package via the local pnpm path.
-- `/home/jmagar/.lab/.env`: set `ACP_CODEX_COMMAND=/home/jmagar/.local/bin/codex-acp-lab` and `ACP_CODEX_ARGS=`.
+- `/home/jmagar/.labby/.env`: set `ACP_CODEX_COMMAND=/home/jmagar/.local/bin/codex-acp-lab` and `ACP_CODEX_ARGS=`.
 
 Current dirty files at capture time that were not conclusively attributable to this session from observed edits:
 - [crates/lab/src/dispatch/deploy/build.rs](/home/jmagar/workspace/lab/crates/lab/src/dispatch/deploy/build.rs)
@@ -209,7 +209,7 @@ Critical shell commands and observed results:
 - Rollback path:
   - revert the `serve.rs` asset freshness/build changes
   - revert the ACP chat controller normalization changes
-  - revert `/home/jmagar/.lab/.env` ACP command override and remove `/home/jmagar/.local/bin/codex-acp-lab` if the wrapper is no longer desired
+  - revert `/home/jmagar/.labby/.env` ACP command override and remove `/home/jmagar/.local/bin/codex-acp-lab` if the wrapper is no longer desired
 
 # 12. Decisions Not Taken
 
@@ -237,5 +237,5 @@ Unfinished work from this session:
 - none observed after `just check`, `just build`, and live `lab serve` verification completed
 
 Follow-on tasks not yet started:
-- decide whether the ACP wrapper setup in `/home/jmagar/.lab/.env` and `/home/jmagar/.local/bin/codex-acp-lab` should be codified in repo-managed deployment docs or deployment automation
+- decide whether the ACP wrapper setup in `/home/jmagar/.labby/.env` and `/home/jmagar/.local/bin/codex-acp-lab` should be codified in repo-managed deployment docs or deployment automation
 - decide whether the dead-code-suppressed marketplace and ACP bridge scaffolding should be fully wired or trimmed in a later cleanup pass

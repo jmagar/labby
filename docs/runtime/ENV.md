@@ -28,8 +28,8 @@ LAB_AUTH_ADMIN_EMAIL=admin@example.com
 Optional auth overrides:
 
 ```env
-LAB_AUTH_SQLITE_PATH=/var/lib/lab/auth.db
-LAB_AUTH_KEY_PATH=/var/lib/lab/auth-jwt.pem
+LAB_AUTH_SQLITE_PATH=/var/lib/labby/auth.db
+LAB_AUTH_KEY_PATH=/var/lib/labby/auth-jwt.pem
 LAB_AUTH_ALLOWED_REDIRECT_URIS=https://callback.example.com/callback/*
 LAB_GOOGLE_CALLBACK_PATH=/auth/google/callback
 LAB_GOOGLE_SCOPES=openid,email,profile

@@ -42,8 +42,8 @@ test('env schema marks token secret and not editable', () => {
 test('settings state contract is section scoped', () => {
   const state: SettingsState = {
     schema_version: 1,
-    config_path: '~/.config/lab/config.toml',
-    env_path: '~/.lab/.env',
+    config_path: '~/.config/labby/config.toml',
+    env_path: '~/.labby/.env',
     section: 'core',
     values: { LAB_LOG: 'labby=info' },
     sources: { LAB_LOG: { source: 'env', overridden_by_env: null } },

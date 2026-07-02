@@ -26,5 +26,5 @@ services:
     # Mount source for quick config iteration without rebuild (config only —
     # binaries still need a rebuild).
     # volumes:
-    #   - lab-data:/home/lab/.local
-    #   - ./config/config.toml:/home/lab/.config/lab/config.toml:ro
+    #   - lab-data:/home/labby/.local
+    #   - ./config/config.toml:/home/labby/.config/labby/config.toml:ro

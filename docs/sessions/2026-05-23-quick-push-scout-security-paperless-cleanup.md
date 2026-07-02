@@ -31,7 +31,7 @@ Use mcporter to test optimized tool search, remove stale Paperless remnants, qui
 
 ## Key Findings
 
-- `~/.lab/config.toml` had `virtual_servers = []`; Paperless only existed under quarantined virtual servers.
+- `~/.labby/config.toml` had `virtual_servers = []`; Paperless only existed under quarantined virtual servers.
 - `gateway.server.get` for `paperless` returned `not_found`, confirming it was no longer active.
 - The stdio MCP path did not exercise the full live gateway catalog; `labby-http` did.
 - `scout` returned useful live HTTP results for Docker, notifications, UniFi, and gateway-route queries.

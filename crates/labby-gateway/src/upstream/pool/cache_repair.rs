@@ -248,7 +248,7 @@ mod tests {
         for diagnostic in [
             "ERR_MODULE_NOT_FOUND: Cannot find package 'zod'",
             "npm error notarget No matching version found for mcp-searxng@1.6.0",
-            "EACCES: permission denied, mkdir '/home/lab/.npm/_cacache'",
+            "EACCES: permission denied, mkdir '/home/labby/.npm/_cacache'",
             "Cannot find module 'fast-glob'",
         ] {
             assert!(
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn uvx_diagnostics_detect_cache_failures() {
         for diagnostic in [
-            "Failed to initialize cache at /home/lab/.cache/uv: Permission denied",
+            "Failed to initialize cache at /home/labby/.cache/uv: Permission denied",
             "ModuleNotFoundError: No module named 'tzlocal'",
         ] {
             assert!(

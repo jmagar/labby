@@ -293,7 +293,7 @@ Bead: `lab-n07n.2` · Status: open · Parent: lab-n07n
 
 ## What
 
-Device-side WebSocket client that dials master over Tailscale, performs the auth handshake (tailnet identity proof + device-provisioned token), maintains the connection with heartbeat and exponential-backoff reconnect, and drains the durable JSONL queue (`~/.lab/device-runtime-queue.jsonl`) into the WS as fleet notifications. On outage, writes accumulate on disk and replay FIFO on reconnect with zero data loss.
+Device-side WebSocket client that dials master over Tailscale, performs the auth handshake (tailnet identity proof + device-provisioned token), maintains the connection with heartbeat and exponential-backoff reconnect, and drains the durable JSONL queue (`~/.labby/device-runtime-queue.jsonl`) into the WS as fleet notifications. On outage, writes accumulate on disk and replay FIFO on reconnect with zero data loss.
 
 ## Context
 
@@ -331,7 +331,7 @@ Master validates tailnet identity against peer IP via Tailscale API, validates t
 - Client uses `tokio-tungstenite` (shared crate with P1, enabled in P1's Cargo.toml edit).
 - Reconnect backoff matches pool-side curve (1s→60s jittered).
 - Heartbeat cadence matches P1 default (30s ping; 90s dead-threshold).
-- Device provisioning token stored at `~/.lab/device-token` with 0600 perms; generated on first connect if absent (master issues on first successful hello); renewed on master reset.
+- Device provisioning token stored at `~/.labby/device-token` with 0600 perms; generated on first connect if absent (master issues on first successful hello); renewed on master reset.
 - Queue drain: on connect, read all envelopes in order, send each as the appropriate fleet method (`fleet/log.event` for `syslog_batch`, `fleet/status.push` for `status`), ack on master-confirmed receipt, remove from disk.
 
 ### Discretion
@@ -417,7 +417,7 @@ Current `crates/lab/src/device/queue.rs:126-180` rewrites the **entire** JSONL f
 
 ### Handshake auth (security, new)
 - Bearer token must be scrubbed from `system.vars`, metadata snapshots, and debug logs (lab-e27 precedent applies). Allowlist pattern: only approved env keys exported.
-- Provisioning token storage: **out of plaintext `~/.lab/.env`**. Use OS keyring — `libsecret` (Linux), `Keychain` (macOS), `Credential Manager` (Windows). If keyring integration is too large for this bead, fall back to `~/.lab/device-token` with `0600` perms as already planned, but flag as follow-up hardening.
+- Provisioning token storage: **out of plaintext `~/.labby/.env`**. Use OS keyring — `libsecret` (Linux), `Keychain` (macOS), `Credential Manager` (Windows). If keyring integration is too large for this bead, fall back to `~/.labby/device-token` with `0600` perms as already planned, but flag as follow-up hardening.
 - Token lifetime: 15–60 min with refresh endpoint. Master keeps revocation allowlist in-memory (or SQLite for multi-master). Revoked token denied on next reconnect; active connections are NOT force-closed by revocation alone.
 
 ### Additional tests (append to Testing)
@@ -429,7 +429,7 @@ Current `crates/lab/src/device/queue.rs:126-180` rewrites the **entire** JSONL f
 
 ### Risks
 - **CRITICAL (perf)** — current full-file rewrite is a production-blocking bug at 100x+ fleet size. Segment queue is a P2 scope addition, not a follow-up.
-- **HIGH (security)** — plaintext `~/.lab/device-token` is acceptable for lab-grade trust but document the keyring upgrade path.
+- **HIGH (security)** — plaintext `~/.labby/device-token` is acceptable for lab-grade trust but document the keyring upgrade path.
 - **MEDIUM (scope)** — P2 may exceed ~1000 LOC budget; pre-plan the P2a/P2b split.
 
 ## CEO Review Addendum (Phase 5a)
@@ -679,7 +679,7 @@ Together, these turn the WS plumbing from P1–P3 into a working fleet control p
 
 ### Policy shapes
 ```toml
-# ~/.lab/config.toml additions
+# ~/.labby/config.toml additions
 
 [fleet.enrollment]
 # Explicit allowlist. Devices not listed are connected but not enrolled in the catalog.
@@ -712,7 +712,7 @@ Deny-by-default: if no matching `peer_policy` entry, the call is rejected.
 ### Locked
 - `UpstreamPool` gains an `insert_upstream(config: UpstreamConfig, connection: UpstreamConnection)` method; write-locks `connections`.
 - Revoke path: `pool.revoke_upstream(name)` marks the entry `Unhealthy` permanently and stops routing through it, without closing the WS.
-- Enrollment policy config reuses the existing TOML file (`~/.lab/config.toml`). No separate fleet.toml (keeps the deployment story simple).
+- Enrollment policy config reuses the existing TOML file (`~/.labby/config.toml`). No separate fleet.toml (keeps the deployment story simple).
 - Peer policy patterns use the same glob-style matching as existing tool exposure patterns — prefer reuse of `ToolExposurePolicy` matcher if shape fits, otherwise factor the matcher into a shared helper.
 - Audit log emits one structured tracing event per decision at `INFO` (allowed) or `WARN` (denied), with fields `surface="fleet", action="peer.invoke", source_device, target_device, target_action, decision, reason`.
 - Allowed `fleet/peer.invoke` resolves the target via pool lookup; if target is `Unhealthy` or absent, returns structured error (`kind = "target_offline"` for disconnected, `"unknown_instance"` for not-enrolled) without retry — caller decides to retry.
@@ -814,7 +814,7 @@ Deny-by-default for destructive actions regardless of action glob match.
 - Per-source rate limit (token bucket, 10/s default) as additional defense.
 
 ### Token storage hardening (cross-cut with P2)
-- Device tokens: OS keyring when available, `~/.lab/device-token` 0600 as fallback. **Do not** store in `~/.lab/.env` where they become visible to `system.vars` scrubbing audits.
+- Device tokens: OS keyring when available, `~/.labby/device-token` 0600 as fallback. **Do not** store in `~/.labby/.env` where they become visible to `system.vars` scrubbing audits.
 - Token rotation: 15-60 min TTL with refresh endpoint. Revocation allowlist persists in SQLite for multi-master deployments.
 
 ### Audit log integrity (new)
@@ -887,9 +887,9 @@ Every peer.invoke handler calls `policy.snapshot()` once at entry; evaluates ent
 ### Audit log tamper-evidence (moved in-scope per eng review)
 Audit path:
 1. In-memory ring buffer (10k entries) for real-time queries (P5 UI reads this)
-2. Append-only JSONL at `~/.lab/fleet-audit.jsonl` with daily rotation
+2. Append-only JSONL at `~/.labby/fleet-audit.jsonl` with daily rotation
 3. Each line carries: `{timestamp, request_id, device_id, action, decision, policy_version, prev_hash, hmac}`
-4. `prev_hash` = SHA-256 of prior line; `hmac` = HMAC-SHA256(key, line_content) with key in `~/.lab/audit-hmac-key` (0600, generated on first audit init)
+4. `prev_hash` = SHA-256 of prior line; `hmac` = HMAC-SHA256(key, line_content) with key in `~/.labby/audit-hmac-key` (0600, generated on first audit init)
 5. Daily rotation: on rotation, final line of prior file hashes-chains into first line of new file
 6. Verification tool: `lab audit verify --since 2026-04-22` walks chain, reports first tampering
 
@@ -948,7 +948,7 @@ Deprecation:
 ### Locked
 - Admin UI extensions land in the existing `apps/gateway-admin/` — no new app.
 - Browser→master WS uses a new endpoint `/v1/fleet/ui/ws` with subscription-based multiplexing (subscribe to `logs:device_id`, `audit`, etc.) — separate from the device-side `/v1/fleet/ws` to keep auth surfaces distinct (browser uses operator session auth; device uses tailnet + token).
-- Peer policy editor writes to the same `~/.lab/config.toml` via a master API endpoint (`POST /v1/fleet/policy`), which validates and triggers hot-reload.
+- Peer policy editor writes to the same `~/.labby/config.toml` via a master API endpoint (`POST /v1/fleet/policy`), which validates and triggers hot-reload.
 - Deprecation is soft — handlers keep working. A follow-up bead (tracked in epic Deferred) removes them after one release.
 - Audit log viewer is read-only in this phase; any remediation actions (e.g., revoke enrollment) are separate admin actions already available from P4 APIs.
 

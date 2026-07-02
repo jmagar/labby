@@ -69,7 +69,7 @@ Add the Webwright plugin to both marketplaces and push to main; then a series of
 | modified | crates/lab/src/dispatch/gateway/manager/core.rs | — | construct pool via from_env() | PR #128 (manager/core.rs:106) |
 | modified | crates/lab/tests/code_mode_runner.rs | — | +309 lines warm-pool tests | PR #128 |
 | modified | docs/dev/CODE_MODE.md | — | warm-pool docs | PR #128 |
-| created | ~/.lab/config.toml (host-local, chezmoi) | — | adb + LLM hosts → host.docker.internal | chezmoi commit bdbb8c2 |
+| created | ~/.labby/config.toml (host-local, chezmoi) | — | adb + LLM hosts → host.docker.internal | chezmoi commit bdbb8c2 |
 | created | docs/sessions/2026-06-15-adb-portability-snippets-and-warm-pool.md | — | this session log | this commit |
 
 ## Beads Activity

@@ -13,6 +13,24 @@ gains tenant/workspace identity beyond the current local workspace model, move
 the local-provider policy behind a typed host-supplied context rather than
 letting these namespaces become general host tools.
 
+`codemode.search`/`codemode.describe` intentionally do **not** use this
+admin-only gate. They stay pure in-sandbox JS closures over a catalog that is
+already scope-filtered per-entry via `scope.allows()` before the discovery/proxy
+JS is generated (`execute.rs`'s `build_code_mode_proxy`), and remain available to
+any `can_execute()` caller, including route-scoped and tool-scoped ones. A prior
+investigation (bead `lab-5cgrz`) evaluated converting them to host-intercepted
+RPC pseudo-tools reusing the `local_provider.rs` pattern and rejected it: the
+claimed injection cost is negligible at current scale, the RPC path would likely
+be *slower* for repeated search/describe calls (it would serialize behind the
+global local-provider lock), and reusing `local_providers_allowed()` verbatim
+would wrongly restrict search/describe to admin-only. If this is ever revisited,
+re-derive the cost data first and solve, at minimum: the caller-gating mismatch
+above, the risk of double-fetching `CodeModeHost::list_tools()` per RPC call
+instead of once per execution, and the fact that `CatalogRenderCache`
+(`labby-gateway`) is a single-slot cache with no scope component in its
+fingerprint — safe today only because it is reached exclusively through the
+unscoped CLI path.
+
 ---
 
 ## Runtime — Javy/QuickJS via subprocess stdio (NOT Wasmtime)

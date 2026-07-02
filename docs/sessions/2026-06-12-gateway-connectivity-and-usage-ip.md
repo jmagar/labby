@@ -56,8 +56,8 @@ Two worker agents were dispatched. One restored four disconnected gateway upstre
 | modified | `crates/lab/src/api/services/stash.rs` | - | Pass `ConnectInfo<SocketAddr>` into dispatch metadata. | Commit `84869fe0`. |
 | modified | `.agents/plugins/marketplace.json` | - | Refresh `mcp-apps` marketplace SHA and description. | Commit `c53adc7a`; JSON validated. |
 | modified | `.claude-plugin/marketplace.json` | - | Refresh `mcp-apps` marketplace SHA and description. | Commit `c53adc7a`; JSON validated. |
-| modified | `/home/jmagar/.lab/config.toml` | - | Add Neo4j stdio env injection and update Cortex/Cloudflare docs MCP URLs. | Gateway worker report; outside repo. |
-| modified | `/home/jmagar/.lab/.env` | - | Refresh `LAB_GW_CORTEX_AUTH_HEADER`. | Gateway worker report; outside repo. |
+| modified | `/home/jmagar/.labby/config.toml` | - | Add Neo4j stdio env injection and update Cortex/Cloudflare docs MCP URLs. | Gateway worker report; outside repo. |
+| modified | `/home/jmagar/.labby/.env` | - | Refresh `LAB_GW_CORTEX_AUTH_HEADER`. | Gateway worker report; outside repo. |
 | created/modified | `/home/jmagar/workspace/WireMCP/package-lock.json` | - | Record installed Node dependencies for `wire-mcp`. | Gateway worker report. |
 | created | `/home/jmagar/workspace/WireMCP/node_modules/` | - | Install missing runtime dependencies for `wire-mcp`. | Gateway worker report; ignored dependency directory. |
 | created | `docs/sessions/2026-06-12-gateway-connectivity-and-usage-ip.md` | - | Capture this session. | This save-to-md pass. |
@@ -152,7 +152,7 @@ No bead activity was performed in this session. A read-only beads pass was run. 
 - Historical usage rows remain unchanged and can still display `unknown IP`.
 - Rollback for repo code: revert `84869fe0`.
 - Rollback for marketplace metadata: revert `c53adc7a` if the `mcp-apps` refresh is not desired.
-- Rollback for live gateway config changes: restore `/home/jmagar/.lab/config.toml` and `/home/jmagar/.lab/.env` from backups or git-managed source if available, then restart/reload Labby.
+- Rollback for live gateway config changes: restore `/home/jmagar/.labby/config.toml` and `/home/jmagar/.labby/.env` from backups or git-managed source if available, then restart/reload Labby.
 
 ## Decisions Not Taken
 

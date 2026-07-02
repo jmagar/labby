@@ -5,8 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-export LAB_HOME="$TMP/lab-home"
-mkdir -p "$LAB_HOME"
+export LABBY_HOME="$TMP/lab-home"
+mkdir -p "$LABBY_HOME"
 
 cd "$ROOT"
 cargo run --all-features -- --json gateway code exec --code '

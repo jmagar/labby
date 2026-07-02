@@ -228,7 +228,7 @@ pub fn gateway_sqlite_path(config: &LabConfig) -> anyhow::Result<PathBuf> {
 }
 ```
 
-Default to a colocated but separate file such as `~/.config/lab/gateway.db`.
+Default to a colocated but separate file such as `~/.config/labby/gateway.db`.
 
 - [ ] **Step 5: Add the canonical managed-server domain**
 

@@ -113,7 +113,7 @@ export function DraftStaleBanner(): React.ReactElement | null {
       <div className="min-w-0 flex-1">
         <p className="font-medium">Old draft detected.</p>
         <p>
-          A saved setup draft{draftSummary} is older than <code>~/.lab/.env</code>. Discard it if
+          A saved setup draft{draftSummary} is older than <code>~/.labby/.env</code>. Discard it if
           you do not need those draft values.
         </p>
         {discardError ? <p className="mt-2 text-xs">{discardError}</p> : null}

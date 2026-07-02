@@ -44,7 +44,7 @@ Also shipped `99c45165`: allow `http://` and RFC 1918 URLs in gateway upstream c
 - **Root cause of #64**: `score_name_haystack` in `index.rs:126` awards `+2.0` per query token found anywhere in the haystack, creating a fixed noise floor. Any tool with a common word in its description scores ≥2.0 per matching token, flooding top-K regardless of relevance.
 - **Pathological example**: `synapse compose docker stats exec` → `zsh_alan_stats` scored 20.4 (one "stats" segment-exact match) beating every docker tool. With RRF: docker tools rank #1-3, `zsh_alan_stats` absent from top 5.
 - **Score floor fix**: Applied per-source (each upstream's floor relative to its own top score, not a global mixed-source maximum). This avoids cross-source scale contamination.
-- **Axon Qdrant collection**: Live collection is named `axon` (not `cortex` as in the `.env`). Named vectors: `dense` (1024-dim Cosine, Qwen3-Embedding-0.6B) + `bm42` (sparse, IDF modifier server-side). `QDRANT_URL=http://127.0.0.1:53333`, `TEI_URL=http://127.0.0.1:52000` already in `~/.lab/.env`.
+- **Axon Qdrant collection**: Live collection is named `axon` (not `cortex` as in the `.env`). Named vectors: `dense` (1024-dim Cosine, Qwen3-Embedding-0.6B) + `bm42` (sparse, IDF modifier server-side). `QDRANT_URL=http://127.0.0.1:53333`, `TEI_URL=http://127.0.0.1:52000` already in `~/.labby/.env`.
 - **mcporter misconfiguration**: Config had `command: /path/to/lab` (wrong binary name — should be `labby`) and `args: ["serve"]` (HTTP mode — should be `["mcp"]` for stdio).
 
 ## Technical Decisions

@@ -6,8 +6,8 @@ Configuration is intentionally split between secrets and preferences.
 
 | Category | Where | Examples |
 |----------|-------|----------|
-| Secrets | `~/.lab/.env` | `*_API_KEY`, `*_TOKEN`, `*_PASSWORD`, `LAB_MCP_HTTP_TOKEN` |
-| Service endpoints | `~/.lab/.env` | `RADARR_URL`, `PLEX_URL`, other per-instance upstream URLs |
+| Secrets | `~/.labby/.env` | `*_API_KEY`, `*_TOKEN`, `*_PASSWORD`, `LAB_MCP_HTTP_TOKEN` |
+| Service endpoints | `~/.labby/.env` | `RADARR_URL`, `PLEX_URL`, other per-instance upstream URLs |
 | Non-secret preferences and defaults | `config.toml` | logging, MCP transport, CORS, admin flags, registry URLs, workspace roots, per-service prefs |
 
 All `config.toml` values can still be overridden by env vars. Env always wins.
@@ -18,9 +18,9 @@ The Labby `/settings` UI is schema-backed by Rust. It exposes configuration
 from three layers, highest precedence first:
 
 1. CLI flags and process environment variables.
-2. `~/.lab/.env`.
-3. `config.toml`, searched from current directory, `~/.lab/config.toml`, then
-   `~/.config/lab/config.toml`.
+2. `~/.labby/.env`.
+3. `config.toml`, searched from current directory, `~/.labby/config.toml`, then
+   `~/.config/labby/config.toml`.
 
 When an environment variable overrides a `config.toml` field, the UI shows the
 override source. Changing the TOML value is still allowed for safe scalar fields,
@@ -51,15 +51,15 @@ the relevant process is restarted or reloaded.
 
 Secrets and service instance endpoints live in:
 
-- `~/.lab/.env`
+- `~/.labby/.env`
 
 Preferences live in (first found wins):
 
 - `./config.toml` (repo/CWD override)
-- `~/.lab/config.toml` (user-level, next to `.env`)
-- `~/.config/lab/config.toml` (XDG-style fallback)
+- `~/.labby/config.toml` (user-level, next to `.env`)
+- `~/.config/labby/config.toml` (XDG-style fallback)
 
-Copy `config/config.example.toml` to `~/.lab/config.toml` and uncomment sections as needed.
+Copy `config/config.example.toml` to `~/.labby/config.toml` and uncomment sections as needed.
 
 ## Load Order
 
@@ -67,7 +67,7 @@ Startup sequence:
 
 1. `config.toml` (first found from the search order above)
 2. Tracing init (using `[log]` section from config.toml)
-3. `~/.lab/.env` (secrets + URLs via `dotenvy`)
+3. `~/.labby/.env` (secrets + URLs via `dotenvy`)
 4. `./.env` from CWD (dev convenience, non-fatal if missing)
 
 Value precedence at point of use (highest wins):
@@ -81,7 +81,7 @@ Value precedence at point of use (highest wins):
 
 On first run, `labby serve` detects a missing MCP token (no `LAB_MCP_HTTP_TOKEN`
 and `LAB_AUTH_MODE` != `oauth`) and self-bootstraps: it generates a 64-char hex
-bearer token, writes a minimal `~/.lab/.env` (token + loopback MCP defaults via
+bearer token, writes a minimal `~/.labby/.env` (token + loopback MCP defaults via
 the atomic `env_merge` path), reloads that file into the process environment via
 `dotenvy` so the token is visible process-wide, prints the
 `http://<host>:<port>/setup` URL once, points the operator to the generated env
@@ -98,7 +98,7 @@ It writes these base keys:
 The web `/setup` wizard then owns all further configuration.
 
 Set `LAB_MCP_HTTP_TOKEN` or `LAB_AUTH_MODE=oauth` beforehand to opt out.
-The generated `~/.lab/.env` is written `0600` on Unix;
+The generated `~/.labby/.env` is written `0600` on Unix;
 **Windows ACL hardening is still pending**
 (`env_merge::set_secure_perms` is a no-op on non-unix), so on Windows the token
 file sits at default ACLs. The `setup.bootstrap` action exposes this primitive
@@ -125,7 +125,7 @@ Controller runtime log store preferences.
 
 | Key | Env override | Default | Description |
 |-----|-------------|---------|-------------|
-| `store_path` | `LAB_LOCAL_LOGS_STORE_PATH` | `~/.lab/logs.db` | Embedded SQLite store path for persisted controller runtime logs |
+| `store_path` | `LAB_LOCAL_LOGS_STORE_PATH` | `~/.labby/logs.db` | Embedded SQLite store path for persisted controller runtime logs |
 | `retention_days` | `LAB_LOCAL_LOGS_RETENTION_DAYS` | `7` | Time-based retention window in days |
 | `max_bytes` | `LAB_LOCAL_LOGS_MAX_BYTES` | `268435456` | Size-based retention limit in logical stored bytes |
 | `queue_capacity` | `LAB_LOCAL_LOGS_QUEUE_CAPACITY` | `1024` | Bounded ingest queue size for the long-lived runtime |
@@ -135,7 +135,7 @@ Example:
 
 ```toml
 [local_logs]
-store_path = "/var/lib/lab/logs.db"
+store_path = "/var/lib/labby/logs.db"
 retention_days = 14
 max_bytes = 536870912
 queue_capacity = 2048
@@ -203,13 +203,13 @@ Shared local workspace/stash preferences.
 
 | Key | Env override | Default | Description |
 |-----|-------------|---------|-------------|
-| `root` | — | `~/.lab/stash` | Shared Lab workspace root. Backs the read-only attachment picker and local writable stash workspaces. Marketplace editable plugin mirrors live under `<root>/plugins/`. |
+| `root` | — | `~/.labby/stash` | Shared Lab workspace root. Backs the read-only attachment picker and local writable stash workspaces. Marketplace editable plugin mirrors live under `<root>/plugins/`. |
 
 Example:
 
 ```toml
 [workspace]
-root = "~/.lab/stash"
+root = "~/.labby/stash"
 ```
 
 ### `[mcpregistry]`
@@ -349,12 +349,12 @@ The path must be a non-empty **relative** path with no `..` segments (checked
 after `\`→`/` normalization), and the joined destination is confirmed to stay
 within the per-run root — rejecting symlinked ancestors — before any write. The
 content is then written into a fresh per-run directory under
-`$LAB_HOME/code-mode-artifacts/<run_id>/` and Labby returns a receipt:
+`$LABBY_HOME/code-mode-artifacts/<run_id>/` and Labby returns a receipt:
 
 ```json
 {
   "path": "reports/brief.md",
-  "absolute_path": "~/.lab/code-mode-artifacts/01J.../reports/brief.md",
+  "absolute_path": "~/.labby/code-mode-artifacts/01J.../reports/brief.md",
   "content_type": "text/markdown",
   "bytes": 18342,
   "sha256": "..."
@@ -515,7 +515,7 @@ OPENACP_NODE2_TOKEN=...
 ```
 
 Lab does not discover or read upstream OpenACP `api-secret` files
-automatically. Provide the token explicitly in `~/.lab/.env`.
+automatically. Provide the token explicitly in `~/.labby/.env`.
 
 Rules:
 
@@ -551,8 +551,8 @@ Full details in [OAUTH.md](./OAUTH.md).
 | `LAB_AUTH_MODE` | no | `bearer` or `oauth`. Defaults to `bearer`. |
 | `LAB_MCP_HTTP_TOKEN` | bearer mode only | Static bearer token for protected HTTP routes. |
 | `LAB_PUBLIC_URL` | oauth mode | Public base URL for metadata, JWT issuer/audience, callback construction, and allowed-host derivation. Path-prefixed deployments are supported. |
-| `LAB_AUTH_SQLITE_PATH` | no | Override path for the auth SQLite database. Defaults to `~/.lab/auth.db`. |
-| `LAB_AUTH_KEY_PATH` | no | Override path for the persisted JWT signing key. Defaults to `~/.lab/auth-jwt.pem`. |
+| `LAB_AUTH_SQLITE_PATH` | no | Override path for the auth SQLite database. Defaults to `~/.labby/auth.db`. |
+| `LAB_AUTH_KEY_PATH` | no | Override path for the persisted JWT signing key. Defaults to `~/.labby/auth-jwt.pem`. |
 | `LAB_GOOGLE_CLIENT_ID` | oauth mode | Google OAuth client ID. |
 | `LAB_GOOGLE_CLIENT_SECRET` | oauth mode | Google OAuth client secret. |
 | `LAB_GOOGLE_CALLBACK_PATH` | no | Callback path appended to `LAB_PUBLIC_URL`. Defaults to `/auth/google/callback`. |
@@ -804,7 +804,7 @@ upstream 'acme' has both bearer_token_env and oauth configured — pick one
 **Key rotation procedure:** rotate by (1) generating a new key, (2) clearing
 all persisted upstream OAuth credentials (`POST /v1/gateway/oauth/clear?upstream=<name>&confirm=true`
 per upstream, or remove rows from `upstream_oauth_credentials`), (3) updating
-`LAB_OAUTH_ENCRYPTION_KEY` in `~/.lab/.env`, (4) restarting `lab`, (5) asking
+`LAB_OAUTH_ENCRYPTION_KEY` in `~/.labby/.env`, (4) restarting `lab`, (5) asking
 each user to re-authorize each upstream. Decryption under the wrong key
 surfaces as `oauth_needs_reauth`, never as an internal error.
 
@@ -831,32 +831,32 @@ secondary supported shape for a dedicated host or VM. See [INCUS.md](./INCUS.md)
 for the recommended runbook. The Docker path below is retained for development,
 compatibility, image smoke, and Docker-specific ACP adapter work.
 
-`docker-compose.yml` mounts config and secrets from the host user's `~/.lab/`
+`docker-compose.yml` mounts config and secrets from the host user's `~/.labby/`
 directory so the container and a local `labby serve` process share the same
 configuration without duplicating files:
 
 ```yaml
 volumes:
-  - ${HOME}/.lab/config.toml:/home/lab/.config/lab/config.toml:ro
+  - ${HOME}/.labby/config.toml:/home/labby/.config/labby/config.toml:ro
 env_file:
-  - path: ${HOME}/.lab/.env
+  - path: ${HOME}/.labby/.env
     required: false
 ```
 
 **Implications:**
 
-- Changes to `~/.lab/config.toml` take effect on the next container restart
+- Changes to `~/.labby/config.toml` take effect on the next container restart
   (`docker compose restart labby-master`).
-- Copy `config/config.example.toml` to `~/.lab/config.toml` and uncomment
+- Copy `config/config.example.toml` to `~/.labby/config.toml` and uncomment
   sections as needed.
 - The container overrides two env vars that would be wrong inside the container
-  even if set in `~/.lab/.env`:
+  even if set in `~/.labby/.env`:
   - `LAB_WEB_ASSETS_DIR=""` — clears any host filesystem path so the binary
     falls back to its embedded assets.
-  - `LAB_LOCAL_LOGS_STORE_PATH="/home/lab/.local/share/lab/logs.db"` — routes
+  - `LAB_LOCAL_LOGS_STORE_PATH="/home/labby/.local/share/labby/logs.db"` — routes
     the log store into the named `labby-data` volume.
 - Docker-specific ACP provider config is mounted from
-  `config/acp-providers.docker.json` to `/home/lab/.lab/acp-providers.json`.
+  `config/acp-providers.docker.json` to `/home/labby/.labby/acp-providers.json`.
   That file uses container paths and passes
   `sandbox_mode="danger-full-access"` to Codex ACP because Docker's default
   seccomp profile blocks the nested namespace sandbox used by Codex

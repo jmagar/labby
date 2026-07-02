@@ -38,7 +38,7 @@ impl JsonFileAcpPersistence {
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
                 let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-                Path::new(&home).join(".lab").join("acp-sessions")
+                Path::new(&home).join(".labby").join("acp-sessions")
             });
         Self { base_dir }
     }

@@ -4,7 +4,7 @@
 
 **Goal:** Finish the half-completed public rename from standalone product name "Lab" to "Labby" while preserving existing runtime compatibility identifiers that would break users, configs, auth, or crate consumers if renamed blindly.
 
-**Architecture:** Treat "Labby" as the user-facing product, CLI binary, web UI, plugin, marketplace, and documentation name. Keep `lab` only where it is an intentional stable contract: repository/worktree path, Rust crate names, Rust module paths, `~/.lab`, `LAB_*` environment variables, `lab:read` / `lab:admin` scopes, `lab_session` cookie, `lab_admin` internal service id, `lab-apis` / `lab-auth` / `lab-winjob`, generated docs derived from source, and historical session/report artifacts.
+**Architecture:** Treat "Labby" as the user-facing product, CLI binary, web UI, plugin, marketplace, and documentation name. Keep `lab` only where it is an intentional stable contract: repository/worktree path, Rust crate names, Rust module paths, `~/.labby`, `LAB_*` environment variables, `lab:read` / `lab:admin` scopes, `lab_session` cookie, `lab_admin` internal service id, `lab-apis` / `lab-auth` / `lab-winjob`, generated docs derived from source, and historical session/report artifacts.
 
 **Tech Stack:** Rust 2024 workspace, Cargo, Just, Next.js/React admin app, TypeScript, Markdown docs, Claude/Codex plugin manifests and skills, shell/PowerShell install scripts.
 
@@ -56,7 +56,7 @@
   | `github.com/jmagar/lab` and local `~/workspace/lab` paths | Repository identity and existing checkout paths. |
   | `crates/lab`, `crates/lab-apis`, `crates/lab-auth`, `crates/lab-winjob` | Rust crate and workspace package contracts. |
   | `lab_apis`, `lab_auth`, and Rust module paths | Rust import paths derived from existing crate names. |
-  | `~/.lab` and `~/.config/lab` | Existing operator config locations. |
+  | `~/.labby` and `~/.config/labby` | Existing operator config locations. |
   | `LAB_*` environment variables | Existing deployment, CI, shell, and plugin configuration contracts. |
   | `lab:read` and `lab:admin` OAuth scopes | Existing authorization contracts. |
   | `lab_session` cookie | Existing browser session compatibility. |
@@ -120,7 +120,7 @@
   | `Lab web UI` | `Labby web UI` |
   | `Lab docs` | `Labby docs` |
 
-  Keep these identifiers unchanged in code blocks and inline literals: `labby`, `LAB_*`, `~/.lab`, `~/.config/lab`, `lab-apis`, `lab-auth`, `lab-winjob`, `lab_apis`, `lab_auth`, `lab:read`, `lab:admin`, `lab_session`, `lab_admin`, `github.com/jmagar/lab`, and file paths containing `/lab/`.
+  Keep these identifiers unchanged in code blocks and inline literals: `labby`, `LAB_*`, `~/.labby`, `~/.config/labby`, `lab-apis`, `lab-auth`, `lab-winjob`, `lab_apis`, `lab_auth`, `lab:read`, `lab:admin`, `lab_session`, `lab_admin`, `github.com/jmagar/lab`, and file paths containing `/lab/`.
 
 - [ ] Update `scripts/install.sh`.
 
@@ -186,7 +186,7 @@
 
 - [ ] Update `docs/README.md`.
 
-  Rename visible product prose from standalone "Lab" to "Labby". Keep `labby`, `LAB_*`, `~/.lab`, `lab-apis`, `lab-auth`, `lab-winjob`, and paths containing `/lab/` unchanged.
+  Rename visible product prose from standalone "Lab" to "Labby". Keep `labby`, `LAB_*`, `~/.labby`, `lab-apis`, `lab-auth`, `lab-winjob`, and paths containing `/lab/` unchanged.
 
 - [ ] Update `docs/ARCH.md`.
 
@@ -198,7 +198,7 @@
 
 - [ ] Update `docs/OPERATIONS.md`.
 
-  Rename visible product prose from standalone "Lab" to "Labby". Keep `LAB_*`, `~/.lab`, `lab:read`, `lab:admin`, and `lab_session` unchanged.
+  Rename visible product prose from standalone "Lab" to "Labby". Keep `LAB_*`, `~/.labby`, `lab:read`, `lab:admin`, and `lab_session` unchanged.
 
 - [ ] Update `docs/GATEWAY.md`.
 
@@ -206,7 +206,7 @@
 
 - [ ] Update `docs/runtime/CONFIG.md`.
 
-  Rename visible product prose from standalone "Lab" to "Labby". Keep config paths such as `~/.lab` and `~/.config/lab` unchanged.
+  Rename visible product prose from standalone "Lab" to "Labby". Keep config paths such as `~/.labby` and `~/.config/labby` unchanged.
 
 - [ ] Update `docs/runtime/ENV.md`.
 
@@ -473,7 +473,7 @@
 
 - Renaming the GitHub repository from `jmagar/lab`.
 - Renaming Rust crates from `lab-*` to `labby-*`.
-- Renaming `~/.lab`, `~/.config/lab`, `LAB_*`, `lab:read`, `lab:admin`, `lab_session`, or `lab_admin`.
+- Renaming `~/.labby`, `~/.config/labby`, `LAB_*`, `lab:read`, `lab:admin`, `lab_session`, or `lab_admin`.
 - Renaming historical session logs, reports, archived references, or old review artifacts.
 - Changing API, MCP, OAuth, cookie, or config compatibility contracts without aliases and a migration guide.
 

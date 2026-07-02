@@ -130,7 +130,7 @@ pub const MCP_ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "mcp.install",
-        description: "Install an MCP server from the registry to Lab gateway upstreams and/or Claude/Codex MCP clients on fleet devices. HTTP servers are added as remote URLs; stdio servers are added as command configs. Required env vars are written to ~/.lab/.env for gateway installs and embedded in the MCP client config for client installs.",
+        description: "Install an MCP server from the registry to Lab gateway upstreams and/or Claude/Codex MCP clients on fleet devices. HTTP servers are added as remote URLs; stdio servers are added as command configs. Required env vars are written to ~/.labby/.env for gateway installs and embedded in the MCP client config for client installs.",
         destructive: true,
         requires_admin: false,
         returns: "InstallResults",

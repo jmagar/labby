@@ -26,7 +26,7 @@ Systematically debug why the upstream MCP servers `apprise-api`, `unrust`, `rust
 
 ## Sequence of Events
 
-1. Inspected `~/.lab/config.toml` and `~/.lab/.env` to confirm Lab gateway upstream definitions, public MCP URLs, and bearer token env wiring.
+1. Inspected `~/.labby/config.toml` and `~/.labby/.env` to confirm Lab gateway upstream definitions, public MCP URLs, and bearer token env wiring.
 2. Checked SWAG reverse-proxy configuration for `unraid.example.com` and confirmed `/mcp` was routed to `100.64.0.10:40010`.
 3. Tested direct ports and public `/mcp` endpoints; found `40010` and `40020` initially refused while `40030`, `40040`, `40050`, and `40060` were open but rejected reverse-proxy Host headers.
 4. Added allowed-host configuration to the sidecar `.env` files and recreated the sidecar Docker Compose services.
@@ -64,7 +64,7 @@ The Lab worktree already contained unrelated dirty files before this note was wr
 
 ## Commands Executed
 
-- `rg` / `sed` against `~/.lab/config.toml`, `~/.lab/.env`, and SWAG proxy confs to inspect configured upstreams and tokens.
+- `rg` / `sed` against `~/.labby/config.toml`, `~/.labby/.env`, and SWAG proxy confs to inspect configured upstreams and tokens.
 - `curl` against direct sidecar health endpoints and public `/mcp` endpoints to separate port/listener failures from reverse-proxy Host/auth failures.
 - `docker ps`, `docker inspect`, and `docker logs` for `unraid-mcp`, `gotify-mcp`, and the other sidecar containers.
 - `docker compose up -d --build` in `/home/jmagar/workspace/unrust` and `/home/jmagar/workspace/rustify` after image metadata fixes.

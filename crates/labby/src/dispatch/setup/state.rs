@@ -24,7 +24,7 @@ fn registry_required_keys(registry: &ToolRegistry) -> Vec<String> {
     keys
 }
 
-/// Build a `SetupSnapshot` describing the current state of `~/.lab/.env`.
+/// Build a `SetupSnapshot` describing the current state of `~/.labby/.env`.
 #[must_use]
 pub fn snapshot(registry: &ToolRegistry) -> SetupSnapshot {
     let env = env_path();
@@ -106,7 +106,7 @@ mod tests {
     use super::{draft_metadata, unix_seconds};
     use std::time::{Duration, SystemTime};
 
-    // Note: snapshot() reads LAB_HOME via env, which Rust 2024 marks unsafe.
+    // Note: snapshot() reads LABBY_HOME via env, which Rust 2024 marks unsafe.
     // The crate forbids unsafe, so we can't mutate the env var inside tests
     // here. End-to-end coverage of the state machine ships in the smoke test
     // recipe (`just smoke-setup`) added in Chunk F.

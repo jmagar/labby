@@ -838,7 +838,7 @@ async fn normalize_remote_runtime<I: HostIo + 'static>(
     controller_host: &str,
 ) -> Result<()> {
     let home_dir = remote_home_dir(io.clone()).await?;
-    let lab_dir = format!("{home_dir}/.lab");
+    let lab_dir = format!("{home_dir}/.labby");
     let config_path = format!("{lab_dir}/config.toml");
     let current = read_remote_file(io.clone(), &config_path)
         .await
@@ -872,7 +872,7 @@ async fn normalize_remote_runtime<I: HostIo + 'static>(
 
 async fn normalize_local_runtime(controller_host: &str) -> Result<()> {
     let home_dir = current_home_dir();
-    let lab_dir = home_dir.join(".lab");
+    let lab_dir = home_dir.join(".labby");
     tokio::fs::create_dir_all(&lab_dir)
         .await
         .with_context(|| format!("create {}", lab_dir.display()))?;
@@ -1285,7 +1285,7 @@ mod tests {
     #[tokio::test]
     async fn normalize_remote_runtime_removes_legacy_files_and_writes_node_controller() {
         let io = Arc::new(RecordingIo::new());
-        io.push_run(RunResp::ok("/home/lab"));
+        io.push_run(RunResp::ok("/home/labby"));
         io.push_run(RunResp::ok(""));
         io.push_run(RunResp::ok(""));
         io.push_run(RunResp::ok(""));
@@ -1295,7 +1295,7 @@ mod tests {
             .expect("normalize");
 
         let ops = io.ops();
-        assert!(ops.iter().any(|op| op.contains(".lab/config.toml")));
+        assert!(ops.iter().any(|op| op.contains(".labby/config.toml")));
         assert!(ops.iter().any(|op| op.contains("device-enrollments.json")));
     }
 

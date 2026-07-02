@@ -23,7 +23,7 @@ Completed bead `lab-zxx5.3` (ACP agent dispatch actions), fixed the `device → 
 
 1. Resumed session mid-bead on `lab-zxx5.3`; identified that remote fleet WS install and binary download were the remaining gaps.
 2. Implemented `install_remote` in `acp_dispatch.rs` — JSON-RPC 2.0 `agent.install` fire-and-forget via `send_text_to_device`; npx only (uvx/binary return `not_implemented` due to device `DistType` limitation).
-3. Implemented `install_binary` in `acp_dispatch.rs` — SSRF-guarded HTTPS download, `redirect::Policy::none()`, streaming SHA-256 via `bytes_stream()`, tempfile same-FS, system tar/unzip, symlink guard, chmod+x, install to `~/.lab/bin/<agent_id>/`.
+3. Implemented `install_binary` in `acp_dispatch.rs` — SSRF-guarded HTTPS download, `redirect::Policy::none()`, streaming SHA-256 via `bytes_stream()`, tempfile same-FS, system tar/unzip, symlink guard, chmod+x, install to `~/.labby/bin/<agent_id>/`.
 4. Added visibility fixes to unblock compilation: `pub(crate) mod mcp_client`, `pub(crate) fn io_internal`, `pub(crate) fn walk_artifacts`, new `home_dir`/`codex_config_path`/`codex_cache_root` helpers in `client.rs`.
 5. Discovered 43 untracked files responsible for compile errors — the `src/node/` module files and `src/api/nodes/` route files committed by `lab-jwbg.8` were never staged. Committed them as `453162aa`.
 6. Added `pub mod node;` to `lib.rs`, `pub mod nodes;` to `api.rs`, type aliases `NodeRole`/`ResolvedNodeRuntime` in `config.rs`, `NodeRuntimeClient` alias in `device_runtime/client.rs`.
@@ -107,7 +107,7 @@ bd close lab-zxx5.3 --force
 
 | Area | Before | After |
 |------|--------|-------|
-| ACP agent install (local) | Stub / unimplemented | SSRF-guarded HTTPS download, streaming SHA-256, system extract, chmod+x to `~/.lab/bin/<id>/` |
+| ACP agent install (local) | Stub / unimplemented | SSRF-guarded HTTPS download, streaming SHA-256, system extract, chmod+x to `~/.labby/bin/<id>/` |
 | ACP agent install (remote device) | Stub | JSON-RPC 2.0 fire-and-forget via fleet WebSocket |
 | SHA-256 computation | Load-all-then-hash (full archive in RAM) | Streaming per-chunk via `bytes_stream()` |
 | `node::` module | Missing (compile error) | Fully compiled alongside `device::` |

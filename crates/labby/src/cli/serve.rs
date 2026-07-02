@@ -259,7 +259,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
             .as_ref()
             .and_then(|n| n.log_retention_days)
             .unwrap_or(crate::node::log_store::DEFAULT_RETENTION_DAYS);
-        let node_log_db_path = node_runtime.home_dir().join(".lab/node-logs.sqlite");
+        let node_log_db_path = node_runtime.home_dir().join(".labby/node-logs.sqlite");
         let node_store = match crate::node::log_store::SqliteNodeLogStore::open(
             node_log_db_path.clone(),
             log_retention_days,
@@ -284,7 +284,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
             }
         };
         let enrollment_store = Arc::new(
-            EnrollmentStore::open(node_runtime.home_dir().join(".lab/node-enrollments.json"))
+            EnrollmentStore::open(node_runtime.home_dir().join(".labby/node-enrollments.json"))
                 .await
                 .context("open node enrollment store")?,
         );
@@ -308,7 +308,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         "http auth configuration resolved"
     );
     let notifier = PeerNotifier::default();
-    // WIRING (SEC): tighten loose ~/.lab/.env permissions at every startup so a
+    // WIRING (SEC): tighten loose ~/.labby/.env permissions at every startup so a
     // freshly-created file (which may be 0644) is corrected to 0600 before any
     // secrets are read.  heal_env_file_permissions is idempotent and a no-op on
     // non-Unix targets.  Do NOT call this after secrets are already in memory —
@@ -400,7 +400,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
 
     // First-run self-bootstrap (setup-wizard consolidation): when no MCP token
     // is configured, OAuth is not active, AND the bind is loopback, generate a
-    // token + minimal ~/.lab/.env so the server can start and the operator can
+    // token + minimal ~/.labby/.env so the server can start and the operator can
     // reach /setup. Closes the headless bootstrap circularity.
     //
     // Loopback gate (HIGH-1): we deliberately do NOT auto-bootstrap on a
@@ -428,14 +428,14 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
                         surface = "cli",
                         service = "serve",
                         error = %error,
-                        "failed to reload generated ~/.lab/.env into process env; \
+                        "failed to reload generated ~/.labby/.env into process env; \
                          in-process token is authoritative, downstream env readers may not see it"
                     );
                 }
                 tracing::info!(
                     surface = "cli",
                     service = "serve",
-                    "first run: generated LAB_MCP_HTTP_TOKEN and wrote ~/.lab/.env"
+                    "first run: generated LAB_MCP_HTTP_TOKEN and wrote ~/.labby/.env"
                 );
                 // Do NOT print the token itself — stderr is commonly captured
                 // by systemd/journald/Docker, which would persist the secret
@@ -522,7 +522,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
 
     // lab-bg3e.3 Q5 reframe: prominent startup banner whenever the web UI
     // is reachable without authentication. v1 ships unsecured by design;
-    // operators must understand any local process can write ~/.lab/.env.
+    // operators must understand any local process can write ~/.labby/.env.
     if web_ui_auth_disabled {
         let banner = "==================================================================\n\
                       ⚠  Lab web UI is running WITHOUT authentication.\n\
@@ -533,7 +533,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         tracing::warn!(
             subsystem = "web_server",
             phase = "startup.banner",
-            "lab web UI started without authentication; any local process can write ~/.lab/.env"
+            "lab web UI started without authentication; any local process can write ~/.labby/.env"
         );
     }
 
@@ -878,7 +878,7 @@ async fn run_http(
         let lock_dir = std::env::var("HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("."))
-            .join(".local/state/lab");
+            .join(".local/state/labby");
         std::fs::create_dir_all(&lock_dir)
             .with_context(|| format!("create master lock dir {}", lock_dir.display()))?;
         let lock_path = lock_dir.join("master.lock");

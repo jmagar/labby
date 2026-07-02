@@ -31,8 +31,8 @@ test('DraftStaleBanner explains old drafts and can discard them', async () => {
       const discarded = actions.includes('draft.discard')
       return new Response(JSON.stringify({
         first_run: false,
-        env_path: '/home/jmagar/.lab/.env',
-        draft_path: '/home/jmagar/.lab/.env.draft',
+        env_path: '/home/jmagar/.labby/.env',
+        draft_path: '/home/jmagar/.labby/.env.draft',
         last_completed_step: 0,
         draft_stale: !discarded,
         has_draft: !discarded,

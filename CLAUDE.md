@@ -103,7 +103,7 @@ lab/
 │           │   ├── router.rs         # build_router() + middleware stack
 │           │   ├── health.rs         # /health + /ready endpoints
 │           │   └── services/         # per-service route groups
-│           ├── config.rs             # ~/.lab/.env + config.toml loading (CWD → ~/.lab/ → ~/.config/lab/)
+│           ├── config.rs             # ~/.labby/.env + config.toml loading (CWD → ~/.labby/ → ~/.config/labby/)
 │           └── output.rs             # table/json formatting
 ├── Cargo.toml                        # workspace
 ├── Justfile
@@ -230,7 +230,7 @@ Naming convention for env vars (read by `labby`, not `labby-apis`):
 
 **Multi-instance services:** append a label before the suffix — `UNRAID_URL` is the default instance, `UNRAID_NODE2_URL` / `UNRAID_NODE2_API_KEY` is an additional named instance `node2`. MCP callers select via `params.instance`; CLI selects via `--instance` or positional label. Never hardcode instance names — derive them from env at startup.
 
-Loaded from `~/.lab/.env`. Product actions that mutate config or env files must use backup-first, atomic-write behavior and preserve unrelated keys/comments where the file format allows it.
+Loaded from `~/.labby/.env`. Product actions that mutate config or env files must use backup-first, atomic-write behavior and preserve unrelated keys/comments where the file format allows it.
 
 ### PluginMeta shape
 
@@ -331,7 +331,7 @@ just build-release  # cargo build --workspace --all-features --release
 just run        # cargo run --all-features -- <args>
 just fmt        # cargo fmt --all
 just clean      # cargo clean
-just mcp-token  # rotate the MCP bearer token in ~/.lab/.env
+just mcp-token  # rotate the MCP bearer token in ~/.labby/.env
 ```
 
 Releases: push a `vX.Y.Z` tag (after bumping the workspace `version` in
@@ -357,7 +357,7 @@ CLI-only and must not be exposed through MCP, HTTP, Code Mode, or remote admin
 actions.
 
 The default service is a hardened system unit at
-`/etc/systemd/system/labby.service`, running `User=lab`, `Group=lab`, and
+`/etc/systemd/system/labby.service`, running `User=labby`, `Group=labby`, and
 `ExecStart=/usr/local/bin/labby serve`. Do not reintroduce `systemd --user`,
 linger, `%h` unit paths, or `~/.local/bin/labby` as the supported self-hosted
 gateway service model. Preserve a user-service fallback only if it is explicit

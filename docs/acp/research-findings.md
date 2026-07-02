@@ -76,7 +76,7 @@ authoritative source and can be read efficiently by seq range.
 
 `tokio::process::Command::new(&command)` with no `.env_clear()` spawns Codex (`npx
 @zed-industries/codex-acp`) with the full parent environment including every service key loaded from
-`~/.lab/.env`: `RADARR_API_KEY`, `SONARR_API_KEY`, `OPENAI_API_KEY`, etc. The subprocess can read
+`~/.labby/.env`: `RADARR_API_KEY`, `SONARR_API_KEY`, `OPENAI_API_KEY`, etc. The subprocess can read
 all of them via `process.env`.
 
 **Fix:** Call `.env_clear()` before `.spawn()`. Explicitly pass only what Codex needs (`HOME`,

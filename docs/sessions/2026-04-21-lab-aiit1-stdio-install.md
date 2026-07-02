@@ -39,7 +39,7 @@ This session was a continuation from a prior context window. The earlier portion
 
 - `crates/lab-apis/src/mcpregistry/types.rs:196-202` — `Package.environment_variables` was untyped `Vec<serde_json::Value>`; registry schema defines `name`, `isRequired`, `isSecret`, `default`, `choices`, `placeholder`, `format`
 - `crates/lab/src/dispatch/mcpregistry/dispatch.rs:46-57` (pre-change) — `server.install` bailed unconditionally with `no_remote_transport` when `server.remotes` was empty; stdio servers were fully blocked
-- `crates/lab/src/config.rs:667` — `dotenv_path()` was private; the path `~/.lab/.env` was not accessible to dispatch modules without making it public
+- `crates/lab/src/config.rs:667` — `dotenv_path()` was private; the path `~/.labby/.env` was not accessible to dispatch modules without making it public
 - `write_env` (`config.rs:847`) takes `[ServiceCreds]`, which is extract-specific; needed a parallel `write_env_pairs` for raw key=value pairs
 - Pre-existing test failures (18 errors, `proxy_prompts` missing in `UpstreamConfig` struct literals in gateway/pool tests) prevent `cargo test` from compiling the test binary; these are unrelated to this work and existed before any changes
 
@@ -85,7 +85,7 @@ rtk cargo test -p lab@0.5.0 --all-features "dispatch::mcpregistry::params::tests
 | `server.install` with dangerous argv flag (`--eval`) | Not checked (argv not validated) | Returns `invalid_param` error |
 | `server.install` with unlisted `runtimeHint` (e.g. `bash`) | Not checked | Returns `invalid_param` error |
 | `server.install` with required env var not supplied | Not applicable (stdio not supported) | Returns `missing_param` error listing the var name |
-| `server.install` with required env var supplied | Not applicable | Writes value to `~/.lab/.env` atomically |
+| `server.install` with required env var supplied | Not applicable | Writes value to `~/.labby/.env` atomically |
 
 ## Verification Evidence
 
@@ -95,7 +95,7 @@ rtk cargo test -p lab@0.5.0 --all-features "dispatch::mcpregistry::params::tests
 
 ## Risks and Rollback
 
-- **`.env` write on install**: `server.install` now has a side effect (writes to `~/.lab/.env`). A failed install after the env write leaves orphaned env vars. Mitigation: backup is created first (`config::backup_env`); user can restore from `.env.bak.<timestamp>`. Rollback: `git revert 86ed3c5` removes the feature.
+- **`.env` write on install**: `server.install` now has a side effect (writes to `~/.labby/.env`). A failed install after the env write leaves orphaned env vars. Mitigation: backup is created first (`config::backup_env`); user can restore from `.env.bak.<timestamp>`. Rollback: `git revert 86ed3c5` removes the feature.
 - **Argv denylist incompleteness**: denylist covers known dangerous flags but is not exhaustive for all runtimes. A registry entry using an undocumented flag variant would pass. Mitigation: registry is a trusted source; the denylist is defense-in-depth.
 - **`proxy_prompts` test failures block CI**: pre-existing failures will fail any CI job that runs `cargo test`. Out of scope here but should be fixed before merging PR #25.
 

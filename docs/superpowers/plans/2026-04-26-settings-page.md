@@ -324,7 +324,7 @@ export function SettingsCore({ nodeInfo }: Props) {
             </div>
           )}
           <p className="text-[11px] text-aurora-text-muted">
-            To change auth mode, re-run Setup or edit <code>~/.lab/config.toml</code>.
+            To change auth mode, re-run Setup or edit <code>~/.labby/config.toml</code>.
           </p>
         </section>
 
@@ -514,7 +514,7 @@ export function SettingsServices({ nodeInfo }: Props) {
                         />
                         <div className="flex items-center justify-between mt-4 pt-3 border-t border-aurora-border-default">
                           <p className="text-[11px] text-aurora-text-muted">
-                            Saves directly to <code>~/.lab/.env</code> — effective on next restart.
+                            Saves directly to <code>~/.labby/.env</code> — effective on next restart.
                           </p>
                           <Button
                             size="sm"
@@ -719,7 +719,7 @@ export function SettingsExtract() {
     await new Promise(r => setTimeout(r, 800))
     // TODO: call extract.apply when lab-bg3e.3 ships
     console.log('[settings/extract] apply:', creds?.filter(c => c.include))
-    toast.success('Credentials applied to ~/.lab/.env')
+    toast.success('Credentials applied to ~/.labby/.env')
     setApplied(true)
     setApplying(false)
   }
@@ -734,7 +734,7 @@ export function SettingsExtract() {
         <h1 className={cn(AURORA_DISPLAY_1, 'text-aurora-text-primary')}>Extract</h1>
         <p className="mt-1 text-[13px] text-aurora-text-muted">
           Scan local and SSH hosts for service credentials, then apply to{' '}
-          <code className="text-[12px]">~/.lab/.env</code>.
+          <code className="text-[12px]">~/.labby/.env</code>.
         </p>
       </div>
 
@@ -799,7 +799,7 @@ export function SettingsExtract() {
                 disabled={applying || applied}
                 className="bg-aurora-accent-primary text-aurora-page-bg hover:bg-aurora-accent-strong"
               >
-                {applying ? 'Applying…' : applied ? <><Check className="size-4 mr-1.5" /> Applied</> : 'Apply to ~/.lab/.env'}
+                {applying ? 'Applying…' : applied ? <><Check className="size-4 mr-1.5" /> Applied</> : 'Apply to ~/.labby/.env'}
               </Button>
               <Button variant="ghost" size="sm" className="text-aurora-text-muted">
                 Preview Diff
@@ -850,7 +850,7 @@ const STUB_CONFIG: Record<string, { title: string; icon: React.ReactNode; desc: 
   advanced: {
     title: 'Advanced',
     icon: <LayoutGrid className="size-8 text-aurora-text-muted" />,
-    desc: 'Raw editor for ~/.lab/.env and ~/.lab/config.toml, log retention, workspace root, and other advanced settings. Coming in v2.',
+    desc: 'Raw editor for ~/.labby/.env and ~/.labby/config.toml, log retention, workspace root, and other advanced settings. Coming in v2.',
   },
 }
 

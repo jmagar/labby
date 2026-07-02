@@ -23,7 +23,7 @@ This session added first-class snippet surfaces across shared dispatch, CLI, MCP
 
 1. Implemented schema-backed snippets dispatch, CLI/API registration, MCP/resource exposure, generated docs, and gateway-admin navigation.
 2. Added and documented four built-in snippets under `docs/snippets/`.
-3. Investigated the stale setup draft warning and removed the current `~/.lab/.env.draft`.
+3. Investigated the stale setup draft warning and removed the current `~/.labby/.env.draft`.
 4. Added `setup.draft.discard`, `labby setup draft discard`, richer `setup.state` metadata, and the updated stale-draft settings banner.
 5. Rebuilt release assets, synced `bin/labby` and `~/.local/bin/labby`, restarted the `labby` container, and confirmed it was healthy.
 6. Bumped the workspace and gateway-admin versions from `0.24.1` to `0.25.0` for the feature release.
@@ -39,7 +39,7 @@ This session added first-class snippet surfaces across shared dispatch, CLI, MCP
 
 - Snippets were added as a high-level product surface while keeping runtime logic in shared dispatch.
 - Built-in snippets remain documentation-backed and discoverable through generated surfaces.
-- Setup draft discard is marked destructive because it deletes a local draft file, even though it does not modify `~/.lab/.env`.
+- Setup draft discard is marked destructive because it deletes a local draft file, even though it does not modify `~/.labby/.env`.
 - The release bump is minor (`0.25.0`) because snippets are a new user-visible capability.
 
 ## Files Changed

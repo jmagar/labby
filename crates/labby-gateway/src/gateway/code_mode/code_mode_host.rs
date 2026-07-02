@@ -35,7 +35,12 @@ impl CodeModeHost for GatewayManager {
         include_snippets: bool,
         use_cache: bool,
     ) -> Result<ToolsRender, ToolError> {
-        let allow_cold_connect = caller.can_execute();
+        // MCP `codemode` execution must not spend the caller's wall-clock budget
+        // cold-connecting every upstream just to render helper metadata; trivial
+        // code that never calls a tool should reach the runner immediately.
+        // Tool execution remains live because `call_tool` resolves the requested
+        // upstream at the actual call boundary.
+        let allow_cold_connect = surface == CodeModeSurface::Cli && caller.can_execute();
         let owner = runtime_owner(caller, surface);
         let oauth_subject = oauth_subject(caller);
         let allowed = scope.allowed_namespaces();

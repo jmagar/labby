@@ -485,7 +485,7 @@ pub struct ExtractApplyOutcome {
 
 - [ ] **Step 4: Add safe env-path resolution**
 
-Keep arbitrary `--env-path` as local CLI behavior only. For dispatch/API/MCP, default to `$HOME/.lab/.env` and reject `env_path` unless `LAB_ALLOW_EXTRACT_ENV_PATH_OVERRIDE=1` is set for tests.
+Keep arbitrary `--env-path` as local CLI behavior only. For dispatch/API/MCP, default to `$HOME/.labby/.env` and reject `env_path` unless `LAB_ALLOW_EXTRACT_ENV_PATH_OVERRIDE=1` is set for tests.
 
 Add `validate_env_path_for_write(path)`:
 

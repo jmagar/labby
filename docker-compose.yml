@@ -28,8 +28,8 @@ services:
       # the install race (see pool/spawn_lock.rs) corrupts a package. A named
       # volume makes the clean install permanent: every later spawn is a cache
       # hit, so the race never runs again.
-      - npm-cache:/home/lab/.npm
-      - uv-cache:/home/lab/.cache
+      - npm-cache:/home/labby/.npm
+      - uv-cache:/home/labby/.cache
       # adb client for the in-container claude-in-mobile MCP server. claude-in-mobile
       # talks to the host's adb SERVER (config.toml: ANDROID_ADB_SERVER_ADDRESS +
       # ANDROID_ADB_SERVER_PORT=5037), so it only needs a client binary on PATH to

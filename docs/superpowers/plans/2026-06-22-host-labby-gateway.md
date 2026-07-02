@@ -418,14 +418,14 @@ Create `crates/lab/src/dispatch/setup/host_service.rs`. Use
 
 Required unit behavior:
 - `ExecStart=%h/.local/bin/labby serve`
-- `EnvironmentFile=-%h/.lab/.env`
+- `EnvironmentFile=-%h/.labby/.env`
 - `WorkingDirectory=%h`
 - `Restart=on-failure`
 - `RestartSec=3`
 - `StartLimitIntervalSec=60`
 - `StartLimitBurst=5`
 - `KillSignal=SIGINT`
-- No hard-coded `--host` or `--port`; binding stays in `~/.lab/.env` or Labby config.
+- No hard-coded `--host` or `--port`; binding stays in `~/.labby/.env` or Labby config.
 
 Implement `unit_text()` as a fixed unit template instead of interpolating raw
 paths. The durable binary path is `%h/.local/bin/labby`; `host-sync` is
@@ -434,7 +434,7 @@ responsible for copying that binary before restart.
 Add unit tests:
 - unit contains `ExecStart=%h/.local/bin/labby serve`
 - unit does not contain `--host 0.0.0.0` or `--port 8765`
-- unit contains `EnvironmentFile=-%h/.lab/.env`
+- unit contains `EnvironmentFile=-%h/.labby/.env`
 - unit contains restart limit settings
 - `unit_path(home)` resolves to `<home>/.config/systemd/user/labby.service`
 
@@ -649,7 +649,7 @@ Wants=network-online.target
 Type=simple
 ExecStart={} serve --host 0.0.0.0 --port 8765
 WorkingDirectory={}
-EnvironmentFile=-%h/.lab/.env
+EnvironmentFile=-%h/.labby/.env
 Restart=always
 RestartSec=2
 KillSignal=SIGINT
@@ -693,7 +693,7 @@ mod tests {
         assert!(unit.contains("Description=Labby host gateway"));
         assert!(unit.contains("ExecStart=/home/jmagar/.local/bin/labby serve --host 0.0.0.0 --port 8765"));
         assert!(unit.contains("WorkingDirectory=/home/jmagar/workspace/lab"));
-        assert!(unit.contains("EnvironmentFile=-%h/.lab/.env"));
+        assert!(unit.contains("EnvironmentFile=-%h/.labby/.env"));
         assert!(unit.contains("Restart=always"));
     }
 
@@ -1236,7 +1236,7 @@ The preferred Labby gateway runtime is a host user service:
 ```
 
 It runs as `labby.service` under `systemd --user`. Bind host, port, auth, and
-upstream gateway configuration continue to come from `~/.lab/.env` and Labby
+upstream gateway configuration continue to come from `~/.labby/.env` and Labby
 config. Do not bake public bind settings into the systemd unit.
 
 ## Install
@@ -1269,7 +1269,7 @@ labby gateway code exec --json --code 'async () => 1'
 ## Verify The Public MCP Route
 
 ```bash
-TOKEN=$(awk -F= '/^LAB_MCP_HTTP_TOKEN=/{print $2}' ~/.lab/.env)
+TOKEN=$(awk -F= '/^LAB_MCP_HTTP_TOKEN=/{print $2}' ~/.labby/.env)
 curl -fsS -H "Authorization: Bearer $TOKEN" https://lab.example.com/mcp
 ```
 
@@ -1354,7 +1354,7 @@ git commit -m "docs: make host labby gateway the default"
 **Files:**
 - No source files required.
 - Uses: `~/.local/bin/labby`
-- Uses: `~/.lab/.env`
+- Uses: `~/.labby/.env`
 - Uses: `~/.config/systemd/user/labby.service`
 - Uses: Codex config entry for `mcp_servers.labby.url = "https://lab.example.com/mcp"`
 
@@ -1449,7 +1449,7 @@ Expected: `count` is at least `1` and `names` includes `node-a`.
 - [ ] **Step 8: Verify the public MCP route**
 
 Use mcporter or an equivalent MCP client to initialize and call Code Mode
-through `https://lab.example.com/mcp` with the bearer token from `~/.lab/.env`.
+through `https://lab.example.com/mcp` with the bearer token from `~/.labby/.env`.
 Do not treat public `/health` as sufficient proof.
 
 Expected: MCP initialize succeeds, then the Code Mode call returns

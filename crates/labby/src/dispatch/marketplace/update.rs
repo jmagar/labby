@@ -1982,7 +1982,7 @@ mod tests {
     fn dispatch_with_home(home: &Path, action: &str, params: Value) -> Result<Value, ToolError> {
         with_home(home, || {
             crate::dispatch::stash::client::with_test_stash_root(
-                home.join(".lab").join("stash"),
+                home.join(".labby").join("stash"),
                 || {
                     Builder::new_current_thread()
                         .enable_all()
@@ -2003,7 +2003,7 @@ mod tests {
     }
 
     fn workspace(home: &Path) -> PathBuf {
-        home.join(".lab")
+        home.join(".labby")
             .join("stash")
             .join("plugins")
             .join(plugin_id())
@@ -2096,7 +2096,7 @@ mod tests {
         base_content: &str,
         local_content: &str,
     ) {
-        let root = home.join(".lab").join("stash");
+        let root = home.join(".labby").join("stash");
         let store = crate::dispatch::stash::store::StashStore::new(root.clone());
         store.ensure_dirs().unwrap();
         let workspace = store.workspace_dir(component_id);
@@ -2607,7 +2607,7 @@ esac
         assert_eq!(
             std::fs::read_to_string(
                 dir.path()
-                    .join(".lab/stash/workspaces/comp-skill/skills/demo/SKILL.md")
+                    .join(".labby/stash/workspaces/comp-skill/skills/demo/SKILL.md")
             )
             .unwrap(),
             "skill=mine\n"
@@ -2615,7 +2615,7 @@ esac
         assert_eq!(
             std::fs::read_to_string(
                 dir.path()
-                    .join(".lab/stash/marketplace/comp-skill/base/skills/demo/SKILL.md")
+                    .join(".labby/stash/marketplace/comp-skill/base/skills/demo/SKILL.md")
             )
             .unwrap(),
             "skill=theirs\n"
@@ -2623,7 +2623,7 @@ esac
         assert_eq!(
             std::fs::read_to_string(
                 dir.path()
-                    .join(".lab/stash/workspaces/comp-command/commands/demo.md")
+                    .join(".labby/stash/workspaces/comp-command/commands/demo.md")
             )
             .unwrap(),
             "command=mine\n"

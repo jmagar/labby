@@ -32,7 +32,7 @@ Labby is centered on the current gateway/operator surface:
 - **Marketplace and registry** - browse Claude/Codex plugin marketplaces, the
   official MCP Registry, and the ACP Agent Registry; install plugins, MCP
   servers, and ACP providers through explicit target-aware workflows.
-- **Stash workspaces** - mirror installable artifacts into `~/.lab/stash`, edit
+- **Stash workspaces** - mirror installable artifacts into `~/.labby/stash`, edit
   and version component snapshots, preview deployment diffs, and deploy saved
   artifacts back to configured targets.
 - **ACP chat** - run provider-backed Agent Client Protocol sessions, stream and
@@ -105,9 +105,9 @@ labby serve --host 127.0.0.1 --port 8765
 
 For loopback development, `labby serve` can bootstrap a missing bearer token for
 you. If `LAB_MCP_HTTP_TOKEN` is absent and `LAB_AUTH_MODE` is not `oauth`, it
-generates a token, writes a minimal `~/.lab/.env`, reloads it into the running
+generates a token, writes a minimal `~/.labby/.env`, reloads it into the running
 process, prints the setup URL, and continues. The token itself is stored in
-`~/.lab/.env` rather than printed.
+`~/.labby/.env` rather than printed.
 
 Bootstrap writes these required `setup` keys if no env exists yet:
 
@@ -123,9 +123,9 @@ Unix) and then skips creating anything else until the web wizard runs.
 For explicit setup:
 
 ```bash
-mkdir -p ~/.lab
-printf 'LAB_AUTH_MODE=bearer\nLAB_MCP_HTTP_TOKEN=%s\n' "$(openssl rand -hex 32)" > ~/.lab/.env
-chmod 600 ~/.lab/.env
+mkdir -p ~/.labby
+printf 'LAB_AUTH_MODE=bearer\nLAB_MCP_HTTP_TOKEN=%s\n' "$(openssl rand -hex 32)" > ~/.labby/.env
+chmod 600 ~/.labby/.env
 labby setup
 labby serve --host 127.0.0.1 --port 8765
 ```
@@ -300,17 +300,17 @@ Configuration is split deliberately:
 
 | Data | Location | Examples |
 | --- | --- | --- |
-| Secrets and endpoint values | `~/.lab/.env` | `LAB_MCP_HTTP_TOKEN`, `LAB_GOOGLE_CLIENT_SECRET`, upstream bearer token env values |
+| Secrets and endpoint values | `~/.labby/.env` | `LAB_MCP_HTTP_TOKEN`, `LAB_GOOGLE_CLIENT_SECRET`, upstream bearer token env values |
 | Preferences | `config.toml` | transport, CORS, auth mode, workspace root, gateway spawn guard, registry URLs |
 
 `config.toml` is searched in this order:
 
 1. `./config.toml`
-2. `~/.lab/config.toml`
-3. `~/.config/lab/config.toml`
+2. `~/.labby/config.toml`
+3. `~/.config/labby/config.toml`
 
 Startup loads the first `config.toml`, initializes tracing, then loads
-`~/.lab/.env` and a CWD `.env` if present. Runtime precedence is:
+`~/.labby/.env` and a CWD `.env` if present. Runtime precedence is:
 
 1. CLI flags
 2. Environment variables
@@ -344,7 +344,7 @@ token as a same-origin header. `/auth/session` recognizes that token and returns
 synthetic admin session:
 
 ```bash
-TOKEN=$(awk -F= '/^LAB_MCP_HTTP_TOKEN=/{print $2}' ~/.lab/.env)
+TOKEN=$(awk -F= '/^LAB_MCP_HTTP_TOKEN=/{print $2}' ~/.labby/.env)
 agent-browser open http://127.0.0.1:8765/chat \
   --headers "{\"Authorization\":\"Bearer $TOKEN\"}"
 ```
@@ -454,7 +454,7 @@ The recommended self-hosted gateway runtime is the Incus system container
 provisioned by `scripts/incus-bootstrap.sh --version vX.Y.Z` and converged
 in-box with `labby setup --provision`. Bare metal uses the same provisioner and
 system unit when the host or VM is dedicated to Labby. The default service is
-`/etc/systemd/system/labby.service`, running as `User=lab`, `Group=lab`, with
+`/etc/systemd/system/labby.service`, running as `User=labby`, `Group=labby`, with
 `ExecStart=/usr/local/bin/labby serve`. From a source checkout, `just host-sync`
 remains the rebuild-and-restart developer shortcut. Docker remains available
 for prod-like image smoke and adapter-container work, but it is no longer the
@@ -465,7 +465,7 @@ recommended agent gateway runtime.
 The Compose stack is a trusted local operator environment, not a hardened
 generic deployment. It bind-mounts host Lab state, agent credentials/plugin
 caches, the repo, and built web assets; secrets are loaded from the mounted
-`/home/lab/.lab/.env`. The image pre-installs ACP adapters
+`/home/labby/.labby/.env`. The image pre-installs ACP adapters
 (`claude-agent-acp`, `codex-acp`, `gemini`) so session spawns use deterministic
 local binaries rather than repeated `npx` installs. Rebuild the image when
 changing Dockerfiles or adapter versions; use `just dev` or `just dev-debug`

@@ -68,22 +68,22 @@ actions:
     action: |-
       #!/usr/bin/env bash
       set -euo pipefail
-      # LABBY_PROVISION_ACTION: lab-user
-      if ! id -u lab >/dev/null 2>&1; then
-        useradd --create-home --shell /usr/bin/zsh lab
+      # LABBY_PROVISION_ACTION: labby-user
+      if ! id -u labby >/dev/null 2>&1; then
+        useradd --create-home --shell /usr/bin/zsh labby
       fi
       mkdir -p \
-        /home/lab/.lab \
-        /home/lab/.local/bin \
-        /home/lab/.local/opt \
-        /home/lab/.cache \
-        /home/lab/.config \
-        /home/lab/.npm \
-        /home/lab/.codex \
-        /home/lab/.claude \
-        /home/lab/.gemini \
-        /home/lab/downloads
-      profile=/home/lab/.zprofile
+        /home/labby/.labby \
+        /home/labby/.local/bin \
+        /home/labby/.local/opt \
+        /home/labby/.cache \
+        /home/labby/.config \
+        /home/labby/.npm \
+        /home/labby/.codex \
+        /home/labby/.claude \
+        /home/labby/.gemini \
+        /home/labby/downloads
+      profile=/home/labby/.zprofile
       touch "$profile"
       if ! grep -q "LABBY managed PATH" "$profile"; then
         cat >> "$profile" <<'EOF'
@@ -92,14 +92,14 @@ actions:
       export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
       EOF
       fi
-      chown -R lab:lab /home/lab
+      chown -R labby:labby /home/labby
 
   - trigger: post-packages
     action: |-
       #!/usr/bin/env bash
       set -euo pipefail
       # LABBY_PROVISION_ACTION: node
-      runuser -u lab -- env HOME=/home/lab USER=lab LOGNAME=lab XDG_CONFIG_HOME=/home/lab/.config XDG_CACHE_HOME=/home/lab/.cache XDG_DATA_HOME=/home/lab/.local/share sh -lc '
+      runuser -u labby -- env HOME=/home/labby USER=labby LOGNAME=labby XDG_CONFIG_HOME=/home/labby/.config XDG_CACHE_HOME=/home/labby/.cache XDG_DATA_HOME=/home/labby/.local/share sh -lc '
       set -eu
       case "$(uname -m)" in
         x86_64|amd64) ;;
@@ -127,7 +127,7 @@ actions:
       #!/usr/bin/env bash
       set -euo pipefail
       # LABBY_PROVISION_ACTION: uv-python
-      runuser -u lab -- env HOME=/home/lab USER=lab LOGNAME=lab XDG_CONFIG_HOME=/home/lab/.config XDG_CACHE_HOME=/home/lab/.cache XDG_DATA_HOME=/home/lab/.local/share sh -lc '
+      runuser -u labby -- env HOME=/home/labby USER=labby LOGNAME=labby XDG_CONFIG_HOME=/home/labby/.config XDG_CACHE_HOME=/home/labby/.cache XDG_DATA_HOME=/home/labby/.local/share sh -lc '
       set -eu
       mkdir -p "$HOME/.local/bin"
       tmp="$(mktemp -d)"
@@ -147,7 +147,7 @@ actions:
       #!/usr/bin/env bash
       set -euo pipefail
       # LABBY_PROVISION_ACTION: rust-go
-      runuser -u lab -- env HOME=/home/lab USER=lab LOGNAME=lab XDG_CONFIG_HOME=/home/lab/.config XDG_CACHE_HOME=/home/lab/.cache XDG_DATA_HOME=/home/lab/.local/share sh -lc '
+      runuser -u labby -- env HOME=/home/labby USER=labby LOGNAME=labby XDG_CONFIG_HOME=/home/labby/.config XDG_CACHE_HOME=/home/labby/.cache XDG_DATA_HOME=/home/labby/.local/share sh -lc '
       set -eu
       mkdir -p "$HOME/.cargo" "$HOME/.local/bin"
       tmp="$(mktemp -d)"
@@ -192,7 +192,7 @@ actions:
       #!/usr/bin/env bash
       set -euo pipefail
       # LABBY_PROVISION_ACTION: agent-clis
-      runuser -u lab -- env HOME=/home/lab USER=lab LOGNAME=lab XDG_CONFIG_HOME=/home/lab/.config XDG_CACHE_HOME=/home/lab/.cache XDG_DATA_HOME=/home/lab/.local/share sh -lc '
+      runuser -u labby -- env HOME=/home/labby USER=labby LOGNAME=labby XDG_CONFIG_HOME=/home/labby/.config XDG_CACHE_HOME=/home/labby/.cache XDG_DATA_HOME=/home/labby/.local/share sh -lc '
       set -eu
       export PATH="$HOME/.local/bin:$PATH"
       npm config set prefix "$HOME/.local"

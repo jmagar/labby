@@ -36,7 +36,7 @@ for arg in "$@"; do
     esac
 done
 
-ENV_FILE="${LAB_ENV_FILE:-$HOME/.lab/.env}"
+ENV_FILE="${LAB_ENV_FILE:-$HOME/.labby/.env}"
 if [ -f "$ENV_FILE" ]; then
     set -a
     # shellcheck disable=SC1090
@@ -105,8 +105,8 @@ check_mounted_config() {
 import json
 from pathlib import Path
 
-provider_path = Path("/home/lab/.lab/acp-providers.json")
-codex_home_config = Path("/home/lab/.lab/acp/codex-home/config.toml")
+provider_path = Path("/home/labby/.labby/acp-providers.json")
+codex_home_config = Path("/home/labby/.labby/acp/codex-home/config.toml")
 
 providers = json.loads(provider_path.read_text())
 codex = next((p for p in providers if p.get("id") == "codex-acp"), None)

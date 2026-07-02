@@ -14,31 +14,32 @@ use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
+use crate::config::{ConfigScalarPatch, ConfigScalarValue};
 use crate::dispatch::error::ToolError;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(600);
 const CAPTURE_BYTES: usize = 16 * 1024;
 const STALE_LOCK_AFTER: Duration = Duration::from_secs(60 * 60);
 const LOCK_PATH: &str = "/var/lock/labby-provision.lock";
-const LAB_USER: &str = "lab";
-const LAB_HOME: &str = "/home/lab";
-const LAB_PATH: &str =
-    "/home/lab/.local/bin:/home/lab/.cargo/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin";
+const LABBY_USER: &str = "labby";
+const LABBY_HOME: &str = "/home/labby";
+const LABBY_PATH: &str =
+    "/home/labby/.local/bin:/home/labby/.cargo/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin";
 const TS_AUTHKEY_ENV: &str = "TS_AUTHKEY";
 const TS_HOSTNAME_ENV: &str = "LABBY_TAILSCALE_HOSTNAME";
 const TS_AUTHKEY_PATH: &str = "/run/labby-ts-authkey";
-const LAB_ZPROFILE: &str = "/home/lab/.zprofile";
+const LABBY_ZPROFILE: &str = "/home/labby/.zprofile";
 const LABBY_IMAGE_YAML: &str = include_str!("../../../../../config/incus/labby-image.yaml");
-const LAB_USER_DIRS: &[&str] = &[
-    "/home/lab/.lab",
-    "/home/lab/.local/bin",
-    "/home/lab/.cache",
-    "/home/lab/.config",
-    "/home/lab/.npm",
-    "/home/lab/.codex",
-    "/home/lab/.claude",
-    "/home/lab/.gemini",
-    "/home/lab/downloads",
+const LABBY_USER_DIRS: &[&str] = &[
+    "/home/labby/.labby",
+    "/home/labby/.local/bin",
+    "/home/labby/.cache",
+    "/home/labby/.config",
+    "/home/labby/.npm",
+    "/home/labby/.codex",
+    "/home/labby/.claude",
+    "/home/labby/.gemini",
+    "/home/labby/downloads",
 ];
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ProvisionOptions {
@@ -80,6 +81,7 @@ enum ActionKind {
     AgentClis,
     TailscaleInstall,
     TailscaleJoin,
+    ControllerConfig,
     HostService,
 }
 
@@ -178,7 +180,7 @@ fn build_plan(skip_deps: bool) -> Vec<ProvisionAction> {
     }
     actions.push(ProvisionAction {
         privilege: Privilege::Root,
-        label: Cow::Borrowed("useradd lab (if absent)"),
+        label: Cow::Borrowed("useradd labby (if absent)"),
         kind: ActionKind::LabUser,
     });
     if !skip_deps {
@@ -219,6 +221,11 @@ fn build_plan(skip_deps: bool) -> Vec<ProvisionAction> {
     }
     actions.push(ProvisionAction {
         privilege: Privilege::Root,
+        label: Cow::Borrowed("set Labby node runtime role to controller"),
+        kind: ActionKind::ControllerConfig,
+    });
+    actions.push(ProvisionAction {
+        privilege: Privilege::Root,
         label: Cow::Borrowed(
             "write /etc/systemd/system/labby.service and systemctl enable --now labby",
         ),
@@ -233,7 +240,7 @@ fn render_plan(actions: &[ProvisionAction]) -> String {
         out.push_str("  ");
         out.push_str(match action.privilege {
             Privilege::Root => "[root] ",
-            Privilege::Lab => "[lab ] ",
+            Privilege::Lab => "[labby] ",
         });
         out.push_str(&action.label);
         out.push('\n');
@@ -273,6 +280,7 @@ impl ProvisionAction {
             }
             ActionKind::TailscaleInstall => command_success("tailscale", &["version"]).await,
             ActionKind::TailscaleJoin => command_success("tailscale", &["ip", "-4"]).await,
+            ActionKind::ControllerConfig => controller_config_ready().await,
             ActionKind::HostService => super::host_service::installed_and_ready().await,
         }
     }
@@ -286,7 +294,7 @@ impl ProvisionAction {
                 run_checked("apt-get", &args).await?;
             }
             ActionKind::LabUser => {
-                run_image_provision_action("lab-user").await?;
+                run_image_provision_action("labby-user").await?;
             }
             ActionKind::Node => {
                 run_image_provision_action("node").await?;
@@ -305,6 +313,9 @@ impl ProvisionAction {
             }
             ActionKind::TailscaleJoin => {
                 install_and_join_tailscale().await?;
+            }
+            ActionKind::ControllerConfig => {
+                ensure_controller_config().await?;
             }
             ActionKind::HostService => {
                 drop(run_checked("systemctl", &["reset-failed", "labby.service"]).await);
@@ -393,29 +404,29 @@ fn lock_conflict_message(path: &Path) -> String {
 }
 
 async fn lab_user_ready() -> Result<bool, ToolError> {
-    if !command_success("id", &["-u", LAB_USER]).await? {
+    if !command_success("id", &["-u", LABBY_USER]).await? {
         return Ok(false);
     }
-    let home_ok = std::fs::metadata(LAB_HOME)
+    let home_ok = std::fs::metadata(LABBY_HOME)
         .map(|metadata| metadata.is_dir())
         .unwrap_or(false);
     if !home_ok {
         return Ok(false);
     }
-    if LAB_USER_DIRS.iter().any(|path| {
+    if LABBY_USER_DIRS.iter().any(|path| {
         !std::fs::metadata(path)
             .map(|meta| meta.is_dir())
             .unwrap_or(false)
     }) {
         return Ok(false);
     }
-    let zprofile_ok = std::fs::read_to_string(LAB_ZPROFILE)
+    let zprofile_ok = std::fs::read_to_string(LABBY_ZPROFILE)
         .map(|profile| profile.contains("LABBY managed PATH"))
         .unwrap_or(false);
     if !zprofile_ok {
         return Ok(false);
     }
-    lab_command_success("test -w \"$HOME/.lab\" && test -w \"$HOME/.local/bin\"").await
+    lab_command_success("test -w \"$HOME/.labby\" && test -w \"$HOME/.local/bin\"").await
 }
 
 async fn apt_floor_installed() -> Result<bool, ToolError> {
@@ -426,6 +437,72 @@ async fn apt_floor_installed() -> Result<bool, ToolError> {
         }
     }
     Ok(true)
+}
+
+async fn controller_config_ready() -> Result<bool, ToolError> {
+    let path = provision_config_path();
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(io_error(err)),
+    };
+    let cfg = toml::from_str::<crate::config::LabConfig>(&raw).map_err(|err| ToolError::Sdk {
+        sdk_kind: "invalid_config".into(),
+        message: format!("failed to parse {}: {err}", path.display()),
+    })?;
+    let Some(node) = cfg.node else {
+        return Ok(false);
+    };
+    Ok(
+        node.role == Some(crate::config::NodeRuntimeRole::Controller)
+            && node
+                .controller
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty()),
+    )
+}
+
+async fn ensure_controller_config() -> Result<(), ToolError> {
+    let hostname = run_command("hostname", &[]).await?;
+    if !hostname.status.success() {
+        return Err(ToolError::Sdk {
+            sdk_kind: "internal_error".into(),
+            message: "failed to read container hostname for controller config".into(),
+        });
+    }
+    let controller = hostname.stdout.trim();
+    let controller = if controller.is_empty() {
+        "labby"
+    } else {
+        controller
+    };
+    let path = provision_config_path();
+    crate::config::patch_config_scalars_checked(
+        &path,
+        &[
+            ConfigScalarPatch::new(
+                "node.role",
+                ConfigScalarValue::String("controller".to_string()),
+            ),
+            ConfigScalarPatch::new(
+                "node.controller",
+                ConfigScalarValue::String(controller.to_string()),
+            ),
+        ],
+        &[],
+    )
+    .map_err(|err| ToolError::Sdk {
+        sdk_kind: "invalid_config".into(),
+        message: format!("failed to update {}: {err}", path.display()),
+    })?;
+    let path_arg = path.to_string_lossy().to_string();
+    run_checked("chown", &[&format!("{LABBY_USER}:{LABBY_USER}"), &path_arg]).await?;
+    Ok(())
+}
+
+fn provision_config_path() -> PathBuf {
+    crate::config::config_toml_path()
+        .unwrap_or_else(|| PathBuf::from(format!("{LABBY_HOME}/.config/labby/config.toml")))
 }
 
 fn apt_floor() -> Vec<&'static str> {
@@ -613,7 +690,7 @@ async fn lab_command_success(script: &str) -> Result<bool, ToolError> {
     let script = lab_shell_script(script);
     command_success(
         "runuser",
-        &["-u", LAB_USER, "--", "sh", "-lc", script.as_str()],
+        &["-u", LABBY_USER, "--", "sh", "-lc", script.as_str()],
     )
     .await
 }
@@ -628,7 +705,7 @@ async fn command_success(program: &str, args: &[&str]) -> Result<bool, ToolError
 
 fn lab_shell_script(script: &str) -> String {
     format!(
-        "export HOME={LAB_HOME}; export PATH={LAB_PATH}; export XDG_CONFIG_HOME={LAB_HOME}/.config; export XDG_CACHE_HOME={LAB_HOME}/.cache; cd {LAB_HOME}; {script}"
+        "export HOME={LABBY_HOME}; export PATH={LABBY_PATH}; export XDG_CONFIG_HOME={LABBY_HOME}/.config; export XDG_CACHE_HOME={LABBY_HOME}/.cache; cd {LABBY_HOME}; {script}"
     )
 }
 
@@ -836,10 +913,11 @@ mod tests {
         assert!(text.contains("ffmpeg"));
         assert!(text.contains("adb"));
         assert!(text.contains("android-sdk"));
-        assert!(text.contains("[lab ] install node v24.x"));
-        assert!(text.contains("[lab ] install rust + go toolchains"));
-        assert!(text.contains("[lab ] install claude + codex + gemini"));
+        assert!(text.contains("[labby] install node v24.x"));
+        assert!(text.contains("[labby] install rust + go toolchains"));
+        assert!(text.contains("[labby] install claude + codex + gemini"));
         assert!(text.contains("[root] install tailscale client"));
+        assert!(text.contains("[root] set Labby node runtime role to controller"));
         assert!(text.contains("[root] write /etc/systemd/system/labby.service"));
         assert!(text.contains("It will NOT:"));
         assert!(text.contains("install or modify Incus"));
@@ -894,7 +972,7 @@ files:
     #[test]
     fn provision_actions_are_derived_from_incus_image_yaml() {
         for name in [
-            "lab-user",
+            "labby-user",
             "node",
             "uv-python",
             "rust-go",
@@ -912,7 +990,7 @@ files:
 
         assert!(!text.contains("apt install"));
         assert!(!text.contains("install node"));
-        assert!(text.contains("useradd lab"));
+        assert!(text.contains("useradd labby"));
         assert!(text.contains("systemctl enable --now labby"));
     }
 

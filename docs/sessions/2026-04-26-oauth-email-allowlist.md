@@ -33,7 +33,7 @@ Full lifecycle from bead execution to merged PR: implemented Google OAuth email 
 6. Ran `/gh-address-comments`: 3 reviewer threads addressed (warn levels, RFC 6749 error_description from AuthError, duplicate log removal)
 7. **Design pivot**: user changed `LAB_AUTH_ALLOWED_EMAILS` (CSV, optional) → `LAB_AUTH_ADMIN_EMAIL` (single, required in oauth mode) for fail-closed default
 8. Updated all docs: `docs/OAUTH.md`, `docs/ENV.md`, `docs/CONFIG.md`, `docs/OPERATIONS.md`, `docs/CHANGELOG.md`, `README.md`, `.env.example`
-9. Added `LAB_AUTH_ADMIN_EMAIL=jmagar@gmail.com` to `~/.lab/.env`
+9. Added `LAB_AUTH_ADMIN_EMAIL=jmagar@gmail.com` to `~/.labby/.env`
 10. Ran `/lavra-plan` to design multi-user allowlist epic `lab-1bri` (4 child beads, sequential chain)
 11. Executed `lab-1bri` via `/lavra-work` across 4 waves:
     - Wave 1 (`lab-1bri.1`): `allowed_users` SQLite table + `list/add/remove_allowed_user` store CRUD
@@ -111,7 +111,7 @@ Full lifecycle from bead execution to merged PR: implemented Google OAuth email 
 | `docs/CHANGELOG.md` | Added entry + Breaking-auth Changed entry |
 | `README.md` | Updated OAuth row + env reference table |
 | `.env.example` | Replaced `LAB_AUTH_ALLOWED_EMAILS` with `LAB_AUTH_ADMIN_EMAIL` |
-| `~/.lab/.env` | Added `LAB_AUTH_ADMIN_EMAIL=jmagar@gmail.com` |
+| `~/.labby/.env` | Added `LAB_AUTH_ADMIN_EMAIL=jmagar@gmail.com` |
 
 ---
 
@@ -175,7 +175,7 @@ gh pr merge 33 --squash --delete-branch
 
 - **Breaking change**: `LAB_AUTH_ALLOWED_EMAILS` removed. Any operator running `LAB_AUTH_MODE=oauth` must add `LAB_AUTH_ADMIN_EMAIL` before `lab serve` will start. Documented in `docs/CHANGELOG.md` and `docs/ENV.md`.
 - **Rollback**: Revert the squash merge commit on main. The removed env var logic can be restored from git history.
-- **Session table**: `allowed_users` rows persist in `~/.lab/auth.db`. Removing a user from the UI revokes future logins but does not invalidate existing browser sessions (sessions expire naturally via TTL).
+- **Session table**: `allowed_users` rows persist in `~/.labby/auth.db`. Removing a user from the UI revokes future logins but does not invalidate existing browser sessions (sessions expire naturally via TTL).
 
 ---
 

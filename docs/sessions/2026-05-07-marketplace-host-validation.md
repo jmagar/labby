@@ -27,7 +27,7 @@ The local effective config already had:
 LAB_PUBLIC_URL=https://lab.example.com
 ```
 
-and `/home/jmagar/.lab/config.toml` had OAuth mode enabled:
+and `/home/jmagar/.labby/config.toml` had OAuth mode enabled:
 
 ```toml
 [auth]

@@ -174,7 +174,7 @@ Denied record:
 
 ### Persistence
 
-Use a file-backed store under `~/.lab/` on the master with atomic write
+Use a file-backed store under `~/.labby/` on the master with atomic write
 semantics. The format can be JSON or TOML, but it must support:
 
 - load on startup

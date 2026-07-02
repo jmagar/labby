@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use labby_runtime::gateway_config::UpstreamConfig;
 
-/// Standard location for the `.env` file: `~/.lab/.env`.
+/// Standard location for the `.env` file: `~/.labby/.env`.
 ///
 /// Vendored from `lab`'s `crate::config::dotenv_path` so the upstream pool's
 /// dotenv-fallback bearer-token resolution does not reach back into the Labby
@@ -12,7 +12,7 @@ fn dotenv_path() -> Option<PathBuf> {
     let home = std::env::var_os("USERPROFILE").map(PathBuf::from);
     #[cfg(not(windows))]
     let home = std::env::var_os("HOME").map(PathBuf::from);
-    home.map(|home| home.join(".lab").join(".env"))
+    home.map(|home| home.join(".labby").join(".env"))
 }
 
 pub fn configured_bearer_token(env_name: &str) -> Option<String> {

@@ -27,7 +27,7 @@ config struct was added to `LabConfig`, wiring `[gateway] extra_stdio_commands` 
 `disable_spawn_guard` through the entire validation chain. The marketplace's local copy
 of the allowlist check was replaced with a delegation to the shared `spawn_guard` module.
 All docs and the example config were updated to reflect the new knobs, and the user's
-live `~/.lab/config.toml` had the `[gateway]` section added with `disable_spawn_guard = true`.
+live `~/.labby/config.toml` had the `[gateway]` section added with `disable_spawn_guard = true`.
 
 ## Sequence of Events
 
@@ -63,7 +63,7 @@ live `~/.lab/config.toml` had the `[gateway]` section added with `disable_spawn_
 10. **Final fix and green build** — fixed the missed callsite; 1837/1837 tests passed.
 11. **Commits pushed** — two commits: `b9c05dad` (fix) and `57a15d5a` (docs).
 12. **Docs and config updated** — `config/config.example.toml`, `docs/runtime/CONFIG.md`,
-    `docs/services/GATEWAY.md`, and `~/.lab/config.toml` all updated with the new
+    `docs/services/GATEWAY.md`, and `~/.labby/config.toml` all updated with the new
     `[gateway]` section.
 
 ## Key Findings
@@ -117,7 +117,7 @@ live `~/.lab/config.toml` had the `[gateway]` section added with `disable_spawn_
 | modified | `config/config.example.toml` | Added `[gateway]` section with commented-out `extra_stdio_commands` and `disable_spawn_guard` examples |
 | modified | `docs/runtime/CONFIG.md` | Added `[gateway]` section reference table with rules and examples |
 | modified | `docs/services/GATEWAY.md` | Added "Spawn Guard" subsection under "Stdio Gateways" |
-| modified | `~/.lab/config.toml` | Added `[gateway]` section with `extra_stdio_commands = ["synapse","ytdl-mcp","claude","axon"]` and `disable_spawn_guard = true` |
+| modified | `~/.labby/config.toml` | Added `[gateway]` section with `extra_stdio_commands = ["synapse","ytdl-mcp","claude","axon"]` and `disable_spawn_guard = true` |
 
 ## Beads Activity
 
@@ -205,7 +205,7 @@ complaint; no issue was tracked in beads before or during the session.
   `gateway.add`. With the guard off, the HTTP auth layer and the destructive-confirm
   gate on `gateway.add` / `gateway.update` remain as the only controls. This is an
   intentional operator choice on a trusted single-user homelab instance.
-- **Rollback** — remove `[gateway]` section from `~/.lab/config.toml` and reload the
+- **Rollback** — remove `[gateway]` section from `~/.labby/config.toml` and reload the
   gateway (`labby gateway reload`). The code change is backward-compatible: omitting the
   section defaults to `extra_stdio_commands = []` and `disable_spawn_guard = false`,
   which is identical to pre-patch behaviour.

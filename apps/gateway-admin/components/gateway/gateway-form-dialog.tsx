@@ -1578,7 +1578,7 @@ export function GatewayFormDialog({
                         <div className="space-y-1">
                           <span className="font-medium text-sm">Paste token</span>
                           <p className="text-sm text-aurora-text-muted">
-                            Paste the secret here and Labby will store it in <code>~/.lab/.env</code> for you.
+                            Paste the secret here and Labby will store it in <code>~/.labby/.env</code> for you.
                           </p>
                         </div>
                       </label>

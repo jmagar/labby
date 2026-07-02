@@ -250,7 +250,7 @@ impl WorkspaceRuntime {
 }
 
 fn resolve_workspace_root(config: &WorkspaceRuntimeConfig) -> std::io::Result<PathBuf> {
-    // Resolve `root` or default `home/.lab/stash`, expand `~`, create the
+    // Resolve `root` or default `home/.labby/stash`, expand `~`, create the
     // directory, canonicalize it, and reject non-directories/relative paths.
     canonicalize_workspace_dir(expand_configured_root(config)?)
 }
@@ -340,7 +340,7 @@ Expected: tests compile or fail only on exact helper implementation details.
 
 The serve adapter passes `config.workspace.root` and `HOME` into `WorkspaceRuntimeConfig`. Preserve the previous config behavior:
 
-- `None` defaults to `$HOME/.lab/stash`.
+- `None` defaults to `$HOME/.labby/stash`.
 - `~` and `~/...` expand against `$HOME`.
 - relative configured roots are rejected after expansion.
 
@@ -725,7 +725,7 @@ If no fixes were required, do not create an empty commit.
 
 - `crates/lab/src/workspace/runtime.rs` exists and exposes `WorkspaceRuntimeBuilder`.
 - `WorkspaceRuntimeBuilder::new(config).build()` resolves the workspace root from explicit `WorkspaceRuntimeConfig`.
-- `WorkspaceRuntimeConfig` preserves `$HOME/.lab/stash` defaulting and `~` expansion behavior.
+- `WorkspaceRuntimeConfig` preserves `$HOME/.labby/stash` defaulting and `~` expansion behavior.
 - `registry.rs` registers `fs` through `RegisteredService::bootstrap_operator(...)` with the MCP-filtered action slice.
 - `cli/serve.rs` attaches `AppState.workspace_root` through the workspace runtime builder.
 - `api/router.rs` delegates `/v1/fs` mount policy to `WorkspaceRuntime::should_mount_http_routes(...)`.

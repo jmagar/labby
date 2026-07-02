@@ -77,12 +77,12 @@ This means a healthy fleet generates exactly one burst of events at startup and 
 `labby deploy monitor` writes its PID to a lock file before entering the watch loop:
 
 ```
-~/.lab/run/deploy-monitor.lock
+~/.labby/run/deploy-monitor.lock
 ```
 
 Behavior:
 
-- **Fresh start.** Creates `~/.lab/run/` if needed, writes the current PID, runs.
+- **Fresh start.** Creates `~/.labby/run/` if needed, writes the current PID, runs.
 - **Lock exists, PID alive.** Refuses to start with a structured error pointing at the live PID and lock path. Exits non-zero.
 - **Lock exists, PID dead (stale).** Silently overwrites the lock and runs.
 - **Clean exit (Ctrl-C / SIGINT).** Removes the lock file via RAII drop.
@@ -95,7 +95,7 @@ Liveness is checked with `nix::sys::signal::kill(pid, None)` (Unix only — send
 If you need to clear a lock by hand:
 
 ```bash
-rm ~/.lab/run/deploy-monitor.lock
+rm ~/.labby/run/deploy-monitor.lock
 ```
 
 Only do this if `ps -p <pid>` confirms the named process is gone. The stale-PID path handles dead processes automatically; manual deletion is only needed if the lock holder changed identity (e.g. PID was reused by an unrelated process).
@@ -106,7 +106,7 @@ Only do this if `ps -p <pid>` confirms the named process is gone. The stale-PID 
 
 ```bash
 ps -ef | grep "labby deploy monitor" | grep -v grep
-cat ~/.lab/run/deploy-monitor.lock
+cat ~/.labby/run/deploy-monitor.lock
 ```
 
 The PID in the lock file should match exactly one running `labby deploy monitor` process.
@@ -114,7 +114,7 @@ The PID in the lock file should match exactly one running `labby deploy monitor`
 ### Stop the monitor
 
 ```bash
-kill -INT $(cat ~/.lab/run/deploy-monitor.lock)
+kill -INT $(cat ~/.labby/run/deploy-monitor.lock)
 ```
 
 SIGINT triggers the clean exit path and removes the lock file. SIGTERM works too, but the lock will linger until the next launch overwrites it.

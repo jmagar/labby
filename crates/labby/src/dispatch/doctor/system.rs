@@ -140,26 +140,26 @@ pub fn run_system_checks() -> Vec<Finding> {
 
     // --- Lab config files ---
     let home = std::env::var("HOME").unwrap_or_default();
-    let env_path = format!("{home}/.lab/.env");
+    let env_path = format!("{home}/.labby/.env");
     findings.push(path_check(
         "lab",
-        "config:~/.lab/.env",
+        "config:~/.labby/.env",
         &env_path,
         Severity::Warn,
     ));
     findings.push(writable_check(
         "lab",
-        "config:~/.lab/.env:writable",
+        "config:~/.labby/.env:writable",
         &env_path,
     ));
 
-    let lab_dir = format!("{home}/.lab");
-    findings.push(writable_check("lab", "config:~/.lab:writable", &lab_dir));
+    let lab_dir = format!("{home}/.labby");
+    findings.push(writable_check("lab", "config:~/.labby:writable", &lab_dir));
 
     findings.push(path_check(
         "lab",
-        "config:~/.lab/config.toml",
-        &format!("{home}/.lab/config.toml"),
+        "config:~/.labby/config.toml",
+        &format!("{home}/.labby/config.toml"),
         Severity::Warn,
     ));
 
@@ -471,9 +471,9 @@ pub fn run_auth_checks() -> Vec<Finding> {
     // --- Auth store files (only meaningful when OAuth is configured) ---
     if is_oauth || has_google {
         let sqlite_path = std::env::var("LAB_AUTH_SQLITE_PATH")
-            .unwrap_or_else(|_| format!("{home}/.lab/auth.db"));
+            .unwrap_or_else(|_| format!("{home}/.labby/auth.db"));
         let key_path = std::env::var("LAB_AUTH_KEY_PATH")
-            .unwrap_or_else(|_| format!("{home}/.lab/auth-jwt.pem"));
+            .unwrap_or_else(|_| format!("{home}/.labby/auth-jwt.pem"));
 
         let sqlite_exists = std::path::Path::new(&sqlite_path).exists();
         findings.push(auth_finding(

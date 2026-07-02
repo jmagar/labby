@@ -66,7 +66,7 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "snippets.create",
-        description: "Create a user snippet under LAB_HOME/snippets",
+        description: "Create a user snippet under LABBY_HOME/snippets",
         destructive: false,
         requires_admin: true,
         returns: "SnippetInfo",

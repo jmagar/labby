@@ -21,7 +21,7 @@ All surface code (axum, rmcp, ratatui, clap) is compiled unconditionally — fea
 
 ## Config Loading
 
-Two files loaded in order: `~/.lab/.env` (secrets, `dotenvy`) then `config.toml` (preferences, searched CWD → `~/.lab/` → `~/.config/lab/`, first found wins). A CWD `.env` is also loaded (errors silently discarded). Failures in `config::load()` are non-fatal by design.
+Two files loaded in order: `~/.labby/.env` (secrets, `dotenvy`) then `config.toml` (preferences, searched CWD → `~/.labby/` → `~/.config/labby/`, first found wins). A CWD `.env` is also loaded (errors silently discarded). Failures in `config::load()` are non-fatal by design.
 
 `scan_instances(prefix)` parses multi-instance env vars as `{PREFIX}_{LABEL}_{SUFFIX}`. Recognized suffixes: `URL`, `API_KEY`, `TOKEN`, `USERNAME`, `PASSWORD`. Any other suffix is silently ignored.
 

@@ -144,8 +144,8 @@ git commit -m "feat(lab): add binary entry point with clap + tokio + tracing"
 //!
 //! Order of precedence (highest wins):
 //!   1. Process environment variables
-//!   2. `~/.lab/.env` (loaded via `dotenvy`)
-//!   3. `~/.config/lab/config.toml` (preferences, not secrets)
+//!   2. `~/.labby/.env` (loaded via `dotenvy`)
+//!   3. `~/.config/labby/config.toml` (preferences, not secrets)
 //!
 //! Multi-instance services follow the `S_<LABEL>_URL` pattern: a service
 //! like `unraid` reads `UNRAID_URL` as the default instance and
@@ -218,15 +218,15 @@ pub fn load() -> Result<LabConfig> {
     Ok(cfg)
 }
 
-/// Standard location for the `.env` file: `$HOME/.lab/.env`.
+/// Standard location for the `.env` file: `$HOME/.labby/.env`.
 fn dotenv_path() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".lab").join(".env"))
+    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".labby").join(".env"))
 }
 
-/// Standard location for the TOML config: `$HOME/.config/lab/config.toml`.
+/// Standard location for the TOML config: `$HOME/.config/labby/config.toml`.
 fn toml_path() -> Option<PathBuf> {
     std::env::var_os("HOME")
-        .map(|home| PathBuf::from(home).join(".config").join("lab").join("config.toml"))
+        .map(|home| PathBuf::from(home).join(".config").join("labby").join("config.toml"))
 }
 
 /// Parse multi-instance env vars for a given service prefix.
@@ -1064,7 +1064,7 @@ pub fn run() -> Result<ExitCode> {
 ```rust
 //! `lab install` / `lab uninstall` / `lab init`.
 //!
-//! These subcommands mutate the user's `.mcp.json` and/or `~/.lab/.env`.
+//! These subcommands mutate the user's `.mcp.json` and/or `~/.labby/.env`.
 //! Real logic lives in later plans — stubs just log intent.
 
 use std::process::ExitCode;

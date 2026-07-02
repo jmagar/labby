@@ -36,7 +36,7 @@ put the latest release binary on PATH; (7) push the beads sync and save the sess
 
 ## Sequence of Events
 
-1. Explained bearer auth: `LAB_MCP_HTTP_TOKEN` from `~/.lab/.env` passed as
+1. Explained bearer auth: `LAB_MCP_HTTP_TOKEN` from `~/.labby/.env` passed as
    `Authorization: Bearer <token>`; works for `/v1/*` and `/auth/session` even under
    OAuth mode.
 2. Inspected git state — on `bd-work/codemode-parity-behaviors`, 9 ahead of `main`,

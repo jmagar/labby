@@ -1123,7 +1123,7 @@ preferences in `config.toml`.
 
 Rules:
 
-- provider credentials and secrets belong in `~/.lab/.env`
+- provider credentials and secrets belong in `~/.labby/.env`
 - ACP non-secret preferences belong in `config.toml`
 - browser chat uses same-origin session auth only and must not depend on
   browser-visible bearer tokens
@@ -1260,7 +1260,7 @@ Retention defaults:
 
 Recommended path/config posture:
 
-- default durable store path under `~/.lab/`
+- default durable store path under `~/.labby/`
 - ACP persistence path should be configurable through `config.toml`
 - an env override may exist later if it aligns with the shared config contract
 

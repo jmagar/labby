@@ -16,7 +16,7 @@ Enable gateway tool search for Lab MCP, make raw tools hidden behind `tool_searc
 
 ## Session Overview
 
-- Enabled root `[tool_search]` config in `~/.lab/config.toml` with `enabled = true`, `top_k_default = 10`, and `max_tools = 5000`.
+- Enabled root `[tool_search]` config in `~/.labby/config.toml` with `enabled = true`, `top_k_default = 10`, and `max_tools = 5000`.
 - Changed gateway tool-search mode so the root MCP surface advertises only `tool_search` and `tool_execute`.
 - Kept Lab built-in service tools searchable and executable through the synthetic tools while hiding their raw MCP entries.
 - Added process-wide tool-search state so in-process Lab service peers also hide their one raw built-in tool when root tool-search mode is enabled.
@@ -29,7 +29,7 @@ Enable gateway tool search for Lab MCP, make raw tools hidden behind `tool_searc
 ## Sequence Of Events
 
 1. Confirmed live HTTP `/mcp` through mcporter showed exactly `tool_search` and `tool_execute`.
-2. User reported Claude Code still showed 11 tools for `plugin:lab:lab` over stdio.
+2. User reported Claude Code still showed 11 tools for `plugin:labby:labby` over stdio.
 3. Inspected process state and found multiple `lab mcp` children under Claude processes.
 4. Confirmed the installed stdio entrypoints were stale: `/home/jmagar/.local/bin/lab` and `/home/jmagar/.local/bin/labby` both reported `labby 0.15.1`.
 5. Built and installed release `0.15.2`; fresh stdio still showed 11 tools, proving the issue was also in the stdio startup path.
@@ -175,12 +175,12 @@ Enable gateway tool search for Lab MCP, make raw tools hidden behind `tool_searc
 
 ## Open Questions
 
-- Confirm in a newly restarted Claude Code UI that `plugin:lab:lab` now reports 2 tools instead of 11.
+- Confirm in a newly restarted Claude Code UI that `plugin:labby:labby` now reports 2 tools instead of 11.
 - Decide whether to commit this ignored session note by force-adding it.
 - Decide whether generated docs under `docs/generated/` should be refreshed so stale `tool_invoke` descriptions in generated artifacts are updated.
 
 ## Next Steps
 
-- Restart or reconnect Claude Code and check `plugin:lab:lab` tool count.
+- Restart or reconnect Claude Code and check `plugin:labby:labby` tool count.
 - If the UI still shows 11, inspect the exact command/path Claude Code is spawning for that plugin instance.
 - Before committing, review the full diff and decide whether to force-add this ignored session note.

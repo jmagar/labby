@@ -838,7 +838,7 @@ Assuming a running `labby serve` instance (e.g. `lab-prod` at `https://lab.examp
 
 Run:
 ```bash
-LAB_MCP_HTTP_TOKEN=$(grep '^LAB_MCP_HTTP_TOKEN=' ~/.lab/.env | cut -d= -f2-) \
+LAB_MCP_HTTP_TOKEN=$(grep '^LAB_MCP_HTTP_TOKEN=' ~/.labby/.env | cut -d= -f2-) \
   mcporter call lab-prod.invoke name=code_search arguments:='{"query":"docker container logs","top_k":5}' 2>&1 | jq '.[].id' | head -10
 ```
 

@@ -1,6 +1,6 @@
 //! Shared `.env` merge primitive.
 //!
-//! `setup.draft.commit` and gateway config mutations write to `~/.lab/.env`
+//! `setup.draft.commit` and gateway config mutations write to `~/.labby/.env`
 //! through this module. This is the only sanctioned way to mutate the file:
 //!
 //! 1. Backup is part of merge: `.env` → `.env.bak.<unix-seconds>` before any

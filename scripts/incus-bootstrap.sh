@@ -138,6 +138,20 @@ ensure_tun_device() {
     fi
 }
 
+ensure_apparmor_signal_rule() {
+    if [ "$DRY_RUN" -eq 1 ]; then
+        say "+ incus config show $(quote "$NAME") --expanded # verify AppArmor signal peer rule"
+        return
+    fi
+
+    expanded_config="$(incus config show "$NAME" --expanded)"
+    if printf '%s\n' "$expanded_config" | grep -Fq "signal peer=@{profile_name}//&unconfined,"; then
+        say "AppArmor signal peer rule configured"
+    else
+        fail "Incus profile '$PROFILE_NAME' must set raw.apparmor='signal peer=@{profile_name}//&unconfined,' so systemd can stop services inside the container"
+    fi
+}
+
 ensure_container_networking() {
     if [ "$DRY_RUN" -eq 1 ]; then
         say "+ incus exec $(quote "$NAME") -- sh -c 'write Incus DHCP netplan, enable systemd-networkd, generate networkd config, verify IPv4/DNS'"
@@ -545,6 +559,7 @@ fi
 
 verify_container_substrate
 ensure_tun_device
+ensure_apparmor_signal_rule
 ensure_container_networking
 apply_backup_config
 run incus exec "$NAME" -- hostnamectl set-hostname "$TAILSCALE_HOSTNAME"

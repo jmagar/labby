@@ -1,23 +1,23 @@
 # Lab configuration — preferences only, no secrets.
 #
-# Copy to ~/.lab/config.toml and uncomment sections as needed.
+# Copy to ~/.labby/config.toml and uncomment sections as needed.
 # A ./config.toml in the working directory also works as a per-repo override.
 #
-# Docker: docker-compose.yml mounts ${HOME}/.lab/config.toml directly, so
+# Docker: docker-compose.yml mounts ${HOME}/.labby/config.toml directly, so
 # Docker and local `labby serve` share the same config.
 #
-# Secrets (API keys, tokens, passwords, URLs) belong in ~/.lab/.env.
+# Secrets (API keys, tokens, passwords, URLs) belong in ~/.labby/.env.
 # Everything else belongs here. All values below can still be overridden
 # by environment variables — env always wins over config.toml.
 #
 # Config search order (first found wins):
 #   1. ./config.toml              (repo/CWD override)
-#   2. ~/.lab/config.toml         (user-level, next to .env)
-#   3. ~/.config/lab/config.toml  (XDG-style fallback)
+#   2. ~/.labby/config.toml         (user-level, next to .env)
+#   3. ~/.config/labby/config.toml  (XDG-style fallback)
 #
 # Value precedence (highest wins):
 #   1. CLI flags
-#   2. Environment variables (including those loaded from ~/.lab/.env)
+#   2. Environment variables (including those loaded from ~/.labby/.env)
 #   3. config.toml (from whichever location was found)
 #   4. Built-in defaults
 
@@ -97,7 +97,7 @@
 [workspace]
 # Root directory for Lab-managed files (fs browsing, stash workspaces).
 # No env var override — config-file only.
-# root = "~/.lab/stash"                  # default: ~/.lab/stash
+# root = "~/.labby/stash"                  # default: ~/.labby/stash
 
 # ── MCP Registry ─────────────────────────────────────────────────────────────
 
@@ -135,7 +135,7 @@
 
 [local_logs]
 # Override with LAB_LOCAL_LOGS_STORE_PATH env var.
-# store_path = "~/.lab/logs.db"
+# store_path = "~/.labby/logs.db"
 
 # Override with LAB_LOCAL_LOGS_RETENTION_DAYS env var.
 # retention_days = 7                     # default: 7
@@ -184,19 +184,19 @@
 # mode = "bearer"                         # default: "bearer"
 
 # Public URL used for OAuth metadata, callbacks, and JWT issuer/audience.
-# Often kept in ~/.lab/.env alongside other URLs.
+# Often kept in ~/.labby/.env alongside other URLs.
 # Override with LAB_PUBLIC_URL.
 # public_url = "https://lab.example.com"
 
 # Optional path override for the auth SQLite database.
 # Override with LAB_AUTH_SQLITE_PATH.
-# sqlite_path = "/var/lib/lab/auth.db"    # default: ~/.lab/auth.db
+# sqlite_path = "/var/lib/labby/auth.db"    # default: ~/.labby/auth.db
 
 # Optional path override for the JWT signing key.
 # Override with LAB_AUTH_KEY_PATH.
-# key_path = "/var/lib/lab/auth-jwt.pem"  # default: ~/.lab/auth-jwt.pem
+# key_path = "/var/lib/labby/auth-jwt.pem"  # default: ~/.labby/auth-jwt.pem
 
-# Google credentials are usually kept in ~/.lab/.env:
+# Google credentials are usually kept in ~/.labby/.env:
 #   LAB_GOOGLE_CLIENT_ID
 #   LAB_GOOGLE_CLIENT_SECRET
 
@@ -235,7 +235,7 @@
 
 # ── Secrets (env-only) ───────────────────────────────────────────────────────
 #
-# These MUST be set via environment variables (in ~/.lab/.env), not here:
+# These MUST be set via environment variables (in ~/.labby/.env), not here:
 #
 #   LAB_MCP_HTTP_TOKEN — bearer token for HTTP transport (required in bearer mode)
 #   *_URL              — service base URLs

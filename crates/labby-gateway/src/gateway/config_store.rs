@@ -73,7 +73,7 @@ pub trait GatewayConfigStore: Send + Sync {
     fn set_process_code_mode_enabled(&self, enabled: bool);
 
     /// The canonical `.env` path used for credential persistence. `None` means
-    /// "use the host default" (`~/.lab/.env`); tests inject an override.
+    /// "use the host default" (`~/.labby/.env`); tests inject an override.
     fn env_path(&self) -> PathBuf;
 
     /// Persist the gateway-owned config sections back to `config.toml`.
@@ -120,7 +120,7 @@ pub struct FsGatewayConfigStore {
 #[cfg(any(test, feature = "testkit"))]
 impl FsGatewayConfigStore {
     /// Build a store for `config_path`, deriving the `.env` path as a sibling
-    /// `.env` file (or `~/.lab/.env` when `config_path` has no parent).
+    /// `.env` file (or `~/.labby/.env` when `config_path` has no parent).
     #[must_use]
     pub fn new(config_path: PathBuf) -> Self {
         let env_path = config_path

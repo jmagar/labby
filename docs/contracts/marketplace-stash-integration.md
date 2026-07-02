@@ -63,7 +63,7 @@ Serialized JSON includes all existing fields plus optional `origin_meta`.
     "source_version": "1.0.0",
     "source_fingerprint": "tree-fingerprint-abc123"
   },
-  "workspace_root": "/home/user/.lab/stash/workspaces/01aryz6s41tpz5x11k39dv3r2g/SKILL.md",
+  "workspace_root": "/home/user/.labby/stash/workspaces/01aryz6s41tpz5x11k39dv3r2g/SKILL.md",
   "workspace_shape": "file",
   "unix_mode": null,
   "created_at": "2026-06-13T12:00:00Z",
@@ -144,7 +144,7 @@ Request:
     "kind": "skill",
     "name": "demo-skill",
     "label": "Demo Skill",
-    "source_path": "/home/user/.lab/plugins/marketplaces/labby/demo/skills/demo",
+    "source_path": "/home/user/.labby/plugins/marketplaces/labby/demo/skills/demo",
     "origin": {
       "kind": "marketplace",
       "plugin_id": "demo@labby",
@@ -175,7 +175,7 @@ Response:
       "source_version": "1.0.0",
       "source_fingerprint": "tree-fingerprint-abc123"
     },
-    "workspace_root": "/home/user/.lab/stash/workspaces/01aryz6s41tpz5x11k39dv3r2g",
+    "workspace_root": "/home/user/.labby/stash/workspaces/01aryz6s41tpz5x11k39dv3r2g",
     "workspace_shape": "directory",
     "unix_mode": null,
     "created_at": "2026-06-13T12:00:00Z",
@@ -245,7 +245,7 @@ Response:
       "plugin_id": "demo@labby",
       "component_id": "01aryz6s41tpz5x11k39dv3r2g",
       "revision_id": "01b7x6s41tpz5x11k39dv3r2g",
-      "stash_workspace": "/home/user/.lab/stash/workspaces/01aryz6s41tpz5x11k39dv3r2g",
+      "stash_workspace": "/home/user/.labby/stash/workspaces/01aryz6s41tpz5x11k39dv3r2g",
       "forked_artifacts": ["skills/demo/SKILL.md"]
     }
   ],
@@ -297,7 +297,7 @@ Response:
   {
     "plugin_id": "demo@labby",
     "component_id": "01aryz6s41tpz5x11k39dv3r2g",
-    "stash_workspace": "/home/user/.lab/stash/workspaces/01aryz6s41tpz5x11k39dv3r2g",
+    "stash_workspace": "/home/user/.labby/stash/workspaces/01aryz6s41tpz5x11k39dv3r2g",
     "forked_artifacts": ["skills/demo/SKILL.md"],
     "status": "unknown"
   }
@@ -625,7 +625,7 @@ Stash root resolution remains:
 Fallback:
 
 ```text
-~/.lab/stash
+~/.labby/stash
 ```
 
 ### Marketplace Fork Helper Files

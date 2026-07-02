@@ -35,7 +35,7 @@ Created and worked in `/home/jmagar/workspace/lab/.worktrees/readme-rewrite` on 
 
 - `README.md` was substantially lighter and less current than the repo, so it was rewritten around the actual Labby surfaces and operator workflow.
 - `docs/runtime/CONFIG.md` had a stale local link to `./TRANSPORT.md`; the correct target is `../surfaces/TRANSPORT.md`.
-- The product rename is not a blanket string replacement: public product copy should say Labby, while compatibility identifiers such as `LAB_*`, `~/.lab`, `lab-apis`, `lab-auth`, `lab_session`, `lab:read`, and `lab_admin` should remain stable.
+- The product rename is not a blanket string replacement: public product copy should say Labby, while compatibility identifiers such as `LAB_*`, `~/.labby`, `lab-apis`, `lab-auth`, `lab_session`, `lab:read`, and `lab_admin` should remain stable.
 - `config/config.example.toml` still documents `filter = "lab=info,lab_apis=warn"`, while code in `crates/lab/src/main.rs` defaults to `labby=info,lab_apis=warn,rmcp=warn`.
 - The first Labby rename plan draft referenced nonexistent paths and had an inverted `rg` guardrail; those defects were patched in the saved plan.
 

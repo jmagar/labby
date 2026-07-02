@@ -1832,7 +1832,7 @@ Create `docs/services/MARKETPLACE.md`:
 Managed marketplaces live under:
 
 ```text
-~/.lab/marketplaces/<slug>/.claude-plugin/marketplace.json
+~/.labby/marketplaces/<slug>/.claude-plugin/marketplace.json
 ```
 
 Lab writes these files atomically and preserves Claude-compatible JSON. Lab-only provenance stays in the catalog store.
