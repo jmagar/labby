@@ -12,6 +12,7 @@ use labby_codemode::snippet::store::{
 use labby_codemode::{
     CodeModeCaller, CodeModeConfig, CodeModeHost, CodeModeSurface, ResolvedSnippet, RunnerPool,
     ToolCallOutcome, ToolScope, ToolsRender, UiLink, destructive_permitted,
+    discovery_entry_visible, discovery_render_params,
 };
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use serde_json::{Map, Value};
@@ -197,17 +198,17 @@ impl CodeModeHost for GatewayManager {
         // `build_code_mode_proxy` would produce for this exact
         // caller/surface/scope — this is what makes the design race-free: no
         // shared "current fingerprint" state is read here, only this call's
-        // own arguments. `include_snippets`/`use_cache` deliberately mirror
-        // `build_code_mode_proxy`'s own formulas (labby-codemode
-        // `execute.rs`) so the fingerprint computed here matches the one the
-        // warming path in `catalog_from_tools` already embedded for this
-        // execution's catalog. `allow_cold_connect` is hardcoded `false`
+        // own arguments. `include_snippets`/`use_cache` come from
+        // labby-codemode's `discovery_render_params` — the SAME function
+        // `build_code_mode_proxy` calls — so the fingerprint computed here
+        // structurally cannot diverge from the one the warming path in
+        // `catalog_from_tools` already embedded for this execution's
+        // catalog. `allow_cold_connect` is hardcoded `false`
         // (unlike `list_tools`'s `caller.can_execute()`): semantic ranking
         // must never spend wall-clock cold-connecting upstreams — by the
         // time a sandbox calls search(), the proxy build already connected
         // everything this execution can see.
-        let include_snippets = caller.can_use_snippets() && !scope.is_scoped();
-        let use_cache = surface == CodeModeSurface::Cli && scope.allowed_namespaces().is_none();
+        let (include_snippets, use_cache) = discovery_render_params(caller, surface, scope);
         let owner = runtime_owner(caller, surface);
         let oauth_subject = oauth_subject(caller);
         let allowed = scope.allowed_namespaces();
@@ -232,11 +233,12 @@ impl CodeModeHost for GatewayManager {
         // Embeddings are cached/warmed over the FULL render (same
         // fingerprint + entry set as `catalog_from_tools`' warming path);
         // ranking is then restricted to exactly the entry subset the
-        // sandbox's own `__codemodeDiscovery` contains for this scope — the
-        // same `kind == Snippet || scope.allows(...)` filter
-        // `build_code_mode_proxy` applies. This is the security invariant:
-        // `rank_by_similarity` is only ever given scope-allowed ids, so it
-        // is structurally impossible to return an id the sandbox cannot see.
+        // sandbox's own `__codemodeDiscovery` contains for this scope —
+        // labby-codemode's `discovery_entry_visible`, the SAME function
+        // `build_code_mode_proxy` filters with. This is the security
+        // invariant: `rank_by_similarity` is only ever given scope-allowed
+        // ids, so it is structurally impossible to return an id the sandbox
+        // cannot see.
         let vectors = self
             .ensure_embeddings_for_fingerprint(&render.fingerprint, &render.entries)
             .await;
@@ -246,10 +248,7 @@ impl CodeModeHost for GatewayManager {
         let allowed_ids: std::collections::BTreeSet<&str> = render
             .entries
             .iter()
-            .filter(|entry| {
-                entry.kind == labby_codemode::CodeModeCatalogKind::Snippet
-                    || scope.allows(&entry.namespace, &entry.name)
-            })
+            .filter(|entry| discovery_entry_visible(entry, scope))
             .map(|entry| entry.id.as_str())
             .collect();
         let scoped_vectors: Vec<(String, Vec<f32>)> = vectors

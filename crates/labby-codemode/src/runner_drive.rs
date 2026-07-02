@@ -31,8 +31,8 @@ use super::artifacts::{
     write_code_mode_artifact,
 };
 use super::config::{
-    MAX_SNIPPET_RESOLVED_BYTES_PER_RUN, MAX_SNIPPET_RESOLVES_PER_RUN, calltool_result_max_bytes,
-    max_calltool_per_run,
+    MAX_INTERNAL_CALLS_PER_RUN, MAX_SNIPPET_RESOLVED_BYTES_PER_RUN, MAX_SNIPPET_RESOLVES_PER_RUN,
+    calltool_result_max_bytes, max_calltool_per_run,
 };
 use super::pool::RunnerPool;
 use super::pool::runner_handle::PooledRunner;
@@ -96,6 +96,10 @@ struct DriveState {
     snippet_resolved_bytes: usize,
     calls_enqueued: u64,
     max_calls_per_run: u64,
+    /// Reserved `__lab_internal::*` pseudo-tool calls seen this run. Metered
+    /// separately from `calls_enqueued` (internal calls never consume the
+    /// ordinary budget) against `MAX_INTERNAL_CALLS_PER_RUN`.
+    internal_calls_enqueued: usize,
     calltool_result_max_bytes: usize,
 }
 
@@ -113,6 +117,7 @@ impl DriveState {
             snippet_resolved_bytes: 0,
             calls_enqueued: 0,
             max_calls_per_run: max_calltool_per_run(),
+            internal_calls_enqueued: 0,
             calltool_result_max_bytes: calltool_result_max_bytes(),
         }
     }
@@ -328,15 +333,48 @@ impl<H: CodeModeHost> CodeModeBroker<'_, H> {
                         CodeModeRunnerOutput::ToolCall { seq, id, params } => {
                             // Reserved host-internal pseudo-tool calls (see
                             // `execute.rs`'s `LAB_INTERNAL_NAMESPACE`) are
-                            // exempt from the per-run call budget and the
-                            // call trace — but NOT from dispatch routing:
+                            // exempt from the ordinary per-run call budget and
+                            // the call trace — but NOT from dispatch routing:
                             // they still flow through the normal enqueue
                             // path below so their promise settles normally.
+                            // They ARE metered separately: past
+                            // `MAX_INTERNAL_CALLS_PER_RUN` each internal call
+                            // settles fail-open with the empty semantic
+                            // result so sandbox JS cannot loop them into
+                            // unbounded embedding-service round trips.
                             let is_internal = id.starts_with("__lab_internal::");
-                            if !is_internal {
+                            if is_internal {
+                                state.internal_calls_enqueued =
+                                    state.internal_calls_enqueued.saturating_add(1);
+                            } else {
                                 state.calls_enqueued = state.calls_enqueued.saturating_add(1);
                             }
-                            if !is_internal && state.calls_enqueued > state.max_calls_per_run {
+                            if is_internal
+                                && state.internal_calls_enqueued > MAX_INTERNAL_CALLS_PER_RUN
+                            {
+                                // Warn once per run, on the first over-ceiling
+                                // call only.
+                                if state.internal_calls_enqueued
+                                    == MAX_INTERNAL_CALLS_PER_RUN.saturating_add(1)
+                                {
+                                    tracing::warn!(
+                                        surface = "dispatch",
+                                        service = "code_mode",
+                                        action = "codemode",
+                                        kind = "internal_call_budget_exceeded",
+                                        budget = MAX_INTERNAL_CALLS_PER_RUN,
+                                        "Code Mode run exceeded the internal pseudo-tool call ceiling; settling further internal calls with the fail-open empty result"
+                                    );
+                                }
+                                enqueue_internal_call_over_ceiling(
+                                    seq,
+                                    id,
+                                    params,
+                                    cfg,
+                                    &mut pending_tool_calls,
+                                );
+                            } else if !is_internal && state.calls_enqueued > state.max_calls_per_run
+                            {
                                 if let Err(err) = reject_tool_call_over_budget(
                                     seq,
                                     id,
@@ -628,6 +666,29 @@ fn enqueue_rejected_tool_call(
     pending_tool_calls.push(Box::pin(
         async move { (seq, id, redacted_params, Err(err), 0) },
     ));
+}
+
+/// Settle an over-ceiling `__lab_internal::*` pseudo-tool call with the
+/// fail-open empty semantic result — the same `{"ranked": []}` shape
+/// `dispatch_internal_call` returns when the embedding service is degraded —
+/// so `codemode.search()` silently falls back to lexical-only scoring.
+///
+/// This deliberately resolves (never rejects) the in-sandbox promise:
+/// FAIL-OPEN is a hard Code Mode invariant, so exceeding the internal-call
+/// ceiling must not error or hang the run. The call never reaches
+/// `host.semantic_rank` (that is the point — no further embedding-service
+/// round trips) and, being internal, never appears in the call trace.
+fn enqueue_internal_call_over_ceiling(
+    seq: u64,
+    id: String,
+    params: Value,
+    cfg: &RunnerConfig,
+    pending_tool_calls: &mut FuturesUnordered<ToolCallFut<'_>>,
+) {
+    let redacted_params = super::trace::redact_trace_params(&params, cfg.trace_params);
+    pending_tool_calls.push(Box::pin(async move {
+        (seq, id, redacted_params, Ok(json!({ "ranked": [] })), 0)
+    }));
 }
 
 async fn dispatch_local_provider_stub(
@@ -1223,6 +1284,182 @@ sleep 3600
                 .iter()
                 .all(|call| call.error_kind.as_deref() != Some("call_budget_exceeded")),
             "the internal call must not consume a budget slot"
+        );
+    }
+
+    /// The internal-call ceiling: `__lab_internal::*` calls stay excluded from
+    /// the ordinary budget and the call trace, but are metered separately
+    /// against `MAX_INTERNAL_CALLS_PER_RUN`. Over-ceiling internal calls must
+    /// (a) settle with the fail-open empty `{"ranked": []}` ToolResult (never
+    /// a ToolError — FAIL-OPEN invariant), (b) never reach
+    /// `host.semantic_rank` (no further embedding-service round trips),
+    /// (c) stay absent from the call trace, and (d) leave the ordinary-call
+    /// budget untouched.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn drive_runner_caps_internal_calls_and_settles_over_ceiling_fail_open() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use crate::host::{ResolvedSnippet, ToolCallOutcome, ToolsRender};
+        use crate::types::{CodeModeCaller, CodeModeSurface, ToolScope};
+        use labby_runtime::CodeModeConfig;
+
+        struct CountingHost {
+            pool: RunnerPool,
+            semantic_calls: AtomicUsize,
+        }
+
+        impl CodeModeHost for CountingHost {
+            async fn list_tools(
+                &self,
+                _caller: &CodeModeCaller,
+                _surface: CodeModeSurface,
+                _scope: &ToolScope,
+                _include_snippets: bool,
+                _use_cache: bool,
+            ) -> Result<ToolsRender, ToolError> {
+                Ok(ToolsRender {
+                    fingerprint: "counting".to_string(),
+                    entries: Vec::new(),
+                    catalog_json: "[]".to_string(),
+                    serialized_size: 2,
+                })
+            }
+
+            async fn call_tool(
+                &self,
+                _id: &str,
+                _params: Value,
+                _caller: &CodeModeCaller,
+                _surface: CodeModeSurface,
+                _scope: &ToolScope,
+            ) -> Result<ToolCallOutcome, ToolError> {
+                Err(ToolError::Sdk {
+                    sdk_kind: "unknown_tool".to_string(),
+                    message: "CountingHost exposes no tools".to_string(),
+                })
+            }
+
+            async fn resolve_snippet(
+                &self,
+                _name: &str,
+                _input: Value,
+            ) -> Result<ResolvedSnippet, ToolError> {
+                Err(ToolError::Sdk {
+                    sdk_kind: "not_found".to_string(),
+                    message: "CountingHost exposes no snippets".to_string(),
+                })
+            }
+
+            async fn semantic_rank(
+                &self,
+                _query: String,
+                _top_k: usize,
+                _caller: &CodeModeCaller,
+                _surface: CodeModeSurface,
+                _scope: &ToolScope,
+            ) -> Result<Vec<(String, f32)>, ToolError> {
+                self.semantic_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(Vec::new())
+            }
+
+            async fn config(&self) -> CodeModeConfig {
+                CodeModeConfig::default()
+            }
+
+            fn runner_pool(&self) -> &RunnerPool {
+                &self.pool
+            }
+        }
+
+        let ceiling = MAX_INTERNAL_CALLS_PER_RUN;
+        let internal_total = ceiling + 4;
+        let ord1 = internal_total + 1;
+        let ord2 = internal_total + 2;
+        // Capture everything the host writes back to the stub so the test can
+        // assert every internal call settled as a ToolResult (fail-open), not
+        // a ToolError.
+        let capture = tempfile::NamedTempFile::new().expect("create capture file");
+        let capture_path = capture.path().display();
+        let script = format!(
+            r#"
+exec 3<&0
+cat <&3 >"{capture_path}" &
+i=1
+while [ "$i" -le {internal_total} ]; do
+  printf '{{"type":"tool_call","seq":%d,"id":"__lab_internal::semantic_rank","params":{{"query":"q","limit":5}}}}\n' "$i"
+  i=$((i+1))
+done
+printf '{{"type":"tool_call","seq":{ord1},"id":"stub::tool","params":{{}}}}\n'
+printf '{{"type":"tool_call","seq":{ord2},"id":"stub::tool","params":{{}}}}\n'
+sleep 2
+printf '{{"type":"done"}}\n'
+sleep 3600
+"#
+        );
+        let host = CountingHost {
+            pool: RunnerPool::from_env().expect("test process must expose current executable"),
+            semantic_calls: AtomicUsize::new(0),
+        };
+        let broker = CodeModeBroker::new(Some(&host));
+        let mut runner = PooledRunner::spawn_stub_script(&script).expect("spawn script stub");
+        let outcome = broker
+            .drive_runner(&mut runner, &test_config(Duration::from_secs(30)))
+            .await;
+        let response = match outcome {
+            DriveOutcome::Completed(response) => response,
+            DriveOutcome::ExecutionError(err) | DriveOutcome::RunnerUnhealthy(err) => {
+                panic!(
+                    "over-ceiling internal calls must fail open, got error kind `{}`",
+                    err.kind()
+                )
+            }
+        };
+        // (b) the ceiling actually gates dispatch: only the first
+        // MAX_INTERNAL_CALLS_PER_RUN internal calls reached the host.
+        assert_eq!(
+            host.semantic_calls.load(Ordering::SeqCst),
+            ceiling,
+            "over-ceiling internal calls must never reach host.semantic_rank"
+        );
+        // (c) internal calls — under and over ceiling — stay out of the trace.
+        assert!(
+            response
+                .calls
+                .iter()
+                .all(|call| !call.id.starts_with("__lab_internal::")),
+            "internal calls must not appear in the call trace"
+        );
+        // (d) the ordinary budget is unaffected: both ordinary calls are
+        // traced (as unknown_tool failures) and none is budget-rejected.
+        assert_eq!(
+            response.calls.len(),
+            2,
+            "both ordinary calls must be traced"
+        );
+        assert!(
+            response
+                .calls
+                .iter()
+                .all(|call| call.error_kind.as_deref() != Some("call_budget_exceeded")),
+            "internal calls must not consume ordinary budget slots"
+        );
+        // (a) every internal call — including the over-ceiling ones — settled
+        // its promise with the fail-open `{"ranked": []}` ToolResult. Poll
+        // briefly: the background `cat` may still be flushing the last lines
+        // to the capture file when the drive loop returns.
+        let mut contents = String::new();
+        for _ in 0..50 {
+            contents = std::fs::read_to_string(capture.path()).unwrap_or_default();
+            if contents.matches(r#""ranked":[]"#).count() >= internal_total {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert_eq!(
+            contents.matches(r#""ranked":[]"#).count(),
+            internal_total,
+            "every internal call (including over-ceiling) must settle with the fail-open empty ranked result"
         );
     }
 

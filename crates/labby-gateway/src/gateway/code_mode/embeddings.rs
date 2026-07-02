@@ -7,8 +7,10 @@
 //! itself returns ordinary `Result`s and does not implement the
 //! cooldown/fail-open policy — that is the caller's responsibility.
 
+use std::sync::LazyLock;
 use std::time::Duration;
 
+use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -29,6 +31,13 @@ pub(crate) const TEI_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 /// memory use.
 pub(crate) const TEI_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
+/// Shared `reqwest::Client` for all TEI requests. `reqwest::Client` is
+/// internally `Arc`-wrapped and holds a connection pool, so one process-wide
+/// client reuses connections across `/embed` calls instead of paying a fresh
+/// connector (and TLS handshake) per request. The per-request timeout stays
+/// on the request builder ([`TEI_REQUEST_TIMEOUT`]).
+static TEI_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
+
 #[derive(Debug, Deserialize)]
 struct TeiEmbedResponse(Vec<Vec<f32>>);
 
@@ -48,9 +57,8 @@ pub(crate) async fn embed_via_tei(url: &str, texts: &[String]) -> Result<Vec<Vec
 }
 
 async fn embed_batch(url: &str, texts: &[String]) -> Result<Vec<Vec<f32>>, ToolError> {
-    let client = reqwest::Client::new();
     let endpoint = format!("{}/embed", url.trim_end_matches('/'));
-    let response = client
+    let response = TEI_CLIENT
         .post(&endpoint)
         .timeout(TEI_REQUEST_TIMEOUT)
         .json(&json!({ "inputs": texts }))
@@ -66,20 +74,7 @@ async fn embed_batch(url: &str, texts: &[String]) -> Result<Vec<Vec<f32>>, ToolE
             message: format!("TEI returned HTTP {}", response.status()),
         });
     }
-    let body = response.bytes().await.map_err(|err| ToolError::Sdk {
-        sdk_kind: "network_error".to_string(),
-        message: format!("failed to read TEI response body: {err}"),
-    })?;
-    if body.len() > TEI_MAX_RESPONSE_BYTES {
-        return Err(ToolError::Sdk {
-            sdk_kind: "decode_error".to_string(),
-            message: format!(
-                "TEI response body is {} bytes, exceeding the {} byte cap",
-                body.len(),
-                TEI_MAX_RESPONSE_BYTES
-            ),
-        });
-    }
+    let body = read_tei_body_capped(response).await?;
     let parsed: TeiEmbedResponse = serde_json::from_slice(&body).map_err(|err| ToolError::Sdk {
         sdk_kind: "decode_error".to_string(),
         message: format!("failed to decode TEI /embed response: {err}"),
@@ -95,6 +90,49 @@ async fn embed_batch(url: &str, texts: &[String]) -> Result<Vec<Vec<f32>>, ToolE
         });
     }
     Ok(parsed.0)
+}
+
+/// Read a TEI response body into a `Vec<u8>` while actually bounding memory
+/// at [`TEI_MAX_RESPONSE_BYTES`]: reject early on a declared `Content-Length`
+/// over the cap, then count bytes as `bytes_stream()` yields chunks and abort
+/// the moment the running total exceeds the cap — never buffering the whole
+/// oversized body first. Mirrors `upstream::http_client::read_body_capped`.
+///
+/// The cap breach keeps the pre-existing `decode_error` kind, so callers'
+/// fail-open handling (cooldown + empty result) is unchanged.
+async fn read_tei_body_capped(response: reqwest::Response) -> Result<Vec<u8>, ToolError> {
+    let too_large = |observed: usize| ToolError::Sdk {
+        sdk_kind: "decode_error".to_string(),
+        message: format!(
+            "TEI response body is {observed} bytes, exceeding the {TEI_MAX_RESPONSE_BYTES} byte cap"
+        ),
+    };
+    // Fast reject when a hostile/misbehaving endpoint declares the oversized
+    // body up front.
+    let declared = response.content_length();
+    if let Some(cl) = declared
+        && cl > TEI_MAX_RESPONSE_BYTES as u64
+    {
+        return Err(too_large(usize::try_from(cl).unwrap_or(usize::MAX)));
+    }
+    // Preallocate only when Content-Length is present and honest (≤ cap).
+    let initial_cap = declared
+        .map(|cl| cl.min(TEI_MAX_RESPONSE_BYTES as u64) as usize)
+        .unwrap_or(0);
+    let mut body: Vec<u8> = Vec::with_capacity(initial_cap);
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|err| ToolError::Sdk {
+            sdk_kind: "network_error".to_string(),
+            message: format!("failed to read TEI response body: {err}"),
+        })?;
+        let running_total = body.len().saturating_add(chunk.len());
+        if running_total > TEI_MAX_RESPONSE_BYTES {
+            return Err(too_large(running_total));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 /// Cosine similarity between two equal-length vectors. Returns `0.0` for a
@@ -187,6 +225,88 @@ mod tests {
         // Port 1 is a reserved/unused low port — connection refused, fast.
         let result = embed_via_tei("http://127.0.0.1:1", &["test".to_string()]).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn embed_via_tei_oversized_declared_body_is_rejected() {
+        // A body over TEI_MAX_RESPONSE_BYTES with an honest Content-Length is
+        // rejected via the header pre-check — before buffering anything —
+        // with the same decode_error kind callers already fail open on.
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/embed"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_bytes(vec![
+                b'0';
+                TEI_MAX_RESPONSE_BYTES
+                    + 1
+            ]))
+            .mount(&server)
+            .await;
+        let err = embed_via_tei(&server.uri(), &["x".to_string()])
+            .await
+            .expect_err("over-cap response must be rejected");
+        match err {
+            ToolError::Sdk { sdk_kind, message } => {
+                assert_eq!(sdk_kind, "decode_error");
+                assert!(
+                    message.contains("byte cap"),
+                    "unexpected message: {message}"
+                );
+            }
+            other => panic!("expected decode_error cap breach, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn embed_via_tei_streaming_body_over_cap_aborts_mid_stream() {
+        // A response WITHOUT Content-Length (read-until-close) must be
+        // aborted the moment the streamed running total exceeds the cap —
+        // the cap has to bound memory, not just post-validate a fully
+        // buffered body.
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test listener");
+        let addr = listener.local_addr().expect("listener addr");
+        tokio::spawn(async move {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            // Minimally drain the request head, then answer with no
+            // Content-Length so reqwest streams until close.
+            let mut buf = [0u8; 4096];
+            let _ = socket.read(&mut buf).await;
+            if socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .is_err()
+            {
+                return;
+            }
+            let chunk = vec![b'1'; 64 * 1024];
+            for _ in 0..(TEI_MAX_RESPONSE_BYTES / chunk.len() + 2) {
+                if socket.write_all(&chunk).await.is_err() {
+                    // The client aborted the read at the cap — expected.
+                    return;
+                }
+            }
+            let _ = socket.shutdown().await;
+        });
+        let err = embed_via_tei(&format!("http://{addr}"), &["x".to_string()])
+            .await
+            .expect_err("over-cap streamed response must be rejected");
+        match err {
+            ToolError::Sdk { sdk_kind, message } => {
+                assert_eq!(sdk_kind, "decode_error");
+                assert!(
+                    message.contains("byte cap"),
+                    "unexpected message: {message}"
+                );
+            }
+            other => panic!("expected decode_error cap breach, got {other:?}"),
+        }
     }
 
     #[test]
