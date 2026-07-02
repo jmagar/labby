@@ -129,6 +129,11 @@ actions:
       # LABBY_PROVISION_ACTION: uv-python
       runuser -u labby -- env HOME=/home/labby USER=labby LOGNAME=labby XDG_CONFIG_HOME=/home/labby/.config XDG_CACHE_HOME=/home/labby/.cache XDG_DATA_HOME=/home/labby/.local/share sh -lc '
       set -eu
+      # uv discovers config by walking up from the CWD; the provision runs from
+      # root'\''s home, so uv would try to read /root/uv.toml (unreadable by labby).
+      # Pin the CWD to the labby home and disable ambient uv config discovery.
+      cd "$HOME"
+      export UV_NO_CONFIG=1
       mkdir -p "$HOME/.local/bin"
       tmp="$(mktemp -d)"
       trap '\''rm -rf "$tmp"'\'' EXIT
