@@ -24,6 +24,11 @@ use labby_runtime::CodeModeConfig;
 /// as a projection.
 #[derive(Debug, Clone)]
 pub struct ToolsRender {
+    /// Fingerprint of the live tool set this render was built from (sorted
+    /// tool ids + snippet directory state). Hosts key auxiliary per-catalog
+    /// caches (e.g. embedding vectors) off this without recomputing it
+    /// themselves.
+    pub fingerprint: String,
     /// The descriptors (tools + snippets) visible to this execution.
     pub entries: Vec<ToolDescriptor>,
     /// `serde_json::to_string(&entries)` — the `const tools = ...` payload.
@@ -87,6 +92,31 @@ pub trait CodeModeHost: Send + Sync {
         input: Value,
     ) -> impl Future<Output = Result<ResolvedSnippet, ToolError>> + Send;
 
+    /// Rank the host's Code Mode catalog by semantic similarity to `query`,
+    /// for the exact same `caller`/`surface`/`scope` that would be passed to
+    /// `list_tools`/`call_tool` for this execution. Returns `(entry_id,
+    /// similarity)` pairs, descending by similarity, capped to `top_k`.
+    ///
+    /// Hosts with no embedding service configured (or currently in a failure
+    /// cooldown) MUST return `Ok(Vec::new())` rather than an `Err` — an empty
+    /// result is the fail-open signal `codemode.search()` uses to skip
+    /// semantic scoring for that call. `Err` is reserved for genuine
+    /// host-side bugs, not for "the embedding service is unreachable".
+    ///
+    /// Implementations must only ever return ids that are members of the
+    /// SAME scope-filtered entry set `list_tools` would return for these
+    /// exact `caller`/`surface`/`scope` — this is a security invariant, not
+    /// an optimization: the caller (`call_tool_id`) intentionally does not
+    /// re-check `scope.allows()` on this method's results.
+    fn semantic_rank(
+        &self,
+        query: String,
+        top_k: usize,
+        caller: &CodeModeCaller,
+        surface: CodeModeSurface,
+        scope: &ToolScope,
+    ) -> impl Future<Output = Result<Vec<(String, f32)>, ToolError>> + Send;
+
     /// Code Mode configuration (timeouts, log/response caps).
     fn config(&self) -> impl Future<Output = CodeModeConfig> + Send;
 
@@ -122,6 +152,7 @@ impl CodeModeHost for NoopHost {
         _use_cache: bool,
     ) -> Result<ToolsRender, ToolError> {
         Ok(ToolsRender {
+            fingerprint: "noop".to_string(),
             entries: Vec::new(),
             catalog_json: "[]".to_string(),
             serialized_size: 2,
@@ -151,6 +182,17 @@ impl CodeModeHost for NoopHost {
             sdk_kind: "not_found".to_string(),
             message: "NoopHost exposes no snippets".to_string(),
         })
+    }
+
+    async fn semantic_rank(
+        &self,
+        _query: String,
+        _top_k: usize,
+        _caller: &CodeModeCaller,
+        _surface: CodeModeSurface,
+        _scope: &ToolScope,
+    ) -> Result<Vec<(String, f32)>, ToolError> {
+        Ok(Vec::new())
     }
 
     async fn config(&self) -> CodeModeConfig {

@@ -113,6 +113,25 @@ pub struct GatewayManager {
     /// the upstream catalog has not changed between calls.
     pub(super) code_mode_catalog_render_cache:
         Arc<Mutex<Option<crate::gateway::code_mode::CatalogRenderCache>>>,
+    /// Cached Code Mode catalog embedding vectors, keyed by the same
+    /// fingerprint as `code_mode_catalog_render_cache`. `RwLock` (not
+    /// `Mutex`), matching the `config: Arc<RwLock<GatewayConfig>>` precedent
+    /// above — this is a read-heavy cache; writes only happen on a
+    /// fingerprint change or the very first embed.
+    ///
+    /// `ensure_embeddings_for_fingerprint` holds the write lock across the
+    /// full check-then-embed-then-store sequence (not just the store) as a
+    /// single-flight guard: concurrent calls against the same cold
+    /// fingerprint serialize onto one TEI batch call instead of firing N
+    /// redundant ones.
+    pub(super) code_mode_embedding_cache:
+        Arc<RwLock<Option<crate::gateway::code_mode::CatalogEmbeddingCache>>>,
+    /// Fail-open cooldown gate for the TEI semantic-search embedding
+    /// service. `Some(instant)` = a call failed at `instant`; calls made
+    /// before `instant + 30s` skip TEI entirely (falling back to
+    /// lexical-only) rather than retrying a known-down service on every
+    /// search. `None` = healthy (or never tried).
+    pub(super) semantic_search_last_failure: Arc<RwLock<Option<Instant>>>,
     /// Cached snippet metadata for Code Mode discovery. Snippet executable
     /// source is never stored here; `codemode.run()` resolves source lazily.
     pub(super) code_mode_snippet_metadata_cache:

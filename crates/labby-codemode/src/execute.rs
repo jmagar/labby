@@ -13,14 +13,31 @@ use super::normalize_user_code;
 use super::shape::shape_final_result;
 use super::truncate::{response_within_budget, truncate_execution_response};
 use super::types::{
-    CodeModeCaller, CodeModeDiscoveryEntry, CodeModeExecutionError, CodeModeExecutionOutcome,
-    CodeModeExecutionResponse, CodeModeSurface, CodeModeToolId, CodeModeToolRef, ToolScope,
+    CodeModeCaller, CodeModeCatalogKind, CodeModeDiscoveryEntry, CodeModeExecutionError,
+    CodeModeExecutionOutcome, CodeModeExecutionResponse, CodeModeSurface, CodeModeToolId,
+    CodeModeToolRef, ToolDescriptor, ToolScope,
 };
 
 /// Compatibility key a Code Mode snippet can return
 /// (`return { __ui: <result> }`) to unwrap the final result payload while using
 /// the last-wins captured mcp-ui widget link.
 const UI_OPT_IN_KEY: &str = "__ui";
+
+/// Reserved namespace for host-internal pseudo-tool calls that are NOT real
+/// Code Mode tool calls — they never reach `host.call_tool`, never consume
+/// the per-run call budget, and never appear in `response.calls`. The
+/// sandbox's generated JS calls these via the ordinary `callTool(id, params)`
+/// primitive so no new sandbox protocol surface is needed; `call_tool_id`
+/// intercepts ids in this namespace before the normal scope check.
+const LAB_INTERNAL_NAMESPACE: &str = "__lab_internal";
+
+/// Maximum accepted semantic query size in bytes for the reserved
+/// `__lab_internal::semantic_rank` call. Oversized queries are truncated on a
+/// char boundary — never errored — before reaching `host.semantic_rank`, so a
+/// hostile sandbox cannot ship arbitrarily large payloads to the embedding
+/// service. Mirrors the adjacent `limit.clamp(1, 50)` clamp-don't-reject
+/// pattern (FAIL-OPEN invariant).
+const MAX_SEMANTIC_QUERY_BYTES: usize = 8 * 1024;
 
 impl<H: CodeModeHost> CodeModeBroker<'_, H> {
     pub async fn execute(
@@ -143,24 +160,18 @@ impl<H: CodeModeHost> CodeModeBroker<'_, H> {
                 String::new()
             });
         };
-        let include_snippets = caller.can_use_snippets() && !scope.is_scoped();
-        // CLI with no explicit namespace scope can be served from the host's
-        // render cache; everything else builds live.
-        let use_cache = surface == CodeModeSurface::Cli && scope.allowed_namespaces().is_none();
+        let (include_snippets, use_cache) = discovery_render_params(caller, surface, scope);
         let render = host
             .list_tools(caller, surface, scope, include_snippets, use_cache)
             .await?;
         let catalog = render
             .entries
             .into_iter()
-            .filter(|entry| {
-                entry.kind == super::types::CodeModeCatalogKind::Snippet
-                    || scope.allows(&entry.namespace, &entry.name)
-            })
+            .filter(|entry| discovery_entry_visible(entry, scope))
             .collect::<Vec<_>>();
         let mut namespaces: Vec<String> = catalog
             .iter()
-            .filter(|entry| entry.kind == super::types::CodeModeCatalogKind::Tool)
+            .filter(|entry| entry.kind == CodeModeCatalogKind::Tool)
             .map(|entry| entry.namespace.clone())
             .collect();
         namespaces.sort();
@@ -170,16 +181,16 @@ impl<H: CodeModeHost> CodeModeBroker<'_, H> {
             .iter()
             .map(CodeModeDiscoveryEntry::from_catalog)
             .collect::<Vec<_>>();
-        let discovery_js =
-            super::preamble::generate_discovery_js(&discovery_entries).map_err(|message| {
-                ToolError::Sdk {
-                    sdk_kind: "invalid_param".to_string(),
-                    message,
-                }
+        let code_mode_config = host.config().await;
+        let blend_weight = code_mode_config.semantic_search.blend_weight;
+        let discovery_js = super::preamble::generate_discovery_js(&discovery_entries, blend_weight)
+            .map_err(|message| ToolError::Sdk {
+                sdk_kind: "invalid_param".to_string(),
+                message,
             })?;
         let tool_entries = catalog
             .iter()
-            .filter(|entry| entry.kind == super::types::CodeModeCatalogKind::Tool)
+            .filter(|entry| entry.kind == CodeModeCatalogKind::Tool)
             .collect::<Vec<_>>();
         let namespace_js =
             super::preamble::generate_js_proxy_from_catalog(&tool_entries, &namespaces).map_err(
@@ -308,6 +319,11 @@ impl<H: CodeModeHost> CodeModeBroker<'_, H> {
         };
         match parsed.reference {
             CodeModeToolRef::Tool { namespace, tool } => {
+                if namespace == LAB_INTERNAL_NAMESPACE {
+                    return self
+                        .dispatch_internal_call(&tool, params, &caller, surface, scope)
+                        .await;
+                }
                 if !scope.allows(&namespace, &tool) {
                     return Err(ToolError::Sdk {
                         sdk_kind: "unknown_tool".to_string(),
@@ -339,6 +355,60 @@ impl<H: CodeModeHost> CodeModeBroker<'_, H> {
                 }
                 Ok(outcome.value)
             }
+        }
+    }
+
+    /// Dispatch a reserved `__lab_internal::*` pseudo-tool call. These never
+    /// reach `host.call_tool` and are never subject to `scope.allows()` —
+    /// see the `LAB_INTERNAL_NAMESPACE` doc comment for why that's safe.
+    async fn dispatch_internal_call(
+        &self,
+        tool: &str,
+        params: Value,
+        caller: &CodeModeCaller,
+        surface: CodeModeSurface,
+        scope: &ToolScope,
+    ) -> Result<Value, ToolError> {
+        let Some(host) = self.host else {
+            return Err(ToolError::Sdk {
+                sdk_kind: "unknown_tool".to_string(),
+                message: "no tool source configured".to_string(),
+            });
+        };
+        match tool {
+            "semantic_rank" => {
+                let query = clamp_semantic_query(
+                    params
+                        .get("query")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                );
+                let limit = params
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .map(|n| n.clamp(1, 50) as usize)
+                    .unwrap_or(50);
+                // Fail-open at this layer too: even though the trait contract
+                // says implementations return `Ok(Vec::new())` on degraded
+                // paths (never `Err`), an accidental `Err` from a host bug
+                // still must not break `codemode.search()` — degrade to an
+                // empty ranked list, identical to the "no semantic signal"
+                // case.
+                let ranked = host
+                    .semantic_rank(query, limit, caller, surface, scope)
+                    .await
+                    .unwrap_or_default();
+                let ranked_json: Vec<Value> = ranked
+                    .into_iter()
+                    .map(|(id, score)| serde_json::json!({ "id": id, "score": score }))
+                    .collect();
+                Ok(serde_json::json!({ "ranked": ranked_json }))
+            }
+            _ => Err(ToolError::Sdk {
+                sdk_kind: "unknown_tool".to_string(),
+                message: format!("unknown internal tool `{LAB_INTERNAL_NAMESPACE}::{tool}`"),
+            }),
         }
     }
 
@@ -396,6 +466,60 @@ pub(crate) fn local_providers_allowed(caller: &CodeModeCaller, scope: &ToolScope
     caller.is_admin() && !scope.is_scoped()
 }
 
+/// Truncate a semantic query to at most [`MAX_SEMANTIC_QUERY_BYTES`], cutting
+/// on a char boundary so the result stays valid UTF-8. Never errors — an
+/// oversized query degrades to its prefix, mirroring the fail-open posture of
+/// the rest of the semantic path.
+fn clamp_semantic_query(mut query: String) -> String {
+    if query.len() > MAX_SEMANTIC_QUERY_BYTES {
+        // `str::floor_char_boundary` is nightly-only; walk back from the cap
+        // (at most 3 steps — UTF-8 sequences are ≤ 4 bytes) to the nearest
+        // boundary. `is_char_boundary(0)` is always true, so this terminates.
+        let mut boundary = MAX_SEMANTIC_QUERY_BYTES;
+        while !query.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        query.truncate(boundary);
+    }
+    query
+}
+
+/// The `(include_snippets, use_cache)` discovery-render parameters for a Code
+/// Mode execution's `caller`/`surface`/`scope`.
+///
+/// This is the single source of truth for the formulas `build_code_mode_proxy`
+/// uses when rendering the sandbox's own discovery catalog. Hosts that
+/// recompute the same render out-of-band (e.g. a gateway's `semantic_rank`
+/// recomputing the scope-filtered entry set) MUST call this instead of
+/// restating the formulas — the semantic-scope security invariant rests on
+/// the two sites never diverging.
+///
+/// - snippets are included only for snippet-capable callers on unscoped runs;
+/// - the host's render cache is only safe for CLI executions with no explicit
+///   namespace scope (everything else builds live).
+pub fn discovery_render_params(
+    caller: &CodeModeCaller,
+    surface: CodeModeSurface,
+    scope: &ToolScope,
+) -> (bool, bool) {
+    let include_snippets = caller.can_use_snippets() && !scope.is_scoped();
+    let use_cache = surface == CodeModeSurface::Cli && scope.allowed_namespaces().is_none();
+    (include_snippets, use_cache)
+}
+
+/// Whether a rendered catalog entry is visible to the sandbox's discovery
+/// catalog under `scope`: snippets are always visible, tools must pass
+/// `scope.allows`.
+///
+/// Single source of truth for the post-render entry filter shared by
+/// `build_code_mode_proxy` and any host recomputing the same scope-filtered
+/// entry set (e.g. a gateway's `semantic_rank`) — see
+/// [`discovery_render_params`] for why divergence here is a security bug,
+/// not a style issue.
+pub fn discovery_entry_visible(entry: &ToolDescriptor, scope: &ToolScope) -> bool {
+    entry.kind == CodeModeCatalogKind::Snippet || scope.allows(&entry.namespace, &entry.name)
+}
+
 fn ui_resource_uri(ui_meta: &Value) -> Option<&str> {
     ui_meta.get("resourceUri").and_then(Value::as_str)
 }
@@ -417,6 +541,46 @@ mod tests {
             logs: Vec::new(),
             artifacts: Vec::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn call_tool_id_routes_lab_internal_namespace_before_scope_check() {
+        // A ToolScope that allows nothing should still let `__lab_internal::*`
+        // through, because it's intercepted before the scope.allows() check.
+        let host = NoopHost::default();
+        let broker = CodeModeBroker::new(Some(&host));
+        let empty_scope = ToolScope::scoped_namespaces(vec![], vec![]);
+        let result = broker
+            .call_tool_id(
+                "__lab_internal::semantic_rank",
+                json!({ "query": "test", "limit": 5 }),
+                CodeModeCaller::TrustedLocal,
+                CodeModeSurface::Cli,
+                &empty_scope,
+            )
+            .await;
+        // NoopHost's semantic_rank always returns Ok(vec![]), so this must
+        // succeed with an empty ranked list, not a `forbidden`/`unknown_tool`
+        // scope error.
+        let value = result.expect("internal dispatch must bypass scope.allows()");
+        assert_eq!(value, json!({ "ranked": [] }));
+    }
+
+    #[tokio::test]
+    async fn call_tool_id_rejects_unknown_internal_tool() {
+        let host = NoopHost::default();
+        let broker = CodeModeBroker::new(Some(&host));
+        let scope = ToolScope::default();
+        let result = broker
+            .call_tool_id(
+                "__lab_internal::not_a_real_internal_tool",
+                json!({}),
+                CodeModeCaller::TrustedLocal,
+                CodeModeSurface::Cli,
+                &scope,
+            )
+            .await;
+        assert!(result.is_err());
     }
 
     #[test]
@@ -466,6 +630,52 @@ mod tests {
             response.ui.as_ref().expect("widget attached").ui_meta["resourceUri"],
             "ui://ytdl-mcp/youtube-search.html"
         );
+    }
+
+    #[test]
+    fn clamp_semantic_query_leaves_small_queries_untouched() {
+        assert_eq!(clamp_semantic_query("hello".to_string()), "hello");
+        let exactly_max = "a".repeat(MAX_SEMANTIC_QUERY_BYTES);
+        assert_eq!(clamp_semantic_query(exactly_max.clone()), exactly_max);
+    }
+
+    #[test]
+    fn clamp_semantic_query_truncates_oversized_ascii_without_error() {
+        let oversized = "a".repeat(MAX_SEMANTIC_QUERY_BYTES + 1000);
+        let clamped = clamp_semantic_query(oversized);
+        assert_eq!(clamped.len(), MAX_SEMANTIC_QUERY_BYTES);
+    }
+
+    #[test]
+    fn clamp_semantic_query_truncates_on_char_boundary() {
+        // 4-byte scorpions straddling the cap: the clamp must land on a char
+        // boundary (valid UTF-8), never split a code point.
+        let oversized = "\u{1F982}".repeat(MAX_SEMANTIC_QUERY_BYTES / 4 + 10);
+        let clamped = clamp_semantic_query(oversized);
+        assert!(clamped.len() <= MAX_SEMANTIC_QUERY_BYTES);
+        assert_eq!(
+            clamped.len(),
+            MAX_SEMANTIC_QUERY_BYTES - MAX_SEMANTIC_QUERY_BYTES % 4
+        );
+        assert!(clamped.chars().all(|c| c == '\u{1F982}'));
+    }
+
+    #[tokio::test]
+    async fn dispatch_internal_call_truncates_oversized_query_instead_of_erroring() {
+        let host = NoopHost::default();
+        let broker = CodeModeBroker::new(Some(&host));
+        let oversized = "q".repeat(MAX_SEMANTIC_QUERY_BYTES * 4);
+        let result = broker
+            .call_tool_id(
+                "__lab_internal::semantic_rank",
+                json!({ "query": oversized, "limit": 5 }),
+                CodeModeCaller::TrustedLocal,
+                CodeModeSurface::Cli,
+                &ToolScope::default(),
+            )
+            .await;
+        let value = result.expect("oversized query must be truncated, not errored");
+        assert_eq!(value, json!({ "ranked": [] }));
     }
 
     #[test]

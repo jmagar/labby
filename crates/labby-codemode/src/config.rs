@@ -13,6 +13,16 @@ pub const MAX_SOURCE_BYTES: usize = 20_000;
 /// Maximum `codemode.run(...)` snippet resolutions allowed in a single run.
 pub(crate) const MAX_SNIPPET_RESOLVES_PER_RUN: usize = 32;
 
+/// Hard ceiling on reserved `__lab_internal::*` pseudo-tool calls per run.
+///
+/// Internal calls (currently `semantic_rank`) are deliberately exempt from
+/// the ordinary `callTool` budget and the call trace, but each one can
+/// trigger an embedding-service round trip — without a separate ceiling,
+/// sandbox JS could loop them for unbounded load on the shared TEI service.
+/// Over-ceiling internal calls settle fail-open with the empty semantic
+/// result instead of erroring the run (see `runner_drive.rs`).
+pub(crate) const MAX_INTERNAL_CALLS_PER_RUN: usize = 32;
+
 /// Maximum total bytes of resolved snippet source allowed in a single run.
 pub(crate) const MAX_SNIPPET_RESOLVED_BYTES_PER_RUN: usize = 256 * 1024;
 

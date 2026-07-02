@@ -24,6 +24,12 @@ use super::GatewayManager;
 /// return immediately without hitting upstreams again.
 const CATALOG_REFRESH_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Cooldown after a TEI failure before the next attempt is tried. Hardcoded
+/// per the plan's YAGNI cut — long enough that a flapping/restarting TEI
+/// container isn't hit on every search call, short enough that recovery is
+/// picked up within one working session.
+const SEMANTIC_SEARCH_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
+
 #[derive(Debug, Clone)]
 struct CodeModeReprobeFailure {
     upstream: String,
@@ -505,6 +511,134 @@ impl GatewayManager {
     ) {
         let mut guard = self.code_mode_catalog_render_cache.lock().await;
         *guard = Some(cache);
+    }
+
+    /// Return the cached catalog embedding vectors if the fingerprint still
+    /// matches.
+    ///
+    /// Production code goes through `ensure_embeddings_for_fingerprint`
+    /// (which serves warm hits itself); this read-only accessor exists for
+    /// tests asserting cache state without triggering an embed.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) async fn cached_embeddings(
+        &self,
+        fingerprint: &str,
+    ) -> Option<Vec<(String, Vec<f32>)>> {
+        let guard = self.code_mode_embedding_cache.read().await;
+        guard.as_ref().and_then(|cache| {
+            if cache.fingerprint == fingerprint {
+                Some(cache.vectors.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Single-flight: ensure the embedding cache is warm for `fingerprint`,
+    /// computing it via `embeddings::embed_via_tei` if needed. Holds the
+    /// write lock across the whole check-then-embed-then-store sequence so
+    /// concurrent callers against the same cold fingerprint serialize onto
+    /// one TEI call rather than firing redundant ones. Fail-open: returns an
+    /// empty `Vec` (and leaves the cache empty) on ANY embedding failure —
+    /// callers never see an `Err` from this method.
+    pub(crate) async fn ensure_embeddings_for_fingerprint(
+        &self,
+        fingerprint: &str,
+        entries: &[crate::gateway::code_mode::ToolDescriptor],
+    ) -> Vec<(String, Vec<f32>)> {
+        let config = self.code_mode_config().await.semantic_search;
+        if !config.is_configured() || entries.is_empty() {
+            return Vec::new();
+        }
+        let mut guard = self.code_mode_embedding_cache.write().await;
+        if let Some(cache) = guard.as_ref()
+            && cache.fingerprint == fingerprint
+        {
+            return cache.vectors.clone();
+        }
+        if !self.semantic_search_available_locked().await {
+            return Vec::new();
+        }
+        let ids: Vec<String> = entries.iter().map(|e| e.id.clone()).collect();
+        let texts: Vec<String> = entries.iter().map(|e| e.description.clone()).collect();
+        let tei_url = config
+            .tei_url
+            .as_deref()
+            .expect("is_configured() guarantees tei_url is Some");
+        match crate::gateway::code_mode::embeddings::embed_via_tei(tei_url, &texts).await {
+            Ok(vectors) if vectors.len() == ids.len() => {
+                self.record_semantic_search_recovery().await;
+                let pairs: Vec<(String, Vec<f32>)> = ids.into_iter().zip(vectors).collect();
+                *guard = Some(crate::gateway::code_mode::CatalogEmbeddingCache {
+                    fingerprint: fingerprint.to_string(),
+                    vectors: pairs.clone(),
+                });
+                pairs
+            }
+            Ok(_) => Vec::new(),
+            Err(err) => {
+                self.record_semantic_search_failure(&err.to_string()).await;
+                Vec::new()
+            }
+        }
+    }
+
+    /// True when the semantic search cooldown has elapsed (or no failure has
+    /// been recorded yet) — i.e. it is safe to attempt a TEI call. Internal:
+    /// does not itself acquire `code_mode_embedding_cache`'s lock, so it is
+    /// safe to call while already holding that lock (as
+    /// `ensure_embeddings_for_fingerprint` does).
+    async fn semantic_search_available_locked(&self) -> bool {
+        let guard = self.semantic_search_last_failure.read().await;
+        match *guard {
+            None => true,
+            Some(last_failure) => last_failure.elapsed() >= SEMANTIC_SEARCH_COOLDOWN,
+        }
+    }
+
+    /// Public cooldown check for callers that are NOT already holding the
+    /// embedding-cache lock (e.g. a `semantic_rank` call that skips catalog
+    /// warming entirely because the cache is already warm).
+    pub(crate) async fn semantic_search_available(&self) -> bool {
+        self.semantic_search_available_locked().await
+    }
+
+    /// Record a TEI failure, starting/refreshing the cooldown window. Logs a
+    /// `tracing::warn!` only on the healthy→failing transition so repeated
+    /// failures during an active cooldown don't spam the log.
+    pub(crate) async fn record_semantic_search_failure(&self, reason: &str) {
+        let mut guard = self.semantic_search_last_failure.write().await;
+        let was_healthy = guard.is_none();
+        *guard = Some(Instant::now());
+        drop(guard);
+        if was_healthy {
+            tracing::warn!(
+                surface = "dispatch",
+                service = "code_mode",
+                action = "semantic_search",
+                kind = "tei_unavailable",
+                reason,
+                "Code Mode semantic search TEI call failed; falling back to lexical-only search until cooldown elapses"
+            );
+        }
+    }
+
+    /// Clear the failure cooldown after a successful TEI call. Logs
+    /// `tracing::info!` only on the failing→healthy transition.
+    pub(crate) async fn record_semantic_search_recovery(&self) {
+        let mut guard = self.semantic_search_last_failure.write().await;
+        let was_failing = guard.is_some();
+        *guard = None;
+        drop(guard);
+        if was_failing {
+            tracing::info!(
+                surface = "dispatch",
+                service = "code_mode",
+                action = "semantic_search",
+                kind = "tei_recovered",
+                "Code Mode semantic search TEI call succeeded again; resuming semantic blend"
+            );
+        }
     }
 
     /// Return the cached catalog render if the fingerprint still matches.

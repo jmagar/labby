@@ -10,6 +10,7 @@
 
 pub(crate) mod catalog_cache;
 pub(crate) mod code_mode_host;
+pub(crate) mod embeddings;
 mod search;
 
 // ── Re-exports of the crate's neutral public surface ────────────────────────
@@ -53,4 +54,14 @@ pub(crate) struct CatalogRenderCache {
 pub(crate) struct SnippetMetadataCache {
     pub fingerprint: String,
     pub entries: Vec<labby_codemode::snippet::store::SnippetInfo>,
+}
+
+/// Cached catalog embedding vectors, keyed by the same fingerprint used for
+/// `CatalogRenderCache` (see `search.rs`'s `catalog_from_tools`). One vector
+/// per catalog entry id, computed via one or more batched TEI calls.
+pub(crate) struct CatalogEmbeddingCache {
+    pub fingerprint: String,
+    /// `(entry.id, embedding_vector)` pairs. Callers should look up by id,
+    /// not by index.
+    pub vectors: Vec<(String, Vec<f32>)>,
 }

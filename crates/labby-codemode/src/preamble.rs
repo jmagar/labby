@@ -167,7 +167,10 @@ pub(crate) fn namespace_segment(name: &str) -> String {
 // JS proxy generation (runtime executable, not type declarations)
 // ────────────────────────────────────────────────────────────────────────────
 
-pub(crate) fn generate_discovery_js(entries: &[CodeModeDiscoveryEntry]) -> Result<String, String> {
+pub(crate) fn generate_discovery_js(
+    entries: &[CodeModeDiscoveryEntry],
+    blend_weight: f32,
+) -> Result<String, String> {
     let json = serde_json::to_string(entries)
         .map_err(|err| format!("failed to serialize Code Mode discovery catalog: {err}"))?;
     let types_map: serde_json::Map<String, serde_json::Value> = entries
@@ -198,14 +201,17 @@ function __codemodeTokens(value) {{
   var normalized = __codemodeNormalize(value);
   return normalized ? normalized.split(/\s+/g) : [];
 }}
-codemode.search = function(input) {{
+codemode.search = async function(input) {{
   var query = typeof input === "object" && input !== null ? String(input.query || "") : String(input || "");
   var limit = typeof input === "object" && input !== null && Number.isFinite(Number(input.limit))
     ? Math.max(1, Math.min(50, Number(input.limit)))
     : 50;
   var tokens = __codemodeTokens(query);
   var __codemodeNoMatchHint = "No matches. Broaden or try synonyms, or call codemode.__meta__.upstreams() to list namespaces and search by upstream name.";
-  if (!tokens.length) return Promise.resolve({{ results: [], total: 0, truncated: false, hint: __codemodeNoMatchHint }});
+  if (!tokens.length) return {{ results: [], total: 0, truncated: false, hint: __codemodeNoMatchHint }};
+
+  // --- lexical scoring (unchanged algorithm) ---
+  var lexicalById = {{}};
   var scored = [];
   for (var i = 0; i < __codemodeDiscovery.length; i++) {{
     var entry = __codemodeDiscovery[i];
@@ -231,7 +237,7 @@ codemode.search = function(input) {{
     }}
     var required = tokens.length <= 2 ? tokens.length : Math.ceil(tokens.length * 0.6);
     if (covered >= required) {{
-      scored.push({{
+      var record = {{
         path: entry.path,
         id: entry.id,
         kind: entry.kind,
@@ -241,18 +247,98 @@ codemode.search = function(input) {{
         signature: entry.signature,
         tags: entry.tags || [],
         score: score
-      }});
+      }};
+      lexicalById[entry.id] = record;
+      scored.push(record);
     }}
   }}
+
+  // --- semantic blend ---
+  // Query the host's semantic ranker through the SAME callTool primitive
+  // used for every other host round-trip — no new bridge. Fail-open: any
+  // rejection or malformed response degrades to an empty ranked list, never
+  // an exception that could break search().
+  var ranked = [];
+  try {{
+    var response = await callTool("__lab_internal::semantic_rank", {{ query: query, limit: limit }});
+    ranked = (response && response.ranked) || [];
+  }} catch (e) {{
+    ranked = [];
+  }}
+
+  // Normalization: lexical `score` is an unbounded sum of per-token
+  // best-field weights. We normalize each entry's lexical score by the MAX
+  // score actually observed among THIS query's lexical matches (not a fixed
+  // global ceiling), so normalization adapts to how many tokens/fields
+  // actually matched for this specific query. Semantic cosine similarity is
+  // already bounded to [-1, 1] (see `embeddings::cosine_similarity`'s
+  // `.clamp(-1.0, 1.0)` on the Rust side); we rescale it to [0, 1] to match
+  // the lexical normalization's range before blending.
+  //
+  // Blend formula: blended = max(normalized_lexical, semantic_similarity_0_to_1 * blend_weight).
+  // `max` (not a weighted sum) is deliberate: a strong exact lexical match
+  // should never be outranked by a mediocre semantic match, and a strong
+  // semantic match (synonym case) should surface even with zero lexical
+  // overlap — either signal being strong is sufficient. `blend_weight`
+  // (config default 0.5) discounts semantic-only matches relative to a
+  // perfect lexical match, so ambiguous semantic near-misses don't crowd
+  // out legitimate lexical results at the same rank.
+  var maxLexicalScore = 0;
+  for (var m = 0; m < scored.length; m++) {{
+    if (scored[m].score > maxLexicalScore) maxLexicalScore = scored[m].score;
+  }}
+  var BLEND_WEIGHT = {blend_weight};
+  for (var r = 0; r < ranked.length; r++) {{
+    var rid = ranked[r].id;
+    var semanticSimilarity01 = (ranked[r].score + 1) / 2; // [-1,1] -> [0,1]
+    var existing = lexicalById[rid];
+    if (existing) {{
+      var normalizedLexical = maxLexicalScore > 0 ? existing.score / maxLexicalScore : 0;
+      existing.blendedScore = Math.max(normalizedLexical, semanticSimilarity01 * BLEND_WEIGHT);
+    }} else {{
+      // Semantic-only match: not found by lexical scoring at all (e.g. the
+      // synonym case with zero token overlap). `ranked` can only ever
+      // contain ids already present in `__codemodeDiscovery` (the host's
+      // semantic_rank ranks exclusively within this execution's
+      // already-scope-filtered catalog — a security invariant on the host
+      // side), so this lookup is safe and will always find a match.
+      for (var d = 0; d < __codemodeDiscovery.length; d++) {{
+        if (__codemodeDiscovery[d].id === rid) {{
+          var de = __codemodeDiscovery[d];
+          var record2 = {{
+            path: de.path, id: de.id, kind: de.kind, namespace: de.namespace,
+            name: de.name, description: de.description, signature: de.signature,
+            tags: de.tags || [], score: 0,
+            blendedScore: semanticSimilarity01 * BLEND_WEIGHT
+          }};
+          lexicalById[rid] = record2;
+          scored.push(record2);
+          break;
+        }}
+      }}
+    }}
+  }}
+  // Entries with no semantic signal keep blendedScore = normalizedLexical
+  // (equivalent to max(normalizedLexical, 0)).
+  for (var b = 0; b < scored.length; b++) {{
+    if (scored[b].blendedScore === undefined) {{
+      scored[b].blendedScore = maxLexicalScore > 0 ? scored[b].score / maxLexicalScore : 0;
+    }}
+  }}
+
   scored.sort(function(a, b) {{
+    if (b.blendedScore !== a.blendedScore) return b.blendedScore - a.blendedScore;
     if (b.score !== a.score) return b.score - a.score;
     return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
   }});
   var total = scored.length;
   if (total === 0) {{
-    return Promise.resolve({{ results: [], total: 0, truncated: false, hint: __codemodeNoMatchHint }});
+    return {{ results: [], total: 0, truncated: false, hint: __codemodeNoMatchHint }};
   }}
-  return Promise.resolve({{ results: scored.slice(0, limit), total: total, truncated: total > limit }});
+  var results = scored.slice(0, limit).map(function(r) {{
+    return {{ path: r.path, id: r.id, kind: r.kind, namespace: r.namespace, name: r.name, description: r.description, signature: r.signature, tags: r.tags, score: r.score }};
+  }});
+  return {{ results: results, total: total, truncated: total > limit }};
 }};
 codemode.describe = function(target) {{
   var raw = String(target == null ? "" : target).trim();
@@ -566,7 +652,7 @@ mod tests {
     #[test]
     fn discovery_preamble_preserves_existing_codemode_object() {
         let entries = vec![discovery_entry("arcane", "containers", "List containers")];
-        let js = generate_discovery_js(&entries).expect("js");
+        let js = generate_discovery_js(&entries, 0.5).expect("js");
         assert!(js.contains("globalThis.codemode = globalThis.codemode || {}"));
         assert!(js.contains("codemode.search"));
         assert!(js.contains("codemode.describe"));
@@ -581,7 +667,7 @@ mod tests {
             discovery_entry("github", "search_issues", "Search GitHub issues"),
             discovery_entry("github", "list_pull_requests", "List GitHub pull requests"),
         ];
-        let js = generate_discovery_js(&entries).expect("js");
+        let js = generate_discovery_js(&entries, 0.5).expect("js");
 
         assert!(js.contains("typeof input === \"object\""));
         assert!(js.contains("Math.max(1, Math.min(50"));
@@ -598,7 +684,7 @@ mod tests {
         entry.dts =
             "type GithubListTagsInput = { owner: string; repo: string; perPage?: number };\n"
                 .to_string();
-        let js = generate_discovery_js(&[entry]).expect("js");
+        let js = generate_discovery_js(&[entry], 0.5).expect("js");
 
         assert!(js.contains("__codemodeTypes"));
         assert!(js.contains("GithubListTagsInput"));
@@ -618,7 +704,7 @@ mod tests {
             "required": ["owner"],
         }));
         entry.dts = "type GithubListTagsInput = { owner: string };\n".to_string();
-        let js = generate_discovery_js(&[entry]).expect("js");
+        let js = generate_discovery_js(&[entry], 0.5).expect("js");
 
         let discovery_slice = js
             .split("var __codemodeTypes")
@@ -636,7 +722,7 @@ mod tests {
             "list_tags",
             "List repository tags",
         )];
-        let js = generate_discovery_js(&entries).expect("js");
+        let js = generate_discovery_js(&entries, 0.5).expect("js");
 
         assert!(js.contains("hint: __codemodeNoMatchHint"));
         assert!(js.contains("codemode.__meta__.upstreams()"));
@@ -644,9 +730,36 @@ mod tests {
     }
 
     #[test]
+    fn generate_discovery_js_includes_semantic_blend() {
+        let entries = vec![discovery_entry("arcane", "containers", "List containers")];
+        let js = generate_discovery_js(&entries, 0.5).expect("js generation succeeds");
+        assert!(js.contains("__lab_internal::semantic_rank"));
+        assert!(js.contains("blendedScore"));
+        assert!(js.contains("codemode.search = async function"));
+    }
+
+    #[test]
+    fn generate_discovery_js_interpolates_configured_blend_weight() {
+        let entries = vec![discovery_entry("arcane", "containers", "List containers")];
+        let js = generate_discovery_js(&entries, 0.75).expect("js generation succeeds");
+        assert!(js.contains("var BLEND_WEIGHT = 0.75"));
+    }
+
+    #[test]
+    fn generate_discovery_js_search_never_throws_on_calltool_rejection() {
+        // Structural check: the semantic-rank call is wrapped in try/catch
+        // with `ranked = []` in the catch body, so a callTool rejection
+        // (e.g. network_error surfaced as a JS Error) cannot propagate out
+        // of codemode.search() and break the caller's script.
+        let entries = vec![discovery_entry("arcane", "containers", "List containers")];
+        let js = generate_discovery_js(&entries, 0.5).expect("js generation succeeds");
+        assert!(js.contains("catch (e) {"));
+    }
+
+    #[test]
     fn discovery_describe_rejects_namespace_only_targets() {
         let entries = vec![discovery_entry("github", "search_issues", "Search issues")];
-        let js = generate_discovery_js(&entries).expect("js");
+        let js = generate_discovery_js(&entries, 0.5).expect("js");
         assert!(js.contains("ambiguous_target"));
         assert!(js.contains("github.search_issues"));
     }

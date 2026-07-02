@@ -255,6 +255,15 @@ impl PooledRunner {
         }
     }
 
+    /// Test-only (Unix): spawn a stub that runs an arbitrary `sh` script,
+    /// letting drive-loop tests emit scripted protocol lines (e.g. `ToolCall`
+    /// events) on stdout. `sh` resolves under `env_clear()` via the libc
+    /// default path, same as `cat` in `spawn_stub`.
+    #[cfg(all(test, not(windows)))]
+    pub(crate) fn spawn_stub_script(script: &str) -> Result<Self, ToolError> {
+        Self::spawn_stub_command("sh", &["-c", script])
+    }
+
     #[cfg(test)]
     fn spawn_stub_command(program: &str, args: &[&str]) -> Result<Self, ToolError> {
         let temp_dir = tempfile::TempDir::new().map_err(|err| ToolError::Sdk {

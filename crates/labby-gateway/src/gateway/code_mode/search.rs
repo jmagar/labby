@@ -83,7 +83,14 @@ async fn catalog_from_tools(
             entry_count = entries.len(),
             "Code Mode discovery catalog served from render cache"
         );
+        // Best-effort embedding warm-up on the cache-hit path too — a no-op
+        // unless semantic search is configured and the embedding cache is
+        // cold for this fingerprint (fail-open; never fails catalog serving).
+        let _warmed = manager
+            .ensure_embeddings_for_fingerprint(&fingerprint, &entries)
+            .await;
         return Ok(ToolsRender {
+            fingerprint,
             entries,
             catalog_json,
             serialized_size,
@@ -135,14 +142,27 @@ async fn catalog_from_tools(
 
     manager
         .store_catalog_render_cache(super::CatalogRenderCache {
-            fingerprint,
+            fingerprint: fingerprint.clone(),
             entries: entries.clone(),
             catalog_json: catalog_json.clone(),
             serialized_size,
         })
         .await;
 
+    // Best-effort catalog embedding warm-up: never blocks or fails catalog
+    // construction (`ensure_embeddings_for_fingerprint` is fail-open by
+    // contract). Deliberately awaited inline (not spawned) so the FIRST
+    // `semantic_rank` call after a catalog change doesn't pay the cold-embed
+    // cost on its own critical path — this list_tools call pays it instead.
+    // `list_tools` is already cached for the CLI/unscoped path and is not
+    // latency-critical, so this tradeoff is accepted rather than using a
+    // detached `tokio::spawn`.
+    let _warmed = manager
+        .ensure_embeddings_for_fingerprint(&fingerprint, &entries)
+        .await;
+
     Ok(ToolsRender {
+        fingerprint,
         entries,
         catalog_json,
         serialized_size,
