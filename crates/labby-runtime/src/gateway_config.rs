@@ -59,6 +59,10 @@ fn default_upstream_priority() -> f32 {
     1.0
 }
 
+fn default_semantic_search_blend_weight() -> f32 {
+    0.5
+}
+
 /// Default MCP path used by protected routes (`/mcp`).
 pub fn default_mcp_path() -> String {
     "/mcp".to_string()
@@ -82,7 +86,48 @@ pub enum CodeModeResultShapePolicy {
     Truncate,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Optional embedding-based semantic search blend for `codemode.search()`.
+///
+/// Disabled by default (`tei_url = None`). When `tei_url` is unset or empty,
+/// `codemode.search()` runs its existing pure-lexical algorithm unchanged;
+/// this struct's fields are never read on that path.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SemanticSearchConfig {
+    /// Base URL of the TEI (Text Embeddings Inference) server, e.g.
+    /// `http://localhost:52000`. `None` or empty (the default) means
+    /// semantic search stays off — this is the sole enable signal, there is
+    /// no separate `enabled` flag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tei_url: Option<String>,
+    /// Weight applied to normalized semantic similarity when blending with
+    /// normalized lexical score. See `preamble.rs` `codemode.search` blend
+    /// comment for the exact formula.
+    #[serde(default = "default_semantic_search_blend_weight")]
+    pub blend_weight: f32,
+}
+
+impl Default for SemanticSearchConfig {
+    fn default() -> Self {
+        Self {
+            tei_url: None,
+            blend_weight: default_semantic_search_blend_weight(),
+        }
+    }
+}
+
+impl SemanticSearchConfig {
+    /// True only when `tei_url` is set to a non-empty string. Every call
+    /// site should gate on this rather than re-checking the field directly.
+    #[must_use]
+    pub fn is_configured(&self) -> bool {
+        self.tei_url
+            .as_deref()
+            .is_some_and(|url| !url.trim().is_empty())
+    }
+}
+
+// `Eq` intentionally omitted: `SemanticSearchConfig.blend_weight` is an `f32`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CodeModeConfig {
     /// Whether the MCP gateway advertises `codemode`.
     #[serde(default)]
@@ -116,6 +161,9 @@ pub struct CodeModeConfig {
     /// Excess bytes are dropped and a sentinel appended.
     #[serde(default = "default_max_log_bytes")]
     pub max_log_bytes: usize,
+    /// Optional embedding-based semantic search blend for `codemode.search()`.
+    #[serde(default)]
+    pub semantic_search: SemanticSearchConfig,
 }
 
 impl Default for CodeModeConfig {
@@ -130,6 +178,7 @@ impl Default for CodeModeConfig {
             token_estimate_divisor: default_token_estimate_divisor(),
             max_log_entries: default_max_log_entries(),
             max_log_bytes: default_max_log_bytes(),
+            semantic_search: SemanticSearchConfig::default(),
         }
     }
 }
@@ -165,6 +214,26 @@ impl CodeModeConfig {
             return Err(ConfigError::InvalidCodeModeMaxLogBytes {
                 value: self.max_log_bytes,
             });
+        }
+        if !(0.0..=1.0).contains(&self.semantic_search.blend_weight) {
+            return Err(ConfigError::InvalidSemanticSearchBlendWeight {
+                value: self.semantic_search.blend_weight,
+            });
+        }
+        if let Some(tei_url) = self.semantic_search.tei_url.as_deref() {
+            let trimmed = tei_url.trim();
+            if !trimmed.is_empty() {
+                let parsed = url::Url::parse(trimmed).map_err(|_| {
+                    ConfigError::InvalidSemanticSearchTeiUrl {
+                        value: tei_url.to_string(),
+                    }
+                })?;
+                if parsed.scheme() != "http" && parsed.scheme() != "https" {
+                    return Err(ConfigError::InvalidSemanticSearchTeiUrl {
+                        value: tei_url.to_string(),
+                    });
+                }
+            }
         }
         Ok(())
     }
@@ -725,6 +794,12 @@ pub enum ConfigError {
     InvalidCodeModeMaxLogEntries { value: usize },
     #[error("gateway code_mode.max_log_bytes={value} is invalid — expected 1..=104857600")]
     InvalidCodeModeMaxLogBytes { value: usize },
+    #[error("gateway code_mode.semantic_search.blend_weight={value} is invalid — expected 0.0..=1.0")]
+    InvalidSemanticSearchBlendWeight { value: f32 },
+    #[error(
+        "gateway code_mode.semantic_search.tei_url={value:?} is invalid — expected a well-formed http:// or https:// URL"
+    )]
+    InvalidSemanticSearchTeiUrl { value: String },
     #[error("gateway upstream_request_timeout_ms={value} is invalid — expected 1..=300000")]
     InvalidUpstreamRequestTimeout { value: u64 },
     #[error("gateway upstream_relay_timeout_ms={value} is invalid — expected 1..=1800000")]
@@ -1067,6 +1142,67 @@ mod tests {
         assert!(cfg.trace_params);
         assert_eq!(cfg.timeout_ms, 30_000);
         assert_eq!(cfg.token_estimate_divisor, 4);
+    }
+
+    #[test]
+    fn semantic_search_defaults_to_unconfigured() {
+        let cfg = CodeModeConfig::default();
+        assert!(cfg.semantic_search.tei_url.is_none());
+        assert!(!cfg.semantic_search.is_configured());
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn semantic_search_with_valid_http_url_is_configured_and_valid() {
+        let mut cfg = CodeModeConfig::default();
+        cfg.semantic_search.tei_url = Some("http://localhost:52000".to_string());
+        assert!(cfg.semantic_search.is_configured());
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn semantic_search_with_https_url_is_valid() {
+        let mut cfg = CodeModeConfig::default();
+        cfg.semantic_search.tei_url = Some("https://tei.internal.example:8443".to_string());
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn semantic_search_with_non_http_scheme_fails_validation() {
+        let mut cfg = CodeModeConfig::default();
+        cfg.semantic_search.tei_url = Some("ftp://example.com".to_string());
+        let err = cfg.validate().unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidSemanticSearchTeiUrl { .. }));
+    }
+
+    #[test]
+    fn semantic_search_with_malformed_url_fails_validation() {
+        let mut cfg = CodeModeConfig::default();
+        cfg.semantic_search.tei_url = Some("not a url at all".to_string());
+        let err = cfg.validate().unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidSemanticSearchTeiUrl { .. }));
+    }
+
+    #[test]
+    fn semantic_search_blend_weight_out_of_range_fails_validation() {
+        let mut cfg = CodeModeConfig::default();
+        cfg.semantic_search.blend_weight = 1.5;
+        let err = cfg.validate().unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::InvalidSemanticSearchBlendWeight { .. }
+        ));
+    }
+
+    #[test]
+    fn semantic_search_toml_round_trips_with_defaults_when_omitted() {
+        // An existing config.toml with a `[code_mode]` section but no
+        // `semantic_search` subsection must still deserialize (backward
+        // compatibility with every config.toml written before this feature).
+        let toml_str = "enabled = true\ntimeout_ms = 30000\n";
+        let cfg: CodeModeConfig = toml::from_str(toml_str).unwrap();
+        assert!(cfg.semantic_search.tei_url.is_none());
+        assert!(!cfg.semantic_search.is_configured());
     }
 
     #[test]

@@ -276,6 +276,35 @@ synthetic `codemode` tool instead.
 | `max_log_entries` | — | `1000` | Maximum captured console log lines per execution. Valid range: 1-100000. |
 | `max_log_bytes` | — | `65536` | Maximum captured console log bytes per execution. Valid range: 1-104857600. |
 
+#### `[code_mode.semantic_search]`
+
+Optional embedding-based semantic search blend for `codemode.search()`.
+Disabled by default — when `tei_url` is unset, `codemode.search()` is
+unchanged pure lexical/substring matching.
+
+| Key | Env override | Default | Description |
+|-----|-------------|---------|-------------|
+| `tei_url` | — | unset | Base URL of a [TEI](https://github.com/huggingface/text-embeddings-inference) (Text Embeddings Inference) server, e.g. `http://localhost:52000`. Must be a well-formed `http://` or `https://` URL. Presence of a non-empty value is the sole enable signal for this feature. |
+| `blend_weight` | — | `0.5` | Weight applied to normalized semantic similarity when blending with normalized lexical score. Valid range: 0.0-1.0. |
+
+Example:
+
+```toml
+[code_mode.semantic_search]
+tei_url = "http://localhost:52000"
+blend_weight = 0.5
+```
+
+Semantic search is fail-open end to end: if TEI is unreachable, times out, or
+returns a non-2xx response, that one `codemode.search()` call silently falls
+back to lexical-only ranking — the response shape is identical either way, and
+no error is visible to the calling agent. After a failure, semantic search is
+skipped for a 30-second cooldown (not configurable) before the next attempt,
+so a flapping TEI instance isn't hit on every search call; recovery is picked
+up automatically once the cooldown elapses. A `tracing::warn!` is logged once
+per failure transition (not once per skipped call) and a `tracing::info!`
+once per recovery, so operators can see degraded state without log spam.
+
 Example:
 
 ```toml
