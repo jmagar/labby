@@ -275,7 +275,7 @@ mod tests {
             // Minimally drain the request head, then answer with no
             // Content-Length so reqwest streams until close.
             let mut buf = [0u8; 4096];
-            let _ = socket.read(&mut buf).await;
+            drop(socket.read(&mut buf).await);
             if socket
                 .write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n",
@@ -292,7 +292,7 @@ mod tests {
                     return;
                 }
             }
-            let _ = socket.shutdown().await;
+            drop(socket.shutdown().await);
         });
         let err = embed_via_tei(&format!("http://{addr}"), &["x".to_string()])
             .await
