@@ -22,6 +22,14 @@ use super::types::{
 /// the last-wins captured mcp-ui widget link.
 const UI_OPT_IN_KEY: &str = "__ui";
 
+/// Reserved namespace for host-internal pseudo-tool calls that are NOT real
+/// Code Mode tool calls — they never reach `host.call_tool`, never consume
+/// the per-run call budget, and never appear in `response.calls`. The
+/// sandbox's generated JS calls these via the ordinary `callTool(id, params)`
+/// primitive so no new sandbox protocol surface is needed; `call_tool_id`
+/// intercepts ids in this namespace before the normal scope check.
+const LAB_INTERNAL_NAMESPACE: &str = "__lab_internal";
+
 impl<H: CodeModeHost> CodeModeBroker<'_, H> {
     pub async fn execute(
         &self,
@@ -308,6 +316,11 @@ impl<H: CodeModeHost> CodeModeBroker<'_, H> {
         };
         match parsed.reference {
             CodeModeToolRef::Tool { namespace, tool } => {
+                if namespace == LAB_INTERNAL_NAMESPACE {
+                    return self
+                        .dispatch_internal_call(&tool, params, &caller, surface, scope)
+                        .await;
+                }
                 if !scope.allows(&namespace, &tool) {
                     return Err(ToolError::Sdk {
                         sdk_kind: "unknown_tool".to_string(),
@@ -339,6 +352,58 @@ impl<H: CodeModeHost> CodeModeBroker<'_, H> {
                 }
                 Ok(outcome.value)
             }
+        }
+    }
+
+    /// Dispatch a reserved `__lab_internal::*` pseudo-tool call. These never
+    /// reach `host.call_tool` and are never subject to `scope.allows()` —
+    /// see the `LAB_INTERNAL_NAMESPACE` doc comment for why that's safe.
+    async fn dispatch_internal_call(
+        &self,
+        tool: &str,
+        params: Value,
+        caller: &CodeModeCaller,
+        surface: CodeModeSurface,
+        scope: &ToolScope,
+    ) -> Result<Value, ToolError> {
+        let Some(host) = self.host else {
+            return Err(ToolError::Sdk {
+                sdk_kind: "unknown_tool".to_string(),
+                message: "no tool source configured".to_string(),
+            });
+        };
+        match tool {
+            "semantic_rank" => {
+                let query = params
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let limit = params
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .map(|n| n.clamp(1, 50) as usize)
+                    .unwrap_or(50);
+                // Fail-open at this layer too: even though the trait contract
+                // says implementations return `Ok(Vec::new())` on degraded
+                // paths (never `Err`), an accidental `Err` from a host bug
+                // still must not break `codemode.search()` — degrade to an
+                // empty ranked list, identical to the "no semantic signal"
+                // case.
+                let ranked = host
+                    .semantic_rank(query, limit, caller, surface, scope)
+                    .await
+                    .unwrap_or_default();
+                let ranked_json: Vec<Value> = ranked
+                    .into_iter()
+                    .map(|(id, score)| serde_json::json!({ "id": id, "score": score }))
+                    .collect();
+                Ok(serde_json::json!({ "ranked": ranked_json }))
+            }
+            _ => Err(ToolError::Sdk {
+                sdk_kind: "unknown_tool".to_string(),
+                message: format!("unknown internal tool `{LAB_INTERNAL_NAMESPACE}::{tool}`"),
+            }),
         }
     }
 
@@ -417,6 +482,46 @@ mod tests {
             logs: Vec::new(),
             artifacts: Vec::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn call_tool_id_routes_lab_internal_namespace_before_scope_check() {
+        // A ToolScope that allows nothing should still let `__lab_internal::*`
+        // through, because it's intercepted before the scope.allows() check.
+        let host = NoopHost::default();
+        let broker = CodeModeBroker::new(Some(&host));
+        let empty_scope = ToolScope::scoped_namespaces(vec![], vec![]);
+        let result = broker
+            .call_tool_id(
+                "__lab_internal::semantic_rank",
+                json!({ "query": "test", "limit": 5 }),
+                CodeModeCaller::TrustedLocal,
+                CodeModeSurface::Cli,
+                &empty_scope,
+            )
+            .await;
+        // NoopHost's semantic_rank always returns Ok(vec![]), so this must
+        // succeed with an empty ranked list, not a `forbidden`/`unknown_tool`
+        // scope error.
+        let value = result.expect("internal dispatch must bypass scope.allows()");
+        assert_eq!(value, json!({ "ranked": [] }));
+    }
+
+    #[tokio::test]
+    async fn call_tool_id_rejects_unknown_internal_tool() {
+        let host = NoopHost::default();
+        let broker = CodeModeBroker::new(Some(&host));
+        let scope = ToolScope::default();
+        let result = broker
+            .call_tool_id(
+                "__lab_internal::not_a_real_internal_tool",
+                json!({}),
+                CodeModeCaller::TrustedLocal,
+                CodeModeSurface::Cli,
+                &scope,
+            )
+            .await;
+        assert!(result.is_err());
     }
 
     #[test]

@@ -326,8 +326,17 @@ impl<H: CodeModeHost> CodeModeBroker<'_, H> {
 
                     match msg {
                         CodeModeRunnerOutput::ToolCall { seq, id, params } => {
-                            state.calls_enqueued = state.calls_enqueued.saturating_add(1);
-                            if state.calls_enqueued > state.max_calls_per_run {
+                            // Reserved host-internal pseudo-tool calls (see
+                            // `execute.rs`'s `LAB_INTERNAL_NAMESPACE`) are
+                            // exempt from the per-run call budget and the
+                            // call trace — but NOT from dispatch routing:
+                            // they still flow through the normal enqueue
+                            // path below so their promise settles normally.
+                            let is_internal = id.starts_with("__lab_internal::");
+                            if !is_internal {
+                                state.calls_enqueued = state.calls_enqueued.saturating_add(1);
+                            }
+                            if !is_internal && state.calls_enqueued > state.max_calls_per_run {
                                 if let Err(err) = reject_tool_call_over_budget(
                                     seq,
                                     id,
@@ -925,6 +934,11 @@ async fn handle_completed_tool_call(
     let Some((seq, id, params, result, elapsed_ms)) = completed else {
         return Ok(());
     };
+    // Reserved host-internal pseudo-tool calls never appear in the call
+    // trace (`state.calls`) — but their ToolResult/ToolError responses are
+    // still written back unconditionally so the sandbox's `callTool(...)`
+    // promise settles normally.
+    let is_internal = id.starts_with("__lab_internal::");
     match result {
         Ok(result) => {
             let serialized_len = serde_json::to_vec(&result).map(|v| v.len()).unwrap_or(0);
@@ -945,28 +959,32 @@ async fn handle_completed_tool_call(
                     &state.calls,
                 )
                 .await?;
+                if !is_internal {
+                    state.calls.push((
+                        seq,
+                        CodeModeExecutedCall {
+                            id,
+                            ok: false,
+                            elapsed_ms,
+                            params,
+                            error_kind: Some("result_too_large".to_string()),
+                        },
+                    ));
+                }
+                return Ok(());
+            }
+            if !is_internal {
                 state.calls.push((
                     seq,
                     CodeModeExecutedCall {
                         id,
-                        ok: false,
+                        ok: true,
                         elapsed_ms,
                         params,
-                        error_kind: Some("result_too_large".to_string()),
+                        error_kind: None,
                     },
                 ));
-                return Ok(());
             }
-            state.calls.push((
-                seq,
-                CodeModeExecutedCall {
-                    id,
-                    ok: true,
-                    elapsed_ms,
-                    params,
-                    error_kind: None,
-                },
-            ));
             write_runner_input_by_deadline(
                 stdin,
                 &CodeModeRunnerInput::ToolResult { seq, result },
@@ -1009,16 +1027,18 @@ async fn handle_completed_tool_call(
                 &state.calls,
             )
             .await?;
-            state.calls.push((
-                seq,
-                CodeModeExecutedCall {
-                    id,
-                    ok: false,
-                    elapsed_ms,
-                    params,
-                    error_kind: Some(kind),
-                },
-            ));
+            if !is_internal {
+                state.calls.push((
+                    seq,
+                    CodeModeExecutedCall {
+                        id,
+                        ok: false,
+                        elapsed_ms,
+                        params,
+                        error_kind: Some(kind),
+                    },
+                ));
+            }
         }
     }
     Ok(())
@@ -1142,6 +1162,68 @@ mod tests {
             trace_params: false,
             capability_filter: ToolScope::default(),
         }
+    }
+
+    /// Budget/trace exclusion for reserved `__lab_internal::` pseudo-tool
+    /// calls: an internal call interleaved with exactly `max_calls_per_run`
+    /// ordinary calls must (a) never appear in the call trace and (b) never
+    /// consume a budget slot — if it did, the last ordinary call would be
+    /// rejected with `call_budget_exceeded`.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn drive_runner_excludes_lab_internal_calls_from_budget_and_trace() {
+        let budget = crate::config::max_calltool_per_run();
+        // The stub emits 1 internal ToolCall + `budget` ordinary ToolCalls,
+        // waits for the host to settle them (a background `cat` drains stdin
+        // so ToolResult/ToolError writes back to the stub never block), then
+        // emits Done.
+        let script = format!(
+            r#"
+exec 3<&0
+cat <&3 >/dev/null &
+printf '{{"type":"tool_call","seq":1,"id":"__lab_internal::semantic_rank","params":{{"query":"q","limit":5}}}}\n'
+i=2
+while [ "$i" -le {last_seq} ]; do
+  printf '{{"type":"tool_call","seq":%d,"id":"stub::tool","params":{{}}}}\n' "$i"
+  i=$((i+1))
+done
+sleep 2
+printf '{{"type":"done"}}\n'
+sleep 3600
+"#,
+            last_seq = budget + 1
+        );
+        let host = NoopHost::default();
+        let broker = CodeModeBroker::new(Some(&host));
+        let mut runner = PooledRunner::spawn_stub_script(&script).expect("spawn script stub");
+        let outcome = broker
+            .drive_runner(&mut runner, &test_config(Duration::from_secs(30)))
+            .await;
+        let response = match outcome {
+            DriveOutcome::Completed(response) => response,
+            DriveOutcome::ExecutionError(err) | DriveOutcome::RunnerUnhealthy(err) => {
+                panic!("run must complete, got error kind `{}`", err.kind())
+            }
+        };
+        assert!(
+            response
+                .calls
+                .iter()
+                .all(|call| !call.id.starts_with("__lab_internal::")),
+            "internal calls must not appear in the call trace"
+        );
+        assert_eq!(
+            response.calls.len(),
+            usize::try_from(budget).expect("budget fits usize"),
+            "every ordinary call must be traced"
+        );
+        assert!(
+            response
+                .calls
+                .iter()
+                .all(|call| call.error_kind.as_deref() != Some("call_budget_exceeded")),
+            "the internal call must not consume a budget slot"
+        );
     }
 
     /// The wall-clock deadline path: a runner that never replies is killed when
