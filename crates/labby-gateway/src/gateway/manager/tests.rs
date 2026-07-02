@@ -81,17 +81,18 @@ impl GatewayConfigStore for SlowPersistStore {
     }
 }
 
-static DEPLOY_KNOWN_META: labby_apis::core::PluginMeta = labby_apis::core::PluginMeta {
-    name: "deploy",
-    display_name: "Deploy",
-    description: "deploy (test stub)",
-    category: labby_apis::core::Category::Bootstrap,
-    docs_url: "",
-    required_env: &[],
-    optional_env: &[],
-    default_port: None,
-    supports_multi_instance: false,
-};
+static DEPLOY_KNOWN_META: labby_primitives::plugin::PluginMeta =
+    labby_primitives::plugin::PluginMeta {
+        name: "deploy",
+        display_name: "Deploy",
+        description: "deploy (test stub)",
+        category: labby_primitives::plugin::Category::Bootstrap,
+        docs_url: "",
+        required_env: &[],
+        optional_env: &[],
+        default_port: None,
+        supports_multi_instance: false,
+    };
 
 impl crate::registry::InProcessServiceRegistry for DeployKnownRegistry {
     fn in_process_services(&self) -> Vec<Box<dyn crate::registry::InProcessService>> {
@@ -128,7 +129,7 @@ impl crate::gateway::service_registry::GatewayServiceRegistry for DeployKnownReg
         })
     }
 
-    fn service_meta(&self, name: &str) -> Option<&'static labby_apis::core::PluginMeta> {
+    fn service_meta(&self, name: &str) -> Option<&'static labby_primitives::plugin::PluginMeta> {
         (name == "deploy").then_some(&DEPLOY_KNOWN_META)
     }
 }

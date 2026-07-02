@@ -535,7 +535,7 @@ pub(super) fn server_view_from_virtual_server(
 }
 
 pub(super) fn service_config_view(
-    meta: &labby_apis::core::PluginMeta,
+    meta: &labby_primitives::plugin::PluginMeta,
     values: &HashMap<String, String>,
 ) -> ServiceConfigView {
     let mut fields = Vec::new();

@@ -33,23 +33,39 @@ Shared dispatch ownership and adapter direction are governed by `docs/dev/DISPAT
 
 ## Repository Structure
 
-The workspace is split into reusable crates plus one product binary crate. Pure
-SDK/domain clients live in `labby-apis`. HTTP/OAuth auth middleware and
-upstream OAuth runtime live in `labby-auth`. Shared transport-neutral contracts
-and helpers live in `labby-runtime`. Code Mode execution lives in
-`labby-codemode`. Gateway runtime/proxy orchestration lives in `labby-gateway`.
-Embedded/static web serving lives in `labby-web`. Windows process-tree reaping
-lives in `labby-winjob`. CLI, MCP, HTTP API adapters, config loading, product
-dispatch, and the `labby` binary live in `labby`.
+The workspace is split into reusable crates plus one product binary crate. A
+dependency-free leaf crate, `labby-primitives`, holds the small vocabulary
+types (`ActionSpec`/`ParamSpec`, `PluginMeta`/`EnvVar`/`Category`, `UiSchema`,
+static SSRF checks) shared by both the SDK and the gateway-extraction crates.
+Pure SDK/domain clients live in `labby-apis`, which re-exports those types from
+`labby-primitives`. HTTP/OAuth auth middleware and upstream OAuth runtime live
+in `labby-auth`. Shared transport-neutral contracts and helpers (`ToolError`,
+gateway config DTOs, redaction, path-safety, backoff) live in `labby-runtime`.
+Code Mode execution lives in `labby-codemode`. Gateway runtime/proxy
+orchestration — including its own dispatch helpers and the stdio spawn-guard/
+SSRF security checks — lives in `labby-gateway`. Embedded/static web serving
+lives in `labby-web`. Windows process-tree reaping lives in `labby-winjob`.
+CLI, MCP, HTTP API adapters, config loading, product dispatch, and the `labby`
+binary live in `labby`.
 
 ```
 lab/
 ├── crates/
+│   ├── labby-primitives/             # Leaf crate: ActionSpec/ParamSpec, PluginMeta/EnvVar/Category,
+│   │   │                             # UiSchema, static SSRF checks. Zero internal deps.
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── action.rs
+│   │       ├── plugin.rs
+│   │       ├── plugin_ui.rs
+│   │       └── ssrf.rs
+│   │
 │   ├── labby-apis/                   # PURE Rust SDK — reusable in any binary
-│   │   ├── Cargo.toml                # deps: reqwest, serde, thiserror, tokio
+│   │   ├── Cargo.toml                # deps: reqwest, serde, thiserror, tokio, labby-primitives
 │   │   └── src/
 │   │       ├── lib.rs                # re-exports, feature gates
-│   │       ├── core/                 # HttpClient, Auth, errors, traits
+│   │       ├── core/                 # HttpClient, Auth, errors, traits; action/plugin/plugin_ui/ssrf
+│   │       │                         # are thin re-exports of labby-primitives
 │   │       ├── acp/                   # ACP provider/session primitives
 │   │       ├── acp_registry/          # SDK-only ACP Registry client
 │   │       ├── mcpregistry/           # SDK-only MCP Registry v0.1 client
@@ -61,9 +77,10 @@ lab/
 │   │       └── stash/                 # stash pure data types
 │   │
 │   ├── labby-auth/                   # HTTP/OAuth auth middleware and storage
-│   ├── labby-runtime/                # ToolError, config DTOs, path/security helpers
+│   ├── labby-runtime/                # ToolError, config DTOs, path/redaction/backoff helpers
 │   ├── labby-codemode/               # Code Mode runner kernel + snippet engine
-│   ├── labby-gateway/                # Gateway manager, upstream pool, OAuth lifecycle
+│   ├── labby-gateway/                # Gateway manager, upstream pool, OAuth lifecycle,
+│   │                                 # dispatch helpers, stdio spawn-guard/SSRF checks
 │   ├── labby-web/                    # Embedded/filesystem web asset serving
 │   ├── labby-winjob/                 # Windows Job Object helper crate
 │   └── labby/                        # BINARY: cli + mcp + api + product dispatch

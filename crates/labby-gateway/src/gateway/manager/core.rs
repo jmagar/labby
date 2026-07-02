@@ -177,7 +177,7 @@ impl GatewayManager {
     pub(super) fn registered_service_meta(
         &self,
         service: &str,
-    ) -> Option<&'static labby_apis::core::PluginMeta> {
+    ) -> Option<&'static labby_primitives::plugin::PluginMeta> {
         self.builtin_service_registry().service_meta(service)
     }
 

@@ -2,7 +2,9 @@
 //!
 //! Argv/env security guards delegate to the shared
 //! [`crate::dispatch::security::spawn_guard`] module — do NOT add local copies
-//! of those rules here.
+//! of those rules here. That module is gateway-owned (`labby-gateway`'s
+//! `security::spawn_guard`), so the `marketplace` feature requires `gateway`
+//! (see `crates/labby/Cargo.toml`).
 //!
 use labby_apis::mcpregistry::types::{
     LabRegistryMetadata, LabRegistrySetupDifficulty, LabRegistryTransportScore, ListServersParams,

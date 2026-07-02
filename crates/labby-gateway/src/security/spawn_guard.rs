@@ -12,7 +12,7 @@
 //! - [`DANGEROUS_DOCKER_FLAGS`] / [`DANGEROUS_NODE_FLAGS`] — argv flags that
 //!   are rejected for the corresponding runtime families.
 
-use crate::error::ToolError;
+use labby_runtime::error::ToolError;
 
 /// Runtime hints / commands the gateway is allowed to execute as stdio upstreams.
 pub const ALLOWED_RUNTIME_HINTS: &[&str] = &[
@@ -347,7 +347,7 @@ mod tests {
 
         let buf = SharedBuf::default();
         let subscriber = tracing_subscriber::registry()
-            .with(EnvFilter::new("labby_runtime=warn"))
+            .with(EnvFilter::new("labby_gateway=warn"))
             .with(
                 fmt::layer()
                     .json()
@@ -387,7 +387,7 @@ mod tests {
 
         let buf = SharedBuf::default();
         let subscriber = tracing_subscriber::registry()
-            .with(EnvFilter::new("labby_runtime=warn"))
+            .with(EnvFilter::new("labby_gateway=warn"))
             .with(
                 fmt::layer()
                     .json()

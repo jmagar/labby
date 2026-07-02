@@ -144,7 +144,10 @@ acp_registry = ["labby-apis/acp_registry", "labby-runtime/acp_registry"]
 node-runtime = []
 all = ["labby-apis/all", "lab-admin", "acp_registry", "deploy", "gateway", "marketplace"]
 gateway = ["dep:labby-codemode", "dep:labby-gateway"]
-marketplace = ["labby-apis/mcpregistry", "labby-runtime/marketplace"]
+# Depends on `gateway` because marketplace's stdio-install validation reuses
+# the shared spawn-guard/SSRF checks, which now live in labby-gateway (moved
+# out of labby-runtime so labby-auth/labby-codemode don't pull them in).
+marketplace = ["labby-apis/mcpregistry", "labby-runtime/marketplace", "gateway"]
 services-all = [
 ]
 default = ["all"]

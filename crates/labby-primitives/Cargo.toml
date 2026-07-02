@@ -1,0 +1,20 @@
+[package]
+name = "labby-primitives"
+description = "Leaf crate of shared vocabulary types with no internal workspace dependencies: action/param catalog metadata and static SSRF preflight checks, used by both the labby-apis product SDK and the gateway-extraction crates."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "../../README.md"
+keywords = ["homelab", "mcp", "gateway", "primitives"]
+categories = ["development-tools"]
+publish = false
+
+[dependencies]
+thiserror.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true

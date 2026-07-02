@@ -14,6 +14,18 @@ It also includes a product-local device runtime subsystem. That subsystem is sep
 
 ## Crate Split
 
+### `crates/labby-primitives`
+
+`labby-primitives` is a dependency-free leaf crate: `ActionSpec`/`ParamSpec`
+(action metadata), `PluginMeta`/`EnvVar`/`Category` (plugin metadata),
+`UiSchema` (Bootstrap wizard field schemas), and the static SSRF preflight
+checks. These types are shared by both `labby-apis` (which re-exports them
+from `core/`) and the gateway-extraction crates (`labby-gateway` depends on it
+directly), so they live below both rather than in either — avoiding a choice
+between forcing the gateway crates to pull in the full SDK, or forcing SDK
+service modules to pull in gateway/runtime machinery just to declare
+`pub const META: PluginMeta`.
+
 ### `crates/labby-apis`
 
 `labby-apis` is the pure SDK layer. It owns:
@@ -23,9 +35,10 @@ It also includes a product-local device runtime subsystem. That subsystem is sep
 - auth handling
 - shared HTTP behavior
 - shared error taxonomy
-- shared action metadata
-- plugin metadata
 - health-check contracts
+
+Action and plugin metadata (`ActionSpec`, `PluginMeta`, etc.) are re-exported
+from `labby-primitives` rather than owned here — see above.
 
 It does not own CLI parsing, MCP transport, HTTP routing, `.env` file loading,
 or shell-facing UX.
@@ -50,10 +63,14 @@ and extracted runtime crates:
 
 - `ToolError`
 - gateway config DTOs
-- dispatch helper payloads
 - redaction and path-safety helpers
-- shared security/spawn guards
+- backoff/jitter helpers
 - feature-gated pure DTO dependencies
+
+Dispatch-helper payloads and the stdio spawn-guard/SSRF security checks live in
+`labby-gateway` instead — they are gateway-only concerns, and keeping them here
+would pull `labby-primitives` into `labby-auth` and `labby-codemode`'s
+dependency graph even though neither ever calls into them.
 
 ### `crates/labby-codemode`
 
@@ -65,9 +82,10 @@ and TypeScript descriptor generation. Hosts inject tools through `CodeModeHost`.
 
 `labby-gateway` is the reusable gateway runtime. It owns upstream MCP proxy
 pools, discovery/import orchestration, virtual servers, protected routes,
-gateway OAuth lifecycle, manager state, and the Code Mode host adapter. It does
-not own product config rendering or `.env` writes; those are injected by the
-host through `GatewayConfigStore`.
+gateway OAuth lifecycle, manager state, the Code Mode host adapter, its own
+`action`/`params` dispatch helpers, and the stdio spawn-guard/SSRF security
+checks. It does not own product config rendering or `.env` writes; those are
+injected by the host through `GatewayConfigStore`.
 
 ### `crates/labby-web`
 

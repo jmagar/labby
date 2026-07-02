@@ -18,14 +18,18 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 jiff.workspace = true
-labby-apis = { path = "../labby-apis", default-features = false }
+# Optional: only pulled in by the mcpregistry/acp_registry/deploy error
+# conversions below, each gated behind its matching feature. The default
+# build (what labby-gateway, labby-auth, and labby-codemode all use) never
+# depends on labby-apis.
+labby-apis = { path = "../labby-apis", default-features = false, optional = true }
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
 tracing.workspace = true
 
 [features]
-marketplace = ["labby-apis/mcpregistry"]
-acp_registry = ["labby-apis/acp_registry"]
-deploy = ["labby-apis/deploy"]
+marketplace = ["dep:labby-apis", "labby-apis/mcpregistry"]
+acp_registry = ["dep:labby-apis", "labby-apis/acp_registry"]
+deploy = ["dep:labby-apis", "labby-apis/deploy"]
 
 [dev-dependencies]
 tempfile.workspace = true

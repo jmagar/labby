@@ -5,19 +5,19 @@
 //! must not claim that validation-time DNS pins the final connection target.
 //!
 //! The host/IP allow-deny policy itself is **not** defined here — it lives in
-//! `labby_apis::core::ssrf` (the canonical single source of truth, since
-//! `labby-apis` cannot depend back on the gateway). This module owns only the
-//! runtime concerns: DNS resolution, the async `spawn_blocking` wrapper, the
-//! concurrency semaphore, and conversion of `SsrfError` into `ToolError`. The
-//! private-TLD suffix denylist, CGNAT/ULA ranges, and IPv4-mapped handling are
-//! all enforced by the shared helpers.
+//! `labby_primitives::ssrf` (the canonical single source of truth, shared with
+//! `labby-apis`). This module owns only the runtime concerns: DNS resolution,
+//! the async `spawn_blocking` wrapper, the concurrency semaphore, and
+//! conversion of `SsrfError` into `ToolError`. The private-TLD suffix
+//! denylist, CGNAT/ULA ranges, and IPv4-mapped handling are all enforced by
+//! the shared helpers.
 
 use std::net::{IpAddr, ToSocketAddrs};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use crate::error::ToolError;
-use labby_apis::core::ssrf as shared;
+use labby_primitives::ssrf as shared;
+use labby_runtime::error::ToolError;
 use tokio::sync::Semaphore;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);

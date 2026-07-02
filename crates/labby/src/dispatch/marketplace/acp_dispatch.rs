@@ -660,8 +660,9 @@ mod tests {
     // NB: The deep download/verify/extract/install guard tests (SSRF address
     // filtering, mandatory SHA-256, size cap, zip-slip/symlink rejection,
     // setuid strip, atomic install, peer re-validation) moved with the
-    // primitive into `labby_apis::acp_registry::installer` and the SSRF guard in
-    // `labby_apis::core::ssrf`. They are exercised there. The tests
+    // primitive into `labby_apis::acp_registry::installer` and the SSRF guard
+    // (canonically `labby_primitives::ssrf`, re-exported through
+    // `labby_apis::core::ssrf`). They are exercised there. The tests
     // below cover the orchestrator's remaining responsibilities.
 
     // The integrity-missing fail-closed gate stays in dispatch because it

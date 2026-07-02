@@ -82,10 +82,11 @@ for a follow-up split. All *new* files added to `pool/` must stay under 500 LOC.
   no longer has any `crate::mcp` import — the boundary is clean. Do not re-add
   `mcp/` imports to any `dispatch/upstream/` file.
   **PATH/basename-only spawn-guard caveat (S6):** the spawn-guard allowlist check
-  in `spawn_guard.rs` is basename-only — `/tmp/x/node` passes because its basename
-  is `node`. This is an accepted residual: the trust boundary is admin-write access
-  to the gateway config, and no further PATH resolution is performed at spawn time.
-  See `spawn_guard.rs` for the canonical comment.
+  in `crate::security::spawn_guard` (`src/security/spawn_guard.rs`) is basename-only
+  — `/tmp/x/node` passes because its basename is `node`. This is an accepted
+  residual: the trust boundary is admin-write access to the gateway config, and
+  no further PATH resolution is performed at spawn time. See
+  `src/security/spawn_guard.rs` for the canonical comment.
 - Do not import API-specific types (router, state) from `api/`.
 - The pool is constructed in `cli/serve.rs` and injected into `AppState` and `LabMcpServer`.
 - Circuit breaker state is internal to the pool. Surfaces call `record_failure()` and `record_success()`.

@@ -11,7 +11,7 @@
 //! and injects it. The trait is a supertrait of [`InProcessServiceRegistry`] so
 //! the same value can be passed to the pool's discovery entry points.
 
-use labby_apis::core::PluginMeta;
+use labby_primitives::plugin::PluginMeta;
 
 use crate::registry::InProcessServiceRegistry;
 

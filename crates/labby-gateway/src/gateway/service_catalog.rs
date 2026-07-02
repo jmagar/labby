@@ -1,4 +1,4 @@
-use labby_apis::core::PluginMeta;
+use labby_primitives::plugin::{EnvVar, PluginMeta};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,7 +47,7 @@ fn meta_to_view(meta: &'static PluginMeta) -> SupportedServiceView {
     }
 }
 
-fn field_view(field: &labby_apis::core::EnvVar) -> ServiceFieldView {
+fn field_view(field: &EnvVar) -> ServiceFieldView {
     ServiceFieldView {
         name: field.name.to_string(),
         description: field.description.to_string(),

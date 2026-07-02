@@ -12,6 +12,7 @@ keywords = ["homelab", "mcp", "cli", "sdk"]
 categories = ["api-bindings", "command-line-utilities"]
 
 [dependencies]
+labby-primitives = { path = "../labby-primitives" }
 tokio.workspace = true
 futures.workspace = true
 reqwest.workspace = true

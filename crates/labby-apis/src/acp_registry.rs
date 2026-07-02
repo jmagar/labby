@@ -10,8 +10,10 @@ pub mod error;
 pub mod installer;
 pub mod types;
 
-/// The canonical SSRF guard now lives in `crate::core::ssrf`; re-exported here so
-/// existing `acp_registry::ssrf` / `super::ssrf` paths keep working unchanged.
+/// The canonical SSRF guard is defined in the dependency-free `labby-primitives`
+/// leaf crate (`labby_primitives::ssrf`) and re-exported through `crate::core::ssrf`;
+/// re-exported again here so existing `acp_registry::ssrf` / `super::ssrf` paths
+/// keep working unchanged.
 pub use crate::core::ssrf;
 
 pub use client::AcpRegistryClient;

@@ -1,16 +1,11 @@
-//! Surface-neutral dispatch helpers shared by every service dispatcher.
+//! Dispatch helpers for `labby-gateway`'s own `action` + `params` surface.
 //!
 //! These build the canonical `help`/`schema` JSON payloads and the small param
-//! extractors that every `action + params` dispatcher relies on. They live here
-//! (rather than in the `lab` binary) so the extracted runtime crates — notably
-//! `lab-gateway`'s dispatch surface — share one source of truth with the binary.
-//! The `lab` binary re-exports them from its own `dispatch::helpers` module so
-//! existing call sites are unchanged.
+//! extractors the gateway's dispatch surface relies on.
 
-use labby_apis::core::ActionSpec;
+use labby_primitives::action::ActionSpec;
+use labby_runtime::error::ToolError;
 use serde_json::{Value, json};
-
-use crate::error::ToolError;
 
 /// Serialize any `Serialize` value to `serde_json::Value`.
 pub fn to_json<T: serde::Serialize>(v: T) -> Result<Value, ToolError> {

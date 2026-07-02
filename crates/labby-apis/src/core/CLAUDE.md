@@ -10,9 +10,13 @@ This directory is the foundation every service module depends on. Changes here r
 | `http.rs` | `HttpClient` wrapper around `reqwest::Client` — auth injection, `request.start`/`request.finish`/`request.error` tracing events, JSON and GraphQL helpers. No retry logic, no backoff, no spans — callers own those. All service clients build on this. |
 | `error.rs` | `ApiError` canonical taxonomy + `kind()` method. See below. |
 | `status.rs` | `ServiceStatus { reachable, auth_ok, version, latency_ms, message }` — returned by `ServiceClient::health()`. |
-| `action.rs` | `ActionSpec { name, description, destructive, params, returns }` + `ParamSpec { name, ty: &'static str, required, description }`. Drives help/schema/catalog. |
-| `plugin.rs` | `PluginMeta` + `Category` (10 variants) + `EnvVar`. Per-service compile-time constants. |
+| `action.rs` | Thin `pub use labby_primitives::action::{ActionSpec, ParamSpec}` re-export. `ActionSpec { name, description, destructive, params, returns }` + `ParamSpec { name, ty: &'static str, required, description }` are defined in the `labby-primitives` leaf crate, not here — see `crates/labby-primitives/src/action.rs`. Drives help/schema/catalog. |
+| `plugin.rs` | Thin `pub use labby_primitives::plugin::{Category, EnvVar, PluginMeta}` re-export. `PluginMeta` + `Category` (10 variants) + `EnvVar` (per-service compile-time constants) are defined in `crates/labby-primitives/src/plugin.rs`. |
+| `plugin_ui.rs` | Thin `pub use labby_primitives::plugin_ui::{...}` re-export of `UiSchema` and the Bootstrap-wizard field types — defined in `crates/labby-primitives/src/plugin_ui.rs`. |
+| `ssrf.rs` | Thin `pub use labby_primitives::ssrf::{...}` re-export of the static SSRF preflight checks — defined in `crates/labby-primitives/src/ssrf.rs`. |
 | `traits.rs` | `ServiceClient` trait with **native `async fn in trait`** — no `#[async_trait]`, no `Box<dyn>`. |
+
+**Why re-exports, not local definitions:** `labby-gateway` (and, through it, `labby-auth`/`labby-codemode`) also needs `ActionSpec`/`ParamSpec`/`PluginMeta`/`EnvVar`/`UiSchema`, but must not depend on the rest of this SDK crate (`http.rs`'s `reqwest`-based `HttpClient`, the service clients, etc.). `labby-primitives` is the shared, dependency-free home both sides point at — edit the types there, not in these shims.
 
 ## ApiError.kind() — canonical stable tags
 

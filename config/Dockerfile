@@ -37,6 +37,7 @@ COPY crates/labby-codemode/Cargo.toml crates/labby-codemode/Cargo.toml
 COPY crates/labby-gateway/Cargo.toml crates/labby-gateway/Cargo.toml
 COPY crates/labby-web/Cargo.toml crates/labby-web/Cargo.toml
 COPY crates/labby-winjob/Cargo.toml crates/labby-winjob/Cargo.toml
+COPY crates/labby-primitives/Cargo.toml crates/labby-primitives/Cargo.toml
 
 # Create stub source files so cargo can parse ALL manifests without error.
 #
@@ -53,6 +54,7 @@ RUN mkdir -p \
       crates/labby-gateway/src \
       crates/labby-web/src \
       crates/labby-winjob/src \
+      crates/labby-primitives/src \
       apps/gateway-admin/out \
  && echo 'fn main(){}' > crates/labby/src/main.rs \
  && echo 'fn main(){}' > crates/labby-web/build.rs \
@@ -65,6 +67,7 @@ RUN mkdir -p \
       crates/labby-gateway/src/lib.rs \
       crates/labby-web/src/lib.rs \
       crates/labby-winjob/src/lib.rs \
+      crates/labby-primitives/src/lib.rs \
  && cargo build --workspace --all-features --release \
  && cargo clean -p labby \
  && cargo clean -p labby-apis \
@@ -74,6 +77,7 @@ RUN mkdir -p \
  && cargo clean -p labby-gateway \
  && cargo clean -p labby-web \
  && cargo clean -p labby-winjob \
+ && cargo clean -p labby-primitives \
  && rm -rf \
       crates/*/src \
       apps/gateway-admin/out \

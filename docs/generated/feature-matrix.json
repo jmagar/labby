@@ -98,7 +98,8 @@
       "feature": "marketplace",
       "dependencies": [
         "labby-apis/mcpregistry",
-        "labby-runtime/marketplace"
+        "labby-runtime/marketplace",
+        "gateway"
       ],
       "included_in_default": true,
       "included_in_all": true,
@@ -285,6 +286,7 @@
       "crate_name": "labby-runtime",
       "feature": "acp_registry",
       "dependencies": [
+        "dep:labby-apis",
         "labby-apis/acp_registry"
       ],
       "included_in_default": false,
@@ -297,6 +299,7 @@
       "crate_name": "labby-runtime",
       "feature": "deploy",
       "dependencies": [
+        "dep:labby-apis",
         "labby-apis/deploy"
       ],
       "included_in_default": false,
@@ -309,6 +312,7 @@
       "crate_name": "labby-runtime",
       "feature": "marketplace",
       "dependencies": [
+        "dep:labby-apis",
         "labby-apis/mcpregistry"
       ],
       "included_in_default": false,

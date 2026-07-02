@@ -1,3 +1,6 @@
-// The stdio spawn-guard lives in `labby-runtime` so marketplace and gateway
-// surfaces share one allowlist without a product-to-product dependency.
-pub use labby_runtime::security::spawn_guard;
+// The stdio spawn-guard lives in `labby-gateway` (gateway-owned; the
+// `marketplace` feature depends on `gateway` for exactly this) so marketplace
+// and gateway surfaces share one allowlist. `labby-gateway` is an optional
+// dependency behind the `gateway` feature, so this re-export must be too.
+#[cfg(feature = "gateway")]
+pub use labby_gateway::security::spawn_guard;
