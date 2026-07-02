@@ -413,3 +413,31 @@ async fn semantic_rank_never_returns_ids_outside_scope_filtered_catalog() {
         .unwrap();
     assert!(result.is_empty());
 }
+#[tokio::test]
+async fn ensure_embeddings_unreachable_tei_fails_open_and_records_cooldown() {
+    let (manager, _pool) = code_mode_manager_with_upstreams(Vec::new()).await;
+    let mut cfg = manager.code_mode_config().await;
+    cfg.semantic_search.tei_url = Some("http://127.0.0.1:1".to_string());
+    manager
+        .seed_config_unchecked_for_tests(GatewayConfig {
+            code_mode: cfg,
+            ..GatewayConfig::default()
+        })
+        .await;
+    let entries = vec![labby_codemode::ToolDescriptor::tool(
+        "alpha",
+        "ping",
+        "Ping the alpha upstream",
+        None,
+        None,
+    )];
+    assert!(manager.semantic_search_available().await);
+    let result = manager
+        .ensure_embeddings_for_fingerprint("fp-test", &entries)
+        .await;
+    assert!(result.is_empty(), "fail-open returns empty vectors");
+    assert!(
+        !manager.semantic_search_available().await,
+        "failure must start the cooldown"
+    );
+}
