@@ -19,7 +19,7 @@ publish = false
 testkit = []
 
 [dependencies]
-labby-apis = { path = "../labby-apis", default-features = false }
+labby-primitives = { path = "../labby-primitives" }
 labby-runtime = { path = "../labby-runtime" }
 labby-auth = { path = "../labby-auth", features = ["upstream-oauth-rmcp"] }
 labby-codemode = { path = "../labby-codemode" }
@@ -70,6 +70,10 @@ tracing-subscriber.workspace = true
 tokio = { workspace = true, features = ["process", "test-util"] }
 proptest = "1"
 labby-auth = { path = "../labby-auth", features = ["upstream-oauth-rmcp"] }
+# Dev-only: one gateway config-view test fixtures against a real labby-apis
+# service constant (`acp::META`) rather than a synthetic one. Production code
+# in this crate never depends on labby-apis — see crates/labby-primitives.
+labby-apis = { path = "../labby-apis", default-features = false }
 
 [lints]
 workspace = true

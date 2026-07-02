@@ -200,11 +200,11 @@ fn gateway_actions_include_servers_and_schema() {
 /// this so `service_meta`/`service_actions`/`contains_service` resolve `deploy`.
 struct DeployTestRegistry;
 
-static DEPLOY_TEST_META: labby_apis::core::PluginMeta = labby_apis::core::PluginMeta {
+static DEPLOY_TEST_META: labby_primitives::plugin::PluginMeta = labby_primitives::plugin::PluginMeta {
     name: "deploy",
     display_name: "Deploy",
     description: "deploy (test stub)",
-    category: labby_apis::core::Category::Bootstrap,
+    category: labby_primitives::plugin::Category::Bootstrap,
     docs_url: "",
     required_env: &[],
     optional_env: &[],
@@ -247,7 +247,7 @@ impl crate::gateway::service_registry::GatewayServiceRegistry for DeployTestRegi
         })
     }
 
-    fn service_meta(&self, name: &str) -> Option<&'static labby_apis::core::PluginMeta> {
+    fn service_meta(&self, name: &str) -> Option<&'static labby_primitives::plugin::PluginMeta> {
         (name == "deploy").then_some(&DEPLOY_TEST_META)
     }
 }

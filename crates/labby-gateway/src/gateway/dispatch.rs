@@ -1,9 +1,7 @@
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use labby_runtime::dispatch_helpers::{
-    action_schema, handle_builtin, help_payload, require_str, to_json,
-};
+use crate::dispatch_helpers::{action_schema, handle_builtin, help_payload, require_str, to_json};
 use labby_runtime::error::ToolError;
 
 use super::SHARED_GATEWAY_OAUTH_SUBJECT;

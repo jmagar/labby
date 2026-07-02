@@ -1,4 +1,4 @@
-use labby_apis::core::action::{ActionSpec, ParamSpec};
+use labby_primitives::action::{ActionSpec, ParamSpec};
 
 const NAME_PARAM: ParamSpec = ParamSpec {
     name: "name",
