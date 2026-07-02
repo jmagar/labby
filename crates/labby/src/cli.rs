@@ -17,6 +17,7 @@ pub mod internal;
 pub mod logs;
 #[cfg(feature = "marketplace")]
 pub mod marketplace;
+#[cfg(feature = "nodes")]
 pub mod nodes;
 pub mod oauth;
 pub mod params;
@@ -78,6 +79,7 @@ pub enum Command {
     /// Generate and verify code-owned documentation artifacts.
     Docs(docs::DocsArgs),
     /// Query nodes from the configured controller.
+    #[cfg(feature = "nodes")]
     Nodes(nodes::NodesArgs),
     /// Quick reachability check for configured services.
     Health,
@@ -119,6 +121,7 @@ pub async fn dispatch(cli: Cli, config: LabConfig) -> Result<ExitCode> {
         Command::Mcp(args) => serve::run_mcp(args, &config).await,
         Command::Doctor(args) => doctor::run(args, format).await,
         Command::Docs(args) => docs::run(args, format),
+        #[cfg(feature = "nodes")]
         Command::Nodes(args) => nodes::run(args, format, &config).await,
         Command::Health => health::run(format).await,
         Command::Setup(args) => setup::run(args, format).await,

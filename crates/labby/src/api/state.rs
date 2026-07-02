@@ -10,7 +10,9 @@ use crate::acp::registry::AcpSessionRegistry;
 use crate::catalog::{Catalog, build_catalog};
 use crate::config::{LabConfig, NodeRole};
 use crate::dispatch::clients::ServiceClients;
+#[cfg(feature = "nodes")]
 use crate::node::enrollment::store::EnrollmentStore;
+#[cfg(feature = "nodes")]
 use crate::node::store::NodeStore;
 use crate::registry::{ToolRegistry, build_default_registry};
 
@@ -60,8 +62,10 @@ pub struct AppState {
     #[cfg(feature = "gateway")]
     pub gateway_manager: Option<Arc<crate::dispatch::gateway::manager::GatewayManager>>,
     /// Shared fleet state store for node runtime ingestion.
+    #[cfg(feature = "nodes")]
     pub node_store: Option<Arc<NodeStore>>,
     /// Shared durable enrollment store for fleet websocket admission control.
+    #[cfg(feature = "nodes")]
     pub enrollment_store: Option<Arc<EnrollmentStore>>,
     /// Shared local-master log runtime used by API SSE and adapter-local lookups.
     pub logs_system: Option<Arc<crate::dispatch::logs::types::LogSystem>>,
@@ -145,7 +149,9 @@ impl AppState {
             actor_key_deriver: None,
             #[cfg(feature = "gateway")]
             gateway_manager: None,
+            #[cfg(feature = "nodes")]
             node_store: None,
+            #[cfg(feature = "nodes")]
             enrollment_store: None,
             logs_system: None,
             #[cfg(feature = "acp")]
@@ -209,12 +215,14 @@ impl AppState {
         self
     }
 
+    #[cfg(feature = "nodes")]
     #[must_use]
     pub fn with_node_store(mut self, store: Arc<NodeStore>) -> Self {
         self.node_store = Some(store);
         self
     }
 
+    #[cfg(feature = "nodes")]
     #[must_use]
     pub fn with_enrollment_store(mut self, store: Arc<EnrollmentStore>) -> Self {
         self.enrollment_store = Some(store);

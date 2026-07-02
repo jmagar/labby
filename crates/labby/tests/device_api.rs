@@ -1,3 +1,4 @@
+#![cfg(feature = "nodes")]
 #![allow(
     clippy::bool_assert_comparison,
     clippy::err_expect,

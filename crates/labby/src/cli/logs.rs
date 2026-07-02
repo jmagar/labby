@@ -12,6 +12,7 @@ use crate::dispatch::logs::client::{
     bootstrap_store_backed_log_system, resolve_retention, resolve_store_path,
 };
 use crate::dispatch::logs::dispatch::dispatch_with_system;
+#[cfg(feature = "nodes")]
 use crate::dispatch::logs::forward::{ForwardConfig, resolve_node_id};
 use crate::dispatch::logs::types::{LogQuery, LogSystem, LogTailRequest};
 use crate::output::{OutputFormat, print};
@@ -25,6 +26,7 @@ pub struct LogsArgs {
 #[derive(Debug, Subcommand)]
 pub enum LogsCommand {
     /// Search fleet logs for a device from the master control plane.
+    #[cfg(feature = "nodes")]
     Search {
         /// Device (node) ID to search logs for.
         #[arg(value_name = "DEVICE")]
@@ -36,9 +38,11 @@ pub enum LogsCommand {
     /// Search or inspect the local-master runtime log store.
     Local(LocalLogsArgs),
     /// Forward this node's syslog to the master log store (peer mode).
+    #[cfg(feature = "nodes")]
     Forward(ForwardArgs),
 }
 
+#[cfg(feature = "nodes")]
 #[derive(Debug, Args)]
 pub struct ForwardArgs {
     /// Override the master base URL (default: LAB_MASTER_URL).
@@ -129,16 +133,19 @@ pub struct LocalTailArgs {
 
 pub async fn run(args: LogsArgs, format: OutputFormat, config: &LabConfig) -> Result<ExitCode> {
     match args.command {
+        #[cfg(feature = "nodes")]
         LogsCommand::Search { device, query } => {
             let value = search_logs(config, &device, &query).await?;
             print(&value, format)?;
             Ok(ExitCode::SUCCESS)
         }
         LogsCommand::Local(local) => run_local(local, format, config).await,
+        #[cfg(feature = "nodes")]
         LogsCommand::Forward(args) => run_forward(args, config).await,
     }
 }
 
+#[cfg(feature = "nodes")]
 pub async fn search_logs(config: &LabConfig, device_id: &str, query: &str) -> Result<Value> {
     crate::node::master_client::MasterClient::from_config(config, None)?
         .search_logs(device_id, query)
@@ -210,6 +217,7 @@ fn build_search_query(args: LocalSearchArgs) -> LogQuery {
 
 /// Parse clap `ForwardArgs` into a `ForwardConfig` and delegate to the
 /// shared dispatch-layer implementation. The CLI owns only arg parsing here.
+#[cfg(feature = "nodes")]
 async fn run_forward(args: ForwardArgs, _config: &LabConfig) -> Result<ExitCode> {
     // clap's `env = "..."` populates Some("") when the var is set to an empty
     // string, bypassing env_non_empty's empty-string filter. Filter here so
@@ -246,8 +254,13 @@ mod tests {
     use crate::cli::{Cli, Command};
 
     #[test]
-    fn logs_cli_parser_accepts_existing_fleet_search() {
+    fn logs_cli_parser_debug_asserts() {
         Cli::command().debug_assert();
+    }
+
+    #[cfg(feature = "nodes")]
+    #[test]
+    fn logs_cli_parser_accepts_existing_fleet_search() {
         assert!(Cli::try_parse_from(["lab", "logs", "search", "node-a", "timeout"]).is_ok());
     }
 

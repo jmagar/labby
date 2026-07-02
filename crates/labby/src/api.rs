@@ -33,6 +33,7 @@ pub mod upstream_oauth;
 pub mod browser_session;
 
 /// Node runtime routes mounted under `/v1/nodes/*`.
+#[cfg(feature = "nodes")]
 pub mod nodes;
 
 /// Static Labby web asset serving helpers.

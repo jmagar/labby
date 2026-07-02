@@ -143,7 +143,7 @@ path = "src/lib.rs"
 acp = ["dep:agent-client-protocol"]
 acp_registry = ["labby-apis/acp_registry", "labby-runtime/acp_registry"]
 node-runtime = []
-all = ["labby-apis/all", "lab-admin", "acp", "acp_registry", "deploy", "gateway", "marketplace", "stash"]
+all = ["labby-apis/all", "lab-admin", "acp", "acp_registry", "deploy", "gateway", "marketplace", "nodes", "stash"]
 gateway = ["dep:labby-codemode", "dep:labby-gateway"]
 # Depends on `gateway` because marketplace's stdio-install validation reuses
 # the shared spawn-guard/SSRF checks, which now live in labby-gateway (moved
@@ -154,6 +154,7 @@ gateway = ["dep:labby-codemode", "dep:labby-gateway"]
 marketplace = ["labby-apis/mcpregistry", "labby-runtime/marketplace", "gateway", "acp", "stash"]
 services-all = [
 ]
+nodes = []
 stash = []
 default = ["all"]
 deploy = ["labby-apis/deploy", "labby-runtime/deploy"]

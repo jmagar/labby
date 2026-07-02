@@ -1063,7 +1063,11 @@ fn build_v1_router(state: &AppState, api_auth_configured: bool) -> Router<AppSta
         });
     let spec_for_route = openapi_spec;
 
-    let mut v1 = Router::new().nest("/nodes", super::nodes::routes(state.clone()));
+    let mut v1 = Router::new();
+    #[cfg(feature = "nodes")]
+    {
+        v1 = v1.nest("/nodes", super::nodes::routes(state.clone()));
+    }
 
     if is_master {
         v1 = v1.route("/{service}/actions", get(service_actions));
@@ -1544,23 +1548,27 @@ pub fn build_router(
     let mut router = Router::new()
         .route("/health", get(health::health))
         .route("/ready", get(health::ready))
-        // POST /v1/nodes/hello is self-registration — exempt from bearer auth.
-        .nest("/v1/nodes", super::nodes::public_routes(state.clone()))
-        // Backward-compat alias for pre-rename self-registration clients.
-        .nest("/v1/fleet", super::nodes::public_routes(state.clone()))
-        // GET /v1/nodes/ws is outside bearer-auth middleware by design.
-        // The `initialize` JSON-RPC method performs enrollment-token validation; all
-        // subsequent node methods require an active session. See docs/runtime/FLEET_METHODS.md.
-        .route(
-            "/v1/nodes/ws",
-            get(crate::api::nodes::fleet::websocket_upgrade),
-        )
-        // Backward-compat alias for pre-rename websocket clients.
-        .route(
-            "/v1/fleet/ws",
-            get(crate::api::nodes::fleet::websocket_upgrade),
-        )
         .merge(v1_protected);
+    #[cfg(feature = "nodes")]
+    {
+        router = router
+            // POST /v1/nodes/hello is self-registration — exempt from bearer auth.
+            .nest("/v1/nodes", super::nodes::public_routes(state.clone()))
+            // Backward-compat alias for pre-rename self-registration clients.
+            .nest("/v1/fleet", super::nodes::public_routes(state.clone()))
+            // GET /v1/nodes/ws is outside bearer-auth middleware by design.
+            // The `initialize` JSON-RPC method performs enrollment-token validation; all
+            // subsequent node methods require an active session. See docs/runtime/FLEET_METHODS.md.
+            .route(
+                "/v1/nodes/ws",
+                get(crate::api::nodes::fleet::websocket_upgrade),
+            )
+            // Backward-compat alias for pre-rename websocket clients.
+            .route(
+                "/v1/fleet/ws",
+                get(crate::api::nodes::fleet::websocket_upgrade),
+            );
+    }
     #[cfg(feature = "marketplace")]
     {
         router = router.merge(v0_1_protected);

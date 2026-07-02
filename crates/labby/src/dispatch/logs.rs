@@ -1,6 +1,7 @@
 pub mod catalog;
 pub mod client;
 pub mod dispatch;
+#[cfg(feature = "nodes")]
 pub mod forward;
 pub mod ingest;
 pub mod metrics;

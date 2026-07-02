@@ -41,9 +41,12 @@ use crate::dispatch::logs::client::{
 };
 use crate::mcp::peers::PeerNotifier;
 use crate::mcp::server::LabMcpServer;
+#[cfg(feature = "nodes")]
 use crate::node::enrollment::store::EnrollmentStore;
 use crate::node::identity::{resolve_local_hostname, resolve_runtime_role_from_config};
+#[cfg(feature = "nodes")]
 use crate::node::runtime::NodeRuntime;
+#[cfg(feature = "nodes")]
 use crate::node::store::NodeStore;
 use crate::output::theme::{CliTheme, ColorPolicy, RenderContext, RenderEnv};
 #[cfg(target_os = "linux")]
@@ -216,11 +219,16 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         master_host = %resolved_runtime.master_host,
         "node runtime resolved"
     );
+    #[cfg(feature = "nodes")]
     let node_runtime = NodeRuntime::from_config(resolved_runtime, config, Some(port))?;
+    #[cfg(feature = "nodes")]
     let node_role = node_runtime.role();
+    #[cfg(not(feature = "nodes"))]
+    let node_role = node_role_without_nodes(&resolved_runtime)?;
 
     // Early return for node (non-controller) processes: skip the full
     // controller startup (registry build, OAuth, gateway, logs system, web UI, etc.).
+    #[cfg(feature = "nodes")]
     if matches!(node_role, crate::config::NodeRole::NonMaster) {
         return run_node_mode(transport, args.command.as_ref(), config, node_runtime, port).await;
     }
@@ -240,40 +248,44 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         selected_service_count = registry.services().len(),
         "service registry ready"
     );
-    let log_retention_days = config
-        .node
-        .as_ref()
-        .and_then(|n| n.log_retention_days)
-        .unwrap_or(crate::node::log_store::DEFAULT_RETENTION_DAYS);
-    let node_log_db_path = node_runtime.home_dir().join(".lab/node-logs.sqlite");
-    let node_store = match crate::node::log_store::SqliteNodeLogStore::open(
-        node_log_db_path.clone(),
-        log_retention_days,
-    )
-    .await
-    {
-        Ok(log_store) => {
-            tracing::info!(
-                path = %node_log_db_path.display(),
-                retention_days = log_retention_days,
-                "node log store opened"
-            );
-            Arc::new(NodeStore::with_log_store(log_store))
-        }
-        Err(err) => {
-            tracing::warn!(
-                path = %node_log_db_path.display(),
-                error = %err,
-                "node log store unavailable; falling back to in-memory store"
-            );
-            Arc::new(NodeStore::default())
-        }
+    #[cfg(feature = "nodes")]
+    let (node_store, enrollment_store) = {
+        let log_retention_days = config
+            .node
+            .as_ref()
+            .and_then(|n| n.log_retention_days)
+            .unwrap_or(crate::node::log_store::DEFAULT_RETENTION_DAYS);
+        let node_log_db_path = node_runtime.home_dir().join(".lab/node-logs.sqlite");
+        let node_store = match crate::node::log_store::SqliteNodeLogStore::open(
+            node_log_db_path.clone(),
+            log_retention_days,
+        )
+        .await
+        {
+            Ok(log_store) => {
+                tracing::info!(
+                    path = %node_log_db_path.display(),
+                    retention_days = log_retention_days,
+                    "node log store opened"
+                );
+                Arc::new(NodeStore::with_log_store(log_store))
+            }
+            Err(err) => {
+                tracing::warn!(
+                    path = %node_log_db_path.display(),
+                    error = %err,
+                    "node log store unavailable; falling back to in-memory store"
+                );
+                Arc::new(NodeStore::default())
+            }
+        };
+        let enrollment_store = Arc::new(
+            EnrollmentStore::open(node_runtime.home_dir().join(".lab/node-enrollments.json"))
+                .await
+                .context("open node enrollment store")?,
+        );
+        (node_store, enrollment_store)
     };
-    let enrollment_store = Arc::new(
-        EnrollmentStore::open(node_runtime.home_dir().join(".lab/node-enrollments.json"))
-            .await
-            .context("open node enrollment store")?,
-    );
 
     let stdio_mode = should_run_stdio(transport, args.command.as_ref());
     let spawn_depth = resolve_lab_spawn_depth(std::env::var("LAB_SPAWN_DEPTH").ok());
@@ -521,8 +533,11 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         );
     }
 
-    state = state.with_node_store(Arc::clone(&node_store));
-    state = state.with_enrollment_store(Arc::clone(&enrollment_store));
+    #[cfg(feature = "nodes")]
+    {
+        state = state.with_node_store(Arc::clone(&node_store));
+        state = state.with_enrollment_store(Arc::clone(&enrollment_store));
+    }
     state = state.with_log_system(logs_system);
     #[cfg(feature = "marketplace")]
     let _registry_sync_keepalive = {
@@ -676,6 +691,7 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         "startup plan resolved"
     );
 
+    #[cfg(feature = "nodes")]
     node_runtime.start_background_tasks();
 
     run_http(
@@ -1253,6 +1269,22 @@ fn reject_protected_routes_without_gateway(config: &LabConfig) -> Result<()> {
     Ok(())
 }
 
+/// Mirror of `reject_protected_routes_without_gateway`: a build without the
+/// `nodes` feature can only run as a controller. Fail loudly if config asks
+/// for node mode instead of silently ignoring it.
+#[cfg(not(feature = "nodes"))]
+fn node_role_without_nodes(
+    resolved: &crate::config::ResolvedNodeRuntime,
+) -> Result<crate::config::NodeRole> {
+    let role = resolved.role;
+    if matches!(role, crate::config::NodeRole::NonMaster) {
+        anyhow::bail!(
+            "node (non-controller) role is configured but this labby build does not include fleet support (built without the `nodes` feature)"
+        );
+    }
+    Ok(role)
+}
+
 /// Run the minimal node-mode startup path.
 ///
 /// Called when role resolution determines the process is a non-controller node.
@@ -1260,6 +1292,7 @@ fn reject_protected_routes_without_gateway(config: &LabConfig) -> Result<()> {
 /// web UI, marketplace sync, EnrollmentStore, etc.) and runs only what a node needs:
 /// background tasks (metadata upload, bootstrap logs, WebSocket flush) and a
 /// loopback health server to keep the process alive and signal systemd readiness.
+#[cfg(feature = "nodes")]
 async fn run_node_mode(
     transport: Transport,
     command: Option<&ServeCommand>,

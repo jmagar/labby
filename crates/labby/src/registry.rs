@@ -530,6 +530,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
         dispatch_fn!(crate::dispatch::snippets::dispatch),
     ));
 
+    #[cfg(feature = "nodes")]
     reg.register(RegisteredService {
         name: "device",
         description: "Manage fleet device enrollments",
@@ -876,6 +877,7 @@ mod tests {
             let mut s = std::collections::HashSet::new();
             #[cfg(feature = "acp")]
             s.insert(labby_apis::acp::META.name);
+            #[cfg(feature = "nodes")]
             s.insert("device");
             #[cfg(feature = "gateway")]
             s.insert("gateway");

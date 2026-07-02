@@ -10,6 +10,7 @@ pub mod deploy;
 
 // Device enrollment actions are MCP-only for now and live outside the shared
 // service-dispatch pattern.
+#[cfg(feature = "nodes")]
 pub mod nodes;
 
 #[cfg(feature = "fs")]

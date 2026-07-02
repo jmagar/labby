@@ -14,6 +14,7 @@ pub mod lab_admin;
 pub mod logs;
 #[cfg(feature = "marketplace")]
 pub mod marketplace;
+#[cfg(feature = "nodes")]
 pub mod node;
 pub mod path_safety;
 pub mod redact;
