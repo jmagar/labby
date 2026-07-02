@@ -15,7 +15,7 @@
 - Slice builds are allowed to have dead-code warnings (CI sets `RUSTFLAGS: ""` for slice jobs — see `.github/workflows/ci.yml:186-217`). The all-features build must stay warning-clean (`just lint` / lefthook pre-commit runs clippy `-D warnings`).
 - No `mod.rs` files. Modern module style only (`foo.rs` sibling to `foo/`).
 - Feature names (exact): `stash`, `acp`, `nodes`.
-- New feature dependencies (exact): `marketplace` requires `acp` and `stash` (because `dispatch/marketplace/acp_dispatch.rs` uses `crate::acp` and `dispatch/marketplace/stash_bridge.rs` uses `crate::dispatch::stash` internals). The `marketplace` feature on main ALREADY requires `gateway` (spawn-guard/SSRF checks live in labby-gateway) — preserve the existing `"gateway"` entry and its comment when appending. `acp` owns the `agent-client-protocol` dependency via `dep:agent-client-protocol`.
+- New feature dependencies (exact): `marketplace` requires `acp`, `nodes`, and `stash` (because `dispatch/marketplace/acp_dispatch.rs` uses `crate::acp`, marketplace's remote plugin install pushes RPCs to fleet nodes via `dispatch/node/send.rs` from `api/services/marketplace.rs` and `dispatch/marketplace/mcp_dispatch.rs`, and `dispatch/marketplace/stash_bridge.rs` uses `crate::dispatch::stash` internals — the `nodes` dependency was discovered during implementation). The `marketplace` feature on main ALREADY requires `gateway` (spawn-guard/SSRF checks live in labby-gateway) — preserve the existing `"gateway"` entry and its comment when appending. `acp` owns the `agent-client-protocol` dependency via `dep:agent-client-protocol`.
 - Commit style: conventional prefixes as used in this repo (`feat:`, `fix:`, `ci:`).
 - Repo rule: create a bead before writing code (`bd create`), claim it, close it at the end.
 - The slice verification command used throughout (run from the repo root):
@@ -243,7 +243,7 @@ all = ["labby-apis/all", "lab-admin", "acp", "acp_registry", "deploy", "gateway"
 marketplace = ["labby-apis/mcpregistry", "labby-runtime/marketplace", "gateway", "acp", "stash"]
 ```
 
-(`marketplace` keeps the existing `"gateway"` entry and its comment; `"acp"` is appended alongside the `"stash"` added in Task 1.)
+(`marketplace` keeps the existing `"gateway"` entry and its comment; `"acp"` is appended alongside the `"stash"` added in Task 1. NOTE — as-shipped: Task 3/4 additionally appends `"nodes"` because marketplace's remote plugin install uses `dispatch::node::send`; the final line is `marketplace = ["labby-apis/mcpregistry", "labby-runtime/marketplace", "gateway", "acp", "nodes", "stash"]`.)
 
 Note: `acp` and `acp_registry` are distinct, unrelated features — do not merge them. `acp_registry` is the marketplace-facing agent installer SDK; `acp` is the chat/session runtime being gated here.
 

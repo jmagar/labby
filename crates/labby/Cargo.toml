@@ -136,8 +136,10 @@ path = "src/lib.rs"
 #   may remain normal dependencies until a dedicated dependency-slimming pass makes them optional.
 # - Supported standalone product slices are: gateway, marketplace, fs, deploy, acp_registry.
 # - `mcpregistry` is owned by marketplace in this crate; do not treat it as standalone here.
-# - `doctor`, `setup`, `serve` base, `nodes`, `logs`, `stash`, and `acp` are base control-plane
-#   or UI-coupled capabilities, not standalone slices in this feature table.
+# - `acp`, `nodes`, and `stash` are feature-gated base capabilities: not standalone
+#   products, but excludable so a gateway-only build stays lean. `marketplace`
+#   requires `acp` + `stash`. `doctor`, `setup`, `logs` (local), docs generation,
+#   and the `serve` base remain always-on.
 # - Helper/internal features are not standalone product slices unless this comment is updated.
 [features]
 acp = ["dep:agent-client-protocol"]
@@ -149,9 +151,10 @@ gateway = ["dep:labby-codemode", "dep:labby-gateway"]
 # the shared spawn-guard/SSRF checks, which now live in labby-gateway (moved
 # out of labby-runtime so labby-auth/labby-codemode don't pull them in).
 # Also requires `acp` (marketplace fork dispatch drives ACP sessions via
-# dispatch/marketplace/acp_dispatch.rs) and `stash` (fork persistence goes
-# through dispatch/marketplace/stash_bridge.rs).
-marketplace = ["labby-apis/mcpregistry", "labby-runtime/marketplace", "gateway", "acp", "stash"]
+# dispatch/marketplace/acp_dispatch.rs), `nodes` (remote plugin install sends
+# RPCs to fleet nodes via dispatch/node/send.rs), and `stash` (fork
+# persistence goes through dispatch/marketplace/stash_bridge.rs).
+marketplace = ["labby-apis/mcpregistry", "labby-runtime/marketplace", "gateway", "acp", "nodes", "stash"]
 services-all = [
 ]
 nodes = []

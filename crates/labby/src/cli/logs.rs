@@ -1,7 +1,9 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+#[cfg(feature = "nodes")]
+use anyhow::Context;
+use anyhow::Result;
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 

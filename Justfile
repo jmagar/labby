@@ -406,3 +406,7 @@ sccache-restart:
     /home/jmagar/.local/sccache --show-stats 2>/dev/null | grep -iE "compile requests|cache location" || true
     echo "✓ restarted. If poisoning persists, wipe on-disk cache:"
     echo "    systemctl --user stop sccache.service && rm -rf ~/.cache/sccache && systemctl --user start sccache.service"
+
+# Compile check for the lean gateway-only slice (base services excluded).
+check-gateway-slice:
+    RUSTFLAGS="" cargo check -p labby --no-default-features --features gateway --all-targets

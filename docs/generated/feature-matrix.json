@@ -2,6 +2,18 @@
   "features": [
     {
       "crate_name": "labby",
+      "feature": "acp",
+      "dependencies": [
+        "dep:agent-client-protocol"
+      ],
+      "included_in_default": true,
+      "included_in_all": true,
+      "classification": "helper_internal",
+      "mapped_crate_feature": null,
+      "exception_reason": "helper/internal feature"
+    },
+    {
+      "crate_name": "labby",
       "feature": "acp_registry",
       "dependencies": [
         "labby-apis/acp_registry",
@@ -19,10 +31,13 @@
       "dependencies": [
         "labby-apis/all",
         "lab-admin",
+        "acp",
         "acp_registry",
         "deploy",
         "gateway",
-        "marketplace"
+        "marketplace",
+        "nodes",
+        "stash"
       ],
       "included_in_default": true,
       "included_in_all": true,
@@ -99,7 +114,10 @@
       "dependencies": [
         "labby-apis/mcpregistry",
         "labby-runtime/marketplace",
-        "gateway"
+        "gateway",
+        "acp",
+        "nodes",
+        "stash"
       ],
       "included_in_default": true,
       "included_in_all": true,
@@ -131,10 +149,30 @@
     },
     {
       "crate_name": "labby",
+      "feature": "nodes",
+      "dependencies": [],
+      "included_in_default": true,
+      "included_in_all": true,
+      "classification": "intentional_exception",
+      "mapped_crate_feature": null,
+      "exception_reason": "intentional crate-local exception"
+    },
+    {
+      "crate_name": "labby",
       "feature": "services-all",
       "dependencies": [],
       "included_in_default": false,
       "included_in_all": false,
+      "classification": "intentional_exception",
+      "mapped_crate_feature": null,
+      "exception_reason": "intentional crate-local exception"
+    },
+    {
+      "crate_name": "labby",
+      "feature": "stash",
+      "dependencies": [],
+      "included_in_default": true,
+      "included_in_all": true,
       "classification": "intentional_exception",
       "mapped_crate_feature": null,
       "exception_reason": "intentional crate-local exception"

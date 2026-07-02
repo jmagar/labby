@@ -6,17 +6,20 @@ Feature invariant status: clean.
 
 | Crate | Feature | Class | In Default | In All | Maps To | Dependencies |
 | --- | --- | --- | --- | --- | --- | --- |
+| labby | `acp` | HelperInternal | true | true | - | `dep:agent-client-protocol` |
 | labby | `acp_registry` | ProductSlice | true | true | labby-apis/acp_registry | `labby-apis/acp_registry`<br>`labby-runtime/acp_registry` |
-| labby | `all` | AggregateDefault | true | true | labby-apis/all | `labby-apis/all`<br>`lab-admin`<br>`acp_registry`<br>`deploy`<br>`gateway`<br>`marketplace` |
+| labby | `all` | AggregateDefault | true | true | labby-apis/all | `labby-apis/all`<br>`lab-admin`<br>`acp`<br>`acp_registry`<br>`deploy`<br>`gateway`<br>`marketplace`<br>`nodes`<br>`stash` |
 | labby | `default` | AggregateDefault | false | false | - | `all` |
 | labby | `deploy` | ProductSlice | true | true | labby-apis/deploy | `labby-apis/deploy`<br>`labby-runtime/deploy` |
 | labby | `fs` | ProductSlice | false | false | - | `dep:walkdir`<br>`dep:globset`<br>`dep:unicode-normalization`<br>`dep:rustix` |
 | labby | `gateway` | ProductSlice | true | true | - | `dep:labby-codemode`<br>`dep:labby-gateway` |
 | labby | `lab-admin` | ProductSlice | true | true | - |  |
-| labby | `marketplace` | ProductSlice | true | true | labby-apis/mcpregistry | `labby-apis/mcpregistry`<br>`labby-runtime/marketplace`<br>`gateway` |
+| labby | `marketplace` | ProductSlice | true | true | labby-apis/mcpregistry | `labby-apis/mcpregistry`<br>`labby-runtime/marketplace`<br>`gateway`<br>`acp`<br>`nodes`<br>`stash` |
 | labby | `mcpregistry` | IntentionalException | true | true | labby-apis/mcpregistry | `marketplace` |
 | labby | `node-runtime` | BinaryOnly | false | false | - |  |
+| labby | `nodes` | IntentionalException | true | true | - |  |
 | labby | `services-all` | IntentionalException | false | false | - |  |
+| labby | `stash` | IntentionalException | true | true | - |  |
 | labby | `systemd` | HelperInternal | false | false | - | `dep:sd-notify` |
 | labby | `test-utils` | IntentionalException | false | false | - |  |
 | labby-apis | `acp_registry` | ServicePassthrough | false | true | labby/acp_registry |  |

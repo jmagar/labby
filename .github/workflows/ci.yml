@@ -196,14 +196,15 @@ jobs:
     # disabling features (a service module is compiled but its registration is
     # gated off), so this job overrides the global `-D warnings`. The
     # all-features `check`/`clippy`/`test` jobs above remain the authoritative
-    # warning-clean signal. `stash` has no feature flag (always-on) so it is
-    # absent.
+    # warning-clean signal.
+    # Base capabilities (acp, nodes, stash) are feature-gated too so a
+    # gateway-only build can exclude them; their slices are compile checks only.
     env:
       RUSTFLAGS: ""
     strategy:
       fail-fast: false
       matrix:
-        slice: [gateway, marketplace, fs, deploy, acp_registry]
+        slice: [gateway, marketplace, fs, deploy, acp_registry, acp, nodes, stash]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
