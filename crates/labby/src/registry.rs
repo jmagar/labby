@@ -554,7 +554,8 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
         });
     }
 
-    // acp is always-on (no feature flag). MCP and CLI surfaces are Phase 2.
+    // acp is feature-gated: chat/session runtime for the web UI (required by marketplace).
+    #[cfg(feature = "acp")]
     {
         let meta = labby_apis::acp::META;
         reg.register(RegisteredService {
@@ -764,7 +765,9 @@ mod tests {
             .iter()
             .map(|service| service.name)
             .collect();
-        let mut kept_services = vec!["setup", "doctor", "acp"];
+        let mut kept_services = vec!["setup", "doctor"];
+        #[cfg(feature = "acp")]
+        kept_services.push("acp");
         #[cfg(feature = "stash")]
         kept_services.push("stash");
         #[cfg(feature = "gateway")]
@@ -871,7 +874,8 @@ mod tests {
         // ever changes the build itself would break on the feature-gated import.
         let http_router_services: std::collections::HashSet<&'static str> = {
             let mut s = std::collections::HashSet::new();
-            s.insert(labby_apis::acp::META.name); // always-on
+            #[cfg(feature = "acp")]
+            s.insert(labby_apis::acp::META.name);
             s.insert("device");
             #[cfg(feature = "gateway")]
             s.insert("gateway");

@@ -1105,8 +1105,12 @@ fn build_v1_router(state: &AppState, api_auth_configured: bool) -> Router<AppSta
             }
         }
 
+        #[cfg(feature = "acp")]
+        {
+            v1 = v1.nest("/acp", services::acp::routes(state.clone()));
+        }
+
         v1 = v1
-            .nest("/acp", services::acp::routes(state.clone()))
             .route(
                 "/openapi.json",
                 get(move || {

@@ -325,14 +325,18 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
     // Create the ACP session registry before the HTTP/stdio split so both transports
     // share the same process-global dispatch slot (intra-process only — stdio and
     // HTTP modes are mutually exclusive within one process).
-    let acp_registry = Arc::new(crate::acp::registry::AcpSessionRegistry::from_env().await);
-    crate::dispatch::acp::install_registry(Arc::clone(&acp_registry));
-    acp_registry.restore_from_db().await;
-    tracing::info!(
-        subsystem = "acp",
-        phase = "ready",
-        "ACP session registry installed"
-    );
+    #[cfg(feature = "acp")]
+    let acp_registry = {
+        let acp_registry = Arc::new(crate::acp::registry::AcpSessionRegistry::from_env().await);
+        crate::dispatch::acp::install_registry(Arc::clone(&acp_registry));
+        acp_registry.restore_from_db().await;
+        tracing::info!(
+            subsystem = "acp",
+            phase = "ready",
+            "ACP session registry installed"
+        );
+        acp_registry
+    };
 
     if stdio_mode {
         tracing::info!(
@@ -470,8 +474,11 @@ pub async fn run(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
 
     let mut state = AppState::from_registry(registry)
         .with_config(config.clone())
-        .with_http_bind_host(host.clone())
-        .with_acp_registry(Arc::clone(&acp_registry));
+        .with_http_bind_host(host.clone());
+    #[cfg(feature = "acp")]
+    {
+        state = state.with_acp_registry(Arc::clone(&acp_registry));
+    }
     if auth_configured {
         match crate::observability::activity::ActorKeyDeriver::load_or_create() {
             Ok(deriver) => {

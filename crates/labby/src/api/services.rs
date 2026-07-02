@@ -13,6 +13,7 @@ pub mod helpers;
 /// Admin-only allowlist management (`/v1/auth/allowed-emails`).
 pub mod auth_admin;
 
+#[cfg(feature = "acp")]
 pub mod acp;
 /// `GET /v1/catalog` — filtered service+action catalog for the ⌘K palette.
 pub mod catalog;

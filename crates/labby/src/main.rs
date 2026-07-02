@@ -27,6 +27,7 @@
 )]
 // binary crate — `pub` items are crate-internal by design
 
+#[cfg(feature = "acp")]
 mod acp;
 mod api;
 mod catalog;

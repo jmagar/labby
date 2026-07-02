@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(feature = "acp")]
 use crate::acp::registry::AcpSessionRegistry;
 use crate::catalog::{Catalog, build_catalog};
 use crate::config::{LabConfig, NodeRole};
@@ -65,6 +66,7 @@ pub struct AppState {
     /// Shared local-master log runtime used by API SSE and adapter-local lookups.
     pub logs_system: Option<Arc<crate::dispatch::logs::types::LogSystem>>,
     /// Shared ACP session registry for browser chat/session routes.
+    #[cfg(feature = "acp")]
     pub acp_registry: Arc<AcpSessionRegistry>,
     /// Resolved node role for the current process.
     pub node_role: Option<NodeRole>,
@@ -146,6 +148,7 @@ impl AppState {
             node_store: None,
             enrollment_store: None,
             logs_system: None,
+            #[cfg(feature = "acp")]
             acp_registry: Arc::new(AcpSessionRegistry::new()),
             node_role: None,
             web_assets_dir: None,
@@ -316,6 +319,7 @@ impl AppState {
     /// **Must be called** after `dispatch::acp::install_registry()` with the same `Arc`
     /// whenever ACP dispatch actions are in scope. See the invariant note on
     /// `from_registry()`.
+    #[cfg(feature = "acp")]
     #[must_use]
     pub fn with_acp_registry(mut self, registry: Arc<AcpSessionRegistry>) -> Self {
         self.acp_registry = registry;

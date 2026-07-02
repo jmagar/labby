@@ -19,6 +19,7 @@
     )
 )]
 
+#[cfg(feature = "acp")]
 pub mod acp;
 #[allow(unreachable_pub)]
 pub mod api;

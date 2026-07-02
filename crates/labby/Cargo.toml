@@ -75,7 +75,7 @@ diffy-imara = "0.3"
 arc-swap = "1"
 tokio-util = { version = "0.7", features = ["rt", "compat", "codec"] }
 strip-ansi-escapes = "0.2"
-agent-client-protocol = { version = "=0.13.1", features = ["unstable"] }
+agent-client-protocol = { version = "=0.13.1", features = ["unstable"], optional = true }
 
 hex = "0.4"
 getrandom = "0.4"
@@ -140,15 +140,18 @@ path = "src/lib.rs"
 #   or UI-coupled capabilities, not standalone slices in this feature table.
 # - Helper/internal features are not standalone product slices unless this comment is updated.
 [features]
+acp = ["dep:agent-client-protocol"]
 acp_registry = ["labby-apis/acp_registry", "labby-runtime/acp_registry"]
 node-runtime = []
-all = ["labby-apis/all", "lab-admin", "acp_registry", "deploy", "gateway", "marketplace", "stash"]
+all = ["labby-apis/all", "lab-admin", "acp", "acp_registry", "deploy", "gateway", "marketplace", "stash"]
 gateway = ["dep:labby-codemode", "dep:labby-gateway"]
 # Depends on `gateway` because marketplace's stdio-install validation reuses
 # the shared spawn-guard/SSRF checks, which now live in labby-gateway (moved
 # out of labby-runtime so labby-auth/labby-codemode don't pull them in).
-# Also requires `stash`: fork persistence goes through dispatch/marketplace/stash_bridge.rs.
-marketplace = ["labby-apis/mcpregistry", "labby-runtime/marketplace", "gateway", "stash"]
+# Also requires `acp` (marketplace fork dispatch drives ACP sessions via
+# dispatch/marketplace/acp_dispatch.rs) and `stash` (fork persistence goes
+# through dispatch/marketplace/stash_bridge.rs).
+marketplace = ["labby-apis/mcpregistry", "labby-runtime/marketplace", "gateway", "acp", "stash"]
 services-all = [
 ]
 stash = []
