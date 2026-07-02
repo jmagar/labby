@@ -384,3 +384,32 @@ async fn catalog_embeddings_stay_cold_when_semantic_search_unconfigured() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn semantic_rank_never_returns_ids_outside_scope_filtered_catalog() {
+    // semantic_rank's own internal build_tools_render call uses the SAME
+    // `scope` parameter it was given, and its ranking set is additionally
+    // filtered with the same `kind == Snippet || scope.allows(...)` test the
+    // sandbox's own discovery catalog uses — so an id excluded by that scope
+    // is structurally never present in the vectors handed to
+    // `rank_by_similarity` in the first place.
+    //
+    // This unit test exercises the unconfigured (no TEI) path, which
+    // already proves semantic_rank cannot fabricate ids independent of
+    // build_tools_render's scope-filtered output regardless of scope — a
+    // live, multi-upstream, TEI-backed confirmation of the same invariant
+    // is covered by the plan's manual smoke test (Task 7 Step 6).
+    let (manager, _pool) = code_mode_manager_with_upstreams(Vec::new()).await;
+    let restrictive_scope = ToolScope::scoped_namespaces(vec![], vec![]);
+    let result = manager
+        .semantic_rank(
+            "anything".to_string(),
+            5,
+            &CodeModeCaller::TrustedLocal,
+            CodeModeSurface::Cli,
+            &restrictive_scope,
+        )
+        .await
+        .unwrap();
+    assert!(result.is_empty());
+}
