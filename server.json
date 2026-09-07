@@ -3,7 +3,7 @@
   "name": "ai.dinglebear/labby",
   "title": "Labby",
   "description": "Rust MCP gateway with Code Mode, authentication, setup, logs, CLI, HTTP API, and operator web UI.",
-  "version": "1.15.1",
+  "version": "1.16.0",
   "websiteUrl": "https://github.com/dinglebear-ai/labby",
   "repository": {
     "url": "https://github.com/dinglebear-ai/labby",
@@ -25,7 +25,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@dinglebear/labby",
-      "version": "1.15.1",
+      "version": "1.16.0",
       "runtimeHint": "npx",
       "packageArguments": [
         {
@@ -76,10 +76,10 @@
       "namespace": "ai.dinglebear",
       "dnsDomain": "dinglebear.ai",
       "distribution": {
-        "npm": "@dinglebear/labby@1.15.1"
+        "npm": "@dinglebear/labby@1.16.0"
       },
       "buildInfo": {
-        "version": "1.15.1",
+        "version": "1.16.0",
         "repository": "https://github.com/dinglebear-ai/labby"
       }
     }

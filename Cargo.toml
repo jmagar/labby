@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/labby-apis", "crates/labby", "crates/labby-auth", "crates/labby-browser", "crates/labby-codemode", "crates/labby-gateway", "crates/labby-openapi", "crates/labby-web", "crates/labby-runtime", "crates/labby-winjob", "crates/labby-primitives", "crates/xtask"]
 
 [workspace.package]
-version = "1.15.1"
+version = "1.16.0"
 edition = "2024"
 rust-version = "1.97.1"
 keywords = ["mcp", "gateway", "homelab", "labby", "agents"]
