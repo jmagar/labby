@@ -448,7 +448,12 @@ pub(crate) fn dedicated_contract_accepts_for(
 
 fn dedicated_contract_for(key: &str, surface: Surface) -> Option<(&'static str, &'static str)> {
     if key.starts_with("stash:") {
-        return if cfg!(target_os = "linux") && matches!(surface, Surface::Api | Surface::Mcp) {
+        return if surface == Surface::Mcp {
+            Some((
+                "requires_durable_principal_link_covered_by_restart_journey",
+                "upstream_connect_error",
+            ))
+        } else if cfg!(target_os = "linux") && surface == Surface::Api {
             Some((
                 "requires_durable_principal_link_covered_by_restart_journey",
                 "service_unavailable",
