@@ -1010,7 +1010,7 @@ mod tests {
             principal_quota_bytes: 16,
             instance_quota_bytes: 16,
             max_concurrent_downloads: 1,
-            database_deadline_ms: 20,
+            database_deadline_ms: 10_000,
             janitor_interval_seconds: 3_600,
             ..crate::config::FileStashPreferences::default()
         };

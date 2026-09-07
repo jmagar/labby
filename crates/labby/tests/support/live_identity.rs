@@ -257,6 +257,24 @@ impl LiveIdentity {
     pub(crate) fn root(&self) -> &Path {
         self.owned.path()
     }
+
+    /// Provision an active same-organization Stash recipient through the
+    /// shared live-identity fixture boundary. Tests should not duplicate the
+    /// access-store schema or bootstrap-owner identifiers.
+    pub(crate) async fn provision_stash_recipient(
+        &self,
+        principal_id: &str,
+        display_name: &str,
+    ) -> Result<(), String> {
+        labby::testkit::provision_file_stash_recipient(
+            self.root().join("labby-home/access.db"),
+            self.identity.credential_id.clone(),
+            principal_id.to_owned(),
+            display_name.to_owned(),
+            "static-bearer:primary".to_owned(),
+        )
+        .await
+    }
     pub(crate) fn base(&self) -> &str {
         &self
             .guard

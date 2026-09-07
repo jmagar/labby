@@ -26,21 +26,18 @@ The generated [service catalog](./generated/service-catalog.md) is authoritative
 
 | Service | Product doc | Notes |
 | --- | --- | --- |
-| `access` | [access-control/](./access-control/) | Principals, Teams, Projects, memberships, roles, and effective authority |
-| `agents`, `tasks` | [services/AGENT_TASKS.md](./services/AGENT_TASKS.md) | Owner-scoped Agent definitions, durable Tasks, admission, execution, and revocation |
 | `browser` | [services/BROWSER.md](./services/BROWSER.md) | Rust-native WebMCP browser bridge, pairing, discovery, consent, and bounded invocation |
-| `dev_containers` | [services/DEV_CONTAINERS.md](./services/DEV_CONTAINERS.md) | Owner-scoped development-container definitions, leases, recovery, and lifecycle |
 | `doctor` | [services/DOCTOR.md](./services/DOCTOR.md) | Always-on system, auth, OAuth relay, and proxy diagnostics |
 | `gateway` | [services/GATEWAY.md](./services/GATEWAY.md) | Upstream catalog, protected routes, virtual servers, OAuth, Code Mode host |
 | upstream proxy runtime | [services/UPSTREAM.md](./services/UPSTREAM.md) | HTTP/Unix/stdio upstream MCP connections, discovery, filtering, health, OAuth, skills |
 | `setup` | [services/SETUP.md](./services/SETUP.md) | Bootstrap, settings, repair, plugin lifecycle, proxy setup, host provisioning |
 | `server_logs` | [services/SERVER_LOGS.md](./services/SERVER_LOGS.md) | Labby's own server-process log query and journal tail |
 | `fs` | [services/FILESYSTEM.md](./services/FILESYSTEM.md) | Optional jailed read-only workspace browsing and preview |
-| `stash` | [services/STASH.md](./services/STASH.md) | Linux/Android principal-scoped file upload, download, sharing, and bounded MCP reads |
+| `stash` | [services/STASH.md](./services/STASH.md) | Linux principal-scoped file upload, download, sharing, and bounded MCP reads |
 | `snippets` | [services/SNIPPETS.md](./services/SNIPPETS.md) | Reusable Code Mode workflow storage, validation, execution, testing, promotion |
 | `artifacts`, `bundles`, `jobs`, `sources`, `uploads` | [services/SKILLS.md](./services/SKILLS.md) and [artifacts/](./artifacts/) | Durable Artifact library, provider-backed control-plane projections, and native Agent Skills projection |
 | `lab_admin` | [services/LAB_ADMIN.md](./services/LAB_ADMIN.md) | Runtime-conditional onboarding audit surface |
-| access owner bootstrap | [services/ACCESS.md](./services/ACCESS.md) | Browser-only explicit creation of the first access-control owner; distinct from the registered `access` service |
+| access owner bootstrap | [services/ACCESS.md](./services/ACCESS.md) | Browser-only explicit creation of the first access-control owner |
 | direct stdio proxy | [guides/STDIO_MCP_PROXY.md](./guides/STDIO_MCP_PROXY.md) | One selected stdio MCP server exposed over Streamable HTTP |
 
 Do not hand-maintain a duplicate action inventory in prose. Use the generated [action catalog](./generated/action-catalog.md) for exact action names, parameters, scopes, destructive classification, and surfaces.

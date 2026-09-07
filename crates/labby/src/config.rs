@@ -1627,6 +1627,8 @@ pub struct FileStashPreferences {
     pub instance_quota_bytes: u64,
     #[serde(default = "default_stash_live_files")]
     pub max_live_files_per_principal: u32,
+    #[serde(default = "default_stash_instance_live_files")]
+    pub max_live_files_per_instance: u32,
     #[serde(default = "default_stash_page_size")]
     pub page_size: u16,
     #[serde(default = "default_stash_query_bytes")]
@@ -1653,6 +1655,10 @@ pub struct FileStashPreferences {
     pub upload_idle_seconds: u64,
     #[serde(default = "default_stash_total_seconds")]
     pub upload_total_seconds: u64,
+    #[serde(default = "default_stash_idle_seconds")]
+    pub download_idle_seconds: u64,
+    #[serde(default = "default_stash_total_seconds")]
+    pub download_total_seconds: u64,
     #[serde(default = "default_stash_pending_seconds")]
     pub pending_ttl_seconds: u64,
     #[serde(default = "default_stash_janitor_batch")]
@@ -1671,6 +1677,7 @@ impl Default for FileStashPreferences {
             principal_quota_bytes: default_stash_principal_bytes(),
             instance_quota_bytes: default_stash_instance_bytes(),
             max_live_files_per_principal: default_stash_live_files(),
+            max_live_files_per_instance: default_stash_instance_live_files(),
             page_size: default_stash_page_size(),
             max_query_bytes: default_stash_query_bytes(),
             max_header_bytes: default_stash_header_bytes(),
@@ -1684,6 +1691,8 @@ impl Default for FileStashPreferences {
             max_concurrent_mcp_reads: default_stash_mcp_reads(),
             upload_idle_seconds: default_stash_idle_seconds(),
             upload_total_seconds: default_stash_total_seconds(),
+            download_idle_seconds: default_stash_idle_seconds(),
+            download_total_seconds: default_stash_total_seconds(),
             pending_ttl_seconds: default_stash_pending_seconds(),
             janitor_batch_size: default_stash_janitor_batch(),
             janitor_backoff_max_seconds: default_stash_janitor_backoff_seconds(),
@@ -1703,6 +1712,9 @@ fn default_stash_instance_bytes() -> u64 {
 }
 fn default_stash_live_files() -> u32 {
     1_000
+}
+fn default_stash_instance_live_files() -> u32 {
+    100_000
 }
 fn default_stash_page_size() -> u16 {
     50
@@ -1764,6 +1776,8 @@ impl FileStashPreferences {
             && (self.principal_quota_bytes..=1_099_511_627_776)
                 .contains(&self.instance_quota_bytes)
             && (1..=100_000).contains(&self.max_live_files_per_principal)
+            && (self.max_live_files_per_principal..=1_000_000)
+                .contains(&self.max_live_files_per_instance)
             && (1..=200).contains(&self.page_size)
             && (1..=1_024).contains(&self.max_query_bytes)
             && (1..=65_536).contains(&self.max_header_bytes)
@@ -1778,6 +1792,8 @@ impl FileStashPreferences {
             && (1..=4).contains(&self.max_concurrent_mcp_reads)
             && (1..=30).contains(&self.upload_idle_seconds)
             && (self.upload_idle_seconds..=600).contains(&self.upload_total_seconds)
+            && (1..=30).contains(&self.download_idle_seconds)
+            && (self.download_idle_seconds..=600).contains(&self.download_total_seconds)
             && self.pending_ttl_seconds
                 >= self
                     .upload_total_seconds
@@ -1785,7 +1801,8 @@ impl FileStashPreferences {
             && self.pending_ttl_seconds <= 1_800
             && (1..=100).contains(&self.janitor_batch_size)
             && (1..=300).contains(&self.janitor_backoff_max_seconds)
-            && (1..=3_600).contains(&self.janitor_interval_seconds);
+            && (1..=3_600).contains(&self.janitor_interval_seconds)
+            && self.janitor_backoff_max_seconds >= self.janitor_interval_seconds;
         if !valid {
             return Err(ConfigError::InvalidProxyConfig {
                 reason:
@@ -3643,15 +3660,86 @@ mcp = true
         assert_eq!(config.file_stash.max_file_bytes, 104_857_600);
         assert_eq!(config.file_stash.principal_quota_bytes, 1_073_741_824);
         assert_eq!(config.file_stash.instance_quota_bytes, 10_737_418_240);
+        assert_eq!(config.file_stash.max_live_files_per_instance, 100_000);
         assert_eq!(config.file_stash.queue_capacity, 64);
         assert_eq!(config.file_stash.max_concurrent_uploads_per_principal, 2);
         assert_eq!(config.file_stash.max_concurrent_uploads_per_instance, 8);
         assert_eq!(config.file_stash.max_concurrent_downloads, 16);
+        assert_eq!(config.file_stash.download_idle_seconds, 30);
+        assert_eq!(config.file_stash.download_total_seconds, 600);
         assert!(config.validate().is_ok());
         config.file_stash.queue_capacity = 0;
         assert!(config.validate().is_err());
         let mut config = LabConfig::default();
         config.file_stash.pending_ttl_seconds = config.file_stash.upload_total_seconds;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn file_stash_rejects_every_resource_limit_outside_its_boundary() {
+        macro_rules! invalid {
+            ($field:ident, $value:expr) => {{
+                let mut config = LabConfig::default();
+                config.file_stash.$field = $value;
+                assert!(
+                    config.validate().is_err(),
+                    "{} accepted an invalid boundary value",
+                    stringify!($field)
+                );
+            }};
+        }
+        invalid!(max_file_bytes, 0);
+        invalid!(principal_quota_bytes, 0);
+        invalid!(instance_quota_bytes, 0);
+        invalid!(max_live_files_per_principal, 0);
+        invalid!(max_live_files_per_instance, 1);
+        invalid!(page_size, 0);
+        invalid!(max_query_bytes, 0);
+        invalid!(max_header_bytes, 0);
+        invalid!(grant_recipients_page_size, 0);
+        invalid!(max_mcp_read_bytes, 0);
+        invalid!(queue_capacity, 0);
+        invalid!(database_deadline_ms, 0);
+        invalid!(max_concurrent_uploads_per_principal, 0);
+        invalid!(max_concurrent_uploads_per_instance, 0);
+        invalid!(max_concurrent_downloads, 0);
+        invalid!(max_concurrent_mcp_reads, 0);
+        invalid!(upload_idle_seconds, 0);
+        invalid!(upload_total_seconds, 0);
+        invalid!(download_idle_seconds, 0);
+        invalid!(download_total_seconds, 0);
+        invalid!(pending_ttl_seconds, 0);
+        invalid!(janitor_batch_size, 0);
+        invalid!(janitor_backoff_max_seconds, 0);
+        invalid!(janitor_interval_seconds, 0);
+
+        invalid!(max_file_bytes, 1_073_741_825);
+        invalid!(principal_quota_bytes, 107_374_182_401);
+        invalid!(instance_quota_bytes, 1_099_511_627_777);
+        invalid!(max_live_files_per_principal, 100_001);
+        invalid!(max_live_files_per_instance, 1_000_001);
+        invalid!(page_size, 201);
+        invalid!(max_query_bytes, 1_025);
+        invalid!(max_header_bytes, 65_537);
+        invalid!(grant_recipients_page_size, 201);
+        invalid!(max_mcp_read_bytes, 26_214_401);
+        invalid!(queue_capacity, 1_025);
+        invalid!(database_deadline_ms, 30_001);
+        invalid!(max_concurrent_uploads_per_principal, 3);
+        invalid!(max_concurrent_uploads_per_instance, 9);
+        invalid!(max_concurrent_downloads, 257);
+        invalid!(max_concurrent_mcp_reads, 5);
+        invalid!(upload_idle_seconds, 31);
+        invalid!(upload_total_seconds, 601);
+        invalid!(download_idle_seconds, 31);
+        invalid!(download_total_seconds, 601);
+        invalid!(pending_ttl_seconds, 1_801);
+        invalid!(janitor_batch_size, 101);
+        invalid!(janitor_backoff_max_seconds, 301);
+        invalid!(janitor_interval_seconds, 3_601);
+
+        let mut config = LabConfig::default();
+        config.file_stash.janitor_backoff_max_seconds = 1;
         assert!(config.validate().is_err());
     }
 

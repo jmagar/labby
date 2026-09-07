@@ -539,8 +539,10 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory");
         std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
             .expect("secure temporary directory");
-        let mut preferences = crate::config::FileStashPreferences::default();
-        preferences.page_size = 2;
+        let preferences = crate::config::FileStashPreferences {
+            page_size: 2,
+            ..crate::config::FileStashPreferences::default()
+        };
         let runtime = Arc::new(
             crate::file_stash::FileStashRuntime::initialize_with_preferences(
                 directory.path().join("stash"),

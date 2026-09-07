@@ -158,7 +158,7 @@ The hosted runtime does not expose Fleet/node WebSockets, node enrollment APIs,
 Marketplace preview routes, ACP session endpoints, old Agent Artifact Manager
 APIs, or MCP Registry compatibility endpoints. Their historical transport
 contracts are archived under [../archive/retired-labby](../archive/retired-labby/).
-On Linux and Android, File Stash exposes authenticated routes beneath
+On Linux, File Stash exposes authenticated routes beneath
 `/v1/stash`; its bounded upload/download behavior and identity requirements are
 specified in [STASH.md](../services/STASH.md). Unsupported platforms omit these
 routes rather than mounting a handler that fails after dispatch.

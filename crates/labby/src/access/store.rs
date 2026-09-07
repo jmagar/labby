@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use rusqlite::TransactionBehavior;
@@ -29,6 +30,7 @@ const AUTHORIZED_OWNERS_CTE: &str = "authorized_owners(owner_kind,owner_id) AS (
 pub(crate) struct AccessStore {
     connection: Arc<Mutex<Connection>>,
     connection_admission: Arc<tokio::sync::Semaphore>,
+    file_stash_principal_gates: Arc<Mutex<HashMap<String, Weak<tokio::sync::RwLock<()>>>>>,
     path: Arc<PathBuf>,
     #[cfg(test)]
     skill_library_authorizations: Arc<AtomicUsize>,
@@ -658,6 +660,20 @@ impl AccessStore {
         })
         .await
     }
+    fn file_stash_principal_gate(&self, principal: &str) -> Arc<tokio::sync::RwLock<()>> {
+        let mut gates = self
+            .file_stash_principal_gates
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        gates.retain(|_, gate| gate.strong_count() > 0);
+        if let Some(gate) = gates.get(principal).and_then(Weak::upgrade) {
+            return gate;
+        }
+        let gate = Arc::new(tokio::sync::RwLock::new(()));
+        gates.insert(principal.to_owned(), Arc::downgrade(&gate));
+        gate
+    }
+
     pub(crate) async fn open(path: PathBuf) -> AccessStoreResult<Self> {
         let path = validated_access_path(&path)
             .map_err(|()| AccessStoreError::InsecurePath { path: path.clone() })?;
@@ -668,6 +684,7 @@ impl AccessStore {
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
             connection_admission: Arc::new(tokio::sync::Semaphore::new(1)),
+            file_stash_principal_gates: Arc::new(Mutex::new(HashMap::new())),
             path: Arc::new(path),
             #[cfg(test)]
             skill_library_authorizations: Arc::new(AtomicUsize::new(0)),
@@ -689,6 +706,7 @@ impl AccessStore {
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
             connection_admission: Arc::new(tokio::sync::Semaphore::new(1)),
+            file_stash_principal_gates: Arc::new(Mutex::new(HashMap::new())),
             path: Arc::new(path),
             #[cfg(test)]
             skill_library_authorizations: Arc::new(AtomicUsize::new(0)),
@@ -879,6 +897,60 @@ impl AccessStore {
             .await
     }
 
+    pub(crate) async fn provision_file_stash_recipient_fixture(
+        &self,
+        owner_credential_id: String,
+        principal_id: String,
+        display_name: String,
+        recipient_credential_id: String,
+    ) -> AccessStoreResult<()> {
+        if principal_id.is_empty()
+            || principal_id.len() > 255
+            || principal_id.chars().any(char::is_control)
+            || display_name.trim().is_empty()
+            || display_name.len() > 255
+            || display_name.chars().any(char::is_control)
+            || recipient_credential_id.is_empty()
+            || recipient_credential_id.len() > 255
+            || recipient_credential_id.chars().any(char::is_control)
+        {
+            return Err(AccessStoreError::MalformedVocabulary);
+        }
+        self.with_connection(move |connection| {
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(map_sqlite_error)?;
+            let organization_id = transaction
+                .query_row(
+                    "SELECT p.organization_id FROM principals p JOIN principal_links l ON l.principal_id=p.principal_id JOIN organizations o ON o.organization_id=p.organization_id WHERE l.credential_id=?1 AND l.status='active' AND p.status='active' AND o.status='active'",
+                    [&owner_credential_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(map_sqlite_error)?;
+            let _revision: i64 = transaction
+                .query_row(
+                    "UPDATE access_metadata SET global_revision=global_revision+1,updated_at=unixepoch() WHERE singleton=1 RETURNING global_revision",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(map_sqlite_error)?;
+            transaction
+                .execute(
+                    "INSERT INTO principals(principal_id,organization_id,kind,status,display_name,created_at,updated_at) VALUES(?1,?2,'user','active',?3,unixepoch(),unixepoch())",
+                    rusqlite::params![principal_id, organization_id, display_name],
+                )
+                .map_err(map_sqlite_error)?;
+            transaction
+                .execute(
+                    "INSERT INTO principal_links(link_id,principal_id,link_kind,issuer,subject,credential_id,status,verification_generation,link_generation,created_at,updated_at) VALUES(?1,?2,'local_credential',NULL,NULL,?3,'active',1,1,unixepoch(),unixepoch())",
+                    rusqlite::params![format!("credential-link:{recipient_credential_id}"), principal_id, recipient_credential_id],
+                )
+                .map_err(map_sqlite_error)?;
+            transaction.commit().map_err(map_sqlite_error)
+        })
+        .await
+    }
+
     pub(crate) async fn list_accessible_projects(
         &self,
         identity: labby_auth::VerifiedIdentity,
@@ -926,50 +998,232 @@ impl AccessStore {
         .await
     }
 
+    /// Resolve an authenticated identity while retaining exclusive mutation
+    /// admission. Callers keep the returned lease through the Stash
+    /// authorization/commit linearization point, so deactivation cannot race
+    /// between identity resolution and the dependent Stash operation.
+    pub(crate) async fn resolve_and_lease_file_stash_principal(
+        &self,
+        identity: labby_auth::VerifiedIdentity,
+    ) -> AccessStoreResult<(
+        super::AccessPrincipalId,
+        super::ActiveFileStashPrincipalLease,
+    )> {
+        let principal = self.resolve_file_stash_principal(identity.clone()).await?;
+        let guard = self
+            .file_stash_principal_gate(principal.as_str())
+            .read_owned()
+            .await;
+        let confirmed = self.resolve_file_stash_principal(identity).await?;
+        if confirmed != principal {
+            return Err(AccessStoreError::IdentityUnavailable);
+        }
+        Ok((
+            principal,
+            super::ActiveFileStashPrincipalLease {
+                _guards: vec![guard],
+            },
+        ))
+    }
+
+    pub(crate) async fn resolve_and_lease_file_stash_participants(
+        &self,
+        identity: labby_auth::VerifiedIdentity,
+        recipient: String,
+    ) -> AccessStoreResult<(
+        super::AccessPrincipalId,
+        super::AccessPrincipalId,
+        super::ActiveFileStashPrincipalLease,
+    )> {
+        let recipient = recipient.trim().to_owned();
+        if recipient.is_empty() || recipient.len() > 255 || recipient.chars().any(char::is_control)
+        {
+            return Err(AccessStoreError::IdentityUnavailable);
+        }
+        let owner = self.resolve_file_stash_principal(identity.clone()).await?;
+        let mut ids = [owner.as_str().to_owned(), recipient.clone()];
+        ids.sort();
+        let first = self.file_stash_principal_gate(&ids[0]).read_owned().await;
+        let second = self.file_stash_principal_gate(&ids[1]).read_owned().await;
+        let owner_for_query = owner.clone();
+        let recipient_for_query = recipient.clone();
+        let confirmed = self
+            .with_connection(move |connection| {
+            let resolved = super::read::resolve_principal_id(connection, &identity)?;
+            if resolved != owner_for_query {
+                return Err(AccessStoreError::IdentityUnavailable);
+            }
+            let active = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM principals owner JOIN principals recipient ON recipient.organization_id=owner.organization_id JOIN organizations o ON o.organization_id=owner.organization_id WHERE owner.principal_id=?1 AND owner.status='active' AND recipient.principal_id=?2 AND recipient.status='active' AND o.status='active')",
+                    rusqlite::params![resolved.as_str(), recipient_for_query],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(map_sqlite_error)?;
+            if !active {
+                return Err(AccessStoreError::IdentityUnavailable);
+            }
+            Ok(())
+        })
+        .await;
+        confirmed?;
+        Ok((
+            owner,
+            super::AccessPrincipalId(recipient),
+            super::ActiveFileStashPrincipalLease {
+                _guards: vec![first, second],
+            },
+        ))
+    }
+
     pub(crate) async fn search_file_stash_recipients(
         &self,
         owner: super::AccessPrincipalId,
         query: String,
         limit: usize,
     ) -> AccessStoreResult<Vec<super::FileStashRecipient>> {
-        self.with_connection(move |connection| {
+        self.search_file_stash_recipients_with_deadline(owner, query, limit, Duration::from_secs(2))
+            .await
+    }
+
+    async fn search_file_stash_recipients_with_deadline(
+        &self,
+        owner: super::AccessPrincipalId,
+        query: String,
+        limit: usize,
+        deadline: Duration,
+    ) -> AccessStoreResult<Vec<super::FileStashRecipient>> {
+        let deadline_at = tokio::time::Instant::now() + deadline;
+        let permit = tokio::time::timeout_at(
+            deadline_at,
+            Arc::clone(&self.connection_admission).acquire_owned(),
+        )
+        .await
+        .map_err(|_| AccessStoreError::Unavailable("recipient search deadline exceeded".into()))?
+        .map_err(|_| AccessStoreError::Unavailable("connection admission closed".into()))?;
+        let connection = Arc::clone(&self.connection);
+        // The interrupt handle is safe to invoke from another thread and is
+        // the only way an async deadline can actually stop SQLite work already
+        // running on the blocking pool.
+        let interrupt = connection
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_interrupt_handle();
+        let mut operation = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let connection = connection
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let pattern = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
             let mut statement = connection.prepare(
                 "SELECT candidate.principal_id, candidate.display_name FROM principals owner JOIN principals candidate ON candidate.organization_id=owner.organization_id WHERE owner.principal_id=?1 AND owner.status='active' AND candidate.status='active' AND candidate.principal_id<>owner.principal_id AND candidate.display_name IS NOT NULL AND candidate.display_name LIKE ?2 ESCAPE '\\' COLLATE NOCASE ORDER BY candidate.display_name,candidate.principal_id LIMIT ?3"
             ).map_err(map_sqlite_error)?;
-            let rows = statement.query_map(rusqlite::params![owner.as_str(), pattern, i64::try_from(limit).unwrap_or(20)], |row| Ok(super::FileStashRecipient { principal_id: row.get(0)?, display_name: row.get(1)? })).map_err(map_sqlite_error)?;
-            rows.collect::<Result<Vec<_>, _>>().map_err(map_sqlite_error)
-        }).await
+            let rows = statement
+                .query_map(
+                    rusqlite::params![owner.as_str(), pattern, i64::try_from(limit).unwrap_or(20)],
+                    |row| {
+                        Ok(super::FileStashRecipient {
+                            principal_id: row.get(0)?,
+                            display_name: row.get(1)?,
+                        })
+                    },
+                )
+                .map_err(map_sqlite_error)?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(map_sqlite_error)
+        });
+        if deadline.is_zero() || tokio::time::Instant::now() >= deadline_at {
+            interrupt.interrupt();
+            drop(operation.await);
+            return Err(AccessStoreError::Unavailable(
+                "recipient search deadline exceeded".into(),
+            ));
+        }
+        let deadline = tokio::time::sleep_until(deadline_at);
+        tokio::pin!(deadline);
+        tokio::select! {
+            biased;
+            () = &mut deadline => {
+                interrupt.interrupt();
+                // Do not return capacity until SQLite has acknowledged the
+                // interrupt and the blocking worker has dropped its lease.
+                drop(operation.await);
+                Err(AccessStoreError::Unavailable("recipient search deadline exceeded".into()))
+            },
+            result = &mut operation => result
+                .map_err(|error| AccessStoreError::Unavailable(error.to_string()))?,
+        }
     }
 
     pub(crate) async fn lease_active_file_stash_principal(
         &self,
         principal: super::AccessPrincipalId,
     ) -> AccessStoreResult<super::ActiveFileStashPrincipalLease> {
-        let permit = Arc::clone(&self.connection_admission)
-            .acquire_owned()
-            .await
-            .map_err(|_| AccessStoreError::Unavailable("connection admission closed".into()))?;
-        let connection = Arc::clone(&self.connection);
-        let active = tokio::task::spawn_blocking(move || {
-            let connection = connection
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let guard = self
+            .file_stash_principal_gate(principal.as_str())
+            .read_owned()
+            .await;
+        let principal_for_query = principal.clone();
+        let active = self
+            .with_connection(move |connection| {
             connection
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM principals p JOIN organizations o ON o.organization_id=p.organization_id WHERE p.principal_id=?1 AND p.status='active' AND o.status='active')",
-                    [principal.as_str()],
+                    [principal_for_query.as_str()],
                     |row| row.get::<_, bool>(0),
                 )
                 .map_err(map_sqlite_error)
         })
-        .await
-        .map_err(|error| AccessStoreError::Unavailable(error.to_string()))??;
+        .await?;
         if !active {
             return Err(AccessStoreError::IdentityUnavailable);
         }
-        Ok(super::ActiveFileStashPrincipalLease { _permit: permit })
+        Ok(super::ActiveFileStashPrincipalLease {
+            _guards: vec![guard],
+        })
     }
+
+    pub(crate) async fn lease_file_stash_participants(
+        &self,
+        owner: super::AccessPrincipalId,
+        recipient: String,
+    ) -> AccessStoreResult<(
+        super::AccessPrincipalId,
+        super::ActiveFileStashPrincipalLease,
+    )> {
+        let recipient = recipient.trim().to_owned();
+        if recipient.is_empty() || recipient.len() > 255 || recipient.chars().any(char::is_control)
+        {
+            return Err(AccessStoreError::IdentityUnavailable);
+        }
+        let mut ids = [owner.as_str().to_owned(), recipient.clone()];
+        ids.sort();
+        let first = self.file_stash_principal_gate(&ids[0]).read_owned().await;
+        let second = self.file_stash_principal_gate(&ids[1]).read_owned().await;
+        let owner_for_query = owner.clone();
+        let recipient_for_query = recipient.clone();
+        let active = self
+            .with_connection(move |connection| {
+            connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM principals owner JOIN principals recipient ON recipient.organization_id=owner.organization_id JOIN organizations o ON o.organization_id=owner.organization_id WHERE owner.principal_id=?1 AND owner.status='active' AND recipient.principal_id=?2 AND recipient.status='active' AND o.status='active')",
+                    rusqlite::params![owner_for_query.as_str(), recipient_for_query],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(map_sqlite_error)
+        })
+        .await?;
+        if !active {
+            return Err(AccessStoreError::IdentityUnavailable);
+        }
+        Ok((
+            super::AccessPrincipalId(recipient),
+            super::ActiveFileStashPrincipalLease {
+                _guards: vec![first, second],
+            },
+        ))
+    }
+
     pub(crate) async fn select_project(
         &self,
         identity: labby_auth::VerifiedIdentity,
@@ -1194,6 +1448,27 @@ impl AccessStore {
     pub(crate) async fn execute_test_statement(&self, sql: &'static str) -> AccessStoreResult<()> {
         self.with_connection(move |connection| {
             connection.execute_batch(sql).map_err(map_sqlite_error)
+        })
+        .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn deactivate_principal_for_test(
+        &self,
+        principal: &'static str,
+    ) -> AccessStoreResult<()> {
+        let _barrier = self
+            .file_stash_principal_gate(principal)
+            .write_owned()
+            .await;
+        self.with_connection(move |connection| {
+            connection
+                .execute(
+                    "UPDATE principals SET status='disabled' WHERE principal_id=?1",
+                    [principal],
+                )
+                .map(|_| ())
+                .map_err(map_sqlite_error)
         })
         .await
     }
@@ -2253,24 +2528,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn recipient_search_deadline_interrupts_sqlite_and_releases_admission() {
+        let directory = super::super::test_support::secure_tempdir();
+        let store = AccessStore::open(secure_test_path(&directory))
+            .await
+            .unwrap();
+        store.execute_test_statement("INSERT INTO organizations VALUES('org','Org','active',0,1,1); INSERT INTO principals VALUES('owner','org','user','active','Owner',1,1),('recipient','org','user','active','Recipient',1,1);").await.unwrap();
+        assert!(matches!(
+            store
+                .search_file_stash_recipients_with_deadline(
+                    super::super::AccessPrincipalId::for_test("owner"),
+                    "Rec".into(),
+                    20,
+                    Duration::ZERO,
+                )
+                .await,
+            Err(AccessStoreError::Unavailable(message)) if message.contains("deadline")
+        ));
+        let recipients = store
+            .search_file_stash_recipients_with_deadline(
+                super::super::AccessPrincipalId::for_test("owner"),
+                "Rec".into(),
+                20,
+                Duration::from_secs(1),
+            )
+            .await
+            .unwrap();
+        assert_eq!(recipients.len(), 1);
+        assert_eq!(recipients[0].principal_id, "recipient");
+    }
+
+    #[tokio::test]
+    async fn recipient_search_deadline_includes_admission_wait() {
+        let directory = super::super::test_support::secure_tempdir();
+        let store = AccessStore::open(secure_test_path(&directory))
+            .await
+            .unwrap();
+        let held = Arc::clone(&store.connection_admission)
+            .acquire_owned()
+            .await
+            .unwrap();
+        let started = tokio::time::Instant::now();
+        let result = store
+            .search_file_stash_recipients_with_deadline(
+                super::super::AccessPrincipalId::for_test("owner"),
+                "Rec".into(),
+                20,
+                Duration::from_millis(10),
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(AccessStoreError::Unavailable(message)) if message.contains("deadline")
+        ));
+        assert!(started.elapsed() < Duration::from_millis(100));
+        drop(held);
+    }
+
+    #[tokio::test]
     async fn file_stash_active_principal_lease_linearizes_deactivation() {
         let directory = super::super::test_support::secure_tempdir();
         let store = AccessStore::open(secure_test_path(&directory))
             .await
             .unwrap();
-        store.execute_test_statement("INSERT INTO organizations VALUES('org','Org','active',0,1,1); INSERT INTO principals VALUES('recipient','org','user','active',NULL,1,1);").await.unwrap();
+        store.execute_test_statement("INSERT INTO organizations VALUES('org','Org','active',0,1,1); INSERT INTO principals VALUES('recipient','org','user','active',NULL,1,1); INSERT INTO principal_links VALUES('link','recipient','local_credential',NULL,NULL,'credential','active',1,1,1,1);").await.unwrap();
+        let identity = labby_auth::VerifiedIdentity::local_credential(
+            labby_auth::Authenticator::StaticBearer,
+            "credential",
+        )
+        .unwrap();
         let lease = store
-            .lease_active_file_stash_principal(super::super::AccessPrincipalId::for_test(
-                "recipient",
-            ))
+            .resolve_and_lease_file_stash_principal(identity)
             .await
+            .unwrap()
+            .1;
+        tokio::time::timeout(Duration::from_millis(25), store.metadata_for_test())
+            .await
+            .expect("a Stash lease must not monopolize AccessStore admission")
             .unwrap();
         let mutation_store = store.clone();
         let mut mutation = tokio::spawn(async move {
             mutation_store
-                .execute_test_statement(
-                    "UPDATE principals SET status='disabled' WHERE principal_id='recipient'",
-                )
+                .deactivate_principal_for_test("recipient")
                 .await
                 .unwrap();
         });
@@ -2289,6 +2628,46 @@ mod tests {
                 .await,
             Err(AccessStoreError::IdentityUnavailable)
         ));
+    }
+
+    #[tokio::test]
+    async fn open_existing_current_does_not_rewrite_principal_labels() {
+        let directory = super::super::test_support::secure_tempdir();
+        let path = secure_test_path(&directory);
+        let store = AccessStore::open(path.clone()).await.unwrap();
+        let input = BootstrapOwnerInput::new(
+            labby_auth::VerifiedIdentity::local_credential(
+                labby_auth::Authenticator::StaticBearer,
+                "static-bearer:primary",
+            )
+            .unwrap(),
+            "Acme",
+            "Default",
+        )
+        .unwrap();
+        store.bootstrap_owner(input).await.unwrap();
+        store
+            .execute_test_statement(
+                "UPDATE principals SET display_name=NULL WHERE principal_id='bootstrap-owner'",
+            )
+            .await
+            .unwrap();
+        drop(store);
+
+        let reopened = AccessStore::open_existing_current(path).await.unwrap();
+        let label = reopened
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT display_name FROM principals WHERE principal_id='bootstrap-owner'",
+                        [],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .map_err(map_sqlite_error)
+            })
+            .await
+            .unwrap();
+        assert_eq!(label, None);
     }
 
     #[tokio::test]

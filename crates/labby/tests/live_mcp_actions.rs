@@ -381,7 +381,7 @@ async fn raw_mode_catalog_is_exact_and_builtin_help_executes_live() {
         })
         .cloned()
         .collect::<BTreeSet<_>>();
-    if !cfg!(any(target_os = "linux", target_os = "android")) {
+    if !cfg!(target_os = "linux") {
         expected.remove("stash");
     }
     let advertised_services = advertised

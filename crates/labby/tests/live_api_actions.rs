@@ -435,8 +435,7 @@ async fn every_api_action_reaches_live_http_or_proves_auth_denial() {
                     )
                     .await;
                     if intent.service == "bundles"
-                        || (intent.service == "stash"
-                            && !cfg!(any(target_os = "linux", target_os = "android")))
+                        || (intent.service == "stash" && !cfg!(target_os = "linux"))
                     {
                         assert!(
                             matches!(
@@ -632,9 +631,10 @@ async fn every_api_action_reaches_live_http_or_proves_auth_denial() {
         for provider_backed in ["artifacts", "bundles", "jobs", "sources", "uploads"] {
             success_capable_services.remove(provider_backed);
         }
-        if !cfg!(any(target_os = "linux", target_os = "android")) {
-            success_capable_services.remove("stash");
-        }
+        // Stash requires a durable principal link, which this context-free
+        // catalog sweep intentionally does not forge. Its Linux success path
+        // is covered by the authenticated two-principal restart journey.
+        success_capable_services.remove("stash");
         assert_eq!(
             successes, success_capable_services,
             "every locally self-contained API service needs a live success"

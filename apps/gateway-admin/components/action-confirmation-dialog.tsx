@@ -19,6 +19,7 @@ interface ActionConfirmationDialogProps {
   confirmLabel: string
   cancelLabel?: string
   busy?: boolean
+  error?: { title: string; detail: string }
   onOpenChange: (open: boolean) => void
   onConfirm: () => void
 }
@@ -30,6 +31,7 @@ export function ActionConfirmationDialog({
   confirmLabel,
   cancelLabel = 'Cancel',
   busy = false,
+  error,
   onOpenChange,
   onConfirm,
 }: ActionConfirmationDialogProps) {
@@ -45,6 +47,12 @@ export function ActionConfirmationDialog({
             {description}
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {error ? (
+          <div role="alert" className="rounded-aurora-1 border border-aurora-error/35 bg-aurora-error/5 p-3">
+            <strong className="text-sm text-aurora-error">{error.title}</strong>
+            <p className="mt-1 text-xs text-aurora-text-muted">{error.detail}</p>
+          </div>
+        ) : null}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={busy}>{cancelLabel}</AlertDialogCancel>
           <AlertDialogAction

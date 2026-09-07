@@ -642,12 +642,16 @@ fn map_constraint(error: rusqlite::Error) -> FileStashStoreError {
     }
 }
 fn open_connection(path: &Path, snapshot_id: &str) -> Result<Connection> {
+    // The Linux runtime supplies a path beneath `/proc/self/fd/<root-fd>` so
+    // SQLite and its WAL sidecars remain anchored to the verified directory.
+    // SQLITE_OPEN_NOFOLLOW rejects that required procfs descriptor link; the
+    // final database entry is instead opened and identity-checked with
+    // openat(..., NOFOLLOW) by the runtime before this connection is exposed.
     let mut c = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_WRITE
             | OpenFlags::SQLITE_OPEN_CREATE
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX
-            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(FileStashStoreError::sqlite)?;
     c.busy_timeout(BUSY_TIMEOUT)

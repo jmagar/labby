@@ -31,7 +31,7 @@ function errorCopy(error: unknown): { title: string; detail: string } {
   if (!(error instanceof StashError)) return { title: 'Stash is offline', detail: 'The service did not respond. Check the Labby connection and retry.' }
   if (error.kind === 'quota_exceeded' || error.status === 413) return { title: 'Storage quota reached', detail: 'Remove files or ask an administrator to increase your File Stash quota.' }
   if (error.kind === 'busy' || error.status === 429) return { title: 'Stash is busy', detail: 'Another file operation is in progress. Wait a moment and retry.' }
-  if (error.kind === 'conflict' || error.status === 409) return { title: 'That name is already used', detail: 'Rename the existing file or choose a different filename.' }
+  if (error.kind === 'conflict' || error.status === 409) return { title: 'That name is already used', detail: 'That name is already used. Rename the existing file or choose a different filename.' }
   return { title: 'File operation failed', detail: error.message }
 }
 
@@ -61,10 +61,11 @@ export function StashPageContent() {
   const input = useRef<HTMLInputElement>(null)
   const generation = useRef(0)
   const loadAbort = useRef<AbortController | null>(null)
+  const statsLoaded = useRef(false)
   const queryRef = useRef('')
   queryRef.current = query
 
-  const load = useCallback(async (search = '', cursor?: string) => {
+  const load = useCallback(async (search = '', cursor?: string, refreshStats = false) => {
     const current = ++generation.current
     if (cursor) setLoadingMore(true); else setLoading(true)
     setError(undefined)
@@ -72,8 +73,9 @@ export function StashPageContent() {
     const controller = new AbortController()
     loadAbort.current = controller
     try {
-      const [page, nextStats] = await Promise.all([api.listFiles(cursor, controller.signal, search || undefined), api.getStats(controller.signal)])
-      if (acceptGeneration(generation.current, current)) { setFiles(previous => mergeFiles(previous, page.files, Boolean(cursor))); setNextCursor(page.next_cursor); setStats(nextStats) }
+      const statsRequest = refreshStats || !statsLoaded.current ? api.getStats(controller.signal) : undefined
+      const [page, nextStats] = await Promise.all([api.listFiles(cursor, controller.signal, search || undefined), statsRequest])
+      if (acceptGeneration(generation.current, current)) { setFiles(previous => mergeFiles(previous, page.files, Boolean(cursor))); setNextCursor(page.next_cursor); if (nextStats) { setStats(nextStats); statsLoaded.current = true } }
     } catch (reason) {
       if (acceptGeneration(generation.current, current) && !(reason instanceof DOMException && reason.name === 'AbortError')) setError(reason)
     } finally { if (acceptGeneration(generation.current, current)) { setLoading(false); setLoadingMore(false); loadAbort.current = null } }
@@ -91,7 +93,7 @@ export function StashPageContent() {
     try {
       await api.uploadFile(file, abort.signal)
       setAnnouncement(`${file.name} uploaded.`)
-      await load(queryRef.current.trim())
+      await load(queryRef.current.trim(), undefined, true)
     } catch (reason) {
       if (!(reason instanceof DOMException && reason.name === 'AbortError')) setError(reason)
       else setAnnouncement(`${file.name} upload canceled.`)
@@ -103,7 +105,7 @@ export function StashPageContent() {
     setBusyDelete(true); setError(undefined)
     try {
       await api.deleteFile(deleteTarget.file_id)
-      setAnnouncement(`${deleteTarget.display_name} deleted.`); setDeleteTarget(undefined); await load(query.trim())
+      setAnnouncement(`${deleteTarget.display_name} deleted.`); setDeleteTarget(undefined); await load(query.trim(), undefined, true)
     } catch (reason) { setError(reason) } finally { setBusyDelete(false) }
   }
 
@@ -139,11 +141,11 @@ function FileRow({ file, grid, onDelete, onManage, onCopy }: { file: StashFile; 
 }
 
 export function ManageDialog({ file, onClose, onChanged, onError }: { file?: StashFile; onClose: () => void; onChanged: (message: string) => Promise<void>; onError: (error: unknown) => void }) {
-  const [name, setName] = useState(''); const [grants, setGrants] = useState<StashGrant[]>([]); const [grantCursor, setGrantCursor] = useState<string | null>(null); const [busy, setBusy] = useState(false); const grantGeneration = useRef(0); const [recipientQuery, setRecipientQuery] = useState(''); const [recipients, setRecipients] = useState<Array<{ principal_id: string; display_name: string }>>([]); const recipientGeneration = useRef(0)
+  const [name, setName] = useState(''); const [grants, setGrants] = useState<StashGrant[]>([]); const [grantCursor, setGrantCursor] = useState<string | null>(null); const [busy, setBusy] = useState(false); const grantGeneration = useRef(0); const [recipientQuery, setRecipientQuery] = useState(''); const [recipients, setRecipients] = useState<Array<{ principal_id: string; display_name: string }>>([]); const recipientGeneration = useRef(0); const [dialogError, setDialogError] = useState<unknown>()
   const loadGrants = useCallback(async (target: StashFile, cursor?: string, signal?: AbortSignal) => { const current = ++grantGeneration.current; try { const page = await api.listGrants(target.file_id, signal, cursor); if (acceptGrantPage(grantGeneration.current, current, file?.file_id, target.file_id)) { setGrants(previous => mergeGrants(previous, page.grants, Boolean(cursor))); setGrantCursor(page.next_cursor) } } catch (error) { if (!(error instanceof DOMException && error.name === 'AbortError')) onError(error) } }, [file?.file_id, onError])
   useEffect(() => { setName(file?.display_name || ''); setGrants([]); setGrantCursor(null); setRecipientQuery(''); setRecipients([]); recipientGeneration.current += 1; if (!file) return; const controller = new AbortController(); void loadGrants(file, undefined, controller.signal); return () => { grantGeneration.current += 1; controller.abort() } }, [file, loadGrants])
   useEffect(() => { setRecipients([]); const normalized = recipientQuery.trim(); if (normalized.length < 3 || !file) return; const responseGeneration = ++recipientGeneration.current; const responseFile = file.file_id; const controller = new AbortController(); const timer = window.setTimeout(() => { api.searchRecipients(normalized, controller.signal).then(values => { if (acceptRecipientSearch(recipientGeneration.current, responseGeneration, file.file_id, responseFile, recipientQuery, normalized)) setRecipients(values) }).catch(error => { if (!(error instanceof DOMException && error.name === 'AbortError')) onError(error) }) }, 250); return () => { window.clearTimeout(timer); recipientGeneration.current += 1; controller.abort() } }, [file, recipientQuery, onError])
   if (!file) return null
-  const run = async (operation: () => Promise<unknown>, message: string) => { setBusy(true); try { await operation(); await onChanged(message); onClose() } catch (error) { onError(error) } finally { setBusy(false) } }
-  return <Dialog open onOpenChange={open => { if (!open && !busy) onClose() }}><DialogContent className="border-aurora-border-strong bg-aurora-panel-medium"><DialogTitle>Manage {file.display_name}</DialogTitle><DialogDescription>Rename this file or manage read access.</DialogDescription><label className="text-xs font-semibold text-aurora-text-muted">Filename<input autoFocus value={name} onChange={event => setName(event.target.value)} className="mt-2 h-10 w-full rounded-aurora-1 border border-aurora-border-default bg-aurora-control-surface px-3 text-sm text-aurora-text-primary"/></label><Button disabled={busy || !name.trim() || name === file.display_name} onClick={() => void run(() => api.renameFile(file.file_id, name.trim()), `${file.display_name} renamed.`)}><Pencil/>Rename</Button><div className="border-t border-aurora-border-subtle pt-4"><label className="text-xs font-semibold text-aurora-text-muted">Find a recipient<input value={recipientQuery} onChange={event => setRecipientQuery(event.target.value)} placeholder="Type at least 3 characters" className="mt-2 h-10 w-full rounded-aurora-1 border border-aurora-border-default bg-aurora-control-surface px-3 text-sm text-aurora-text-primary"/></label>{recipients.length ? <ul aria-label="Recipient results" className="mt-2 divide-y divide-aurora-border-subtle">{recipients.map(recipient => <li key={recipient.principal_id} className="flex items-center justify-between py-2"><span className="text-sm text-aurora-text-primary">{recipient.display_name}</span><Button size="sm" variant="outline" disabled={busy} onClick={() => { const selected = selectedRecipientId(recipients, recipient.principal_id); if (selected) void run(() => api.createGrant(file.file_id, selected), `Access granted to ${recipient.display_name}.`) }}>Grant access</Button></li>)}</ul> : null}</div>{grants.length ? <div><h3 className="text-xs font-semibold text-aurora-text-muted">Active grants</h3><ul className="mt-2 divide-y divide-aurora-border-subtle">{grants.map(grant => <li key={grant.grant_id} className="flex items-center justify-between gap-3 py-2"><code className="truncate text-xs text-aurora-text-primary">{grant.grantee_principal_id}</code><Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => api.revokeGrant(file.file_id, grant.grant_id), `Access revoked for ${file.display_name}.`)}>Revoke</Button></li>)}</ul>{grantCursor ? <Button variant="outline" size="sm" disabled={busy} onClick={() => void loadGrants(file, grantCursor)}>Load more grants</Button> : null}</div> : <p className="text-xs text-aurora-text-muted">No active grants.</p>}</DialogContent></Dialog>
+  const run = async (operation: () => Promise<unknown>, message: string) => { setBusy(true); setDialogError(undefined); try { await operation(); await onChanged(message); onClose() } catch (error) { setDialogError(error); onError(error) } finally { setBusy(false) } }
+  return <Dialog open onOpenChange={open => { if (!open && !busy) onClose() }}><DialogContent className="border-aurora-border-strong bg-aurora-panel-medium"><DialogTitle>Manage {file.display_name}</DialogTitle><DialogDescription>Rename this file or manage read access.</DialogDescription>{dialogError ? <p role="alert" className="text-sm text-aurora-error">{errorCopy(dialogError).detail}</p> : null}<label className="text-xs font-semibold text-aurora-text-muted">Filename<input autoFocus value={name} onChange={event => setName(event.target.value)} className="mt-2 h-10 w-full rounded-aurora-1 border border-aurora-border-default bg-aurora-control-surface px-3 text-sm text-aurora-text-primary"/></label><Button disabled={busy || !name.trim() || name === file.display_name} onClick={() => void run(() => api.renameFile(file.file_id, name.trim()), `${file.display_name} renamed.`)}><Pencil/>Rename</Button><div className="border-t border-aurora-border-subtle pt-4"><label className="text-xs font-semibold text-aurora-text-muted">Find a recipient<input value={recipientQuery} onChange={event => setRecipientQuery(event.target.value)} placeholder="Type at least 3 characters" className="mt-2 h-10 w-full rounded-aurora-1 border border-aurora-border-default bg-aurora-control-surface px-3 text-sm text-aurora-text-primary"/></label>{recipients.length ? <ul aria-label="Recipient results" className="mt-2 divide-y divide-aurora-border-subtle">{recipients.map(recipient => <li key={recipient.principal_id} className="flex items-center justify-between py-2"><span className="text-sm text-aurora-text-primary">{recipient.display_name}</span><Button size="sm" variant="outline" disabled={busy} onClick={() => { const selected = selectedRecipientId(recipients, recipient.principal_id); if (selected) void run(() => api.createGrant(file.file_id, selected), `Access granted to ${recipient.display_name}.`) }}>Grant access</Button></li>)}</ul> : null}</div>{grants.length ? <div><h3 className="text-xs font-semibold text-aurora-text-muted">Active grants</h3><ul className="mt-2 divide-y divide-aurora-border-subtle">{grants.map(grant => <li key={grant.grant_id} className="flex items-center justify-between gap-3 py-2"><code className="truncate text-xs text-aurora-text-primary">{grant.grantee_principal_id}</code><Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => api.revokeGrant(file.file_id, grant.grant_id), `Access revoked for ${file.display_name}.`)}>Revoke</Button></li>)}</ul>{grantCursor ? <Button variant="outline" size="sm" disabled={busy} onClick={() => void loadGrants(file, grantCursor)}>Load more grants</Button> : null}</div> : <p className="text-xs text-aurora-text-muted">No active grants.</p>}</DialogContent></Dialog>
 }

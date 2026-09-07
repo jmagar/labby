@@ -68,6 +68,8 @@ pub(crate) mod skills;
 mod stdio_sandbox;
 #[cfg(test)]
 pub mod test_support;
+#[doc(hidden)]
+pub mod testkit;
 #[cfg(unix)]
 pub(crate) mod unix_listener;
 #[cfg(feature = "fs")]

@@ -277,7 +277,7 @@ The MCP server does not expose ACP, Marketplace, Registry-browser, Fleet/node,
 Deploy-product, or old Agent Artifact Manager tools. Historical contracts are
 preserved only under [../archive/retired-labby](../archive/retired-labby/).
 
-On Linux and Android, File Stash uses the ordinary one-tool service shape for
+On Linux, File Stash uses the ordinary one-tool service shape for
 bounded metadata operations and exposes authorized file reads as
 `stash://me/files/{opaque_file_id}` resources.
 The URI is a stable object identity, not a filesystem path or filename. See

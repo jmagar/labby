@@ -715,6 +715,19 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
         ));
     }
 
+    // Static documentation describes every compiled product surface and must
+    // not drift with the host that generated it. The live registry remains
+    // fail-closed on platforms without descriptor-relative filesystem support.
+    if !apply_runtime_conditions || cfg!(target_os = "linux") {
+        reg.register_caller_bound(RegisteredService::bootstrap_operator(
+            crate::dispatch::file_stash::META.0,
+            crate::dispatch::file_stash::META.1,
+            crate::dispatch::file_stash::META.2,
+            crate::dispatch::file_stash::ACTIONS,
+            dispatch_fn!(crate::dispatch::file_stash::dispatch),
+        ));
+    }
+
     reg
 }
 
@@ -986,10 +999,7 @@ mod tests {
 
     #[test]
     fn stash_registration_matches_descriptor_relative_platform_support() {
-        assert_eq!(
-            registry_has_service("stash"),
-            cfg!(any(target_os = "linux", target_os = "android"))
-        );
+        assert_eq!(registry_has_service("stash"), cfg!(target_os = "linux"));
     }
 
     /// Guard that the MCP registry and the HTTP router mount identical service sets.
@@ -1015,6 +1025,8 @@ mod tests {
             #[cfg(feature = "fs")]
             s.insert("fs");
             #[cfg(any(target_os = "linux", target_os = "android"))]
+            s.insert("stash");
+            #[cfg(target_os = "linux")]
             s.insert("stash");
             s
         };

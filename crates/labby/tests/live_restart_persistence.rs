@@ -16,7 +16,7 @@ mod support {
 }
 
 use reqwest::StatusCode;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(target_os = "linux")]
 use serde_json::Value;
 use state_snapshot::{NarrowStorageObservation, OwnedProcessObservation, PERSISTENCE_CONTRACT};
 
@@ -105,7 +105,7 @@ async fn staged_protected_route_change_is_not_half_published_before_restart() {
     assert!(cleanup.is_clean(), "cleanup: {:?}", cleanup.failures);
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn file_stash_round_trips_across_two_principals_and_restart() {
     use base64::Engine as _;
@@ -117,58 +117,10 @@ async fn file_stash_round_trips_across_two_principals_and_restart() {
     )
     .await
     .expect("bootstrap owner");
-    let access_path = identity.root().join("labby-home/access.db");
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    {
-        let connection = rusqlite::Connection::open(&access_path).expect("open access store");
-        connection
-            .execute(
-                "INSERT INTO principals(principal_id,organization_id,kind,status,display_name,created_at,updated_at) VALUES(?1,'bootstrap-local','user','active','Stash recipient',?2,?2)",
-                rusqlite::params!["stash-live-recipient", now],
-            )
-            .expect("seed recipient principal");
-        connection
-            .execute(
-                "INSERT INTO principal_links(link_id,principal_id,link_kind,issuer,subject,credential_id,status,verification_generation,link_generation,created_at,updated_at) VALUES('stash-live-recipient-link',?1,'local_credential',NULL,NULL,'static-bearer:primary','active',1,1,?2,?2)",
-                rusqlite::params!["stash-live-recipient", now],
-            )
-            .expect("bind recipient credential");
-        let identity_matrix = connection
-            .prepare(
-                "SELECT p.principal_id,l.link_kind,coalesce(l.credential_id,l.subject) \
-                 FROM principals p JOIN principal_links l ON l.principal_id=p.principal_id \
-                 WHERE p.principal_id IN ('bootstrap-owner','stash-live-recipient') \
-                 ORDER BY p.principal_id",
-            )
-            .expect("prepare identity matrix")
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })
-            .expect("query identity matrix")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("collect identity matrix");
-        assert_eq!(identity_matrix.len(), 3);
-        assert!(identity_matrix.iter().any(|row| {
-            row.0 == "stash-live-recipient"
-                && row.1 == "local_credential"
-                && row.2 == "static-bearer:primary"
-        }));
-        assert_eq!(
-            identity_matrix
-                .iter()
-                .filter(|row| row.0 == "bootstrap-owner")
-                .count(),
-            2,
-            "bootstrap owner must retain its external and issued-credential identities"
-        );
-    }
+    identity
+        .provision_stash_recipient("stash-live-recipient", "Stash recipient")
+        .await
+        .expect("provision recipient through live identity fixture");
 
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
     let bytes = b"real daemon stash bytes\n";
@@ -283,7 +235,7 @@ async fn file_stash_round_trips_across_two_principals_and_restart() {
 
     let mcp_headers = |request: reqwest::RequestBuilder| {
         request
-            .bearer_auth(identity.static_token_for_request())
+            .bearer_auth(identity.credential_for_request())
             .header("accept", "application/json, text/event-stream")
             .header("content-type", "application/json")
     };

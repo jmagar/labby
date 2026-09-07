@@ -621,6 +621,12 @@ async fn remove_unreferenced_tmp(
                 {
                     continue;
                 }
+                if name
+                    .strip_suffix(".part")
+                    .is_some_and(|upload_id| active.contains(upload_id))
+                {
+                    continue;
+                }
                 remove_regular_if_exists(&directory, &name)?;
             }
             sync_directory(&directory)
@@ -982,6 +988,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn integrity_scrub_does_not_reap_a_published_active_upload() {
+        use std::io::Write;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let runtime =
+            super::super::FileStashRuntime::initialize_with_preferences(root(&temp), preferences())
+                .await;
+        let blobs = runtime.blob_store().await.unwrap();
+        let (reservation, admission) = blobs
+            .reserve_for_owner("owner", "a".into(), "a".into(), 1)
+            .await
+            .unwrap();
+        let temp_name = format!("{}.part", reservation.upload_id);
+        let mut file = create_regular_exclusive(&blobs.tmp, &temp_name).unwrap();
+        file.write_all(b"x").unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+        remove_unreferenced_tmp(
+            &blobs.tmp,
+            10,
+            CancellationToken::new(),
+            Arc::clone(&blobs.active_uploads),
+        )
+        .await
+        .unwrap();
+        assert_eq!(regular_size(&blobs.tmp, &temp_name).unwrap(), Some(1));
+        publish_exclusive(&blobs.tmp, &temp_name, &blobs.blobs, &reservation.upload_id).unwrap();
+
+        blobs
+            .remove_orphan_batch(vec![reservation.upload_id.clone()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            regular_size(&blobs.blobs, &reservation.upload_id).unwrap(),
+            Some(1)
+        );
+        drop(admission);
+    }
+
+    #[tokio::test]
     async fn restart_completes_blob_published_and_rolls_back_pending_boundaries() {
         let temp = tempfile::TempDir::new().unwrap();
         let stash_root = root(&temp);
@@ -992,6 +1039,10 @@ mod tests {
         .await;
         let blobs = runtime.blob_store().await.unwrap();
         let store = runtime.store().await.unwrap();
+        // This test manually constructs crash-recovery boundaries outside the
+        // upload admission path, so stop the live janitor before injecting
+        // those otherwise unreachable intermediate states.
+        runtime.stop_janitor_for_test().await;
         let published = store
             .reserve_upload(
                 "owner".into(),

@@ -253,6 +253,28 @@ pub fn run(args: ServeArgs, config: &LabConfig) -> impl Future<Output = Result<E
     Box::pin(run_server(args, config))
 }
 
+async fn initialize_selected_file_stash_runtime(
+    registry: &ToolRegistry,
+    config: &LabConfig,
+) -> Arc<crate::file_stash::FileStashRuntime> {
+    if registry.service("stash").is_none() {
+        return Arc::new(crate::file_stash::FileStashRuntime::blocked());
+    }
+    match crate::config::file_stash_root_path(config) {
+        Ok(root) => Arc::new(
+            crate::file_stash::FileStashRuntime::initialize_with_preferences(
+                root,
+                config.file_stash.clone(),
+            )
+            .await,
+        ),
+        Err(_) => {
+            tracing::warn!("file stash runtime unavailable: state root could not be resolved");
+            Arc::new(crate::file_stash::FileStashRuntime::blocked())
+        }
+    }
+}
+
 async fn run_server(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
     let transport = resolve_transport(
         args.transport,
@@ -398,19 +420,7 @@ async fn run_server(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
         crate::dispatch::depot::authority_projection::start_managed_projection(&config.depot)
             .await
             .context("start managed Depot authority projection")?;
-    let file_stash_runtime = match crate::config::file_stash_root_path(config) {
-        Ok(root) => Arc::new(
-            crate::file_stash::FileStashRuntime::initialize_with_preferences(
-                root,
-                config.file_stash.clone(),
-            )
-            .await,
-        ),
-        Err(_) => {
-            tracing::warn!("file stash runtime unavailable: state root could not be resolved");
-            Arc::new(crate::file_stash::FileStashRuntime::blocked())
-        }
-    };
+    let file_stash_runtime = initialize_selected_file_stash_runtime(&registry, config).await;
 
     let spawn_depth = resolve_lab_spawn_depth(std::env::var("LABBY_SPAWN_DEPTH").ok());
     let suppress_upstream_runtime = stdio_recursion_guard_active(stdio_mode, spawn_depth);
@@ -1979,6 +1989,7 @@ fn run_stdio(
     // The server bootstrap stays on the stack throughout this session. Keep
     // the protocol future on the heap rather than copying it into that frame.
     Box::pin(async move {
+        let file_stash_shutdown = Arc::clone(&file_stash_runtime);
         if suppress_upstream_runtime {
             tracing::warn!(
                 surface = "mcp",
@@ -2060,6 +2071,7 @@ fn run_stdio(
         };
         #[cfg(feature = "gateway")]
         gateway_manager.shutdown_code_mode_runner_pool().await;
+        file_stash_shutdown.shutdown().await;
         server_result?;
         tracing::info!(
             surface = "mcp",
@@ -2483,9 +2495,9 @@ mod tests {
     use super::workspace_runtime_home_from_env_values;
     use super::{
         McpArgs, PeerNotifier, ServeCommand, Transport, allowed_hosts, bind_addr,
-        build_http_router, filter_registry, is_loopback_host, resolve_lab_spawn_depth,
-        resolve_port, resolve_transport, resolve_web_ui_auth_disabled, should_run_stdio,
-        stdio_recursion_guard_active,
+        build_http_router, filter_registry, initialize_selected_file_stash_runtime,
+        is_loopback_host, resolve_lab_spawn_depth, resolve_port, resolve_transport,
+        resolve_web_ui_auth_disabled, should_run_stdio, stdio_recursion_guard_active,
     };
     #[cfg(feature = "skills")]
     use super::{bootstrap_selected_skill_library_with, configure_skill_library_imports};
@@ -2494,6 +2506,24 @@ mod tests {
     use crate::config::{LabConfig, McpPreferences, WebPreferences};
     use crate::registry::{build_default_registry, filter_built_in_upstream_apis};
     use clap::Parser;
+
+    #[tokio::test]
+    async fn excluding_stash_does_not_initialize_its_storage_root() {
+        let registry = filter_registry(build_default_registry(), &["doctor".to_owned()])
+            .expect("doctor is a registered service");
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let stash_root = tempdir.path().join("must-not-be-created");
+        let mut config = LabConfig::default();
+        config.file_stash.root = Some(stash_root.clone());
+
+        let runtime = initialize_selected_file_stash_runtime(&registry, &config).await;
+
+        assert!(!stash_root.exists());
+        assert!(matches!(
+            runtime.status().await,
+            crate::file_stash::FileStashStatus::Blocked(_)
+        ));
+    }
 
     #[test]
     fn transport_resolution_prefers_explicit_stdio_then_cli_then_http_default() {

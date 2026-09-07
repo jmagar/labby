@@ -812,7 +812,6 @@ impl LabMcpServer {
                     .with_mime_type("application/json"),
             );
         }
-
         // Error-contract schemas: always listed so agents can discover the
         // envelope contract in-band instead of relying on out-of-band docs.
         #[cfg(feature = "skills")]

@@ -114,6 +114,77 @@ pub struct LocalSessionResponseDoc {
     pub expires_at: i64,
 }
 
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct StashFileDoc {
+    pub file_id: String,
+    pub uri: String,
+    pub display_name: String,
+    pub size_bytes: u64,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub owned: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct StashPageDoc {
+    pub files: Vec<StashFileDoc>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct StashStatsDoc {
+    pub owned_file_count: u64,
+    pub owned_shared_file_count: u64,
+    pub owned_committed_bytes: u64,
+    pub owned_reserved_bytes: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct StashUploadResponseDoc {
+    pub file_id: String,
+    pub uri: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct StashRenameRequestDoc {
+    pub display_name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct StashGrantRequestDoc {
+    pub grantee_principal_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct StashGrantDoc {
+    pub grant_id: String,
+    pub file_id: String,
+    pub grantee_principal_id: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct StashGrantPageDoc {
+    pub grants: Vec<StashGrantDoc>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct StashRecipientQueryDoc {
+    pub query: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct StashRecipientDoc {
+    pub principal_id: String,
+    pub display_name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct StashRecipientsDoc {
+    pub recipients: Vec<StashRecipientDoc>,
+}
+
 // ── Documentation-only error schemas ────────────────────────────────────
 //
 // These mirror the `ToolError` wire format for OpenAPI documentation but
@@ -741,6 +812,292 @@ pub fn build_service_paths(service_names: &[String]) -> Vec<(String, PathItem)> 
     paths
 }
 
+/// Build the dedicated streaming and browser-facing File Stash routes.
+#[must_use]
+pub fn build_stash_paths() -> Vec<(String, PathItem)> {
+    use utoipa::openapi::HttpMethod;
+
+    let response = |description: &str, schema: &str| {
+        ResponseBuilder::new()
+            .description(description)
+            .content(
+                "application/json",
+                ContentBuilder::new()
+                    .schema(Some(RefOr::Ref(utoipa::openapi::Ref::new(schema))))
+                    .build(),
+            )
+            .build()
+    };
+    let responses = |success_code: &str, description: &str, schema: Option<&str>| {
+        let success = schema.map_or_else(
+            || ResponseBuilder::new().description(description).build(),
+            |schema| response(description, schema),
+        );
+        ResponsesBuilder::new()
+            .response(success_code, success)
+            .response("400", agent_error_response("Malformed File Stash request"))
+            .response(
+                "401",
+                agent_error_response("Authentication is missing or invalid"),
+            )
+            .response("404", agent_error_response("File or grant was not found"))
+            .response(
+                "409",
+                agent_error_response("Filename or grant conflicts with existing state"),
+            )
+            .response(
+                "413",
+                agent_error_response("File or request exceeds a configured limit"),
+            )
+            .response("422", agent_error_response("File Stash validation failed"))
+            .response("429", agent_error_response("File Stash capacity is busy"))
+            .response("503", agent_error_response("File Stash is unavailable"))
+            .build()
+    };
+    let security = || SecurityRequirement::new::<&str, [&str; 0], &str>("bearer_auth", []);
+    let query_parameter = |name: &'static str, description: &'static str| {
+        ParameterBuilder::new()
+            .name(name)
+            .parameter_in(ParameterIn::Query)
+            .required(Required::False)
+            .description(Some(description))
+            .schema(Some(param_type_to_schema("string")))
+            .build()
+    };
+    let path_parameter = |name: &'static str| {
+        ParameterBuilder::new()
+            .name(name)
+            .parameter_in(ParameterIn::Path)
+            .required(Required::True)
+            .schema(Some(param_type_to_schema("string")))
+            .build()
+    };
+    let json_body = |schema: &'static str| {
+        RequestBodyBuilder::new()
+            .content(
+                "application/json",
+                ContentBuilder::new()
+                    .schema(Some(RefOr::Ref(utoipa::openapi::Ref::new(schema))))
+                    .build(),
+            )
+            .required(Some(Required::True))
+            .build()
+    };
+    let operation = |method: HttpMethod,
+                     summary: &'static str,
+                     success_code: &'static str,
+                     success_description: &'static str,
+                     success_schema: Option<&'static str>,
+                     parameters: Vec<utoipa::openapi::path::Parameter>,
+                     body: Option<utoipa::openapi::request_body::RequestBody>| {
+        let operation = OperationBuilder::new()
+            .tag("stash")
+            .summary(Some(summary))
+            .parameters(Some(parameters))
+            .request_body(body)
+            .responses(responses(success_code, success_description, success_schema))
+            .security(security())
+            .build();
+        PathItemBuilder::new().operation(method, operation).build()
+    };
+
+    let mut root = build_service_paths(&["stash".to_owned()])
+        .pop()
+        .expect("stash service path")
+        .1;
+    root.get = operation(
+        HttpMethod::Get,
+        "List or search File Stash files",
+        "200",
+        "Caller-authorized file page",
+        Some("#/components/schemas/StashPageDoc"),
+        vec![
+            query_parameter("cursor", "Opaque page cursor"),
+            query_parameter("query", "Page-local filename substring filter"),
+            ParameterBuilder::new()
+                .name("limit")
+                .parameter_in(ParameterIn::Query)
+                .required(Required::False)
+                .schema(Some(param_type_to_schema("integer")))
+                .build(),
+        ],
+        None,
+    )
+    .get;
+
+    let file_path = || vec![path_parameter("file_id")];
+    vec![
+        ("/v1/stash".to_owned(), root),
+        (
+            "/v1/stash/stats".to_owned(),
+            operation(
+                HttpMethod::Get,
+                "Read File Stash usage",
+                "200",
+                "Owned-file usage",
+                Some("#/components/schemas/StashStatsDoc"),
+                vec![],
+                None,
+            ),
+        ),
+        (
+            "/v1/stash/recipients".to_owned(),
+            operation(
+                HttpMethod::Post,
+                "Search eligible grant recipients",
+                "200",
+                "Recipient matches",
+                Some("#/components/schemas/StashRecipientsDoc"),
+                vec![],
+                Some(json_body("#/components/schemas/StashRecipientQueryDoc")),
+            ),
+        ),
+        (
+            "/v1/stash/uploads".to_owned(),
+            operation(
+                HttpMethod::Post,
+                "Upload a File Stash object",
+                "201",
+                "Created file identity",
+                Some("#/components/schemas/StashUploadResponseDoc"),
+                vec![
+                    ParameterBuilder::new()
+                        .name("Content-Length")
+                        .parameter_in(ParameterIn::Header)
+                        .required(Required::True)
+                        .description(Some("Exact raw body length in bytes"))
+                        .schema(Some(param_type_to_schema("integer")))
+                        .build(),
+                    ParameterBuilder::new()
+                        .name("X-Labby-Stash-Filename")
+                        .parameter_in(ParameterIn::Header)
+                        .required(Required::True)
+                        .description(Some("Percent-encoded display filename"))
+                        .schema(Some(param_type_to_schema("string")))
+                        .build(),
+                    ParameterBuilder::new()
+                        .name("X-CSRF-Token")
+                        .parameter_in(ParameterIn::Header)
+                        .required(Required::False)
+                        .description(Some("Required for cookie-authenticated mutations"))
+                        .schema(Some(param_type_to_schema("string")))
+                        .build(),
+                ],
+                Some(
+                    RequestBodyBuilder::new()
+                        .content(
+                            "application/octet-stream",
+                            ContentBuilder::new()
+                                .schema(Some(RefOr::T(param_type_to_schema("string"))))
+                                .build(),
+                        )
+                        .required(Some(Required::True))
+                        .build(),
+                ),
+            ),
+        ),
+        ("/v1/stash/files/{file_id}".to_owned(), {
+            let mut item = operation(
+                HttpMethod::Get,
+                "Read File Stash metadata",
+                "200",
+                "File metadata",
+                Some("#/components/schemas/StashFileDoc"),
+                file_path(),
+                None,
+            );
+            item.patch = operation(
+                HttpMethod::Patch,
+                "Rename an owned File Stash object",
+                "200",
+                "Renamed file metadata",
+                Some("#/components/schemas/StashFileDoc"),
+                file_path(),
+                Some(json_body("#/components/schemas/StashRenameRequestDoc")),
+            )
+            .patch;
+            item.delete = operation(
+                HttpMethod::Delete,
+                "Delete an owned File Stash object",
+                "204",
+                "File deleted",
+                None,
+                file_path(),
+                None,
+            )
+            .delete;
+            item
+        }),
+        ("/v1/stash/files/{file_id}/content".to_owned(), {
+            let mut item = operation(
+                HttpMethod::Get,
+                "Download File Stash content",
+                "200",
+                "Raw file bytes",
+                None,
+                file_path(),
+                None,
+            );
+            if let Some(get) = item.get.as_mut() {
+                get.responses.responses.insert(
+                    "200".to_owned(),
+                    RefOr::T(
+                        ResponseBuilder::new()
+                            .description(
+                                "Raw file bytes with private no-store and attachment headers",
+                            )
+                            .content(
+                                "application/octet-stream",
+                                ContentBuilder::new()
+                                    .schema(Some(RefOr::T(param_type_to_schema("string"))))
+                                    .build(),
+                            )
+                            .build(),
+                    ),
+                );
+            }
+            item
+        }),
+        ("/v1/stash/files/{file_id}/grants".to_owned(), {
+            let mut item = operation(
+                HttpMethod::Get,
+                "List active File Stash grants",
+                "200",
+                "Grant page",
+                Some("#/components/schemas/StashGrantPageDoc"),
+                vec![
+                    path_parameter("file_id"),
+                    query_parameter("cursor", "Opaque grant page cursor"),
+                ],
+                None,
+            );
+            item.post = operation(
+                HttpMethod::Post,
+                "Grant read access to a File Stash object",
+                "201",
+                "Created read grant",
+                Some("#/components/schemas/StashGrantDoc"),
+                file_path(),
+                Some(json_body("#/components/schemas/StashGrantRequestDoc")),
+            )
+            .post;
+            item
+        }),
+        (
+            "/v1/stash/files/{file_id}/grants/{grant_id}".to_owned(),
+            operation(
+                HttpMethod::Delete,
+                "Revoke a File Stash grant",
+                "204",
+                "Grant revoked",
+                None,
+                vec![path_parameter("file_id"), path_parameter("grant_id")],
+                None,
+            ),
+        ),
+    ]
+}
+
 #[must_use]
 pub fn build_app_paths() -> Vec<(String, PathItem)> {
     let generic_json = || {
@@ -1267,6 +1624,17 @@ fn server_logs_query_parameters() -> Vec<utoipa::openapi::path::Parameter> {
         CredentialSelfResponseDoc,
         MutationMetadataResponseDoc,
         LocalSessionResponseDoc,
+        StashFileDoc,
+        StashPageDoc,
+        StashStatsDoc,
+        StashUploadResponseDoc,
+        StashRenameRequestDoc,
+        StashGrantRequestDoc,
+        StashGrantDoc,
+        StashGrantPageDoc,
+        StashRecipientQueryDoc,
+        StashRecipientDoc,
+        StashRecipientsDoc,
     )),
     modifiers(&SecurityAddon),
 )]
@@ -1297,6 +1665,11 @@ pub fn build_openapi_spec(
     }
     for (path, item) in build_service_paths(&service_names) {
         spec.paths.paths.insert(path, item);
+    }
+    if service_names.iter().any(|service| service == "stash") {
+        for (path, item) in build_stash_paths() {
+            spec.paths.paths.insert(path, item);
+        }
     }
     for (path, item) in build_app_paths() {
         spec.paths.paths.insert(path, item);
@@ -1613,6 +1986,31 @@ mod tests {
         assert_eq!(paths.len(), 2);
         assert_eq!(paths[0].0, "/v1/gateway-alpha");
         assert_eq!(paths[1].0, "/v1/gateway-beta");
+    }
+
+    #[test]
+    fn stash_openapi_covers_every_dedicated_route_descriptor() {
+        let paths = build_stash_paths();
+        let documented = paths
+            .iter()
+            .flat_map(|(path, item)| {
+                let json = serde_json::to_value(item).expect("path item json");
+                ["get", "post", "patch", "delete"]
+                    .into_iter()
+                    .filter(move |method| json.get(*method).is_some())
+                    .map(move |method| (method.to_ascii_uppercase(), path.clone()))
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        let expected = crate::api::services::file_stash::descriptors()
+            .into_iter()
+            .map(|descriptor| {
+                (
+                    descriptor.method.to_owned(),
+                    format!("/v1/stash{}", descriptor.path.trim_end_matches('/')),
+                )
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(documented, expected);
     }
 
     #[test]

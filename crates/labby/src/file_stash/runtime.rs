@@ -3,9 +3,10 @@ use super::{
     store::{FileStashStore, FileStashStoreError},
 };
 use crate::config::FileStashPreferences;
+#[cfg(unix)]
+use std::io::{Read, Write};
 use std::{
     fs::File,
-    io::{Read, Write},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -199,6 +200,13 @@ impl FileStashRuntime {
             FileStashStatus::Recovering => Err(FileStashBlockedReason::Unavailable),
             FileStashStatus::Blocked(reason) => Err(reason),
             FileStashStatus::Shutdown => Err(FileStashBlockedReason::Unavailable),
+        }
+    }
+    #[cfg(test)]
+    pub(crate) async fn stop_janitor_for_test(&self) {
+        self.janitor_cancel.cancel();
+        if let Some(task) = self.janitor_task.lock().await.take() {
+            let _unused = task.await;
         }
     }
     pub(crate) async fn shutdown(&self) {
