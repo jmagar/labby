@@ -72,6 +72,13 @@ identifiers were removed. Commit links remain the authoritative historical recor
 
 - Relicense Dinglebear-owned original work under AGPL-3.0-only and document separate commercial licensing; third-party material retains its original terms.
 
+## [1.16.0](https://github.com/dinglebear-ai/labby/compare/v1.15.1...v1.16.0) (2026-09-07)
+
+
+### Added
+
+* **depot:** add full administration control plane ([#567](https://github.com/dinglebear-ai/labby/issues/567)) ([c83333c](https://github.com/dinglebear-ai/labby/commit/c83333c8bc1704a804801cdb2c480b09d1ddc438))
+
 ## [1.15.1](https://github.com/dinglebear-ai/labby/compare/v1.15.0...v1.15.1) (2026-09-05)
 
 
