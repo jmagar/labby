@@ -443,11 +443,15 @@ pub(crate) fn dedicated_contract_accepts_for(
     error_kind: &str,
 ) -> bool {
     // The isolated MCP runner can fail at either side of the same missing
-    // durable-principal boundary: before connecting to Depot, or after the
-    // Stash service maps the unavailable authority. Both are stable errors;
-    // the authenticated restart journey supplies the success evidence.
+    // durable-principal boundary: the Linux peer can be denied before
+    // resolution, Depot can be unreachable, or Stash can map the unavailable
+    // authority. These are stable errors; the authenticated restart journey
+    // supplies the success evidence.
     if key.starts_with("stash:") && surface == Surface::Mcp {
-        return matches!(error_kind, "upstream_connect_error" | "service_unavailable");
+        return matches!(
+            error_kind,
+            "forbidden" | "upstream_connect_error" | "service_unavailable"
+        );
     }
     dedicated_contract_for(key, surface)
         .is_some_and(|(_, expected_kind)| error_kind == expected_kind)
@@ -581,7 +585,7 @@ mod dedicated_contract_tests {
 
     #[test]
     fn stash_mcp_accepts_both_missing_authority_layers() {
-        for kind in ["upstream_connect_error", "service_unavailable"] {
+        for kind in ["forbidden", "upstream_connect_error", "service_unavailable"] {
             assert!(dedicated_contract_accepts_for(
                 "stash:stash.list",
                 Surface::Mcp,
