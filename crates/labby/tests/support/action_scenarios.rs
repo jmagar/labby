@@ -447,17 +447,19 @@ pub(crate) fn dedicated_contract_accepts_for(
 }
 
 fn dedicated_contract_for(key: &str, surface: Surface) -> Option<(&'static str, &'static str)> {
-    if surface == Surface::Api && key.starts_with("stash:") {
-        return if cfg!(target_os = "linux") {
+    if key.starts_with("stash:") {
+        return if cfg!(target_os = "linux") && matches!(surface, Surface::Api | Surface::Mcp) {
             Some((
                 "requires_durable_principal_link_covered_by_restart_journey",
                 "service_unavailable",
             ))
-        } else {
+        } else if surface == Surface::Api {
             Some((
                 "requires_descriptor_relative_filesystem_platform",
                 "route_not_found",
             ))
+        } else {
+            None
         };
     }
     if key == "gateway:gateway.skills.list" && !cfg!(feature = "skills") {
